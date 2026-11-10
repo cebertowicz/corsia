@@ -226,8 +226,6 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await deleteRenderedLine(page, quote);
 	}
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
-	// The comments control says nothing about the lost quote: the card itself carries that, in the list.
-	await expect(page.locator('.comment-status .unplaced-dot')).toHaveCount(0);
 	if (mobile) expect(await page.locator('.comment-status').evaluate((button) => getComputedStyle(button).paddingLeft)).toBe('8px');
 	await page.locator('.comment-status').click();
 	await expect(drawer).toBeVisible();

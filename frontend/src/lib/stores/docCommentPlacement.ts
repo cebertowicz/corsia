@@ -32,7 +32,7 @@ class LivePlacement {
 	private seq = 0;
 	private inFlight: { seq: number; requestId: string; reload: boolean } | null = null;
 	private marked: { reload: boolean } | null = null;
-	/** A reload is queued or in flight. It runs on its own, once per live load, with nothing shown: a refusal leaves rows lost and is only logged. */
+	/** A reload is queued or in flight. It runs on its own, with nothing shown: a refusal is logged, and the next trigger asks again. */
 	private reloading = false;
 	/** How many lost comments with their words in the text the last reload was asked for in this live load (`placeLost`). */
 	private lostAsked = 0;
@@ -146,7 +146,7 @@ class LivePlacement {
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 			if (request.reload) {
 				console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
-				this.settleReload();
+				this.settleReload(); this.lostAsked = 0; // the next edit, load, answer or reconnect asks again
 			}
 			this.next();
 		} else if (frame.type === 'doc_opened') {
@@ -235,7 +235,7 @@ class LivePlacement {
 	 * Places lost comments again whose words are in the text, through `reload`. A row is lost when the text its server range
 	 * held is deleted; words that come back (an undo, a paste, retyping) are new text the range never held, so only a
 	 * reload, which looks for the quote, finds them. Asked once per live load, and again when more are lost than it last
-	 * asked about, so one a reload can't place is not asked about again in this load.
+	 * asked about, so one a reload can't place is not asked about again in this load. A refused reload asked about none.
 	 */
 	private placeLost = (): void => {
 		if (this.destroyed || this.session.connection !== 'connected') return;

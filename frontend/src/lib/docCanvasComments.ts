@@ -85,17 +85,9 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	});
 }
 
-/**
- * Shared comment state for the document surface: the header's comment count, and its lost comments. The orphaned
- * count is the list's 'Text changed' group, so a resolved thread is never in it. Placing lost comments again is the
- * live placement's (`docCommentPlacement.ts`).
- */
+/** The document header's comment count: open threads, and resolved ones with unread replies. */
 export function commentSurfaceStatus(comments: DocComment[]) {
-	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
-	return {
-		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
-		orphanedCount: comments.filter(lost).length,
-	};
+	return { commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length };
 }
 
 /**

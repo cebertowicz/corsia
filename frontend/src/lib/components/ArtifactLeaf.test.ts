@@ -311,7 +311,7 @@ describe('ArtifactLeaf legacy discussion compatibility', () => {
 });
 
 describe('ArtifactLeaf in-canvas comments', () => {
-	it('keeps an orphan in its own card, with no unplaced mark on the pill, and opens its list inside the canvas without changing the right pane', async () => {
+	it('keeps an orphan in its own card, counted on the pill, and opens its list inside the canvas without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
 		// jsdom lays nothing out, so give the document column the width a wide canvas has: wide enough for the inline drawer.
 		const measure = HTMLElement.prototype.getBoundingClientRect;
@@ -326,9 +326,6 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
 			render();
 			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'), { timeout: MOUNT_WAIT_MS });
-			const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
-			expect(pill.getAttribute('title')).toBeNull();
-			expect(pill.querySelector('.unplaced-dot')).toBeNull();
 			paneOpen.set(true);
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
@@ -336,7 +333,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			expect(document.body.querySelector('.popover')).toBeNull();
 			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 			expect(get(paneOpen)).toBe(true);
-			expect(host.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain("couldn't be placed");
+			expect(host.querySelector('[data-doc-comments-drawer] [data-comment-id="orphan"] .ct.orphaned')).not.toBeNull();
 		} finally {
 			wide.mockRestore();
 		}

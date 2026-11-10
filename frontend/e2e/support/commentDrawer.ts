@@ -36,18 +36,14 @@ export async function closeComments(scope: Page | Locator): Promise<void> {
 	await viewer.locator('.comment-status').click();
 }
 
-/**
- * The control that opens a text document's resolved threads. Beside the margin column it is the document header's "Resolved"
- * button, which opens them in a drawer of their own; in the narrow sheet it is the entry under the open threads.
- */
+/** The control that opens a text document's resolved threads: the document header's "Resolved" button, at every width. */
 export function resolvedEntry(drawer: Locator): Locator {
-	const header = drawer.locator('xpath=ancestor::*[.//*[@data-resolved-entry]][1]').locator('[data-resolved-entry]');
-	return drawer.locator('[data-aside-kind="resolved"]').or(header);
+	return drawer.locator('xpath=ancestor::*[.//*[@data-resolved-entry]][1]').locator('[data-resolved-entry]');
 }
 
-/** Where the opened resolved threads are listed: the resolved drawer beside the margin column, or the sheet's own list. */
+/** Where the opened resolved threads are listed: the resolved drawer. */
 export function resolvedList(page: Page): Locator {
-	return page.locator('.resolved-drawer, .sheet-resolved');
+	return page.locator('.resolved-drawer');
 }
 
 /** The "Resolved" list opened, when the document has resolved threads. */

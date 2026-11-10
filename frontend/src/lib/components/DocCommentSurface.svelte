@@ -109,7 +109,7 @@
 		const comment = comments.find((item) => item.id === id);
 		if (comment && onItsImage(comment)) images?.onOpen(comment, { id, move: true });
 	}
-	/** The image drawer's own Filter. A document's column shows its open threads as cards and lists only resolved ones (`view`). */
+	/** The image drawer's own Filter. A document shows its open threads (`view`); its resolved ones are in the resolved drawer. */
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let filterOpen = $state(false);
 	let drawer = $state<HTMLElement>();
@@ -133,7 +133,7 @@
 	let replyDrafts = $state<Record<string, string>>({});
 	let replySelections = $state<Record<string, [number, number]>>({});
 	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
-	/** What the list holds. A document's column keeps its open threads as cards in the margin and lists the resolved ones in its own box; the sheet lists the open threads and, under them, the resolved ones behind an entry; an image's drawer has its own Filter. */
+	/** What the list holds. A document's margin column and its sheet hold the open threads; the resolved ones are only in the resolved drawer the header opens; an image's drawer has its own Filter. */
 	const view = $derived(image ? filter : 'open');
 	const held = keptThreads({ comments: () => comments, drafts: () => replyDrafts, leavesOnRelease: () => view === 'open', reduced: () => get(prefersReducedMotion), crossfaded: () => get(prefersReducedMotion) && sheetDrawer && surfaceState?.kind === 'list' });
 	const unreadListed = retainUnreadList(() => surfaceState?.kind === 'list', () => comments);

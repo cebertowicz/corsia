@@ -685,4 +685,18 @@ describe('lost comments are placed again in the same live load', () => {
 		doc.remote(text => text.insert(10, ' gamma'));
 		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
 	});
+
+	it('asks again on the next load after the server refuses the reload, and places the comment then', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
+		doc.answer(doc.asks()[0]);
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
+		doc.frame({ type: 'doc_error', kind: 'refused', request_id: reloads(doc)[0].request_id, message: 'positions refused' });
+		await settled();
+		expect(row('c2')).toMatchObject({ orphaned: true });
+		await loadComments('artifact');
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
+		doc.answer(reloads(doc)[1], { ranges: [{ id: 'c1', from_off: 6, to_off: 10 }, { id: 'c2', from_off: 11, to_off: 16 }] });
+		await vi.waitFor(() => expect(row('c2')).toMatchObject({ placement: 'placed', drawn: true, from: 11, to: 16 }));
+	});
 });

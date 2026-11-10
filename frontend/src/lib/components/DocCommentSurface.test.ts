@@ -97,8 +97,8 @@ describe('DocCommentSurface suggestions', () => {
 		drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]')!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
 		expect(drawer!.querySelector('[data-drawer-filter]')).toBeNull();
-		// No heading, close or entry in the column: the header's control opens the resolved drawer.
-		expect(drawer!.querySelector('.drawer-heading, [data-aside-kind]')).toBeNull();
+		// No heading or close in the column: the header's control opens the resolved drawer.
+		expect(drawer!.querySelector('.drawer-heading')).toBeNull();
 		expect(document.body.querySelector('.resolved-drawer')).toBeNull();
 		open.set(true); flushSync();
 		const list = document.body.querySelector('.resolved-drawer')!;
@@ -171,19 +171,21 @@ describe('DocCommentSurface suggestions', () => {
 		expect(card).not.toBeNull();
 		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
-		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
 		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();
 	});
 
-	it('shows a review conversation as a card in the column, with no entry of its own', () => {
+	it('shows a review conversation as a card in the column', () => {
 		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, id: 'review-1', replacement: null, review: true }] });
 		expect(document.body.querySelector('[data-margin-card="review-1"]')).not.toBeNull();
-		expect(document.body.querySelector('[data-aside-kind="review"]')).toBeNull();
 	});
 
-	it('has no resolved entry while nothing is resolved', () => {
-		render({ state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-aside-kind]')).toBeNull();
+	it('counts no resolved threads for the header control once nothing is resolved', () => {
+		const open = resolvedDrawerProps();
+		const comments = writable([suggestion, { ...secondSuggestion, resolved: true }]), liveComments = fromStore(comments);
+		render(Object.defineProperties({ state: { kind: 'list' }, get comments() { return liveComments.current; } }, open.props));
+		expect(open.count()).toBe(1);
+		comments.set([suggestion]); flushSync();
+		expect(open.count()).toBe(0);
 		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
 	});
 
@@ -194,7 +196,6 @@ describe('DocCommentSurface suggestions', () => {
 		const ids = (selector: string) => [...document.body.querySelectorAll(`${selector} [data-comment-id]`)].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids('[data-doc-comments-drawer]')).toEqual(['comment-1']);
 		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('1 open');
-		expect(document.body.querySelector('[data-doc-comments-drawer] [data-aside-kind]')).toBeNull();
 		expect(open.count()).toBe(2);
 		open.set(true); flushSync(); await tick();
 		expect(ids('.resolved-drawer')).toEqual(['new', 'old']);
@@ -210,9 +211,8 @@ describe('DocCommentSurface suggestions', () => {
 		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});
 
-	it('has no resolved entry and no empty-resolved text in the sheet while nothing is resolved', () => {
+	it('has no empty-resolved text in the sheet while nothing is resolved', () => {
 		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-doc-comments-drawer] [data-aside-kind]')).toBeNull();
 		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('No resolved comments');
 	});
 
@@ -222,13 +222,10 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('Send now');
 	});
 
-	it.each([false, true])('keeps a comment whose text moved or went as a marked card, with no line saying it could not be placed (sheet: %s)', (narrow) => {
+	it.each([false, true])('keeps a comment whose text moved or went as a marked card (sheet: %s)', (narrow) => {
 		render({ narrow, state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }, { ...secondSuggestion, orphaned: true, detached: true }] });
 		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
 		expect(drawer.querySelectorAll('[data-comment-id] .ct.orphaned')).toHaveLength(2);
-		expect(drawer.querySelector('[data-drawer-placement]')).toBeNull();
-		expect(document.body.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
-		expect(drawer.textContent).not.toContain("couldn't be placed");
 	});
 
 	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
@@ -612,7 +609,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.textContent).not.toContain('Accept all from agent-1');
 	});
 
-	it('accepts all, re-seeds without a stale banner, and shows skipped reasons', async () => {
+	it.each([true, false])('accepts all, re-seeds without a stale banner, and shows skipped reasons (sheet: %s)', async (narrow) => {
 		mocks.flushDraft.mockResolvedValue(true);
 		mocks.decideSuggestion.mockResolvedValue({
 			accepted: ['comment-1'],
@@ -621,13 +618,13 @@ describe('DocCommentSurface suggestions', () => {
 			revision: 'r3',
 		});
 		mocks.loadComments.mockResolvedValue(undefined);
-		// Accept all is in the sheet's list; beside the margin column it is the review bar's.
+		// Accept all is the sheet list's first item, and the margin column's.
 		const { onSuggestionAccepted } = render({
-			narrow: true,
+			narrow,
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 		});
-		const button = Array.from(document.body.querySelectorAll('button')).find(
+		const button = Array.from(document.body.querySelectorAll(narrow ? 'button' : '.margin-accept-all button')).find(
 			(candidate) => candidate.textContent === 'Accept all from agent-1',
 		) as HTMLButtonElement;
 		button.click();
@@ -640,13 +637,13 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.textContent).not.toContain('Updated elsewhere');
 	});
 
-	it('runs accept-all once, shows it busy, and reports a failure inline', async () => {
+	it.each([true, false])('runs accept-all once, shows it busy, and reports a failure inline (sheet: %s)', async (narrow) => {
 		mocks.flushDraft.mockResolvedValue(true);
 		let fail!: (error: Error) => void;
 		mocks.decideSuggestion.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
 		mocks.loadComments.mockResolvedValue(undefined);
-		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
-		const acceptAll = () => document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!;
+		render({ narrow, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
+		const acceptAll = () => document.body.querySelector<HTMLButtonElement>(`${narrow ? '' : '.margin-accept-all '}.suggestion-status button`)!;
 		expect(acceptAll().textContent).toBe('Accept all from agent-1');
 		acceptAll().click(); acceptAll().click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
@@ -662,9 +659,9 @@ describe('DocCommentSurface suggestions', () => {
 		expect(acceptAll().disabled).toBe(false);
 	});
 
-	it('hides accept-all from read-only viewers', () => {
+	it.each([true, false])('hides accept-all from read-only viewers (sheet: %s)', (narrow) => {
 		render({
-			narrow: true,
+			narrow,
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 			readOnly: true,
