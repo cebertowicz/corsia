@@ -92,6 +92,7 @@
 	let feedbackStatus = $state<DocFeedbackStatus>();
 	let detailsOpen = $state(false);
 	let ownershipInDetails = $state(true);
+	let compactOwnerOnly = $state(true);
 	let compactOwnerOpen = $state(false);
 	let ownerAnchor = $state<HTMLButtonElement | null>(null);
 	$effect(() => { if (!compactOwnerOpen) ownerAnchor = null; });
@@ -132,6 +133,17 @@
 				const style = getComputedStyle(header);
 				const available = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 				ownershipInDetails = available < needed;
+				const slot = header.querySelector<HTMLElement>('.identity-owner');
+				const compactButton = slot?.querySelector<HTMLElement>('button.identity');
+				if (slot && compactButton && slot.getBoundingClientRect().width > 0) {
+					const compactProbe = compactButton.cloneNode(true) as HTMLElement;
+					compactProbe.classList.remove('compact');
+					Object.assign(compactProbe.style, { position: 'fixed', left: '-10000px', top: '0', width: 'max-content', maxWidth: 'none', overflow: 'visible', visibility: 'hidden', font: getComputedStyle(compactButton).font });
+					compactProbe.querySelectorAll<HTMLElement>('.identity-name').forEach(name => { name.style.overflow = 'visible'; name.style.minWidth = 'max-content'; });
+					document.body.appendChild(compactProbe);
+					compactOwnerOnly = slot.getBoundingClientRect().width < compactProbe.getBoundingClientRect().width;
+					compactProbe.remove();
+				}
 			});
 		};
 		const resize = new ResizeObserver(measure);
@@ -230,7 +242,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails || compactOwnerOnly} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -347,7 +359,7 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.identity-owner { flex: 1; min-width: 10ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		/* The verified phrase carries the picker when the owner cannot fit. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }
