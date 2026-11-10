@@ -29,8 +29,9 @@ export function seed(page: Page, request: APIRequestContext) {
   return seedDocument(page, request, true);
 }
 
-/** The review document, with every kind of comment at its extremes, or with none (the empty state). */
-export async function seedDocument(page: Page, request: APIRequestContext, withComments: boolean) {
+/** The review document, with every kind of comment at its extremes, or with none (the empty state). With the sidebar
+ * collapsed, desktop widths that otherwise show the document alone show it beside the chat. */
+export async function seedDocument(page: Page, request: APIRequestContext, withComments: boolean, collapseSidebar = false) {
   const title = `Responsive Design Review and Accessibility Coordination Agent ${Date.now()}`;
   const thread = await createSession(request, title);
   const params = { token: TEST_TOKEN };
@@ -94,6 +95,7 @@ export async function seedDocument(page: Page, request: APIRequestContext, withC
     await loginByUrl(target, { waitForComposer: false });
     if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
     await sidebarThread(target, title).click();
+    if (collapseSidebar && (target.viewportSize()?.width ?? 0) > 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
     await expect(target.locator('.cm-content')).toBeVisible();
     const images = target.locator('.cm-md-image img, .cm-md-table td img');
     await expect(images).toHaveCount(2);
