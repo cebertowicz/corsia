@@ -1,5 +1,6 @@
 
-import type { APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext } from '@playwright/test';
+import { TEST_TOKEN } from './corsia';
 
 const BACKEND_PORT = Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110);
 const BASE_URL = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -69,6 +70,25 @@ export async function readUnmatchedThreads(
     request: APIRequestContext,
 ): Promise<Array<string | null>> {
     return (await readMockState(request)).unmatched_calls.map(call => call.thread_id);
+}
+
+/**
+ * The thread's mock turn is over: it is no longer running and left this exact reply in its recent messages.
+ * Then no model call since the last seed went unserved, so the reply is the one this test seeded.
+ */
+export async function waitForThreadReply(
+    request: APIRequestContext,
+    threadId: string,
+    content: string,
+    { timeout = 30_000, message }: { timeout?: number; message?: string } = {},
+): Promise<void> {
+    await expect.poll(async () => {
+        const response = await request.get(`${BASE_URL}/api/delegation/threads/${threadId}/status`, { params: { token: TEST_TOKEN } });
+        expect(response.ok()).toBeTruthy();
+        const status = await response.json();
+        return !status.turn_active && status.recent_messages.some((msg: { content?: string }) => msg.content === content);
+    }, { timeout, message }).toBe(true);
+    expect(await readUnmatchedThreads(request)).toEqual([]);
 }
 
 export async function releaseMockGate(

@@ -4,7 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
-import { tableAt, tableRowAt, widgetSourceAt } from './widget-blocks';
+import { tableAt, tableRowAt, tableRowAtHeight, widgetSourceAt } from './widget-blocks';
 
 const TABLE = '| Item | Owner |\n|---|---|\n| Alpha | Dana |\n| Bravo | Eli |';
 const DOC = `# Title\n\n${TABLE}\n\nAfter | text\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
@@ -72,6 +72,44 @@ describe('tableRowAt', () => {
 		expect(tableRowAt(view, diagram, at('Alpha'))).toBeNull();
 		el.querySelector('table')!.replaceChildren();
 		expect(tableRowAt(view, el, at('Alpha'))).toBeNull();
+	});
+});
+
+describe('tableRowAtHeight', () => {
+	const lineOf = (needle: string) => { const at = DOC.indexOf(needle, TABLE_FROM); return DOC.lastIndexOf('\n', at) + 1; };
+
+	it('names the drawn row at a screen height by the start of the source line it is drawn from', () => {
+		open();
+		const el = drawnTable(view);
+		expect(tableRowAtHeight(view, el, 120)).toMatchObject({ pos: TABLE_FROM, rect: { top: 100 } });
+		expect(tableRowAtHeight(view, el, 150)).toMatchObject({ pos: lineOf('Alpha'), rect: { top: 140 } });
+		expect(tableRowAtHeight(view, el, 200)).toMatchObject({ pos: lineOf('Bravo'), rect: { top: 180 } });
+	});
+
+	it('takes the first row above the table and the last below it', () => {
+		open();
+		const el = drawnTable(view);
+		expect(tableRowAtHeight(view, el, 0)?.pos).toBe(TABLE_FROM);
+		expect(tableRowAtHeight(view, el, 999)?.pos).toBe(lineOf('Bravo'));
+	});
+
+	it('is the inverse of tableRowAt', () => {
+		open();
+		const el = drawnTable(view);
+		for (const y of [120, 150, 200]) {
+			const found = tableRowAtHeight(view, el, y)!;
+			expect(tableRowAt(view, el, found.pos)?.rect.top).toBe(found.rect.top);
+		}
+	});
+
+	it('is null for anything that is not a drawn table', () => {
+		open();
+		const diagram = document.createElement('div');
+		diagram.className = 'cm-md-mermaid';
+		expect(tableRowAtHeight(view, diagram, 120)).toBeNull();
+		const el = drawnTable(view);
+		el.querySelector('table')!.replaceChildren();
+		expect(tableRowAtHeight(view, el, 120)).toBeNull();
 	});
 });
 

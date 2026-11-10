@@ -108,6 +108,14 @@ describe('markdown live preview — marks never reveal raw source on focus', () 
 		expect(text).toContain('bold');
 		expect(text).not.toContain('**bold**');
 	});
+
+	it('hides a code fence and its language name, even with the cursor on the fence line', () => {
+		const doc = '# Doc\n\n```ts\nconst a = 1;\n```\n';
+		const view = mount(doc, doc.indexOf('ts') + 1); // cursor inside "ts"
+		const lines = [...view.contentDOM.querySelectorAll('.cm-md-code')].map((line) => line.textContent);
+		expect(lines).toEqual(['', 'const a = 1;', '']);
+		expect(view.state.doc.toString()).toBe(doc);
+	});
 });
 
 describe('markdown live preview — addresses written in the text', () => {

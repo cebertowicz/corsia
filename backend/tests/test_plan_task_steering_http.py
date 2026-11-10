@@ -457,9 +457,10 @@ def test_the_pane_offers_the_actions_the_row_state_allows(
 def test_resume_and_close_stay_agent_operations_and_pause_is_the_users(db):
     """Adding the human path must not take resume or close from the agent tool.
 
-    Pause is the user's alone: an agent schedules a task instead.
+    A task pause is the person's alone: an agent schedules a task instead.
     """
     from plans import boundary_fields
 
     assert not {"resume_node", "close_node"} & boundary_fields.HUMAN_OPERATIONS
-    assert {"pause_node", "pause"} <= boundary_fields.HUMAN_OPERATIONS
+    assert "pause_node" in boundary_fields.HUMAN_OPERATIONS
+    assert not {"pause", "resume"} & boundary_fields.HUMAN_OPERATIONS

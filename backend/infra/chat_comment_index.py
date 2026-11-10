@@ -38,6 +38,24 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
         )
 
 
+def _merge_agent_answer(agent_answers: dict, thread: dict, key: tuple, sender: str, cid: str,
+                        answer_id: str, answered_at: str, text: str, unread: int) -> None:
+    """Add this cid's sections to the thread's one answer from this agent message."""
+    sections = [section['text'] for section in parse_answers(text, answer_id).get(cid, [])]
+    if not sections:
+        return
+    answer = agent_answers.get((key, answer_id))
+    if answer is None:
+        agent_answers[(key, answer_id)] = answer = {
+            'author_kind': 'agent', 'user_message_id': sender, 'cid': cid,
+            'assistant_message_id': answer_id, 'sections': [],
+            'created_at': answered_at, 'unread': False,
+        }
+        thread['answers'].append(answer)
+    answer['sections'] += [section for section in sections if section not in answer['sections']]
+    answer['unread'] = answer['unread'] or bool(unread)
+
+
 def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messages: list[dict]) -> None:
     """Attach comments and indexed answers for the targets in one loaded page."""
     by_id = {message['id']: message for message in messages if message.get('role') == 'assistant'}
@@ -86,6 +104,8 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
             threads[(sender, cid)] = {**comment, 'user_message_id': sender, 'created_at': created, 'answers': []}
             by_id[target].setdefault('chat_comments', []).append(threads[(sender, cid)])
     replies_added = set()
+    # One agent message gives a thread one answer, however many of the thread's cids its tags name.
+    agent_answers: dict[tuple, dict] = {}
     for target, sender, cid, created, answer_id, answered_at, text, root_sender, root_cid, unread in rows:
         comment = comments.get((sender, cid))
         key = (root_sender, root_cid) if root_sender else (sender, cid)
@@ -98,14 +118,9 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
             })
             replies_added.add((sender, cid))
         if answer_id and text is not None:
-            sections = parse_answers(text, answer_id).get(cid, [])
-            if sections:
-                threads[key]['answers'].append({
-                    'author_kind': 'agent', 'user_message_id': sender, 'cid': cid,
-                    'assistant_message_id': answer_id,
-                    'text': '\n\n'.join(section['text'] for section in sections),
-                    'created_at': answered_at, 'unread': bool(unread),
-                })
+            _merge_agent_answer(agent_answers, threads[key], key, sender, cid, answer_id, answered_at, text, unread)
+    for answer in agent_answers.values():
+        answer['text'] = '\n\n'.join(answer.pop('sections'))
     for thread in threads.values():
         thread['answers'].sort(key=lambda answer: answer['created_at'])
     for message in by_id.values():

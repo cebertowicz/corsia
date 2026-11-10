@@ -106,7 +106,7 @@ def test_bounded_preview_binds_scoped_immutable_reference() -> None:
 
 
 def test_destructively_retained_row_never_claims_full_retrieval() -> None:
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    from infra.tool_retention_marker import TOOL_TRIM_MARKER
     from core.tool_result_projection import (
         ToolResultProjectionError,
         render_tool_result_for_model,

@@ -143,6 +143,7 @@ _INVALID_BODIES = {
     "archive_node": {"node_id": "NODE", "order_key": 3, "expected_revision": 0},
     "close_node": {"node_id": "NODE", "order_key": 3, "expected_revision": 0},
     "pause": {"node_id": "NODE", "expected_revision": 0},
+    "resume": {"node_id": "NODE", "expected_revision": 0},
 }
 
 
@@ -151,9 +152,10 @@ def test_the_matrix_covers_every_published_operation():
     ship unclassified."""
     from tools import plans as tool_plans
 
-    # The user's pause is not published to agents but still reaches the
-    # boundary over HTTP, so its malformed bodies stay classified too.
-    assert set(_INVALID_BODIES) == set(tool_plans._OPERATIONS) | {"pause", "pause_node"}
+    # A task pause is the user's alone and not published to agents, but it
+    # still reaches the boundary over HTTP, so its malformed bodies stay
+    # classified too.
+    assert set(_INVALID_BODIES) == set(tool_plans._OPERATIONS) | {"pause_node"}
 
 
 @pytest.mark.asyncio

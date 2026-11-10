@@ -14,6 +14,7 @@ from registry import service as registry_service
 from registry.file_types import image_media_type
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
+from registry.identity_bridge import written_row
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
 IMAGE_FILE_CODE = "image_file"
@@ -62,9 +63,29 @@ def checked_read_path(path: str, project_id: str | None, db) -> tuple[Path, list
         raise HTTPException(400, detail) from exc
 
 
+def _registered_by_snapshot(thread_id: str, p: Path, artifact_id: str, db) -> dict | None:
+    """This thread's row when the open's snapshot read already registered this file, read without a writer.
+
+    Registration ran in full moments ago; registering again would only restamp it. A claim that names
+    another identity, or a thread with no live registration of it, registers as usual.
+    """
+    existing = registry_service.find_file_identity(str(p), db=db)
+    if existing is None or existing["id"] != artifact_id or existing["state"] != "active":
+        return None
+    registered = db.execute(
+        "SELECT 1 FROM artifact_registrations WHERE artifact_id=? AND parent_thread_id=? AND retired_at IS NULL",
+        (artifact_id, thread_id),
+    ).fetchone()
+    return written_row(db, artifact_id, thread_id) if registered else None
+
+
 def read_document(path: str, user_id: str, project_id: str | None, thread_id: str | None,
-                  *, live_open: bool = False) -> dict:
-    """Validate one existing file, read its bytes, and resolve canonical identity."""
+                  *, live_open: bool = False, registered_artifact_id: str | None = None) -> dict:
+    """Validate one existing file, read its bytes, and resolve canonical identity.
+
+    ``registered_artifact_id`` is the identity this open's snapshot read just registered: when it is
+    still this file's identity and this thread's registration, this read takes no write.
+    """
     db = get_db()
     try:
         if thread_id and not owns_thread(thread_id, user_id, db=db):
@@ -91,7 +112,8 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             _live_open_setup(p, project_id, thread_id, db)
         artifact_type = registry_service.classify(p)
         if thread_id:
-            art = registry_service.register_write_strict(thread_id, str(p), db=db)
+            art = registered_artifact_id and _registered_by_snapshot(thread_id, p, registered_artifact_id, db)
+            art = art or registry_service.register_write_strict(thread_id, str(p), db=db)
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)

@@ -16,6 +16,8 @@ from typing import Iterable
 #: which is otherwise only learned by a refusal, and when another
 #: operation fits better. Keyed by operation.
 _OPERATION_NOTES = {
+    "pause": "conductor or CORSIA agent on another agent's plan, from plan_read(thread_id=...)",
+    "resume": "conductor or CORSIA agent on another agent's plan, from plan_read(thread_id=...)",
     # One first choice for each neighboring settlement state. Active accept
     # remains runtime-compatible, but the published vocabulary never recommends it.
     "mark_done": (

@@ -49,6 +49,26 @@ afterEach(() => {
 });
 
 describe('tool row outcome', () => {
+	it('summarizes a block that reads a skill and an ordinary file', () => {
+		const tools: ActivityTool[] = [
+			{ id: 'a', name: 'Read', args: JSON.stringify({ path: '/w/.corsia/skills/plans/SKILL.md' }), object: '/w/.corsia/skills/plans/SKILL.md', outcome: 'done', status: 'done' },
+			{ id: 'b', name: 'Read', args: JSON.stringify({ path: 'src/app.ts' }), object: 'src/app.ts', outcome: 'done', status: 'done' },
+		];
+		const result = summary(tools);
+		expect(host!.querySelectorAll('.ta-seg')).toHaveLength(2);
+		expect(result.label).toContain(' · ');
+	});
+
+	it('renders both tool rows when a provider repeats a call ID', () => {
+		expect(rows([
+			{ id: 'same', name: 'read_file', phrase: 'Reading first', status: 'running' },
+			{ id: 'same', name: 'read_file', phrase: 'Reading second', status: 'running' },
+		])).toEqual([
+			{ phrase: 'Reading first', outcome: null },
+			{ phrase: 'Reading second', outcome: null },
+		]);
+	});
+
 	it('renders the projected phrase and outcome, with a failure first line', () => {
 		expect(rows([
 			{ id: 'a', name: 'read_file', phrase: 'Reading a.md', outcome: 'done', status: 'done' },

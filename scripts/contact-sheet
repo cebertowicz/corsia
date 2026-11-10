@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Capture a responsive screenshot sheet using the disposable mock frontend.
+# Usage: scripts/contact-sheet <scenario> [--out DIR]
+# Add a scenario under frontend/e2e/contact-sheet: export seed(page, request)
+# to create the fixture, open it on page, and return an async open(page) function;
+# also export scrollAnchor (a selector inside the screen's scrollable content).
+# Writes index.html and screenshots to DIR (default: contact-sheet/<scenario>).
+# Captures light and dark, top and bottom, around CSS width thresholds.
+set -euo pipefail
+scenario="${1:-}"
+case "$scenario" in ''|*[!a-z0-9-]*) printf 'Choose a scenario name using lowercase letters, numbers, and hyphens.\n' >&2; exit 2 ;; esac
+shift
+root="$(cd "$(dirname "$0")/.." && pwd)"
+[ -f "$root/frontend/e2e/contact-sheet/$scenario.ts" ] || { printf 'Unknown scenario: %s\n' "$scenario" >&2; exit 2; }
+out="$PWD/contact-sheet/$scenario"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out) [ "$#" -ge 2 ] || { printf '%s\n' '--out needs a directory' >&2; exit 2; }; out="$2"; shift 2 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+mkdir -p "$out"
+out="$(cd "$out" && pwd)"
+run_root="$(mktemp -d /tmp/corsia-contact-sheet.XXXXXXXX)"
+ports="$(python3 -c 'import socket; a=socket.socket(); b=socket.socket(); a.bind(("127.0.0.1", 0)); b.bind(("127.0.0.1", 0)); print(a.getsockname()[1], b.getsockname()[1])')"
+read -r backend_port frontend_port <<< "$ports"
+unset CORSIA_E2E_REUSE CORSIA_E2E_PRESERVE_WORKSPACE CORSIA_BROWSER_INSTANCE_KEY
+unset CORSIA_E2E_LIVE_FAULTS CORSIA_E2E_FRESH_ROOTS
+export CORSIA_E2E_OWNED_PROCESSES_ONLY=1
+export CORSIA_E2E_MOCK=1 CORSIA_E2E_WORKSPACE="$run_root/workspace" CORSIA_E2E_STATE_DIR="$run_root/state"
+export CORSIA_E2E_BACKEND_PORT="$backend_port" CORSIA_E2E_FRONTEND_PORT="$frontend_port"
+export CONTACT_SHEET_SCENARIO="$scenario" CONTACT_SHEET_OUT="$out"
+cd "$root"
+bash scripts/e2e-local e2e/contact-sheet/contact-sheet.spec.ts --project chromium-desktop

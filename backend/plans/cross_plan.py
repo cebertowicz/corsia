@@ -57,6 +57,7 @@ def conductor_task_settled(connection, node_id: str, *, outcome: str) -> None:
     """
     from plans import closure, review_evidence, service
     from plans.close_next_bounds import bounded
+    from plans.conductor_add import ADD_PROVENANCE
     from plans.operator_node_facts import executor_labels, revision_root
     from prompts import plan_wakes as text
 
@@ -65,8 +66,8 @@ def conductor_task_settled(connection, node_id: str, *, outcome: str) -> None:
     # it as a revision, so the receipt is read from the start of that chain.
     created = connection.execute(
         """SELECT actor_id FROM plan_node_events
-           WHERE node_id=? AND event='node_created' AND provenance='plan.conductor_add'""",
-        (revision_root(node_id, db=connection),),
+           WHERE node_id=? AND event='node_created' AND provenance=?""",
+        (revision_root(node_id, db=connection), ADD_PROVENANCE),
     ).fetchone()
     if created is None or created["actor_id"] is None or created["actor_id"] == node["owner_id"]:
         return

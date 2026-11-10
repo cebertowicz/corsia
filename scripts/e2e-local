@@ -24,6 +24,7 @@
 set -euo pipefail
 
 MOCK_MODE="${CORSIA_E2E_MOCK:-0}"
+OWNED_PROCESSES_ONLY="${CORSIA_E2E_OWNED_PROCESSES_ONLY:-0}"
 
 if [ "$MOCK_MODE" = "1" ]; then
   export CORSIA_E2E_MODEL="mock/test-model"
@@ -186,11 +187,13 @@ prepare_roots() {
     || refuse "these roots: the backend path guard rejected them (reason above)"
 
   trap cleanup EXIT
-  STALE_PIDS=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
-  if [ -n "$STALE_PIDS" ]; then
-    yellow "killing stale backend(s) on :${BOOT_PORT} — $STALE_PIDS"
-    echo "$STALE_PIDS" | xargs kill 2>/dev/null || true
-    sleep 1
+  if [ "$OWNED_PROCESSES_ONLY" != "1" ]; then
+    STALE_PIDS=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+    if [ -n "$STALE_PIDS" ]; then
+      yellow "killing stale backend(s) on :${BOOT_PORT} — $STALE_PIDS"
+      echo "$STALE_PIDS" | xargs kill 2>/dev/null || true
+      sleep 1
+    fi
   fi
   if [ "$WORKSPACE" = "$DEFAULT_WORKSPACE" ]; then rm -rf "$WORKSPACE"; fi
   if [ "$STATE_ROOT" = "$DEFAULT_STATE_ROOT" ]; then rm -rf "$STATE_ROOT"; fi
@@ -198,10 +201,14 @@ prepare_roots() {
 }
 
 cleanup() {
-  STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
-  if [ -n "$STALE" ]; then
-    echo "$STALE" | xargs kill 2>/dev/null || true
-    sleep 1
+  if [ "$OWNED_PROCESSES_ONLY" = "1" ]; then
+    if [ -n "${BOOT_PID:-}" ]; then kill_backend; fi
+  else
+    STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+    if [ -n "$STALE" ]; then
+      echo "$STALE" | xargs kill 2>/dev/null || true
+      sleep 1
+    fi
   fi
   # The boot log is deliberately NOT deleted: when boot fails it is the only
   # record of why. It is gitignored and overwritten by the next run.
@@ -213,7 +220,7 @@ boot_backend() {
   local workspace="$1"
   local log_file="$2"
   ( cd "${REPO_ROOT}/backend" && \
-    env CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$workspace" \
+    exec env CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$workspace" \
       CORSIA_STATE_DIR="$STATE_ROOT" "$VENV_PY" -m uvicorn main:app \
       --host 127.0.0.1 --port $BOOT_PORT > "$log_file" 2>&1 ) &
   BOOT_PID=$!
@@ -224,9 +231,11 @@ kill_backend() {
     kill "$BOOT_PID" 2>/dev/null || true
     wait "$BOOT_PID" 2>/dev/null || true
   fi
-  STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
-  if [ -n "$STALE" ]; then
-    echo "$STALE" | xargs kill 2>/dev/null || true
+  if [ "$OWNED_PROCESSES_ONLY" != "1" ]; then
+    STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+    if [ -n "$STALE" ]; then
+      echo "$STALE" | xargs kill 2>/dev/null || true
+    fi
   fi
   BOOT_PID=""
   sleep 1
@@ -244,6 +253,37 @@ while [ $# -gt 0 ]; do
     *)         EXTRA_ARGS+=("$1"); shift ;;
   esac
 done
+
+# Check before creating roots or provisioning accounts, including --reuse. Bind
+# rather than probing HTTP so any TCP listener is detected without signalling it.
+if [ "$OWNED_PROCESSES_ONLY" = "1" ]; then
+  if ! "$VENV_PY" - "$BOOT_PORT" <<'PY'
+import errno
+import socket
+import sys
+
+port = int(sys.argv[1])
+sockets = []
+try:
+    for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        try:
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sockets.append(sock)
+            if family == socket.AF_INET6:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            sock.bind((address, port))
+        except OSError as exc:
+            if family == socket.AF_INET6 and exc.errno in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL):
+                continue
+            raise
+finally:
+    for sock in sockets:
+        sock.close()
+PY
+  then
+    refuse "backend port :${BOOT_PORT}: it is unavailable"
+  fi
+fi
 
 if [ "$MOCK_MODE" = "1" ]; then
   header "MOCK MODE — all LLM responses are seeded mocks"

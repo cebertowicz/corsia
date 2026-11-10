@@ -1,7 +1,8 @@
 """An agent sets a task aside by scheduling it, never by pausing it.
 
-Pause is the user's (``shared/planning/plans-work-never-stops-2026-09-28.md``,
-W1). An agent that wants to come back to a task later arms a deadline watch
+Pause is the person's (``shared/planning/plans-work-never-stops-2026-09-28.md``,
+W1), and a coordinator's on another agent's whole plan (``pause_authority``).
+An agent that wants to come back to a task later arms a deadline watch
 with a reason: ``arm_watch`` with ``reason`` and no ``artifact_id``. It may be
 any distance out, because the watch ends by itself and wakes its owner, which
 a pause never did. The reason rides in the ``watch_armed`` payload as
@@ -21,7 +22,8 @@ import plans.service as service
 
 #: What a scheduled watch waits for when the caller names nothing.
 SCHEDULED_EVENT = "scheduled"
-#: A whole-plan pause and a task pause: both are the user's alone.
+#: A whole-plan pause and a task pause. A task pause is the person's alone; a
+#: whole-plan pause is also a coordinator's, on another agent's plan.
 PAUSE_OPERATIONS = frozenset({"pause", "pause_node"})
 
 OWNER_ONLY_REFUSAL = (
@@ -33,7 +35,7 @@ OWNER_ONLY_REFUSAL = (
 def pause_refusal(node_id: str | None) -> str:
     """The one line an agent reads when it reaches for pause."""
     return (
-        "Pause is the user's. To come back to this later, schedule it: "
+        "Only the person or their conductor pauses. To come back to this later, schedule it: "
         f"arm_watch(node_id={node_id or '<task id>'}, "
         "condition={type: deadline, value: <ISO time>}, reason=<why>)."
     )

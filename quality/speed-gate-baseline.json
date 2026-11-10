@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Every harness route now reads each signed-in account's own row and policy; dev's added accounts already paid this read, and the old ambient Default skipped it. Per-route cost is flat in the number of models and grows by a constant per account.",
+  "reason": "The chat-list read omits 19 engine columns no list caller reads (turn, model-switch, compaction, confinement and local-only state); thread detail and the owning routes still serve them.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -332,7 +332,7 @@
       "steps": 62
     },
     "/api/threads": {
-      "bytes": 786999,
+      "bytes": 511535,
       "statements": 21,
       "steps": 233896
     },

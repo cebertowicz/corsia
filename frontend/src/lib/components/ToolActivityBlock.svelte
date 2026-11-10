@@ -70,9 +70,16 @@
 	const summaryLabel = $derived(summarySegments.map((segment) => segment.label).join(' · '));
 	const isExpanded = $derived(expandedTools.has(blockKey));
 
-	const visibleRows = $derived(
-		isExpanded ? tools : anyRunning ? tools.filter((t) => t.status === 'running') : []
-	);
+	// A provider can repeat a call ID; each row keeps its own key so one repeat never breaks the list.
+	const visibleRows = $derived.by(() => {
+		const rows = isExpanded ? tools : anyRunning ? tools.filter((t) => t.status === 'running') : [];
+		const occurrences = new Map<string, number>();
+		return rows.map((tool) => {
+			const occurrence = occurrences.get(tool.id) ?? 0;
+			occurrences.set(tool.id, occurrence + 1);
+			return { tool, key: JSON.stringify([tool.id, occurrence]) };
+		});
+	});
 
 	function rowDiff(t: ActivityTool) {
 		const payload = diffPayload(t.name, t.args);
@@ -137,7 +144,8 @@
 			<span class="ta-status-spacer" aria-hidden="true"></span>
 		{/if}
 		<span class="ta-segments">
-			{#each summarySegments as seg, i (seg.kind)}
+			<!-- Not keyed by kind: skill reads and file reads are two segments of the same kind. -->
+			{#each summarySegments as seg, i}
 				{#if i > 0}<span class="ta-sep">·</span>{/if}
 				<span class="ta-seg" class:bad={seg.kind === 'failed' || seg.kind === 'refused'} class:unknown={seg.kind === 'unknown'}>{seg.label}</span>
 			{/each}
@@ -147,7 +155,8 @@
 
 	{#if visibleRows.length > 0}
 		<div class="ta-rows">
-			{#each visibleRows as t (t.id)}
+			{#each visibleRows as row (row.key)}
+				{@const t = row.tool}
 				{@const displayArgs = toolDisplayArgs(t.name, t.args)}
 				{@const displayResult = toolDetailResult(t.name, t.result)}
 				{@const kind = toolKind(t.name, t.args)}

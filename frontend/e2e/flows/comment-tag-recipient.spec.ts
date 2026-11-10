@@ -98,7 +98,7 @@ test('@flow:document-comments tagging an agent in a reply delivers only to parti
 		const payload = (await posted).postDataJSON();
 		expect(payload.tagged_agent_ids).toEqual([]);
 		expect(payload.tagged_agent_mentions).toEqual([]);
-		await expect(card.getByText(`@Tag recipient ${stamp}`, { exact: true })).toBeVisible();
+		await expect(card.getByText(`@Tag recipient ${stamp}`, { exact: true }).and(card.locator('p'))).toBeVisible();
 		await expect(card.locator('.comment-mention').filter({ hasText: `@Tag recipient ${stamp}` })).toHaveCount(1);
 	} finally {
 		await demoteAgent(request, tagged);

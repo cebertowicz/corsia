@@ -62,9 +62,6 @@ from core.thread_lifecycle_plans import (
     withdraw_owned_decisions as _withdraw_owned_decisions,
 )
 
-# Marker prefix makes the trim idempotent: trimmed rows are skipped on re-run.
-TOOL_TRIM_MARKER = "[tool output trimmed"
-
 
 class ThreadLifecycleError(ValueError):
     """A requested lifecycle transition cannot be applied."""

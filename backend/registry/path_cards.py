@@ -22,7 +22,10 @@ _FENCE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 _MARKDOWN_LINK = re.compile(r"\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 # File paths in prose or inline code; URLs are masked before this scan.
 _BARE_PATH = re.compile(r"(?<![\w/.:~%-])((?:/|(?:\.{1,2}/))?(?:[\w@%+=,.~-]+/)*[\w@%+=,~-][\w@%+=,.~-]*\.[A-Za-z0-9]{1,8})(?![\w/])")
-_URL = re.compile(r"[a-z][a-z\d+.-]*://[^\s<>()]+", re.IGNORECASE)
+# A URL: a scheme from its first letter, "://", and the token after it. Each attempt starts
+# only where a run of scheme characters starts, so a long run is read once, not once per
+# character; the run's leading digits and signs stay visible to the bare-path scan.
+_URL = re.compile(r"(?<![a-z\d+.-])([\d+.-]*)([a-z][a-z\d+.-]*://[^\s<>()]+)", re.IGNORECASE)
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 _SCHEME = re.compile(r"^[a-z][a-z\d+.-]*:", re.IGNORECASE)
 # ``file.md:12`` or ``file.md:12:3``, a place in a file as agents cite it, names that file.
@@ -77,12 +80,16 @@ def _names_file(target: str) -> bool:
     return "." in scheme.group() and bool(_LINE_SUFFIX.match(path))
 
 
+def _mask_urls(body: str) -> str:
+    """Blank every URL out of ``body``, keeping every other character where it was."""
+    return _URL.sub(lambda m: m.group(1) + " " * len(m.group(2)), body)
+
+
 def targets(text: str) -> list[str]:
     """Link targets and bare paths outside fenced code, in the order text names them."""
     body = _FENCE.sub("", text or "")
     found: list[tuple[int, str]] = [(m.start(), m.group(1)) for m in _MARKDOWN_LINK.finditer(body)]
-    bare_body = _MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body)
-    bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
+    bare_body = _mask_urls(_MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body))
     found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(bare_body)]
     ordered: list[str] = []
     seen: set[str] = set()

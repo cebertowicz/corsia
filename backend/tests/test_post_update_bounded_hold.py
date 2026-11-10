@@ -77,11 +77,26 @@ async def test_transcript_lookups_under_the_write_lock_are_bounded_by_position(d
 
     scans = [sql for sql in locked if "json_extract" in sql]
     assert len(scans) == 2, scans
-    for sql in scans:
-        detail = " ".join(
-            row[-1] for row in deleg_db.execute("EXPLAIN QUERY PLAN " + sql).fetchall()
-        )
-        assert "idx_messages_session_seq (thread_id=? AND seq>?)" in detail, detail
+    details = [
+        " ".join(row[-1] for row in deleg_db.execute("EXPLAIN QUERY PLAN " + sql).fetchall())
+        for sql in scans
+    ]
+    # The invariant is that neither locked lookup may widen past the position it
+    # was given: ``seq>?`` must be part of the seek itself, and no plan may fall
+    # back to scanning the thread. Schema 186 changed which index carries that
+    # bound for the sibling lookup — it now seeks
+    # ``idx_messages_meta_turn_seq (thread_id=? AND <expr>=? AND seq>?)``, which
+    # visits that Turn's rows from the position on instead of walking the thread
+    # backwards testing metadata on every row (34 ms to 1.8 ms at 3,053,475 rows,
+    # 4.5x even for that thread's busiest Turn) — while the idempotency-key
+    # lookup keeps its old position seek.
+    for detail in details:
+        assert "SCAN messages" not in detail, detail
+        assert "seq>?)" in detail, detail
+    assert any("idx_messages_meta_turn_seq" in detail for detail in details), details
+    assert any(
+        "idx_messages_session_seq (thread_id=? AND seq>?)" in detail for detail in details
+    ), details
 
 
 @pytest.mark.asyncio
