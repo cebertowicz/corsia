@@ -79,6 +79,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await expect(page.locator('button.identity')).toBeVisible();
   await page.screenshot({ path: `${out}/switch-status-${high}.png` });
   await page.setViewportSize({ width: 900, height: 900 });
+  await page.waitForTimeout(2000); // The Details switch follows the shell transition.
   await showPicker(page);
   let release!: () => void;
   const delayed = new Promise<void>(resolve => release = resolve);

@@ -70,8 +70,8 @@
 
 <svelte:window onresize={measurePane} />
 <button bind:this={anchor} type="button" class="identity" class:expanded aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
-	{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true"> · </span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}
-	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}<span aria-hidden="true">⌄</span>
+	{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}
+	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}<span aria-hidden="true">&nbsp;⌄</span>
 </button>
 {#snippet fields()}
 	<div class="owner-picker">
