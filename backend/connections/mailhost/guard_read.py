@@ -239,7 +239,7 @@ def _conversation(ep, username: str, password: str, account_id: str, ids: set[st
     # One session: in Inbox and then Sent, one SEARCH for the thread's Message-IDs and one FETCH of what it finds.
     with imap.account_lock(account_id), imap.session(ep, username, password) as conn:
         try:
-            names = (imap.MAILBOX, _sent_folder(conn, ep, username))
+            names: tuple[str, ...] = (imap.MAILBOX, _sent_folder(conn, ep, username))
         except _SentFolderMissing:
             names = (imap.MAILBOX,)
         emails = []

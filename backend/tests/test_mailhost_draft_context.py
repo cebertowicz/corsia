@@ -55,4 +55,6 @@ async def test_a_reply_draft_saved_with_the_old_in_reply_to_line_still_sends_thr
     [(_, raw)] = host.built.smtp.sent
     message = message_from_bytes(raw, policy=policy.default)
     assert message["In-Reply-To"] == "<orig@example.com>"
-    assert "In reply to" not in message.get_body(("plain",)).get_content()
+    body = message.get_body(("plain",))
+    assert body is not None
+    assert "In reply to" not in body.get_content()
