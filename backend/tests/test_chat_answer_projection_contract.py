@@ -1,71 +1,57 @@
-"""Answer projections have one grammar owner and bounded stream scanning."""
+"""The answer-tag grammar has one home, and its prefix check cannot drift from it."""
 
 import ast
+import random
+import re
 from pathlib import Path
 
-from infra import chat_comment_answers as answers
+from infra.chat_comment_ids import CID_PATTERN, could_start_cid, format_cid
+
+_GRAMMAR_HOMES = {'infra/chat_comment_ids.py', 'infra/chat_comment_answers.py'}
 
 
 def test_private_answer_grammar_is_not_imported_elsewhere():
     backend = Path(__file__).resolve().parents[1]
-    private = {'_TAGGED', '_TAG', '_PARTIAL_TAG'}
+    private = {'_TAGGED', '_TAG', '_CID'}
     violations = []
     for path in backend.rglob('*.py'):
-        if path == Path(answers.__file__).resolve():
+        if str(path.relative_to(backend)) in _GRAMMAR_HOMES:
             continue
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.ImportFrom) and node.module == 'infra.chat_comment_answers':
+            if isinstance(node, ast.ImportFrom) and node.module in ('infra.chat_comment_answers', 'infra.chat_comment_ids'):
                 if private.intersection(alias.name for alias in node.names):
                     violations.append(str(path.relative_to(backend)))
     assert not violations
 
 
-def test_stream_scans_linearly_for_one_character_deltas(monkeypatch):
-    scanned = [0]
-    class CountingPattern:
-        def __init__(self, pattern):
-            self.pattern = pattern
-        def search(self, text, pos=0):
-            scanned[0] += len(text) - pos
-            return self.pattern.search(text, pos)
-    monkeypatch.setattr(answers, '_TAGGED', CountingPattern(answers._TAGGED))
-    monkeypatch.setattr(answers, '_PARTIAL_TAG', CountingPattern(answers._PARTIAL_TAG))
-    stream = answers.VisibleAnswerStream()
-    text = 'x' * 50_000
-    assert ''.join(stream.feed(char) for char in text) == text
-    assert scanned[0] <= len(text) * 8
-    before = scanned[0]
-    for char in '\n\n[c1.1] secret' + 'z' * 1000:
-        stream.feed(char)
-    after = scanned[0]
-    stream.feed('z' * 1000)
-    assert scanned[0] == after
-    assert after - before < 200
+def test_every_start_of_a_cid_passes_the_prefix_check():
+    rng = random.Random(2433)
+    cids = [format_cid(rng.randint(1, 10 ** rng.randint(1, 6)), rng.randint(1, 10 ** rng.randint(1, 4)))
+            for _ in range(500)] + [format_cid(1, 1), format_cid(10, 10), format_cid(109, 2005)]
+    for cid in cids:
+        assert re.fullmatch(CID_PATTERN, cid), cid
+        for end in range(len(cid) + 1):
+            assert could_start_cid(cid[:end]), cid[:end]
 
 
-def test_stream_preserves_partial_boundary_across_newline_chunks():
-    stream = answers.VisibleAnswerStream()
-    chunks = ('\n\r', '\n', ' \r', '\n[c1\n', '0')
-    assert [stream.feed(chunk) for chunk in chunks] == ['', '', '\n', '', '\r\n \r\n[c1\n0']
+def test_text_that_cannot_become_a_cid_fails_the_prefix_check():
+    for text in ('x', 'c0', 'c1..', 'c1.0', 'c01', 'c1.1]', 'c1.1 ', 'c1 is', 'code', 'C1.1'):
+        assert not could_start_cid(text), text
 
 
-def test_stream_scans_long_partial_prefixes_linearly(monkeypatch):
-    scanned = [0]
+def test_stream_sends_the_same_chat_text_however_the_reply_is_chunked():
+    from infra.chat_comment_answers import VisibleAnswerStream
 
-    class CountingPattern:
-        def __init__(self, pattern):
-            self.pattern = pattern
-
-        def search(self, text, pos=0):
-            scanned[0] += len(text) - pos
-            return self.pattern.search(text, pos)
-
-    monkeypatch.setattr(answers, '_TAGGED', CountingPattern(answers._TAGGED))
-    monkeypatch.setattr(answers, '_PARTIAL_TAG', CountingPattern(answers._PARTIAL_TAG))
-    for text in ('\n' + ' ' * 50_000 + 'x', '[c' + '1' * 50_000 + 'x',
-                 '\n\n[c1.' + '2' * 50_000 + '] hidden'):
-        before = scanned[0]
-        stream = answers.VisibleAnswerStream()
-        result = ''.join(stream.feed(char) for char in text)
-        assert result == ('' if text.endswith('] hidden') else text)
-        assert scanned[0] - before <= len(text) * 8
+    cases = {
+        'Intro\n\n[c1.1] secret\n\n[c12.3] more': 'Intro',
+        '[c1.1] secret': '',
+        'Price [c1.1] is inline\n\nDone': 'Price [c1.1] is inline\n\nDone',
+        'List\n\n[c1] not a tag\n\n[c2.1] secret': 'List\n\n[c1] not a tag',
+        'Ends mid tag\n\n[c1.1': 'Ends mid tag',
+    }
+    for text, shown in cases.items():
+        for first in range(len(text) + 1):
+            for second in range(first, len(text) + 1):
+                stream = VisibleAnswerStream()
+                sent = ''.join(stream.feed(chunk) for chunk in (text[:first], text[first:second], text[second:]))
+                assert sent == shown, (text, first, second, sent)

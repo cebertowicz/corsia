@@ -29,7 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.sidebar_preview import project_previews
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, strip_answer_tags
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -191,10 +191,11 @@ def _first_readable_line(content: object) -> str | None:
     return None
 
 
+
 def _summary(update: dict, message_content: object) -> str | None:
     """A stored event's sidebar preview; lifecycle text comes only from its snapshot."""
     if update["kind"] == "marked":
-        return _first_readable_line(message_content)
+        return _first_readable_line(strip_answer_tags(message_content))
     title = update["title"]
     if not title:
         return None
@@ -239,27 +240,23 @@ def latest_by_thread_with_attention(
                  WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
                  GROUP BY thread_id
             )
-            SELECT {columns}, messages.content AS message_content,
+            SELECT {columns}, {VISIBLE_CONTENT} AS message_content,
                    selected.display_key, selected.attention_key,
                    {row_key} AS row_key
               FROM selected
               CROSS JOIN thread_updates u INDEXED BY idx_thread_updates_thread_time
                 ON u.thread_id=selected.thread_id
                 AND ({row_key}=selected.display_key OR {row_key}=selected.attention_key)
-              LEFT JOIN messages ON messages.id=u.source_id AND u.source_kind='message'""",
+              LEFT JOIN messages m ON m.id=u.source_id AND u.source_kind='message'
+              {VISIBLE_CONTENT_JOIN}""",
         ids,
     ).fetchall()
     display: dict[str, dict] = {}
     attention: dict[str, dict] = {}
     width = len(_COLUMNS.split(","))
-    updates = [_public(tuple(row)[:width]) for row in rows]
-    contents = project_previews(db, [
-        (update['thread_id'], update['message_id'] if update['kind'] == 'marked' else None,
-         row['message_content'] if update['kind'] == 'marked' else None)
-        for row, update in zip(rows, updates)
-    ], limit=None)
-    for row, update, content in zip(rows, updates, contents):
-        update["summary"] = _summary(update, content)
+    for row in rows:
+        update = _public(tuple(row)[:width])
+        update["summary"] = _summary(update, row["message_content"])
         if row["row_key"] == row["display_key"]:
             display[update["thread_id"]] = update
         if row["row_key"] == row["attention_key"]:

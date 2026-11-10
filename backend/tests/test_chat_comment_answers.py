@@ -138,6 +138,63 @@ def test_write_places_known_answers(isolated_db):
         db.close()
 
 
+def test_write_saves_the_chat_text_once_and_keeps_the_message_as_written(isolated_db):
+    text = "Intro\n\n[c1.1][c1.2] shared\n\n[c1.9] unknown"
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, text)
+        insert_message("thread", "assistant", "Plain\n\n[c1.9] unknown", {"turn_unbound_reason": "legacy_import"},
+                       msg_id="unplaced", db=db, created_at="2026-01-03")
+        db.commit()
+        assert db.execute("SELECT content FROM messages WHERE id='answer'").fetchone()[0] == text
+        assert [tuple(row) for row in db.execute("SELECT message_id,thread_id,content FROM chat_visible_content")] == [
+            ("answer", "thread", "Intro\n\n[c1.9] unknown"),
+        ]
+    finally:
+        db.close()
+
+
+def test_deleting_a_comment_keeps_its_answer_out_of_chat(isolated_db):
+    from infra.chat_comment_index import attach_comments
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, "Intro\n\n[c1.1] answer")
+        db.execute("DELETE FROM chat_comments WHERE cid='c1.1'")
+        db.commit()
+        page = [{"id": "answer", "role": "assistant", "content": "Intro\n\n[c1.1] answer"}]
+        attach_comments(db, "thread", OWNER_USER, page)
+    finally:
+        db.close()
+    assert page[0]["chat_visible_content"] == "Intro"
+    assert page[0]["chat_answer_cids"] == []
+
+
+def test_migration_saves_chat_text_for_messages_answered_before_it(tmp_path):
+    """A database at 186 holding answered messages gets their chat text, once."""
+    db = sqlite3.connect(tmp_path / "answered.db")
+    initialize_schema(db)
+    db.row_factory = None
+    _seed(db)
+    db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES "
+               "('old-answer','thread','assistant','Intro\n\n[c1.1] old\n\n[c1.9] unplaced','2026-01-02',2),"
+               "('old-plain','thread','assistant','Plain [c1.1] words','2026-01-03',3)")
+    db.executemany("INSERT INTO chat_comment_answers VALUES ('thread','question',?,'old-answer','2026-01-02')",
+                   [("c1.1",), ("c1.2",)])
+    db.execute("DROP TABLE chat_visible_content")
+    db.execute("PRAGMA user_version=186")
+    db.commit()
+    result = migrate_to_current(db, SCHEMA_VERSION)
+    assert (result.from_version, result.to_version) == (186, SCHEMA_VERSION)
+    assert db.execute("SELECT message_id,content FROM chat_visible_content").fetchall() == [
+        ("old-answer", "Intro\n\n[c1.9] unplaced"),
+    ]
+    assert db.execute("SELECT content FROM messages WHERE id='old-answer'").fetchone()[0].endswith("[c1.9] unplaced")
+    assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
+    db.close()
+
+
 def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     from main import app
     db = get_db()
@@ -243,6 +300,7 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         db.execute("INSERT INTO chat_comment_answers VALUES ('thread','followup','c2.1','answer','t')")
         db.execute("INSERT INTO chat_comment_views VALUES (?,?,?,?)", (OWNER_USER, 'followup', 'c2.1', 't'))
         seed_thread(db, "other")
+        db.execute("INSERT INTO chat_visible_content VALUES ('other-answer','other','')")
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
                    "VALUES ('other-question','other','user','x','t',1)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('other','other-question','c1.1','other-answer','t')")
@@ -259,6 +317,7 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comment_answers")] == ["other"]
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comments")] == ["other"]
         assert [row[0] for row in db.execute("SELECT user_message_id FROM chat_comment_views")] == ["other-question"]
+        assert [row[0] for row in db.execute("SELECT message_id FROM chat_visible_content")] == ["other-answer"]
     finally:
         db.rollback()
         db.close()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from core.message_display import llm_to_display
+from infra.chat_comment_answers import message_answer_fields
 from infra.database import get_db
 from infra.message_activity import DISPLAY_ROW_SELECT
 
@@ -25,18 +26,11 @@ def load_assistant_step_display(
         step = _project_assistant_step(
             _lineage_rows(_db, child_thread_id, assistant_step_id), assistant_step_id,
         )
-        step.update(answer_projection(_db, child_thread_id, assistant_step_id, step.get("content", "")))
+        step.update(message_answer_fields(child_thread_id, assistant_step_id, _db))
         return step
     finally:
         if not db:
             _db.close()
-
-
-def answer_projection(db, thread_id: str, message_id: str, content: str) -> dict:
-    """Project the saved answer placements onto a step frame."""
-    from infra.chat_comment_answers import project_saved_answers
-
-    return project_saved_answers(db, [(thread_id, message_id, content)])[0]
 
 
 def assistant_step_payload(step: dict, *, message_id: str) -> dict:

@@ -32,6 +32,31 @@ def test_cc_new_turn_drops_stopped_turns_held_delta():
     asyncio.run(run())
 
 
+def test_codex_new_turn_drops_stopped_turns_held_delta(isolated_db):
+    from types import SimpleNamespace
+    from subagents import codex_runtime
+    from subagents.codex_runtime_events import _on_text_delta
+    from test_thread_root_visibility import _seed_threads
+
+    _seed_threads([('cx', None)], turns=[(2, 'new', 'cx')])
+    old = TurnIdentity('old', 1)
+    new = TurnIdentity('new', 2)
+    live = codex_runtime._LiveCodex(session=None, parent_thread_id=None, name='cx', corsia_turn=old)
+    frames = []
+    ctx = SimpleNamespace(live=live, thread_id='cx', bcast=lambda _thread, frame: frames.append(frame))
+
+    async def run():
+        await _on_text_delta(ctx, {'text': 'Intro\n\n[c1', '_corsia_turn_identity': old})
+        assert frames[-1]['content'] == 'Intro'
+        # The previous turn stopped without saving its partial tag.
+        await codex_runtime._start_live_turn('cx', live, 'input', successor_turn_id='new',
+                                             bcast=lambda _thread, frame: None, preadmitted_turn=new)
+        await _on_text_delta(ctx, {'text': 'New turn', '_corsia_turn_identity': new})
+        assert frames[-1]['content'] == 'New turn'
+
+    asyncio.run(run())
+
+
 def test_native_stream_reconnect_and_saved_projection(isolated_db):
     db = get_db()
     try:

@@ -825,6 +825,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 185 -> 186 indexes the two history walks a scoped read still takes.
         from infra.migration_185_to_186_scoped_history_indexes import migrate_185_to_186
         migrate_185_to_186(db)
+        # 186 -> 187 saves the chat text of messages that answered comments.
+        from infra.migration_186_to_187_chat_visible_content import migrate_186_to_187
+        migrate_186_to_187(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -958,7 +961,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 186
+    assert SCHEMA_VERSION == 187
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

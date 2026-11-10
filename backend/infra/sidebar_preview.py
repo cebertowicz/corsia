@@ -1,11 +1,22 @@
-"""Shared sidebar message selection and answer projection."""
+"""The sidebar's last-message preview, shared by the thread list and live updates."""
 
-from infra.chat_comment_answers import project_previews
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, strip_answer_tags
+from infra.database import get_db
 
-# Both listed and live previews select the same latest user or assistant message.
-LATEST_MESSAGE_JOIN = """LEFT JOIN messages m ON m.id =
-    (SELECT lm.id FROM messages lm WHERE lm.thread_id=s.id
-     AND lm.role IN ('user','assistant') ORDER BY lm.created_at DESC LIMIT 1)"""
-PREVIEW_CONTENT = """CASE WHEN EXISTS (
-    SELECT 1 FROM chat_comment_answers a WHERE a.assistant_message_id = m.id
-) THEN m.content ELSE substr(m.content, 1, 100) END"""
+# The first 100 characters of thread ``s``'s newest user or assistant message, as chat shows it.
+# Callers strip the tags of sections that were not placed.
+LAST_MESSAGE_PREVIEW = f"""(SELECT substr({VISIBLE_CONTENT}, 1, 100) FROM messages m {VISIBLE_CONTENT_JOIN}
+    WHERE m.thread_id=s.id AND m.role IN ('user','assistant') ORDER BY m.created_at DESC LIMIT 1)"""
+
+
+def sidebar_update(thread_id: str) -> dict | None:
+    """One thread's live sidebar title, time and preview."""
+    db = get_db()
+    try:
+        row = db.execute(
+            f"SELECT title, updated_at, {LAST_MESSAGE_PREVIEW} AS last_message FROM threads s WHERE s.id=?",
+            (thread_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    return {**dict(row), "last_message": strip_answer_tags(row["last_message"])} if row else None

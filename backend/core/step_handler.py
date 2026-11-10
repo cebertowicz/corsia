@@ -6,9 +6,9 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
-from infra.chat_comment_answers import VisibleAnswerStream
-from core.step_projection import step_answer_projection, turn_sidebar_projection
-from infra.database import get_db, write_transaction
+from infra.chat_comment_answers import VisibleAnswerStream, message_answer_fields
+from infra.database import write_transaction
+from infra.sidebar_preview import sidebar_update
 from infra.time import utc_now_iso
 from infra.db_async import run_in_db
 from infra.context_receipts import attach_delivered_context_to_latest_assistant as _attach_delivered_context_to_latest_assistant
@@ -172,7 +172,7 @@ class StepHandler:
             "metadata": ws_meta,
             "created_at": step_now,
             "seq": await _step_seq(self.thread_id, step_id),
-            **await step_answer_projection(self.thread_id, step_id, step_content),
+            **await run_in_db(message_answer_fields, self.thread_id, step_id),
             "finalized_tool_ids": [],
         })
 
@@ -302,7 +302,7 @@ class StepHandler:
             "metadata": metadata,
             "created_at": self.tool_step_created_at,
             "seq": await _step_seq(self.thread_id, self.tool_step_id),
-            **await step_answer_projection(self.thread_id, self.tool_step_id, self.tool_step_content),
+            **await run_in_db(message_answer_fields, self.thread_id, self.tool_step_id),
             "finalized_tool_ids": finalized_ids,
         })
 
@@ -359,7 +359,7 @@ class StepHandler:
         await self._emit(ws_payload)
 
         try:
-            row = await run_in_db(turn_sidebar_projection, self.thread_id)
+            row = await run_in_db(sidebar_update, self.thread_id)
             if row:
                 await self._emit({
                     "type": "session_updated",

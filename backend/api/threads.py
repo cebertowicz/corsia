@@ -14,10 +14,11 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 
 from infra.auth import authenticate
-from infra.sidebar_preview import LATEST_MESSAGE_JOIN, PREVIEW_CONTENT, project_previews
+from infra.chat_comment_answers import strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
+from infra.sidebar_preview import LAST_MESSAGE_PREVIEW
 from infra.product_events import emit_product_event
 from infra.conductor import get_all_coordination_ids
 from infra.corsia_agent import get_corsia_agent
@@ -83,15 +84,11 @@ async def list_threads(token: str, archived: int = 0):
         reader = Reader.from_user(user)
         visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
-               CASE WHEN {visible} THEN
-                 {PREVIEW_CONTENT}
-               END as last_message,
-               CASE WHEN {visible} THEN m.id END as last_message_id
-               FROM threads s {LATEST_MESSAGE_JOIN}
-               WHERE s.user_id = ?
+               CASE WHEN {visible} THEN {LAST_MESSAGE_PREVIEW} END as last_message
+               FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params: list = [*identity, *identity, user["id"]]
+        params: list = [*identity, user["id"]]
         if conductor_ids:
             placeholders = ','.join('?' * len(conductor_ids))
             sql += f" AND (s.id NOT IN ({placeholders}) OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived'))"
@@ -102,15 +99,11 @@ async def list_threads(token: str, archived: int = 0):
             agent_id = get_corsia_agent(db=db) if conductor_ids else None
             projected = []
             coordination = []
-            items = [project_thread(reader, row) for row in rows]
-            previews = project_previews(db, [
-                (row['id'], item.pop('last_message_id', None), item['last_message'])
-                for row, item in zip(rows, items)
-            ])
-            for row, item, preview in zip(rows, items, previews):
+            for row in rows:
+                item = project_thread(reader, row)
                 for column in _LIST_INTERNAL_COLUMNS:
                     item.pop(column, None)
-                item['last_message'] = preview
+                item['last_message'] = strip_answer_tags(item['last_message'])
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'

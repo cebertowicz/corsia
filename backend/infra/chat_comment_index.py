@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from infra.chat_comment_answers import (
-    UNREAD_FROM, UNREAD_WHERE, parse_answers, project_saved_answers,
-)
+from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
@@ -73,19 +71,8 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         "ORDER BY c.created_at,c.user_message_id,c.cid,answer.answered_at",
         (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
-    missing_content = [message_id for message_id, message in by_id.items() if 'content' not in message]
-    stored_content = {}
-    if missing_content:
-        stored_content = dict(db.execute(
-            "SELECT id,content FROM messages WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
-            (thread_id, json.dumps(missing_content)),
-        ))
-    projections = project_saved_answers(db, [
-        (thread_id, message_id, message.get('content', stored_content.get(message_id)))
-        for message_id, message in by_id.items()
-    ])
-    for message, projection in zip(by_id.values(), projections):
-        message.update(projection)
+    for message_id, fields in saved_answer_fields(db, thread_id, list(by_id)).items():
+        by_id[message_id].update(fields)
     sender_ids = list({row[1] for row in rows})
     if not sender_ids:
         return

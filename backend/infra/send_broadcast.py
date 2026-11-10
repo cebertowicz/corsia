@@ -11,7 +11,7 @@ from loguru import logger
 
 from core.installed_context import INSTALLED_SOURCES
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
-from infra.chat_comment_answers import project_saved_answers
+from infra.chat_comment_answers import message_answer_fields
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.turn_errors import apply_error_next_steps, last_turn_error_id
@@ -49,7 +49,7 @@ class InputBroadcastRow:
     active_turn_id: str | None = None
     write_outcome: str | None = None
     delivery_intent: str | None = None
-    answer_projection: dict | None = None
+    answer_fields: dict | None = None
 
 
 def read_input_broadcast_row(
@@ -103,9 +103,9 @@ def read_input_broadcast_row(
             write_outcome=row["write_outcome"],
             delivery_intent=row["delivery_intent"],
             # An update can answer chat comments mid-turn; the page must not wait for the turn's end to place them.
-            answer_projection=project_saved_answers(connection, [
-                (str(row["thread_id"]), str(row["id"]), str(row["content"]))
-            ])[0] if row["role"] == "assistant" else None,
+            answer_fields=message_answer_fields(
+                str(row["thread_id"]), str(row["id"]), connection,
+            ) if row["role"] == "assistant" else None,
         )
     finally:
         if owns_connection:
@@ -123,7 +123,6 @@ def project_input_message(row: InputBroadcastRow) -> dict:
     if isinstance(metadata, dict):
         for key in _PRIVATE_METADATA_KEYS:
             metadata.pop(key, None)
-    # Use the saved-answer projection read with the durable row.
     return {
         "id": row.message_id,
         "role": row.role,
@@ -136,7 +135,7 @@ def project_input_message(row: InputBroadcastRow) -> dict:
         "seq": row.seq,
         "active_turn_id": row.active_turn_id,
         "write_outcome": row.write_outcome,
-        **(row.answer_projection or {}),
+        **(row.answer_fields or {}),
     }
 
 
