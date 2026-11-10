@@ -123,12 +123,39 @@ export function tableRowAt(view: EditorView, el: Element, pos: number): { rect: 
 	return tr ? { rect: tr.getBoundingClientRect(), index } : null;
 }
 
+/**
+ * The drawn row of a rendered table at screen height `y` (the first whose bottom is below it, else the last), with the start of
+ * the source line it is drawn from: the inverse of `tableRowAt`. The delimiter line is not drawn, so body row `i` is line `i + 1`.
+ */
+export function tableRowAtHeight(view: EditorView, el: Element, y: number): { pos: number; rect: DOMRect } | null {
+	if (!(el instanceof HTMLElement) || !el.matches(TABLE)) return null;
+	const block = blockRange(view, el), rows = el.querySelector('table')?.rows;
+	if (!block || !rows?.length) return null;
+	let index = 0;
+	while (index < rows.length - 1 && rows[index].getBoundingClientRect().bottom <= y) index++;
+	const lines = view.state.sliceDoc(block.from, block.to).split('\n');
+	const line = Math.min(index === 0 ? 0 : index + 1, lines.length - 1);
+	let pos = block.from;
+	for (let i = 0; i < line; i++) pos += lines[i].length + 1;
+	return { pos, rect: rows[index].getBoundingClientRect() };
+}
+
+/** The drawn table whose source holds a position, or null when the position is in no table or its table is not drawn. */
+export function drawnTableAt(view: EditorView, pos: number): HTMLElement | null {
+	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(TABLE)) {
+		const block = blockRange(view, el);
+		if (block && pos >= block.from && pos <= block.to) return el;
+	}
+	return null;
+}
+
 /** The box a position inside a rendered table (its row) or diagram (the whole diagram) is drawn at, when that block is on screen. */
 export function widgetBoxAt(view: EditorView, pos: number): DOMRect | null {
-	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(`${TABLE}, ${DIAGRAM}`)) {
+	const table = drawnTableAt(view, pos);
+	if (table) return tableRowAt(view, table, pos)?.rect ?? null;
+	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(DIAGRAM)) {
 		const block = blockRange(view, el);
-		if (!block || pos < block.from || pos > block.to) continue;
-		return el.matches(TABLE) ? tableRowAt(view, el, pos)?.rect ?? null : el.getBoundingClientRect();
+		if (block && pos >= block.from && pos <= block.to) return el.getBoundingClientRect();
 	}
 	return null;
 }

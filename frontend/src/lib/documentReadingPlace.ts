@@ -1,12 +1,15 @@
 import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
+import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
 
 /**
  * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
  * starts. The pane holds the header row and the editor, so a notice or the review bar growing in the header moves the
  * editor and its text but not this edge, and the place still says where the reader had the line on screen. The line is
- * found and laid through CodeMirror's height map, so it is known for text the editor has not drawn yet.
+ * found and laid through CodeMirror's height map, so it is known for text the editor has not drawn yet. A table is one
+ * block to the editor, so inside a drawn table the place is the row at the edge, found and laid from the drawn rows: a
+ * row above it growing, shrinking or inserted in the same table then moves the place with the text.
  *
  * `scrollTop` is the offset it was read at; at 0 or less the reader is at the very start, and the place is the start
  * itself, whatever the header does. `end` marks a reader following text appended to the end; the place is the end.
@@ -23,15 +26,35 @@ function frameTop(view: EditorView): number {
 	return (view.dom.closest<HTMLElement>('.doc') ?? view.scrollDOM).getBoundingClientRect().top;
 }
 
-/** How far below the frame edge the line block holding `from` starts. */
+/** How far below the frame edge the line block holding `from` starts, or inside a drawn table the row holding it. */
 export function placeTop(view: EditorView, from: number): number {
-	return view.documentTop + view.lineBlockAt(Math.min(from, view.state.doc.length)).top - frameTop(view);
+	const pos = Math.min(from, view.state.doc.length), block = view.lineBlockAt(pos), table = drawnTableAt(view, pos);
+	const row = table && tableRowAt(view, table, pos);
+	return (row ? row.rect.top : view.documentTop + block.top) - frameTop(view);
 }
 
 /** Runs CodeMirror's pending measure now, so its heights are the layout's (its own resize handling waits 50 ms). */
 function measureNow(view: EditorView): void {
 	view.requestMeasure();
 	view.lineBlockAtHeight(0);
+}
+
+/**
+ * What the reader's place anchors on at a scroller edge (`edge` and `bottom` are the scroller's top and bottom on screen):
+ * the line block there, or inside a drawn table the row there. Every holder of the reader's place uses this one rule.
+ */
+export function placeAnchorAt(view: EditorView, edge: number, bottom: number): { from: number; row: { pos: number; rect: DOMRect } | null } {
+	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block.from);
+	let row = table && tableRowAtHeight(view, table, edge);
+	// A row cut off at the edge is context above the reader; the place is the next row, the first one wholly started in view,
+	// or the line after the table when the cut-off row is its last, so that the cut-off row growing or shrinking moves only itself.
+	let from = block.from;
+	if (row && row.rect.top < edge - 0.5 && row.rect.bottom < bottom) {
+		const next = tableRowAtHeight(view, table!, row.rect.bottom);
+		if (next && next.pos !== row.pos) row = next;
+		else if (block.to < view.state.doc.length) [row, from] = [null, view.lineBlockAt(block.to + 1).from];
+	}
+	return { from: row ? row.pos : from, row: row || null };
 }
 
 /** Reads the reader's place: the line at the scroller's top edge, at the current offset or at `scrollTop`. */
@@ -41,8 +64,10 @@ export function captureDocumentPlace(view: EditorView, scrollTop?: number): Text
 	const at = scrollTop ?? scroller.scrollTop;
 	// At another offset the text sits lower by the difference.
 	const shift = scroller.scrollTop - at;
-	const block = view.lineBlockAtHeight(scroller.getBoundingClientRect().top - view.documentTop - shift);
-	return { from: block.from, top: view.documentTop + shift + block.top - frameTop(view), scrollTop: at };
+	const box = scroller.getBoundingClientRect();
+	const { from, row } = placeAnchorAt(view, box.top - shift, box.bottom - shift);
+	if (row) return { from, top: row.rect.top + shift - frameTop(view), scrollTop: at };
+	return { from, top: view.documentTop + shift + view.lineBlockAt(from).top - frameTop(view), scrollTop: at };
 }
 
 /**
