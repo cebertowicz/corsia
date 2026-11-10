@@ -17,27 +17,34 @@ export function cellDifference(oldText: string, newText: string) {
 
 const ONLY_BREAKS = /^\n+$/;
 
+/** Whether `at` sits between an escape's backslash and its pipe, a place the reader cannot see, since the backslash is hidden. */
+const insideEscape = (doc: Text, at: number) => doc.sliceString(at - 1, at) === '\\' && doc.sliceString(at, at + 1) === '|';
+
 /**
- * Escapes each `|` in `text` only when the backslashes before it run even, counting the ones the cell already holds
- * before `at`. An even run means the new pipe is not escaped by what precedes it — a `\` typed a keystroke earlier, or a
- * pasted `\\` — and an odd run means it already is, so nothing is added and no escape is doubled.
+ * Where a backslash has to go so that every `|` in the cell's text has an odd run of backslashes before it again, given
+ * the ranges the change put in. A pipe the change put in is escaped in place; a pipe the change left behind an even run —
+ * a backslash typed or left by a deletion right before an escape pair — gets its backslash where the change ended, so
+ * that backslash becomes a literal one and the caret after it still sits before the pair.
  */
-export function escapeCellPipes(doc: Text, at: number, text: string): string {
+function unescapedPipes(text: string, inserted: { from: number; to: number }[]) {
+	const at: number[] = [];
 	let run = 0;
-	while (doc.sliceString(at - run - 1, at - run) === '\\') run++;
-	let out = '';
-	for (const char of text) {
-		if (char === '\\') { run++; out += char; continue; }
-		if (char === '|') { out += run % 2 === 0 ? '\\|' : '|'; run = 0; continue; }
+	for (let pipe = 0; pipe < text.length; pipe++) {
+		if (text[pipe] === '\\') { run++; continue; }
+		if (text[pipe] === '|' && run % 2 === 0) {
+			const typed = inserted.some((range) => range.from <= pipe && pipe < range.to);
+			const ended = typed ? undefined : inserted.findLast((range) => pipe - run <= range.to && range.to <= pipe);
+			at.push(ended ? ended.to : pipe);
+		}
 		run = 0;
-		out += char;
 	}
-	return out;
+	return at;
 }
 
 /**
- * The rewrite itself: every inserted pipe leaves an odd run of backslashes behind it, a paste of a block of lines becomes
- * one line, Enter on its own does nothing, and a deletion that would leave half of an escape pair takes the pair, since a
+ * The rewrite itself: a paste of a block of lines becomes one line, Enter on its own does nothing, a deletion that would
+ * leave half of an escape pair takes the pair, and a character typed between an escape's hidden backslash and its pipe
+ * goes in front of the pair. Then every `|` in the cell's resulting text is checked, not only the ones typed, because a
  * bare `|` ends the cell and splits the row.
  */
 export function cellShapeOnly(transaction: Transaction) {
@@ -49,19 +56,22 @@ export function cellShapeOnly(transaction: Transaction) {
 		const before = insert.sliceString(0, insert.length);
 		let text = before;
 		if (from !== to) {
-			if (doc.sliceString(to - 1, to) === '\\' && doc.sliceString(to, to + 1) === '|') to++;
-			if (doc.sliceString(from - 1, from) === '\\' && doc.sliceString(from, from + 1) === '|') from--;
-		}
+			if (insideEscape(doc, to)) to++;
+			if (insideEscape(doc, from)) from--;
+		} else if (insideEscape(doc, from)) from = to = from - 1;
 		if (text.includes('\n')) text = ONLY_BREAKS.test(text) ? '' : text.replace(/\n+/g, ' ');
-		if (text.includes('|')) text = escapeCellPipes(doc, from, text);
 		rewritten ||= from !== fromA || to !== toA || text !== before;
 		changes.push({ from, to, insert: text });
 	});
-	if (!rewritten) return transaction;
+	let applied = ChangeSet.of(changes, doc.length);
+	const inserted: { from: number; to: number }[] = [];
+	applied.iterChangedRanges((_fromA, _toA, from, to) => inserted.push({ from, to }));
+	const escapes = unescapedPipes(applied.apply(doc).toString(), inserted);
+	if (escapes.length) applied = applied.compose(ChangeSet.of(escapes.map((at) => ({ from: at, insert: '\\' })), applied.newLength));
+	if (!rewritten && !escapes.length) return transaction;
 	const userEvent = transaction.annotation(Transaction.userEvent);
 	// The caret follows the text that actually went in, which is longer than what the reader typed once an escape was added:
 	// mapped through the original change it would sit before the escaped pipe, and the next keystroke would land there.
-	const applied = ChangeSet.of(changes, doc.length);
 	// So the caret the transaction asked for is taken back to where it stood before the change, then carried past whatever
 	// the rewritten change put in at that place.
 	const back = transaction.changes.invertedDesc;
@@ -69,7 +79,7 @@ export function cellShapeOnly(transaction: Transaction) {
 	const heads = asked ? asked.ranges.map((range) => back.mapPos(range.head, -1)) : transaction.startState.selection.ranges.map((range) => range.head);
 	const main = asked ? asked.mainIndex : transaction.startState.selection.mainIndex;
 	const selection = EditorSelection.create(heads.map((head) => EditorSelection.cursor(applied.mapPos(head, 1))), main);
-	return [userEvent ? { changes, userEvent, selection } : { changes, selection }];
+	return [userEvent ? { changes: applied, userEvent, selection } : { changes: applied, selection }];
 }
 
 /**

@@ -1,12 +1,12 @@
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, StateField, type EditorState, type Extension, type Range } from '@codemirror/state';
+import { Facet, type EditorState, type Extension, type Range } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
-import { BlockWidget, priorWidget } from './block-widget';
+import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
 import { markdownTableDecorations } from './widget-table';
 import { cellEditorExtensions, markdownCellEditing } from './widget-cell-editor';
 
@@ -182,30 +182,8 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 );
 
 /**
- * A block-decoration StateField whose set is derived from the syntax tree.
- * Rebuilds when the document changes OR when the background parser advances
- * (the language tree reference changes between transactions). The tree check is
- * essential: CodeMirror parses incrementally, so a block node (table / mermaid
- * fence) below the initial parse budget enters the tree later via a parse
- * transaction that carries NO doc change. A `docChanged`-only field computes
- * once against the partial tree and never sees those nodes — leaving real-world
- * docs (a table 40 lines down) stuck on raw markdown until the next edit.
- */
-function syntaxDecorationField(build: (state: EditorState, prior?: DecorationSet) => DecorationSet): StateField<DecorationSet> {
-	return StateField.define<DecorationSet>({
-		create: (state) => build(state),
-		update(deco, tr) {
-			const mapped = deco.map(tr.changes);
-			if (tr.docChanged || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state, mapped);
-			return mapped;
-		},
-		provide: (f) => EditorView.decorations.from(f)
-	});
-}
-
-/**
  * Replaces each ```mermaid fenced block with a rendered diagram block widget.
- * Mirrors the table field: block decorations must come from a state field, and
+ * Like the table field (`widget-table.ts`): block decorations must come from a state field, and
  * the replaced range spans whole lines so the widget cleanly takes the block's
  * place.
  */

@@ -1,11 +1,11 @@
-import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
-import { StateField, type EditorState, type Range } from '@codemirror/state';
+import { Decoration, type DecorationSet, type EditorView } from '@codemirror/view';
+import type { EditorState, Range } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { renderMarkdown } from '$lib/markdown';
 import { imageContext, refreshMarkdownImages, type ImageContext } from './markdown-image';
 import { renderedFragment } from './rendered-images';
 import { blockSource, tableAt } from './widget-blocks';
-import { BlockWidget, priorWidget } from './block-widget';
+import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
 import { tableCells } from './widget-cells';
 import { CELL_EDITING } from './widget-cell-layer';
 import { type OpenCell } from './widget-cell-state';
@@ -140,13 +140,4 @@ function buildTableDecorations(state: EditorState, prior?: DecorationSet): Decor
 	return Decoration.set(decos, true);
 }
 
-export const markdownTableDecorations = StateField.define<DecorationSet>({
-	create: (state) => buildTableDecorations(state),
-	update(deco, tr) {
-		const imageRefresh = tr.effects.some((effect) => effect.is(refreshMarkdownImages));
-		const mapped = deco.map(tr.changes);
-		if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildTableDecorations(tr.state, mapped);
-		return mapped;
-	},
-	provide: (f) => EditorView.decorations.from(f)
-});
+export const markdownTableDecorations = syntaxDecorationField(buildTableDecorations, (tr) => tr.effects.some((effect) => effect.is(refreshMarkdownImages)));

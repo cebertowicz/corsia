@@ -94,7 +94,15 @@ export const openCellState = StateField.define<OpenCell | null>({
 	}
 });
 
-export const openCellIn = (state: EditorState) => state.field(openCellState);
+/**
+ * A cell the renderer pads in has no delimiters of its own yet, so the text typed into it opens the cell in the
+ * source: the row gains its pipe and the text sits between the two, inside the one transaction the reader made.
+ */
+export function openCellInSource(state: EditorState, changes: { from: number; insert: string }[], cell: OpenCell) {
+	const leading = state.sliceDoc(cell.from - 1, cell.from) === '|' ? ' ' : ' | ';
+	const first = changes.find((change) => change.insert && change.from === cell.from);
+	if (first) first.insert = `${leading}${first.insert} |`;
+}
 
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */
 export const CELL_SYNC = 'table-cell-sync';

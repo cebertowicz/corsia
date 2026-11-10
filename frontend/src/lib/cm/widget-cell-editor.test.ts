@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
+import * as productEvents from '$lib/product_events';
 import { A as AUTHOR, type Rig } from './typed-reveal-rig';
 import {
 	cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
-	layer, mountedEditor, open, pasted, press, table, typed
+	layer, mountedEditor, open, press, table, typed
 } from './widget-cell-rig';
 
 /**
@@ -59,6 +60,38 @@ describe('clicking a cell edits it where it is read', () => {
 		const r = track(open([EditorState.readOnly.of(true)]));
 		clicked(r);
 		expect(mountedEditor(r)).toBeNull();
+	});
+
+	it('closes, keeping what was typed, when the document turns read-only, and sends it nothing more', () => {
+		const readOnly = new Compartment();
+		const r = track(open([readOnly.of(EditorState.readOnly.of(false))]));
+		clicked(r);
+		typed(r, 6, 'XY');
+		const stale = cellEditor(r)!;
+		r.view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(true)) });
+		const kept = DOC.replace('Login', 'LoginXY');
+		expect(mountedEditor(r), 'the cell closed').toBeNull();
+		expect(r.view.state.doc.toString(), 'what was typed before is kept').toBe(kept);
+		expect(cellEl(r).textContent).toBe('LoginXY');
+		stale.dispatch({ changes: { from: 8, insert: 'Z' }, userEvent: 'input.type' });
+		expect(r.view.state.doc.toString(), 'a keystroke still in flight does not reach the document').toBe(kept);
+	});
+
+	it('reports one committed edit per cell left changed, and none for a cell only looked at', () => {
+		const emit = vi.spyOn(productEvents, 'emitProductEvent');
+		const r = track(open());
+		clicked(r);
+		press(r, 'Escape');
+		expect(emit, 'opening and leaving a cell is not an edit').not.toHaveBeenCalled();
+		clicked(r);
+		expect(layer(r)!.children, 'the closed editor left nothing behind in the layer').toHaveLength(1);
+		typed(r, 6, 'X');
+		typed(r, 7, 'Y');
+		press(r, 'Tab');
+		expect(emit.mock.calls, 'moving on to the next cell commits the one left').toEqual([['document', 'table_cell_edited']]);
+		press(r, 'Escape');
+		expect(emit, 'the next cell was not changed').toHaveBeenCalledTimes(1);
+		emit.mockRestore();
 	});
 
 	it('keeps the table\'s DOM across a keystroke, so the editor and the reader\'s place survive', () => {
@@ -214,63 +247,6 @@ describe('a live edit from another client reaches the open cell', () => {
 		expect(r.view.state.doc.toString()).toContain('Login!');
 		expect(r.view.state.doc.toString()).toContain('DoneED');
 		expect(cellText(r)).toBe(' Login! ');
-	});
-});
-
-describe('nothing typed or pasted breaks the table', () => {
-	it('stores a typed pipe escaped, so the row keeps its columns', () => {
-		const r = track(open());
-		clicked(r);
-		typed(r, 6, '|no');
-		const text = r.view.state.doc.toString();
-		expect(text).toContain('Login\\|no');
-		expect(text).not.toContain('Login|no');
-		expect(table(r)!.rows[1].cells).toHaveLength(2);
-		expect(cellText(r), 'the cell editor holds the escaped source too').toBe(' Login\\|no ');
-		expect(cellCaret(r), 'the caret is after what went in, escape included, so the next key lands after it').toBe(10);
-		typed(r, cellCaret(r), '!');
-		expect(cellText(r)).toBe(' Login\\|no! ');
-	});
-
-	it('leaves the pipe escaped when a backslash was typed a keystroke earlier', () => {
-		const r = track(open());
-		clicked(r);
-		typed(r, 6, '\\');
-		typed(r, 7, '|');
-		const text = r.view.state.doc.toString();
-		expect(text, 'the earlier backslash already escapes it, so no second one is added').toContain('Login\\|');
-		expect(text).not.toContain('Login\\\\|');
-		expect(table(r)!.rows[1].cells, 'the row is still two columns').toHaveLength(2);
-	});
-
-	it('keeps a pasted block of lines inside the cell', () => {
-		const r = track(open());
-		clicked(r);
-		pasted(r, 6, 'two\nlines');
-		expect(cellText(r), 'the break became a space where it was pasted').toBe(' Logintwo lines ');
-		expect(cellCaret(r), 'the caret is at the end of the paste').toBe(15);
-		const text = r.view.state.doc.toString();
-		expect(text).toContain('| Logintwo lines | Done |');
-		expect(text.split('\n'), 'nothing was added to or taken from the table\'s lines').toHaveLength(DOC.split('\n').length);
-	});
-
-	it('has nowhere for a line break to go', () => {
-		const r = track(open());
-		clicked(r);
-		typed(r, 6, '\n');
-		expect(r.view.state.doc.toString()).toBe(DOC);
-		expect(cellText(r)).toBe(' Login ');
-	});
-
-	it('deletes both halves of an escaped pipe together', () => {
-		const r = track(open());
-		clicked(r);
-		typed(r, 6, '|');
-		expect(r.view.state.doc.toString()).toContain('Login\\|');
-		deleted(r, 6, 7);
-		expect(r.view.state.doc.toString()).toBe(DOC);
-		expect(cellCaret(r), 'the caret is where the pair was').toBe(6);
-		expect(table(r)!.rows[1].cells).toHaveLength(2);
 	});
 });
 

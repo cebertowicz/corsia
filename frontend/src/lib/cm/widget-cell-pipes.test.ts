@@ -1,0 +1,152 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EditorState } from '@codemirror/state';
+import type { Rig } from './typed-reveal-rig';
+import { tableCells } from './widget-cells';
+import { cellShapeOnly } from './widget-cell-text';
+import {
+	build, cellCaret, cellText, cleanup, clicked, deleted, DOC, open, pasted, table, typed
+} from './widget-cell-rig';
+
+/**
+ * A cell's source sits between two pipes, so every `|` inside it has to stay escaped — an odd run of backslashes before
+ * it — or the row splits into more cells than it had. The escape's backslash is hidden while the cell is edited, so the
+ * reader cannot see which side of it the caret is on; whatever they type, paste or delete, the cell's text keeps every
+ * pipe escaped and lands where they meant it.
+ */
+
+const rigs: Rig[] = [];
+const track = <T extends Rig>(r: T) => { rigs.push(r); return r; };
+
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { while (rigs.length) rigs.pop()!.view.destroy(); cleanup(); document.body.innerHTML = ''; vi.useRealTimers(); });
+
+/** A body row whose first cell already holds an escaped pipe: ` a\|b ` between its delimiters. */
+const PIPED_ROW = '| a\\|b | Done |';
+const PIPED = DOC.replace('| Login | Done |', PIPED_ROW);
+
+/** The body row's cells as the repo's own table scan splits the saved source. */
+function savedRow(r: Rig) {
+	const lines = r.view.state.doc.toString().split('\n');
+	const head = lines.indexOf('| Feature | Status |');
+	const src = lines.slice(head, head + 3).join('\n');
+	return tableCells(src).filter((span) => span.row === 1).map((span) => src.slice(span.from, span.to));
+}
+
+/** Every `|` in the text has an odd run of backslashes right before it. */
+function allPipesEscaped(text: string) {
+	let run = 0;
+	for (const char of text) {
+		if (char === '|' && run % 2 === 0) return false;
+		run = char === '\\' ? run + 1 : 0;
+	}
+	return true;
+}
+
+describe('nothing typed or pasted breaks the table', () => {
+	it('stores a typed pipe escaped, so the row keeps its columns', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, '|no');
+		const text = r.view.state.doc.toString();
+		expect(text).toContain('Login\\|no');
+		expect(text).not.toContain('Login|no');
+		expect(table(r)!.rows[1].cells).toHaveLength(2);
+		expect(cellText(r), 'the cell editor holds the escaped source too').toBe(' Login\\|no ');
+		expect(cellCaret(r), 'the caret is after what went in, escape included, so the next key lands after it').toBe(10);
+		typed(r, cellCaret(r), '!');
+		expect(cellText(r)).toBe(' Login\\|no! ');
+	});
+
+	it('leaves the pipe escaped when a backslash was typed a keystroke earlier', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, '\\');
+		typed(r, 7, '|');
+		const text = r.view.state.doc.toString();
+		expect(text, 'the earlier backslash already escapes it, so no second one is added').toContain('Login\\|');
+		expect(text).not.toContain('Login\\\\|');
+		expect(table(r)!.rows[1].cells, 'the row is still two columns').toHaveLength(2);
+	});
+
+	it('keeps a pasted block of lines inside the cell', () => {
+		const r = track(open());
+		clicked(r);
+		pasted(r, 6, 'two\nlines');
+		expect(cellText(r), 'the break became a space where it was pasted').toBe(' Logintwo lines ');
+		expect(cellCaret(r), 'the caret is at the end of the paste').toBe(15);
+		const text = r.view.state.doc.toString();
+		expect(text).toContain('| Logintwo lines | Done |');
+		expect(text.split('\n'), 'nothing was added to or taken from the table\'s lines').toHaveLength(DOC.split('\n').length);
+	});
+
+	it('has nowhere for a line break to go', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, '\n');
+		expect(r.view.state.doc.toString()).toBe(DOC);
+		expect(cellText(r)).toBe(' Login ');
+	});
+
+	it('deletes both halves of an escaped pipe together', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, '|');
+		expect(r.view.state.doc.toString()).toContain('Login\\|');
+		deleted(r, 6, 7);
+		expect(r.view.state.doc.toString()).toBe(DOC);
+		expect(cellCaret(r), 'the caret is where the pair was').toBe(6);
+		expect(table(r)!.rows[1].cells).toHaveLength(2);
+	});
+});
+
+describe('an escaped pipe the cell already holds stays escaped', () => {
+	it('keeps a backslash typed just before the hidden one as a literal backslash in front of the pipe', () => {
+		const r = track(build(PIPED));
+		clicked(r);
+		expect(cellText(r), 'setup: the cell holds an escaped pipe').toBe(' a\\|b ');
+		typed(r, 2, '\\');
+		expect(cellText(r), 'a literal backslash, then the escaped pipe').toBe(' a\\\\\\|b ');
+		expect(savedRow(r), 'the saved row splits into the same two cells').toEqual(['a\\\\\\|b', 'Done']);
+		expect(table(r)!.rows[1].cells).toHaveLength(2);
+		typed(r, cellCaret(r), 'c');
+		expect(cellText(r), 'the next key lands after the backslash, before the pipe').toBe(' a\\\\c\\|b ');
+	});
+
+	it('keeps a backslash typed between the hidden backslash and its pipe as a literal backslash', () => {
+		const r = track(build(PIPED));
+		clicked(r);
+		typed(r, 3, '\\');
+		expect(cellText(r)).toBe(' a\\\\\\|b ');
+		expect(savedRow(r)).toEqual(['a\\\\\\|b', 'Done']);
+	});
+
+	it('puts a character typed between the hidden backslash and its pipe in front of the pair', () => {
+		const r = track(build(PIPED));
+		clicked(r);
+		typed(r, 3, 'x');
+		expect(cellText(r), 'the pair stays whole, with the character before it').toBe(' ax\\|b ');
+		expect(savedRow(r)).toEqual(['ax\\|b', 'Done']);
+		typed(r, cellCaret(r), 'y');
+		expect(cellText(r), 'and the next one follows it').toBe(' axy\\|b ');
+		expect(savedRow(r)).toEqual(['axy\\|b', 'Done']);
+	});
+
+	it('keeps the pipe escaped when a deletion joins a backslash to its escape', () => {
+		const r = track(build(PIPED.replace('a\\|b', 'a\\x\\|b')));
+		clicked(r);
+		deleted(r, 3, 4);
+		expect(cellText(r), 'the remaining backslash is literal and the pipe still escaped').toBe(' a\\\\\\|b ');
+		expect(savedRow(r)).toEqual(['a\\\\\\|b', 'Done']);
+	});
+
+	it('keeps every pipe escaped whatever is typed at any place in the cell', () => {
+		const start = ' a\\|\\\\\\|b\\ ';
+		for (let at = 0; at <= start.length; at++) {
+			for (const insert of ['\\', '|', 'x', '\\|', '\\\\', 'x\\']) {
+				const state = EditorState.create({ doc: start, extensions: EditorState.transactionFilter.of(cellShapeOnly) });
+				const text = state.update({ changes: { from: at, insert }, userEvent: 'input.type' }).state.doc.toString();
+				expect(allPipesEscaped(text), `${JSON.stringify(insert)} at ${at} gives ${JSON.stringify(text)}`).toBe(true);
+			}
+		}
+	});
+});

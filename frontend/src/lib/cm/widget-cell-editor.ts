@@ -2,10 +2,11 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { emitProductEvent } from '$lib/product_events';
 import { blockRange, cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import { cellClicked } from './widget-cell-click';
 import {
-	CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellState, type OpenCell
+	CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellInSource, openCellState, type OpenCell
 } from './widget-cell-state';
 import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
@@ -48,6 +49,8 @@ class CellEditors {
 	private cell: OpenCell | null = null;
 	private left: OpenCell | null = null;
 	private fresh = false;
+	// Whether the reader has changed the open cell's text, so leaving it commits an edit.
+	private edited = false;
 	private editor: EditorView | null = null;
 	private wrap: HTMLElement | null = null;
 	private mounted: HTMLTableCellElement | null = null;
@@ -88,6 +91,9 @@ class CellEditors {
 		const cell = update.state.field(openCellState);
 		update.view.dom.classList.toggle('cm-md-cell-open', !!cell);
 		if (!cell) { this.detach(); return; }
+		// A document that turns read-only (while a suggestion is applied, say) takes no more typing: the cell closes, keeping
+		// what was already typed, since every keystroke before this one is in the document.
+		if (update.state.readOnly) { this.close(); return; }
 		const was = this.cell;
 		const moved = !was || was.from !== cell.from || was.to !== cell.to
 			|| was.row !== cell.row || was.col !== cell.col || was.tableFrom !== cell.tableFrom;
@@ -96,6 +102,7 @@ class CellEditors {
 			// The cell the editor is leaving goes back to being rendered text before the editor moves on to the next one.
 			const previous = drawnTableAt(this.host, was.tableFrom);
 			if (previous) repaintTableCell(previous, update.state, was);
+			this.committed();
 			this.left = was;
 			this.mounted = null;
 		}
@@ -232,8 +239,9 @@ class CellEditors {
 			update.changes.iterChanges((fromA, toA, _fromB, _toB, insert) => {
 				changes.push({ from: cell.from + fromA, to: cell.from + toA, insert: insert.sliceString(0, insert.length) });
 			});
-			if (cell.padded) this.openCellInSource(changes, cell);
+			if (cell.padded) openCellInSource(this.host.state, changes, cell);
 			const event = update.transactions[update.transactions.length - 1]?.annotation(Transaction.userEvent);
+			this.edited = true;
 			this.host.dispatch(event ? { changes, userEvent: event } : { changes });
 		}
 		// The reader's place is mirrored after the change, never before it: a caret at the end of a long insertion sits past
@@ -241,26 +249,22 @@ class CellEditors {
 		if (update.selectionSet || update.docChanged) this.mirrorToDocument(cell, editor);
 	};
 
-	/**
-	 * A cell the renderer pads in has no delimiters of its own yet, so the text typed into it opens the cell in the
-	 * source: the row gains its pipe and the text sits between the two, inside the one transaction the reader made.
-	 */
-	private openCellInSource(changes: Change[], cell: OpenCell) {
-		const leading = this.host.state.sliceDoc(cell.from - 1, cell.from) === '|' ? ' ' : ' | ';
-		for (const change of changes) {
-			if (!change.insert || change.from !== cell.from) continue;
-			change.insert = `${leading}${change.insert} |`;
-			return;
-		}
+	/** One product event for each cell the reader leaves with its text changed: no cell content or position goes with it. */
+	private committed() {
+		if (this.edited) emitProductEvent('document', 'table_cell_edited');
+		this.edited = false;
 	}
 
 	private detach() {
 		const editor = this.editor;
 		if (!editor) return;
+		this.committed();
 		const cell = this.cell ?? this.left, mounted = this.mounted;
 		this.editor = null;
 		this.cell = null;
 		this.left = null;
+		// The layer is reused for the next cell opened, so the closed editor's element leaves it rather than staying behind, empty.
+		this.wrap?.remove();
 		this.wrap = null;
 		this.mounted = null;
 		editor.destroy();
