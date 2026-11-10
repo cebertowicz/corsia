@@ -1173,6 +1173,7 @@ async function seedAndOpen(
 	const seeded = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: docPath, text: DOCS[scenario.doc], thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
+	await expectThreadStored(request, threadId, `${scenario.name} ${variant} after seeding`);
 	const context = await browser.newContext({
 		baseURL: testInfo.project.use.baseURL, viewport: vp.viewport, colorScheme: theme,
 		deviceScaleFactor: vp.phone ? 2 : 1, isMobile: vp.phone, hasTouch: vp.phone, ...contextOptions,
@@ -1283,7 +1284,13 @@ async function seedAndOpen(
 		}
 		await item.click();
 	};
-	await loginByUrl(page);
+	try {
+		await loginByUrl(page);
+	} catch (error) {
+		// Name the state the page was opened against, so a failed open says whether the scenario's data was still there.
+		await expectThreadStored(request, threadId, `${scenario.name} ${variant} when the page open failed`);
+		throw error;
+	}
 	await openThread();
 	// A real turn through the mock model, so the chat beside the draft holds a user message and a final reply.
 	const chat = CHATS[scenario.doc];
@@ -1297,6 +1304,12 @@ async function seedAndOpen(
 		if (!scenario.pdfByPath) await expect(page.locator('.cm-content')).toContainText(scenario.doc === 'plain' ? 'Volunteer work day' : 'Alex Rivera');
 	}
 	return { page, context, docPath, files, review, artifactId, threadId };
+}
+
+/** The scenario's session thread is readable from the backend the page talks to; a failure names which step lost it. */
+async function expectThreadStored(request: APIRequestContext, threadId: string, when: string) {
+	const response = await request.get(`/api/threads/${threadId}/messages`, { params: { token: TEST_TOKEN } });
+	expect(response.ok(), `${when}: thread ${threadId} read returned ${response.status()}`).toBeTruthy();
 }
 
 async function workspaceRoot(request: APIRequestContext) {
