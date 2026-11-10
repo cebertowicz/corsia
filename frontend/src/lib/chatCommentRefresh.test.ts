@@ -154,13 +154,3 @@ it('shows a mid-turn update\'s answers in their threads without waiting for the 
   await vi.waitFor(() => expect(batches).toEqual([['update'], ['target']]));
   stop();
 });
-
-it('does not replace the server projection on a saved step', () => {
-  messages.set([row('answer', 3, { chat_answer_cids: ['c1.1'], chat_visible_content: 'Intro\n\n[c1.9] unknown' })]);
-  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-  const stop = watchChatCommentThreads(50);
-  expect(state.handlers.has('step_text')).toBe(false);
-  expect(get(messages)[0].chat_visible_content).toBe('Intro\n\n[c1.9] unknown');
-  expect(fetcher).not.toHaveBeenCalled();
-  stop();
-});

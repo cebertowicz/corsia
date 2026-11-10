@@ -1,4 +1,5 @@
-/** Answers to chat comments never stream into chat, live or replayed after a reconnect. */
+/** The live turn shows exactly the visible text the server streams, live or replayed after a reconnect.
+ * The server removes answers to chat comments before streaming (backend test_chat_answer_previews.py). */
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
