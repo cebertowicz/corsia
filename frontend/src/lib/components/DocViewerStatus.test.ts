@@ -68,7 +68,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
-		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 threads');
+		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 comments');
 		const delivery = header?.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
@@ -104,7 +104,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		const pill = host.querySelector('.comment-status');
-		expect(pill?.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
+		expect(pill?.getAttribute('aria-label')).toBe('2 comments, 3 comments and edits waiting for Send');
 		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
 		expect(host.textContent).not.toContain('Send 3 comments');
 		// Nothing is held back for the document, so no Send shows, not even clipped.
@@ -136,7 +136,7 @@ describe('DocViewerStatus freshness metadata', () => {
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
 			expect(get(deliverCommentsImmediately)).toBe(true);
 			await vi.waitFor(() => expect(host.textContent).not.toContain('Send 2 comments'));
-			expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toContain('3 messages not sent yet');
+			expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toContain('3 comments and edits waiting for Send');
 			toggle.click(); flushSync();
 			expect(sends()).toHaveLength(1);
 		} finally {
@@ -150,16 +150,16 @@ describe('DocViewerStatus freshness metadata', () => {
 		render(value(), undefined, { commentCount: 1 });
 		const pill = host.querySelector('.comment-status')!;
 		expect(pill.querySelector('.count')!.textContent).toBe('1');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
-		expect(pill.getAttribute('aria-label')).toBe('1 thread');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('comment');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('1 thread, 1 message not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment, 1 comment or edit waiting for Send');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('1 thread');
+		expect(pill.getAttribute('aria-label')).toBe('1 comment');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 
@@ -209,8 +209,8 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it.each([
-		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 threads, 3 messages not sent yet'],
-		['neither', { commentCount: 2 }, null, '2 threads'],
+		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 comments, 3 comments and edits waiting for Send'],
+		['neither', { commentCount: 2 }, null, '2 comments'],
 	])('names %s comment status once', (_state, props, feedback, expected) => {
 		render(value(), undefined, props);
 		if (feedback) component!.sync('artifact-1', feedback);
@@ -311,7 +311,7 @@ describe('DocViewerStatus held comments', () => {
 			[...identity.children].indexOf(identity.querySelector<HTMLElement>('.document-tools')!),
 		);
 		// The pill's dot still counts everything unsent on the document.
-		expect(host.querySelector('.comment-status')!.getAttribute('aria-label')).toContain('5 messages not sent yet');
+		expect(host.querySelector('.comment-status')!.getAttribute('aria-label')).toContain('5 comments and edits waiting for Send');
 	});
 
 	it('keeps a read that arrives before the identity-row sender exists, and shows it once that sender mounts', () => {

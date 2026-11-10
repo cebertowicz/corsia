@@ -262,7 +262,8 @@ describe('CommentThread', () => {
 		const { onAgree } = render(thread({ acked: true }));
 		button('.ct-act.ack').click();
 		expect(onAgree).toHaveBeenCalledWith('c1', false);
-		expect(button('.ct-act.ack').getAttribute('aria-label')).toContain('Agree');
+		expect(button('.ct-act.ack').getAttribute('aria-label')).toBe('Agree with this comment');
+		expect(button('.ct-act.ack').getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('resolves an open thread', () => {

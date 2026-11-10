@@ -25,7 +25,7 @@ for (const [width, height, project] of layouts) {
 			await expect(page.locator(`.cm-suggestion-insert[data-suggestion-id="${id}"]`)).toHaveCount(1);
 			await expect(page.locator(`.cm-suggestion-del[data-suggestion-id="${id}"]`)).toHaveCount(0);
 		}
-		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		await page.getByRole('button', { name: /^\d+ comments?\b/ }).click();
 		await showAllThreads(drawer);
 		await page.screenshot({ path: process.env.CORSIA_INSERT_FRAMES ? path.join(process.env.CORSIA_INSERT_FRAMES, `insert-open-${width}.png`) : info.outputPath(`insert-open-${width}.png`) });
 		await accept(ids[0]).click();

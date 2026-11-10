@@ -17,7 +17,7 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	const [loose, fine, stale] = seeded.ids;
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^3 threads\b/ }).click();
+		await page.getByRole('button', { name: /^3 comments\b/ }).click();
 		await expect(seeded.drawer).toBeVisible();
 		await showAllThreads(seeded.drawer);
 	};
@@ -368,7 +368,7 @@ test('@flow:document-suggestions a document opens after the text a decided sugge
 	await expect(page.getByText(/^Couldn't open /)).toHaveCount(0);
 	await expect(page.locator('.cm-suggestion-del').filter({ hasText: 'stays' })).toHaveCount(1);
 	// The decided suggestion is closed, so it is neither counted open nor reported as a comment without a place.
-	const pill = page.getByRole('button', { name: /^1 thread\b/ });
+	const pill = page.getByRole('button', { name: /^1 comment\b/ });
 	await expect(pill).not.toHaveAccessibleName(/couldn't be placed/);
 	await pill.click();
 	await expect(drawer).toBeVisible();

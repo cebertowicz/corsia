@@ -60,7 +60,7 @@ export async function leaveUserCommentsUnsent(request: APIRequestContext, artifa
 
 /** Open the comments drawer from the header pill ("N threads, …") and return its unsent-messages footer. */
 export async function openUnsentFooter(page: Page): Promise<Locator> {
-	await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+	await page.getByRole('button', { name: /^\d+ comments?\b/ }).click();
 	return page.getByRole('region', { name: 'Document comments' }).locator('[data-drawer-unsent]');
 }
 

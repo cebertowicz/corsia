@@ -255,7 +255,7 @@ async function tabTo(page: Page, selector: string): Promise<void> {
 // The document is on screen with its text drawn and its comment count read.
 async function documentReady(page: Page): Promise<void> {
 	await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ threads?\b/ })).toBeVisible();
+	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ comments?\b/ })).toBeVisible();
 }
 
 // The frames belong to the replier's thread, not the conductor landing the app opens on.
@@ -772,7 +772,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
 				// This landing frame is intentionally before the 1.5 s visible dwell: marker, pill, and dock still agree.
-				await expect(page.getByRole('button', { name: '3 threads, 1 unread' })).toBeVisible();
+				await expect(page.getByRole('button', { name: '3 comments, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				// The reply is on screen but not yet read (the stamp is held), so Chat still counts it beside the document.
 				if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
@@ -810,9 +810,9 @@ for (const theme of ['light', 'dark'] as const) {
 			// The backend would push the new queue; the stand-in queue is read again.
 			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 			await resetDockPosition(page);
-			const commentsPill = page.getByRole('button', { name: '3 threads, 3 unread' });
+			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
 			await expect(commentsPill).toBeVisible();
-			await expect(commentsPill).toHaveText(/^\s*3 threads · 3 unread$/);
+			await expect(commentsPill).toHaveText(/^\s*3 comments · 3 unread$/);
 			// Beside the document, Chat counts the same waiting replies in its one chip; none enters the Needs-you dock.
 			// The pill counts the three unread threads; the chip counts their replies: the later three, plus the seeded
 			// replies except the first, which the document's arrival opened and so read.
@@ -825,7 +825,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// Opening the comments shows the three threads the pill and the dock counted. Hold the
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
-			await page.getByRole('button', { name: '3 threads, 3 unread' }).click();
+			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
 			await expect(page.getByText('3 open', { exact: true })).toBeVisible();
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			// Beside the document, Chat counts the same waiting replies in its one chip; none enters the Needs-you dock.
@@ -868,7 +868,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await documentReady(page);
 			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
 			// Arriving opened the first thread, so it reads; the other two stay new until opened, though the second is on screen.
-			await expect(page.getByRole('button', { name: '3 threads, 2 unread', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: '3 comments, 2 unread', exact: true })).toBeVisible();
 			await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(2);
 			// The remaining New reply must be wholly below the sheet viewport, not merely clipped at its edge.
 			const unreadCard = page.locator(`[data-comment-id="${scenario.roots[2]}"]`);
@@ -949,7 +949,7 @@ for (const width of [1440, 393]) {
 		await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
 		await documentReady(page);
 		await expect(page.locator('.ct-new')).toHaveCount(0);
-		await expect(page.getByRole('button', { name: '3 threads' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '3 comments', exact: true })).toBeVisible();
 		await shot(page, `00a-before-in-document-light-${width}`);
 		await page.evaluate(async (id) => {
 			const { closeArtifactTab } = await import('/src/lib/stores/artifactWorkspace.ts');
@@ -1232,7 +1232,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await notice.getByRole('button').click();
 			await documentReady(page);
 			// Arriving opened the first thread; the other two stay new until opened.
-			await expect(page.getByRole('button', { name: '3 threads, 2 unread', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: '3 comments, 2 unread', exact: true })).toBeVisible();
 			const showSurface = (surface: 'chat' | 'artifact') => width === 393
 				? page.evaluate(async ({ id, next }) => {
 					const { setActiveSurface } = await import('/src/lib/stores/artifactWorkspace.ts');
@@ -1252,7 +1252,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The reader opens each remaining thread by clicking its card.
 			await showSurface('artifact');
 			// On the phone the comments sheet closed with the surface; the document's own pill opens it again.
-			if (width === 393) await page.getByRole('button', { name: '3 threads, 2 unread', exact: true }).click();
+			if (width === 393) await page.getByRole('button', { name: '3 comments, 2 unread', exact: true }).click();
 			for (const root of [scenario.roots[1], scenario.roots[2]]) {
 				const card = page.locator(`[data-comment-id="${root}"] .ct`).first();
 				await card.scrollIntoViewIfNeeded();

@@ -908,7 +908,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expectControl(page, '12 new');
 
 			// Beside the comments pill: both stay whole and clear of each other.
-			const pill = page.getByRole('button', { name: /^\d+ threads?\b/ });
+			const pill = page.getByRole('button', { name: /^\d+ comments?\b/ });
 			await expect(pill).toBeVisible();
 			const [control, pillBox] = await Promise.all([controlBox(page).boundingBox(), pill.boundingBox()]);
 			const overlaps = control!.x < pillBox!.x + pillBox!.width && pillBox!.x < control!.x + control!.width && control!.y < pillBox!.y + pillBox!.height && pillBox!.y < control!.y + control!.height;

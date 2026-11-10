@@ -282,13 +282,13 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(headerSend(page)).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
-	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 messages not sent yet$/);
+	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 comments and edits waiting for Send$/);
 	await expect(approve).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
 	await approve.click();
 	await expect(bar(page).locator('.rb-receipt')).toContainText('Approved with changes');
 	await expect(bar(page).locator('.rb-receipt')).not.toContainText('comments');
-	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
+	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /waiting for Send/);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	await shot(page, 'receipt-with-changes', info);
 });
@@ -387,8 +387,8 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its threads, then any unsent messages: "2 threads, 2 messages not sent yet".
-	await page.getByRole('button', { name: /^2 threads\b/ }).click();
+	// The pill names its comments, then what waits for Send: "2 comments, 2 comments and edits waiting for Send".
+	await page.getByRole('button', { name: /^2 comments\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
@@ -414,7 +414,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 comment\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
 	await expect(approve).toBeVisible();
@@ -441,7 +441,7 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		await page.getByRole('button', { name: /^\d+ comments?\b/ }).click();
 		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
@@ -457,7 +457,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	await open(page, doc, mode, theme);
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 comment\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
@@ -481,7 +481,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await sent;
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 comment\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByText('Sending your review…')).toBeVisible();
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
@@ -540,7 +540,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await page.getByRole('button', { name: /^6 threads, 6 messages not sent yet$/ }).click();
+	await page.getByRole('button', { name: /^6 comments, 6 comments and edits waiting for Send$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expect(drawer).toBeVisible();
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
@@ -570,7 +570,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 		expect(native, 'native touch reaches the padding outside Send’s former 28px box').toEqual({ hit: true, pointerType: 'touch' });
 	} else await send.click();
 	await expect(send).toHaveCount(0);
-	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
+	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /waiting for Send/);
 	if (output && mode === 'phone') {
 		await expect(page.locator('.document-header .sent')).toHaveText('Sent');
 		await settled(page);
@@ -718,7 +718,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'overlay inset').not.toBe('0px');
 
 		const tools = page.locator('.document-tools');
-		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
+		const pill = tools.getByRole('button', { name: /^0 comments\b/ });
 		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
 		const requestChanges = bar(page).getByRole('button', { name: 'Reject', exact: true });

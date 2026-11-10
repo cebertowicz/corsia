@@ -149,7 +149,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
-	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first().click();
+	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ comments?/i }).first().click();
 	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
 }
 

@@ -29,7 +29,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		const seeded = await seedImage(page, request, 'region-1440');
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 threads');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
 			await expect(commentButton(page)).toBeVisible();
 			await shoot(page, testInfo, '1440-01-open', true);
 
@@ -224,7 +224,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByRole('button', { name: 'Toggle panel' }).click();
 			await expect.poll(async () => (await viewer(page).boundingBox())!.width).toBeGreaterThan(800);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 threads');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
 			// The fit settles after the canvas widens; draw on the settled image.
 			let last = 0;
 			await expect.poll(async () => { const w = (await frame(page)).width; const settled = w === last; last = w; return settled; }).toBe(true);

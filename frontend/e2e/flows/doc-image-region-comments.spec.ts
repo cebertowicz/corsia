@@ -83,7 +83,7 @@ const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
 const docComments = (page: Page) => page.locator('.document-header .comment-status');
 /** The document's pending batch, as its header pill names it; its Send is the document header's. */
-const unsentName = (count: number) => new RegExp(`, ${count} messages? not sent yet$`);
+const unsentName = (count: number) => new RegExp(`, ${count} ${count === 1 ? 'comment or edit' : 'comments and edits'} waiting for Send$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
 /** The document's own delivery row: what was sent, or not delivered with Retry. */
 const docDelivery = (page: Page) => page.locator('.document-header .feedback-controls');
@@ -276,14 +276,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 
 		const replaced = await request.put(`/api/files/content${query}`, {
 			data: { path: imagePath, text: svgImage(REPLACED_NATURAL), thread_id: seeded.sessionId },
 		});
 		expect(replaced.ok(), `image replace failed: ${replaced.status()}`).toBeTruthy();
 		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
-		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 	});
 
 	test('reopens a replaced image and keeps its region comment on the fresh image', async ({ page, request }, testInfo) => {
@@ -297,14 +297,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 
 		fs.writeFileSync(seeded.imagePath, syntheticPng(REPLACED_NATURAL.width, REPLACED_NATURAL.height));
 		await page.getByRole('button', { name: 'Close walkthrough.md' }).click();
 		await expect(page.getByRole('button', { name: 'Close walkthrough.md' })).toHaveCount(0);
 		await reopenDocument(page);
 		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
-		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 
 		await docImage(page).click();
 		await expect(overlay(page)).toBeVisible();
@@ -340,9 +340,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		await expect.poll(() => sends.document).toHaveLength(1);
 		expect(JSON.parse(sends.document[0]).delivery_policy).toBe('image-held');
-		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
 		await expect(headerSend(page)).toHaveCount(0);
-		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 comments?\b/);
 		await expectImagesSettled(page, testInfo, 'doc-1440-04-document');
 
 		// J3: pressing the image opens the viewer with the comment's tag on it (no margin icon stands by the image; the drawer below opens one comment).
@@ -377,7 +377,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		const body = sent.postDataJSON() as { artifact_id?: string; delivery_policy?: string } | null;
 		if (body?.artifact_id) expect(body.artifact_id).toBe(seeded.artifactId);
 		expect(body?.delivery_policy).toBe('document-held');
-		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
 		await shoot(page, testInfo, 'doc-1440-08-document-sent', true);
 	});
 
@@ -411,7 +411,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
 		await expectImagesSettled(page, testInfo, 'doc-393-04-document');
 		await docComments(page).click();
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
@@ -427,7 +427,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-393-05c-header-send', true);
 		await sendByKeyboard(page, headerSend(page));
-		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /waiting for Send/);
 		await shoot(page, testInfo, 'doc-393-06-document-sent', true);
 	});
 

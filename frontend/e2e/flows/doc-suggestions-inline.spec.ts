@@ -8,7 +8,7 @@ import { layouts } from '../support/liveConcurrency';
 // The editor's inline marks for one suggestion: the struck quote and the drawn insert.
 const strike = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-del[data-suggestion-id="${id}"]`);
 const insert = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-insert[data-suggestion-id="${id}"]`);
-const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ threads?\b/ });
+const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ comments?\b/ });
 
 async function openComments(page: Page, drawer: Locator) {
 	await commentsButton(page).click();

@@ -124,7 +124,7 @@ for (const [width, height, project] of layouts) {
 			const reports = watchPlacementReports(reader);
 			const foreignSeen = await countReceived(reader, '"store_id":"foreign-');
 			await expect.poll(() => markTexts(reader)).toEqual([placed]);
-			await reader.getByRole('button', { name: /^1 thread\b/ }).click();
+			await reader.getByRole('button', { name: /^1 comment\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			fault.arm();
 			await agentComment(request, document, agent.id, fresh, `Fresh ${stamp}`);
@@ -165,7 +165,7 @@ for (const [width, height, project] of layouts) {
 			const typed = `typed ${stamp}`;
 			await typeAtDocumentEnd(page, typed);
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toContain(typed);
-			await page.getByRole('button', { name: /^1 thread\b/ }).click();
+			await page.getByRole('button', { name: /^1 comment\b/ }).click();
 			const row = page.getByRole('region', { name: 'Document comments', exact: true }).locator(`[data-comment-id="${loose}"]`);
 			let decisions = 0;
 			page.on('request', outgoing => { if (outgoing.url().includes(`/api/comments/${loose}/decision`)) decisions += 1; });

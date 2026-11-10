@@ -386,8 +386,8 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
 		// The image viewer's list opens on All, so its pill counts the resolved thread too.
-		expect(pill.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('threads');
+		expect(pill.getAttribute('aria-label')).toBe('2 comments, 3 comments and edits waiting for Send');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('comments');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 	});
 
@@ -400,11 +400,11 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
-		expect(pill.getAttribute('aria-label')).toBe('3 threads, 2 messages not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('3 comments, 2 comments and edits waiting for Send');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		doc.component.sync('art-doc', pending(0));
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('3 threads');
+		expect(pill.getAttribute('aria-label')).toBe('3 comments');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 

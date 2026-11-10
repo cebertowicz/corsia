@@ -213,7 +213,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 comment\b/ }).click();
 	await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');

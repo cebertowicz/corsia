@@ -18,7 +18,7 @@ export const ITEMS = [
 export const [FIRST, ALPHA, BRAVO, LAST, SUGGESTION, SUGGESTION2] = [0, 1, 2, 3, 4, 5];
 
 export type Doc = Awaited<ReturnType<typeof openSuggestionDocument>>;
-export const pill = (page: Page) => page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first();
+export const pill = (page: Page) => page.getByRole('button', { name: /^\d+ comments?/i }).first();
 export const card = (page: Page, doc: Doc, i: number) => page.locator(`[data-margin-card="${doc.ids[i]}"]`);
 export const docWidth = (page: Page) => page.evaluate(() => Math.round(document.querySelector('.doc')?.getBoundingClientRect().width ?? 0));
 

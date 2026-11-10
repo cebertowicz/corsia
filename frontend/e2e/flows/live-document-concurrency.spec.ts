@@ -102,7 +102,7 @@ for (const [width, height, project] of layouts) {
 				await writer.locator('.sel-comment').click();
 				await writer.getByPlaceholder('Comment, or @ to tag an agent').fill(`Late ${stamp}`);
 				await writer.getByRole('button', { name: 'Comment', exact: true }).last().click();
-				await expect(reader.getByRole('button', { name: /^1 thread\b/ })).toBeVisible();
+				await expect(reader.getByRole('button', { name: /^1 comment\b/ })).toBeVisible();
 			});
 
 			// The caret never moved: the next key lands right after the typed text, and focus stayed in the editor.
@@ -188,7 +188,7 @@ for (const [width, height, project] of layouts) {
 			const remote = `remote ${stamp}`;
 			await typeAtDocumentEnd(writer, remote);
 			await expect(reader.locator('.cm-content')).toContainText(remote);
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await reader.getByRole('button', { name: /^2 comments\b/ }).click();
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
 			await drawerRow(reader, red.id).getByRole('button', { name: 'Accept', exact: true }).click();
 			// A decided suggestion leaves the open cards for the Resolved list.
@@ -217,7 +217,7 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await reader.getByRole('button', { name: /^2 comments\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			await drawer.getByRole('button', { name: `Accept all from ${red.author}`, exact: true }).click();
@@ -241,7 +241,7 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await reader.getByRole('button', { name: /^2 comments\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			const replyId = await drawer.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }).getAttribute('data-comment-id');
