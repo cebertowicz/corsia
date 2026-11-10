@@ -13,7 +13,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await setDebugVersionOverlay(request, false);
   await seed(page, request);
   await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
-  const widths = process.env.O1_WIDTHS?.split(',').map(Number) ?? [1024, 1100, 1280, 1440, 393];
+  const widths = process.env.O1_WIDTHS?.split(',').map(Number) ?? [1024, 1100, 1280, 1440];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(2000); // Capture the settled shell, not its resize transition.
@@ -110,4 +110,16 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await page.getByRole('option', { name: 'You', exact: true }).click();
   await expect(page.getByText('Taking ownership isn’t available when more than one person uses this CORSIA. Choose an agent instead.')).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/refusal-fallback.png` });
+});
+
+test('ownership control at phone width', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setDebugVersionOverlay(request, false);
+  await seed(page, request);
+  await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+  await page.setViewportSize({ width: 393, height: 900 });
+  await expect(page.locator('.cm-content')).toBeVisible();
+  await page.screenshot({ animations: 'disabled', path: `${out}/rest-393.png` });
+  await showPicker(page);
+  await page.screenshot({ animations: 'disabled', path: `${out}/picker-393.png` });
 });
