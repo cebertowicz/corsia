@@ -335,3 +335,37 @@ test('keeps the quoted word in view with its composer beside it across the panel
 	expect(back.wordInsideScroller, `the quoted word is still on screen back at the original width (${JSON.stringify(back)})`).toBe(true);
 	expect(back.composerToWord, `the composer is still beside its word back at the original width (${JSON.stringify(back)})`).toBeLessThanOrEqual(40);
 });
+
+/**
+ * The panel's move redraws a card that is already up in whichever form the narrower canvas has room for. That form takes
+ * no focus: the reader asked for the panel, not for a new surface, so focus stays on the panel's own control while it is
+ * open, and the writing place returns only when the panel closes. (Review 6 findings F1, F2, F3.)
+ */
+test('takes no focus in a comment form the panel redrew, and keeps the card and its draft', async ({ page, request }) => {
+	test.setTimeout(180_000);
+	await page.setViewportSize({ width: 1360, height: 900 });
+	await seedDocument(page, request, true);
+	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+	if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
+	await page.waitForTimeout(1500);
+	const input = await writing.pin.open(page);
+	await input.click();
+	await input.pressSequentially('A reply held open');
+	const before = await activeField(page);
+	expect(before.tag, `the reply holds focus before the panel opens (${JSON.stringify(before)})`).toBe('TEXTAREA');
+	await toggle.click();
+	await page.waitForTimeout(1500);
+	const open = await activeField(page);
+	expect(open.tag, `the form the panel drew took focus while the panel was open (${JSON.stringify(open)})`).not.toBe('TEXTAREA');
+	const stayed = await surfaceUp(page, before);
+	expect(stayed.found, `the card is still up while the panel is open (${JSON.stringify(stayed)})`).toBe(true);
+	expect(stayed.up, `the card the panel redrew is still on screen (${JSON.stringify(stayed)})`).toBe(true);
+	expect(stayed.value, `the draft is unchanged while the panel is open (${JSON.stringify(stayed)})`).toBe(before.value);
+	await toggle.click();
+	await page.waitForTimeout(2200);
+	const after = await activeField(page);
+	expect(after.tag, `focus is back in the same reply after the panel closes (${JSON.stringify(after)})`).toBe('TEXTAREA');
+	expect(after.of, `the reply is the same comment after the panel closes (${JSON.stringify(after)})`).toBe(before.of);
+	expect(after.value, `the draft survived the trip (${JSON.stringify(after)})`).toBe(before.value);
+});
