@@ -256,7 +256,7 @@
 			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}
-				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
+				<span class="delivery-toggle" title="Deliver immediately. When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>
 					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
 				</span>

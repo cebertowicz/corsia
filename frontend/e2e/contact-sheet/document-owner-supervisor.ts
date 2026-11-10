@@ -60,6 +60,16 @@ export async function seed(page: Page, request: APIRequestContext) {
 		await target.getByText('Release planning', { exact: true }).first().click();
 		await expect(target.locator('.cm-content')).toBeVisible();
 		await expect(target.locator('.doc')).toHaveCSS('opacity', '1');
+		await expect(target.locator('.cm-content .cm-md-h1')).toBeVisible();
+		await target.waitForFunction(() => {
+			const editor = document.querySelector('.cm-content');
+			if (!editor || editor.contains(document.activeElement)) return false;
+			return [...editor.querySelectorAll('.cm-line')].every(line => {
+				const box = line.getBoundingClientRect();
+				return box.bottom <= 0 || box.top >= innerHeight || !/^\s*#{1,6}\s/.test(line.textContent ?? '');
+			});
+		});
+		await target.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 		await expect(target.locator('button.identity:visible, button.details-toggle:visible').first()).toBeVisible();
 	}
 	await open(page);
