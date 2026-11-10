@@ -221,7 +221,12 @@ test.describe('@flow:document-table-comment-frames @surface:documents phone', ()
 		await place();
 		await expect.poll(async () => { const box = await boxOf(cell); return box ? box.y + box.height > 700 : false; }).toBe(true);
 		const scrolledTo = await scrollTop();
+		// A tap on a cell of a document that can be edited opens the cell's editor; its text is then selected for the
+		// comment, as text is selected anywhere else in the document.
 		await cell.tap();
+		await expect(page.locator('.cm-md-cell-editor .cm-content')).toBeFocused();
+		await page.keyboard.press('Home');
+		await page.keyboard.press('Shift+End');
 		await page.locator('.sel-comment').tap();
 		const panel = page.locator('.drawer-panel');
 		await expect(panel).toBeVisible();

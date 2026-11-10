@@ -3,9 +3,9 @@ import { EditorState, Facet, Transaction, type Extension } from '@codemirror/sta
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { blockRange, cellElement, drawnTableAt, TABLE } from './widget-blocks';
-import { CELL_IMAGE } from './widget-open';
+import { cellClicked } from './widget-cell-click';
 import {
-	CELL_EDITOR, CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellState, type OpenCell
+	CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
 import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
@@ -63,16 +63,9 @@ class CellEditors {
 	/** A click on a drawn cell edits it: a caret in that cell, the way a click in prose places one. */
 	private readonly openPressed = (event: MouseEvent) => {
 		const host = this.host;
-		const target = event.target instanceof Element ? event.target : null;
-		// A click on something inside the cell that has its own job — a link, an image, a comment or suggestion drawn on the
-		// cell's text — belongs to that flow, not to editing. The cell's own editor is excluded so a click in it stays a caret move.
-		if (!target || target.closest(CELL_EDITOR) || target.closest(`a, img, ${CELL_IMAGE}, [data-comment-ids]`)) return;
-		const widget = target.closest<HTMLElement>(TABLE);
-		const cell = target.closest<HTMLTableCellElement>('td, th');
-		const row = cell?.parentElement as HTMLTableRowElement | null;
-		if (!widget || !host.dom.contains(widget) || !cell || !row || host.state.readOnly) return;
-		const selection = document.getSelection();
-		if (selection && !selection.isCollapsed && widget.contains(selection.anchorNode)) return; // a drag inside the table is a comment selection, not a click to edit
+		const clicked = cellClicked(host, event.target instanceof Element ? event.target : null);
+		if (!clicked) return;
+		const { widget, cell, row } = clicked;
 		const block = blockRange(host, widget);
 		if (!block) return;
 		const open = cellToOpen(host.state, block.from, row.rowIndex, cell.cellIndex);

@@ -168,10 +168,11 @@ export async function editorInCell(page: Page, target: Locator) {
 	expect(caret!.y).toBeGreaterThanOrEqual(b.y - 1);
 	expect(caret!.y + caret!.height).toBeLessThanOrEqual(b.y + b.height + 1);
 	// The editor's text is drawn where the cell draws it: the same first character at the same place, on as many lines.
+	// The place is both ways: a cell in a row made tall by another is drawn at its vertical alignment, not at the top.
 	const drawn = (el: Element) => {
 		// Read off the text alone: the boxes of the elements holding it (the editor's line, a comment's mark) are not lines.
 		const range = document.createRange(), bottoms = new Set<number>();
-		let left: number | null = null;
+		let first: DOMRect | null = null;
 		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
 			const text = node.textContent!, at = text.search(/\S/);
@@ -181,13 +182,14 @@ export async function editorInCell(page: Page, target: Locator) {
 			for (const rect of range.getClientRects()) if (rect.width > 0) bottoms.add(Math.round(rect.bottom));
 			// The first character that is not padding, measured on its own.
 			range.setEnd(node, at + 1);
-			left ??= range.getBoundingClientRect().left;
+			first ??= range.getBoundingClientRect();
 		}
-		return { left: left ?? 0, lines: bottoms.size };
+		return { left: first?.left ?? 0, top: first?.top ?? 0, lines: bottoms.size };
 	};
 	const text = await cellContent(page).evaluate(drawn);
 	const under = await target.evaluate(drawn);
 	expect(Math.abs(text.left - under.left), 'the text starts where the cell draws it').toBeLessThanOrEqual(1);
+	expect(Math.abs(text.top - under.top), 'at the same height').toBeLessThanOrEqual(1);
 	expect(text.lines, 'and wraps onto as many lines').toBe(under.lines);
 	return { editor: e, cell: b };
 }

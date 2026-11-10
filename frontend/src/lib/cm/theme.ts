@@ -96,7 +96,10 @@ export const docTheme = EditorView.theme({
 		outlineOffset: '-2px',
 		borderRadius: 'var(--radius-sm)',
 		cursor: 'text',
-		overflow: 'hidden'
+		overflow: 'hidden',
+		// A column, so the editor's text can sit as high in the layer as the cell's sits in the row (`widget-cell-layer.ts`).
+		display: 'flex',
+		flexDirection: 'column'
 	},
 	'.cm-md-cell-layer .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
 	// The document's own theme gives a content area 40vh of bottom padding, and that rule reaches this editor too: without

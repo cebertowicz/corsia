@@ -69,7 +69,11 @@ for (const layout of LAYOUTS) {
 		test('a read-only document never opens a cell editor', async ({ page }) => {
 			test.setTimeout(120_000);
 			const seeded = await openTableDocument(page, layout, { readOnly: true });
-			await cell(page, 2, 1).click();
+			if (layout.project === 'chromium-mobile') {
+				// With nothing to edit, a tap on a cell still selects it for a comment, as it did before cells could be edited.
+				await cell(page, 2, 1).tap();
+				await expect(page.locator('.sel-comment'), 'a tap selects the read-only cell for a comment').toBeVisible();
+			} else await cell(page, 2, 1).click();
 			await page.keyboard.type('typed');
 			await expect(editorIn(page), 'no editor opens in a read-only document').toHaveCount(0);
 			expect(await cell(page, 2, 1).innerText(), 'and the cell is unchanged').toBe('Plain words in a cell.');

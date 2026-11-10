@@ -7,6 +7,7 @@ import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey }
 import { blockRange, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { selectionIn } from './widget-selection';
 import { CELL_EDITOR } from './widget-cell-state';
+import { cellClicked } from './widget-cell-click';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
 
@@ -70,7 +71,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			if ((this.pointer !== 'touch' && !this.recentTouch()) || this.touchMoved) return;
 			const target = event.target instanceof Element ? event.target : null;
 			const widget = target && widgetOf(this.view, target);
-			if (!widget || target.closest('a') || target.closest(CELL_EDITOR)) return;
+			// A tap that edits a cell is the cell editor's: selecting the cell's text here would take the caret off its editor.
+			if (!widget || target.closest('a') || target.closest(CELL_EDITOR) || cellClicked(this.view, target)) return;
 			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
 			const range = document.createRange();

@@ -55,6 +55,9 @@ export class CellLayer {
 		el.style.width = `${box.width}px`;
 		el.style.minHeight = `${box.height}px`;
 		el.style.padding = `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`;
+		// A row is as tall as its tallest cell, and a shorter cell's text sits where its vertical alignment puts it; the
+		// editor's text sits there too, so opening a cell in a tall row does not move its text to the top.
+		el.style.justifyContent = style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start';
 		// The cell's own type, not the editor's: a line that wraps at a different width, or at a different height, would put
 		// the reader's text out of step with the row they are editing. The renderer wraps a cell's text in an element of its
 		// own, and that element carries the type, so it is asked rather than the cell around it.

@@ -137,5 +137,31 @@ for (const layout of LAYOUTS) {
 			expect(await firstTable(page).locator('tr').count(), 'no row was added').toBe(4);
 			await frame(page, `03-pasted-lines-${at}`);
 		});
+
+		test('a short cell in a tall row opens with its text where it was', async ({ page }) => {
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			// The Wide row is as tall as its long note; the cell beside it holds one word, drawn at the middle of the row.
+			const short = cell(page, 3, 2);
+			const wordTop = () => page.evaluate(() => {
+				const td = document.querySelector('.cm-md-table table')!.querySelectorAll('tr')[3].querySelectorAll('td')[2];
+				const editor = document.querySelector('.cm-md-cell-editor .cm-content');
+				// The word's own text, not the boxes around it: the editor's line box is taller than the glyphs it holds.
+				const walker = document.createTreeWalker(editor ?? td, NodeFilter.SHOW_TEXT);
+				let text = walker.nextNode();
+				while (text && !text.textContent!.trim()) text = walker.nextNode();
+				const range = document.createRange();
+				range.selectNodeContents(text!);
+				return Math.round(range.getBoundingClientRect().top);
+			});
+			const atRest = await wordTop();
+			const rowTop = (await short.boundingBox())!.y;
+			expect(atRest - rowTop, 'setup: the word sits well below the top of its tall row').toBeGreaterThan(20);
+			await frame(page, `07-tall-row-${at}-rest`);
+			if (layout.project === 'chromium-mobile') await short.tap(); else await short.click();
+			await editorInCell(page, short);
+			expect(Math.abs((await wordTop()) - atRest), 'opening the cell leaves its word at the same height').toBeLessThanOrEqual(1);
+			await frame(page, `07-tall-row-${at}-open`);
+		});
 	});
 }
