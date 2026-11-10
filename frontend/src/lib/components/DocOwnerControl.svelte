@@ -98,7 +98,7 @@
 	.pending { opacity: 0.65; }
 	.failure { color: var(--red-text); }
 	@media (any-pointer: coarse) { .identity { min-height: 44px; align-items: center; } }
-	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.owner-picker { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
 	label { color: var(--text-secondary); font-size: var(--text-footnote); }
 	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-lg); font: inherit; }

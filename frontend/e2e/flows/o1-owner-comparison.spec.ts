@@ -30,5 +30,14 @@ test('owner slots in the base comparison fixture', async ({ page, request }) => 
       return { header: box(header), identity: box(header.querySelector('.document-identity')), details: box(header.querySelector('.identity-details')), tools: box(header.querySelector('.document-tools')), metadata: box(header.querySelector('.document-metadata')), age: describe('.identity-age'), owner: describe('.identity-owner'), verified: describe('.identity-verified') };
     });
     console.log('O1', width, JSON.stringify(measurements));
+    if (width === 1280) {
+      const slots = target.locator('button.identity:visible');
+      await expect(slots).toHaveCount(2);
+      for (let i = 0; i < 2; i++) {
+        await slots.nth(i).focus();
+        await expect(slots.nth(i)).toHaveCSS('outline-style', 'solid');
+        await target.screenshot({ path: `${out}/o1-focus-${i + 1}-1280.png`, animations: 'disabled' });
+      }
+    }
   }
 });

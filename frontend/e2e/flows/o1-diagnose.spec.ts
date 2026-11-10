@@ -87,13 +87,8 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await page.getByRole('option', { name: 'You', exact: true }).click();
   await expect(page.getByText('Taking ownership isn’t available when more than one person uses this CORSIA. Choose an agent instead.')).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/refusal-fallback.png` });
-});
-
-test('ownership control at phone width', async ({ page, request }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await setDebugVersionOverlay(request, false);
-  await seed(page, request);
-  await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+  await page.unroute('**/api/artifacts/*/ownership');
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 393, height: 900 });
   await expect(page.locator('.cm-content')).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/rest-393.png` });
