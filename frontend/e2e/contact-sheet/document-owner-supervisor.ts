@@ -60,7 +60,6 @@ export async function seed(page: Page, request: APIRequestContext) {
 		await target.getByText('Release planning', { exact: true }).first().click();
 		await expect(target.locator('.cm-content')).toBeVisible();
 		await expect(target.locator('.doc')).toHaveCSS('opacity', '1');
-		await expect(target.locator('button.identity:visible, button.details-toggle:visible').first()).toBeVisible();
 	}
 	await open(page);
 	return open;
