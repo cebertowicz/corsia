@@ -277,6 +277,12 @@ describe('DocCommentSurface suggestions', () => {
 		}
 	});
 
+	it.each([false, true])('draws one thread flat in the popover and the sheet: the container is its card (narrow %s)', (narrow) => {
+		render({ narrow, state: { kind: 'thread', id: suggestion.id }, ...(narrow ? {} : { bounds: noRoomCanvas() }) });
+		const card = document.body.querySelector<HTMLElement>(`${narrow ? '[data-adaptive-drawer]' : '[data-popover]'} .ct`)!;
+		expect(card.classList.contains('flat')).toBe(true);
+	});
+
 	it('keeps a document text-comment sheet above the keyboard on narrow screens', () => {
 		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
 		expect(document.body.querySelector('.drawer-backdrop')?.classList.contains('follow-keyboard')).toBe(true);
