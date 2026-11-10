@@ -99,8 +99,6 @@ export function commentSurfaceStatus(comments: DocComment[], text: string) {
 			const quote = anchoredQuote(comment);
 			return lost(comment) && !!quote && text.includes(quote);
 		}).length,
-		placementReloading: comments.some((comment) => comment.placementReloading),
-		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
 }
 

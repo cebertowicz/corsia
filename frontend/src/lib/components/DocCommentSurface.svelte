@@ -31,6 +31,7 @@
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import { imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+	import { paneOverlay } from '$lib/stores/artifactCanvas';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false, quiet = false, draftOverColumn = false, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
@@ -117,7 +118,7 @@
 	let canvasWidth = $state(Number.POSITIVE_INFINITY);
 	$effect(() => observeCanvasWidth(bounds, (width) => canvasWidth = width));
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it, today's sheet. Image viewers already decide whether their canvas is a sheet.
-	const roomForMargin = $derived(hasRoomForMargin(canvasWidth));
+	const roomForMargin = $derived(hasRoomForMargin(canvasWidth, $paneOverlay));
 	const sheetDrawer = $derived(narrow || (!image && !roomForMargin));
 	const cardAsSheet = $derived(phone ?? narrow);
 	// Margin column on any desktop canvas with room, cards beside their anchors.
@@ -314,10 +315,12 @@
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
+	<!-- Accept all belongs to the column too, but takes no room unless there is something to say. -->
+	{#if margin && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="margin-accept-all">{@render acceptAllBar()}</div>{/if}
 	<div class="drawer-comments" class:margin-clip={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
-		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} behind={false}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
+		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		{#if !margin && !image && resolvedList.length}{@render sheetResolved()}{/if}
 		</div>{/key}</div>
 	</div>
@@ -343,7 +346,7 @@
 	.rb-sheet-host:empty, .rb-sheet-host[hidden] { display: none; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
-	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
+	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: calc(var(--space-2) + var(--pane-overlay-inset, 0px)); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
 	.canvas-comment-drawer.margin:global(.on-canvas) { display: flex; }
 	/* The resolved drawer's cards share the margin cards' corners. */
 	.resolved-drawer { --ct-radius: var(--radius); }
@@ -373,4 +376,5 @@
 	.drawer-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
+	.margin-accept-all { flex: none; padding: 0 0 var(--space-1) 0; }
 </style>

@@ -6,6 +6,8 @@ import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte'
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { arrivedDocComments } from '$lib/stores/docComments';
+import { paneOverlay } from '$lib/stores/artifactCanvas';
+import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
 
 /** What a card is anchored to; the popover owns the union. */
 export type CommentAnchor = NonNullable<PopoverAnchor>;
@@ -29,8 +31,11 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
 /** The canvas width (px) at which the text keeps at least 45 characters beside the 308 px margin column. */
 export const MARGIN_MIN = 660;
 
-/** Whether a canvas this wide (px) leaves room for the margin column beside its text; below it, the popover or the sheet. */
-export const hasRoomForMargin = (canvasWidth: number) => canvasWidth >= MARGIN_MIN;
+/**
+ * Whether a canvas this wide (px) leaves room for the margin column beside its text; below it, the popover or the sheet.
+ * A Workspace panel the shell shows over the canvas (`paneOverlay`) covers its inline end (`--pane-overlay-inset`), so that part is no room.
+ */
+export const hasRoomForMargin = (canvasWidth: number, overlaid = get(paneOverlay)) => canvasWidth - (overlaid ? PANE_DRAWER_WIDTH : 0) >= MARGIN_MIN;
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
 export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string, marginUp?: () => boolean) {

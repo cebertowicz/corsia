@@ -376,7 +376,8 @@ describe('comment placement in a live document (4.2)', () => {
 		expect(doc.asks()).toHaveLength(2);
 	});
 
-	it('settles a refused Reload without leaving its control busy', async () => {
+	it('settles a refused Reload without leaving its control busy, and records the failure once', async () => {
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 		const doc = await opened();
 		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(row().placement).toBe('placed'));
@@ -384,9 +385,11 @@ describe('comment placement in a live document (4.2)', () => {
 		const reload = doc.asks()[1];
 		doc.frame({ type: 'doc_error', kind: 'refused', request_id: reload.request_id, message: 'positions refused' });
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'not_placed', placementReloading: false, placementReloadError: true }));
+		expect(errors).toHaveBeenCalledTimes(1);
 	});
 
 	it('keeps a never-drawn orphan eligible after a refused Reload and through a reconnect retry', async () => {
+		const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 		const doc = await opened('alpha gamma', [{ ...serverRow('c1', 'beta', 6), orphaned: true }]);
 		const projectedOrphans = () => commentsInDocumentOrder(rows(), doc.session.text.toString())
 			.filter(comment => comment.orphaned).map(comment => comment.id);
@@ -414,6 +417,7 @@ describe('comment placement in a live document (4.2)', () => {
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: undefined, placementReloading: false, placementReloadError: true }));
 		expect(row().drawn).toBeFalsy();
 		expect(projectedOrphans()).toEqual(['c1']);
+		expect(errors).toHaveBeenCalledTimes(2);
 	});
 
 	it('leaves a row the matching answer does not name unplaced, with no place to draw', async () => {

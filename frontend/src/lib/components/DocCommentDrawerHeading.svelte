@@ -14,7 +14,7 @@
 	const filterName = $derived(FILTERS.find(([key]) => key === filter)?.[1] ?? 'Open');
 </script>
 
-<div class="drawer-heading"><h2 tabindex="-1" data-drawer-focus-home>Comments{#if count}{' '}<span>{count}</span>{/if}</h2><div class="drawer-tools">{#if filtered}<div class="filter-menu">
+<div class="drawer-heading"><h2>Comments{#if count}{' '}<span>{count}</span>{/if}</h2><div class="drawer-tools">{#if filtered}<div class="filter-menu">
 	<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
 	{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 </div>{/if}<IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={onClose}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
@@ -22,9 +22,6 @@
 <style>
 	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 0 var(--space-1) var(--space-1); }
 	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-	/* Where focus rests when a pinned footer takes it away: not a control, so Enter there does nothing. */
-	.drawer-heading h2:focus { outline: none; }
-	.drawer-heading h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 	/* The compact menu keeps the filter choices out of the thread list. */
 	.drawer-tools { display: inline-flex; align-items: center; gap: var(--space-1); }

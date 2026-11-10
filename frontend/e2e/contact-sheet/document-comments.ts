@@ -69,7 +69,13 @@ export async function seedDocument(page: Page, request: APIRequestContext, withC
     await comment('narrow widths', 'Name the widths we test.');
     await comment('alongside the document', 'Side by side, or below at narrow widths?');
     await comment('remains legible', 'Legible against which contrast target?');
+    // Two open suggestions from each of two people, so each has an Accept all.
     await comment('Read the comments', 'Suggested wording.', { replacement: 'Read every comment' });
+    await comment('Confirm that the page', 'Shorter.', { replacement: 'Confirm the page' });
+    const otherSuggestions = [
+      await comment('responsive review', 'Name the review.', { replacement: 'responsive design review' }),
+      await comment('what remains to be decided', 'Plainer.', { replacement: 'what is still open' }),
+    ];
     await comment('Navigation', 'Is this the only area with a note?');
     // The text this thread was on has since been deleted.
     const lost = await comment('compare the layout at each width', 'This paragraph needs a screenshot.');
@@ -78,6 +84,7 @@ export async function seedDocument(page: Page, request: APIRequestContext, withC
     const patch = await request.patch(`/api/comments/${resolved}`, { params, data: { resolved: true } });
     expect(patch.ok(), await patch.text()).toBeTruthy();
     isolatedDb(['cursor = connection.execute("UPDATE doc_comments SET author=? WHERE artifact_id=? AND author_kind=?", (sys.argv[2], sys.argv[3], "user"))', 'assert cursor.rowcount == int(sys.argv[4]), cursor.rowcount'], 'Jordan Lee', artifact, String(personComments));
+    isolatedDb(['cursor = connection.execute("UPDATE doc_comments SET author=? WHERE id IN (?, ?)", tuple(sys.argv[2:5]))', 'assert cursor.rowcount == 2, cursor.rowcount'], 'Sam Rivera', ...otherSuggestions);
   }
   if (withComments) await seedComments();
   async function open(target: Page) {

@@ -54,12 +54,11 @@
 		moved: () => (scroller ? [scroller] : []),
 		// Its rows: one that grows with no change to the DOM (an image loading) moves every highlight below it.
 		resized: () => (scroller ? [...scroller.children].filter(row => !row.classList.contains('chat-margin')) : []),
-		room: () => (scroller ? { el: scroller, property: '--margin-overhang' } : null),
 	};
 </script>
 
 <section class="chat-margin" aria-label="Chat comments" use:marginOnCanvas={{ root: scroller?.parentElement ?? null, scroller: '.messages' }}>
-	<DocMarginStack source={anchors} pinned={entries} {selectedId} {composer} behind={false}>
+	<DocMarginStack source={anchors} pinned={entries} {selectedId} {composer}>
 		{#snippet card(entry)}
 			<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard, and moving into it picks the card, as a document card does, so the stack keeps it in view. -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->

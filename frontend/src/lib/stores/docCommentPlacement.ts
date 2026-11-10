@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { get, type Writable } from 'svelte/store';
 import type { DocComment } from './docComments';
+import { clearReloadErrors, markReloading, refuseRequest, reloadFlags, reportReloadFailure, settleReload } from './docCommentReload';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
@@ -53,13 +54,11 @@ class LivePlacement {
 		let ask = false;
 		const rows = next.map(row => {
 			const old = previous.get(row.id);
-			if (!placeable(row)) return old?.placementReloading || old?.placementReloadError
-				? { ...row, placementReloading: old.placementReloading, placementReloadError: old.placementReloadError } : row;
+			const reload = reloadFlags(old);
+			if (!placeable(row)) return { ...row, ...reload };
 			const key = `${row.from}:${row.to}:${row.anchor}`, changed = this.server.get(row.id) !== key;
 			this.server.set(row.id, key);
 			const drawn = old?.drawn ? { drawn: true, from: old.from, to: old.to } : { drawn: false };
-			const reload = old?.placementReloading || old?.placementReloadError
-				? { placementReloading: old.placementReloading, placementReloadError: old.placementReloadError } : {};
 			if (!changed && old?.placement === 'placed' && old.drawn) return { ...row, ...drawn, ...reload, placement: 'placed' as const };
 			ask = true;
 			return { ...row, ...drawn, ...reload, placement: 'placing' as const };
@@ -99,17 +98,7 @@ class LivePlacement {
 		this.rows.update(all => all[id] ? { ...all, [id]: change(all[id]) } : all);
 	}
 
-	private markReloading(): void {
-		this.write(rows => rows.map(row => row.anchor && !row.review
-			// A row with no placement has never been drawn; keep its orphan eligibility while Reload is in flight.
-			? {
-				...row,
-				placement: row.placement === undefined && !row.drawn ? undefined : 'placing',
-				placementReloading: true,
-				placementReloadError: false,
-			}
-			: row));
-	}
+	private markReloading(): void { this.write(markReloading); }
 
 	private ask(reload = false): void {
 		if (this.inFlight) { this.marked = { reload: reload || !!this.marked?.reload }; return; }
@@ -146,10 +135,11 @@ class LivePlacement {
 			if (!this.inFlight || frame.request_id !== this.inFlight.requestId || frame.kind === 'store_mismatch') return;
 			const request = this.inFlight;
 			this.inFlight = null;
-			this.write(rows => rows.map(row => row.placement === 'placing'
-				? { ...row, placement: 'not_placed', placementReloadError: request.reload ? row.placementReloading : row.placementReloadError }
-				: request.reload && row.placementReloading ? { ...row, placementReloadError: true } : row));
-			if (request.reload) this.settleReload();
+			this.write(rows => refuseRequest(rows, request.reload));
+			if (request.reload) {
+				reportReloadFailure(this.session.artifactId, frame.kind);
+				this.settleReload();
+			}
 			this.next();
 		} else if (frame.type === 'doc_opened') {
 			if (this.current().some(row => row.placement === 'placing' || row.placement === 'not_placed') || this.marked?.reload) {
@@ -205,7 +195,7 @@ class LivePlacement {
 		}
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
 		if (reload) {
-			this.clearReloadErrors();
+			this.write(clearReloadErrors);
 			this.settleReload();
 		}
 		this.next();
@@ -235,17 +225,7 @@ class LivePlacement {
 		}));
 	}
 
-	private clearReloadErrors(): void {
-		this.write(rows => rows.some(row => row.placementReloading && row.placementReloadError)
-			? rows.map(row => row.placementReloading ? { ...row, placementReloadError: false } : row)
-			: rows);
-	}
-
-	private settleReload(): void {
-		this.write(rows => rows.some(row => row.placementReloading)
-			? rows.map(row => row.placementReloading ? { ...row, placementReloading: false } : row)
-			: rows);
-	}
+	private settleReload(): void { this.write(settleReload); }
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {
