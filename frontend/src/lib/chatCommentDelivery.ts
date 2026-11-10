@@ -5,13 +5,13 @@ const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid
 
 /**
  * The empty comment envelopes in one thread that need no row of their own, because every comment they carry
- * is already shown on a loaded (and, when given, visible) target. One pass builds the keys; each envelope then
+ * is already attached to a loaded target. One pass builds the keys; each envelope then
  * checks its comments against them, so the transcript asks once per change instead of rescanning per row.
  */
-export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined, visibleTargets?: ReadonlySet<string>): Set<string> {
+export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
 	const byId = new Map<string, Message>();
 	const retries = new Map<string, string[]>();
-	// A send still on its way is placed once its comment's thread is shown; a delivered one once its own copy is.
+	// A send still on its way is placed once its comment's thread is loaded; a delivered one once its own copy is.
 	const roots = new Set<string>();
 	const shown = new Set<string>();
 	for (const row of rows) {
@@ -19,7 +19,6 @@ export function placedCommentEnvelopes(rows: Message[], threadId: string | null 
 		byId.set(row.id, row);
 		const from = row.metadata?.retried_from_message_id;
 		if (from) retries.set(from, [...(retries.get(from) ?? []), row.id]);
-		if (visibleTargets && !visibleTargets.has(row.id)) continue;
 		for (const root of row.chat_comments ?? []) {
 			const key = replyKey(root.user_message_id, root.cid);
 			if (key) { roots.add(key); shown.add(key); }

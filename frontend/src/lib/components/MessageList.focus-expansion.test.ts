@@ -77,6 +77,21 @@ afterEach(() => {
 });
 
 describe('comment-only sends across server stubs', () => {
+	it('places a reply whose loaded target is inside collapsed work', () => {
+		const target = { ...work('target', 1, '10:00:00'), thread_id: A, content: 'Target', chat_comments: [{
+			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'Target', note: 'note', from_off: 0, to_off: 6,
+			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z',
+			answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'answer', text: 'reply', created_at: '2026-10-02T10:01:00Z', unread: false }],
+		}] };
+		const send = { ...human('send', 2, '10:01:00', 't1', '10:01:00'), thread_id: A, content: '', metadata: { reply_context: { comments: [{ id: 'c', cid: 'answer' }] } } };
+		messages.set([target, send, { ...work('step', 3, '10:02:00'), thread_id: A }, { ...said('last', 4, '10:03:00'), thread_id: A }] as Message[]);
+		renderList({ historyComplete: true });
+		expect(toggles()).toHaveLength(1);
+		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
+		toggles()[0].click(); flushSync();
+		expect(host.querySelector('[data-message-id="target"]')).not.toBeNull();
+		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
+	});
 	it('opens the combined range once without repeating its pieces or drawing placed sends', () => {
 		const first = { ...said('target', 1, '10:00:00'), thread_id: A, chat_comments: [{
 			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'target', note: 'note', from_off: 0, to_off: 6,

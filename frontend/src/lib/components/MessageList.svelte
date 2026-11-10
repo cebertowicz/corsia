@@ -29,7 +29,7 @@
 	import { MessageListScrollControl } from './messageListScrollControl';
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
-
+	import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
 	let { messagesEl = $bindable(), layoutRoot = undefined, userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		/** The panel holding this transcript's composer, when the transcript is not its direct child (it sits beside the comment margin). */
@@ -143,9 +143,10 @@
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
-	const transcriptWithPlaced = (placed: ReadonlySet<string>) => mergeTranscriptUpdates(
+	const placedEnvelopes = $derived(placedCommentEnvelopes($messages, renderedThreadId));
+	const transcriptEntries = $derived(mergeTranscriptUpdates(
 			buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
-				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placed),
+				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placedEnvelopes),
 			(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 			{
 				focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
@@ -153,8 +154,7 @@
 				sourceContext: renderedThreadId ? { threadId: renderedThreadId,
 					phase: $turnStates.get(renderedThreadId)?.phase ?? 'idle', turnId: $turnStates.get(renderedThreadId)?.turnId ?? null } : undefined,
 			},
-		);
-	const transcriptEntries = $derived(transcriptWithPlaced(new Set()));
+		));
 	const initialLanding = new InitialLandingIntent((landing) => {
 		if (landing.target === 'divider') {
 			landedVisit = landing.threadId;
@@ -310,7 +310,7 @@
 	<!-- Every transcript row, live work included, renders through the body's Focus classification. -->
 		<MessageListBody
 			{transcriptEntries}
-			{transcriptWithPlaced}
+			{placedEnvelopes}
 			{pendingEntries}
 			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
 			{expandedTools}

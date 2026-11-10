@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
-import { buildTranscriptPresentation, isRunExpanded, runTokens } from './transcriptFocusModel';
+import { buildTranscriptPresentation, isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
 
 const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
 const target = {
@@ -21,7 +21,7 @@ function presentation(sends: any[]) {
   const rows: any[] = [target];
   sends.forEach((row, i) => rows.push(work(i + 1), row));
   rows.push(work(4), last);
-  const placed = placedCommentEnvelopes(rows, 'thread', new Set(['target', 'last']));
+  const placed = placedCommentEnvelopes(rows, 'thread');
   return { placed, entries: buildTranscriptPresentation(rows, true, null, undefined, [], placed) };
 }
 
@@ -48,11 +48,13 @@ describe('Focus comment sends', () => {
     });
     const stubs = [stub('a', 'b', 2, 3), stub('c', 'd', 5, 6), stub('e', 'f', 8, 9)];
     const rows: any[] = [{ ...target, seq: 1 }, { ...send(1), seq: 4 }, { ...send(2), seq: 7 }, { ...last, seq: 10 }];
-    const placed = placedCommentEnvelopes(rows, 'thread', new Set(['target', 'last']));
+    const placed = placedCommentEnvelopes(rows, 'thread');
     const before = buildTranscriptPresentation(rows, true, null, undefined, stubs);
     const expanded = new Set(runTokens(before, 3, true));
     const after = buildTranscriptPresentation(rows, true, null, undefined, stubs, placed);
-    expect(isRunExpanded(runTokens(after, 1, true), expanded)).toBe(true);
+    const tokens = runTokens(after, 1, true);
+    expect(isRunExpanded(tokens, expanded)).toBe(true);
+    expect(isRunExpanded(tokens, toggleRun(tokens, expanded))).toBe(false);
   });
   it('keeps a failed send with an unseen target in place', () => {
     const failed = send(2, { delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'unplaced', root_cid: 'missing', root_user_message_id: 'missing' }] } } });

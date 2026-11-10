@@ -45,19 +45,18 @@ describe('pending comment replies', () => {
 
 describe('comment-only envelopes', () => {
 	// Whether this envelope is placed when the transcript holds it alongside these rows.
-	const placed = (envelope: Message, rows: Message[], visible?: ReadonlySet<string>) =>
-		placedCommentEnvelopes([envelope, ...rows.filter(other => other.id !== envelope.id)], envelope.thread_id, visible).has(envelope.id);
+	const placed = (envelope: Message, rows: Message[]) =>
+		placedCommentEnvelopes([envelope, ...rows.filter(other => other.id !== envelope.id)], envelope.thread_id).has(envelope.id);
 
-	it('hides a pending reply only while its original thread is available on a visible target', () => {
+	it('hides a pending reply only while its original thread is available on a loaded target', () => {
 		const pending = { ...row('pending', 'queued'), _optimistic: true } as Message;
 		const target = { id: 'target', thread_id: 'thread', role: 'assistant', content: 'quote', chat_comments: [{ ...root, answers: [] }] } as unknown as Message;
 		expect(placed(pending, [pending])).toBe(false);
-		expect(placed(pending, [pending, target], new Set())).toBe(false);
-		expect(placed(pending, [pending, target], new Set(['target']))).toBe(true);
+		expect(placed(pending, [pending, target])).toBe(true);
 		expect(placed({ ...pending, content: 'Also do this' }, [pending, target])).toBe(false);
 		const failed = { ...pending, _optimistic: false, delivery_state: 'failed' } as Message;
-		expect(placed(failed, [failed, target], new Set(['target']))).toBe(true);
-		expect(placed(failed, [failed], new Set())).toBe(false);
+		expect(placed(failed, [failed, target])).toBe(true);
+		expect(placed(failed, [failed])).toBe(false);
 	});
 
 	it('hides only when every comment is available on a loaded target', () => {
@@ -65,8 +64,7 @@ describe('comment-only envelopes', () => {
 		const target = { id: 'target', thread_id: 'thread', role: 'assistant', content: 'quote', chat_comments: [{ ...root, answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'reply-cid' }] }] } as unknown as Message;
 		expect(placed(input, [input])).toBe(false);
 		expect(placed(input, [input, target])).toBe(true);
-		expect(placed(input, [input, target], new Set())).toBe(false);
-		expect(placed(input, [input, target], new Set(['target']))).toBe(true);
+
 		const retry = { ...input, id: 'retry', metadata: { ...input.metadata, retried_from_message_id: input.id, reply_context: { comments: [{ id: 'reply-id', cid: 'retry-cid' }] } } } as Message;
 		const retriedTarget = { ...target, chat_comments: [{ ...root, answers: [{ author_kind: 'user', user_message_id: 'retry', cid: 'retry-cid' }] }] } as unknown as Message;
 		expect(placed(input, [input, retry, retriedTarget])).toBe(true);

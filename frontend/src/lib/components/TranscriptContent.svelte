@@ -15,7 +15,6 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
-	import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
@@ -39,7 +38,7 @@
 
 	let {
 		entries,
-		transcriptWithPlaced,
+		placedEnvelopes = new Set<string>(),
 		expandedTools,
 		expandedReasoning,
 		onToggleToolBlock,
@@ -57,7 +56,7 @@
 		showWait = true,
 	}: {
 		entries: TranscriptEntry[];
-		transcriptWithPlaced?: (placed: ReadonlySet<string>) => TranscriptEntry[];
+		placedEnvelopes?: ReadonlySet<string>;
 		expandedTools: Set<string>;
 		expandedReasoning: Set<string>;
 		onToggleToolBlock: (id: string) => void;
@@ -85,36 +84,18 @@
 	const boundTurn = $derived(boundThreadId ? $turnStates.get(boundThreadId) ?? INITIAL_TURN_STATE : null);
 	const pausePresentation = $derived(attachPlanLimitPauses(entries, pauses, boundThreadId && boundTurn
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
-	const baselineEntries = $derived(pausePresentation.entries);
+	const renderedEntries = $derived(pausePresentation.entries);
 	// Open runs (their `row:` and `after:` tokens); written only by clicks.
 	let expandedFolds = $state(new Set<string>());
 	const visibleSources = $derived.by(() => {
 		const ids = new Set<string>();
-		baselineEntries.forEach((entry, index) => {
+		renderedEntries.forEach((entry, index) => {
 			const items = entry.kind === 'message' ? [entry] : entry.kind === 'fold'
-				&& isRunExpanded(runTokens(baselineEntries, index, historyComplete), expandedFolds) ? entry.items : [];
+				&& isRunExpanded(runTokens(renderedEntries, index, historyComplete), expandedFolds) ? entry.items : [];
 			for (const item of items) for (const row of sourceMembers(item.message)) ids.add(row.id);
 		});
 		return ids;
 	});
-	// Placement uses only the first presentation, so regrouping cannot change its input.
-	const placedEnvelopes = $derived(placedCommentEnvelopes($messages, boundThreadId, visibleSources));
-	const focusPresentation = $derived.by(() => {
-		if (!transcriptWithPlaced || $coreSettings?.features?.focus_mode !== true || !placedEnvelopes.size) return { entries: baselineEntries, placed: placedEnvelopes };
-		const merged = attachPlanLimitPauses(transcriptWithPlaced(placedEnvelopes), pauses, boundThreadId && boundTurn
-			? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined).entries;
-		const stillVisible = new Set<string>();
-		merged.forEach((entry, index) => {
-			const items = entry.kind === 'message' ? [entry] : entry.kind === 'fold'
-				&& isRunExpanded(runTokens(merged, index, historyComplete), expandedFolds) ? entry.items : [];
-			for (const item of items) for (const row of sourceMembers(item.message)) stillVisible.add(row.id);
-		});
-		// Preserve visible targets if regrouping loses an expansion identity.
-		return [...visibleSources].every(id => placedEnvelopes.has(id) || stillVisible.has(id))
-			? { entries: merged, placed: placedEnvelopes }
-			: { entries: baselineEntries, placed: placedEnvelopes };
-	});
-	const renderedEntries = $derived(focusPresentation.entries);
 	const stubPauses = $derived(stubPauseTurns(renderedEntries, pauses, turnSummaries));
 	// A hold's ask card has one home: its blocked update row while that row is on screen, else its message.
 	const homedHolds = $derived(new Set(renderedEntries.flatMap((entry) =>
@@ -224,7 +205,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	{#if !focusPresentation.placed.has(msg.id)}
+	{#if !placedEnvelopes.has(msg.id)}
 	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />

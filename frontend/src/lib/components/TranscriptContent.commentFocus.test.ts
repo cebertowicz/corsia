@@ -2,13 +2,14 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it } from 'vitest';
 import { messages } from '$lib/stores/threads';
 import { coreSettings } from '$lib/stores/settings';
+import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
 import TranscriptContent from './TranscriptContent.svelte';
 import { buildTranscriptPresentation } from './transcriptFocusModel';
 
 let instance: Record<string, unknown> | undefined;
 afterEach(() => { if (instance) unmount(instance); instance = undefined; messages.set([]); coreSettings.set(null as any); document.body.innerHTML = ''; });
 
-it('keeps placed replies hidden if regrouping cannot preserve a visible target', () => {
+it('keeps a placed reply hidden alongside its target', () => {
   const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
   const rows: any[] = [
     { ...base, id: 'target', role: 'assistant', content: 'Target', metadata: { for_user: true }, chat_comments: [{
@@ -21,7 +22,7 @@ it('keeps placed replies hidden if regrouping cannot preserve a visible target',
   const baseline = buildTranscriptPresentation(rows, true);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: baseline, transcriptWithPlaced: () => [], threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: baseline, placedEnvelopes: placedCommentEnvelopes(rows, 'thread'), threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();
@@ -29,7 +30,7 @@ it('keeps placed replies hidden if regrouping cannot preserve a visible target',
   expect(host.querySelector('[data-message-id="send"]')).toBeNull();
 });
 
-it('keeps an expanded comment target visible when the adjacent runs merge', () => {
+it('shows a comment target when the combined run is expanded', () => {
   const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
   const rows: any[] = [
     { ...base, id: 'target', role: 'assistant', content: 'Target text', metadata: {}, chat_comments: [{
@@ -43,15 +44,16 @@ it('keeps an expanded comment target visible when the adjacent runs merge', () =
   ];
   messages.set(rows);
   coreSettings.set({ features: { focus_mode: true } } as any);
-  const present = (placed: ReadonlySet<string>) => buildTranscriptPresentation(rows, true, null, undefined, [], placed);
+  const placed = placedCommentEnvelopes(rows, 'thread');
+  const present = buildTranscriptPresentation(rows, true, null, undefined, [], placed);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: present(new Set()), transcriptWithPlaced: present, threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: present, placedEnvelopes: placed, threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();
-  expect(host.querySelectorAll('.fold-toggle')).toHaveLength(2);
-  expect(host.querySelector('[data-message-id="send"]')).not.toBeNull();
+  expect(host.querySelectorAll('.fold-toggle')).toHaveLength(1);
+  expect(host.querySelector('[data-message-id="send"]')).toBeNull();
   (host.querySelector('.fold-toggle') as HTMLButtonElement).click();
   flushSync();
   expect(host.querySelectorAll('.fold-toggle')).toHaveLength(1);
