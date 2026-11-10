@@ -202,6 +202,19 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brxown fox');
 		});
 
+		it('where cards open as the phone sheet, keys that carry the caret into a comment before the tap is read open nothing', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, commentsAsSheet: true });
+			// A slow frame: the tap lands outside the comment, and the arrow keys move the caret in before the press is read.
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 13 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' });
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+		});
+
 		it('where cards open as a popover over the text, the caret arriving by keys opens none, and typing is reported so an open one can close', () => {
 			const onAnchorFocus = vi.fn(), onTyping = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onTyping, cardsCoverText: () => true });

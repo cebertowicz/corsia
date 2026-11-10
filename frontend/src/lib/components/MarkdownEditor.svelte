@@ -183,6 +183,8 @@
 
 	/** The highlight the caret last came to rest in: a caret moving inside it (typing, Backspace, the arrow keys) is editing there, and does not pick its card again. */
 	let caretIn: string | null = null;
+	/** A press waiting for its frame; cleared when the caret moves by keys or typing before then. */
+	let pendingPress: MouseEvent | null = null;
 
 	function handleSelection(v: EditorView, click?: MouseEvent) {
 		const r = v.state.selection.main;
@@ -239,7 +241,8 @@
 					mousedown(press, v) {
 						dragging = true;
 						onSelect?.(null);
-						const up = () => { dragging = false; requestAnimationFrame(() => handleSelection(v, press)); };
+						// The press is read a frame after mouseup, once the editor has placed the caret; a key that moves it first supersedes the press.
+						const up = () => { dragging = false; pendingPress = press; requestAnimationFrame(() => { if (pendingPress !== press) return; pendingPress = null; handleSelection(v, press); }); };
 						window.addEventListener('mouseup', up, { once: true });
 						return false;
 					}
@@ -253,6 +256,7 @@
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);
 					if (u.selectionSet && !dragging && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
+						pendingPress = null;
 						handleSelection(u.view);
 					}
 				})
