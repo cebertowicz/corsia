@@ -1,5 +1,4 @@
 import { cellElement } from './widget-blocks';
-import { CELL_EDITOR } from './widget-cell-state';
 import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
 import { colourStyle } from './suggestion-marks';
 
@@ -137,9 +136,8 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;
-			// A cell whose own editor is open holds that editor in place of its rendered text: wrapping text inside it would
-			// tear the editor apart, so a mark on that cell marks the cell instead of the characters.
-			const inside = hit.length === 1 && !cell.querySelector(CELL_EDITOR) && (from > span.from || to < span.to || !!mark.suggestion);
+			// A mark inside one cell wraps the characters it covers; a mark across cells, or covering a whole cell, marks the cells.
+			const inside = hit.length === 1 && (from > span.from || to < span.to || !!mark.suggestion);
 			const text = src.slice(span.from, span.to), part = src.slice(Math.max(from, span.from), Math.min(to, span.to));
 			const rendered = cell.textContent ?? '';
 			const inSource = occurrences(text, part);

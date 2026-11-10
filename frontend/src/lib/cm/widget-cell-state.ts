@@ -107,5 +107,5 @@ export function openCellInSource(state: EditorState, changes: { from: number; in
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */
 export const CELL_SYNC = 'table-cell-sync';
 
-/** The class the cell editor's own element carries, which the comment flows and the paint pass read to leave it alone. */
+/** The class of the open cell editor's element, in a layer over the cell: an event from inside it is the editor's, not the table's. */
 export const CELL_EDITOR = '.cm-md-cell-editor';
