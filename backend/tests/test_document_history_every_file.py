@@ -166,6 +166,25 @@ async def test_a_registered_thread_file_still_honours_every_other_ignore_rule(hi
 
 
 @pytest.mark.asyncio
+async def test_history_is_offered_only_once_a_version_is_recorded(history_scope):
+    from infra.document_history import history_offered
+    from infra.guidance_targets import history_target as target_of
+
+    workspace, thread_id = history_scope
+    path = placed(workspace / '.threads' / thread_id / 'notes' / 'fresh.md', 'Draft.\n')
+    register(thread_id, path)
+
+    def offered() -> bool:
+        return history_offered(workspace, (path, target_of(path, workspace)))
+
+    # Registered but never saved: nothing to list, so no History control and no empty panel (VH7).
+    assert offered() is False
+    await save_document_text(DocumentSave(path=str(path), text='Saved.\n', thread_id=thread_id), owner(thread_id))
+    assert wait_recorded()
+    assert offered() is True
+
+
+@pytest.mark.asyncio
 async def test_a_restore_lands_after_every_earlier_save_or_not_at_all(history_scope, monkeypatch):
     from doceditor.document_save import DocumentSaveError
     from infra import guidance_git
@@ -495,6 +514,30 @@ async def test_live_write_with_a_history_fault_still_lands(history_scope, tmp_pa
     finally:
         live.close()
     assert path.read_text() == 'Still saved.\n'
+
+
+@pytest.mark.asyncio
+async def test_an_outside_edit_behind_a_refused_restore_is_kept_as_a_version(history_scope, monkeypatch):
+    from api import files
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    monkeypatch.setattr(files, 'authenticate', lambda _token: {'id': user_id})
+    path = placed(workspace / 'notes' / 'plan.md', 'First.\n')
+    await save_document_text(DocumentSave(path=str(path), text='First version.\n', thread_id=thread_id), user_id)
+    first = head(workspace)
+    await save_document_text(DocumentSave(path=str(path), text='Second version.\n', thread_id=thread_id), user_id)
+    assert wait_recorded()
+    path.write_text('Outside edit.\n')
+    before = int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace))
+    refused = await files.restore_version('test', files.RestoreBody(
+        path=str(path), version=first, base_sha256=sha('Second version.\n'), thread_id=thread_id))
+    assert (refused.status_code, json.loads(refused.body)['kind']) == (409, 'stale')
+    assert path.read_text() == 'Outside edit.\n'
+    # Kept before the refusal answers, by no one's name: the history the person reloads ends at the text they see.
+    assert int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace)) == before + 1
+    assert 'Reason: unrecorded' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+    assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Outside edit.\n'
 
 
 @pytest.mark.asyncio

@@ -38,18 +38,17 @@ def history_off(workspace: Path) -> bool:
 
 
 def history_offered(workspace: Path, document=None) -> bool:
-    """Whether an open recorded file offers History: the workspace records history, and the writer's
-    ignore gate lets ``document`` (its path and target; a guidance file passes None) in. A Git fault in
-    that check offers none, as for an ignored file."""
-    from infra.history_ignore import ignored
-
+    """Whether an open recorded file offers History: the workspace records history, and ``document`` (its
+    path and target; a guidance file passes None) has a version to list, so a file with none recorded has
+    no History control (VH7). One ``git log`` (an unborn HEAD exits 128: none recorded); a Git fault
+    offers none."""
     try:
         repo = repository(workspace)
         if repo is None or document is None:
             return repo is not None
-        path, target = document
-        relative = path.resolve(strict=False).relative_to(repo).as_posix()
-        return not ignored(repo, [relative], tray=target.registered)
+        relative = document[0].resolve(strict=False).relative_to(repo).as_posix()
+        return bool(_git_bytes(repo, "log", "-1", "--format=%H", "--diff-filter=d", "--",
+                               f":(literal){relative}", ok=(0, 128)).strip())
     except (GitFault, ValueError) as exc:
         logger.warning("history check failed for {}: {}", document, exc)
         return document is None
