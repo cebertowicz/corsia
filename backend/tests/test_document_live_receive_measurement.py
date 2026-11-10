@@ -126,7 +126,7 @@ async def test_report_journal_and_mirror_per_thousand_typed_characters(tmp_path,
     live = await LiveDocument.open(path, tmp_path / "store.sqlite")
     async def valid(text, actor=None):
         pass
-    async def write(text, prior_hash):
+    async def write(text, prior_hash, *_operation):
         await asyncio.to_thread(write_atomic_plain, path, text, prior_hash)
     lane = DocumentLane(live, validate_actor=valid, write=write)
     peer = clone(live.doc.get_update())

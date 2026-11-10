@@ -69,16 +69,16 @@ describe('a tab whose document relocated before its draft followed', () => {
 
 describe('a live reopen that replayed a device copy', () => {
 	const fileText = '# Doc\nfirst';
-	const openWith = async (liveText: string, unwritten: boolean) => {
+	const openWith = async (liveText: string, unwritten: boolean, history?: boolean, onReady = vi.fn()) => {
 		const flush = vi.fn().mockResolvedValue({});
 		const written = vi.fn();
 		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush,
 			durability: { clean: true, unwritten, written, snapshot: () => ({ localGeneration: 3, ackGeneration: 1 }) }, connection: 'connected' };
-		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' } });
+		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' }, history });
 		vi.mocked(openLiveDocument).mockResolvedValue(live as never);
 		liveDocumentBindings.set({ [target.instanceId]: live } as never);
 		seedDraft(target, liveText);
-		await loadViewerContent({ target, isCurrent: () => true, onReady: vi.fn(), onSnapshot: vi.fn(), onUnavailable: vi.fn() });
+		await loadViewerContent({ target, isCurrent: () => true, onReady, onSnapshot: vi.fn(), onUnavailable: vi.fn() });
 		await new Promise(resolve => setTimeout(resolve, 0));
 		return Object.assign(flush, { written });
 	};
@@ -93,6 +93,15 @@ describe('a live reopen that replayed a device copy', () => {
 		const flush = await openWith(fileText, true);
 		expect(flush).not.toHaveBeenCalled();
 		expect(flush.written).toHaveBeenCalledExactlyOnceWith(3);
+	});
+
+	it('offers History on a live open only when the server says the file is recorded', async () => {
+		const recorded = vi.fn();
+		await openWith(fileText, false, true, recorded);
+		expect(recorded).toHaveBeenCalledWith(expect.objectContaining({ history: true }));
+		const unrecorded = vi.fn();
+		await openWith(fileText, false, undefined, unrecorded);
+		expect(unrecorded).toHaveBeenCalledWith(expect.objectContaining({ history: false }));
 	});
 
 	it('writes nothing on a plain reopen with no local transactions to write', async () => {

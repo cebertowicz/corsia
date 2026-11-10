@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from pathlib import Path
 
 from infra.guidance_messages import SAVE_UNSYNCED
 
@@ -21,6 +22,17 @@ class SaveResult:
     line: str | None = None
     unsynced: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
+
+
+@dataclass
+class KnownHead:
+    """What one read under the lock already holds: the Git directory, the commit to build on, its tree and
+    the file modes in it, so a document record asks Git for none of them again; a commit moves it on."""
+
+    git_dir: Path
+    head: str | None
+    tree: str | None
+    modes: dict[str, str]
 
 
 @dataclass(frozen=True)

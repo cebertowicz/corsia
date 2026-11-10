@@ -319,7 +319,7 @@ async def _lane(scope, tmp_path, path, actor, *, direct_user=False):
     async def valid(text, actor=None):
         pass
 
-    async def writer(text, prior_hash):
+    async def writer(text, prior_hash, *_operation):
         await asyncio.to_thread(write_atomic_plain, path, text, prior_hash)
 
     lane = DocumentLane(live, validate_actor=valid, write=writer, policy=policy.decide)

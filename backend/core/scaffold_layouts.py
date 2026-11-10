@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from infra.history_ignore import CREDENTIAL_NAMES
+
 
 @dataclass(frozen=True)
 class _Layout:
@@ -39,7 +41,9 @@ def _workspace_layout() -> _Layout:
                 "\n# Project source checkouts are separate repositories.\n"
                 "projects/*/source/\n"
                 "\n# Finder metadata is not workspace truth.\n"
-                ".DS_Store\n",
+                ".DS_Store\n"
+                "\n# Credentials never enter workspace history.\n"
+                + "".join(f"{name}\n" for name in CREDENTIAL_NAMES),
             ),
             (
                 "shared/INDEX.md",

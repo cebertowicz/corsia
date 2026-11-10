@@ -66,6 +66,11 @@ export function decodeUpdate(value: string): Uint8Array {
 
 /** The server's wire digest: the first 16 lowercase hex characters of SHA-256 over UTF-8. */
 export async function textDigest(text: string): Promise<string> {
+	return (await textSha256(text)).slice(0, 16);
+}
+
+/** Lowercase hex SHA-256 over UTF-8: the hash the server compares a document's text by. */
+export async function textSha256(text: string): Promise<string> {
 	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-	return Array.from(new Uint8Array(digest).subarray(0, 8), byte => byte.toString(16).padStart(2, '0')).join('');
+	return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
