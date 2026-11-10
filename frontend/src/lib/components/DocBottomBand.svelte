@@ -39,6 +39,8 @@
 {/if}
 
 <style>
-	.doc-bottom-band { grid-area: bottom; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: 0 var(--space-3); }
+	/* It floats over its canvas (placed by DocViewer.css on a document, by the viewer over an image); only its notices take the pointer. */
+	.doc-bottom-band { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: 0 var(--space-3); }
+	.doc-bottom-band > :global(*) { pointer-events: auto; }
 	.doc-bottom-band :global(.delivery-confirmation) { align-self: center; max-width: 100%; }
 </style>

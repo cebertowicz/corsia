@@ -4,7 +4,7 @@
 	import { Button } from './ui';
 	import { displayedDocument } from '$lib/ws/presence';
 	import { isViewing, onRecordedDocActivity, type DocActivityFrame, type DocSpan } from '$lib/docPresence';
-	import { UnseenDocActivity, locateDocumentActivity, type ActivityPill } from '$lib/docCanvasActivity';
+	import { UnseenDocActivity, locateDocumentActivity, watchCanvasAndBand, type ActivityPill } from '$lib/docCanvasActivity';
 
 	let { root, artifactId, threadId, onJump }: {
 		root?: HTMLElement; artifactId: string | null; threadId: string | null;
@@ -35,7 +35,9 @@
 		const clip = root?.querySelector('.doc-main')?.getBoundingClientRect();
 		if (clip && root && pill) {
 			const box = root.getBoundingClientRect();
-			top = (pill.direction === 'above' ? clip.top + 4 : clip.bottom - 48) - box.top;
+			// Both float over the text's foot: a below pill sits above the bottom band's notices rather than on them.
+			const band = root.querySelector(':scope > [data-doc-bottom-band]')?.getBoundingClientRect();
+			top = (pill.direction === 'above' ? clip.top + 4 : Math.min(clip.bottom, band?.top ?? clip.bottom) - 48) - box.top;
 			right = box.right - clip.right + 8;
 		}
 	}
@@ -71,14 +73,13 @@
 			eligible.add(identity(frame));
 			if (frame.kind === 'read') void arrive(frame);
 		});
-		const resize = new ResizeObserver(schedule);
-		resize.observe(element);
+		const stopWatching = watchCanvasAndBand(element, schedule);
 		const updateVisibility = () => { visibility = document.visibilityState; };
 		updateVisibility();
 		document.addEventListener('visibilitychange', updateVisibility);
 		element.addEventListener('scroll', schedule, true);
 		return () => {
-			recorded(); resize.disconnect();
+			recorded(); stopWatching();
 			document.removeEventListener('visibilitychange', updateVisibility);
 			element.removeEventListener('scroll', schedule, true);
 			if (pendingMeasure !== null) cancelAnimationFrame(pendingMeasure);

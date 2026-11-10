@@ -51,3 +51,21 @@ export function locateDocumentActivity(view: EditorView, clip: DOMRect, from: nu
 	if (spanTop >= bottom) return { direction: 'below', distance: spanTop - bottom };
 	return { direction: 'visible', distance: 0 };
 }
+
+/**
+ * Calls `changed` whenever the canvas or its bottom band changes size, so a below pill stays above the band's notices: the band
+ * comes and goes without resizing the canvas, and grows in place when a notice or the jump control joins it. Returns the stop.
+ */
+export function watchCanvasAndBand(root: HTMLElement, changed: () => void): () => void {
+	const resize = new ResizeObserver(changed);
+	resize.observe(root);
+	const watchBand = () => {
+		const band = root.querySelector(':scope > [data-doc-bottom-band]');
+		if (band) resize.observe(band);
+		changed();
+	};
+	const children = new MutationObserver(watchBand);
+	children.observe(root, { childList: true });
+	watchBand();
+	return () => { resize.disconnect(); children.disconnect(); };
+}

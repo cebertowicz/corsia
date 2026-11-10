@@ -132,6 +132,10 @@ export const docTheme = EditorView.theme({
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
+// A line the editor scrolls into view stops above whatever floats over the text's foot. The scroller's CSS
+// scroll-padding-bottom (set by the document canvas, 0 elsewhere) is the one value, so native and CodeMirror scrolls agree.
+export const docScrollMargin = EditorView.scrollMargins.of((view) => ({ bottom: parseFloat(getComputedStyle(view.scrollDOM).scrollPaddingBottom) || 0 }));
+
 export const docHighlight = syntaxHighlighting(
 	HighlightStyle.define([
 		{ tag: t.heading, color: 'var(--text-primary)' },
@@ -149,3 +153,6 @@ export const docHighlight = syntaxHighlighting(
 		{ tag: t.list, color: 'var(--text-primary)' }
 	])
 );
+
+/** The document editor's look: its theme, where scrolled-to lines stop, and its syntax colours. */
+export const docEditorLook = [docTheme, docScrollMargin, docHighlight];

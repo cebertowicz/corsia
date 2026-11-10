@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { UnseenDocActivity, type ActivityPosition } from './docCanvasActivity';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { UnseenDocActivity, watchCanvasAndBand, type ActivityPosition } from './docCanvasActivity';
 import type { DocActivityFrame } from './docPresence';
 
 const frame = (id: string, from = 100): DocActivityFrame => ({
@@ -48,5 +48,27 @@ describe('unseen document arrivals', () => {
 		expect(unseen.pill(position)?.span.from).toBe(120);
 		unseen.clear();
 		expect(unseen.pill(position)).toBeNull();
+	});
+});
+
+describe('watchCanvasAndBand', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('watches the size of a bottom band that appears later, so the pill moves when the band grows in place', async () => {
+		const observed: Element[] = [];
+		vi.stubGlobal('ResizeObserver', class { observe(node: Element) { observed.push(node); } disconnect() {} });
+		const root = document.createElement('div');
+		const changed = vi.fn();
+		const stop = watchCanvasAndBand(root, changed);
+		expect(observed).toEqual([root]);
+		const band = root.appendChild(document.createElement('div'));
+		band.setAttribute('data-doc-bottom-band', '');
+		await Promise.resolve();
+		expect(observed).toEqual([root, band]);
+		expect(changed).toHaveBeenCalledTimes(2);
+		stop();
+		root.removeChild(band);
+		await Promise.resolve();
+		expect(changed).toHaveBeenCalledTimes(2);
 	});
 });

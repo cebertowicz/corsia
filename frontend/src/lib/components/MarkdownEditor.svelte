@@ -7,7 +7,7 @@
 	import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { GFM } from '@lezer/markdown';
-	import { docTheme, docHighlight } from '$lib/cm/theme';
+	import { docEditorLook } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
 	import { imageContext, imageOpener, refreshMarkdownImages, type OpenImageRequest } from '$lib/cm/markdown-image';
 	import { linkOpener } from '$lib/cm/markdown-link';
@@ -225,8 +225,7 @@
 					...defaultKeymap
 				]),
 				markdown({ extensions: GFM }),
-				docTheme,
-				docHighlight,
+				docEditorLook,
 				markdownLivePreview,
 				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '', imageCacheKey: imageBase.imageCacheKey }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
@@ -355,7 +354,8 @@
 				return id ? liveAnchor(id)() : null;
 			}, click)),
 		}));
-		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.point ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+		// Every drawn field counts (a thread read since, a pin renumbered), so only the handler is left out.
+		const sig = JSON.stringify(ranges, (key, value) => key === 'onMarkerFocus' ? undefined : value);
 		if (sig === lastPainted) return;
 		lastPainted = sig;
 		curHighlights = ranges;
