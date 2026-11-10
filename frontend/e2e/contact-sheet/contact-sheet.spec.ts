@@ -32,6 +32,16 @@ async function dismissToasts(page: Page) {
 
 const overlaidPanel = (page: Page) => page.locator('aside.pane.overlay:not(.collapsed)');
 
+// Waits until no finite animation or transition is running (the pane's slide, the canvas resizing), then a frame for
+// the canvas to re-measure. Endless ones such as spinners are skipped, since they never finish.
+async function settle(page: Page) {
+  await page.evaluate(async () => {
+    const running = () => document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity);
+    for (let left = running(); left.length; left = running()) await Promise.all(left.map(animation => animation.finished.catch(() => undefined)));
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+}
+
 // Where the Workspace panel covers the canvas instead of docking beside it, the screen with it open and with it
 // closed are different layouts, so both are shot. Switches to the state not yet shot and returns its file suffix and
 // caption, or returns undefined, with the page unchanged, where the panel does not overlay.
@@ -48,7 +58,8 @@ async function togglePanelOverlay(page: Page): Promise<{ suffix: string; caption
     await toggle.click();
     return undefined;
   }
-  await page.waitForTimeout(1000); // let the canvas re-measure and the pane's slide finish
+  if (wasOverlaid) await expect(overlaidPanel(page)).toHaveCount(0);
+  await settle(page);
   return state;
 }
 
