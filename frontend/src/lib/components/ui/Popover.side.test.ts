@@ -83,3 +83,24 @@ it('keeps the side a click-opened card chose while it grows, and does not flip a
 		expect(surface().style.left).toBe('212px');
 	} finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); }
 });
+
+it('clamps into the screen when its own content grows, with no other signal', async () => {
+	let height = 100;
+	const grown: (() => void)[] = [];
+	const observer = vi.spyOn(globalThis, 'ResizeObserver').mockImplementation(function (callback: ResizeObserverCallback) {
+		grown.push(() => callback([], {} as ResizeObserver));
+		return { observe() {}, unobserve() {}, disconnect() {} } as unknown as ResizeObserver;
+	} as unknown as typeof ResizeObserver);
+	const host = document.createElement('div'); document.body.appendChild(host);
+	const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+	const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => height);
+	const card = mount(Popover, { target: host, props: { anchor: new DOMRect(200, 100, 0, 20), open: true, onClose: vi.fn(), placement: 'pointer', children: (() => {}) as any } });
+	flushSync();
+	try {
+		const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface().style.top).toBe('124px'));
+		// A reply typed into the card makes it taller: its bottom stays on screen, so Send does.
+		height = window.innerHeight - 20; grown.forEach((fire) => fire()); flushSync();
+		expect(surface().style.top).toBe(`${window.innerHeight - height - 8}px`);
+	} finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); observer.mockRestore(); }
+});

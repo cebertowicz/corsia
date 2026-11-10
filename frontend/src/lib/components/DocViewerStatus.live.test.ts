@@ -23,7 +23,7 @@ function render(overrides: Record<string, unknown> = {}) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(DocViewerStatus, { target: host, props: {
 		liveSession: session, ready: true, stale: false, readonly: false, commentCount: 0,
-		orphanedCount: 0, artifactId: null, targetInstanceId: 'tab', freshness: null, onOpenComments: () => {},
+		artifactId: null, targetInstanceId: 'tab', freshness: null, onOpenComments: () => {},
 		...overrides,
 	} }); flushSync();
 }
@@ -43,12 +43,6 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
-it('names live unplaced comments once on the document status pill', () => {
-	setup(); render({ orphanedCount: 2 });
-	const pill = host.querySelector('.comment-status')!;
-	expect(pill.getAttribute('aria-label')).toBe("0 threads, 2 comments couldn't be placed");
-});
-
 it('shows the approved settling row and offers reading and copying without a second write', async () => {
 	setup(); session.pending = true;
 	const retry = vi.spyOn(session, 'retry'); const flush = vi.spyOn(session, 'flush');

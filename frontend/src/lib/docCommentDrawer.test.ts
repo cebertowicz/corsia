@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickedOpener, footerFocusHome, onSheetMoved, openerFocus, presence, scrollListToCard } from './docCommentDrawer';
+import { clickedOpener, onSheetMoved, openerFocus, presence, scrollListToCard } from './docCommentDrawer';
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -21,68 +21,6 @@ it('keeps a visible candidate in place while still scrolling ordinary or offscre
 	card.getBoundingClientRect = () => ({ top: 200, bottom: 300 } as DOMRect);
 	scrollListToCard(drawer, 'a', false);
 	expect(list.scrollTo).toHaveBeenCalledTimes(3);
-});
-
-/** A drawer with a heading to rest on and a footer holding Send now. */
-function drawer() {
-	document.body.innerHTML = '<section><h2 tabindex="-1">Comments</h2><div data-footer><button type="button">Send now</button></div></section><button type="button" data-outside>Elsewhere</button>';
-	const heading = document.querySelector<HTMLElement>('h2')!;
-	const footer = document.querySelector<HTMLElement>('[data-footer]')!;
-	const send = footer.querySelector<HTMLButtonElement>('button')!;
-	const action = footerFocusHome(footer, () => heading);
-	return { heading, footer, send, action };
-}
-const settled = () => new Promise<void>((resolve) => queueMicrotask(resolve));
-
-describe('footerFocusHome', () => {
-	it('moves focus to the drawer heading when Send now is disabled under it and focus drops to the page', async () => {
-		const { heading, send } = drawer();
-		send.focus();
-		// What a browser does to a focused control that is disabled, which jsdom does not: focus goes to the page, and
-		// the control, disabled by then, reports focusout with nowhere it went.
-		send.blur();
-		send.disabled = true;
-		send.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
-		await settled();
-		expect(document.activeElement).toBe(heading);
-	});
-
-	it('moves focus to the drawer heading when the footer leaves while focus is inside it', async () => {
-		const { heading, footer, send, action } = drawer();
-		send.focus();
-		footer.remove();
-		action.destroy();
-		await settled();
-		expect(document.activeElement).toBe(heading);
-	});
-
-	it('leaves focus alone when it moves somewhere on purpose or the footer never held it', async () => {
-		const { heading, footer, send, action } = drawer();
-		const outside = document.querySelector<HTMLElement>('[data-outside]')!;
-		send.focus();
-		outside.focus();
-		await settled();
-		expect(document.activeElement).toBe(outside);
-		// An enabled control blurred (the window losing focus, a click on bare text) is not the footer's doing.
-		send.focus();
-		send.blur();
-		await settled();
-		expect(document.activeElement).toBe(document.body);
-		footer.remove();
-		action.destroy();
-		await settled();
-		expect(document.activeElement).not.toBe(heading);
-	});
-
-	it('does nothing when the heading has gone with the drawer', async () => {
-		const { heading, footer, send, action } = drawer();
-		send.focus();
-		heading.remove();
-		footer.remove();
-		action.destroy();
-		await settled();
-		expect(document.activeElement).toBe(document.body);
-	});
 });
 
 describe('openerFocus', () => {

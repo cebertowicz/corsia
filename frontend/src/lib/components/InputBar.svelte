@@ -31,10 +31,11 @@
 	import { updateRestarting } from '$lib/update/store';
 
 	import { corsiaAgentId } from '$lib/utils/conductor';
-		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread, marginComments = false, selectedCommentId = $bindable(null) }: {
+		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: {
 			threadId?: string | null;
 			marginComments?: boolean;
 			selectedCommentId?: string | null;
+			marginComposer?: import('$lib/docMarginSource').MarginComposer | null;
 			onSend: () => void;
 			onTriggerWarm?: () => void;
 			onAutoCreateThread?: () => Promise<void>;
@@ -340,7 +341,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} {marginComments} bind:selectedCommentId onChange={value => comments = value} onSendReply={sendReply} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} {marginComments} bind:selectedCommentId bind:marginComposer onChange={value => comments = value} onSendReply={sendReply} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>

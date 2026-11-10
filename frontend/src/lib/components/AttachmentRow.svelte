@@ -130,7 +130,7 @@
 {/snippet}
 {#snippet chipFace()}
 	{@render glyph()}
-	<span class="text"><span class="head"><span class="title">{card.title}</span>{#if newMarker}<NewMarker />{/if}</span></span>
+	<span class="text"><span class="head"><span class="title">{card.title}</span>{#if newMarker}<NewMarker dot />{/if}</span></span>
 {/snippet}
 
 {#if variant === 'row'}

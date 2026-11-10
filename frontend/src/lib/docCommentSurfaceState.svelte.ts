@@ -6,6 +6,8 @@ import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte'
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { arrivedDocComments } from '$lib/stores/docComments';
+import { paneOverlay } from '$lib/stores/artifactCanvas';
+import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
 
 /** What a card is anchored to; the popover owns the union. */
 export type CommentAnchor = NonNullable<PopoverAnchor>;
@@ -30,8 +32,11 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
 /** The canvas width (px) at which the text keeps at least 45 characters beside the 308 px margin column. */
 export const MARGIN_MIN = 660;
 
-/** Whether a canvas this wide (px) leaves room for the margin column beside its text; below it, the popover or the sheet. */
-export const hasRoomForMargin = (canvasWidth: number) => canvasWidth >= MARGIN_MIN;
+/**
+ * Whether a canvas this wide (px) leaves room for the margin column beside its text; below it, the popover or the sheet.
+ * A Workspace panel the shell shows over the canvas (`paneOverlay`) covers its inline end (`--pane-overlay-inset`), so that part is no room.
+ */
+export const hasRoomForMargin = (canvasWidth: number, overlaid = get(paneOverlay)) => canvasWidth - (overlaid ? PANE_DRAWER_WIDTH : 0) >= MARGIN_MIN;
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
 export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string, marginUp?: () => boolean) {
@@ -52,32 +57,46 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let hovered = $state<string | null>(null);
 	/** The column was shown on load, so the shell (sidebar, Workspace panel) is left as it is until the reader closes it. */
 	let quiet = $state(false);
-	function close() {
+	/** The draft was started with the margin column up: the column stays while it is written, and closing the draft goes back to it. */
+	let overColumn = $state(false);
+	/** Closes everything, the column under a draft included: another document, the history view. */
+	function closeAll() {
 		state = null;
 		quiet = false;
+		overColumn = false;
 		cancelCommentCapture(draftScope?.());
 	}
+	/** Closes what is open; a draft written over the margin column closes back to the column. */
+	function close() {
+		if (state?.kind !== 'draft' || !overColumn) { closeAll(); return; }
+		overColumn = false;
+		cancelCommentCapture(draftScope?.());
+		state = { kind: 'list' };
+	}
 	function openDraft(rect: CommentAnchor) {
+		if (state?.kind !== 'draft') overColumn = (state?.kind === 'list' || state?.kind === 'thread') && !!marginUp?.();
 		anchor = rect;
 		atClick = false;
 		state = { kind: 'draft' };
 	}
 	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. The highlight is how a thread is opened now that no marker stands by it: its card, once shown, stamps the replies viewed. */
 	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
-		const changed = pickComment(id, rect, viaSuggestion || !!marginUp?.(), clicked);
+		const margin = marginUp?.();
+		// A document canvas with no room for the column shows its list as a sheet: a highlight picked there opens that one thread in its place.
+		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
 		if (changed) arrivedDocComments.set(new Set([id]));
 		return changed;
 	}
-	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean) {
+	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean, replacesList = false) {
 		// state.id identifies this surface's card, which may stay open after resolution; the shared focus store
 		// identifies the highlighted thread and clears when it resolves.
 		// The drawer is nonmodal: a caret landing in commented text (a click, or
 		// Escape collapsing a selection) keeps it open rather than swapping it
 		// for that comment's popover. Pressing a suggestion in the editor still
 		// focuses its card there.
-		if (state?.kind === 'list' && !viaSuggestion) return false;
+		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
-		if (state?.kind === 'list') { focusedDocComment.set(id); return changed; }
+		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id, fromText: true };
@@ -138,8 +157,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get atClick() { return atClick; },
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
-		get quiet() { return quiet; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
+		get quiet() { return quiet; }, get draftOverColumn() { return state?.kind === 'draft' && overColumn; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
+		close, closeAll, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
 	};
 }
 

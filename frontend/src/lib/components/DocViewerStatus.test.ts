@@ -38,7 +38,6 @@ function render(freshness: DocumentFreshness, onMarkVerified = vi.fn().mockResol
 			stale: false,
 			readonly: false,
 			commentCount: 0,
-			orphanedCount: 0,
 			artifactId: 'artifact-1',
 			targetInstanceId: 'tab-1',
 			onOpenComments: vi.fn(),
@@ -202,8 +201,6 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it.each([
-		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, "2 threads, 2 comments couldn't be placed, 3 messages not sent yet"],
-		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 threads, 2 comments couldn't be placed"],
 		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 threads, 3 messages not sent yet'],
 		['neither', { commentCount: 2 }, null, '2 threads'],
 	])('names %s comment status once', (_state, props, feedback, expected) => {
@@ -212,12 +209,6 @@ describe('DocViewerStatus freshness metadata', () => {
 		flushSync();
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
 		expect(pill.getAttribute('aria-label')).toBe(expected);
-	});
-
-	it('names unplaced comments from the status pill', () => {
-		render(value(), undefined, { orphanedCount: 1 });
-		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
-		expect(pill.getAttribute('aria-label')).toBe("0 threads, 1 comment couldn't be placed");
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {
@@ -277,15 +268,6 @@ describe('DocViewerStatus toolbar', () => {
 		const status = host.querySelector('.metadata-status[role="status"]')!;
 		expect(status.textContent).toContain('File changed since you opened it');
 		expect(status.classList.contains('sr-only')).toBe(true);
-	});
-
-	it('anchors the unplaced dot to the comment icon, not the control box', () => {
-		render(value(), undefined, { commentCount: 2, orphanedCount: 1 });
-		const button = host.querySelector('.comment-status')!;
-		const dot = button.querySelector('.unplaced-dot')!;
-		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
-		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
-		expect(button.getAttribute('aria-label')).toBe("2 threads, 1 comment couldn't be placed");
 	});
 });
 

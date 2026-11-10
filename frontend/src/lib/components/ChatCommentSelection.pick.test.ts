@@ -80,3 +80,34 @@ it('hands a thread open in its popover to its card when the column comes up, kee
 	expect(chatReplyDrafts.get('one')).toBe('keep this draft');
 	chatReplyDrafts.set('one', '');
 });
+
+it('writes a new comment in the column, as a card level with its text, while the column is up', async () => {
+	setupSurface();
+	Object.defineProperty(Range.prototype, 'getClientRects', { value: () => [{ top: 120, bottom: 140, left: 10, right: 60 }], configurable: true });
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [] }] as never);
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	await tick();
+	const range = document.createRange();
+	range.setStart(host.querySelector('.long-message-body')!.firstChild!, 0);
+	range.setEnd(host.querySelector('.long-message-body')!.firstChild!, 4);
+	document.getSelection()!.removeAllRanges();
+	document.getSelection()!.addRange(range);
+	document.dispatchEvent(new Event('selectionchange'));
+	flushSync();
+	host.querySelector<HTMLButtonElement>('.sel-comment')!.click();
+	flushSync();
+	await tick();
+	flushSync();
+
+	// The column draws the composer; nothing opens over the text.
+	const writing = host.querySelector<HTMLElement>('[data-margin-composer="composer"]')!;
+	expect(writing.querySelector('[role="dialog"] textarea')).not.toBeNull();
+	expect(document.querySelector('[data-popover]')).toBeNull();
+	// Cancel closes it at once: there is no popover to wait out.
+	writing.querySelector<HTMLButtonElement>('button.cancel')!.click();
+	flushSync();
+	await tick();
+	flushSync();
+	expect(host.querySelector<HTMLElement>('[data-margin-composer]')!.dataset.marginComposer).toBe('');
+	Reflect.deleteProperty(Range.prototype, 'getClientRects');
+});

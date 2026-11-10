@@ -1,3 +1,4 @@
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createComment, openLiveDocument, seedLiveDocument } from '../support/liveDocument';
@@ -55,7 +56,7 @@ for (const width of [1440, 393]) {
 		await page.getByRole('button', { name: /^1 thread\b/ }).click();
 		await expect(comments).toBeVisible();
 		await expect(button).toHaveCount(0);
-		await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await closeComments(comments);
 		await expect(comments).toHaveCount(0);
 		// Closing restores the still-valid selection on both mobile and desktop.
 		await expect(button).toBeVisible();

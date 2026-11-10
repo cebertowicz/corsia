@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatPanel from './ChatPanel.svelte';
 import { withEmptyAttentionQueue } from '../__tests__/fixtures/attentionQueue';
 import { withOpenTime } from '../__tests__/fixtures/openTimeServer';
+import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import type { TurnSummary } from './transcriptRunLabel';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages, reasoningEffort, threads } from '$lib/stores/threads';
@@ -102,7 +103,7 @@ describe('ChatPanel first-page failure', () => {
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
 		await vi.waitFor(() => expect(get(messages).find(message => message.id === 'target')?.chat_comments?.[0]?.answers).toMatchObject([{ text: 'recovered answer', author_kind: 'agent', unread: true }]));
 		await vi.waitFor(() => expect(host.innerHTML).toContain('data-comment-ids="comment"'));
-		await vi.waitFor(() => expect(document.querySelector('[data-highlight-dot] .ct-new-dot')).not.toBeNull());
+		await vi.waitFor(() => expect(document.querySelector('[data-highlight-dot] [aria-label="New reply"]')).not.toBeNull());
 		expect(host.textContent).not.toContain('recovered answer');
 		(host.querySelector('[data-comment-ids="comment"]') as HTMLElement).click();
 		flushSync();
@@ -208,9 +209,9 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
-		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 1 step · 4 min'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 1 step · 4 min'), { timeout: MOUNT_WAIT_MS });
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
-		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'), { timeout: MOUNT_WAIT_MS });
 	});
 
 	it('aborts the first page of the thread the user left, without an error state', async () => {

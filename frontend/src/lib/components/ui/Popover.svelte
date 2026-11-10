@@ -3,6 +3,8 @@
 	export type Anchor = DOMRect | HTMLElement | (() => DOMRect | null) | null;
 	/** Fired on `window` when an anchor's text may have moved without a scroll or resize (an edit, or lines drawn after a scroll). */
 	export const ANCHOR_MOVED = 'popover-anchor-moved';
+	/** Where an anchor is drawn now. */
+	export const anchorRect = (value: Anchor) => typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value;
 </script>
 
 <script lang="ts">
@@ -49,7 +51,6 @@
 	let rememberedKey: unknown;
 	let anchorSeen: DOMRect | null | undefined;
 	let lastScrollInput = 0;
-	function rectFor(value: Anchor) { return typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value; }
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
 		const edge = bounds?.getBoundingClientRect();
@@ -59,7 +60,7 @@
 		};
 	}
 	function position(event?: Event) {
-		const rect = rectFor(anchor);
+		const rect = anchorRect(anchor);
 		const live = typeof anchor === 'function';
 		if (!surface) return;
 		// A scroll inside the card or in another pane left the anchor where it was, so there is nothing to answer.
@@ -159,6 +160,13 @@
 			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
 		});
 		return () => { cancelled = true; };
+	});
+	// Content growing inside the card (a reply being typed) clamps it again, so its foot and Send stay on screen.
+	$effect(() => {
+		if (!open || !surface) return;
+		const observer = new ResizeObserver(() => position());
+		observer.observe(surface);
+		return () => observer.disconnect();
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
