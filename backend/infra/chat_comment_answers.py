@@ -38,6 +38,14 @@ def visible_answer_content(text: str, placed_cids: list[str]) -> str:
     return result.strip()
 
 
+def shown_answer_cids(db: sqlite3.Connection, thread_id: str, message_id: str) -> list[str]:
+    """The comments whose answers in this message show in their threads."""
+    return [cid for (cid,) in db.execute(
+        f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.assistant_message_id=?",
+        (thread_id, message_id),
+    )]
+
+
 def strip_answer_tags(text: str | None) -> str | None:
     """Drop the comment tags that open answer sections, keeping their text."""
     if not text:

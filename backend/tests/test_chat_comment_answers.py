@@ -1,6 +1,7 @@
 """Chat answers are indexed at write time and read per person."""
 
 import json
+from pathlib import Path
 import sqlite3
 
 import pytest
@@ -8,12 +9,15 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import parse_answers, strip_answer_tags, visible_answer_content
+from infra.chat_comment_answers import _TAGGED, parse_answers, strip_answer_tags, visible_answer_content
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
 from infra.reply_context import RejectedComments, require_every_comment
 from infra.schema import SCHEMA_VERSION
+
+# The client hides a streaming answer from the same cases (chatAnswerStream.test.ts).
+TAG_CASES = json.loads((Path(__file__).parent / 'fixtures' / 'chat-answer-tags.json').read_text())
 
 
 def _seed(db):
@@ -73,6 +77,33 @@ def test_thread_list_preview_hides_answer_tags(isolated_db):
         db.close()
     listed = TestClient(app).get(f"/api/threads?token={OWNER_TOKEN}").json()["threads"]
     assert [t["last_message"] for t in listed if t["id"] == "thread"] == ["Moved. Tonight runs at 4 AM."]
+
+
+@pytest.mark.parametrize('case', TAG_CASES, ids=lambda case: case['name'])
+def test_shared_tag_cases_find_the_first_section(case):
+    match = _TAGGED.search(case['text'])
+    assert (case['text'][:match.start()] if match else None) == case['before_first_tag']
+
+
+def test_live_update_carries_its_placed_answers(isolated_db):
+    """An update sent mid-turn reaches the page with its placed answers already out of its chat text."""
+    from infra.send_broadcast import project_input_message, read_input_broadcast_row
+    db = get_db()
+    try:
+        _seed(db)
+        insert_message("thread", "assistant", "Intro\n\n[c1.1] placed\n\n[c1.9] unknown",
+                       {"for_user": True, "turn_unbound_reason": "legacy_import"},
+                       msg_id="update", db=db, created_at="2026-01-02")
+        insert_message("thread", "assistant", "No answers here", {"for_user": True, "turn_unbound_reason": "legacy_import"},
+                       msg_id="plain", db=db, created_at="2026-01-03")
+        db.commit()
+        pushed = project_input_message(read_input_broadcast_row("update", db=db))
+        plain = project_input_message(read_input_broadcast_row("plain", db=db))
+    finally:
+        db.close()
+    assert pushed["chat_answer_cids"] == ["c1.1"]
+    assert pushed["chat_visible_content"] == "Intro\n\n[c1.9] unknown"
+    assert "chat_answer_cids" not in plain and "chat_visible_content" not in plain
 
 
 def test_malformed_cid_is_rejected():

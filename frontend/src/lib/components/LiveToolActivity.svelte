@@ -4,6 +4,7 @@
 	} from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
 	import { renderMarkdown } from '$lib/markdown';
+	import { visibleStreamText } from '$lib/chatAnswerStream';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -20,7 +21,8 @@
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
 	const activeTools = $derived((boundThreadId && $activeToolsByThread.get(boundThreadId)) || []);
 	const liveReasoning = $derived((boundThreadId && $liveReasoningByThread.get(boundThreadId)) || '');
-	const streamContent = $derived((boundThreadId && $streamContentByThread.get(boundThreadId)) || '');
+	// Answers to chat comments show only in their comment threads, so they never stream into chat.
+	const streamContent = $derived(visibleStreamText((boundThreadId && $streamContentByThread.get(boundThreadId)) || ''));
 	const isStreaming = $derived(isThreadTurnActive($turnStates, boundThreadId));
 
 	function autoScroll(node: HTMLElement, _content: string) {

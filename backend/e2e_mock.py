@@ -32,7 +32,7 @@ _DEFAULT_REPLY: dict = {
 
 
 def _reset_mock_state(replies: list[dict] | None = None) -> None:
-    """Replace the mock response queue and its response and completion gates."""
+    """Replace the mock response queue and its response, content and completion gates."""
     global _mock_replies, _mock_gates, _call_count
     global _consumed_targeted_replies, _last_targeted_replies, _last_thread_replies
     for event in _mock_gates.values():
@@ -40,7 +40,7 @@ def _reset_mock_state(replies: list[dict] | None = None) -> None:
     _mock_replies = replies or []
     _mock_gates = {
         gate_name: asyncio.Event()
-        for reply in _mock_replies for key in ("response_gate", "completion_gate")
+        for reply in _mock_replies for key in ("response_gate", "content_gate", "completion_gate")
         if isinstance((gate_name := reply.get(key)), str) and gate_name
     }
     _call_count = 0
@@ -150,6 +150,8 @@ async def _streaming_iter(reply: dict):
     if content:
         mid = len(content) // 2
         yield _make_chunk(content=content[:mid] or content)
+        # A content gate holds the reply half-written, as a slow model leaves it mid-stream.
+        await _wait_for_gate(reply, "content_gate")
         if mid > 0:
             yield _make_chunk(content=content[mid:])
 

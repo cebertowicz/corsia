@@ -139,3 +139,40 @@ it('refreshes only a newly commented target on input', async () => {
   await vi.waitFor(() => expect(batches).toEqual([['target']]));
   stop();
 });
+
+it('shows a mid-turn update\'s answers in their threads without waiting for the turn to end', async () => {
+  const comment = { id: 'comment', cid: 'c1.1', user_message_id: 'user', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [] };
+  messages.set([row('target', 1, { chat_comments: [comment] }), row('update', 3, { chat_answer_cids: ['c1.1'], chat_visible_content: '' })]);
+  const batches: string[][] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+    const ids = JSON.parse(String(options.body)).message_ids as string[];
+    batches.push(ids);
+    return { ok: true, json: async () => ({ messages: ids.map(id => id === 'update' ? { id, chat_answer_cids: ['c1.1'], chat_visible_content: '' } : { id, chat_comments: [comment] }) }) };
+  }));
+  const stop = watchChatCommentThreads(50);
+  state.handlers.get('message_added')!({ thread_id: 'thread', message: { id: 'update', chat_answer_cids: ['c1.1'], metadata: { for_user: true } } });
+  await vi.waitFor(() => expect(batches).toEqual([['update'], ['target']]));
+  stop();
+});
+
+it('keeps a written answer hidden until the server says which sections it placed', async () => {
+  messages.set([row('answer', 3, { content: 'Intro\n\n[c1.1] placed\n\n[c1.9] unknown' })]);
+  let answer: (value: unknown) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { answer = resolve; })));
+  const stop = watchChatCommentThreads(50);
+  state.handlers.get('step_text')!({ thread_id: 'thread', message_id: 'answer', content: 'Intro\n\n[c1.1] placed\n\n[c1.9] unknown' });
+  expect(get(messages)[0].chat_visible_content).toBe('Intro');
+  answer({ ok: true, json: async () => ({ messages: [{ id: 'answer', chat_answer_cids: ['c1.1'], chat_visible_content: 'Intro\n\n[c1.9] unknown' }] }) });
+  await vi.waitFor(() => expect(get(messages)[0].chat_visible_content).toBe('Intro\n\n[c1.9] unknown'));
+  stop();
+});
+
+it('leaves a written message without answer sections alone', () => {
+  messages.set([row('plain', 3, { content: 'See [c1.1] inline' })]);
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const stop = watchChatCommentThreads(50);
+  state.handlers.get('step_text')!({ thread_id: 'thread', message_id: 'plain', content: 'See [c1.1] inline' });
+  expect(get(messages)[0].chat_visible_content).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled();
+  stop();
+});

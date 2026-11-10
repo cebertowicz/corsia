@@ -11,6 +11,7 @@ from loguru import logger
 
 from core.installed_context import INSTALLED_SOURCES
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
+from infra.chat_comment_answers import shown_answer_cids, visible_answer_content
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.turn_errors import apply_error_next_steps, last_turn_error_id
@@ -48,6 +49,7 @@ class InputBroadcastRow:
     active_turn_id: str | None = None
     write_outcome: str | None = None
     delivery_intent: str | None = None
+    chat_answer_cids: tuple[str, ...] = ()
 
 
 def read_input_broadcast_row(
@@ -100,6 +102,9 @@ def read_input_broadcast_row(
             active_turn_id=row["active_turn_id"],
             write_outcome=row["write_outcome"],
             delivery_intent=row["delivery_intent"],
+            # An update can answer chat comments mid-turn; the page must not wait for the turn's end to place them.
+            chat_answer_cids=tuple(shown_answer_cids(connection, str(row["thread_id"]), str(row["id"])))
+            if row["role"] == "assistant" else (),
         )
     finally:
         if owns_connection:
@@ -117,6 +122,11 @@ def project_input_message(row: InputBroadcastRow) -> dict:
     if isinstance(metadata, dict):
         for key in _PRIVATE_METADATA_KEYS:
             metadata.pop(key, None)
+    # Placed answers project as a loaded page projects them (chat_comment_index.attach_comments).
+    answers = {
+        "chat_answer_cids": list(row.chat_answer_cids),
+        "chat_visible_content": visible_answer_content(row.content, list(row.chat_answer_cids)),
+    } if row.chat_answer_cids else {}
     return {
         "id": row.message_id,
         "role": row.role,
@@ -129,6 +139,7 @@ def project_input_message(row: InputBroadcastRow) -> dict:
         "seq": row.seq,
         "active_turn_id": row.active_turn_id,
         "write_outcome": row.write_outcome,
+        **answers,
     }
 
 

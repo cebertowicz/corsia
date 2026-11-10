@@ -16,6 +16,9 @@ export function addedMessage(payload: any, threadId: string): Message | null {
 		metadata: payload.metadata,
 		created_at: payload.created_at,
 		...(sequence !== undefined ? { seq: sequence } : {}),
+		// An update sent mid-turn arrives with its placed answers already out of its chat text.
+		...(Array.isArray(payload.chat_answer_cids) && typeof payload.chat_visible_content === 'string'
+			? { chat_answer_cids: payload.chat_answer_cids, chat_visible_content: payload.chat_visible_content } : {}),
 		...(payload.active_turn_id === null || typeof payload.active_turn_id === 'string'
 			? { active_turn_id: payload.active_turn_id } : {}),
 		...(payload.write_outcome === null || ['accepted', 'proved_no_write', 'ambiguous'].includes(payload.write_outcome)

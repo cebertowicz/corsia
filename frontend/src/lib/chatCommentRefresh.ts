@@ -4,6 +4,7 @@ import { activeThreadId, messages, type Message } from '$lib/stores/threads';
 import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
+import { hasAnswerTag, visibleStreamText } from '$lib/chatAnswerStream';
 
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
@@ -71,6 +72,14 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 	const stops = [on('turn_complete', frame => refresh(frame)), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;
 		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
+		// An update can answer comments while its turn keeps running; show them in their threads now.
+		else if (frame?.message?.chat_answer_cids?.length) void refresh({ thread_id: frame.thread_id, step_ids: [frame.message.id] });
+	}), on('step_text', frame => {
+		if (typeof frame?.content !== 'string' || !hasAnswerTag(frame.content)) return;
+		// The written message keeps hiding what streamed hidden until the server says which sections it placed.
+		messages.update(rows => rows.map(row => row.id === frame.message_id && row.chat_visible_content === undefined
+			? { ...row, chat_visible_content: visibleStreamText(frame.content).trim() } : row));
+		void refresh({ thread_id: frame.thread_id, step_ids: [frame.message_id] });
 	})];
 	return () => { generation++; stops.forEach(stop => stop()); };
 }
