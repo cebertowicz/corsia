@@ -1,11 +1,10 @@
 <script lang="ts">
 	import Popover from '$lib/components/ui/Popover.svelte';
-	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import AgentOptions from '$lib/components/reviews/AgentOptions.svelte';
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
-	let { artifactId, ownership, onChange, expanded = false }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; expanded?: boolean } = $props();
+	let { artifactId, ownership, onChange, compact = false }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean } = $props();
 	let anchor = $state<HTMLButtonElement>();
 	let paneWidth = $state(360);
 	function measurePane() {
@@ -69,9 +68,10 @@
 </script>
 
 <svelte:window onresize={measurePane} />
-<button bind:this={anchor} type="button" class="identity" class:expanded aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
-	{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}
-	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}<span class="identity-chevron" aria-hidden="true">⌄</span>
+<button bind:this={anchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
+	<span class="compact-owner">Owner: {ownerLabel}</span>
+	<span class="full-owner">{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
+	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}
 </button>
 {#snippet fields()}
 	<div class="owner-picker">
@@ -86,24 +86,18 @@
 		{#if error && errorFor === 'supervisor'}<p id="supervisor-error" role="status">{error}</p>{/if}
 	</div>
 {/snippet}
-{#if open && paneWidth < 360}
-	<AdaptiveDrawer ariaLabel="Owner and supervisor" heading="Owner and supervisor" onClose={() => { open = false; picker = null; }}>
-		{@render fields()}
-	</AdaptiveDrawer>
-{:else}
-	<Popover {anchor} {open} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
-		{@render fields()}
-	</Popover>
-{/if}
+<Popover {anchor} {open} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
+	{@render fields()}
+</Popover>
 
 <style>
-	.identity { display: flex; gap: var(--space-1); text-decoration: underline; text-underline-offset: 2px; min-width: 0; max-width: 100%; white-space: nowrap; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+	.identity { display: flex; gap: var(--space-1); min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 	.identity-part { display: flex; min-width: 0; white-space: pre; }
 	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-	.identity.expanded { display: block; white-space: normal; }
-	.identity.expanded .identity-part { display: inline; white-space: normal; }
-	.identity.expanded .identity-name { overflow: visible; overflow-wrap: anywhere; }
-	.identity.expanded .identity-chevron { display: none; }
+	.compact-owner { display: none; overflow: hidden; text-overflow: ellipsis; }
+	.full-owner { display: contents; }
+	.identity.compact .compact-owner { display: block; }
+	.identity.compact .full-owner { display: none; }
 	.identity:hover { color: var(--text-primary); }
 	.pending { opacity: 0.65; }
 	.failure { color: var(--red-text); }

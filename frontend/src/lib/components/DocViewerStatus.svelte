@@ -102,28 +102,25 @@
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
 				const metadata = header.querySelector<HTMLElement>('.document-metadata.has-ownership');
-				const tools = header.querySelector<HTMLElement>('.document-tools');
-				if (!metadata || !tools) return;
+				if (!metadata) return;
 				const probe = metadata.cloneNode(true) as HTMLElement;
 				probe.classList.remove('expanded');
 				Object.assign(probe.style, { position: 'fixed', left: '-10000px', top: '0', display: 'flex', width: 'max-content', maxWidth: 'none', overflow: 'visible', flexWrap: 'nowrap', visibility: 'hidden', font: getComputedStyle(metadata).font });
 				const owner = probe.querySelector<HTMLElement>('.metadata-owner');
 				const button = probe.querySelector<HTMLElement>('button.identity');
 				if (owner) Object.assign(owner.style, { flex: 'none', overflow: 'visible' });
-				if (button) { button.classList.remove('expanded'); Object.assign(button.style, { width: 'max-content', maxWidth: 'none' }); }
+				if (button) { button.classList.remove('compact'); Object.assign(button.style, { width: 'max-content', maxWidth: 'none' }); }
 				probe.querySelectorAll<HTMLElement>('.identity-name').forEach(name => { name.style.overflow = 'visible'; name.style.minWidth = 'max-content'; });
 				document.body.appendChild(probe);
 				const needed = probe.getBoundingClientRect().width;
 				probe.remove();
 				const style = getComputedStyle(header);
-				const available = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - tools.getBoundingClientRect().width - 6;
+				const available = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 				ownershipInDetails = available < needed;
 			});
 		};
 		const resize = new ResizeObserver(measure);
 		resize.observe(header);
-		const tools = header.querySelector('.document-tools');
-		if (tools) resize.observe(tools);
 		const mutations = new MutationObserver(measure);
 		mutations.observe(header, { childList: true, characterData: true, subtree: true });
 		measure();
@@ -171,7 +168,7 @@
 	function detailsKeys(element: HTMLElement) {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape' || !detailsOpen || !(event.target instanceof Node)) return;
-			const toggle = element.querySelector<HTMLButtonElement>('.identity-details');
+			const toggle = element.querySelector<HTMLButtonElement>('.details-toggle');
 			if (event.target !== toggle && !element.querySelector('.document-metadata')?.contains(event.target)) return;
 			event.preventDefault();
 			event.stopPropagation();
@@ -213,28 +210,14 @@
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
-<header class="document-header" class:ownership-in-details={ownership && ownershipInDetails} use:detailsKeys use:ownershipFit>
+<header class="document-header" use:detailsKeys use:ownershipFit>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
-		<button type="button" class="identity-details" class:has-ownership={!!ownership} aria-label="Document details" aria-expanded={detailsOpen}
-			onclick={() => detailsOpen = !detailsOpen}>
+		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if ownership}<span class="ownership-details-label">Details</span>{/if}
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}>{#if !ownership}<span class="identity-owner">Owner: {freshness.owner_name}</span>{/if}<span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
-		</button>
+			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} onChange={(value) => onOwnershipChanged?.(value)} />{:else}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation.phrase}</button></span>{/if}
+		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
-			<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-				{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} expanded={ownershipInDetails && detailsOpen} onChange={(value) => onOwnershipChanged?.(value)} /></div>
-				{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
-				{#if freshness && freshnessPresentation}
-					{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>
-					{:else}<span class="metadata-secondary">{freshnessPresentation.phrase}</span>{/if}
-					{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-					{#if shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>{/if}
-				{/if}
-			</div>
-		{/if}
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools document-status-row">
 			{#if artifactId}
@@ -259,6 +242,18 @@
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
+	{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
+		<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
+			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+			{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
+			{#if freshness && freshnessPresentation}
+				{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>
+				{:else}<span class="metadata-secondary">{freshnessPresentation.phrase}</span>{/if}
+				{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
+				{#if shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>{/if}
+			{/if}
+		</div>
+	{/if}
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
 	connectionStatusId={connectionDescriptionId} />
 <span class="metadata-status" class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
@@ -274,7 +269,6 @@
 	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
-	.ownership-details-label { display: none; }
 	.feedback-controls { display: contents; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -287,7 +281,7 @@
 	.document-status-row :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
-	.document-metadata { flex: 1 1 0; flex-wrap: nowrap; overflow: hidden; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.verification-action { margin-left: -10px; }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
@@ -299,24 +293,14 @@
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
 		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
-		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
-		.document-metadata:not(.expanded):not(.has-ownership) { display: none; }
-		.document-metadata.has-ownership:not(.expanded) { display: none; }
-		.document-metadata.expanded { flex: 1 1 100%; order: 10; flex-wrap: wrap; overflow: visible; }
+		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
 	}
 
-	/* The header's content box excludes an overlapping Workspace pane. */
-	@container doc-header (max-width: 600px) {
-		.identity-details.has-ownership { display: flex; }
-		.ownership-details-label { display: inline; }
-		.identity-details.has-ownership .document-title { display: none; }
-		.document-metadata.has-ownership:not(.expanded) { display: none; }
-		.document-metadata.has-ownership.expanded { flex: 1 1 100%; order: 10; flex-wrap: wrap; overflow: visible; }
-	}
 
 	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
 	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
@@ -350,8 +334,7 @@
 		}
 	}
 	@container doc-canvas (max-width: 37.5rem) {
-		.identity-details:has(.identity-age), .identity-details.has-ownership { display: flex; }
-		.ownership-details-label { display: inline; }
+		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
 		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
@@ -380,16 +363,6 @@
 		.history-tool svg { display: block; }
 		.history-tool .label { display: none; }
 	}
-	/* Ownership uses Details only when the whole status row cannot fit. */
-	.document-header:not(.ownership-in-details) .identity-details.has-ownership { display: none; }
-	.document-header:not(.ownership-in-details) .document-metadata.has-ownership:not(.expanded),
-	.document-header:not(.ownership-in-details) .document-metadata.has-ownership.expanded { display: flex; flex: 1 1 0; order: 0; flex-wrap: nowrap; overflow: hidden; }
-	.document-header.ownership-in-details .identity-details.has-ownership { display: flex; }
-	.document-header.ownership-in-details .identity-details.has-ownership .document-title { display: none; }
-	.document-header.ownership-in-details .ownership-details-label { display: inline; }
-	.document-header.ownership-in-details .document-metadata.has-ownership:not(.expanded) { display: none; }
-	.document-header.ownership-in-details .document-metadata.has-ownership.expanded { display: flex; flex: 1 1 100%; order: 10; flex-wrap: wrap; overflow: visible; }
-	.document-header.ownership-in-details .document-metadata.has-ownership.expanded .metadata-owner { flex: 1 1 100%; overflow: visible; white-space: normal; }
 	@media (max-width: 768px) {
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 	}

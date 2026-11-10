@@ -20,7 +20,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await expect(page.locator('.cm-content')).toBeVisible();
     await page.screenshot({ animations: 'disabled', path: `${out}/rest-${width}.png` });
     const details = page.getByRole('button', { name: 'Document details' });
-    if (await details.isVisible()) {
+    if (!(await page.locator('button.identity').isVisible()) && await details.isVisible()) {
       await details.click();
       await expect(page.locator('button.identity')).toBeVisible();
       await page.screenshot({ animations: 'disabled', path: `${out}/details-${width}.png` });
@@ -36,7 +36,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     });
     console.log('WIDTH', width, JSON.stringify(rects));
     expect(rects.control!.width).toBeGreaterThan(30);
-    if (width >= 769) {
+    if (width >= 769 && !(await control.evaluate(button => button.classList.contains('compact')))) {
       const labelsFit = await control.evaluate(button => {
         const parent = button.closest('.document-metadata')!.getBoundingClientRect();
         return [...button.querySelectorAll<HTMLElement>('.identity-part, .identity-name')].every(part => {
@@ -60,9 +60,9 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   const inDetails = async (width: number) => {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(2000); // Allow the shell's responsive transition to settle.
-    return page.locator('.document-header').evaluate(header => header.classList.contains('ownership-in-details'));
+    return page.locator('button.identity').evaluate(button => button.classList.contains('compact'));
   };
-  let low = 1280, high = 2000;
+  let low = 1100, high = 1440;
   expect(await inDetails(low)).toBe(true);
   expect(await inDetails(high)).toBe(false);
   while (high - low > 1) {
@@ -72,10 +72,10 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   console.log('SWITCH', low, high);
   expect(await inDetails(low)).toBe(true);
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-${low}.png` });
-  await page.getByRole('button', { name: 'Document details' }).click();
-  await expect(page.locator('button.identity')).toBeVisible();
+  await page.locator('button.identity').click();
+  await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-open-${low}.png` });
-  await page.getByRole('button', { name: 'Document details' }).click();
+  await page.keyboard.press('Escape');
   expect(await inDetails(high)).toBe(false);
   await expect(page.locator('button.identity')).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-status-${high}.png` });
