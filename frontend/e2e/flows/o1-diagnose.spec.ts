@@ -38,11 +38,11 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     if (width >= 769) {
       const labelsFit = await control.evaluate(button => {
         const parent = button.closest('.document-metadata')!.getBoundingClientRect();
-        return [...button.querySelectorAll('.identity-part')].every(part => {
+        return [...button.querySelectorAll<HTMLElement>('.identity-part, .identity-name')].every(part => {
           const range = document.createRange();
-          range.selectNodeContents(part.firstChild!);
-          const label = range.getBoundingClientRect();
-          return label.left >= parent.left - 1 && label.right <= parent.right + 1;
+          range.selectNodeContents(part);
+          return [...range.getClientRects()].every(rect => rect.left >= parent.left - 1 && rect.right <= parent.right + 1)
+            && part.scrollWidth <= part.clientWidth + 1;
         });
       });
       expect(labelsFit).toBe(true);

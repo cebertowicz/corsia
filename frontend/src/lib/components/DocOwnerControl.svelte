@@ -5,7 +5,7 @@
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
-	let { artifactId, ownership, onChange }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void } = $props();
+	let { artifactId, ownership, onChange, expanded = false }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; expanded?: boolean } = $props();
 	let anchor = $state<HTMLButtonElement>();
 	let paneWidth = $state(360);
 	function measurePane() {
@@ -69,7 +69,7 @@
 </script>
 
 <svelte:window onresize={measurePane} />
-<button bind:this={anchor} type="button" class="identity" aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
+<button bind:this={anchor} type="button" class="identity" class:expanded aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
 	{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true"> · </span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}
 	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}<span aria-hidden="true">⌄</span>
 </button>
@@ -100,6 +100,9 @@
 	.identity { display: flex; gap: var(--space-1); text-decoration: underline; text-underline-offset: 2px; min-width: 0; max-width: 100%; white-space: nowrap; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 	.identity-part { display: flex; min-width: 0; white-space: pre; }
 	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	.identity.expanded { flex-wrap: wrap; white-space: normal; }
+	.identity.expanded .identity-part { max-width: 100%; white-space: normal; }
+	.identity.expanded .identity-name { overflow: visible; overflow-wrap: anywhere; }
 	.identity:hover { color: var(--text-primary); }
 	.pending { opacity: 0.65; }
 	.failure { color: var(--red-text); }

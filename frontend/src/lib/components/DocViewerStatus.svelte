@@ -110,7 +110,7 @@
 				const owner = probe.querySelector<HTMLElement>('.metadata-owner');
 				const button = probe.querySelector<HTMLElement>('button.identity');
 				if (owner) Object.assign(owner.style, { flex: 'none', overflow: 'visible' });
-				if (button) Object.assign(button.style, { width: 'max-content', maxWidth: 'none' });
+				if (button) { button.classList.remove('expanded'); Object.assign(button.style, { width: 'max-content', maxWidth: 'none' }); }
 				probe.querySelectorAll<HTMLElement>('.identity-name').forEach(name => { name.style.overflow = 'visible'; name.style.minWidth = 'max-content'; });
 				document.body.appendChild(probe);
 				const needed = probe.getBoundingClientRect().width;
@@ -225,7 +225,7 @@
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
 			<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-				{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+				{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} expanded={ownershipInDetails && detailsOpen} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 				{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 				{#if freshness && freshnessPresentation}
 					{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>
@@ -389,6 +389,7 @@
 	.document-header.ownership-in-details .ownership-details-label { display: inline; }
 	.document-header.ownership-in-details .document-metadata.has-ownership:not(.expanded) { display: none; }
 	.document-header.ownership-in-details .document-metadata.has-ownership.expanded { display: flex; flex: 1 1 100%; order: 10; flex-wrap: wrap; overflow: visible; }
+	.document-header.ownership-in-details .document-metadata.has-ownership.expanded .metadata-owner { flex: 1 1 100%; overflow: visible; white-space: normal; }
 	@media (max-width: 768px) {
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 	}
