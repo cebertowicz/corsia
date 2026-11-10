@@ -17,7 +17,7 @@ export async function seed(page: Page, request: APIRequestContext) {
 	}
 	isolatedDb([
 		"for agent in sys.argv[2:]: connection.execute(\"UPDATE threads SET agent_enabled=1, agent_status='active' WHERE id=?\", (agent,))",
-		"connection.execute(\"INSERT INTO plans(id,owner_kind,owner_id,state,created_at,updated_at) VALUES ('sheet-paused','thread',?,'paused','2026-01-01','2026-01-01')\", (sys.argv[3],))",
+		"connection.execute(\"INSERT INTO plans(id,owner_kind,owner_id,state,created_at,updated_at) VALUES (?, 'thread', ?, 'paused', '2026-01-01', '2026-01-01')\", ('sheet-paused-' + sys.argv[3], sys.argv[3]))",
 		"for agent in [sys.argv[3], *sys.argv[7:]]: connection.execute(\"UPDATE threads SET spawned_by=? WHERE id=?\", (sys.argv[2], agent))",
 		"connection.execute(\"UPDATE threads SET model=NULL WHERE id=?\", (sys.argv[2],))",
 	], owner, ...agents);
