@@ -13,13 +13,7 @@ from tools.mcp_config import (
     MCPConfigError, _active_auth, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
     timeout_seconds, url_origin,
 )
-from tools.mcp_local_transport import (
-    _mcp_denial_guidance,
-    _mcp_denied_paths_in,
-    mcp_oserror_detail as _mcp_oserror_detail,
-    prepare_managed_runtime,
-    safehouse_stdio_parameters as _safehouse_stdio_parameters,
-)
+from tools.mcp_local_transport import _mcp_denial_guidance, _mcp_denied_paths_in, prepare_managed_runtime
 from tools.mcp_stamp import build_stamp
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
@@ -217,17 +211,9 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     if config.get("command"):
         if config.get("bearer_file"):
             raise MCPConfigError("bearer_file is supported only for HTTP MCP servers")
-        from mcp.client.stdio import stdio_client
+        from tools.mcp_stdio_launch import open_stdio
 
-        env = {**(config.get("env") or {}), **secret_env}
-        params, profile_path = await asyncio.to_thread(
-            _safehouse_stdio_parameters, name, config, config["command"], config.get("args", []), env,
-        )
-        stack.callback(profile_path.unlink, missing_ok=True)
-        try:
-            read, write = await stack.enter_async_context(stdio_client(params))
-        except OSError as error:
-            raise MCPConfigError(_mcp_oserror_detail(error)) from None
+        read, write = await open_stdio(name, config, secret_env, stack)
     elif config.get("url"):
         from mcp.client.sse import sse_client
         from tools.mcp_http_transport import sse_http_client_factory
