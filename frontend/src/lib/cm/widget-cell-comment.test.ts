@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { widgetComments, type WidgetSelection } from './widget-comments';
-import { emptyCellSelection } from './widget-cell-comment';
+import { cellRowsAt, emptyCellSelection, openCellPlace } from './widget-cell-comment';
 import { type Rig } from './typed-reveal-rig';
 import { build, cellEditor, cellEl, cleanup, clicked, deleted, typed } from './widget-cell-rig';
+
+afterEach(() => { vi.restoreAllMocks(); });
 
 /**
  * An empty cell has no text to select for a comment, so while its editor is open and still empty the Comment offer is
@@ -69,5 +71,40 @@ describe('the Comment offer on an empty cell being edited', () => {
 		const r = openCell(0);
 		expect(raised.filter(Boolean), 'a caret in text raises nothing').toEqual([]);
 		expect(emptyCellSelection(r.view)).toBeNull();
+	});
+});
+
+// 'Log' in the open cell ` Login `, as document offsets.
+const logFrom = rowFrom + 2, logTo = logFrom + 3;
+
+describe('text selected in an open cell', () => {
+	it('places the offer off the selected text in the cell editor, as a drawn cell\'s selection is', () => {
+		const r = openCell(0);
+		// Two drawn lines: the offer sits above the first and from where the last ends.
+		vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
+			return (this.toString() === 'Log' ? [new DOMRect(300, 120, 20, 16), new DOMRect(290, 138, 12, 16)] : []) as unknown as DOMRectList;
+		});
+		expect(openCellPlace(r.view, logFrom, logTo), 'measured off the selected words').toEqual({ top: 120, left: 302 });
+	});
+
+	it('places nothing for a range outside the open cell, or with no cell open', () => {
+		const r = openCell(0);
+		expect(openCellPlace(r.view, 0, 3), 'prose is placed by the editor').toBeNull();
+		const closed = build(DOC);
+		rigs.push(closed);
+		expect(openCellPlace(closed.view, logFrom, logTo)).toBeNull();
+	});
+
+	it('anchors the composer to the cell\'s row across the table, open or not, and to nothing outside a table', () => {
+		const r = openCell(0);
+		vi.spyOn(cellEl(r, 1, 0).parentElement!, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 200, 300, 32));
+		vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 150, 320, 90));
+		expect(cellRowsAt(r.view, logFrom, logTo), 'the row, as wide as the table').toEqual(new DOMRect(36, 200, 320, 32));
+		expect(cellRowsAt(r.view, 0, 3), 'prose keeps its own rows').toBeNull();
+		const closed = build(DOC);
+		rigs.push(closed);
+		vi.spyOn(cellEl(closed, 1, 0).parentElement!, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 200, 300, 32));
+		vi.spyOn(closed.view.dom.querySelector<HTMLElement>('.cm-md-table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 150, 320, 90));
+		expect(cellRowsAt(closed.view, logFrom, logTo), 'the same row once the cell closes').toEqual(new DOMRect(36, 200, 320, 32));
 	});
 });

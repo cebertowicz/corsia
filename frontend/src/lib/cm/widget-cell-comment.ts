@@ -1,8 +1,9 @@
 import type { EditorState } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
-import { cellElement, drawnTableAt } from './widget-blocks';
-import { cellSource, openCellState } from './widget-cell-state';
-import { selectionIn } from './widget-selection';
+import { EditorView } from '@codemirror/view';
+import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
+import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
+import { tableCells } from './widget-cells';
+import { rowsBox, selectionIn, textPlace } from './widget-selection';
 import type { WidgetSelection } from './widget-selection-types';
 
 /**
@@ -42,4 +43,30 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	// That caret's own box has no size, so the offer is placed on the cell's box, the one its open editor is laid over.
 	const box = td.getBoundingClientRect();
 	return { ...raised, top: box.top, left: box.left };
+}
+
+/**
+ * Where the Comment offer sits for text selected in the open cell: measured off the cell editor's own text the way a drawn
+ * cell's selection is (`textPlace`), since the table hides that source in the document. Null when the range is not in the open cell.
+ */
+export function openCellPlace(view: EditorView, from: number, to: number): { top: number; left: number } | null {
+	const cell = view.state.field(openCellState, false);
+	if (!cell || from < cell.from || to > cell.to) return null;
+	const el = view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
+	const inner = el && EditorView.findFromDOM(el);
+	if (!inner) return null;
+	const start = inner.domAtPos(from - cell.from), end = inner.domAtPos(to - cell.from), range = document.createRange();
+	range.setStart(start.node, start.offset);
+	range.setEnd(end.node, end.offset);
+	return textPlace(range);
+}
+
+/** The box a comment's composer is anchored to for a range inside one table cell, open or not: its row, as for a drawn cell's selection (`rowsBox`). */
+export function cellRowsAt(view: EditorView, from: number, to: number): DOMRect | null {
+	const widget = drawnTableAt(view, from), block = widget && blockRange(view, widget);
+	if (!widget || !block || to > block.to) return null;
+	const span = tableCells(view.state.sliceDoc(block.from, block.to))
+		.find((s) => from - block.from >= s.rawFrom && to - block.from <= s.rawTo);
+	const td = span && cellElement(widget, span);
+	return td ? rowsBox(widget, [td]) : null;
 }

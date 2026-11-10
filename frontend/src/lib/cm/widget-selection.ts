@@ -9,14 +9,28 @@ import { type WidgetSelection } from './widget-selection-types';
  * comment flow the same shape it gets for text, with the label and the anchor box the card is later given.
  */
 
+/** Where the Comment offer for selected text sits: above the selection's first line, from where it ends. */
+export function textPlace(range: Range): { top: number; left: number } {
+	const rects = [...range.getClientRects()];
+	const end = rects[rects.length - 1] ?? range.getBoundingClientRect();
+	return { top: Math.min(...(rects.length ? rects : [end]).map((r) => r.top)), left: end.right };
+}
+
+/** The rows `cells` sit in, across the whole widget: where a table selection's composer is anchored. Null once they are gone. */
+export function rowsBox(el: HTMLElement, cells: HTMLElement[]): DOMRect | null {
+	const trs = cells.map((cell) => cell.parentElement).filter((tr): tr is HTMLElement => !!tr?.isConnected);
+	if (trs.length === 0) return null;
+	const top = Math.min(...trs.map((tr) => tr.getBoundingClientRect().top));
+	const bottom = Math.max(...trs.map((tr) => tr.getBoundingClientRect().bottom));
+	const wide = el.getBoundingClientRect();
+	return new DOMRect(wide.left, top, wide.width, bottom - top);
+}
+
 /** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
 export function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {
 	const block = blockRange(view, el);
 	if (!block || block.to <= block.from) return null;
-	const rects = [...range.getClientRects()];
-	const end = rects[rects.length - 1] ?? range.getBoundingClientRect();
-	const top = Math.min(...(rects.length ? rects : [end]).map((r) => r.top));
-	const place = { top, left: end.right, above: true, inWidget: true as const };
+	const place = { ...textPlace(range), above: true, inWidget: true as const };
 	const { state } = view;
 	if (el.matches(DIAGRAM)) {
 		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => widgetCommentLabel(state, block.from, block.to, '') ?? undefined, anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
@@ -37,14 +51,7 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 		})
 		.filter(({ span, picked }) => picked.trim() !== '' || (range.collapsed && span.from === span.to));
 	if (covered.length === 0) return null;
-	const rows = (items: Array<{ cell: HTMLTableCellElement }> = covered) => {
-		const trs = items.map(({ cell }) => cell.parentElement).filter((tr): tr is HTMLElement => !!tr?.isConnected);
-		if (trs.length === 0) return null;
-		const top = Math.min(...trs.map((tr) => tr.getBoundingClientRect().top));
-		const bottom = Math.max(...trs.map((tr) => tr.getBoundingClientRect().bottom));
-		const wide = el.getBoundingClientRect();
-		return new DOMRect(wide.left, top, wide.width, bottom - top);
-	};
+	const rows = (items: Array<{ cell: HTMLTableCellElement }> = covered) => rowsBox(el, items.map(({ cell }) => cell));
 	const first = covered[0], last = covered[covered.length - 1];
 	// The label comes from the one shared function, from the same offsets and quote the card is later given.
 	const whole = (start: { span: CellSpan; cell: HTMLTableCellElement } = first, end: { span: CellSpan; cell: HTMLTableCellElement } = last, items: Array<{ cell: HTMLTableCellElement }> = covered): WidgetSelection => {

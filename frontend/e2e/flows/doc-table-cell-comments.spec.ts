@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import {
 	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText
@@ -10,6 +10,38 @@ import {
  * click. A read-only document never opens a cell editor. At 1280 with the Workspace panel over the document, a click
  * still reaches the cell where it is drawn.
  */
+
+type Box = { x: number; y: number; right: number; bottom: number };
+/** Where `target` rests: read once the offer's pop and the sheet's slide have finished, since both move what they draw. */
+const boxOf = (target: Locator): Promise<Box> => target.evaluate(async (el) => {
+	await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => null)));
+	const r = el.getBoundingClientRect();
+	return { x: r.left, y: r.top, right: r.right, bottom: r.bottom };
+});
+/** The box `words` are laid out in inside `root`, as the browser draws them. */
+const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((el, words) => {
+	const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+	for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+		const at = node.textContent!.indexOf(words);
+		if (at < 0) continue;
+		const range = document.createRange();
+		range.setStart(node, at);
+		range.setEnd(node, at + words.length);
+		const r = range.getBoundingClientRect();
+		return { x: r.left, y: r.top, right: r.right, bottom: r.bottom };
+	}
+	throw new Error(`no "${words}" drawn`);
+}, words);
+const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
+/** `box` measured from the top-left of `origin`. */
+const from = (box: Box, origin: Box): Box => ({ x: box.x - origin.x, y: box.y - origin.y, right: box.right - origin.x, bottom: box.bottom - origin.y });
+/** Where the composer opened: against the cell beside it, or on the screen when it opened in the phone's sheet. */
+const composerAt = async (composer: Locator, target: Locator) => {
+	const inSheet = await composer.evaluate((el) => !!el.closest('[data-adaptive-drawer]'));
+	return inSheet ? await boxOf(composer) : from(await boxOf(composer), await boxOf(target));
+};
+/** Within 2px: the same words lay out a pixel apart in the drawn cell and in its editor. */
+const near = (a: number, b: number) => Math.abs(a - b) <= 2;
 
 for (const layout of LAYOUTS) {
 	const at = layout.width;
@@ -64,6 +96,44 @@ for (const layout of LAYOUTS) {
 			await image.click();
 			await expect(page.locator('.cm-md-cell-editor'), 'no cell editor opened over the image').toHaveCount(0);
 			await frame(page, `05-image-in-cell-${at}`);
+		});
+
+		test('text selected in an open cell is offered Comment, and its composer opens, where a drawn cell\'s selection does', async ({ page }) => {
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			const keys = await keysOf(page);
+			const target = cell(page, 3, 1), offer = page.locator('.sel-comment'), composer = commentBox(page);
+			await target.scrollIntoViewIfNeeded();
+
+			// The same words dragged over in the drawn cell, before any cell is opened: where the offer and composer go for them.
+			const drawn = await wordsIn(target, 'A long'), middle = (drawn.y + drawn.bottom) / 2;
+			await page.mouse.move(drawn.x + 1, middle);
+			await page.mouse.down();
+			await page.mouse.move(drawn.right - 1, middle, { steps: 8 });
+			await page.mouse.up();
+			await expect(offer, 'setup: the drawn cell\'s selection is offered Comment').toBeVisible();
+			// Read against the cell's own box, so a scroll between the two selections moves nothing compared.
+			const drawnCell = await boxOf(target), drawnOffer = from(await boxOf(offer), drawnCell);
+			await offer.click();
+			await expect(composer, 'setup: its composer opens').toBeVisible();
+			const drawnComposer = await composerAt(composer, target);
+			await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
+			await expect(composer).toBeHidden();
+
+			await target.click({ position: { x: 6, y: 6 } });
+			await editorInCell(page, target);
+			await page.keyboard.press(keys.docStart);
+			for (let char = 0; char < 'A long'.length; char++) await page.keyboard.press('Shift+ArrowRight');
+			await expect(offer).toBeVisible();
+			const words = await wordsIn(page.locator('.cm-md-cell-editor'), 'A long'), box = await boxOf(target), shown = await boxOf(offer);
+			const placed = from(shown, box);
+			expect(shown.bottom <= words.y && shown.x >= box.x && shown.x <= box.right && near(placed.y, drawnOffer.y) && near(placed.x, drawnOffer.x),
+				`the offer sits above the selected words, from inside the cell, as for the drawn cell (${JSON.stringify({ shown, words, box, placed, drawnOffer })})`).toBe(true);
+			await offer.click();
+			await expect(composer).toBeVisible();
+			const opened = await composerAt(composer, target);
+			expect(near(opened.y, drawnComposer.y) && near(opened.x, drawnComposer.x),
+				`the composer opens where it does for the drawn cell (${JSON.stringify({ opened, drawnComposer })})`).toBe(true);
 		});
 
 		test('a read-only document never opens a cell editor', async ({ page }) => {
