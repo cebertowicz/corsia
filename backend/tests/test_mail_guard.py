@@ -98,3 +98,22 @@ def test_own_target_later_other_warns_and_later_own_stops():
 def test_from_the_account_without_own_flag_is_still_counted():
     forged = replace(TARGET, sender="Me <me@example.test>", to="pat@example.test")
     assert check(target=forged).info
+
+
+def test_every_note_the_person_sees_carries_its_kind_and_message():
+    newer = replace(TARGET, message_id="b", date=NOW, sender="Sam <sam@example.test>")
+    other_thread = replace(TARGET, message_id="c", thread_id="thread-c", date=NOW)
+    result = check(thread=[newer], sender=[other_thread], to=["other@example.test"])
+    by_text = {note["text"]: note for note in result.notes}
+    assert by_text["This goes to other@example.test, not taylor@example.test."] == {
+        "kind": "loud", "text": "This goes to other@example.test, not taylor@example.test.", "message_ref": None}
+    assert by_text["Sam also wrote in this thread."]["message_ref"] == "b"
+    assert by_text["Taylor wrote about the same subject in another thread."]["kind"] == "loud"
+    count = [note for note in result.notes if note["kind"] == "quiet"]
+    assert [note["text"] for note in count] == result.info
+
+
+def test_the_notes_of_a_stale_reply_are_loud():
+    again = replace(TARGET, message_id="b", date=NOW)
+    result = check(thread=[again])
+    assert [(note["kind"], note["message_ref"]) for note in result.notes if note["kind"] == "loud"] == [("loud", "b")]

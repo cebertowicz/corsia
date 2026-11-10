@@ -39,6 +39,7 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { createPlanDestinations } from './chatPlanDestinations';
 	import { openDocumentOnReplies } from './chatReplyDestination';
+	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -359,7 +360,12 @@
 				onOpenDestination={(destination, threadId) => {
 					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
 					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
-					if (destination.pane === 'documents') onOpenDocuments(destination.id);
+					if (destination.pane === 'documents') {
+						// A review that names its document opens it where the reader is, as the Documents list's Open does;
+						// only a destination without a path falls back to the list.
+						if (destination.path) openArtifactAndShowThread({ artifactId: destination.id, path: destination.path, title: destination.title ?? destination.path }, threadId ?? $activeThreadId);
+						else onOpenDocuments(destination.id);
+					}
 				}}
 			/>
 			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} onJumpToReply={jumpToChatReply} scroller={messagesEl} />

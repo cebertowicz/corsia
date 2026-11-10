@@ -33,6 +33,8 @@ export interface ArtifactTab {
 	status: ArtifactTabStatus;
 	/** Where the viewer should go once this tab's comments load; consumed once. */
 	landOn?: DocumentLanding;
+	/** Instance key of the tab this one was opened from (an email draft's attachment chip); absent for every other opener. */
+	openedFrom?: string;
 }
 
 export interface ThreadArtifactWorkspace {
@@ -48,6 +50,8 @@ export interface OpenArtifactInput {
 	title: string;
 	/** Set by the waiting-reply handoff, never by an ordinary document opener. */
 	landOn?: DocumentLanding;
+	/** Set only by an email draft's attachment chip: the draft tab's instance key, so the opened file can return to it. */
+	openedFrom?: string;
 }
 
 export interface OpenSubagentInput {
@@ -93,7 +97,7 @@ export interface TabLoadSignal {
 	 * Which viewer the backend says this file needs. Viewer-local and never stored on the tab: the
 	 * leaf reads it, the workspace store ignores it, and each load decides it again.
 	 */
-	renderer?: 'image' | 'document';
+	renderer?: 'image' | 'document' | 'pdf';
 }
 
 export interface RevisionCheck {

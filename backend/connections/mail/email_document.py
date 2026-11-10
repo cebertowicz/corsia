@@ -20,9 +20,8 @@ SIGNATURE_DELIMITER = "-- "
 
 # A plain address: no display name, quotes, brackets, separators or whitespace.
 _ADDRESS = re.compile(r"""^[^\s,;<>"()\[\]\\@]+@[^\s,;<>"()\[\]\\@]+$""")
+# ``in reply to`` is still accepted: drafts saved before it was dropped carry the line, and the send ignores it.
 _HEADERS = ("from", "to", "cc", "subject", "in reply to")
-UNREAD_REPLY_TARGET = "an earlier message"
-_SHOWN_LIMIT = 200
 
 NEEDS_RECIPIENT = "A draft needs at least one recipient."
 BAD_ADDRESS = "Recipients must be plain email addresses such as name@example.com."
@@ -114,41 +113,19 @@ def reply_subject(subject: str) -> str:
     return subject if re.match(r"\s*re\s*:", subject, re.IGNORECASE) else f"Re: {subject}"
 
 
-def reply_target_label(sender: str | None, subject: str | None) -> str:
-    """The original's sender and subject as one safe line, or a fixed phrase when neither read.
-
-    Both come from someone else's email: whitespace and control characters collapse so a header
-    value can never start a line of its own in the document.
-    """
-
-    def clean(value: str | None) -> str:
-        return re.sub(r"[\s\x00-\x1f\x7f]+", " ", value or "").strip()[:_SHOWN_LIMIT]
-
-    sender, subject = clean(sender), clean(subject)
-    if sender and subject:
-        return f'"{subject}" from {sender}'
-    if subject:
-        return f'"{subject}"'
-    if sender:
-        return f"a message from {sender}"
-    return UNREAD_REPLY_TARGET
-
-
 def compose_document(
     sender: str, to: list[str], cc: list[str], subject: str, body: str, signature: str,
-    reply_label: str | None = None, notes: list[str] | None = None,
+    notes: list[str] | None = None,
 ) -> str:
     """The draft document: header lines, a blank line, the body, then the signature.
 
-    ``From:`` shows the person which account sends and ``In reply to:`` which message it
-    answers; the send reads neither, so neither can choose a sender or a thread.
+    ``From:`` shows the person which account sends; the send doesn't read it, so it can't
+    choose a sender. The message a reply answers is in the draft's stored target, not here.
     """
     head = [f"From: {sender}", f"To: {', '.join(to)}"]
     if cc:
         head.append(f"Cc: {', '.join(cc)}")
     head.append(f"Subject: {subject}")
-    if reply_label:
-        head.append(f"In reply to: {reply_label}")
     for note in notes or []:
         head.extend(f"Note: {line}" for line in note.splitlines() or [""])
     text = "\n".join(head) + "\n\n" + body.strip("\n")

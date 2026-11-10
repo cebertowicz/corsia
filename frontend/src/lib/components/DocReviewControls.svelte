@@ -7,7 +7,8 @@
 	import { toasts } from '$lib/stores/toast';
 	import Avatar from './ui/Avatar.svelte';
 	import ReviewSurface from './reviews/ReviewSurface.svelte';
-	let { artifactId, viewingThreadId, targetKey }: { artifactId: string; viewingThreadId: string | null; targetKey: string | null } = $props();
+	// `textOnly`: the request control is its words at every width, without the icon (the email draft's compact form).
+	let { artifactId, viewingThreadId, targetKey, textOnly = false }: { artifactId: string; viewingThreadId: string | null; targetKey: string | null; textOnly?: boolean } = $props();
 	const model = createDocumentReviewState();
 	const uniqueId = $props.id();
 	const id = `document-reviews-${uniqueId}`;
@@ -71,7 +72,7 @@
 		</button>
 	{/if}
 	{#if viewingThreadId}
-		<button type="button" class="doc-tool review-request" bind:this={requestTrigger} aria-label="Request review" aria-expanded={open} aria-controls={id} title="Request review"
+		<button type="button" class="doc-tool review-request" class:text-only={textOnly} bind:this={requestTrigger} aria-label="Request review" aria-expanded={open} aria-controls={id} title="Request review"
 			onclick={(event) => show(event.currentTarget)}>
 			<svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="6.5" cy="5.5" r="2.5" /><path d="M2 13.5c0-2.4 2-4 4.5-4s4.5 1.6 4.5 4M13 4v4M11 6h4" /></svg>
 			<span class="label">Request review</span>
@@ -86,6 +87,7 @@
 
 <style>
 	.review-controls { display: contents; }
+	.review-request.text-only svg { display: none; }
 	.review-request svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 	.stack { display: inline-flex; align-items: center; }
 	.reviewer { position: relative; display: inline-flex; margin-left: -5px; }
@@ -95,6 +97,6 @@
 	.mark.ended { background: var(--text-tertiary); }
 	.more { margin-left: -5px; padding: 1px 5px; border: 2px solid var(--bg-primary); border-radius: var(--radius-pill); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	@container doc-canvas (max-width: 600px) {
-		.review-request .label { display: none; }
+		.review-request:not(.text-only) .label { display: none; }
 	}
 </style>

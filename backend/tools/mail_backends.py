@@ -53,8 +53,8 @@ class MailBackend(Protocol):
 
     async def draft_metadata(
         self, account: dict, existing: dict | None, reply_id: object,
-    ) -> tuple[dict, str | None, str]:
-        """``(target, reply label, signature)`` for a draft about to be saved."""
+    ) -> tuple[dict, str]:
+        """``(target, signature)`` for a draft about to be saved."""
 
     async def guard_data(
         self, account_id: str, message_id: str, since: datetime | None = None,

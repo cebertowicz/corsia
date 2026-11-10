@@ -91,6 +91,8 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
 		if (input.landOn) tabs[existing] = { ...tabs[existing], landOn: input.landOn };
+		// The latest opener decides where Back goes: a reopen from anywhere else drops the return.
+		if (input.openedFrom !== tabs[existing].openedFrom) tabs[existing] = { ...tabs[existing], openedFrom: input.openedFrom };
 		return {
 			...ws,
 			tabs,
@@ -110,6 +112,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		latestRevision: null,
 		status: 'loading',
 		...(input.landOn ? { landOn: input.landOn } : {}),
+		...(input.openedFrom ? { openedFrom: input.openedFrom } : {}),
 	};
 	return {
 		...ws,

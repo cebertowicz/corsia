@@ -19,7 +19,7 @@ from connections.google import client as google_client, gmail_read, guard_read
 from connections.google.accounts import thread_key
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
-from connections.google.email_gmail import GMAIL as GMAIL_API, fetch_signature, kept_reply_label, reply_target
+from connections.google.email_gmail import GMAIL as GMAIL_API, fetch_signature, reply_target
 from tools.action_delivery import deliver_claimed
 from tools.reviewed_drafts import draft_target
 
@@ -75,14 +75,14 @@ class GmailBackend:
     async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
         return 25_000_000, True
 
-    async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
+    async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str]:
         """The reply target named now or kept from the draft it replaces, and the account's signature."""
         account_id = str(account["id"])
         if reply_id:
-            target, label = await reply_target(account_id, str(reply_id))
+            target = await reply_target(account_id, str(reply_id))
         else:
-            target, label = draft_target(existing), await kept_reply_label(account_id, existing)
-        return target, label, await fetch_signature(account_id)
+            target = draft_target(existing)
+        return target, await fetch_signature(account_id)
 
     async def keep_draft_copy(self, account: dict, text: str, target: dict, previous: dict) -> str | None:
         """Nothing to mirror: Gmail sees the message only when it is sent."""

@@ -183,8 +183,9 @@ class EmailDraftTool(Tool):
         existing = await run_in_db(open_draft, thread_id, str(draft_id), "email") if draft_id is not None else None
         if existing is not None and existing["state"] != "open":
             raise DraftRefused(NO_OPEN_DRAFT)
-        target, reply_label, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
+        target, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
         notes: list[str] = []
+        shown: list[dict[str, str | None]] = []  # what the person sees on the draft, each with its kind
         original = None
         if target.get("reply_to"):
             if not target.get("in_reply_to"):
@@ -198,6 +199,7 @@ class EmailDraftTool(Tool):
                 raise DraftRefused(_stop("Draft not saved", verdict.stops))
             to = to or verdict.recipients
             notes.extend(verdict.warnings + verdict.info + verdict.stale)
+            shown.extend(verdict.notes)
             if not original.own:
                 notes.append("The message being replied to:\n" + evidence(original))
                 notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
@@ -207,6 +209,7 @@ class EmailDraftTool(Tool):
             subject = reply_subject(subject)
         face, size, font_note = await _font(backend, account_id)
         notes.extend([font_note] if font_note else [])
+        shown.extend([{"kind": "quiet", "text": font_note, "message_ref": None}] if font_note else [])
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
         try:
@@ -215,9 +218,9 @@ class EmailDraftTool(Tool):
             if str(exc).startswith("Not sent: "):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
-        target = {**target, "account_id": account_id, "account": address, "attachments": attached}
+        target = {**target, "account_id": account_id, "account": address, "attachments": attached, "notes": shown}
         notes.extend(f"Attachment: {item['name']} ({_size(item['size'])})" for item in attached)
-        text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
+        text = compose_document(address, to, cc, subject, body, signature, notes)
         if applies_to_message and limit is not None:
             parsed = parse_document(text)
             if parsed is None:

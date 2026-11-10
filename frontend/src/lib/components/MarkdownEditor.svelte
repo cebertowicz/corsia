@@ -20,6 +20,7 @@
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { emailHeader as emailHeaderExtension, type EmailHeaderOptions } from '$lib/cm/email-header';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -51,7 +52,8 @@
 		pendingComment = null,
 		scrollTo = null,
 		tabInstanceId = null,
-		onDocumentPlace
+		onDocumentPlace,
+		emailHeader = null
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -83,6 +85,8 @@
 		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
+		/** An email draft: its header lines are drawn as a compact block over the editable text (cm/email-header.ts). */
+		emailHeader?: EmailHeaderOptions | null;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -92,6 +96,7 @@
 	let view = $state<EditorView>();
 	const roComp = new Compartment();
 	const documentComp = new Compartment();
+	const emailComp = new Compartment();
 	let activeText: Y.Text | null = null;
 	let binding: ReturnType<typeof liveDocumentBinding> | undefined;
 	const localHistory = [history(), keymap.of(historyKeymap)];
@@ -217,6 +222,7 @@
 				commentRail,
 				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
 				presenceMarks,
+				emailComp.of(emailHeader ? emailHeaderExtension(emailHeader) : []),
 				typedReveal,
 				EditorView.lineWrapping,
 				EditorView.contentAttributes.of({ spellcheck: 'true' }),
@@ -300,6 +306,11 @@
 			try { view.dispatch({ changes: { from, to: current.length - tail, insert: next.slice(from, next.length - tail) } }); }
 			finally { syncing = false; }
 		}
+	});
+
+	$effect(() => {
+		const options = emailHeader;
+		view?.dispatch({ effects: emailComp.reconfigure(options ? emailHeaderExtension(options) : []) });
 	});
 
 	$effect(() => {

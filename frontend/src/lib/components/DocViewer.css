@@ -40,6 +40,15 @@
   @media (any-pointer: coarse) { .doc { --doc-phone-inset: 24px; } }
 }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }
+/* An email draft scrolls as one column: the warnings, the draft and the earlier emails. The editor grows to its text instead of scrolling itself. */
+.doc-body { display: contents; }
+.doc-main.email-mode { display: flex; flex-direction: column; }
+.doc-body.email-scroll { display: block; flex: 1 1 auto; min-height: 0; overflow-x: clip; overflow-y: auto; overscroll-behavior: contain; }
+.doc-body.email-scroll .ed-wrap { height: auto; }
+.doc-body.email-scroll .cm-editor { height: auto; }
+.doc-body.email-scroll .cm-scroller { overflow: visible; }
+.doc-body.email-scroll .cm-content { padding-bottom: var(--space-3); }
+/* An email draft's notes: the loud ones are EmailNotes.svelte, the quiet ones cm/email-header.ts. */
 .ed-wrap .cm-scroller { overscroll-behavior: contain; }
 .readonly-note { padding: 6px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-tertiary); font-size: var(--text-footnote); }
 .load-error { display: flex; flex-direction: column; gap: 8px; padding: 24px 4px; color: var(--text-secondary); }

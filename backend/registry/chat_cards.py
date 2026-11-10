@@ -65,7 +65,7 @@ def _presentation(
     row: Mapping[str, Any] | None, artifact_id: str | None, kind: str, available: bool,
 ) -> dict[str, Any]:
     title = (row.get("title") or _file_name(row)) if row is not None else None
-    shown = resolve_descriptor(row.get("integration"), row.get("type")) if row is not None else None
+    shown = resolve_descriptor(row.get("integration"), row.get("type"), row.get("path") or row.get("external_id")) if row is not None else None
     return {
         "kind": kind,
         "artifact_id": artifact_id,

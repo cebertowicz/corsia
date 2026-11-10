@@ -68,3 +68,11 @@ def test_upload_image_descriptor_is_labelled_iconned_and_openable():
     assert (descriptor.label, descriptor.icon, descriptor.capability) == (
         "Image", "image", presentation.CAPABILITY_LEAF_PACKAGE,
     )
+
+
+def test_an_email_draft_gets_the_envelope_and_no_other_document_does():
+    draft = presentation.resolve_descriptor("workspace", "document", "/work/thread/email-drafts/email-1.md")
+    assert (draft.icon, draft.capability) == ("mail", presentation.CAPABILITY_LEAF_PACKAGE)
+    assert presentation.resolve_descriptor("workspace", "document", "/work/thread/notes/email-1.md").icon == "file-text"
+    assert presentation.resolve_descriptor("workspace", "document").icon == "file-text"
+    assert presentation.resolve_descriptor("workspace", "code", "/work/email-drafts/x.py").icon == "file-code"

@@ -219,21 +219,32 @@ async def test_reply_reads_message_headers_only(mail):
     assert "SECRET BODY" not in (mail.workspace / saved["path"]).read_text()
 
 
-async def test_a_reply_target_is_shown_in_the_document_and_a_plain_draft_shows_none(mail):
+def _header_lines(mail, saved):
+    return (mail.workspace / saved["path"]).read_text().split("\n\n")[0].split("\n")
+
+
+async def test_a_reply_target_is_kept_in_the_record_and_never_written_into_the_document(mail):
     plain = await _draft(mail)
-    assert "In reply to:" not in (mail.workspace / plain["path"]).read_text()
+    assert not any(line.lower().startswith("in reply to") for line in _header_lines(mail, plain))
 
     saved = await _draft(mail, reply_to_message_id="m-100")
-    head = (mail.workspace / saved["path"]).read_text().split("\n\n")[0].split("\n")
+    head = _header_lines(mail, saved)
     assert "Subject: Lunch" in head
-    assert 'In reply to: "Lunch plans" from Pat Kim <pat@mail.example>' in head
+    assert not any(line.lower().startswith("in reply to") for line in head)
     assert any("emails from" in line for line in head)
-    # Display only: the send threads with the stored target, and the line is not a send input.
-    assert json.loads(_row(saved["draft_id"])["target_json"])["reply_to"] == "m-100"
+    # The send threads with the stored target; the document carries no thread identity and is not a send input.
+    target = json.loads(_row(saved["draft_id"])["target_json"])
+    assert (target["reply_to"], target["in_reply_to"]) == ("m-100", "<abc@mail.example>")
     assert email_document.parse_document((mail.workspace / saved["path"]).read_text())["subject"] == "Lunch"
-    # An update that names no target keeps threading, so the document keeps saying so.
+    # An update that names no target keeps threading from the record.
     again = await _draft(mail, draft_id=saved["draft_id"], body="Later?")
-    assert "In reply to: " in (mail.workspace / again["path"]).read_text()
+    assert json.loads(_row(again["draft_id"])["target_json"])["in_reply_to"] == "<abc@mail.example>"
+    assert not any(line.lower().startswith("in reply to") for line in _header_lines(mail, again))
+
+
+def test_a_document_saved_with_an_in_reply_to_line_still_parses():
+    text = 'From: me@example.com\nTo: a@example.com\nSubject: Re: Hi\nIn reply to: "Hi" from Pat\n\nBody.\n'
+    assert email_document.parse_document(text)["subject"] == "Re: Hi"
 
 
 async def test_a_reply_target_with_no_readable_headers_is_refused(mail):
@@ -593,3 +604,12 @@ async def test_the_agent_is_told_to_send_only_when_the_person_says_to(mail):
     assert "latest message says to send this draft" in EmailSendTool().description
     assert (await _draft(mail))["next"] == sentence
     assert TOOL_CATALOG["email_send"].summary == "Send a saved email draft after the person says to send it"
+
+
+async def test_the_notes_the_person_sees_are_kept_in_the_record_with_their_kind(mail):
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    notes = json.loads(_row(saved["draft_id"])["target_json"])["notes"]
+    assert notes and all(set(note) == {"kind", "text", "message_ref"} and note["kind"] in {"loud", "quiet"} for note in notes)
+    assert any(note["kind"] == "quiet" and "emails from" in note["text"] for note in notes)
+    # The quoted message and the attachment list are not notes; the record's own fields carry them.
+    assert not any(note["text"].startswith(("The message being replied to", "Attachment:")) for note in notes)
