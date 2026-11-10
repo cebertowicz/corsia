@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import {
-	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText
+	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, settled
 } from '../support/tableCells';
 
 /**
@@ -13,11 +13,13 @@ import {
 
 type Box = { x: number; y: number; right: number; bottom: number };
 /** Where `target` rests: read once the offer's pop and the sheet's slide have finished, since both move what they draw. */
-const boxOf = (target: Locator): Promise<Box> => target.evaluate(async (el) => {
-	await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => null)));
-	const r = el.getBoundingClientRect();
-	return { x: r.left, y: r.top, right: r.right, bottom: r.bottom };
-});
+const boxOf = async (target: Locator): Promise<Box> => {
+	await settled(target.page());
+	return target.evaluate((el) => {
+		const r = el.getBoundingClientRect();
+		return { x: r.left, y: r.top, right: r.right, bottom: r.bottom };
+	});
+};
 /** The box `words` are laid out in inside `root`, as the browser draws them. */
 const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((el, words) => {
 	const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -129,11 +131,13 @@ for (const layout of LAYOUTS) {
 			const placed = from(shown, box);
 			expect(shown.bottom <= words.y && shown.x >= box.x && shown.x <= box.right && near(placed.y, drawnOffer.y) && near(placed.x, drawnOffer.x),
 				`the offer sits above the selected words, from inside the cell, as for the drawn cell (${JSON.stringify({ shown, words, box, placed, drawnOffer })})`).toBe(true);
+			await frame(page, `05-selection-offer-${at}`);
 			await offer.click();
 			await expect(composer).toBeVisible();
 			const opened = await composerAt(composer, target);
 			expect(near(opened.y, drawnComposer.y) && near(opened.x, drawnComposer.x),
 				`the composer opens where it does for the drawn cell (${JSON.stringify({ opened, drawnComposer })})`).toBe(true);
+			await frame(page, `05-selection-composer-${at}`);
 		});
 
 		test('a read-only document never opens a cell editor', async ({ page }) => {

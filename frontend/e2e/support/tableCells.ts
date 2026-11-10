@@ -66,6 +66,11 @@ async function seed(page: Page, text: string, readOnly: boolean) {
 	return { title, fileName, docPath, params, threadId, artifactId: (await seeded.json()).artifact.id as string };
 }
 
+/** Resolves once every animation and transition that ends (the sidebar's slide, a button's pop) has ended. */
+export const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
+	.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+	.map((a) => a.finished.catch(() => null))).then(() => undefined));
+
 /** Seed the document (and, when writable, a comment on one table cell), then open it in the canvas at `layout`. */
 export async function openTableDocument(page: Page, layout: { width: number; height: number }, { readOnly = false, text = DOC } = {}): Promise<Seeded> {
 	await page.setViewportSize({ width: layout.width, height: layout.height });
@@ -92,6 +97,9 @@ export async function openTableDocument(page: Page, layout: { width: number; hei
 	if (layout.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(doc.title, { exact: true }).first().click();
 	await expect(page.locator('.cm-md-table table').first()).toBeVisible({ timeout: 20_000 });
+	// At phone width choosing the document closes the sidebar, and the page slides back into place after the table is drawn.
+	// An action taken during that slide finds its target moving, and Playwright scrolls the document to bring it into view.
+	await settled(page);
 	return { title: doc.title, docPath: doc.docPath, params: doc.params, commentId, threadId: doc.threadId, artifactId: doc.artifactId };
 }
 
