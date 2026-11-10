@@ -4,8 +4,8 @@
 (``Reason: unrecorded``, by an unknown editor) when the bytes it replaced are not what history holds.
 A guidance save runs it before answering (:func:`infra.guidance_git.save_guidance`). A document save
 writes its bytes, answers, and is recorded here afterwards (:func:`save_queued`): one workspace at a
-time, in save order, consecutive saves of one document by one author under one message joined. A
-version that cannot be recorded is kept and retried with the next save in that workspace, and the
+time, in save order, consecutive saves of one document by one author under one message joined, the
+person's ignore rules read once per batch so the save itself asks Git nothing. A version that cannot be recorded is kept and retried with the next save in that workspace, and the
 next save of that document says so. A restore (``atomic``) queues behind every earlier save and
 answers only once its own version is recorded, putting the old bytes back when it is not.
 """
@@ -45,6 +45,7 @@ class Version:
     author: str
     message: str
     kind: str
+    tray: bool = False  # registered thread-folder files, judged by the ignore gate's tray rule
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,9 @@ def record(repo: Path, versions: list[Version], git_dir: Path) -> tuple[list[_Co
     try:
         known, blobs, blob_id = _read_head(repo, sorted({rel for version in versions for rel in version.files}), git_dir)
         for version in versions:
+            if not version.files:  # every file it saved is one history keeps out
+                landed.append(None)
+                continue
             # Bytes history already holds were recorded by an earlier try; anything else it replaced
             # that history lacks came from outside CORSIA and is kept first, under no one's name.
             outside = {rel: prior for rel, (prior, data) in version.files.items()
@@ -117,14 +121,14 @@ def _sweep(repo: Path, files: dict[str, bytes | None], kind: str, known: KnownHe
 
 def save_queued(
     repo: Path, writes: dict[Path, bytes | None], rels: dict[Path, str], *, author: str, message: str,
-    expected, atomic: bool, write: Callable[[Path, bytes], object],
+    expected, atomic: bool, write: Callable[[Path, bytes], object], tray: bool = False,
 ) -> SaveResult:
     """Blocking. Write a document save and queue its version; ``atomic`` waits for that version and
     puts the old bytes back when it is not recorded."""
     prior = write_checked(writes, expected, write)
     if isinstance(prior, SaveResult):
         return prior
-    version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, "document")
+    version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, "document", tray)
     done: Future | None = Future() if atomic else None
     line = _enqueue(repo, _Queued(version, done))
     if done is None:
@@ -195,6 +199,7 @@ def _record_locked(repo: Path, versions: list[Version]) -> tuple[list[_Commit | 
     from infra.guidance_git import _acquire, _release, git_dir
 
     try:
+        versions = _without_ignored(repo, versions)
         directory = git_dir(repo)
         handle = _acquire(repo, directory)[0]
     except Exception as exc:  # a busy lock or a Git fault: the whole batch waits for the next save
@@ -204,6 +209,18 @@ def _record_locked(repo: Path, versions: list[Version]) -> tuple[list[_Commit | 
     finally:
         _release(handle)
     return landed, error
+
+
+def _without_ignored(repo: Path, versions: list[Version]) -> list[Version]:
+    """Each version without the files the person's ignore rules keep out: one check per kind of file."""
+    from infra.history_ignore import ignored
+
+    out: set[tuple[bool, str]] = set()
+    for tray in (False, True):
+        if rels := sorted({rel for version in versions if version.tray == tray for rel in version.files}):
+            out |= {(tray, rel) for rel in ignored(repo, rels, tray=tray)}
+    return [replace(version, files={rel: pair for rel, pair in version.files.items() if (version.tray, rel) not in out})
+            for version in versions] if out else versions
 
 
 def coalesced(batch: list[_Queued]) -> list[_Queued]:

@@ -336,10 +336,12 @@ def _save(
         return unrecorded("history-off", why or "", SAVE_HISTORY_OFF.format(why=why))
     try:
         rels = {path: path.resolve(strict=False).relative_to(repo).as_posix() for path in writes}
-        if ignored(repo, list(rels.values()), tray=target.registered):
+        # A plain document save answers without Git: its ignore rules are read as it is recorded.
+        if not (target.document and not atomic) and ignored(repo, list(rels.values()), tray=target.registered):
             return unrecorded("history-off", "ignored", SAVE_HISTORY_OFF.format(why="the path is ignored by Git"))
         if target.document:  # recorded after the save answers, so never under the lock here
-            return save_queued(repo, writes, rels, author=author, message=message, expected=expected, atomic=atomic, write=write)
+            return save_queued(repo, writes, rels, author=author, message=message, expected=expected, atomic=atomic,
+                               write=write, tray=target.registered)
         directory = git_dir(repo)
         handle, timing["lock_wait_ms"] = _acquire(repo, directory)
     except _LockBusy as exc:

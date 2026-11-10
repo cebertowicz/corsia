@@ -157,6 +157,7 @@ async def test_a_registered_thread_file_still_honours_every_other_ignore_rule(hi
     for path in (kept, by_root, by_exclude, by_nested):
         await save_document_text(DocumentSave(path=str(path), text='Changed.\n', thread_id=thread_id), user_id)
         assert path.read_text() == 'Changed.\n'
+    assert wait_recorded()
     assert head(workspace) != before
     changed = set(_git(['diff', '--name-only', before, 'HEAD'], cwd=workspace).split())
     assert changed == {f'.threads/{thread_id}/reports/summary.md'}
