@@ -645,9 +645,9 @@ async def test_notes_live_in_the_record_and_compose_writes_only_email_headers(ma
     saved = await _draft(mail, reply_to_message_id="m-100")
     notes = json.loads(_row(saved["draft_id"])["target_json"])["notes"]
     assert all(isinstance(note, str) for note in notes)
-    # Count and original read/screening evidence have no complete home in the conversation list; retain their notes.
+    # Keep the sender count; the replied-to row already shows the original message.
     assert any("emails from" in note for note in notes)
-    assert any(note.startswith("The message being replied to") for note in notes)
+    assert not any(note.startswith("The message being replied to") for note in notes)
     assert any("quoted below the reply" in note for note in notes)
     assert not any(note.startswith("Attachment:") for note in notes)
     assert all(not line.startswith(("Note:", "In reply to:")) for line in _header_lines(mail, saved))

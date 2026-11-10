@@ -198,7 +198,6 @@ const expectHintBelow = (name: string, flagged: string) => async (page: Page) =>
 // Guard facts without a complete home in the conversation rows stay in the draft record's quiet notes.
 const WITH_NOTES = { notes: [SAME_SUBJECT, FONT,
 	'8 emails from Dana Whitfield <dana.whitfield@example.com> in the last 30 days.',
-	'The message being replied to:\nDana Whitfield <dana.whitfield@example.com> wrote on Nov 4, 2026, 5:12 PM UTC (unread).\nThe text isn’t shown here; read it in your mail app.',
 	'The earlier message from Dana Whitfield <dana.whitfield@example.com> will be quoted below the reply.',
 ] };
 /** The draft's attachments as the route returns them: absolute paths under the chat's folder, which the seeding wrote. */
@@ -215,7 +214,7 @@ const SCENARIOS: Scenario[] = [
 	// Journey 2: what the person should check before sending.
 	{ name: '4-warning', doc: 'ccadded', context: reply({ conversation: [...NEWER[1], ...FOUR], ...WITH_NOTES }), act: expectAmber },
 	{ name: '4b-quiet-open', doc: 'reply', context: reply(WITH_NOTES), act: async (page) => {
-		await expect(page.locator('.cm-email-notes-toggle')).toHaveText('5 notes');
+		await expect(page.locator('.cm-email-notes-toggle')).toHaveText('4 notes');
 		await page.locator('.cm-email-notes-toggle').click();
 		await expect(page.locator('.cm-email-notes-list li')).toHaveText(WITH_NOTES.notes);
 		await expect(page.locator('.cm-email-notes-list')).toBeVisible();

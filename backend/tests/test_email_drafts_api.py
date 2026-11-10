@@ -92,10 +92,10 @@ async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answer
     assert [m["body"] for m in context["conversation"]] == ["I can come too.", "Noon or one?", "Lunch this week?"]
     assert context["conversation"][1]["sender"] == "Pat Kim <pat@mail.example>"
     assert context["answered"] == ["pat@mail.example", "sam@example.com", "ana@mail.example"]
-    # Count and original read/screening evidence are retained because conversation rows do not carry those facts.
+    # Keep the sender count; the replied-to row already shows the original message.
     assert context["notes"] == json.loads(_row(saved["draft_id"])["target_json"])["notes"]
     assert any("emails from" in note for note in context["notes"])
-    assert any(note.startswith("The message being replied to") for note in context["notes"])
+    assert not any(note.startswith("The message being replied to") for note in context["notes"])
     assert context["attachments"] == []
 
 

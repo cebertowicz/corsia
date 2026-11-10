@@ -41,7 +41,6 @@ from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft,
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.mail_backends import Gate, MailBackend, backend_for
-from tools.mail_guard import evidence
 from tools.mail_guard_runtime import guarded_reply, new_arrival
 
 log = logging.getLogger(__name__)
@@ -211,7 +210,6 @@ class EmailDraftTool(Tool):
             notes.extend(verdict.warnings + verdict.info + verdict.stale)
             quiet.extend(verdict.quiet)
             if not original.own:
-                notes.append("The message being replied to:\n" + evidence(original))
                 notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
         if not to:
             raise DraftRefused(NEEDS_RECIPIENT)
