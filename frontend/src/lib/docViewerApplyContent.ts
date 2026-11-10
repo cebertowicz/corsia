@@ -19,6 +19,6 @@ export function applyDocumentContent(d: DocViewerTarget, content: ViewerContent,
 	if (content.artifactId && !d.artifactId) enrichDraftTarget(d, content.artifactId);
 	const shown = options.shown();
 	options.apply(content, !content.live && Boolean(existingDraft(d)?.editText !== existingDraft(d)?.savedText));
-	options.signal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId });
+	options.signal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId, icon: content.presentation?.icon });
 	reloadDocumentFeedback(content.artifactId, seq, options.loadSeq, options.feedback());
 }

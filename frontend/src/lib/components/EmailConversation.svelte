@@ -1,32 +1,22 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { formatMoment, parseUTC } from '$lib/time';
-	import { previewLine, senderAddress, senderName, type ConversationStatus, type EmailComment, type EmailMessage } from '$lib/emailDraft';
-	import CommentQuote from './comments/CommentQuote.svelte';
-	import EmailCommentSelection from './EmailCommentSelection.svelte';
+	import { previewLine, senderAddress, senderName, type ConversationStatus, type EmailMessage } from '$lib/emailDraft';
 
-	let { messages, repliedTo = null, status = 'ready', unreadable = 0, comments = [], onretry }: {
+	let { messages, repliedTo = null, status = 'ready', unreadable = 0, onretry }: {
 		/** Newest first: the emails that came after the one the draft answers, that one, then the older ones. */
 		messages: EmailMessage[];
 		/** The id of the email the draft answers; its row says so. */
 		repliedTo?: string | null;
-		/** Comments on lines of these emails; each names its email and quotes the line. */
-		comments?: EmailComment[];
 		status?: ConversationStatus;
 		unreadable?: number;
 		onretry?: () => void;
 	} = $props();
 
 	const uid = $props.id();
-	let root = $state<HTMLElement>();
 	let expanded = $state<Set<string>>(new Set());
-	// Comments posted in this view, and the one being written. A comment names its email and quotes the line.
-	let posted = $state<EmailComment[]>([]);
-	let writing = $state<{ messageId: string; quote: string } | null>(null);
-	const allComments = $derived([...comments, ...posted]);
 	const now = new Date();
 
 	function toggle(id: string) {
@@ -34,30 +24,7 @@
 		if (next.has(id)) next.delete(id); else next.add(id);
 		expanded = next;
 	}
-	/** Open one earlier email and bring it into view (a note about it links here). */
-	export async function reveal(id: string) {
-		if (!expanded.has(id)) toggle(id);
-		await tick();
-		root?.querySelector(`[data-email-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: $prefersReducedMotion ? 'auto' : 'smooth' });
-	}
 	const moment = (iso: string) => formatMoment(parseUTC(iso), now, { clock: true });
-	/** An email's text in pieces, each commented line (or the one being written) apart from the rest. */
-	function pieces(message: EmailMessage): Array<{ text: string; comment?: EmailComment; writing?: boolean }> {
-		const body = message.body.trim();
-		const marks = [
-			...allComments.filter((comment) => comment.messageId === message.id).map((comment) => ({ quote: comment.quote, comment, writing: false })),
-			...(writing && writing.messageId === message.id ? [{ quote: writing.quote, comment: undefined, writing: true }] : []),
-		].map((mark) => ({ ...mark, at: body.indexOf(mark.quote) })).filter((mark) => mark.at >= 0).sort((a, b) => a.at - b.at);
-		const out: Array<{ text: string; comment?: EmailComment; writing?: boolean }> = [];
-		let cursor = 0;
-		for (const mark of marks) {
-			if (mark.at < cursor) continue;
-			out.push({ text: body.slice(cursor, mark.at) }, { text: mark.quote, comment: mark.comment, writing: mark.writing });
-			cursor = mark.at + mark.quote.length;
-		}
-		out.push({ text: body.slice(cursor) });
-		return out;
-	}
 	const label = $derived(
 		status === 'ready' || status === 'partial'
 			? `In this conversation · ${messages.length} ${messages.length === 1 ? 'email' : 'emails'}`
@@ -65,19 +32,19 @@
 	);
 </script>
 
-<section class="email-conversation" aria-labelledby="{uid}-label" bind:this={root}>
+<section class="email-conversation" aria-labelledby="{uid}-label">
 	<h3 class="email-conversation-label" id="{uid}-label">{label}</h3>
 	{#if status === 'loading'}
 		<p class="email-status" role="status">Loading the earlier emails…</p>
 	{:else if status === 'error'}
 		<p class="email-status failed" role="alert">
 			<span>Couldn’t load the earlier emails in this conversation.</span>
-			<button type="button" class="email-retry" onclick={onretry}>Try again</button>
+			<button type="button" class="email-retry" onclick={onretry}>Retry</button>
 		</p>
 	{:else if status === 'partial'}
 		<p class="email-status failed" role="alert">
 			<span>{unreadable} {unreadable === 1 ? 'email' : 'emails'} in this conversation couldn’t be loaded.</span>
-			<button type="button" class="email-retry" onclick={onretry}>Try again</button>
+			<button type="button" class="email-retry" onclick={onretry}>Retry</button>
 		</p>
 	{/if}
 	{#if messages.length}
@@ -97,21 +64,13 @@
 					{#if open}
 						<div class="email-body" id="{uid}-{message.id}" transition:slide={{ duration: $prefersReducedMotion ? 0 : 220, easing: cubicOut }}>
 							{#if senderAddress(message.sender)}<div class="email-address">{senderAddress(message.sender)}</div>{/if}
-							<div class="email-text">{#each pieces(message) as piece, at (at)}{#if piece.comment}<mark class="cm-comment-anchor email-commented">{piece.text}</mark>{:else if piece.writing}<mark class="cm-comment-pending email-commented">{piece.text}</mark>{:else}{piece.text}{/if}{/each}</div>
-							{#each allComments.filter((comment) => comment.messageId === message.id) as comment (comment.quote + comment.text)}
-								<div class="email-comment">
-									<p class="email-comment-for">Comment on {senderName(message.sender)}’s email · {moment(message.date)}</p>
-									<CommentQuote quote={comment.quote} lines={2} />
-									<p class="email-comment-text">{comment.text}</p>
-								</div>
-							{/each}
+							<div class="email-text">{message.body.trim()}</div>
 						</div>
 					{/if}
 				</li>
 			{/each}
 		</ul>
 	{/if}
-	<EmailCommentSelection root={root} {messages} bind:pending={writing} onpost={(comment) => (posted = [...posted, comment])} />
 </section>
 
 <style>
@@ -145,12 +104,6 @@
 	.email-body { padding: var(--space-1) var(--space-2) var(--space-3); overflow: hidden; }
 	.email-address { font-size: var(--text-caption); color: var(--text-tertiary); margin-bottom: var(--space-2); overflow-wrap: anywhere; }
 	/* Reader body: the treatment MarkdownEditor.svelte gives the document text through docTheme (cm/theme.ts): 15px, 16px at phone width. */
-	/* The amber anchor is the shared comment-anchor role (commentAnchors.css); a mark only needs to keep the text colour. */
-	.email-commented { color: inherit; }
-	.email-comment { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-3) 0 0; font-size: var(--text-footnote); line-height: var(--lh-normal); color: var(--text-secondary); }
-	.email-comment p { margin: 0; }
-	.email-comment-for { font-size: var(--text-caption); color: var(--text-tertiary); }
-	.email-comment-text { color: var(--text-primary); overflow-wrap: anywhere; }
 	.email-text { font-family: var(--font-sans); font-size: var(--text-body); line-height: var(--lh-relaxed); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
 	@media (max-width: 48rem) { .email-text { font-size: var(--text-callout); } }
 	@media (pointer: coarse) { .email-toggle { min-height: var(--touch-target); } .email-retry { min-height: var(--touch-target); display: inline-flex; align-items: center; } }

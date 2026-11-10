@@ -15,9 +15,9 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, inSheet = false, answerable = true, capsuleClearance = $bindable(0), receipt, stale, unreadable, actions,
+		status = '', suppressed = false, inSheet = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
-		view: 'ask' | 'receipt' | 'stale' | 'unreadable';
+		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
 		/** How many others also asked. */
 		plus?: number;
@@ -32,14 +32,10 @@
 		status?: string;
 		suppressed?: boolean;
 		inSheet?: boolean;
-		/** False when the answer lives elsewhere (a request marked `purpose: 'send'`, answered by an email draft's Send bar): the ask shows with no status line or answer controls. */
-		answerable?: boolean;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
 		receipt?: Receipt | null;
 		stale?: { label: string; text: string; sub: string };
-		/** The requests could not be read: the failure line in the stale notice's place, with `actions` (a read-again button) at its end. */
-		unreadable?: { label: string; text: string };
 		actions: Snippet;
 	} = $props();
 
@@ -117,12 +113,6 @@
 			{/each}
 		</span>
 	</section>
-{:else if view === 'unreadable' && unreadable}
-	<section class="review-bar stale unreadable" role="alert" aria-label={unreadable.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
-		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" /><path d="M8 5v3.5M8 10.8v.1" /></svg>
-		<span class="rb-text">{unreadable.text}</span>
-		<span class="rb-retry">{@render actions()}</span>
-	</section>
 {:else if view === 'stale' && stale}
 	<section class="review-bar stale" role="status" aria-label={stale.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-1.5-3.6M13 2.5v3h-3" /></svg>
@@ -153,7 +143,6 @@
 				</ul>
 			{/if}
 		</span>
-		{#if answerable}
 		<span class="rb-row2">
 			<div class="rb-capsule" class:suppressed class:insheet={inSheet} class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
@@ -161,7 +150,6 @@
 				{@render actions()}
 			</div>
 		</span>
-		{/if}
 	</section>
 {/if}
 </div>
@@ -232,10 +220,6 @@
 	.review-bar.stale .rb-icon { color: var(--amber-text); }
 	.review-bar.stale .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
 	.review-bar.stale .rb-sub { margin-left: auto; opacity: 0.85; }
-	/* The failure line is the ask's own status colour; the read-again button sits at the line's end and drops under it when the width is short. */
-	.review-bar.unreadable { flex-wrap: wrap; }
-	.review-bar.unreadable .rb-text { flex: 1 1 12rem; min-width: 0; color: var(--amber-text); font-weight: var(--fw-regular); }
-	.review-bar.unreadable .rb-retry { flex: none; margin-left: auto; line-height: normal; }
 
 	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or an ended notice takes the first column at the same height and keeps its text on line 1. */
 	:global(.document-header) .rb-slot { grid-template-columns: subgrid; }
@@ -290,13 +274,13 @@
 			/* A closed ask keeps its existing requester/ask markup in one 44px line: the requester has a bounded natural width and the ask end-ellipsizes in the remaining space. With no one-line ask, the requester takes the line. */
 			:global(.document-header) .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 auto; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 55%; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
 			:global(.document-header) .review-bar.ask.static .rb-lead { flex: 1 1 auto; max-width: 100%; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
 			/* The person step's name may wrap, so its touch row grows with it. */
 			:global(.document-header) .review-bar.ask.static:not(.expanded) { grid-template-rows: minmax(var(--rb-hit), auto); }
-			/* Centre the ask's text line within the touch row (its line box is the row's height). The text stays in a block so a cut ask ends with an ellipsis: a flex container clips without one. */
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: block; line-height: var(--rb-hit); align-self: stretch; flex: 1 1 0; min-width: 0; }
+			/* Centre the ask's text line within the touch row; its former block line box sat above the requester's centred content. */
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: flex; align-items: center; align-self: stretch; flex: 1 1 0; min-width: 0; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
 			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
 			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }

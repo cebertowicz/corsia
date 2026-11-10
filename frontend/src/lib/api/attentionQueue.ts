@@ -82,13 +82,8 @@ export interface ExternalReviewDetail {
 	pending_count: number;
 	total_count: number;
 	node_id: string;
-	/**
-	 * Set by the request's producer: `send` marks the review an email draft's own Send and Don't send answer.
-	 * PROTOTYPE: the server does not send it yet (a dependency on Structured Plans).
-	 */
-	purpose?: 'send';
 	/** We own the indicator; the raising lane owns the resolution surface. */
-	destination: AttentionDestination | null;
+	destination: { version?: number; pane: string; id: string } | null;
 	source: AttentionSource | null;
 }
 

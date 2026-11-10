@@ -119,26 +119,6 @@ export class FromWidget extends WidgetType {
 
 const NOT_ON_EMAIL = 'Not on the email you’re replying to.';
 
-/** The left edge of whatever is to the right of the mark on its own row (the next address, its comma, the Cc button), or null when the row ends at the mark. */
-function nextOnRow(mark: HTMLElement, row: DOMRect): number | null {
-	const line = mark.closest('.cm-line');
-	if (!line) return null;
-	const onRow = (box: DOMRect) => box.bottom > row.top && box.top < row.bottom;
-	let next: number | null = null;
-	const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-	for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-		const text = node as Text;
-		if (mark.contains(text) || text.parentElement?.closest('.cm-email-cc-add') || !/\S/.test(text.data)) continue;
-		if (!(mark.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
-		const range = document.createRange();
-		range.selectNodeContents(text);
-		for (const box of range.getClientRects()) if (onRow(box)) next = Math.min(next ?? box.left, box.left);
-	}
-	const button = line.querySelector('.cm-email-cc-add')?.getBoundingClientRect();
-	if (button && onRow(button)) next = Math.min(next ?? button.left, button.left);
-	return next;
-}
-
 /** The "!" after an address that was not on the email being answered: hover or focus on a desktop, a tap on a phone, shows why. */
 export class AddedMarkWidget extends WidgetType {
 	eq() { return true; }
@@ -153,22 +133,17 @@ export class AddedMarkWidget extends WidgetType {
 		tip.setAttribute('aria-hidden', 'true');
 		tip.textContent = NOT_ON_EMAIL;
 		mark.append(tip);
-		// The hint is one line on the mark's own row, centered on it, and never wraps or grows past the row. In order: just right of the "!" when nothing
-		// else is on the row to its right and it fits; ending at the "!" (over this entry's own address text, and past it where the editor has room to the
-		// left); just right of the "!" over the next address when only the right has room; else as close to the "!" as fits, clamped inside the editor's
-		// edges (it then covers the "!" too).
+		// The hint is one line just below the mark's row, ending at the "!", so it never covers its own address. Where the editor's left edge would cut
+		// it, it starts at that edge instead.
 		const place = () => {
 			tip.style.left = '';
-			tip.setAttribute('data-side', 'right');
+			tip.removeAttribute('data-clamped');
 			const scroller = mark.closest('.cm-scroller')?.getBoundingClientRect();
-			const inner = { left: (scroller?.left ?? 0) + 8, right: Math.min(scroller?.right ?? window.innerWidth, window.innerWidth) - 8 };
-			const row = mark.getBoundingClientRect();
+			const inner = (scroller?.left ?? 0) + 8;
 			const box = tip.getBoundingClientRect();
-			if (box.right <= Math.min(inner.right, nextOnRow(mark, row) ?? inner.right)) return;
-			if (box.width <= row.left - inner.left) { tip.setAttribute('data-side', 'left'); return; }
-			if (box.right <= inner.right) return;
-			tip.setAttribute('data-side', 'clamp');
-			tip.style.left = `${Math.max(inner.left, inner.right - box.width) - row.left}px`;
+			if (box.left >= inner) return;
+			tip.setAttribute('data-clamped', '');
+			tip.style.left = `${inner - mark.getBoundingClientRect().left}px`;
 		};
 		const close = () => { mark.removeAttribute('data-open'); document.removeEventListener('pointerdown', outside, true); };
 		const outside = (event: Event) => { if (!mark.contains(event.target as Node)) close(); };

@@ -74,8 +74,8 @@ NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
-#: The folder the draft tools write email drafts into (``prefix`` in tools/google_email.py and
-#: tools/microsoft_actions.py). An email draft is a workspace document in that folder; no stored field marks it.
+#: The folder the draft tools write email drafts into (tools/google_email.py and tools/microsoft_actions.py import it).
+#: An email draft is a workspace document in that folder; the descriptor below is the one rule that says so.
 EMAIL_DRAFT_FOLDER = "email-drafts"
 
 _EMAIL_DRAFT = PresentationDescriptor(

@@ -2,7 +2,6 @@
 	import { tick, untrack } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
 	import ImageViewer from './ImageViewer.svelte';
-	import ArtifactPdfLeaf, { createPdfTabs } from './ArtifactPdfLeaf.svelte';
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
@@ -52,15 +51,13 @@
 	// about it is stored on the tab, so a file replaced by one of the other kind
 	// is shown by whichever viewer the next load finds it needs.
 	let imageTabs = $state<string[]>([]);
-	const pdfTabs = createPdfTabs(() => threadId, () => workspace.tabs);
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
 	);
 	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
-	const showsPdf = $derived(showable !== null && !!activeTab && pdfTabs.has(activeTab.instanceId));
-	const target = $derived(showsImage || showsPdf ? null : showable);
+	const target = $derived(showsImage ? null : showable);
 	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 	const activeViewState = $derived(threadId && activeTab ? tabViewState(threadId, activeTab.instanceId) : null);
@@ -180,7 +177,6 @@
 			const key = imageKey(signal.instanceId);
 			const others = imageTabs.filter((k) => k !== key);
 			imageTabs = signal.renderer === 'image' ? [...others, key] : others;
-			pdfTabs.mark(signal.instanceId, signal.renderer === 'pdf');
 		}
 		if (threadId) applyTabLoadSignal(threadId, signal);
 		if (signal.status === 'ready') {
@@ -277,8 +273,6 @@
 					<span>It isn’t in this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
-			{:else if showsPdf && showable}
-				<ArtifactPdfLeaf target={showable} {onSignal} {threadId} tab={activeTab} tabs={workspace.tabs} closeTab={requestCloseTab} />
 			{:else if imageTarget}
 				<ImageViewer
 					bind:this={imageViewer}

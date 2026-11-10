@@ -5,17 +5,14 @@
 	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
 	import ReviewBarShell from './ReviewBarShell.svelte';
 	import { createReviewBarState, DRAFT_OPEN, type ReviewBarState } from '$lib/reviewBarState.svelte';
-	import { answerHoldIds } from '$lib/api/reviewBar';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll, emailEnded = false }: {
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
 		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean; inSheet?: boolean;
-		/** An email draft whose send is over (Sent or Not sent): a request marked `purpose: 'send'` then has no other answer, so it is answered here like any other. */
-		emailEnded?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
 		/** Accepts them all and puts the accepted text on screen; throws when it could not, so no verdict is sent. */
@@ -35,20 +32,10 @@
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const read = $derived(bar.read);
-	// A request its producer marked `purpose: 'send'` is an email draft's own Send and Don't send answer (`EmailSendBar`): until
-	// the email has ended the bar shows it with no answer controls. Every other request is answered here, with its own holds only,
-	// and once the email has ended so is a send request (`emailEnded`). The requests come newest first: the bar leads with the newest
-	// answerable request, else the newest, and lists the rest.
-	$effect(() => { bar.emailEnded = emailEnded; });
-	const requests = $derived(read?.requests ?? null);
-	const answeredHere = (request: { purpose?: 'send' }) => emailEnded || request.purpose !== 'send';
-	const lead = $derived(requests ? (requests.find(answeredHere) ?? requests[0] ?? null) : null);
-	const answerable = $derived(requests === null || requests.some(answeredHere));
-	const asker = $derived(lead?.asker.name ?? read?.asker?.name ?? 'An agent');
-	const ask = $derived(lead?.reason ?? read?.ask_reason ?? '');
-	const holdIds = $derived(answerHoldIds(read, emailEnded));
-	const otherAsks = $derived(requests ? requests.filter((request) => request !== lead).map((request) => ({ name: request.asker.name, reason: request.reason })) : (read?.other_asks ?? []));
-	const others = $derived(requests ? otherAsks.map((other) => other.name) : (read?.other_askers ?? []));
+	const asker = $derived(read?.asker?.name ?? 'An agent');
+	const ask = $derived(read?.ask_reason ?? '');
+	const holdIds = $derived(read?.hold_ids ?? []);
+	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
 	const busy = $derived(bar.phase === 'sending' || bar.accepting);
@@ -72,9 +59,7 @@
 			? `${comments} comment${comments === 1 ? '' : 's'} sent` : '';
 		return [said, delivered, time].filter(Boolean);
 	});
-	const view = $derived(bar.unreadable ? 'unreadable' : bar.phase === 'answered' ? 'receipt' : bar.phase === 'stale' ? 'stale' : 'ask');
-	// Read again re-reads the requests and nothing else: no verdict leaves from here, and a request that then shows has its own answers.
-	const UNREADABLE = { label: 'Review request', text: 'Couldn’t load the review request.' };
+	const view = $derived(bar.phase === 'answered' ? 'receipt' : bar.phase === 'stale' ? 'stale' : 'ask');
 
 	// A new artifact starts a new bar; the read follows the artifact's and the plans' changes.
 	$effect(() => {
@@ -171,19 +156,16 @@
 
 {#if personStep || personReceipt}
 	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} />
-{:else if bar.visible || bar.unreadable}
+{:else if bar.visible}
 	<ReviewBarShell
-		{view} who={{ name: asker, id: lead?.asker.id ?? read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
-		others={otherAsks} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
-		{suppressed} {inSheet} {answerable} bind:capsuleClearance
+		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
+		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
+		{suppressed} {inSheet} bind:capsuleClearance
 		receipt={{ icon: bar.receipt?.verdict === 'changes_requested' ? 'changes' : 'check', label: 'Review answered', segments: receiptText }}
 		stale={{ label: 'Review request ended', text: 'This review request has ended', sub: 'Refreshing' }}
-		unreadable={UNREADABLE}
 	>
 		{#snippet actions()}
-			{#if bar.unreadable}
-				<Button size="sm" variant="secondary" loading={bar.retrying} onclick={() => void bar.retryRead()}>Retry</Button>
-			{:else if noting}
+			{#if noting}
 				<textarea class="rb-note" rows="1" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
 				<div class="rb-actions">

@@ -1,4 +1,4 @@
-import { docOpenRefusal, ImageFileError, PdfFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
+import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 import type { DraftOpen } from '$lib/docViewerLoading';
 import type { TabLoadSignal } from '$lib/artifactTabs';
 
@@ -9,7 +9,6 @@ export function handleViewerFailure(error: unknown, opened: DraftOpen, handlers:
 }): void {
 	// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
 	if (error instanceof ImageFileError) { handlers.signal({ status: 'loading', renderer: 'image' }); return; }
-	if (error instanceof PdfFileError) { handlers.signal({ status: 'loading', renderer: 'pdf' }); return; }
 	// A 404 is terminal for this tab. Refresh server-owned reply attention as well.
 	if (error instanceof Error && /^404\b/.test(error.message)) {
 		handlers.signal({ status: 'unavailable' }); handlers.reloadAttention(); return;

@@ -16,24 +16,9 @@ export interface PersonStepInstruction {
 	owner_name: string;
 }
 
-/**
- * One open review request on the artifact. `purpose: 'send'` is set by the request's producer and marks the request an
- * email draft's own Send and Don't send answer; any other request is an ordinary document review.
- * PROTOTYPE: the server sends neither `requests` nor `purpose` yet (a dependency on Structured Plans); a read without
- * `requests` is one ordinary ask, as before.
- */
-export interface ReviewRequest {
-	hold_id: string;
-	asker: { id: string; name: string };
-	reason: string;
-	purpose?: 'send';
-}
-
 /** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
 export interface ReviewBarRead {
 	ask_raised: boolean;
-	/** The open requests, newest first. Absent: the read is one ordinary ask. */
-	requests?: ReviewRequest[];
 	/** The Plans-owned holds this answer closes; each one identifies one review round. */
 	hold_ids: string[];
 	ask_reason: string | null;
@@ -52,20 +37,6 @@ export interface ReviewAnswer { verdict: ReviewVerdict; note: string | null; fee
 /** The server's typed refusal of an answer; `code` is what the bar branches on. */
 export class ReviewRefusal extends Error {
 	constructor(readonly code: string, message: string) { super(message); }
-}
-
-/**
- * The holds the canvas's review answers: every ordinary request, and a send request only once the email has ended (`emailEnded`):
- * before that its answers are Send and Don't send, and after it nothing else can answer it.
- */
-export function answerHoldIds(read: ReviewBarRead | null, emailEnded = false): string[] {
-	if (!read) return [];
-	return read.requests ? read.requests.filter((request) => emailEnded || request.purpose !== 'send').map((request) => request.hold_id) : read.hold_ids;
-}
-
-/** The holds Send and Don't send answer: the requests their producer marked `purpose: 'send'`, and nothing else. */
-export function sendHoldIds(read: ReviewBarRead | null): string[] {
-	return read?.requests?.filter((request) => request.purpose === 'send').map((request) => request.hold_id) ?? [];
 }
 
 const authorization = () => ({ Authorization: `Bearer ${get(token) ?? ''}` });

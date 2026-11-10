@@ -66,17 +66,6 @@ export class ImageFileError extends Error {
 	}
 }
 
-/** `detail.code` of the 415 a text open answers for a PDF file (prototype: the backend does not send it yet). */
-export const PDF_FILE_CODE = 'pdf_file';
-
-/** The backend refused to open this file as text because it is a PDF. */
-export class PdfFileError extends Error {
-	constructor() {
-		super('This file is a PDF');
-		this.name = 'PdfFileError';
-	}
-}
-
 export class DocOpenError extends Error {
 	readonly code: DocOpenRefusal['code'];
 	readonly title: string;
@@ -88,10 +77,8 @@ export class DocOpenError extends Error {
 }
 
 /** The typed error for a failed text open's `detail`, or null when it is neither a refusal nor an image. */
-export function docOpenFailure(detail: unknown): DocOpenError | ImageFileError | PdfFileError | null {
+export function docOpenFailure(detail: unknown): DocOpenError | ImageFileError | null {
 	const refusal = docOpenRefusal(detail);
 	if (refusal) return new DocOpenError(refusal);
-	const code = (detail as { code?: unknown } | undefined)?.code;
-	if (code === IMAGE_FILE_CODE) return new ImageFileError();
-	return code === PDF_FILE_CODE ? new PdfFileError() : null;
+	return (detail as { code?: unknown } | undefined)?.code === IMAGE_FILE_CODE ? new ImageFileError() : null;
 }

@@ -12,6 +12,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
+from registry.presentation import resolve_descriptor
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
 from registry.identity_bridge import written_row
@@ -127,8 +128,11 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     # the database pool.
     target = guidance_target(p, config.WORKSPACE)
     recorded = target is not None and not target.fault
+    # How the viewer names and marks this file (an email draft opens as an email), from the one backend rule.
+    shown = resolve_descriptor(notification["integration"], notification["type"], str(p))
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
+            "presentation": {"label": shown.label, "icon": shown.icon},
             "freshness": freshness, "_recorded": recorded,
             "_notification": notification}
 

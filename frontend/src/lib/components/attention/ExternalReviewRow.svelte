@@ -39,25 +39,6 @@
 		};
 	});
 
-	// Whoever is not a person is named with what kind it is, in the words a person uses ("thread" is an agent here). The
-	// spaces sit inside the string: whitespace at the edge of a template block is trimmed, which ran the words together.
-	const KIND_WORD: Record<string, string> = { thread: 'agent', service: 'service' };
-	const eyebrow = $derived.by(() => {
-		const who = review.requester;
-		if (!who) return 'Review';
-		const kind = KIND_WORD[who.kind];
-		return `Review · ${who.label ?? who.lane}${kind ? ` (${kind})` : ''}`;
-	});
-
-	// A destination with a path opens that file directly (`ChatPanel`), so the button names what opens: an item whose
-	// producer marked it `purpose: 'send'` is an email draft's send review ("Open draft"), any other path is a document,
-	// and a destination with no path keeps naming its pane.
-	const openLabel = $derived.by(() => {
-		const destination = review.destination;
-		if (!destination?.path) return `Open in ${destination?.pane ?? ''}`;
-		return review.purpose === 'send' ? 'Open draft' : 'Open document';
-	});
-
 	const headingId = $derived(`external-review-${review.review_key}`);
 	const remaining = $derived(
 		review.total_count > 0 ? `${review.pending_count} of ${review.total_count} left` : null,
@@ -77,7 +58,9 @@
 		<div>
 			<!-- A lane must never render as a person, so the kind is shown for
 			     anything that is not a user. -->
-			<span class="eyebrow">{eyebrow}</span>
+			<span class="eyebrow">
+				Review{#if review.requester} · {review.requester.label ?? review.requester.lane}{#if review.requester.kind !== 'user'} ({review.requester.kind}){/if}{/if}
+			</span>
 			<h3 id={headingId} tabindex="-1" bind:this={heading}>{review.title}</h3>
 			{#if remaining}<p class="remaining">{remaining}</p>{/if}
 		</div>
@@ -95,13 +78,9 @@
 			<Button
 				variant="primary"
 				size="sm"
-				onclick={(event) => {
-					// The chat column marks chat the active surface on any click inside it; bubbling there would flip a document just opened back to chat, which on a phone hides it (as `AttachmentRow` avoids).
-					event.stopPropagation();
-					onOpenDestination(review.destination!);
-				}}
+				onclick={() => onOpenDestination(review.destination!)}
 			>
-				{openLabel}
+				Open in {review.destination.pane}
 			</Button>
 		{:else}
 			<p class="unavailable" role="status">

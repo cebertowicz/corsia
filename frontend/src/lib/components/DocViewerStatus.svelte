@@ -45,11 +45,8 @@
 		historyAvailable = false,
 		historyOpen = false,
 		onOpenHistory,
-		emailDraft = false,
 	}: {
 		title?: string;
-		/** An email draft: the delivery control and Request review are worded for sending an email. */
-		emailDraft?: boolean;
 		presence?: import('svelte').Snippet;
 		/** The review bar sits first in the header, so its buttons come before the document in tab order. */
 		reviewBar?: import('svelte').Snippet;
@@ -191,11 +188,11 @@
 			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}
-				<span class="delivery-toggle" title={emailDraft ? 'When off, comments go to the agent when you close the draft or pause for two minutes.' : 'When off, comments send when you close the document or pause for two minutes.'}>
-					<span>{emailDraft ? 'Send comments right away' : 'Deliver immediately'}</span>
-					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel={emailDraft ? 'Send comments right away' : 'Deliver comments immediately'} />
+				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
+					<span>Deliver immediately</span>
+					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
 				</span>
-				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} textOnly={emailDraft} />
+				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
 			{/if}
 			{#if historyAvailable && onOpenHistory}<button type="button" class="doc-tool history-tool" aria-label="History" title="History" aria-expanded={historyOpen} onclick={onOpenHistory}>
 				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>

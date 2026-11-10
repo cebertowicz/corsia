@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { mount, unmount } from 'svelte';
+	import { mount, unmount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import type { CommentRange, ScrollOrigin } from '$lib/cm/comment-marks';
 	import type { CommentSelection } from '$lib/stores/commentSelection';
@@ -15,11 +15,10 @@
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
-	import EmailSendBar from './EmailSendBar.svelte';
-	import { addressesOnAnsweredEmail, badEntriesIn, emailDraftContext, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailAttachment, type EmailDraftContext } from '$lib/emailDraft';
+	import { badEntries, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
+	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
 	import type { EmailHeaderOptions } from '$lib/cm/email-header';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
-	import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
 	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
@@ -55,7 +54,7 @@
 		tabInstanceId = null,
 		artifactId = null,
 		onDocumentPlace,
-		reviewBar,
+		emailDraft = false,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -89,41 +88,37 @@
 		tabInstanceId?: string | null;
 		artifactId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
-		/** The canvas's review bar state. Out: `emailEnded` once the draft's send is over and its send bar holds no answer (none on its way, none to retry), so the review bar answers a send request then, and `emailDraft`. In: `answersOpen`, the bar showing the draft's open request with its answers (the send bar's unanswered sentence points at it only then). */
-		reviewBar: ReviewBarState;
+		/** The backend's presentation says this document is an email draft: it opens as an email, its context read from the draft's account. */
+		emailDraft?: boolean;
 	} = $props();
 
-	let sendEnded = $state(false);
 	let editor = $state<MarkdownEditor>();
-	// An email draft keeps its text in the editor, with the safeguard's warnings above it and the read-only conversation
-	// below. The editor sits in the same wrapper either way, so editing the header never remounts it.
-	// `readAttempt` counts the person's retries of a failed conversation read.
+	// An email draft keeps its text in the editor, with the warnings above it and the read-only conversation below. The
+	// editor sits in the same wrapper either way, so editing the header never remounts it. `readAttempt` counts the
+	// person's retries of a failed read; each one reads the draft's context again.
 	let readAttempt = $state(0);
-	const email = $derived<EmailDraftContext | null>(docState === 'ready' ? emailDraftContext(value, undefined, readAttempt) : null);
-	let conversation = $state<EmailConversation>();
-	// The attachments are read from the draft record; removing one re-saves the draft through the existing save path
-	// (prototype: only the list changes). The prototype's files live in the folder `corsia:emailDraftFiles` names.
-	let removedFiles = $state<Set<string>>(new Set());
-	// A sent or not-to-send email, or a draft the tab can't edit, is read-only: no typing, no Cc control, no chip remove marks.
-	$effect(() => { reviewBar.emailDraft = !!email; return () => { reviewBar.emailDraft = false; }; });
-	const emailLocked = $derived(!!email && (readOnly || email.readOnly === true || sendEnded));
-	const attachments = $derived<EmailAttachment[]>((email?.attachments ?? []).filter((item) => !removedFiles.has(item.name)).map((item) => ({ ...item, path: prototypeFilePath(item.path) })));
-	function prototypeFilePath(name: string): string {
-		try { const dir = localStorage.getItem('corsia:emailDraftFiles'); return dir ? `${dir.replace(/\/$/, '')}/${name}` : name; } catch { return name; }
-	}
-	const badEntries = $derived(badEntriesIn(value, email?.badRecipients));
-	const loudLines = $derived(email ? [newerEmailsLine(newerEmails(email)), notFullAddressLine(badEntries), ...email.notes.filter((note) => note.kind === 'loud').map((note) => note.text)].filter((line): line is string => !!line) : []);
-	const quietNotes = $derived(email?.notes.filter((note) => note.kind === 'quiet').map((note) => note.text) ?? []);
+	let context = $state<{ artifactId: string; read: EmailDraftContext } | null>(null);
+	const LOADING: EmailDraftContext = { status: 'loading', conversation: [], notes: [], attachments: [] };
+	$effect(() => {
+		const id = emailDraft && docState === 'ready' ? artifactId : null;
+		readAttempt;
+		if (!id) { context = null; return; }
+		let current = true;
+		context = { artifactId: id, read: untrack(() => context)?.artifactId === id ? { ...untrack(() => context)!.read, status: 'loading' } : LOADING };
+		void fetchEmailDraftContext(id).then((read) => { if (current) context = { artifactId: id, read }; });
+		return () => { current = false; };
+	});
+	const email = $derived<EmailDraftContext | null>(context?.read ?? null);
+	const attachments = $derived(email?.attachments ?? []);
+	// Who the email goes to is read from the draft's own text, so the warnings follow each edit.
+	const refused = $derived(email ? badEntries(value) : []);
+	const loudLines = $derived(email ? [newerEmailsLine(newerEmails(email)), notFullAddressLine(refused)].filter((line): line is string => !!line) : []);
 	const emailHeader = $derived<EmailHeaderOptions | null>(email ? {
-		quiet: quietNotes,
-		bad: badEntries,
-		answered: email ? addressesOnAnsweredEmail(email) : null,
-		attachmentsKey: JSON.stringify([attachments, emailLocked]),
+		quiet: email.notes,
+		answered: email.answered ?? null,
+		attachmentsKey: JSON.stringify(attachments),
 		mountAttachments: attachments.length ? (host) => {
-			const chips = mount(EmailAttachments, { target: host, props: {
-				attachments, threadId: $activeThreadId, openedFrom: tabInstanceId,
-				onremove: emailLocked ? undefined : (item: EmailAttachment) => { removedFiles = new Set([...removedFiles, item.name]); },
-			} });
+			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: $activeThreadId } });
 			return () => void unmount(chips);
 		} : null,
 	} : null);
@@ -147,7 +142,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap">
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} readOnly={readOnly || emailLocked} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {emailHeader} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {emailHeader} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		{#if saveError}
 			<div class="save-error" role="alert">{saveError}</div>
 		{/if}
@@ -155,7 +150,6 @@
 {/snippet}
 
 <div class="doc-main" class:email-mode={email} bind:this={column}>
-	{#if email && docState === 'ready'}<EmailSendBar readOnly={readOnly || !!email.readOnly} connected={typingAllowed && !email.offline} blocker={attachments.find((item) => item.unavailable)?.name ?? null} sendEnds={email.sendEnds} reviewArtifactId={email.review ? artifactId : null} bind:ended={sendEnded} bind:answersFree={reviewBar.emailEnded} answersShown={reviewBar.answersOpen} />{/if}
 	{#if docState === 'loading'}
 		<div class="loadbar"><span></span></div>
 		<div class="md-skel">{#each Array(6) as _, i (i)}<span class="ms-line" style="width:{[90, 70, 80, 55, 75, 45][i]}%"></span>{/each}</div>
@@ -169,7 +163,7 @@
 			{#if email}<EmailNotes lines={loudLines} />{/if}
 			{@render editorBlock()}
 			{#if email && (email.conversation.length || email.status !== 'ready')}
-				<EmailConversation bind:this={conversation} messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} unreadable={email.unreadable} comments={email.comments} onretry={() => readAttempt += 1} />
+				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} unreadable={email.unreadable} onretry={() => readAttempt += 1} />
 			{/if}
 		</div>
 	{/if}

@@ -23,6 +23,13 @@ export interface DocContent {
 	/** On a live_open read: false with a reason when the document opens as a non-live file. */
 	live?: boolean;
 	live_unavailable?: string;
+	/** How the app names and marks this file, from the backend's one descriptor rule (`icon` 'mail' is an email draft). */
+	presentation?: DocPresentation;
+}
+
+export interface DocPresentation {
+	label: string;
+	icon: string;
 }
 
 export interface DocRevision {

@@ -20,8 +20,7 @@ SIGNATURE_DELIMITER = "-- "
 
 # A plain address: no display name, quotes, brackets, separators or whitespace.
 _ADDRESS = re.compile(r"""^[^\s,;<>"()\[\]\\@]+@[^\s,;<>"()\[\]\\@]+$""")
-# ``in reply to`` is still accepted: drafts saved before it was dropped carry the line, and the send ignores it.
-_HEADERS = ("from", "to", "cc", "subject", "in reply to")
+_HEADERS = ("from", "to", "cc", "subject")
 
 NEEDS_RECIPIENT = "A draft needs at least one recipient."
 BAD_ADDRESS = "Recipients must be plain email addresses such as name@example.com."

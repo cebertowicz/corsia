@@ -27,7 +27,6 @@
 		onActivate,
 		task,
 		time,
-		openedFrom,
 	}: {
 		card: MessageCard;
 		threadId: string | null | undefined;
@@ -47,8 +46,6 @@
 		task?: string;
 		/** When the block happened; read through the transcript's own short time. */
 		time?: string;
-		/** An email draft's chip: the draft tab's instance key, so the opened file can lead back to it. */
-		openedFrom?: string | null;
 	} = $props();
 
 	// A review-bar submission shows at once and stays for this session because cards are not refetched; it belongs
@@ -94,7 +91,7 @@
 		event.stopPropagation();
 		if (onActivate) { onActivate(); return; }
 		if (!threadId || !card.path) return;
-		openArtifactTab(threadId, { artifactId: card.artifact_id, path: card.path, title: card.name ?? card.title, ...(openedFrom ? { openedFrom } : {}) });
+		openArtifactTab(threadId, { artifactId: card.artifact_id, path: card.path, title: card.name ?? card.title });
 		// The pane is a drawer on narrow canvases; leaving it open would cover the document.
 		if (isPaneDrawer()) paneOpen.set(false);
 	}

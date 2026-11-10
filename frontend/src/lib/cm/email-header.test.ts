@@ -1,16 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { history, undo } from '@codemirror/commands';
 import { addedRecipients, badRecipientRanges, emailHeader } from './email-header';
 
-const HEAD = ['From: Alex Rivera <alex@example.com>', 'To: Dana Whitfield <dana@example.com>', 'Subject: Saturday'];
+const HEAD = ['From: alex@example.com', 'To: dana@example.com', 'Subject: Saturday'];
 let view: EditorView | null = null;
-// jsdom has no layout, so no text boxes: an empty list unless a test lays the row out.
-Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
 
-function mount(lines: string[], readOnly = false, answered: string[] | null = null, bad: string[] = []) {
+function mount(lines: string[], readOnly = false, answered: string[] | null = null) {
 	const parent = document.body.appendChild(document.createElement('div'));
-	const extensions = [emailHeader({ quiet: [], bad, answered, attachmentsKey: '', mountAttachments: null }), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
+	const extensions = [history(), emailHeader({ quiet: [], answered, attachmentsKey: '', mountAttachments: null }), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
 	view = new EditorView({ parent, state: EditorState.create({ doc: `${lines.join('\n')}\n\nHi Dana,\n`, extensions }) });
 	return view;
 }
@@ -69,20 +68,25 @@ describe('an added recipient', () => {
 	};
 
 	it('is the address in To or Cc that was not on the email being answered, amber, with a "!" that says why', () => {
-		mount([HEAD[0], 'To: Dana Whitfield <dana@example.com>, Priya Raman <priya@example.com>', 'Cc: marcus@example.com', HEAD[2]], false, ANSWERED);
-		expect(marks()).toEqual(['Priya Raman <priya@example.com>', 'marcus@example.com']);
+		mount([HEAD[0], 'To: dana@example.com, priya@example.com', 'Cc: marcus@example.com', HEAD[2]], false, ANSWERED);
+		expect(marks()).toEqual(['priya@example.com', 'marcus@example.com']);
 		const bangs = document.querySelectorAll<HTMLButtonElement>('.cm-email-added-mark');
 		expect(bangs).toHaveLength(2);
 		expect(bangs[0].getAttribute('aria-label')).toBe('Not on the email you’re replying to.');
 		expect(bangs[0].querySelector('.cm-email-added-tip')?.textContent).toBe('Not on the email you’re replying to.');
 	});
 
+	it('compares addresses without case', () => {
+		mount([HEAD[0], 'To: Dana@Example.com', HEAD[2]], false, ANSWERED);
+		expect(marks()).toEqual([]);
+	});
+
 	it('keeps the "!" in one no-wrap piece with the end of its address, so it is never alone on a line', () => {
-		mount([HEAD[0], 'To: Priya Raman <priya@example.com>', HEAD[2]], false, ANSWERED);
+		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ANSWERED);
 		const tail = document.querySelector<HTMLElement>('.cm-email-added-tail')!;
 		expect(tail.contains(document.querySelector('.cm-email-added-mark'))).toBe(true);
-		expect(tail.textContent).toBe('e.com>!Not on the email you’re replying to.');
-		expect(tail.previousElementSibling?.textContent).toBe('Priya Raman <priya@exampl');
+		expect(tail.textContent).toBe('le.com!Not on the email you’re replying to.');
+		expect(tail.previousElementSibling?.textContent).toBe('priya@examp');
 	});
 
 	it('marks nothing when every address was on the email, or when there is no email to compare with', () => {
@@ -106,128 +110,121 @@ describe('an added recipient', () => {
 });
 
 describe('a bad address', () => {
-	it('is amber where it sits in To or Cc, with no "!", and the other entries are left alone', () => {
-		mount([HEAD[0], 'To: Dana Whitfield <dana@example.com>, priya.raman', 'Cc: dana@', HEAD[2]], false, ['dana@example.com'], ['priya.raman', 'dana@']);
-		expect([...document.querySelectorAll('.cm-email-added')].map((node) => node.textContent)).toEqual(['priya.raman', 'dana@']);
+	it('is every entry in To or Cc the send would refuse, amber where it sits, with no "!", and the other entries are left alone', () => {
+		mount([HEAD[0], 'To: dana@example.com, priya.raman', 'Cc: dana@, Sam Lee <sam@example.com>', HEAD[2]], false, ['dana@example.com']);
+		expect([...document.querySelectorAll('.cm-email-bad')].map((node) => node.textContent)).toEqual(['priya.raman', 'dana@', 'Sam Lee <sam@example.com>']);
+		expect(document.querySelector('.cm-email-added')).toBeNull();
 		expect(document.querySelector('.cm-email-added-mark')).toBeNull();
-		expect(document.querySelector('.cm-email-added-tip')).toBeNull();
 	});
 
-	it('marks nothing when the safeguard named nothing, and finds an entry by its text as typed', () => {
+	it('has its own class, apart from an added recipient', () => {
+		mount([HEAD[0], 'To: priya@example.com, priya.raman', HEAD[2]], false, ['dana@example.com']);
+		expect(document.querySelectorAll('.cm-email-bad')).toHaveLength(1);
+		expect(document.querySelector('.cm-email-bad')!.classList.contains('cm-email-added')).toBe(false);
+		expect(document.querySelectorAll('.cm-email-added-mark')).toHaveLength(1);
+	});
+
+	it('marks nothing when every entry is a full address, and finds an entry by its text as typed', () => {
 		mount(HEAD);
-		expect(document.querySelector('.cm-email-added')).toBeNull();
-		expect(badRecipientRanges(' dana@example.com, priya.raman', 3, new Set(['priya.raman']))).toEqual([{ from: 22, to: 33 }]);
-		expect(badRecipientRanges(' dana@example.com, priya.raman', 3, new Set(['priya']))).toEqual([]);
+		expect(document.querySelector('.cm-email-bad')).toBeNull();
+		expect(badRecipientRanges(' dana@example.com, priya.raman', 3)).toEqual([{ from: 22, to: 33 }]);
+	});
+
+	it('reads an old "In reply to:" line as a plain line, not a field', () => {
+		mount([HEAD[0], HEAD[1], 'In reply to: Dana, Nov 3', HEAD[2]]);
+		expect(document.querySelector('.cm-email-bad')).toBeNull();
+		// Labelled: From, To and Subject only.
+		expect([...document.querySelectorAll('.cm-email-head-label')].map((node) => node.textContent)).toEqual(['From:', 'To:', 'Subject:']);
+	});
+});
+
+describe('the From line', () => {
+	const from = (editor: EditorView) => editor.state.doc.line(1).text;
+	const type = (editor: EditorView, text: string) =>
+		editor.dispatch(editor.state.update({ changes: { from: 0, to: editor.state.doc.length, insert: text }, userEvent: 'input.type' }));
+
+	it('keeps From when the person selects everything and types: what they typed is the rest of the draft', () => {
+		const editor = mount(HEAD);
+		editor.dispatch({ selection: EditorSelection.single(0, editor.state.doc.length) });
+		type(editor, 'x');
+		expect(editor.state.doc.toString()).toBe('From: alex@example.com\nx');
+		expect(editor.state.selection.main.head).toBe(editor.state.doc.length);
+	});
+
+	it('keeps From when the person selects everything and deletes', () => {
+		const editor = mount(HEAD);
+		editor.dispatch(editor.state.update({ changes: { from: 0, to: editor.state.doc.length }, userEvent: 'delete.selection' }));
+		expect(editor.state.doc.toString()).toBe('From: alex@example.com\n');
+	});
+
+	it('applies the rest of an edit that crosses From, and an undo puts the whole draft back', () => {
+		const editor = mount(HEAD);
+		const before = editor.state.doc.toString();
+		// From the middle of From to the end of To, replaced with typed text.
+		editor.dispatch(editor.state.update({ changes: { from: 8, to: 43, insert: 'To: sam@example.com' }, userEvent: 'input.type' }));
+		expect(from(editor)).toBe('From: alex@example.com');
+		expect(editor.state.doc.line(2).text).toBe('To: sam@example.com');
+		expect(editor.state.doc.line(3).text).toBe('Subject: Saturday');
+		undo(editor);
+		expect(editor.state.doc.toString()).toBe(before);
+	});
+
+	it('leaves an edit that does not reach From as it is, and lets an agent or remote write change it', () => {
+		const editor = mount(HEAD);
+		editor.dispatch(editor.state.update({ changes: { from: 27, insert: 'x' }, userEvent: 'input.type' }));
+		expect(editor.state.doc.line(2).text).toBe('To: xdana@example.com');
+		editor.dispatch(editor.state.update({ changes: { from: 6, to: 22, insert: 'sam@example.com' }, annotations: Transaction.remote.of(true) }));
+		expect(from(editor)).toBe('From: sam@example.com');
 	});
 });
 
 describe('the "!" hint', () => {
-	// jsdom has no layout: give the editor, the mark, the hint and the text around the mark the boxes a real page would, on one row.
-	const ROW = { top: 0, bottom: 20 };
+	// jsdom has no layout: give the editor, the mark and the hint the boxes a real page would.
 	const TEXT_WIDTH = 230;
-	const rect = (left: number, width: number) => ({ ...ROW, left, right: left + width, width, height: 20, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+	const rect = (left: number, width: number, top = 0) => ({ top, bottom: top + 20, left, right: left + width, width, height: 20, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 
-	/** `editor` is the editor's right edge, `markLeft` where the "!" sits; the hint is placed by its data-side and left as the CSS would. */
-	function layout(editor: number, markLeft: number, text: { from: string; left: number } | null) {
-		const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-			if (this.classList.contains('cm-scroller')) return rect(0, editor);
+	/** `editor` is the editor's left edge, `markLeft` where the "!" sits; the hint ends at the mark unless it was clamped, as the CSS places it. */
+	function layout(editor: number, markLeft: number) {
+		return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			if (this.classList.contains('cm-scroller')) return rect(editor, 1000);
 			if (this.classList.contains('cm-email-added-mark')) return rect(markLeft, 12);
-			if (this.classList.contains('cm-email-cc-add')) return rect(editor - 30, 24);
 			if (!this.classList.contains('cm-email-added-tip')) return rect(0, 0);
-			const side = this.getAttribute('data-side');
-			if (side === 'left') return rect(markLeft - TEXT_WIDTH, TEXT_WIDTH);
-			if (side === 'clamp') return rect(markLeft + parseFloat(this.style.left), TEXT_WIDTH);
-			return rect(markLeft + 12 + 4, TEXT_WIDTH);
+			const left = this.hasAttribute('data-clamped') ? markLeft + parseFloat(this.style.left) : markLeft + 12 - TEXT_WIDTH;
+			return rect(left, TEXT_WIDTH, 24);
 		});
-		// Text before the mark starts at 40 (the value column); `text.from` is a piece of text after the mark, at `text.left`.
-		const ranges = vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
-			const data = this.startContainer.textContent ?? '';
-			if (text && data.includes(text.from)) return [rect(text.left, 60)] as unknown as DOMRectList;
-			return [rect(40, markLeft - 40)] as unknown as DOMRectList;
-		});
-		return () => { spy.mockRestore(); ranges.mockRestore(); };
 	}
 	const tip = () => document.querySelector<HTMLElement>('.cm-email-added-tip')!;
 	const open = () => document.querySelector<HTMLButtonElement>('.cm-email-added-mark')!.click();
 
-	it('opens just right of the "!" where it fits, on the mark\'s own row', () => {
-		const restore = layout(1000, 200, null);
+	it('opens below the "!" row and ends at the "!", so it never covers its own address', () => {
+		const spy = layout(0, 300);
 		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ['dana@example.com']);
 		open();
-		expect(tip().getAttribute('data-side')).toBe('right');
-		expect(tip().style.maxWidth).toBe('');
-		expect(tip().getBoundingClientRect().left).toBeGreaterThanOrEqual(212);
-		restore();
+		expect(tip().hasAttribute('data-clamped')).toBe(false);
+		expect(tip().style.left).toBe('');
+		spy.mockRestore();
 	});
 
-	it('ends at the "!" and opens leftward when it does not fit on a phone, never past the start of its own address', () => {
-		const restore = layout(360, 300, null);
+	it('starts at the editor\'s left edge when ending at the "!" would cut it', () => {
+		const spy = layout(0, 100);
 		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ['dana@example.com']);
 		open();
-		expect(tip().getAttribute('data-side')).toBe('left');
-		const box = tip().getBoundingClientRect();
-		expect(box.right).toBe(300);
-		expect(box.left).toBeGreaterThanOrEqual(40);
-		restore();
-	});
-
-	it('stays one line on the "!" row, as close to the "!" as fits and inside the editor, when neither side has room for it', () => {
-		const restore = layout(360, 150, null);
-		mount([HEAD[0], 'To: a@b.co', HEAD[2]], false, ['dana@example.com']);
-		open();
-		expect(tip().getAttribute('data-side')).toBe('clamp');
-		const box = tip().getBoundingClientRect();
-		expect(box.width).toBe(TEXT_WIDTH);
-		expect(box.left).toBe(122);
-		expect(box.right).toBe(352);
-		expect(tip().style.whiteSpace).toBe('');
-		restore();
-	});
-
-	it('does the same with a recipient after the short address on the row, and starts at the left edge of the editor when it is narrower than the hint', () => {
-		const restore = layout(230, 150, { from: 'dana@example.com', left: 170 });
-		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
-		open();
-		expect(tip().getAttribute('data-side')).toBe('clamp');
+		expect(tip().hasAttribute('data-clamped')).toBe(true);
 		expect(tip().getBoundingClientRect().left).toBe(8);
-		restore();
+		spy.mockRestore();
 	});
 
-	it('ends at the "!" over other text on its row when its own address is too short and the editor has room to the left', () => {
-		const restore = layout(1000, 400, { from: 'dana@example.com', left: 416 });
-		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
-		open();
-		expect(tip().getAttribute('data-side')).toBe('left');
-		expect(tip().getBoundingClientRect().right).toBe(400);
-		restore();
-	});
-
-	it('opens right of the "!" over the next address only when the editor has no room to the left for it', () => {
-		const restore = layout(1000, 20, { from: 'dana@example.com', left: 36 });
-		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
-		open();
-		expect(tip().getAttribute('data-side')).toBe('right');
-		expect(tip().getBoundingClientRect().right).toBeLessThanOrEqual(992);
-		restore();
-	});
-
-	it('opens leftward, not over the next address on the row, even where there is room on the right', () => {
-		const restore = layout(1000, 300, { from: 'dana@example.com', left: 316 });
-		mount([HEAD[0], 'To: priya@example.com, dana@example.com', HEAD[2]], false, ['dana@example.com']);
-		open();
-		expect(tip().getAttribute('data-side')).toBe('left');
-		expect(tip().getBoundingClientRect().right).toBe(300);
-		restore();
-	});
-
-	it('is placed again each time it opens, with no above or below flip left over', () => {
-		const restore = layout(1000, 200, null);
+	it('is placed again each time it opens', () => {
+		const spy = layout(0, 100);
 		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ['dana@example.com']);
 		open();
 		open();
+		spy.mockImplementation(function (this: HTMLElement) {
+			if (this.classList.contains('cm-email-added-tip')) return rect(this.hasAttribute('data-clamped') ? 0 : 300 - TEXT_WIDTH + 12, TEXT_WIDTH, 24);
+			return rect(this.classList.contains('cm-email-added-mark') ? 300 : 0, 12);
+		});
 		open();
-		expect(tip().hasAttribute('data-below')).toBe(false);
-		expect(tip().getAttribute('data-side')).toBe('right');
-		restore();
+		expect(tip().hasAttribute('data-clamped')).toBe(false);
+		spy.mockRestore();
 	});
 });

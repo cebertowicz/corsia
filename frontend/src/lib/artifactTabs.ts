@@ -91,8 +91,6 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
 		if (input.landOn) tabs[existing] = { ...tabs[existing], landOn: input.landOn };
-		// The latest opener decides where Back goes: a reopen from anywhere else drops the return.
-		if (input.openedFrom !== tabs[existing].openedFrom) tabs[existing] = { ...tabs[existing], openedFrom: input.openedFrom };
 		return {
 			...ws,
 			tabs,
@@ -112,7 +110,6 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		latestRevision: null,
 		status: 'loading',
 		...(input.landOn ? { landOn: input.landOn } : {}),
-		...(input.openedFrom ? { openedFrom: input.openedFrom } : {}),
 	};
 	return {
 		...ws,
@@ -196,7 +193,7 @@ function commitTab(ws: ThreadArtifactWorkspace, idx: number, next: ArtifactTab, 
 }
 
 function unchanged(a: ArtifactTab, b: ArtifactTab): boolean {
-	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.title === b.title && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision;
+	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.title === b.title && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision && a.icon === b.icon;
 }
 
 /**
@@ -220,6 +217,7 @@ export function applyLoadSignal(ws: ThreadArtifactWorkspace, signal: TabLoadSign
 		loadedRevision: loaded ? signal.revision! : prev.loadedRevision,
 		latestRevision: loaded ? signal.revision! : prev.latestRevision,
 		artifactId: signal.artifactId ?? prev.artifactId,
+		icon: signal.icon ?? prev.icon,
 	};
 	if (unchanged(prev, next)) return null;
 	return commitTab(ws, idx, next, canMergeDuplicate);

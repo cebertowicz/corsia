@@ -27,8 +27,8 @@ function read(comments = 0): ReviewBarRead {
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
-async function render(draftOpen = false, onAnswered?: () => void, extra: Record<string, unknown> = {}) {
-	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered, ...extra } });
+async function render(draftOpen = false, onAnswered?: () => void) {
+	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
 	flushSync();
 }
@@ -418,91 +418,5 @@ describe('ReviewBar', () => {
 		api.answerReview.mockResolvedValueOnce({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(2) });
 		button('Approve with changes')!.click();
 		await vi.waitFor(() => expect(onAnswered).toHaveBeenCalledTimes(1));
-	});
-});
-
-describe('ReviewBar with a send request on the draft', () => {
-	const send = { hold_id: 'h-send', asker: { id: 'email', name: 'Email drafter' }, reason: 'Review the reply to Dana', purpose: 'send' as const };
-	const ordinary = { hold_id: 'h-ord', asker: { id: 'crew', name: 'Trail crew' }, reason: 'Check the parking numbers' };
-	const withRequests = (requests: ReviewBarRead['requests']): ReviewBarRead => ({ ...read(), requests, hold_ids: requests!.map((r) => r.hold_id) });
-
-	it('a send request alone shows the request and no answer controls: Send and Don’t send answer it', async () => {
-		api.fetchReviewBar.mockResolvedValue(withRequests([send]));
-		await render();
-		expect(host.textContent).toContain('Email drafter');
-		expect(host.textContent).toContain('Review the reply to Dana');
-		expect(host.querySelectorAll('.rb-actions button')).toHaveLength(0);
-		for (const name of ['Approve', 'Approve with changes', 'Reject']) expect(button(name)).toBeUndefined();
-	});
-
-	it('an ordinary request beside it keeps its answers, and an answer carries only the ordinary holds', async () => {
-		api.fetchReviewBar.mockResolvedValue(withRequests([ordinary, send]));
-		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts() });
-		await render();
-		expect(host.textContent).toContain('Trail crew');
-		expect(host.textContent).toContain('Check the parking numbers');
-		for (const name of ['Approve', 'Approve with changes', 'Reject']) expect(button(name)).toBeTruthy();
-		button('Approve')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h-ord']));
-	});
-
-	it('once the email has ended, a send request is answered here with its own hold', async () => {
-		api.fetchReviewBar.mockResolvedValue(withRequests([send]));
-		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts() });
-		await render(false, undefined, { emailEnded: true });
-		expect(host.textContent).toContain('Review the reply to Dana');
-		for (const name of ['Approve', 'Approve with changes', 'Reject']) expect(button(name)).toBeTruthy();
-		button('Approve')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h-send']));
-	});
-
-	it('once the email has ended, an answer carries every open request, the send request included', async () => {
-		api.fetchReviewBar.mockResolvedValue(withRequests([ordinary, send]));
-		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts() });
-		await render(false, undefined, { emailEnded: true });
-		button('Approve')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h-ord', 'h-send']));
-	});
-
-	it('an ordinary request listed after the send request still leads the bar', async () => {
-		api.fetchReviewBar.mockResolvedValue(withRequests([send, ordinary]));
-		await render();
-		expect(host.textContent).toContain('Check the parking numbers');
-		expect(button('Approve')).toBeTruthy();
-	});
-
-	it('says nothing about a failed read until the email has ended', async () => {
-		api.fetchReviewBar.mockRejectedValue(new Error('unavailable'));
-		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1' } });
-		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalled());
-		await tick();
-		expect(host.querySelector('.review-bar')).toBeNull();
-	});
-
-	it('once the email has ended and the read failed, it says so and offers Retry, which only reads', async () => {
-		api.fetchReviewBar.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue(withRequests([send]));
-		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts() });
-		await render(false, undefined, { emailEnded: true });
-		expect(host.querySelector('.review-bar')?.textContent).toContain('Couldn’t load the review request.');
-		expect(host.querySelector('[role="alert"]')).toBeTruthy();
-		for (const name of ['Approve', 'Approve with changes', 'Reject']) expect(button(name)).toBeUndefined();
-		button('Retry')!.click();
-		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
-		expect(api.fetchReviewBar).toHaveBeenCalledTimes(2);
-		expect(host.textContent).toContain('Review the reply to Dana');
-		expect(button('Retry')).toBeUndefined();
-		expect(api.answerReview).not.toHaveBeenCalled();
-	});
-
-	it('a Retry that fails again keeps the line and the button', async () => {
-		api.fetchReviewBar.mockRejectedValue(new Error('unavailable'));
-		await render(false, undefined, { emailEnded: true });
-		button('Retry')!.click();
-		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
-		await tick();
-		expect(host.querySelector('.review-bar')?.textContent).toContain('Couldn’t load the review request.');
-		expect(button('Retry')).toBeTruthy();
-		await vi.waitFor(() => expect(button('Retry')!.disabled).toBe(false)); // the read is over: the button can be pressed again
-		expect(api.answerReview).not.toHaveBeenCalled();
 	});
 });

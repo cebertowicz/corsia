@@ -1,8 +1,9 @@
 import type { EditorState } from '@codemirror/state';
+import { isFullAddress } from '$lib/emailDraft';
 
 // Reading the To and Cc lines of an email draft header: where they are, and which entries are added or not full addresses.
 
-export const FIELD = /^(from|to|cc|subject|in reply to|note)\s*:/i;
+export const FIELD = /^(from|to|cc|subject|note)\s*:/i;
 
 /** Where the To and Cc lines are in the header. */
 export function recipientLines(state: EditorState) {
@@ -23,7 +24,7 @@ export function recipientLines(state: EditorState) {
 /** A complete address: something@something.tld, so one still being typed is not marked. */
 const COMPLETE_ADDRESS = /^[^@\s<>,]+@[^@\s<>,]+\.[^@\s<>,]+$/;
 
-/** The entries of a To or Cc value (name and address, or whatever was typed), each with its range in the document. */
+/** The entries of a To or Cc value as typed, each with its range in the document. */
 function recipientEntryRanges(value: string, valueFrom: number): Array<{ from: number; to: number; text: string }> {
 	const found: Array<{ from: number; to: number; text: string }> = [];
 	let at = 0;
@@ -36,16 +37,14 @@ function recipientEntryRanges(value: string, valueFrom: number): Array<{ from: n
 	return found;
 }
 
-/** The addresses of a To or Cc value that are not in `known`, each with the range of its entry (name and address) in the document. */
+/** The addresses of a To or Cc value that are not in `known`, each with its range in the document. */
 export function addedRecipients(value: string, valueFrom: number, known: ReadonlySet<string>): Array<{ from: number; to: number }> {
-	return recipientEntryRanges(value, valueFrom).filter(({ text }) => {
-		const bracket = /<([^>]*)>\s*$/.exec(text);
-		const address = (bracket ? bracket[1] : text).trim();
-		return COMPLETE_ADDRESS.test(address) && !known.has(address.toLowerCase());
-	}).map(({ from, to }) => ({ from, to }));
+	return recipientEntryRanges(value, valueFrom)
+		.filter(({ text }) => isFullAddress(text) && COMPLETE_ADDRESS.test(text) && !known.has(text.toLowerCase()))
+		.map(({ from, to }) => ({ from, to }));
 }
 
-/** The entries of a To or Cc value that are among `bad` (the safeguard's not-a-full-address entries), as typed. */
-export function badRecipientRanges(value: string, valueFrom: number, bad: ReadonlySet<string>): Array<{ from: number; to: number }> {
-	return recipientEntryRanges(value, valueFrom).filter(({ text }) => bad.has(text)).map(({ from, to }) => ({ from, to }));
+/** The entries of a To or Cc value the send would refuse (`isFullAddress`), each with its range in the document. */
+export function badRecipientRanges(value: string, valueFrom: number): Array<{ from: number; to: number }> {
+	return recipientEntryRanges(value, valueFrom).filter(({ text }) => !isFullAddress(text)).map(({ from, to }) => ({ from, to }));
 }

@@ -78,6 +78,7 @@
 	let openRefusal = $state<DocOpenRefusal | null>(null);
 	let liveUnavailable = $state<ViewerContent['liveUnavailable']>(null);
 	let loadedArtifactId = $state<string | null>(null);
+	let emailDraft = $state(false); // The backend's presentation of the loaded file marks it an email draft, so it opens as an email.
 	let readonly = $state(false);
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
@@ -191,7 +192,7 @@
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
 				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
-				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
+				emailDraft = value.presentation?.icon === 'mail'; freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
 	}
@@ -273,7 +274,6 @@
 <div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
 		title={target?.name ?? 'Document'}
-		emailDraft={reviewBarState.emailDraft}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		saveStatus={history.restoring ? 'saving' : save.status}
@@ -319,7 +319,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
-		reviewBar={reviewBarState}
+		{emailDraft}
 		{docState}
 		documentName={target?.name ?? 'this document'}
 		onRetry={() => reloadNonce += 1}
@@ -395,6 +395,6 @@
 	/>
 </div>
 {#snippet reviewControls(inSheet: boolean)}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} emailEnded={reviewBarState.emailEnded} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined && !inSheet} {inSheet} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined && !inSheet} {inSheet} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

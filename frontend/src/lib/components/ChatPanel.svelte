@@ -38,7 +38,7 @@
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { createPlanDestinations } from './chatPlanDestinations';
-	import { openDocumentDestination, openDocumentOnReplies } from './chatReplyDestination';
+	import { openDocumentOnReplies } from './chatReplyDestination';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -359,7 +359,7 @@
 				onOpenDestination={(destination, threadId) => {
 					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
 					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
-					if (destination.pane === 'documents') openDocumentDestination(destination, threadId, $activeThreadId, onOpenDocuments);
+					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
 			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} onJumpToReply={jumpToChatReply} scroller={messagesEl} />

@@ -13,6 +13,7 @@ from connections.microsoft.errors import MicrosoftError
 from connections.mail import email_screen
 from connections.mail.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
 from infra.db_async import run_in_db
+from registry.presentation import EMAIL_DRAFT_FOLDER
 from tools.action_delivery import deliver_claimed
 from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft
@@ -188,7 +189,7 @@ class MicrosoftMailDraftTool(Tool):
             address = str((await run_in_db(_visible_account, account, thread_id))["address"])
             text = compose_document(address, to, cc, subject, body, "")
             saved = await save_draft(
-                thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
+                thread_id=thread_id, kind="email", extension=".md", prefix=EMAIL_DRAFT_FOLDER,
                 account_id=account, target={"account_id": account, "account": address}, text=text,
                 draft_id=kwargs.get("draft_id"), context=kwargs,
                 description="Microsoft email draft; the person reviews it before anything is sent.",

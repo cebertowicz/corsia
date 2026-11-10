@@ -101,17 +101,17 @@ describe('EmailConversation read states', () => {
 		expect(toggles()).toHaveLength(0);
 	});
 
-	it('says a failed read failed and offers Try again, which calls back once per press', () => {
+	it('says a failed read failed and offers Retry, which calls back once per press', () => {
 		let tries = 0;
 		component = mount(EmailConversation, { target: host, props: { messages: [], status: 'error', onretry: () => { tries += 1; } } });
 		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load the earlier emails in this conversation.');
 		const retry = host.querySelector<HTMLButtonElement>('.email-retry')!;
-		expect(retry.textContent).toBe('Try again');
+		expect(retry.textContent).toBe('Retry');
 		retry.click();
 		expect(tries).toBe(1);
 	});
 
-	it('a partial read lists the emails it has, counts the missing ones and offers Try again', () => {
+	it('a partial read lists the emails it has, counts the missing ones and offers Retry', () => {
 		component = mount(EmailConversation, { target: host, props: { messages, status: 'partial', unreadable: 3 } });
 		expect(host.querySelector('h3')?.textContent).toContain('2 emails');
 		expect(host.querySelector('[role="alert"]')?.textContent).toContain('3 emails in this conversation couldn’t be loaded.');

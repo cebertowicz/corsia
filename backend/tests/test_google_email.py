@@ -242,9 +242,9 @@ async def test_a_reply_target_is_kept_in_the_record_and_never_written_into_the_d
     assert not any(line.lower().startswith("in reply to") for line in _header_lines(mail, again))
 
 
-def test_a_document_saved_with_an_in_reply_to_line_still_parses():
+def test_an_in_reply_to_line_is_not_a_draft_header():
     text = 'From: me@example.com\nTo: a@example.com\nSubject: Re: Hi\nIn reply to: "Hi" from Pat\n\nBody.\n'
-    assert email_document.parse_document(text)["subject"] == "Re: Hi"
+    assert email_document.parse_document(text) is None
 
 
 async def test_a_reply_target_with_no_readable_headers_is_refused(mail):
@@ -606,10 +606,10 @@ async def test_the_agent_is_told_to_send_only_when_the_person_says_to(mail):
     assert TOOL_CATALOG["email_send"].summary == "Send a saved email draft after the person says to send it"
 
 
-async def test_the_notes_the_person_sees_are_kept_in_the_record_with_their_kind(mail):
+async def test_only_quiet_notes_are_kept_in_the_record(mail):
     saved = await _draft(mail, reply_to_message_id="m-100")
     notes = json.loads(_row(saved["draft_id"])["target_json"])["notes"]
-    assert notes and all(set(note) == {"kind", "text", "message_ref"} and note["kind"] in {"loud", "quiet"} for note in notes)
-    assert any(note["kind"] == "quiet" and "emails from" in note["text"] for note in notes)
-    # The quoted message and the attachment list are not notes; the record's own fields carry them.
-    assert not any(note["text"].startswith(("The message being replied to", "Attachment:")) for note in notes)
+    assert all(isinstance(note, str) for note in notes)
+    # The 30-day count, the quoted message and the attachment list are not shown to the person; newer emails and
+    # recipients are worked out by the draft view, never written here.
+    assert not any("emails from" in note or note.startswith(("The message being replied to", "Attachment:")) for note in notes)

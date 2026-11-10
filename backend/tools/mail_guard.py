@@ -44,18 +44,9 @@ class Verdict:
     warnings: list[str] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     evidence_ids: list[dict[str, str]] = field(default_factory=list)
-    #: What the person sees on the draft: each of the lists above, worded for them, with a ``kind`` (``loud`` changes who
-    #: gets the email or whether it is still the right reply; ``quiet`` is context) and the message it is about.
-    notes: list[dict[str, str | None]] = field(default_factory=list)
-
-
-def _person(sender: str) -> str:
-    name, address = parseaddr(sender)
-    return name or address or sender
-
-
-def _note(result: Verdict, kind: str, text: str, message: Message | None = None) -> None:
-    result.notes.append({"kind": kind, "text": text, "message_ref": message.message_id if message else None})
+    #: Context the person sees under the draft's header, worded for them. Who the email goes to and newer emails in
+    #: its thread are not here: the draft view works those out from the draft and the conversation it reads.
+    quiet: list[str] = field(default_factory=list)
 
 
 def normalize_subject(subject: str) -> str:
@@ -109,7 +100,6 @@ def check_reply(
         result.recipients = recipients
         if requested_to and [x.casefold() for x in requested_to] != [x.casefold() for x in recipients]:
             result.warnings.append(f"The requested recipient differs from the original reply address {', '.join(recipients)}; the reply will go to {', '.join(requested_to)}.")
-            _note(result, "loud", f"This goes to {', '.join(requested_to)}, not {', '.join(recipients)}.")
     for message in thread:
         if message.date <= target.date or message.message_id == target.message_id:
             continue
@@ -117,10 +107,8 @@ def check_reply(
             result.stops.append("You already replied after the target:\n" + evidence(message))
         elif same_sender(message.sender, target.sender):
             result.stale.append("The sender wrote again in this thread:\n" + evidence(message))
-            _note(result, "loud", f"{_person(message.sender)} wrote again in this thread.", message)
         else:
             result.warnings.append("Another person wrote in this thread:\n" + evidence(message))
-            _note(result, "loud", f"{_person(message.sender)} also wrote in this thread.", message)
     subject = normalize_subject(target.subject)
     for message in sender_messages:
         if (message.thread_id == target.thread_id or message.date <= target.date
@@ -132,8 +120,8 @@ def check_reply(
             result.stale.append(detail)
         else:
             result.warnings.append(detail)
-        _note(result, "loud", f"{_person(message.sender)} wrote about the same subject in another thread.", message)
+        name, address = parseaddr(message.sender)
+        result.quiet.append(f"{name or address or message.sender} wrote about the same subject in another thread.")
     if not target.own:
         result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
-        _note(result, "quiet", result.info[-1])
     return result

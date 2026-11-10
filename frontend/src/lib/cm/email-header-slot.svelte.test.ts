@@ -7,7 +7,7 @@ import { useEmailHeader, type EmailHeaderOptions } from './email-header-slot.sve
 Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
 
 const DOC = 'From: Alex Rivera <alex@example.com>\nTo: Dana Whitfield <dana@example.com>\nSubject: Saturday\n\nHi Dana,\n';
-const OPTIONS: EmailHeaderOptions = { quiet: [], bad: [], answered: null, attachmentsKey: '', mountAttachments: null };
+const OPTIONS: EmailHeaderOptions = { quiet: [], answered: null, attachmentsKey: '', mountAttachments: null };
 let cleanup: (() => void) | null = null;
 let view: EditorView | null = null;
 
