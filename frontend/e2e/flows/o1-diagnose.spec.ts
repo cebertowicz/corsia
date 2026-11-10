@@ -18,12 +18,12 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(2000); // Capture the settled shell, not its resize transition.
     await expect(page.locator('.cm-content')).toBeVisible();
-    await page.screenshot({ path: `${out}/rest-${width}.png` });
+    await page.screenshot({ animations: 'disabled', path: `${out}/rest-${width}.png` });
     const details = page.getByRole('button', { name: 'Document details' });
     if (await details.isVisible()) {
       await details.click();
       await expect(page.locator('button.identity')).toBeVisible();
-      await page.screenshot({ path: `${out}/details-${width}.png` });
+      await page.screenshot({ animations: 'disabled', path: `${out}/details-${width}.png` });
     }
     await showPicker(page);
     const control = page.locator('button.identity');
@@ -52,7 +52,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     expect(rects.input!.width).toBeGreaterThan(100);
     expect(rects.dialog!.left).toBeGreaterThanOrEqual(0);
     expect(rects.dialog!.right).toBeLessThanOrEqual(width);
-    await page.screenshot({ path: `${out}/picker-${width}.png` });
+    await page.screenshot({ animations: 'disabled', path: `${out}/picker-${width}.png` });
     await page.keyboard.press('Escape');
     if (await details.isVisible() && await details.getAttribute('aria-expanded') === 'true') await details.click();
   }
@@ -71,14 +71,14 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   }
   console.log('SWITCH', low, high);
   expect(await inDetails(low)).toBe(true);
-  await page.screenshot({ path: `${out}/switch-details-${low}.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-${low}.png` });
   await page.getByRole('button', { name: 'Document details' }).click();
   await expect(page.locator('button.identity')).toBeVisible();
-  await page.screenshot({ path: `${out}/switch-details-open-${low}.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-open-${low}.png` });
   await page.getByRole('button', { name: 'Document details' }).click();
   expect(await inDetails(high)).toBe(false);
   await expect(page.locator('button.identity')).toBeVisible();
-  await page.screenshot({ path: `${out}/switch-status-${high}.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/switch-status-${high}.png` });
   await page.setViewportSize({ width: 900, height: 900 });
   await page.waitForTimeout(2000); // The Details switch follows the shell transition.
   await showPicker(page);
@@ -91,22 +91,22 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await page.getByRole('option', { name: 'Community outreach', exact: true }).click();
   await expect(page.locator('button.identity')).toContainText('Saving');
   await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toHaveValue('Community outreach');
-  await page.screenshot({ path: `${out}/pending-open.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/pending-open.png` });
   await page.keyboard.press('Escape');
   await expect(page.locator('button.identity')).toContainText('Saving');
-  await page.screenshot({ path: `${out}/pending-closed.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/pending-closed.png` });
   release();
   await expect(page.locator('button.identity')).toContainText('Change failed');
   await expect(page.locator('button.identity')).toContainText('Research coordinator');
-  await page.screenshot({ path: `${out}/failure-closed.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/failure-closed.png` });
   await page.locator('button.identity').click();
   await expect(page.getByText('Couldn’t change the supervisor. Try again.')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Internal Server Error');
-  await page.screenshot({ path: `${out}/failure-open.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/failure-open.png` });
   await page.unroute('**/api/artifacts/*/ownership');
   await page.route('**/api/artifacts/*/ownership', route => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ detail: 'legacy raw refusal' }) }));
   await page.getByRole('combobox', { name: 'Owner', exact: true }).click();
   await page.getByRole('option', { name: 'You', exact: true }).click();
   await expect(page.getByText('Taking ownership isn’t available when more than one person uses this CORSIA. Choose an agent instead.')).toBeVisible();
-  await page.screenshot({ path: `${out}/refusal-fallback.png` });
+  await page.screenshot({ animations: 'disabled', path: `${out}/refusal-fallback.png` });
 });
