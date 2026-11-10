@@ -2,7 +2,7 @@
 	import { tick, untrack } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
 	import ImageViewer from './ImageViewer.svelte';
-	import PdfViewer from './PdfViewer.svelte';
+	import ArtifactPdfLeaf, { createPdfTabs } from './ArtifactPdfLeaf.svelte';
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
@@ -52,18 +52,14 @@
 	// about it is stored on the tab, so a file replaced by one of the other kind
 	// is shown by whichever viewer the next load finds it needs.
 	let imageTabs = $state<string[]>([]);
-	// A file the backend says is a PDF is shown the same way, in the PDF viewer.
-	let pdfTabs = $state<string[]>([]);
+	const pdfTabs = createPdfTabs(() => threadId, () => workspace.tabs);
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
 	);
 	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
-	const showsPdf = $derived(showable !== null && !!activeTab && pdfTabs.includes(imageKey(activeTab.instanceId)));
-	const pdfTarget = $derived(showsPdf ? showable : null);
-	/** The draft tab a PDF was opened from (its attachment chip), while that tab is still open: only then does the viewer offer "Back to draft". */
-	const pdfReturnTab = $derived(showsPdf && activeTab?.openedFrom ? workspace.tabs.find((t) => t.instanceId === activeTab.openedFrom) ?? null : null);
+	const showsPdf = $derived(showable !== null && !!activeTab && pdfTabs.has(activeTab.instanceId));
 	const target = $derived(showsImage || showsPdf ? null : showable);
 	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
@@ -169,8 +165,6 @@
 		const prefix = `${threadId}\u0000`;
 		const kept = imageTabs.filter((k) => !k.startsWith(prefix) || open.has(k));
 		if (kept.length !== imageTabs.length) imageTabs = kept;
-		const keptPdf = pdfTabs.filter((k) => !k.startsWith(prefix) || open.has(k));
-		if (keptPdf.length !== pdfTabs.length) pdfTabs = keptPdf;
 	});
 	function recordDocumentPlace(instanceId: string, place: TextDocumentPlace) {
 		if (threadId) recordTabDocumentPlace(threadId, instanceId, place);
@@ -186,8 +180,7 @@
 			const key = imageKey(signal.instanceId);
 			const others = imageTabs.filter((k) => k !== key);
 			imageTabs = signal.renderer === 'image' ? [...others, key] : others;
-			const otherPdfs = pdfTabs.filter((k) => k !== key);
-			pdfTabs = signal.renderer === 'pdf' ? [...otherPdfs, key] : otherPdfs;
+			pdfTabs.mark(signal.instanceId, signal.renderer === 'pdf');
 		}
 		if (threadId) applyTabLoadSignal(threadId, signal);
 		if (signal.status === 'ready') {
@@ -284,14 +277,8 @@
 					<span>It isn’t in this chat’s files.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
-			{:else if pdfTarget}
-				<PdfViewer target={pdfTarget} {onSignal} backToDraft={pdfReturnTab !== null} onClose={() => {
-					const pdfId = activeTab?.instanceId;
-					if (!pdfId) return;
-					// Land on the draft first: closing the active tab would otherwise pick its neighbour.
-					if (pdfReturnTab && threadId) setActiveTab(threadId, pdfReturnTab.instanceId);
-					void requestCloseTab(pdfId);
-				}} />
+			{:else if showsPdf && showable}
+				<ArtifactPdfLeaf target={showable} {onSignal} {threadId} tab={activeTab} tabs={workspace.tabs} closeTab={requestCloseTab} />
 			{:else if imageTarget}
 				<ImageViewer
 					bind:this={imageViewer}

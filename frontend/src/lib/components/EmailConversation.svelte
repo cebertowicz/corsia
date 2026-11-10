@@ -152,7 +152,7 @@
 	.email-comment-for { font-size: var(--text-caption); color: var(--text-tertiary); }
 	.email-comment-text { color: var(--text-primary); overflow-wrap: anywhere; }
 	.email-text { font-family: var(--font-sans); font-size: var(--text-body); line-height: var(--lh-relaxed); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
-	@media (max-width: 768px) { .email-text { font-size: var(--text-callout); } }
+	@media (max-width: 48rem) { .email-text { font-size: var(--text-callout); } }
 	@media (pointer: coarse) { .email-toggle { min-height: var(--touch-target); } .email-retry { min-height: var(--touch-target); display: inline-flex; align-items: center; } }
 	@media (prefers-reduced-motion: reduce) { .email-toggle, .email-chevron { transition: none; } }
 </style>

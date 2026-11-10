@@ -54,12 +54,12 @@
 {/if}
 
 <style>
-	.email-attachments { list-style: none; margin: 0; padding: var(--space-2) 2px var(--space-1); display: flex; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.email-attachments { list-style: none; margin: 0; padding: var(--space-2) calc(var(--space-1) / 2) var(--space-1); display: flex; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	/* One pill holds the chip (icon, name, size) and the remove mark: the pill carries the fill, the hover and press tint and the
 	   focus ring, so nothing floats outside it. Desktop caps it at 320 px; on a narrow screen it takes the line. */
 	.attachment {
-		display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: min(100%, 320px);
-		min-height: 32px; padding: 0 var(--space-1) 0 var(--space-3); border-radius: var(--radius-pill); background: var(--bg-tertiary);
+		display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: min(100%, calc(var(--space-7) * 10));
+		min-height: var(--space-7); padding: 0 var(--space-1) 0 var(--space-3); border-radius: var(--radius-pill); background: var(--bg-tertiary);
 		transition: opacity 160ms ease-out, transform 160ms ease-out, background var(--dur-tight) var(--ease-snap);
 	}
 	.attachment:has(:global(.tile.chip.thumbed)) { padding-left: var(--space-1); }
@@ -74,17 +74,17 @@
 		background: transparent !important; border-radius: var(--radius-pill);
 	}
 	.attachment :global(button.tile.chip:focus-visible) { outline: none; }
-	.attachment-remove { all: unset; box-sizing: border-box; position: relative; cursor: pointer; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--radius-pill); color: var(--text-tertiary); }
+	.attachment-remove { all: unset; box-sizing: border-box; position: relative; cursor: pointer; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: var(--space-6); height: var(--space-6); border-radius: var(--radius-pill); color: var(--text-tertiary); }
 	@media (hover: hover) { .attachment-remove:hover { color: var(--text-primary); background: var(--bg-hover); } }
 	.attachment-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 	/* On touch the mark is drawn at 24 px and the press target is 44 px (--touch-target) around it, reaching past the pill and kept
 	   clear of the size text by the gap before it. */
 	@media (pointer: coarse) {
-		.attachment { min-height: 36px; }
+		.attachment { min-height: calc(var(--space-6) + var(--space-3)); }
 		.attachment-remove { margin-left: var(--space-3); }
 		.attachment-remove::after { content: ''; position: absolute; top: 50%; left: 50%; width: var(--touch-target); height: var(--touch-target); transform: translate(-50%, -50%); }
 	}
-	@media (max-width: 768px) {
+	@media (max-width: 48rem) {
 		.attachment { max-width: 100%; }
 	}
 </style>

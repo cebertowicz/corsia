@@ -111,6 +111,22 @@ def _size(count: int) -> str:
     return f"{count / (1024 * 1024):.1f} MB"
 
 
+async def _check_message_size(
+    backend: MailBackend, thread_id: str, account_id: str, text: str, target: dict, attached: list,
+    limit: int, original: Any, font: tuple[str | None, str | None],
+) -> None:
+    """Builds the message as it would be sent and refuses a draft whose attachments push it past the account's size limit."""
+    parsed = parse_document(text)
+    if parsed is None:
+        raise DraftRefused("Couldn't prepare the draft. Check its contents and save it again.")
+    sample = build_message(parsed, target)
+    quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
+    mail_compose.add_html(sample, parsed["body"], font[0], font[1], quote_body)
+    await asyncio.to_thread(attachments.add, thread_id, sample, attached)
+    if len(sample.as_bytes()) > limit:
+        raise DraftRefused(f"Draft not saved: {attachments.OVERSIZE}")
+
+
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
 
 class EmailDraftTool(Tool):
@@ -222,15 +238,7 @@ class EmailDraftTool(Tool):
         notes.extend(f"Attachment: {item['name']} ({_size(item['size'])})" for item in attached)
         text = compose_document(address, to, cc, subject, body, signature, notes)
         if applies_to_message and limit is not None:
-            parsed = parse_document(text)
-            if parsed is None:
-                raise DraftRefused("Couldn't prepare the draft. Check its contents and save it again.")
-            sample = build_message(parsed, target)
-            quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
-            mail_compose.add_html(sample, parsed["body"], face, size, quote_body)
-            await asyncio.to_thread(attachments.add, thread_id, sample, attached)
-            if len(sample.as_bytes()) > limit:
-                raise DraftRefused(f"Draft not saved: {attachments.OVERSIZE}")
+            await _check_message_size(backend, thread_id, account_id, text, target, attached, limit, original, (face, size))
         try:
             saved = await save_draft(
                 thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",

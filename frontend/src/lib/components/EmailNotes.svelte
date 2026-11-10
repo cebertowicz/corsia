@@ -22,6 +22,6 @@
 		padding: var(--space-2) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-phone-inset, var(--doc-rail, 44px));
 		font-size: var(--text-footnote); line-height: var(--lh-normal); font-weight: var(--fw-semibold); color: var(--amber-text);
 	}
-	.email-loud li { display: flex; align-items: baseline; gap: var(--space-2); padding: 0 2px; overflow-wrap: anywhere; }
+	.email-loud li { display: flex; align-items: baseline; gap: var(--space-2); padding: 0 calc(var(--space-1) / 2); overflow-wrap: anywhere; }
 	.loud-icon { flex: 0 0 auto; align-self: center; }
 </style>
