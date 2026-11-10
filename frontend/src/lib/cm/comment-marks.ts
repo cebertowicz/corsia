@@ -1,9 +1,10 @@
-import { StateField, StateEffect } from '@codemirror/state';
+import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
+import { mapCommentRange } from './comment-range';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -33,6 +34,8 @@ export interface CommentRange {
 	pin?: { region: ImageRegion; number: number; color: string };
 	/** The thread has a reply the reader has not opened: its highlight carries the new-reply sign (`comment-new-signs.ts`). */
 	unread?: boolean;
+	/** Its text was just typed over: the rest of the word typed at its end joins it (`mapCommentRange`). */
+	open?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
@@ -57,14 +60,23 @@ export const commentRanges = StateField.define<CommentRange[]>({
 	create() { return []; },
 	update(ranges, tr) {
 		for (const effect of tr.effects) {
-			if (effect.is(setCommentRanges)) ranges = effect.value.filter(located);
+			// The comments' own positions arrive without the open end the typing here gave a range: it stays while they agree.
+			if (effect.is(setCommentRanges)) ranges = effect.value.filter(located).map((range) =>
+				ranges.some((was) => was.open && was.id === range.id && was.from === range.from && was.to === range.to) ? { ...range, open: true } : range);
 		}
 		if (!tr.docChanged) return ranges;
 		return ranges
-			.map((range) => range.point ? { ...range, from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.from, -1) } : { ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) })
+			// A pure insertion's empty range is neither text nor a point: text typed at it ends it, as before.
+			.map((range) => range.point || range.from < range.to
+				? { ...range, ...mapCommentRange(range.point ? { from: range.from, to: range.from } : range, tr.changes) }
+				: { ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) })
 			.filter((range) => located(range) && holdsQuote(range, tr.newDoc));
 	}
 });
+
+/** The comments whose text was just typed over in `state`: the one owner of an editor's open ends, which the cards follow. */
+export const openCommentIds = (state: EditorState): ReadonlySet<string> =>
+	new Set(state.field(commentRanges, false)?.filter((range) => range.open).map((range) => range.id));
 
 /** The anchor highlights, derived from `commentRanges`. A suggestion's range has none: its own marks replace it. */
 export const commentMarks = [

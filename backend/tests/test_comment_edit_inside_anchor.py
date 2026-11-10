@@ -272,6 +272,30 @@ async def test_typing_at_an_edge_stays_outside_the_highlight_after_a_reload(owne
 
 
 @pytest.mark.asyncio
+async def test_a_word_typed_over_the_highlight_a_key_at_a_time_keeps_the_comment_after_a_reload(ownership_scope, tmp_path, monkeypatch):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    try:
+        artifact, row = _comment_on(scope, entry)
+        begin = entry.live.text.index(QUOTE)
+        _edit(entry, begin, len(QUOTE), "H")
+        for index, key in enumerate("andoff overview"):
+            _edit(entry, begin + 1 + index, 0, key)
+        assert row["id"] in entry.live.open_ends
+        # A placement answer that agrees with the range keeps it open; the next edit elsewhere closes it.
+        entry.live.track_range(row["id"], *entry.live.ranges[row["id"]])
+        _edit(entry, 0, 0, "X")
+        _edit(entry, entry.live.text.index("Handoff overview") + len("Handoff overview"), 0, "!")
+        assert row["id"] not in entry.live.open_ends
+        live, reloaded = await _live_then_reloaded(scope, entry, artifact, row)
+        for thread in (live, reloaded):
+            assert thread["orphaned"] is False
+            assert _text_at(entry.live.text, thread) == "Handoff overview"
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("edge", ["start", "end"])
 async def test_deleting_text_at_an_edge_shrinks_the_highlight_and_keeps_it_after_a_reload(ownership_scope, tmp_path, monkeypatch, edge):
     scope = ownership_scope

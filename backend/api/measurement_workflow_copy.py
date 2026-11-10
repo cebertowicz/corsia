@@ -59,7 +59,7 @@ def summary(verdict: Mapping[str, Any] | None, excluded: Mapping[str, Any], owne
         elif word == "changed_early":
             inputs = verdict.get("inputs") or {}
             count = inputs.get("k")
-            lines.append(f"The earlier version was replaced after {count} runs, before a call."
+            lines.append(f"The earlier version was replaced after {count} {'run' if count == 1 else 'runs'}, before a call."
                          if type(count) is int else REASON_COPY["changed_early"])
         elif word in {"keep", "revert"}:
             lines.append(OUTCOME_COPY.get(reason, f"The comparison supports {'keeping' if word == 'keep' else 'reverting'} this version."))

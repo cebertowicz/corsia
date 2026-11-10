@@ -69,7 +69,7 @@ function openCard(narrow = true) {
 function edit(from: number, to: number, insert: string) {
 	const before = get(screenText);
 	const change = ChangeSet.of({ from, to, insert }, before.length);
-	remapComments(ARTIFACT, (position) => change.mapPos(position));
+	remapComments(ARTIFACT, change);
 	screenText.set(before.slice(0, from) + insert + before.slice(to));
 	flushSync();
 }

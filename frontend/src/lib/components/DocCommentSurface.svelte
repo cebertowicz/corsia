@@ -119,9 +119,9 @@
 	const roomForMargin = $derived(hasRoomForMargin(canvasWidth, $paneOverlay));
 	const sheetDrawer = $derived(narrow || (!image && !roomForMargin));
 	/** How a card opened from the text shows: the phone sheet; else the margin column on any desktop canvas with room, cards beside their anchors; else a popover over the text. The editor reads it, so only a press opens a card over the text. */
-	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : !narrow && !image && roomForMargin ? 'margin' : 'popover'; }
-	const wantsRoom = $derived(!narrow && !image && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
-	const margin = $derived(wantsRoom && roomForMargin);
+	const columnFits = $derived(!narrow && !image && roomForMargin); // the one margin rule: the card mode and the column both read it
+	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : columnFits ? 'margin' : 'popover'; }
+	const margin = $derived(columnFits && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
 	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "Original text deleted" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });

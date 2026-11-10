@@ -166,11 +166,12 @@
 
 	{#if showContent && msg.content}
 	<div class="comment-mark-layer">
-	<div class="md-content long-message-body">
-		{#if msg.firstRunOpeningReveal}
-			<span class="sr-only" aria-live="polite" aria-atomic="true">{openingAnnouncement}</span>
-		{/if}
-		<div aria-hidden={openingAnnouncement || (msg.firstRunOpeningReveal && msg.typewriterPos != null) ? 'true' : undefined}>
+	<!-- Beside the body, not in it: a comment's offsets count the body's text, which must read the same as after a reload. -->
+	{#if msg.firstRunOpeningReveal}
+		<span class="sr-only" aria-live="polite" aria-atomic="true">{openingAnnouncement}</span>
+	{/if}
+	<!-- The leading space is part of that text: saved comment offsets count it. -->
+	<div class="md-content long-message-body">{' '}<div aria-hidden={openingAnnouncement || (msg.firstRunOpeningReveal && msg.typewriterPos != null) ? 'true' : undefined}>
 			{#if msg.typewriterPos != null}
 				<pre class="typewriter-text">{msg.content.slice(0, msg.typewriterPos)}</pre>
 				<span class="typewriter-cursor" aria-hidden="true">&#9613;</span>

@@ -870,6 +870,25 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(document.body.querySelector('[data-comment-id="comment-1"] .ct-act.resolve')).toBe(resolve);
 	});
 
+	it('reports the margin card mode exactly while its margin column is shown, as the canvas is resized', async () => {
+		const resized: (() => void)[] = [];
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized.push(callback); } observe() {} unobserve() {} disconnect() {} });
+		let width = 1000;
+		const bounds = document.body.appendChild(document.createElement('div'));
+		bounds.getBoundingClientRect = () => new DOMRect(0, 0, width, 800);
+		canvases.push(bounds);
+		render({ bounds, state: { kind: 'list' } });
+		const surface = component as unknown as { cardMode(): string };
+		const column = () => document.body.querySelector('.drawer-comments.margin-clip') !== null;
+		const resize = (to: number) => { width = to; resized.forEach((callback) => callback()); flushSync(); };
+		expect([surface.cardMode(), column()]).toEqual(['margin', true]);
+		resize(600); // under MARGIN_MIN: the column leaves (after its exit motion) as the mode stops being 'margin'
+		expect(surface.cardMode()).toBe('popover');
+		await vi.waitFor(() => expect(column()).toBe(false));
+		resize(660); // exactly MARGIN_MIN
+		expect([surface.cardMode(), column()]).toEqual(['margin', true]);
+	});
+
 	it('opens a thread as a popover at a narrow width that is not a phone, and as a sheet on a phone', () => {
 		render({ narrow: true, phone: false, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id } });
 		expect(document.body.querySelector('[data-popover]')).not.toBeNull();

@@ -4,11 +4,11 @@ import type { DocComment } from './docComments';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
+import { edges, placeNow, type Positions } from './docCommentPositions';
 
 /** A live row's placement (4.2). Rows without one are not live, or have no place the server tracks. */
 export type Placement = 'placed' | 'placing' | 'not_placed';
 type Rows = Writable<Record<string, DocComment[]>>;
-type Positions = { from: Y.RelativePosition; to: Y.RelativePosition };
 type Range = NonNullable<DocumentFrame['ranges']>[number];
 
 /** The rows the server keeps a live range for: anchored, top level, not a review comment, not orphaned. */
@@ -206,11 +206,9 @@ class LivePlacement {
 			.map(range => [range.id, range]));
 		const keep = this.marked !== null; // a newer answer decides rows this one does not name
 		const { text } = this.session;
-		for (const [id, range] of found) {
-			// Exclusive boundaries: text typed exactly at either edge lands outside the range.
-			this.positions.set(id, { from: Y.createRelativePositionFromTypeIndex(text, range.from_off, 0),
-				to: Y.createRelativePositionFromTypeIndex(text, range.to_off, -1) });
-		}
+		// An open end (`docCommentPositions.ts`) survives an answer that agrees with the row: the server holds it open too.
+		const open = (id: string, range: Range) => !!this.positions.get(id)?.open && this.current().some(row => row.id === id && row.from === range.from_off && row.to === range.to_off);
+		for (const [id, range] of found) this.positions.set(id, edges(text, range.from_off, range.to_off, open(id, range)));
 		this.write(rows => rows.map(original => {
 			const state = flags.get(original.id);
 			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
@@ -230,12 +228,11 @@ class LivePlacement {
 	private moved = (event: Y.YTextEvent): void => {
 		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
 		if (!this.positions.size) return;
-		const { doc } = this.session;
 		this.write(rows => rows.map(row => {
 			const at = row.drawn ? this.positions.get(row.id) : undefined;
 			if (!at) return row;
-			const from = Y.createAbsolutePositionFromRelativePosition(at.from, doc)?.index;
-			const to = Y.createAbsolutePositionFromRelativePosition(at.to, doc)?.index;
+			const { from, to, moved } = placeNow(at, this.session.text, row, event.delta);
+			if (moved) this.positions.set(row.id, moved);
 			return from === undefined || to === undefined || (from === row.from && to === row.to) ? row : { ...row, from, to };
 		}));
 	};
