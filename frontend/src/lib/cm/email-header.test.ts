@@ -193,6 +193,24 @@ describe('the "!" hint', () => {
 		restore();
 	});
 
+	it('ends at the "!" over other text on its row when its own address is too short and the editor has room to the left', () => {
+		const restore = layout(1000, 400, { from: 'dana@example.com', left: 416 });
+		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
+		open();
+		expect(tip().getAttribute('data-side')).toBe('left');
+		expect(tip().getBoundingClientRect().right).toBe(400);
+		restore();
+	});
+
+	it('opens right of the "!" over the next address only when the editor has no room to the left for it', () => {
+		const restore = layout(1000, 20, { from: 'dana@example.com', left: 36 });
+		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
+		open();
+		expect(tip().getAttribute('data-side')).toBe('right');
+		expect(tip().getBoundingClientRect().right).toBeLessThanOrEqual(992);
+		restore();
+	});
+
 	it('opens leftward, not over the next address on the row, even where there is room on the right', () => {
 		const restore = layout(1000, 300, { from: 'dana@example.com', left: 316 });
 		mount([HEAD[0], 'To: priya@example.com, dana@example.com', HEAD[2]], false, ['dana@example.com']);
