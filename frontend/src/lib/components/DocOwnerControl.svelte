@@ -4,7 +4,7 @@
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
-	let { artifactId, ownership, onChange, compact = false }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean } = $props();
+	let { artifactId, ownership, onChange, compact = false, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null) }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null } = $props();
 	let anchor = $state<HTMLButtonElement>();
 	let paneWidth = $state(360);
 	function measurePane() {
@@ -14,10 +14,6 @@
 		paneWidth = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 	}
 	let open = $state(false);
-	let saving = $state(false);
-	let error = $state('');
-	let errorFor = $state<'owner' | 'supervisor' | null>(null);
-	let pending = $state<{ kind: 'owner' | 'supervisor'; id: string; name: string } | null>(null);
 	let picker = $state<'owner' | 'supervisor' | null>(null);
 	let search = $state('');
 	let typing = $state(false);

@@ -92,6 +92,10 @@
 	let feedbackStatus = $state<DocFeedbackStatus>();
 	let detailsOpen = $state(false);
 	let ownershipInDetails = $state(true);
+	let ownershipSaving = $state(false);
+	let ownershipError = $state('');
+	let ownershipErrorFor = $state<'owner' | 'supervisor' | null>(null);
+	let ownershipPending = $state<{ kind: 'owner' | 'supervisor'; id: string; name: string } | null>(null);
 
 	// Measure the complete status content, including the full ownership label.
 	// The detached visual probe is independent of the currently selected layout,
@@ -215,7 +219,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} onChange={(value) => onOwnershipChanged?.(value)} />{:else}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation.phrase}</button></span>{/if}
+			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation.phrase}</button></span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -244,7 +248,7 @@
 	</div>
 	{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
 		<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 			{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 			{#if freshness && freshnessPresentation}
 				{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>

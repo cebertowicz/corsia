@@ -20,13 +20,13 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await expect(page.locator('.cm-content')).toBeVisible();
     await page.screenshot({ animations: 'disabled', path: `${out}/rest-${width}.png` });
     const details = page.getByRole('button', { name: 'Document details' });
-    if (!(await page.locator('button.identity').isVisible()) && await details.isVisible()) {
+    if (!(await page.locator('button.identity:visible').first().isVisible()) && await details.isVisible()) {
       await details.click();
-      await expect(page.locator('button.identity')).toBeVisible();
+      await expect(page.locator('button.identity:visible').first()).toBeVisible();
       await page.screenshot({ animations: 'disabled', path: `${out}/details-${width}.png` });
     }
     await showPicker(page);
-    const control = page.locator('button.identity');
+    const control = page.locator('button.identity:visible').first();
     await expect(control).toBeVisible();
     const surface = page.getByRole('combobox', { name: 'Supervisor', exact: true });
     await expect(surface).toBeVisible();
@@ -60,7 +60,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   const inDetails = async (width: number) => {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(2000); // Allow the shell's responsive transition to settle.
-    return page.locator('button.identity').evaluate(button => button.classList.contains('compact'));
+    return page.locator('button.identity:visible').first().evaluate(button => button.classList.contains('compact'));
   };
   let low = 1100, high = 1440;
   expect(await inDetails(low)).toBe(true);
@@ -72,12 +72,12 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   console.log('SWITCH', low, high);
   expect(await inDetails(low)).toBe(true);
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-${low}.png` });
-  await page.locator('button.identity').click();
+  await page.locator('button.identity:visible').first().click();
   await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-open-${low}.png` });
   await page.keyboard.press('Escape');
   expect(await inDetails(high)).toBe(false);
-  await expect(page.locator('button.identity')).toBeVisible();
+  await expect(page.locator('button.identity:visible').first()).toBeVisible();
   await page.screenshot({ animations: 'disabled', path: `${out}/switch-status-${high}.png` });
   await page.setViewportSize({ width: 900, height: 900 });
   await page.waitForTimeout(2000); // The Details switch follows the shell transition.
@@ -89,17 +89,17 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await route.fulfill({ status: 500, contentType: 'text/plain', body: 'Internal Server Error' });
   });
   await page.getByRole('option', { name: 'Community outreach', exact: true }).click();
-  await expect(page.locator('button.identity')).toContainText('Saving');
+  await expect(page.locator('button.identity:visible').first()).toContainText('Saving');
   await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toHaveValue('Community outreach');
   await page.screenshot({ animations: 'disabled', path: `${out}/pending-open.png` });
   await page.keyboard.press('Escape');
-  await expect(page.locator('button.identity')).toContainText('Saving');
+  await expect(page.locator('button.identity:visible').first()).toContainText('Saving');
   await page.screenshot({ animations: 'disabled', path: `${out}/pending-closed.png` });
   release();
-  await expect(page.locator('button.identity')).toContainText('Change failed');
-  await expect(page.locator('button.identity')).toContainText('Research coordinator');
+  await expect(page.locator('button.identity:visible').first()).toContainText('Change failed');
+  await expect(page.locator('button.identity:visible').first()).toContainText('Research coordinator');
   await page.screenshot({ animations: 'disabled', path: `${out}/failure-closed.png` });
-  await page.locator('button.identity').click();
+  await page.locator('button.identity:visible').first().click();
   await expect(page.getByText('Couldn’t change the supervisor. Try again.')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Internal Server Error');
   await page.screenshot({ animations: 'disabled', path: `${out}/failure-open.png` });

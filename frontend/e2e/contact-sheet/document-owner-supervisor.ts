@@ -66,7 +66,7 @@ export async function seed(page: Page, request: APIRequestContext) {
 
 export async function showPicker(target: Page) {
 	const details = target.getByRole('button', { name: 'Document details' });
-	const identity = target.getByRole('button', { name: /^Owner/ });
+	const identity = target.locator('button.identity:visible').first();
 	if (!(await identity.isVisible()) && await details.isVisible()) await details.click();
 	await identity.click();
 	await target.getByRole('combobox', { name: 'Supervisor', exact: true }).click();
