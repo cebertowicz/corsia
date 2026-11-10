@@ -306,11 +306,6 @@
 	/* After the base rules above: equal specificity, so the later rule wins at phone width. */
 	@container doc-canvas (max-width: 600px) {
 		.identity-details { min-height: 44px; justify-content: center; }
-		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
-		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
@@ -351,6 +346,11 @@
 	@container doc-canvas (max-width: 37.5rem) {
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
+		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
+		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		/* The verified phrase carries the picker when the owner cannot fit. */
+		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }
 		.document-title { display: none; }
 		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
