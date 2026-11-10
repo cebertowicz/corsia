@@ -143,6 +143,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	};
 }
 
+/** How a card opened from the text shows: in the margin column beside it, as a popover over it, or as the phone sheet. */
+export type CardMode = 'margin' | 'popover' | 'sheet';
+
 /** Whether the margin column fits beside the text now: the canvas is wide enough and the pane is not a drawer over it. */
 export function marginFits(root: HTMLElement | undefined, paneDrawer: boolean) {
 	return !paneDrawer && hasRoomForMargin(root?.getBoundingClientRect().width ?? 0);

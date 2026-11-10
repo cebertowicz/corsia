@@ -145,7 +145,7 @@ describe('MarkdownEditor edits', () => {
 
 		it('where cards open as the phone sheet, a caret in the struck text opens nothing but a press on the insert still does', () => {
 			const onAnchorFocus = vi.fn();
-			const view = open({ highlights: [suggestion('red')], onAnchorFocus, commentsAsSheet: true });
+			const view = open({ highlights: [suggestion('red')], onAnchorFocus, cardMode: 'sheet' });
 			view.dispatch({ selection: { anchor: 8 } }); flushSync();
 			view.dispatch({ selection: { anchor: 9 } }); flushSync();
 			expect(onAnchorFocus).not.toHaveBeenCalled();
@@ -179,7 +179,7 @@ describe('MarkdownEditor edits', () => {
 
 		it('where cards open as the phone sheet, every tap on a comment opens it; a caret moved in by keys or typing is editing', async () => {
 			const onAnchorFocus = vi.fn();
-			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, commentsAsSheet: true });
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// The press the editor reports once the pointer is up, with the caret where it landed.
 			const tap = async (at: number) => {
 				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
@@ -204,20 +204,34 @@ describe('MarkdownEditor edits', () => {
 
 		it('where cards open as the phone sheet, keys that carry the caret into a comment before the tap is read open nothing', async () => {
 			const onAnchorFocus = vi.fn();
-			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, commentsAsSheet: true });
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// A slow frame: the tap lands outside the comment, and the arrow keys move the caret in before the press is read.
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
 			view.dispatch({ selection: { anchor: 13 }, userEvent: 'select.pointer' });
 			window.dispatchEvent(new MouseEvent('mouseup'));
+			view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowLeft', keyCode: 37 }));
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' });
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 			flushSync();
 			expect(onAnchorFocus).not.toHaveBeenCalled();
 		});
 
+		it('where cards open as the phone sheet, a tap whose caret is reported late, as a plain select after the pointer is up, still opens its comment once', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			// No pointer selection: a touch leaves the caret to the browser, whose report CodeMirror labels 'select' once 50 ms have passed.
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
+		});
+
 		it('where cards open as a popover over the text, the caret arriving by keys opens none, and typing is reported so an open one can close', () => {
 			const onAnchorFocus = vi.fn(), onTyping = vi.fn();
-			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onTyping, cardsCoverText: () => true });
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onTyping, cardMode: 'popover' });
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
 			expect(onAnchorFocus).not.toHaveBeenCalled();
 			view.dispatch({ changes: { from: 8, insert: 'x' }, selection: { anchor: 9 }, userEvent: 'input.type' }); flushSync();
