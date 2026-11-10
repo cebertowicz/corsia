@@ -1,18 +1,20 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { GAP, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
 	 * The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. A composer (a new
 	 * comment, or an unsent one being edited) is a card too, level with the text it is written on: it keeps its line as a
-	 * picked card does, and the cards around it make room.
+	 * picked card does, and the cards around it make room. A `head` (the column's Accept all) is a card at the column's top
+	 * that no card goes above, so a change in its height moves the cards with a fresh placement, never under it.
 	 */
-	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null } = $props();
+	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null } = $props();
 	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
 	const takeFocus = (node: HTMLElement) => { queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
 	let stackEl = $state<HTMLElement>();
+	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});
 	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
 	let pickedBefore: string | null = null;
@@ -20,7 +22,7 @@
 	// cards sit beside their lines and scroll with the text natively, and the content already reaches as far as the last card.
 	$effect(() => {
 		if (!stackEl) return;
-		const scroller = source.scroller(), column = source.column(stackEl);
+		const scroller = source.scroller(), column = source.column(stackEl), heading = headEl;
 		if (!scroller || !column) return;
 		const writing = composer;
 		const ids = [...pinned.map((comment) => comment.id), ...(writing ? [writing.id] : [])], selected = writing?.id ?? selectedId;
@@ -48,7 +50,7 @@
 			const tail = items.reduce((most, item) => Math.max(most, item.y), 0);
 			items.push(...loose.map((item) => ({ ...item, y: tail })));
 			items.sort((a, b) => a.y - b.y);
-			const next = placeCards(items, selected);
+			const next = placeCards(items, selected, heading ? heading.offsetHeight + GAP : 0);
 			if (Object.keys(next).length !== Object.keys(tops).length || Object.entries(next).some(([id, top]) => Math.abs((tops[id] ?? 1e9) - top) > 0.5)) tops = next;
 			reveal();
 		};
@@ -68,20 +70,21 @@
 			schedule();
 		});
 		for (const el of source.moved()) mutations.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
-		for (const el of [scroller, column, ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
+		for (const el of [scroller, column, ...(heading ? [heading] : []), ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
 		// Untracked: read() both reads and writes `tops`, which would otherwise rerun this setup on every placement it makes.
 		untrack(read);
 		return () => { cancelAnimationFrame(frame); mutations.disconnect(); sizes.disconnect(); };
 	});
 </script>
 
-<div class="margin-stack" bind:this={stackEl}>{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
+<div class="margin-stack" bind:this={stackEl}>{#if head}<div class="margin-card margin-head placed" data-margin-head bind:this={headEl}>{@render head()}</div>{/if}{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
 
 <style>
 	/* The cards take the Frosted card role through these tokens, which the thread card reads; their corners are the comment popover's. A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */
 	.margin-stack { --ct-bg: var(--glass-thin); --ct-border: var(--border); --ct-radius: var(--radius); --ct-shadow: var(--glass-rim), 0 10px 14px -10px color-mix(in srgb, black 22%, transparent); position: absolute; top: 0; left: 0; right: 0; }
-	/* A composer is drawn as a card, in the same frame. */
-	.margin-composer { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: var(--space-2) calc(var(--space-2) + var(--space-1) / 2); }
+	/* A composer, and the head's Accept all, are drawn as cards, in the same frame. */
+	.margin-composer, .margin-head { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: var(--space-2) calc(var(--space-2) + var(--space-1) / 2); }
 	.margin-card { position: absolute; left: 0; right: 0; visibility: hidden; }
 	.margin-card.placed { visibility: visible; }
+	.margin-head { top: 0; }
 </style>

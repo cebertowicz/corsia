@@ -61,4 +61,26 @@ describe('DocMarginStack', () => {
 		expect(column.querySelector<HTMLElement>('[data-margin-card="a"]')!.style.top).toBe('40px');
 		expect(document.activeElement).toBe(writing.querySelector('textarea'));
 	});
+
+	it('draws its head as a card at the column top that no card goes under, even one picked level with text above its foot', () => {
+		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+		const scroller = document.createElement('div');
+		const column = document.createElement('div');
+		scroller.append(column);
+		document.body.append(scroller);
+		const mark = document.createElement('span');
+		scroller.append(mark);
+		mark.getBoundingClientRect = () => ({ top: 10 }) as DOMRect;
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.hasAttribute('data-margin-head') ? 40 : 0; });
+		const source: MarginAnchorSource = { scroller: () => scroller, column: () => column, anchor: (id) => id === 'a' ? mark : null, moved: () => [], resized: () => [] };
+		const head = createRawSnippet(() => ({ render: () => '<button>Accept all from Sam</button>' }));
+		component = mount(DocMarginStack, { target: column, props: { source, pinned: [thread('a')], selectedId: 'a', card, head } });
+		flushSync();
+
+		const top = column.querySelector<HTMLElement>('.margin-stack > [data-margin-head]')!;
+		expect(top.classList.contains('placed')).toBe(true);
+		expect(top.textContent).toBe('Accept all from Sam');
+		expect(column.querySelector<HTMLElement>('[data-margin-card="a"]')!.style.top).toBe('48px');
+		vi.restoreAllMocks();
+	});
 });

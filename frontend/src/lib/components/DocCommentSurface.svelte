@@ -303,6 +303,7 @@
 {#snippet threadList(items: DocComment[], reply?: boolean, inMargin?: boolean, underTextChanged?: boolean, flat?: boolean)}
 	<CommentList {replyTags} {underTextChanged} {flat} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 {/snippet}
+<!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
 {#snippet acceptAllBar()}
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
 {/snippet}
@@ -322,12 +323,10 @@
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
-	<!-- Accept all belongs to the column too, but takes no room unless there is something to say. -->
-	{#if margin && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="margin-accept-all">{@render acceptAllBar()}</div>{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
-		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
+		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} head={!readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError) ? acceptAllBar : null}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
 	</div>
 {/snippet}
@@ -377,5 +376,4 @@
 	.drawer-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
-	.margin-accept-all { flex: none; padding: 0 0 var(--space-1) 0; }
 </style>

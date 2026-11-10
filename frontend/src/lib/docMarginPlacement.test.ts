@@ -42,6 +42,17 @@ describe('placeCards: soft-pinned margin cards', () => {
 		}
 	});
 
+	it('never places a card above the floor: cards above a selected one with no room to step up stack down from it, the selected card after them', () => {
+		const items = [card('a', 20), card('b', 30), card('c', 40)];
+		const tops = placeCards(items, 'c', 50);
+		expect(tops).toEqual({ a: 50, b: 50 + 100 + GAP, c: 50 + 2 * (100 + GAP) });
+		expect(Math.min(...Object.values(placeCards(items, null, 50)))).toBe(50);
+		// With room above, the selected card stays level with its text.
+		expect(placeCards([card('a', 300), card('b', 310)], 'b', 50)).toEqual({ a: 310 - GAP - 100, b: 310 });
+		// A first card held on the floor (its text is above it) stays there; a pick lower down still keeps its line and steps its neighbour up.
+		expect(placeCards([card('a', 20), card('b', 400), card('c', 410)], 'c', 50)).toEqual({ a: 50, b: 410 - GAP - 100, c: 410 });
+	});
+
 	it('gives every card a top, and an unknown selection changes nothing', () => {
 		const items = [card('a', 10), card('b', 20)];
 		expect(placeCards(items, 'missing')).toEqual(placeCards(items, null));
