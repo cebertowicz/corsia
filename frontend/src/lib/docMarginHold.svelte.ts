@@ -37,7 +37,14 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		if (!area || !view) return;
 		const scroller = view.scrollDOM, box = scroller.getBoundingClientRect();
 		const x = box.left + box.width / 2;
-		const read = now && selectedId() ? bounds()?.querySelector(`.cm-comment-line[data-comment-ids*="${selectedId()}"]`)?.getBoundingClientRect().top : undefined;
+		// The row to hold is the one the reader is writing about: the text a pending comment quotes, else a picked thread's
+		// line. Holding the top line alone let a reflow push that text out of the view the composer sits in: the composer
+		// follows its own text, so it ended clamped at the canvas's edge with the word below the fold.
+		const subject = bounds()?.querySelector('.cm-comment-pending')
+			?? (now && selectedId()
+				? bounds()?.querySelector(`.cm-comment-line[data-comment-ids*="${selectedId()}"]`)
+				: null);
+		const read = subject?.getBoundingClientRect().top;
 		const picked = read !== undefined && read > box.top && read < box.bottom;
 		const y = picked ? read + 2 : box.top + 4;
 		let pos = view.posAtCoords({ x, y }, false);
