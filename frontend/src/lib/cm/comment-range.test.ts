@@ -57,6 +57,14 @@ describe('mapCommentRange', () => {
 		expect(mapped(4, 9, { from: 4, to: 9 })).toEqual({ from: 4, to: 4, open: false });
 	});
 
+	// The server's and the live placement's cases (`test_document_live_text.py`, `docCommentPlacement.test.ts`), same results.
+	it('leaves an empty range when a replacement reaches past either edge, and keys typed after stay outside', () => {
+		for (const [from, to, at] of [[0, 13, 1], [2, 11, 3], [4, 11, 5], [3, 9, 4]]) {
+			const range = typed(4, 9, { from, to, insert: 'X' }, { from: at, insert: 'y' });
+			expect({ empty: range.from === range.to, open: range.open }).toEqual({ empty: true, open: false });
+		}
+	});
+
 	it('keeps what is left of the text after a partial edit', () => {
 		expect(mapped(4, 9, { from: 2, to: 6, insert: 'X' })).toEqual({ from: 3, to: 6, open: false });
 	});
@@ -92,8 +100,10 @@ describe('the highlight follows the same rule', () => {
 		expect(state.field(commentRanges)).toEqual([expect.objectContaining({ from: 4, to: 6 })]);
 	});
 
-	it('drops the highlight whose text is deleted', () => {
+	it('drops the highlight whose text is deleted, or replaced with more around it', () => {
 		expect(after([{ from: 4, to: 9 }])).toEqual([]);
+		expect(after([{ from: 0, to: 13, insert: 'X' }, { from: 1, insert: 'y' }])).toEqual([]);
+		expect(after([{ from: 3, to: 9, insert: 'X' }, { from: 4, insert: 'y' }])).toEqual([]);
 	});
 
 	it('keeps typing at its first and last character outside it', () => {

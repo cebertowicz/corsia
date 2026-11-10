@@ -202,20 +202,16 @@ export function ackComment(artifactId: string, commentId: string, acked = true) 
 }
 
 const dirty = new Map<string, Set<string>>();
-/** Per document, the comments whose text was just typed over: the rest of the word typed at their end joins them. */
-const openEnds = new Map<string, Set<string>>();
 
-export function remapComments(artifactId: string, changes: ChangeDesc) {
-	const open = openEnds.get(artifactId) ?? new Set<string>();
-	openEnds.set(artifactId, open);
+/** `open`: the comments whose highlight had an open end before the edit (`cm/comment-marks.ts` `openCommentIds`). */
+export function remapComments(artifactId: string, changes: ChangeDesc, open: ReadonlySet<string> = new Set()) {
 	docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			// A live row moves only by its own positions, and the server alone persists its offsets.
 			if (c.drawn || c.placement || c.from == null || c.to == null) return c;
-			// The same rule as the highlight's (`cm/comment-marks.ts`), so the card and its highlight never disagree.
-			const { open: stillOpen, ...range } = mapCommentRange({ from: c.from, to: c.to, open: open.has(c.id) }, changes);
-			if (stillOpen) open.add(c.id); else open.delete(c.id);
-			const next = { ...c, ...range };
+			// The highlight's rule and its open ends (`cm/comment-marks.ts`), so the card and its highlight never disagree.
+			const { from, to } = mapCommentRange({ from: c.from, to: c.to, open: open.has(c.id) }, changes);
+			const next = { ...c, from, to };
 			if (next.from !== c.from || next.to !== c.to) {
 				if (!dirty.has(artifactId)) dirty.set(artifactId, new Set());
 				dirty.get(artifactId)!.add(c.id);

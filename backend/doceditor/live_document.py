@@ -134,7 +134,7 @@ class LiveDocument:
         self.ranges.update(zip(ids, spans))
         self.open_ends = {ids[index] for index in opened}
         held = list(self._reservations.values())
-        for reservation, span in zip(held, map_spans([item.span for item in held], self._before, event.delta, follow_typing=False)):
+        for reservation, span in zip(held, map_spans([item.span for item in held], self._before, event.delta)):
             reservation.span = span
         self._before = self.text
         self.snapshot = (self._before, dict(self.ranges))

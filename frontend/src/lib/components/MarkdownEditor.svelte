@@ -15,7 +15,7 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, coveredByMove, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, openCommentIds, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -78,7 +78,8 @@
 		/** The person typed or deleted in the text. */
 		onTyping?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
-		onEdit?: (changes: ChangeDesc) => void;
+		/** `open`: the comments whose text was just typed over, before this edit (`openCommentIds`). */
+		onEdit?: (changes: ChangeDesc, open: ReadonlySet<string>) => void;
 		onLayout?: (mapPos?: (pos: number) => number) => void;
 		highlights?: CommentRange[];
 		presence?: PresenceRange[];
@@ -250,7 +251,7 @@
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) {
 						value = u.state.doc.toString();
-						if (!syncing) onEdit?.(u.changes);
+						if (!syncing) onEdit?.(u.changes, openCommentIds(u.startState));
 						if (u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'))) onTyping?.();
 					}
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();

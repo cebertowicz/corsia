@@ -34,7 +34,7 @@ def test_unicode_diff_uses_pycrdt_byte_offsets():
 
 
 def test_utf16_range_maps_remote_unicode_delta():
-    from doceditor.live_text import clone, map_offset
+    from doceditor.live_text import clone, map_spans
 
     doc = document("é hello 🙂 world")
     before = str(doc["text"])
@@ -44,30 +44,28 @@ def test_utf16_range_maps_remote_unicode_delta():
     other = clone(doc.get_update())
     other["text"].insert(0, "🙂 ")
     doc.apply_update(other.get_update(doc.get_state()))
-    assert map_offset(2, before, deltas[0], right=False) == 5
-    assert map_offset(7, before, deltas[0], right=True) == 10
+    assert map_spans([(2, 7)], before, deltas[0]) == [(5, 10)]
     text.unobserve(subscription)
 
 
 def test_deletion_delta_collapses_without_quote_guess():
-    from doceditor.live_text import apply_text, map_offset
+    from doceditor.live_text import apply_text, map_spans
 
     doc = document("one quote two")
     deltas = []
     text = doc["text"]
     subscription = text.observe(lambda event: deltas.append(event.delta))
     apply_text(doc, "one  two")
-    assert map_offset(4, "one quote two", deltas[0], right=False) == 4
-    assert map_offset(9, "one quote two", deltas[0], right=True) == 4
+    assert map_spans([(4, 9)], "one quote two", deltas[0]) == [(4, 4)]
     text.unobserve(subscription)
 
 
 def test_exclusive_boundaries_and_single_point_association():
-    from doceditor.live_text import map_offset
+    from doceditor.live_text import map_spans
 
-    assert map_offset(1, "abc", [{"retain": 1}, {"insert": "🙂"}], right=False) == 3
-    assert map_offset(2, "abc", [{"retain": 2}, {"insert": "🙂"}], right=True) == 2
-    assert map_offset(1, "abc", [{"retain": 1}, {"insert": "🙂"}], right=True) == 1
+    assert map_spans([(1, 2)], "abc", [{"retain": 1}, {"insert": "🙂"}]) == [(3, 4)]
+    assert map_spans([(1, 2)], "abc", [{"retain": 2}, {"insert": "🙂"}]) == [(1, 2)]
+    assert map_spans([(1, 1)], "abc", [{"retain": 1}, {"insert": "🙂"}]) == [(1, 1)]
 
 
 def _edited(text, edit):
@@ -83,17 +81,17 @@ def _edited(text, edit):
 
 
 def test_typing_over_a_whole_span_moves_it_onto_the_typed_text():
-    from doceditor.live_text import map_spans
+    from doceditor.live_text import follow_spans, map_spans
 
     def type_over(text):
         del text[4:9]
         text.insert(4, "words!")
 
-    assert map_spans([(4, 9)], "one quote two", _edited("one quote two", type_over)) == [(4, 10)]
-    # Either order of the two halves of one edit lands the same way.
+    assert follow_spans([(4, 9)], "one quote two", _edited("one quote two", type_over)) == ([(4, 10)], {0})
+    # Either order of the two halves of one edit lands the same way; a reservation's plain mapping collapses.
     for delta in ([{"retain": 4}, {"insert": "words!"}, {"delete": 5}], [{"retain": 4}, {"delete": 5}, {"insert": "words!"}]):
-        assert map_spans([(4, 9)], "one quote two", delta) == [(4, 10)]
-        [(first, last)] = map_spans([(4, 9)], "one quote two", delta, follow_typing=False)
+        assert follow_spans([(4, 9)], "one quote two", delta) == ([(4, 10)], {0})
+        [(first, last)] = map_spans([(4, 9)], "one quote two", delta)
         assert first == last
 
 
@@ -145,6 +143,15 @@ def test_the_open_end_closes_at_the_first_edit_elsewhere():
     assert _typed("one quote two", (4, 9), [_replace(4, 9, "words!")])[:2] == ((4, 10), True)
 
 
+def test_a_replacement_wider_than_the_span_collapses_it():
+    # Select-all and type, a paste over a wider selection, an agent rewriting around it: the comment's text is gone,
+    # and keys typed after stay outside.
+    assert _typed("one quote two", (4, 9), [_replace(0, 13, "X"), _insert(1, "y")])[:2] == ((0, 0), False)
+    assert _typed("one quote two", (4, 9), [_replace(2, 11, "X"), _insert(3, "y")])[:2] == ((2, 2), False)
+    assert _typed("one quote two", (4, 9), [_replace(4, 11, "X"), _insert(5, "y")])[:2] == ((4, 4), False)
+    assert _typed("one quote two", (4, 9), [_replace(3, 9, "X"), _insert(4, "y")])[:2] == ((3, 3), False)
+
+
 def test_the_open_end_counts_utf16_like_the_browser():
     span, _, text = _typed("one quote two", (4, 9), [_replace(4, 9, "é"), _insert(5, "🙂")])
     assert span == (4, 7)
@@ -152,20 +159,19 @@ def test_the_open_end_counts_utf16_like_the_browser():
 
 
 def test_deleting_a_whole_span_collapses_it_and_edges_stay_exclusive():
-    from doceditor.live_text import map_offset, map_spans
+    from doceditor.live_text import follow_spans, map_spans
 
     def delete(text):
         del text[4:9]
 
-    assert map_spans([(4, 9)], "one quote two", _edited("one quote two", delete)) == [(4, 4)]
+    assert follow_spans([(4, 9)], "one quote two", _edited("one quote two", delete)) == ([(4, 4)], set())
     # Typed at the first or the last character: outside the span, which keeps its text.
-    assert map_spans([(4, 9)], "one quote two", [{"retain": 4}, {"insert": "AB"}]) == [(6, 11)]
-    assert map_spans([(4, 9)], "one quote two", [{"retain": 9}, {"insert": "AB"}]) == [(4, 9)]
+    assert follow_spans([(4, 9)], "one quote two", [{"retain": 4}, {"insert": "AB"}]) == ([(6, 11)], set())
+    assert follow_spans([(4, 9)], "one quote two", [{"retain": 9}, {"insert": "AB"}]) == ([(4, 9)], set())
     # A collapsed span stays before what is typed at it, and an edit that leaves part of a span's text keeps that part.
-    assert map_spans([(4, 4)], "one  two", [{"retain": 4}, {"insert": "AB"}]) == [(4, 4)]
+    assert follow_spans([(4, 4)], "one  two", [{"retain": 4}, {"insert": "AB"}]) == ([(4, 4)], set())
     partial = [{"retain": 2}, {"delete": 4}, {"insert": "X"}]
-    assert map_spans([(4, 9)], "one quote two", partial) == [
-        (map_offset(4, "one quote two", partial, right=False), map_offset(9, "one quote two", partial, right=True))]
+    assert follow_spans([(4, 9)], "one quote two", partial) == (map_spans([(4, 9)], "one quote two", partial), set())
 
 
 def test_utf16_boundary_conversion_and_digest_format():
@@ -181,9 +187,8 @@ def test_utf16_boundary_conversion_and_digest_format():
 
 
 def test_multi_operation_delta_maps_skin_tone_and_combining_marks():
-    from doceditor.live_text import map_offset
+    from doceditor.live_text import map_spans
 
     before = "é👍🏽a\u0301QUOTE中"
     delta = [{"retain": 2}, {"delete": 8}, {"insert": "🙂 "}, {"retain": 3}, {"insert": "X"}]
-    assert map_offset(7, before, delta, right=False) == 7
-    assert map_offset(12, before, delta, right=True) == 12
+    assert map_spans([(7, 12)], before, delta) == [(7, 12)]

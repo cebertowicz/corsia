@@ -63,7 +63,7 @@
 		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		onCaretAway?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
-		onEdit: (changes: ChangeDesc) => void;
+		onEdit: (changes: ChangeDesc, open: ReadonlySet<string>) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
 		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;

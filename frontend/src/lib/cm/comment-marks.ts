@@ -1,4 +1,4 @@
-import { StateField, StateEffect } from '@codemirror/state';
+import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
@@ -65,6 +65,10 @@ export const commentRanges = StateField.define<CommentRange[]>({
 			.filter((range) => located(range) && holdsQuote(range, tr.newDoc));
 	}
 });
+
+/** The comments whose text was just typed over in `state`: the one owner of an editor's open ends, which the cards follow. */
+export const openCommentIds = (state: EditorState): ReadonlySet<string> =>
+	new Set(state.field(commentRanges, false)?.filter((range) => range.open).map((range) => range.id));
 
 /** The anchor highlights, derived from `commentRanges`. A suggestion's range has none: its own marks replace it. */
 export const commentMarks = [

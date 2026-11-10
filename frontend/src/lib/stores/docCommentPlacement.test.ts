@@ -157,6 +157,13 @@ describe('comment placement in a live document (4.2)', () => {
 		expect(row()).toMatchObject({ from: 5, to: 12 });
 	});
 
+	it.each([[0, 13, 1], [2, 11, 3], [4, 11, 5], [3, 9, 4]])('leaves a placed row empty when %i..%i, past an edge, is replaced, and keeps the next key outside', async (from, to, at) => {
+		const doc = await placedQuote();
+		doc.remote(text => { text.delete(from, to - from); text.insert(from, 'X'); });
+		doc.remote(text => text.insert(at, 'y'));
+		expect(row().from).toBe(row().to);
+	});
+
 	it('keeps the open end through an answer that agrees with the row', async () => {
 		const doc = await placedQuote();
 		doc.remote(text => { text.delete(4, 5); text.insert(4, 'H'); });
