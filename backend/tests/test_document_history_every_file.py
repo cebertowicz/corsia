@@ -563,16 +563,20 @@ async def test_restore_of_an_open_document_goes_through_its_lane(history_scope, 
         stale = await restore(sha('Not what is open.\n'))
         assert (stale.status_code, json.loads(stale.body)['kind']) == (409, 'stale')
         assert path.read_text() == 'Second version.\n'
-        # An edit made outside CORSIA after the person opened the version is never replaced.
+        # An edit made outside CORSIA after the person opened the version is never replaced, and is kept
+        # as a version, so the history they reload ends at the text they see.
         path.write_text('Second version.\nOutside edit.\n')
+        kept = int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace))
         outside = await restore(sha('Second version.\n'))
         assert (outside.status_code, json.loads(outside.body)['kind']) == (409, 'stale')
         assert path.read_text() == 'Second version.\nOutside edit.\n'
         assert live.text == 'Second version.\nOutside edit.\n'
-        path.write_text('Second version.\n')
+        assert int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace)) == kept + 1
+        assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Second version.\nOutside edit.\n'
         assert wait_recorded()
         before = int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace))
-        result = await restore(sha('Second version.\n'))
+        # Restored from the text the person now sees, it lands.
+        result = await restore(sha('Second version.\nOutside edit.\n'))
     finally:
         live.close()
     assert result == {'version': None, 'sha256': sha('First version.\n')}

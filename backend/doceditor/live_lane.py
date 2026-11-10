@@ -340,7 +340,16 @@ class DocumentLane:
             await self._barrier()
             await self._import()
             if file_hash(self.live.text.encode("utf-8")) != expected_sha256:
-                from doceditor.document_save import DocumentSaveError, STALE_MESSAGE
+                from doceditor.document_save import DocumentSaveError, FileChangedOutside, STALE_MESSAGE
+                # Offered against the text the person restored from, the write is refused as changed, and
+                # the history writer keeps the outside edit as a version: the list they reload ends at it.
+                if file_hash(await asyncio.to_thread(self.live.path.read_bytes)) != expected_sha256:
+                    try:
+                        await self.write(operation.content, expected_sha256, operation)
+                    except FileChangedOutside:
+                        pass
+                    except Exception:
+                        log.warning("Live restore could not keep the outside edit as a version", exc_info=True)
                 raise DocumentSaveError("stale", STALE_MESSAGE)
             return await self._execute(operation)
         return await self._submit(run)
