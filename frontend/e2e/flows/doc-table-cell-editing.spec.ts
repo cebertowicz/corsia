@@ -71,8 +71,11 @@ for (const layout of LAYOUTS) {
 			const seeded = await openTableDocument(page, layout);
 			await cell(page, 1, 1).click({ position: { x: 6, y: 6 } });
 			await editorInCell(page, cell(page, 1, 1));
+			// The focused textbox is named for the cell it edits, and renamed when Tab moves it.
+			await expect(page.getByRole('textbox', { name: 'Review note, row 1', exact: true })).toBeFocused();
 			await page.keyboard.press('Tab');
 			await editorInCell(page, cell(page, 1, 2));
+			await expect(page.getByRole('textbox', { name: 'Preview, row 1', exact: true })).toBeFocused();
 			await page.keyboard.press('Tab');
 			await editorInCell(page, cell(page, 2, 0));
 			await frame(page, `02-tab-wraps-row-${at}`);

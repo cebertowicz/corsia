@@ -84,6 +84,27 @@ describe('Tab and Enter move through the table', () => {
 	});
 });
 
+describe('the open cell is named for its place in the table', () => {
+	const label = (r: Rig) => cellEditor(r)!.contentDOM.getAttribute('aria-label');
+
+	it('by its column header and body row, at open and after Tab and Enter', () => {
+		const r = openTable();
+		expect(label(r)).toBe('Feature, row 1');
+		press(r, 'Tab');
+		expect(label(r)).toBe('Status, row 1');
+		press(r, 'Enter');
+		expect(label(r)).toBe('Status, row 2');
+	});
+
+	it('by its column number when the header is empty, and as the header when it is one', () => {
+		const r = track(build('|  | Status |\n| --- | --- |\n| Login | Done |'));
+		clicked(r, cellEl(r, 1, 0));
+		expect(label(r)).toBe('Column 1, row 1');
+		clicked(r, cellEl(r, 0, 1));
+		expect(label(r)).toBe('Column 2 header');
+	});
+});
+
 describe('Escape leaves the table', () => {
 	it('closes the cell and puts the caret after the table', () => {
 		const r = openTable();

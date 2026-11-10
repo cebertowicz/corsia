@@ -11,7 +11,7 @@ import {
 import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
-import { CellLayer } from './widget-cell-layer';
+import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
 
 /**
@@ -130,6 +130,8 @@ class CellEditors {
 		const hadFocus = wrap.contains(document.activeElement);
 		this.layer.open(td, wrap, this.host);
 		this.mounted = td;
+		// Named for the cell it is over, so a screen reader says which cell is being edited, and again after Tab or Enter.
+		this.editor?.contentDOM.setAttribute('aria-label', cellLabel(td));
 		// Focus is taken only once the editor is in the document — before that, focusing it does nothing — and the click
 		// that opened the cell counts as the reader asking for the caret there, at the word they clicked rather than at the
 		// start of the cell. The layer is over the cell by now, so the editor reads the click's point off its own layout.

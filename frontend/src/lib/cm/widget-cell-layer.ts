@@ -1,7 +1,19 @@
 import type { EditorView } from '@codemirror/view';
+import { clean } from './widget-cells';
 
 /** Marks the cell whose text is stepped aside while its editor lies over it. */
 export const CELL_EDITING = 'cm-md-cell-editing';
+
+/**
+ * What a screen reader calls the open cell's editor: its column's header and its body row, counted from 1, or the column's
+ * number when its header is empty. A header cell has no row of its own to name, so it is named as its column's header.
+ */
+export function cellLabel(td: HTMLTableCellElement): string {
+	const row = td.parentElement instanceof HTMLTableRowElement ? td.parentElement.rowIndex : 0, col = td.cellIndex + 1;
+	if (row === 0) return `Column ${col} header`;
+	const header = clean(td.closest('table')?.rows[0]?.cells[td.cellIndex]?.textContent ?? '');
+	return `${header || `Column ${col}`}, row ${row}`;
+}
 
 /**
  * Where a cell's editor is allowed to live.
