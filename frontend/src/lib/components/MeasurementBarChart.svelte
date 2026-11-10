@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { desktopGeometry, hasClippedBar, isLow, isWithheld, phoneGeometry, type BarPoint, type ChartGeometry } from './measurementBarChart';
+	import { desktopGeometry, hasClippedBar, isLow, isWithheld, phoneGeometry, type BarPoint, type ChartGeometry, type ChartItem } from './measurementBarChart';
 
-	let { points, axisTitle, unit = 'week', averageName, caption, minN, minNText, ariaLabel, tickFormat, valueFormat, percent100 = false, showN = true }: {
+	let { points, axisTitle, unit = 'week', averageName, caption, minN, minNText, ariaLabel, tickFormat, valueFormat, percent100 = false, showN = true, marks = [], scaleMax, missingText = 'too few' }: {
 		points: BarPoint[];
 		/** Names the measure and its unit; it is the y-axis title. */
 		axisTitle: string;
@@ -19,9 +19,12 @@
 		valueFormat: (value: number) => string;
 		percent100?: boolean;
 		showN?: boolean;
+		scaleMax?: number;
+		missingText?: string;
+		marks?: { index: number; label: string }[];
 	} = $props();
 
-	const spec = $derived({ points, axisTitle, tickFormat, valueFormat, minN, percent100, showN });
+	const spec = $derived({ points, axisTitle, tickFormat, valueFormat, minN, percent100, showN, scaleMax, missingText });
 	const phone = $derived(phoneGeometry(spec));
 	// The desktop plot is drawn at the card's own width, so text keeps its size and the bars fill the card.
 	let dskWidth = $state(0);
@@ -38,25 +41,42 @@
 	const anyWithheld = $derived(points.some(isWithheld));
 	const anyPartial = $derived(points.some((p) => p.partial));
 	const hasAverage = $derived(points.some((p) => p.ma !== null));
+	const visibleMarks = $derived(marks.filter((mark) => Number.isInteger(mark.index) && mark.index >= 0 && mark.index < points.length));
+	const chartLabel = $derived(visibleMarks.length
+		? `${ariaLabel}. Chart marks: ${visibleMarks.map((mark) => `${mark.label}, week starting ${points[mark.index].start}`).join('; ')}.`
+		: ariaLabel);
 </script>
 
 {#snippet svg(g: ChartGeometry)}
-	<svg viewBox={`0 0 ${g.width} ${Math.trunc(g.height)}`} role="img" aria-label={ariaLabel}>
+	{@const axisLabels = g.items.filter((item): item is Extract<ChartItem, { kind: 'text' }> => item.kind === 'text' && (item.cls === 'xl' || item.cls === 'xl cur'))}
+	{@const zero = g.items.find((item): item is Extract<ChartItem, { kind: 'line' }> => item.kind === 'line' && item.cls === 'zero')!}
+	{@const plotTop = g.width === 335 ? 52 : 28}
+	{@const band = visibleMarks.length ? 60 : 0}
+	<svg viewBox={`0 0 ${g.width} ${Math.trunc(g.height) + band}`} role="img" aria-label={chartLabel}>
 		{#each g.items as item}
 			{#if item.kind === 'text'}
-				<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>
+				{#if !visibleMarks.length || item.cls !== 'vl'}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[band && item.cls !== 'at' ? `translate(0 ${band})` : '', item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ') || undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
 			{:else if item.kind === 'line'}
-				<line class={item.cls} x1={item.x1} x2={item.x2} y1={item.y} y2={item.y} />
+				<line class={item.cls} x1={item.x1} x2={item.x2} y1={item.y} y2={item.y} transform={`translate(0 ${band})`} />
 			{:else if item.kind === 'rect'}
-				<rect class={item.cls} x={item.x} y={item.y} width={item.width} height={item.height} />
+				<rect class={item.cls} x={item.x} y={item.y} width={item.width} height={item.height} transform={`translate(0 ${band})`} />
 			{:else if item.kind === 'path'}
-				<path class={item.cls} d={item.d} />
+				<path class={item.cls} d={item.d} transform={`translate(0 ${band})`} />
 			{:else if item.kind === 'polyline'}
-				<polyline class={item.cls} points={item.points} />
+				<polyline class={item.cls} points={item.points} transform={`translate(0 ${band})`} />
 			{:else}
-				<circle class={item.cls} cx={item.cx} cy={item.cy} r={item.r} />
+				<circle class={item.cls} cx={item.cx} cy={item.cy} r={item.r} transform={`translate(0 ${band})`} />
 			{/if}
 		{/each}
+		{#each visibleMarks as mark, i}
+			<line class="version-mark" x1={axisLabels[mark.index].x} x2={axisLabels[mark.index].x} y1={plotTop + band} y2={zero.y + band} />
+			<text class="version-label" x={axisLabels[mark.index].x} y={32 + i * 12} text-anchor={axisLabels[mark.index].x < g.width / 2 ? 'start' : 'end'}>{mark.label}</text>
+		{/each}
+		{#if visibleMarks.length}
+			{#each g.items as item}
+				{#if item.kind === 'text' && item.cls === 'vl'}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[`translate(0 ${band})`, item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ')} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
+			{/each}
+		{/if}
 	</svg>
 {/snippet}
 
@@ -65,13 +85,13 @@
 		<span><i class="b"></i>One {unit}</span><span><i class="c"></i>Latest {unit}</span>
 		{#if anyPartial}<span><i class="p"></i>Today so far: the day is still running</span>{/if}
 		{#if anyLow}<span><i class="h"></i>Hollow bar: {minNText} (low n){anyClip ? '; a bar taller than the axis is cut at the top and keeps its value' : ''}</span>{/if}
-		{#if anyWithheld}<span>No bar, "too few": too little behind that {unit} to show a value</span>{/if}
+		{#if anyWithheld}<span>No bar, "{missingText}": {missingText === 'too few' ? `too little behind that ${unit} to show a value` : `no value for that ${unit}`}</span>{/if}
 		{#if hasAverage}<span><i class="l"></i>{averageName}</span>{/if}
 	</div>
 	<div class="mob">{@render svg(phone)}</div>
 	<div class="dsk" use:watchWidth>{@render svg(desktop)}</div>
 	<table class="sr-only">
-		<caption>{ariaLabel}</caption>
+		<caption>{chartLabel}</caption>
 		<thead><tr><th scope="col">{unit === 'day' ? 'Day' : 'Week starting'}</th><th scope="col">{axisTitle}</th><th scope="col">n</th>{#if hasAverage}<th scope="col">{averageName}</th>{/if}</tr></thead>
 		<tbody>
 			{#each points.filter((p) => !p.empty) as point}
@@ -118,6 +138,8 @@
 	svg .ma { fill: none; stroke: var(--mbc-ink); stroke-width: 1.6; }
 	svg .xl.cur { font-weight: 750; fill: var(--mbc-ink); }
 	svg .brk { fill: none; stroke: var(--mbc-halo); stroke-width: 1.6; }
+	svg .version-mark { stroke: var(--mbc-current); stroke-width: 1; }
+	svg .version-label { fill: var(--mbc-current); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	@media (min-width: 900px) {
 		.mob { display: none; }
 		.dsk { display: block; }

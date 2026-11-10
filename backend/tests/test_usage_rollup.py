@@ -354,7 +354,7 @@ def test_every_measurement_route_starts_the_refresh(isolated_db, monkeypatch):
     monkeypatch.setattr(usage_rollup, "schedule_refresh", lambda: started.append(1))
     client = TestClient(app, raise_server_exceptions=False)
     headers = {"Authorization": f"Bearer {OWNER_TOKEN}"}
-    paths = ("agents", "models", "cost", "limits", "key-figures", "where-to-look")
+    paths = ("agents", "models", "cost", "limits", "key-figures", "where-to-look", "workflows")
     for path in paths:
         client.get(f"/api/measurement/{path}?project=all&agent=all&grain=days&timezone=UTC", headers=headers)
     assert len(started) == len(paths)
