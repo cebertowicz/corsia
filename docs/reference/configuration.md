@@ -117,7 +117,7 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | `SHELL` | — | Selects the user's shell. | `backend/cli_location.py` |
 | `TIKTOKEN_CACHE_DIR` | — | Selects the tokenization cache directory. | `backend/core/token_estimation.py` |
 | `TZ` | — | Provides the timezone for provider usage limits. | `backend/subagents/provider_usage_limits.py` |
-| `XDG_CONFIG_HOME` | — | Selects the XDG configuration directory. | `backend/automation/script_sandbox.py`, `backend/infra/git_state_cache.py`, `backend/infra/history_ignore.py` |
+| `XDG_CONFIG_HOME` | — | Selects the XDG configuration directory. | `backend/automation/script_sandbox.py`, `backend/infra/git_state_cache.py` |
 
 
 ## Internal and test variables

@@ -132,32 +132,35 @@ async def test_a_registered_thread_file_git_ignores_is_recorded_and_an_unregiste
 
 
 @pytest.mark.asyncio
-async def test_a_registered_thread_file_still_honours_every_other_ignore_rule(history_scope):
+async def test_a_registered_thread_file_is_kept_only_when_gits_deciding_rule_is_the_tray_line(history_scope):
     from infra.document_history import history_offered
     from infra.guidance_targets import history_target as target_of
 
     workspace, thread_id = history_scope
-    # The tray-wide line is the one rule registration overrides; the person's other rules still hold.
-    (workspace / '.gitignore').write_text('/.threads/*/*\n!/.threads/*/skills/\n*.secret.md\n')
+    # The tray-wide line is the one rule registration overrides; a rule Git names instead still holds.
+    (workspace / '.gitignore').write_text('/.threads/*/*\n!/.threads/*/skills/\n/.threads/*/private/\n*.secret.md\n')
     (workspace / '.git' / 'info').mkdir(exist_ok=True)
-    (workspace / '.git' / 'info' / 'exclude').write_text('private-notes/\n')
+    (workspace / '.git' / 'info' / 'exclude').write_text('*.local.md\n')
     tray = workspace / '.threads' / thread_id
     kept = placed(tray / 'reports' / 'summary.md', 'Draft.\n')
-    by_root = placed(tray / 'reports' / 'keys.secret.md', 'token\n')
-    by_exclude = placed(tray / 'private-notes' / 'plan.md', 'Private.\n')
-    by_nested = placed(tray / 'local' / 'notes.md', 'Local.\n')
-    (tray / 'local' / '.gitignore').write_text('notes.md\n')
-    for path in (kept, by_root, by_exclude, by_nested):
+    by_root = placed(tray / 'keys.secret.md', 'token\n')
+    by_folder = placed(tray / 'private' / 'plan.md', 'Private.\n')
+    by_nested = placed(tray / 'notes.md', 'Local.\n')
+    (tray / '.gitignore').write_text('notes.md\n')
+    # Git names the tray line for a file in a tray's sub-folder, and the root .gitignore over
+    # info/exclude, so these rules do not keep the file out.
+    masked = [placed(tray / 'reports' / 'old.secret.md', 'Old.\n'), placed(tray / 'mine.local.md', 'Mine.\n')]
+    held = (by_root, by_folder, by_nested)
+    for path in (kept, *held, *masked):
         register(thread_id, path)
     user_id = owner(thread_id)
     before = head(workspace)
-    for path in (kept, by_root, by_exclude, by_nested):
+    for path in (kept, *held, *masked):
         await save_document_text(DocumentSave(path=str(path), text='Changed.\n', thread_id=thread_id), user_id)
         assert path.read_text() == 'Changed.\n'
-    assert head(workspace) != before
     changed = set(_git(['diff', '--name-only', before, 'HEAD'], cwd=workspace).split())
-    assert changed == {f'.threads/{thread_id}/reports/summary.md'}
-    offered = {path.name: history_offered(workspace, (path, target_of(path, workspace))) for path in (kept, by_root, by_exclude, by_nested)}
+    assert changed == {path.relative_to(workspace).as_posix() for path in (kept, *masked)}
+    offered = {path.name: history_offered(workspace, (path, target_of(path, workspace))) for path in (kept, *held)}
     assert offered == {'summary.md': True, 'keys.secret.md': False, 'plan.md': False, 'notes.md': False}
 
 
