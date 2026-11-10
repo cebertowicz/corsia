@@ -32,13 +32,14 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await expect(surface).toBeVisible();
     const rects = await page.evaluate(() => {
       const box = (el: Element | null) => el?.getBoundingClientRect().toJSON();
-      return { pane: box(document.querySelector('.doc')), control: box(document.querySelector('button.identity')), input: box(document.querySelector('#supervisor-choice')), dialog: box(document.querySelector('[role=dialog]')) };
+      const visibleControl = [...document.querySelectorAll('button.identity')].find(el => el.getBoundingClientRect().width > 0);
+      return { pane: box(document.querySelector('.doc')), control: box(visibleControl ?? null), input: box(document.querySelector('#supervisor-choice')), dialog: box(document.querySelector('[role=dialog]')) };
     });
     console.log('WIDTH', width, JSON.stringify(rects));
     expect(rects.control!.width).toBeGreaterThan(30);
     if (width >= 769 && !(await control.evaluate(button => button.classList.contains('compact')))) {
       const labelsFit = await control.evaluate(button => {
-        const parent = button.closest('.document-metadata')!.getBoundingClientRect();
+        const parent = button.parentElement!.getBoundingClientRect();
         return [...button.querySelectorAll<HTMLElement>('.identity-part, .identity-name')].every(part => {
           const range = document.createRange();
           range.selectNodeContents(part);
