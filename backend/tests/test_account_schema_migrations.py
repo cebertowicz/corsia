@@ -825,6 +825,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 185 -> 186 indexes the two history walks a scoped read still takes.
         from infra.migration_185_to_186_scoped_history_indexes import migrate_185_to_186
         migrate_185_to_186(db)
+        # 186 -> 187 indexes saved draft paths.
+        from infra.migration_186_to_187_email_draft_lookup import migrate_186_to_187
+        migrate_186_to_187(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
