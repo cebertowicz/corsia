@@ -3,6 +3,7 @@ import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
+import { mapCommentRange } from './comment-range';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -28,6 +29,8 @@ export interface CommentRange {
 	point?: boolean;
 	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
 	region?: boolean;
+	/** Its text was just typed over: the rest of the word typed at its end joins it (`mapCommentRange`). */
+	open?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
@@ -49,11 +52,16 @@ export const commentRanges = StateField.define<CommentRange[]>({
 	create() { return []; },
 	update(ranges, tr) {
 		for (const effect of tr.effects) {
-			if (effect.is(setCommentRanges)) ranges = effect.value.filter(located);
+			// The comments' own positions arrive without the open end the typing here gave a range: it stays while they agree.
+			if (effect.is(setCommentRanges)) ranges = effect.value.filter(located).map((range) =>
+				ranges.some((was) => was.open && was.id === range.id && was.from === range.from && was.to === range.to) ? { ...range, open: true } : range);
 		}
 		if (!tr.docChanged) return ranges;
 		return ranges
-			.map((range) => range.point ? { ...range, from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.from, -1) } : { ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) })
+			// A pure insertion's empty range is neither text nor a point: text typed at it ends it, as before.
+			.map((range) => range.point || range.from < range.to
+				? { ...range, ...mapCommentRange(range.point ? { from: range.from, to: range.from } : range, tr.changes) }
+				: { ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) })
 			.filter((range) => located(range) && holdsQuote(range, tr.newDoc));
 	}
 });

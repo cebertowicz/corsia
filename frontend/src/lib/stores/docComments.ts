@@ -6,6 +6,8 @@ import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
+import type { ChangeDesc } from '@codemirror/state';
+import { mapCommentRange } from '$lib/cm/comment-range';
 
 export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
@@ -200,13 +202,20 @@ export function ackComment(artifactId: string, commentId: string, acked = true) 
 }
 
 const dirty = new Map<string, Set<string>>();
+/** Per document, the comments whose text was just typed over: the rest of the word typed at their end joins them. */
+const openEnds = new Map<string, Set<string>>();
 
-export function remapComments(artifactId: string, mapPos: (pos: number) => number) {
+export function remapComments(artifactId: string, changes: ChangeDesc) {
+	const open = openEnds.get(artifactId) ?? new Set<string>();
+	openEnds.set(artifactId, open);
 	docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			// A live row moves only by its own positions, and the server alone persists its offsets.
 			if (c.drawn || c.placement || c.from == null || c.to == null) return c;
-			const next = { ...c, from: mapPos(c.from), to: mapPos(c.to) };
+			// The same rule as the highlight's (`cm/comment-marks.ts`), so the card and its highlight never disagree.
+			const { open: stillOpen, ...range } = mapCommentRange({ from: c.from, to: c.to, open: open.has(c.id) }, changes);
+			if (stillOpen) open.add(c.id); else open.delete(c.id);
+			const next = { ...c, ...range };
 			if (next.from !== c.from || next.to !== c.to) {
 				if (!dirty.has(artifactId)) dirty.set(artifactId, new Set());
 				dirty.get(artifactId)!.add(c.id);

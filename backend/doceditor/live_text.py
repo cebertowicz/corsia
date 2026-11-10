@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Collection, Sequence
 import hashlib
 
 from doceditor.live_diff import text_changes, text_changes_async
@@ -139,3 +140,75 @@ def map_offsets(edges: list[tuple[int, bool]], before: str, delta: list[dict]) -
 def map_offset(offset: int, before: str, delta: list[dict], *, right: bool) -> int:
     """Map one edge with the same exclusive-boundary semantics as all ranges."""
     return map_offsets([(offset, right)], before, delta)[0]
+
+
+def _changes(before: str, delta: list[dict]) -> list[tuple[int, int, int]]:
+    """An edit's changes as UTF-16 ``(start, end, inserted)`` in the text before it, a delete and the insert beside it merged."""
+    raw = before.encode("utf-8")
+    changes: list[list[int]] = []
+    position = byte_position = 0
+    last: list[int] | None = None
+    for operation in delta:
+        if "retain" in operation:
+            end_byte = byte_position + operation["retain"]
+            position += utf16_length(raw[byte_position:end_byte].decode("utf-8"))
+            byte_position, last = end_byte, None
+            continue
+        if last is None:
+            last = [position, position, 0]
+            changes.append(last)
+        if "delete" in operation:
+            end_byte = byte_position + operation["delete"]
+            position += utf16_length(raw[byte_position:end_byte].decode("utf-8"))
+            byte_position, last[1] = end_byte, position
+        if "insert" in operation:
+            last[2] += utf16_length(operation["insert"])
+    return [(start, end, inserted) for start, end, inserted in changes]
+
+
+def _exclusive(spans: Sequence[tuple[int, int]], before: str, delta: list[dict]) -> list[tuple[int, int]]:
+    edges = [(offset, right) for start, end in spans for offset, right in ((start, start == end), (end, True))]
+    mapped = map_offsets(edges, before, delta) if edges else []
+    return [(first, max(first, last)) for first, last in zip(mapped[::2], mapped[1::2])]
+
+
+def map_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict], *, follow_typing: bool = True) -> list[tuple[int, int]]:
+    """Map spans through one edit by ``follow_spans``, none of them open.
+
+    Without ``follow_typing`` a replaced span collapses too: a selection still
+    being commented on never moves onto text its author did not select.
+    """
+    return follow_spans(spans, before, delta)[0] if follow_typing else _exclusive(spans, before, delta)
+
+
+def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict],
+                 open_ends: Collection[int] = ()) -> tuple[list[tuple[int, int]], set[int]]:
+    """Map comment spans through one edit, and say which have an open end after it.
+
+    The browser's ``cm/comment-range.ts`` follows the same rule. Edges are
+    exclusive: text typed exactly at either edge lands outside. An edit that
+    removes all of a span's text and puts new text in its place moves the span
+    onto that text and opens its end: while the edits after it only insert
+    exactly at that end (the rest of the word being typed), they join it; the
+    first edit anywhere else closes it. ``open_ends`` are the indices open
+    before this edit. Removing the text with nothing in its place collapses the
+    span, the comment whose text is gone. A collapsed span stays before text
+    typed at it.
+    """
+    moved = _exclusive(spans, before, delta)
+    changes = _changes(before, delta) if open_ends else []
+    opened: set[int] = set()
+    for index in open_ends:
+        start, end = spans[index]
+        if all(first == last == end for first, last, _ in changes):
+            moved[index] = (start, end + sum(inserted for *_, inserted in changes))
+            opened.add(index)
+    typed_over = [index for index, ((start, end), (first, last)) in enumerate(zip(spans, moved))
+                  if index not in opened and start < end and first == last]
+    if typed_over:
+        wider = map_offsets([edge for index in typed_over for edge in ((spans[index][0], True), (spans[index][1], False))], before, delta)
+        for index, first, last in zip(typed_over, wider[::2], wider[1::2]):
+            if first < last:
+                moved[index] = (first, last)
+                opened.add(index)
+    return moved, opened

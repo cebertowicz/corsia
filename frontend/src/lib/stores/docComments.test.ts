@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChangeSet } from '@codemirror/state';
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn(), persistPositions: vi.fn(), postComment: vi.fn(), patchComment: vi.fn(), markCommentThreadViewed: vi.fn() }));
 vi.mock('$lib/api/docs', () => ({
@@ -114,12 +115,26 @@ describe('comment loading presentation', () => {
 	});
 });
 
+describe('remapComments', () => {
+	it('moves a comment onto text typed over all of it, like its highlight, and empties it when the text is deleted', () => {
+		const comment = (id: string, from: number, to: number) => ({ id, from, to, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] });
+		// The editor's own mapping of an edit to "one quote two", whose comment is on "quote" (4..9): the text deleted, then typed.
+		const edit = (insert: string) => ChangeSet.of({ from: 4, to: 9 }, 13).compose(ChangeSet.of({ from: 4, insert }, 8));
+		docComments.set({ remap: [comment('typed', 4, 9)] });
+		remapComments('remap', edit('words!'));
+		expect(get(docComments).remap[0]).toMatchObject({ from: 4, to: 10 });
+		docComments.set({ remap: [comment('deleted', 4, 9)] });
+		remapComments('remap', edit(''));
+		expect(get(docComments).remap[0]).toMatchObject({ from: 4, to: 4 });
+	});
+});
+
 describe('flushPositions', () => {
 	it('does not persist a mapped unresolved comment when its anchor no longer matches restored draft text', async () => {
 		docComments.set({ artifact: [{
 			id: 'comment', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [],
 		}] });
-		remapComments('artifact', (position) => position + 1);
+		remapComments('artifact', ChangeSet.of({ from: 0, insert: 'i' }, 5));
 		await flushPositions('artifact', 'inserted quote');
 		expect(mocks.persistPositions).not.toHaveBeenCalled();
 	});

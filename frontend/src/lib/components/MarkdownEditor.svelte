@@ -3,7 +3,7 @@
 	import type * as Y from 'yjs';
 	import { liveDocumentBinding } from '$lib/cm/live-document-binding';
 	import { EditorView, keymap } from '@codemirror/view';
-	import { EditorState, Compartment, Transaction } from '@codemirror/state';
+	import { EditorState, Compartment, Transaction, type ChangeDesc } from '@codemirror/state';
 	import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { GFM } from '@lezer/markdown';
@@ -78,7 +78,7 @@
 		/** The person typed or deleted in the text. */
 		onTyping?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
-		onEdit?: (mapPos: (pos: number) => number) => void;
+		onEdit?: (changes: ChangeDesc) => void;
 		onLayout?: (mapPos?: (pos: number) => number) => void;
 		highlights?: CommentRange[];
 		presence?: PresenceRange[];
@@ -250,7 +250,7 @@
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) {
 						value = u.state.doc.toString();
-						if (!syncing) onEdit?.((p) => u.changes.mapPos(p));
+						if (!syncing) onEdit?.(u.changes);
 						if (u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'))) onTyping?.();
 					}
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();

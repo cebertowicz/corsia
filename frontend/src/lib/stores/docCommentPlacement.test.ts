@@ -9,6 +9,7 @@ vi.mock('$lib/api/docs', () => ({
 	persistPositions: mocks.persistPositions, markCommentThreadViewed: vi.fn(),
 }));
 
+import { ChangeSet } from '@codemirror/state';
 import { docComments, commentLoads, flushPositions, loadComments, reloadPlacements, remapComments, retryPlacement, type DocComment } from './docComments';
 import { liveDocumentBindings } from './liveDocuments';
 import { LiveDocumentSession } from './liveDocumentSession';
@@ -61,6 +62,8 @@ function live(text: string, storeId = 'store') {
 
 const rows = (): DocComment[] => get(docComments).artifact ?? [];
 const row = (id = 'c1') => rows().find(comment => comment.id === id)!;
+// An editor edit that would move every offset by 100.
+const shift100 = ChangeSet.of({ from: 0, insert: 'x'.repeat(100) }, 1000);
 
 async function opened(text = 'alpha beta gamma', comments = [serverRow('c1', 'beta', 6)]) {
 	const doc = live(text);
@@ -106,8 +109,62 @@ describe('comment placement in a live document (4.2)', () => {
 		doc.remote(text => text.insert(8, '>')); // exactly at the start: outside the range
 		expect(row()).toMatchObject({ from: 9, to: 13 });
 		expect(doc.session.text.toString().slice(9, 13)).toBe('beta');
-		remapComments('artifact', position => position + 100); // the editor's mapping never moves a live row
+		remapComments('artifact', shift100); // the editor's mapping never moves a live row
 		expect(row()).toMatchObject({ from: 9, to: 13 });
+	});
+
+	it('moves a placed row onto text typed over all of it, and leaves it empty when the text is only deleted', async () => {
+		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), serverRow('c2', 'gamma', 11)]);
+		doc.answer(doc.asks()[0], { ranges: [{ id: 'c1', from_off: 6, to_off: 10 }, { id: 'c2', from_off: 11, to_off: 16 }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
+		doc.remote(text => { text.delete(6, 4); text.insert(6, 'BETA!'); });
+		expect(row()).toMatchObject({ from: 6, to: 11 });
+		doc.remote(text => text.insert(11, '?')); // typed right after what replaced it: joins it
+		expect(row()).toMatchObject({ from: 6, to: 12 });
+		doc.remote(text => text.delete(13, 5));
+		expect(row('c2')).toMatchObject({ from: 13, to: 13 });
+		doc.remote(text => text.insert(12, '.')); // an edit elsewhere came first: outside
+		expect(row()).toMatchObject({ from: 6, to: 12 });
+	});
+
+	// The editor's cases (`cm/comment-range.test.ts`), with the same text and the same results.
+	const typeOver = (doc: ReturnType<typeof live>) => {
+		doc.remote(text => { text.delete(4, 5); text.insert(4, 'H'); });
+		[...'andoff'].forEach((ch, i) => doc.remote(text => text.insert(5 + i, ch)));
+	};
+	const placedQuote = async () => {
+		const doc = await opened('one quote two', [serverRow('c1', 'quote', 4)]);
+		doc.answer(doc.asks()[0], { ranges: [{ id: 'c1', from_off: 4, to_off: 9 }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 4, to: 9 }));
+		return doc;
+	};
+
+	it('covers a word typed over a placed row a key at a time', async () => {
+		const doc = await placedQuote();
+		typeOver(doc);
+		expect(row()).toMatchObject({ from: 4, to: 11 });
+		expect(doc.session.text.toString().slice(4, 11)).toBe('Handoff');
+	});
+
+	it('closes the open end at the first edit elsewhere, and keeps typing at an untouched end outside', async () => {
+		const doc = await placedQuote();
+		doc.remote(text => text.insert(9, 'A'));
+		expect(row()).toMatchObject({ from: 4, to: 9 });
+		doc.remote(text => text.delete(9, 1));
+		typeOver(doc);
+		doc.remote(text => text.insert(0, 'X'));
+		doc.remote(text => text.insert(12, '!'));
+		expect(row()).toMatchObject({ from: 5, to: 12 });
+	});
+
+	it('keeps the open end through an answer that agrees with the row', async () => {
+		const doc = await placedQuote();
+		doc.remote(text => { text.delete(4, 5); text.insert(4, 'H'); });
+		expect(doc.asks()).toHaveLength(2); // the edit inside the row asks for its flags
+		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 4, to_off: 5 }] });
+		await settled();
+		doc.remote(text => text.insert(5, 'a'));
+		expect(row()).toMatchObject({ from: 4, to: 6 });
 	});
 
 	it('uses server flags from the matching live snapshot after an edit', async () => {
@@ -172,7 +229,7 @@ describe('comment placement in a live document (4.2)', () => {
 	it('never remaps or queues for saving a live row that is still being placed', async () => {
 		await opened();
 		expect(row()).toMatchObject({ placement: 'placing', drawn: false, from: 6, to: 10 });
-		remapComments('artifact', position => position + 100);
+		remapComments('artifact', shift100);
 		expect(row()).toMatchObject({ from: 6, to: 10 });
 		await flushPositions('artifact');
 		expect(mocks.persistPositions).not.toHaveBeenCalled();
