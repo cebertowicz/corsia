@@ -16,6 +16,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   const widths = process.env.O1_WIDTHS?.split(',').map(Number) ?? [1024, 1100, 1280, 1440, 393];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(2000); // Capture the settled shell, not its resize transition.
     await expect(page.locator('.cm-content')).toBeVisible();
     await page.screenshot({ path: `${out}/rest-${width}.png` });
     const details = page.getByRole('button', { name: 'Document details' });
