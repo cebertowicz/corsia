@@ -411,7 +411,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			await vi.waitFor(() => expect(mocks.loadComments).toHaveBeenCalledWith('art-clean'));
 			mocks.loadComments.mockClear();
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-clean', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 2, to: 3 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
-			await vi.waitFor(() => expect(get(docSaveDrafts)[tab.instanceId]?.editText).toBe('# remote edit'), { timeout: 1_500 });
+			// Async loads and the editor mount run past vi.waitFor's 1 s default under a full parallel run.
+			await vi.waitFor(() => expect(get(docSaveDrafts)[tab.instanceId]?.editText).toBe('# remote edit'), { timeout: 5_000 });
 			expect(mocks.fetchContent).toHaveBeenCalledTimes(2);
 			expect(mocks.loadComments).toHaveBeenCalledWith('art-clean');
 		} finally {
@@ -497,7 +498,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-dirty-race', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 0, to: 1 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
 			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull());
 			setDraftText(target, '# local draft');
-			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).toBeNull(), { timeout: 1_500 });
+			// Async loads and the editor mount run past vi.waitFor's 1 s default under a full parallel run.
+			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).toBeNull(), { timeout: 5_000 });
 			expect(get(docSaveDrafts)[tab.instanceId]).toMatchObject({ editText: '# local draft', savedText: '# saved' });
 		} finally {
 			stopPresence();
@@ -514,10 +516,11 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		const stopPresence = startDocPresence();
 		try {
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('local draft'));
+			// Async loads and the editor mount run past vi.waitFor's 1 s default under a full parallel run.
+			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('local draft'), { timeout: 5_000 });
 			mocks.fetchContent.mockClear();
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-dirty', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 0, to: 8 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
-			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull());
+			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull(), { timeout: 5_000 });
 			expect(mocks.fetchContent).not.toHaveBeenCalled();
 			expect(get(docSaveDrafts)[tab.instanceId].editText).toBe('# local draft');
 		} finally {
