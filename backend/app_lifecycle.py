@@ -22,6 +22,7 @@ import infra.startup_progress as startup_progress
 from infra import state
 from infra.db_async import run_in_db
 from infra.database import shutdown_pool
+from infra.otel_logs.lifecycle import start_corsia_logs
 from llm.providers.omlx_startup import adopt_and_upgrade
 from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
 
@@ -68,9 +69,12 @@ async def lifespan(app: FastAPI):
     """Start and stop backend runtime services for the FastAPI app."""
     from loguru import logger
 
+    # Capture starts first, so startup's own phase timings and errors reach the
+    # conductor log store. It never raises: a failure leaves capture off.
+    await asyncio.to_thread(start_corsia_logs)
     configure_sqlite_fetch_switch_interval()
     with startup_progress.publishing():
-        app_startup_init.initialize_startup(logger)
+        await app_startup_init.initialize_startup_off_loop(logger)
     app_loop.capture(asyncio.get_running_loop())
     from llm.live_cost_map import start_refresh
 
