@@ -3,7 +3,7 @@
 import json
 import sqlite3
 
-from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, strip_answer_tags, visible_answer_content
+from infra.chat_comment_answers import _TAGGED, SHOWN_ANSWERS_FROM, strip_answer_tags, visible_answer_content
 
 # Both listed and live previews select the same latest user or assistant message.
 LATEST_MESSAGE_JOIN = """LEFT JOIN messages m ON m.id =
@@ -32,6 +32,22 @@ def project_previews(db: sqlite3.Connection, rows: list[tuple[str, str | None, s
     for thread, message, text in rows:
         if message and text and '[c' in text:
             text = visible_answer_content(text, answers.get((thread, message), []))
-        text = strip_answer_tags(text)
-        result.append(text[:limit] if text is not None and limit is not None else text)
+        if text and limit is not None:
+            # A preview needs only the first visible characters, but a complete
+            # tag must be recognized before any of its text is removed.
+            chunks: list[str] = []
+            pos = length = 0
+            while length < limit and text.find('[c', pos) != -1:
+                match = _TAGGED.search(text, pos)
+                if match is None:
+                    break
+                prefix = text[pos:match.start(1)]
+                chunks.append(prefix)
+                length += len(prefix)
+                pos = match.end()
+            chunks.append(text[pos:pos + max(0, limit - length)])
+            text = ''.join(chunks)[:limit]
+        elif limit is None:
+            text = strip_answer_tags(text)
+        result.append(text)
     return result

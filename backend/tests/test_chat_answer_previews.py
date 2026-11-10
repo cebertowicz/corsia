@@ -52,6 +52,49 @@ def test_long_answer_is_projected_before_preview_is_cut(isolated_db):
     assert "Visible" in projection["last_message"]
 
 
+def test_incremental_preview_matches_full_projection(isolated_db):
+    import random
+
+    from infra.chat_comment_answers import strip_answer_tags, visible_answer_content
+    from infra.sidebar_preview import project_previews
+
+    rng = random.Random(1847)
+    pieces = ['a', 'é🙂', '\n\n', '\n \n', '[c1.1]', '[c2.2]', '[c1.',
+              '[[c1.1]]', '[c1.1][c2.2] ', 'x' * 97, 'x' * 100, 'x' * 101]
+    texts = [''.join(rng.choices(pieces, k=rng.randint(1, 18))) for _ in range(500)]
+    texts += ['x' * n + '\n\n[c1.1] ' + 'private' * 80 + '\n\n[c2.2] visible'
+              for n in (0, 95, 98, 99, 100, 101)]
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, '[c1.1] indexed')
+        db.commit()
+        rows = [('thread', 'answer', text) for text in texts] + [('thread', 'unplaced', text) for text in texts]
+        actual = project_previews(db, rows)
+        expected = [strip_answer_tags(visible_answer_content(text, ['c1.1']) if '[c' in text else text)[:100]
+                    for text in texts]
+        expected += [strip_answer_tags(text)[:100] for text in texts]
+        assert actual == expected
+    finally:
+        db.close()
+
+
+def test_placed_answer_crossing_preview_boundary_stays_private(isolated_db):
+    from infra.sidebar_preview import project_previews
+
+    db = get_db()
+    try:
+        _seed(db)
+        text = 'Introduction ' * 7 + '\n\n[c1.1] ' + 'SECRET' * 60 + '\n\n[c2.2] visible'
+        _answer(db, text)
+        db.commit()
+        preview = project_previews(db, [('thread', 'answer', text)])[0]
+        assert 'SECRET' not in preview
+        assert preview == ('Introduction ' * 7 + '\n\nvisible')[:100]
+    finally:
+        db.close()
+
+
 def test_batched_preview_projects_answers_with_one_lookup(isolated_db):
     from infra.sidebar_preview import project_previews
 
