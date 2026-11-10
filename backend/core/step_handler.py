@@ -148,7 +148,7 @@ class StepHandler:
                                msg_id=step_id, db=db, created_at=step_now)
 
         await run_in_db(_persist)
-        self.answer_stream = VisibleAnswerStream()
+        self.answer_stream.reset()
 
         self.step_ids.append(step_id)
         pending_hints = self.tool_hints[:]
@@ -255,7 +255,7 @@ class StepHandler:
                                msg_id=tc_step_id, db=db, created_at=tc_step_now)
 
         await run_in_db(_persist)
-        self.answer_stream = VisibleAnswerStream()
+        self.answer_stream.reset()
         self.step_ids.append(tc_step_id)
         self.tool_step_id = tc_step_id
         self.tool_step_created_at = tc_step_now

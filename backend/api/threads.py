@@ -84,12 +84,12 @@ async def list_threads(token: str, archived: int = 0):
         visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
                CASE WHEN {visible} THEN
-                 (SELECT m.content FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
+                 CASE WHEN instr(m.content, '[c') > 0 THEN m.content ELSE substr(m.content, 1, 100) END
                END as last_message,
-               CASE WHEN {visible} THEN
-                 (SELECT m.id FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
-               END as last_message_id
-               FROM threads s WHERE s.user_id = ?
+               CASE WHEN {visible} THEN m.id END as last_message_id
+               FROM threads s LEFT JOIN messages m ON m.id =
+                 (SELECT lm.id FROM messages lm WHERE lm.thread_id = s.id ORDER BY lm.created_at DESC LIMIT 1)
+               WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
         params: list = [*identity, *identity, user["id"]]

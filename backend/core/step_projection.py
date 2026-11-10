@@ -22,11 +22,12 @@ def turn_sidebar_projection(thread_id: str) -> dict | None:
     try:
         row = db.execute(
             """SELECT s.title, s.updated_at,
-               (SELECT m.content FROM messages m WHERE m.thread_id=s.id AND m.role IN ('user','assistant')
-                ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-               (SELECT m.id FROM messages m WHERE m.thread_id=s.id AND m.role IN ('user','assistant')
-                ORDER BY m.created_at DESC LIMIT 1) AS last_message_id
-               FROM threads s WHERE s.id=?""", (thread_id,),
+               CASE WHEN instr(m.content, '[c') > 0 THEN m.content ELSE substr(m.content, 1, 100) END AS last_message,
+               m.id AS last_message_id
+               FROM threads s LEFT JOIN messages m ON m.id =
+                 (SELECT lm.id FROM messages lm WHERE lm.thread_id=s.id AND lm.role IN ('user','assistant')
+                  ORDER BY lm.created_at DESC LIMIT 1)
+               WHERE s.id=?""", (thread_id,),
         ).fetchone()
         result = dict(row) if row else None
         if result and result['last_message_id']:

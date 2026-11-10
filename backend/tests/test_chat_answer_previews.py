@@ -30,6 +30,28 @@ def test_placed_answer_is_not_in_thread_or_marked_preview(isolated_db):
     assert summary == "Visible introduction"
 
 
+def test_long_answer_is_projected_before_preview_is_cut(isolated_db):
+    from core.step_projection import turn_sidebar_projection
+    from main import app
+
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, "[c1.1] " + "Private " * 30 + "\n\n[c99.1] " + "Visible " * 20)
+        db.commit()
+    finally:
+        db.close()
+
+    response = TestClient(app).get("/api/threads", params={"token": OWNER_TOKEN})
+    assert response.status_code == 200
+    thread = next(t for t in response.json()["threads"] if t["id"] == "thread")
+    assert thread["last_message"] == ("Visible " * 20)[:100]
+    projection = turn_sidebar_projection("thread")
+    assert projection is not None
+    assert "Private" not in projection["last_message"]
+    assert "Visible" in projection["last_message"]
+
+
 @pytest.fixture
 def seeded_answer(isolated_db):
     db = get_db()
