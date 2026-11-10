@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import { liveDocumentBinding } from '$lib/cm/live-document-binding';
 	import { EditorView, keymap } from '@codemirror/view';
@@ -361,15 +361,18 @@
 	});
 
 	$effect(() => {
-		const target = scrollTo;
-		if (!view || !target) return;
-		revealTypedUnder(view, [target]);
-		scrollToRange(view, target.from, target.to, target.origin);
-		if (target.focus) {
-			view.dispatch({ selection: { anchor: Math.min(target.from, view.state.doc.length) }, annotations: Transaction.userEvent.of('select.doc-comment') });
+		const target = scrollTo, editor = view;
+		if (!editor || !target) return;
+		// Only a new target moves the reader. The jump reads other state (the visible band asks whether a sheet is over the
+		// text); tracked, a sheet closing would replay the jump and pull focus back to the text from the sheet's opener.
+		untrack(() => {
+			revealTypedUnder(editor, [target]);
+			scrollToRange(editor, target.from, target.to, target.origin);
+			if (!target.focus) return;
+			editor.dispatch({ selection: { anchor: Math.min(target.from, editor.state.doc.length) }, annotations: Transaction.userEvent.of('select.doc-comment') });
 			if (window.matchMedia?.('(pointer: coarse)').matches) host?.focus({ preventScroll: true });
-			else view.focus();
-		}
+			else editor.focus();
+		});
 	});
 </script>
 
