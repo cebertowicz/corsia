@@ -40,6 +40,34 @@ def _rows(sql: str, params: tuple = ()) -> list[dict]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["restart", "update"])
+@pytest.mark.parametrize("configured_port", ["43217", None])
+async def test_device_restart_targets_main_http_listener(monkeypatch, mode, configured_port):
+    from starlette.requests import Request
+
+    import api.system_admin as system_admin
+
+    if configured_port is None:
+        monkeypatch.delenv("BACKEND_PORT", raising=False)
+    else:
+        monkeypatch.setenv("BACKEND_PORT", configured_port)
+    request = Request({"type": "http", "server": ("127.0.0.1", 47901), "corsia_listener": "devices"})
+    prelaunch = AsyncMock(return_value=("operation", object()))
+    with (
+        patch.object(system_admin, "authenticate", return_value={"id": "person"}),
+        patch.object(system_admin, "require_human_user"),
+        patch.object(system_admin, "prelaunch_settings_restart", prelaunch),
+        patch.object(system_admin, "_monitor_restart_process", new_callable=AsyncMock),
+    ):
+        await system_admin.system_restart(request, "session", mode=mode)
+
+    env = prelaunch.await_args.args[3]
+    expected = configured_port or str(DEFAULT_BACKEND_PORT)
+    assert env["BACKEND_PORT"] == expected
+    assert env["CORSIA_RESTART_BACKEND_PORT"] == expected
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
     tmp_path: Path,
     monkeypatch,

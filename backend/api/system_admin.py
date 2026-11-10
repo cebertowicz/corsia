@@ -15,6 +15,7 @@ from api.self_restart_response import emit_self_restart_audit as _emit_self_rest
 from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
 from infra.auth import authenticate, require_human_user, require_user
+from infra.default_port import DEFAULT_BACKEND_PORT
 
 router = APIRouter(tags=["system"])
 
@@ -29,10 +30,12 @@ def _authenticated_user(request: Request) -> dict | None:
 
 
 def _own_backend_port(request: Request) -> int:
-    server = request.scope.get("server")
+    server = None if request.scope.get("corsia_listener") == "devices" else request.scope.get("server")
     if server and isinstance(server[1], int):
         return server[1]
     env_port = os.environ.get("BACKEND_PORT")
+    if not env_port and request.scope.get("corsia_listener") == "devices":
+        return DEFAULT_BACKEND_PORT
     if env_port and env_port.isdigit():
         return int(env_port)
     raise HTTPException(500, "Cannot determine this backend's own port for restart")

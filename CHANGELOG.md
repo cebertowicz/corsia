@@ -46,6 +46,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
 - On a narrow screen, opening another agent's chat from a chat now keeps it visible.
+- On a paired computer, updates and restarts now reach the main CORSIA service instead of failing because they were started from the paired device.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
 - On a phone, typing while a comment you tapped in the text is open closes its sheet and puts what you type in the document.
