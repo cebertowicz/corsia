@@ -149,6 +149,11 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 					case 'CodeInfo': // a fence's language name ("ts") is syntax too
 						hide(node.from, node.to);
 						break;
+					case 'Escape':
+						// A backslash escape shows the character it escapes, not the backslash, like every other mark here.
+						// It is also how a table cell keeps a typed pipe: the cell stores `\|` and the reader reads `|`.
+						hide(node.from, node.from + 1);
+						break;
 					case 'InlineCode':
 						decos.push(Decoration.mark({ class: 'cm-md-inline-code' }).range(node.from, node.to));
 						break;

@@ -10,9 +10,15 @@ export interface CellSpan { row: number; col: number; from: number; to: number; 
  * The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty
  * cells; the delimiter row is skipped. `rawFrom`/`rawTo` are the same cell between its two pipes, padding included — the
  * only span that can hold a space the reader types at either edge of the cell.
+ *
+ * GFM renders every row to the header's column count, padding a short row with empty cells that have no source of their
+ * own. They still draw a `<td>` a person can click, so they get a span: zero-width at the row's end, anchored on the row's
+ * last delimiter, which is the smallest source span that belongs uniquely to that cell. A row with more cells than the
+ * header keeps its extra spans, and the render has no cell for them, so callers that look cells up in the DOM skip them.
  */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
+	const rows: { row: number; spans: CellSpan[]; lastBar: number | null; end: number }[] = [];
 	let lineStart = 0;
 	src.split('\n').forEach((line, index) => {
 		const start = lineStart;
@@ -27,6 +33,7 @@ export function tableCells(src: string): CellSpan[] {
 		const edges = [-1, ...bars, line.length];
 		const lead = line.slice(0, bars[0] ?? 0).trim() === '' && bars.length > 0;
 		const tail = bars.length > 0 && line.slice(bars[bars.length - 1] + 1).trim() === '';
+		const spans: CellSpan[] = [];
 		let col = 0;
 		for (let i = 0; i < edges.length - 1; i++) {
 			if ((i === 0 && lead) || (i === edges.length - 2 && tail)) continue;
@@ -36,9 +43,17 @@ export function tableCells(src: string): CellSpan[] {
 			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
 			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
-			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
+			spans.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
 		}
+		rows.push({ row, spans, lastBar: bars.length ? start + bars[bars.length - 1] : null, end: start + line.length });
 	});
+	const columns = rows[0]?.spans.length ?? 0;
+	for (const { row, spans, lastBar, end } of rows) {
+		cells.push(...spans);
+		for (let col = spans.length; col < columns; col++) {
+			cells.push({ row, col, from: end, to: end, anchorFrom: lastBar ?? end, anchorTo: lastBar === null ? end : lastBar + 1, rawFrom: end, rawTo: end });
+		}
+	}
 	return cells;
 }
 
