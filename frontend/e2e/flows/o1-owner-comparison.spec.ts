@@ -34,6 +34,7 @@ test('owner slots in the base comparison fixture', async ({ page, request }) => 
       const slots = target.locator('button.identity:visible');
       await expect(slots).toHaveCount(2);
       for (let i = 0; i < 2; i++) {
+        await target.keyboard.press('Tab'); // Enter keyboard-navigation mode before moving focus to the slot.
         await slots.nth(i).focus();
         await expect(slots.nth(i)).toHaveCSS('outline-style', 'solid');
         await target.screenshot({ path: `${out}/o1-focus-${i + 1}-1280.png`, animations: 'disabled' });
