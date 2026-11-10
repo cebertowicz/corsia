@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+PRE_STOP_UPDATE_REFUSED = 79
+
 _BASH_STARTUP_ENV = frozenset({
     "BASHOPTS",
     "BASH_COMPAT",
@@ -72,6 +74,15 @@ _corsia_lifecycle_cleanup() {
             --data-urlencode "operation_id=$_corsia_cleanup_operation" \
             "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" 2>/dev/null \
             || printf 'Lifecycle drain cleanup curl exit %s\n' "$?"
+    fi
+    if [ "$_corsia_lifecycle_is_update" = true ]; then
+        if [ "$_corsia_lifecycle_status" -ne 0 ] \
+            && [ -z "${_corsia_update_stopping:-}" ] \
+            && [ "$_corsia_unconfirmed_bootout" != true ]; then
+            exit 79
+        fi
+        # Reserve 79 exclusively for a positively identified pre-stop refusal.
+        [ "$_corsia_lifecycle_status" -ne 79 ] || _corsia_lifecycle_status=1
     fi
     exit "$_corsia_lifecycle_status"
 }

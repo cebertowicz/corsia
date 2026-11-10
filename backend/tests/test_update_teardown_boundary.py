@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from api.restart_shell import spawn_restart_lifecycle
+from api.restart_shell import PRE_STOP_UPDATE_REFUSED, spawn_restart_lifecycle
 
 
 @pytest.mark.parametrize(
@@ -39,9 +39,30 @@ return 0
     with (tmp_path / "lifecycle.log").open("w") as log:
         child = spawn_restart_lifecycle(script, ["restart-prepared"], environment,
                                         "a" * 32, log, caller_credential="test-credential")
-        expected = 0 if scenario == "success" else (-9 if scenario == "killed" else (2 if scenario.startswith("bootout_") else 1))
+        expected = 0 if scenario == "success" else (-9 if scenario == "killed" else (2 if scenario.startswith("bootout_") else PRE_STOP_UPDATE_REFUSED))
         assert child.wait(timeout=5) == expected
     observed = calls.read_text() if calls.exists() else ""
     assert ("DELETE" in observed) is delete_expected
     log = (tmp_path / "lifecycle.log").read_text()
     assert ("cleanup held: launchd teardown unconfirmed" in log) is scenario.startswith("bootout_")
+
+
+@pytest.mark.parametrize("body", [
+    "_corsia_update_stopping=1; exit 79",
+    "_corsia_unconfirmed_bootout=true; exit 79",
+    "kill -KILL $$",
+])
+def test_no_pre_stop_signal_after_stop_or_unknown_exit(tmp_path, body):
+    script = tmp_path / "corsia"
+    script.write_text(f"#!/bin/bash\n{body}\n")
+    script.chmod(0o755)
+    curl = tmp_path / "curl"
+    curl.write_text("#!/bin/bash\nexit 52\n")
+    curl.chmod(0o755)
+    environment = {**os.environ, "PATH": str(tmp_path), "CORSIA_RESTART_BACKEND_PORT": "4111"}
+    with (tmp_path / "lifecycle.log").open("w") as log:
+        child = spawn_restart_lifecycle(
+            script, ["restart-prepared"], environment, "a" * 32, log,
+            caller_credential="test-credential",
+        )
+        assert child.wait(timeout=5) != PRE_STOP_UPDATE_REFUSED

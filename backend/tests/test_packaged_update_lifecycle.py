@@ -200,7 +200,8 @@ app_mode_swap_staged_update /disposable/staged
                 {**os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port)},
                 operation_id, log, caller_credential=OWNER_TOKEN,
             )
-            assert await asyncio.to_thread(child.wait, 10) == 1
+            from api.restart_shell import PRE_STOP_UPDATE_REFUSED
+            assert await asyncio.to_thread(child.wait, 10) == PRE_STOP_UPDATE_REFUSED
     finally:
         server.should_exit = True
         await serving
@@ -215,6 +216,81 @@ app_mode_swap_staged_update /disposable/staged
     assert detail["backend_healthy"] is False
     assert detail["log_path"] == str(log_path)
     assert not self_restart.restart_holds_new_work()
+
+
+async def test_failed_update_child_releases_when_cleanup_cannot_connect(isolated_db, tmp_path, monkeypatch):
+    import os
+
+    from api import system_admin
+    from api.restart_shell import spawn_restart_lifecycle
+    from infra import drain, state
+
+    operation_id = await run_in_db(operation_in, "ready")
+    drain.SIGNAL_FILE.write_text("{}")
+    state._drain = {"operation_id": operation_id}
+    assert self_restart.restart_holds_new_work()
+    script = tmp_path / "corsia"
+    script.write_text("#!/bin/bash\n/bin/sleep 0.2\nexit 1\n")
+    script.chmod(0o755)
+    curl = tmp_path / "curl"
+    curl.write_text("#!/bin/bash\nexit 52\n")
+    curl.chmod(0o755)
+    log_path = tmp_path / "update.log"
+    settled = asyncio.Event()
+    real_abort = restart.abort_restart_control
+
+    async def observe_abort(*args, **kwargs):
+        try:
+            return await real_abort(*args, **kwargs)
+        finally:
+            settled.set()
+
+    monkeypatch.setattr(restart, "abort_restart_control", observe_abort)
+
+    async def launch(*_args, **_kwargs):
+        with log_path.open("w") as log:
+            assert await run_in_db(record_update_log, operation_id, str(log_path))
+            child = spawn_restart_lifecycle(
+                script, ["restart-prepared"],
+                {**os.environ, "PATH": str(tmp_path), "CORSIA_RESTART_BACKEND_PORT": "12345"},
+                operation_id, log, caller_credential=OWNER_TOKEN,
+            )
+        return operation_id, child
+
+    monkeypatch.setattr(system_admin, "prelaunch_settings_restart", launch)
+    await system_admin.launch_update({"id": "steve"}, OWNER_TOKEN, "manual", None, port=12345)
+    await asyncio.wait_for(settled.wait(), 3)
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "failed"
+    assert json.loads(row["failure_detail"])["log_path"] == str(log_path)
+    assert not self_restart.restart_holds_new_work()
+    assert not drain.SIGNAL_FILE.exists() and state._drain is None
+    assert "Lifecycle drain cleanup curl exit 52" in log_path.read_text()
+
+
+async def test_child_refusal_preserves_already_recorded_reason(isolated_db):
+    from api.system_admin import _settle_update_child_refusal
+
+    operation_id = await run_in_db(operation_in, "ready")
+    assert await restart.abort_restart_control(
+        operation_id, error="specific refusal", failure_code="update_refused"
+    )
+    await _settle_update_child_refusal(operation_id)
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "failed"
+    assert row["error"] == "specific refusal" and row["failure_code"] == "update_refused"
+
+
+@pytest.mark.parametrize("phase", ["restarting", "resuming", "verifying"])
+async def test_child_refusal_does_not_release_advanced_update(isolated_db, phase):
+    from api.system_admin import _settle_update_child_refusal
+
+    operation_id = await run_in_db(operation_in, phase)
+    held_before = self_restart.restart_holds_new_work()
+    await _settle_update_child_refusal(operation_id)
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "in_flight" and row["phase"] == phase
+    assert self_restart.restart_holds_new_work() == held_before
 
 
 async def test_failure_report_releases_before_bundle_rollback(isolated_db, monkeypatch):

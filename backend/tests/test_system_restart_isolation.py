@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 import threading
-from unittest.mock import AsyncMock, mock_open, patch
+from unittest.mock import AsyncMock, Mock, mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -556,7 +556,7 @@ async def test_update_owns_restart_slot_through_preparation(isolated_db):
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),
@@ -603,7 +603,7 @@ async def test_cancelled_update_retains_ownership_until_preparation_settles(
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),

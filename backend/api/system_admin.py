@@ -7,10 +7,11 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+from threading import Thread
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
-from api.restart_shell import spawn_restart_lifecycle
+from api.restart_shell import PRE_STOP_UPDATE_REFUSED, spawn_restart_lifecycle
 from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
 from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
@@ -85,7 +86,44 @@ async def launch_update(
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
+    _own_update_child_exit(process, operation_id)
     return operation_id, process
+
+
+_UPDATE_EXIT_TASKS: set[asyncio.Task] = set()
+
+
+def _own_update_child_exit(process, operation_id: str) -> None:
+    """Settle a confirmed pre-stop refusal without holding backend shutdown."""
+    loop = asyncio.get_running_loop()
+
+    def on_exit() -> None:
+        if process.wait() != PRE_STOP_UPDATE_REFUSED:
+            return
+
+        def schedule() -> None:
+            task = loop.create_task(_settle_update_child_refusal(operation_id))
+            _UPDATE_EXIT_TASKS.add(task)
+            task.add_done_callback(_UPDATE_EXIT_TASKS.discard)
+
+        try:
+            loop.call_soon_threadsafe(schedule)
+        except RuntimeError:
+            # The backend has shut down; startup owns any remaining operation.
+            pass
+
+    Thread(target=on_exit, name="update-child-exit", daemon=True).start()
+
+
+async def _settle_update_child_refusal(operation_id: str) -> None:
+    from automation.restart import abort_restart_control
+
+    await abort_restart_control(
+        operation_id,
+        error="Update failed before restart; see the update log.",
+        failure_code="update_refused",
+        pre_stop_only=True,
+    )
 
 
 @router.post("/system/restart")
