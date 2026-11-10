@@ -204,6 +204,24 @@ def test_a_symlink_to_a_file_outside_the_workspace_is_never_guidance_or_committe
     assert "PRIVATE KEY BYTES" not in _git(["log", "--all", "-p"], cwd=workspace)
 
 
+def test_the_sweep_never_records_a_credential_shaped_file_in_a_skills_evals(history_scope):
+    from infra.guidance_git import startup_sweep
+
+    workspace, _ = history_scope
+    evals = workspace / "skills" / "demo" / "evals"
+    (evals / "fixtures").mkdir(parents=True)
+    # A workspace made before the scaffold carried credential lines has no ignore rule for these.
+    (evals / ".env").write_text("API_TOKEN=PRIVATE-ENV-BYTES\n")
+    (evals / "fixtures" / "server.key").write_text("PRIVATE KEY BYTES\n")
+    (evals / "cases.md").write_text("# cases\n")
+    startup_sweep(workspace)
+    recorded = _git(["ls-files", "skills"], cwd=workspace).split()
+    assert "skills/demo/evals/cases.md" in recorded
+    assert not any(path.endswith((".env", ".key")) for path in recorded)
+    log = _git(["log", "--all", "-p"], cwd=workspace)
+    assert "PRIVATE-ENV-BYTES" not in log and "PRIVATE KEY BYTES" not in log
+
+
 # --- Commit message -------------------------------------------------------
 
 
