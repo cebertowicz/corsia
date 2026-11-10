@@ -1,0 +1,133 @@
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { StateField, type EditorState, type Range } from '@codemirror/state';
+import { syntaxTree } from '@codemirror/language';
+import { renderMarkdown } from '$lib/markdown';
+import { imageContext, refreshMarkdownImages, type ImageContext } from './markdown-image';
+import { renderedFragment } from './rendered-images';
+import { blockSource, tableAt } from './widget-blocks';
+import { BlockWidget, priorWidget } from './block-widget';
+import { tableCells } from './widget-cells';
+import { openCellIn, type OpenCell } from './widget-cell-state';
+
+/**
+ * The rendered table, and the one way its DOM is built and kept current.
+ *
+ * A table is one block widget over its source lines, so a keystroke in a cell would otherwise recreate the whole table —
+ * which is why an editor cannot live inside a cell while the widget is thrown away on every change. So the widget answers
+ * CodeMirror's `updateDOM` and moves in only the cells whose text actually changed, leaving every other node — the cell
+ * being edited above all, since its own editor holds that text live — where it is. CodeMirror calls `updateDOM` only when
+ * `eq` says the two widgets differ, and hands it the widget that drew the node, so `eq` stays the strict question "does
+ * this render the same" and `updateDOM` patches the difference. A change of *shape* — a row added, a column gained — and a
+ * change of the image context, whose URLs are baked into the rendered cells, both refuse the patch and rebuild instead.
+ */
+
+class TableWidget extends BlockWidget {
+	readonly images: ImageContext | null;
+	constructor(readonly src: string, images: ImageContext | null, prior: TableWidget | null = null) {
+		super(prior);
+		// The context provider is live; retain this render's values so a refresh can compare them with the next one.
+		this.images = images && { ...images };
+	}
+	eq(o: TableWidget) {
+		return o.src === this.src && sameImages(this.images, o.images);
+	}
+	toDOM() {
+		const el = renderTable(this.src, this.images);
+		el.dataset.srcLength = String(this.src.length); // the source range this DOM stands for, for `blockRange`
+		return this.drew(el);
+	}
+	updateDOM(dom: HTMLElement, view: EditorView, from: TableWidget) {
+		if (!sameImages(this.images, from.images) || shape(this.src) !== shape(from.src)) return false;
+		if (!transplant(dom, this.src, this.images, from.src, openCellIn(view.state))) return false;
+		dom.dataset.srcLength = String(this.src.length);
+		this.drew(dom); // this node is what the next render measures its height against
+		return true;
+	}
+	ignoreEvent() { return true; }
+}
+
+const sameImages = (a: ImageContext | null, b: ImageContext | null) =>
+	a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token && a?.imageCacheKey === b?.imageCacheKey;
+
+/** The one rendering path a table has: the app's canonical markdown renderer, over the table's own source lines. */
+function renderTable(src: string, images: ImageContext | null): HTMLElement {
+	const el = document.createElement('div');
+	el.className = 'cm-md-table md-content';
+	// Same trust boundary as every `{@html} renderMarkdown(...)` surface: renderMarkdown applies the canonical DOMPurify
+	// policy before HTML reaches the document. Keep this widget on that single sanitized renderer.
+	el.append(renderedFragment(renderMarkdown(src), images));
+	return el;
+}
+
+/** The row count and the number of source cells in each: what a cell-by-cell patch can follow, and what a real edit breaks. */
+const shape = (src: string) => {
+	const perRow: number[] = [];
+	for (const span of tableCells(src)) perRow[span.row] = (perRow[span.row] ?? 0) + 1;
+	return `${src.split('\n').length}|${perRow.join(',')}`;
+}
+
+/**
+ * Re-renders `src` and moves into the drawn table only the cells whose source text differs from `was`, the source the node
+ * holds — and never the open cell, whose own editor shows that text as it changes.
+ */
+function transplant(el: HTMLElement, src: string, images: ImageContext | null, was: string, open: OpenCell | null, force?: { row: number; col: number }): boolean {
+	const fresh = renderTable(src, images).querySelector('table');
+	const drawn = el.querySelector('table');
+	if (!fresh || !drawn) return false;
+	const held = tableCells(was);
+	for (const span of tableCells(src)) {
+		const before = held.find((item) => item.row === span.row && item.col === span.col);
+		const unchanged = before && was.slice(before.rawFrom, before.rawTo) === src.slice(span.rawFrom, span.rawTo);
+		const forced = force && span.row === force.row && span.col === force.col;
+		if (unchanged && !forced) continue;
+		if (open && span.row === open.row && span.col === open.col) continue;
+		const next = fresh.rows[span.row]?.cells[span.col];
+		const now = drawn.rows[span.row]?.cells[span.col];
+		if (next && now) now.replaceWith(next);
+	}
+	return true;
+}
+
+/**
+ * Puts a cell's rendered content back from the document's source: what a closed cell needs, since its editor replaced the
+ * rendered text while it was open and the source may have moved on underneath it.
+ */
+export function repaintTableCell(el: HTMLElement, state: EditorState, cell: OpenCell) {
+	const block = tableAt(state, cell.from, cell.from + 1);
+	if (!block || block.from !== cell.tableFrom || !el.querySelector('table')) return;
+	const src = state.sliceDoc(block.from, block.to);
+	transplant(el, src, state.facet(imageContext)(), src, null, cell);
+}
+
+/**
+ * Replaces each GFM table with a rendered block widget. Block decorations must come from a state field (CodeMirror forbids
+ * them from view plugins), and the replaced range spans whole lines so the widget cleanly takes the block's place. It
+ * rebuilds when the document changes or the background parser advances: a table below the initial parse budget enters the
+ * tree later, on a transaction that carries no document change.
+ */
+function buildTableDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
+	const decos: Range<Decoration>[] = [];
+	const { doc } = state;
+	const images = state.facet(imageContext)();
+	syntaxTree(state).iterate({
+		enter: (node) => {
+			if (node.name !== 'Table') return;
+			const { from, to } = blockSource(doc, node);
+			const src = doc.sliceString(from, to);
+			decos.push(Decoration.replace({ widget: new TableWidget(src, images, priorWidget(prior, from, to, TableWidget)), block: true }).range(from, to));
+			return false;
+		}
+	});
+	return Decoration.set(decos, true);
+}
+
+export const markdownTableDecorations = StateField.define<DecorationSet>({
+	create: (state) => buildTableDecorations(state),
+	update(deco, tr) {
+		const imageRefresh = tr.effects.some((effect) => effect.is(refreshMarkdownImages));
+		const mapped = deco.map(tr.changes);
+		if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildTableDecorations(tr.state, mapped);
+		return mapped;
+	},
+	provide: (f) => EditorView.decorations.from(f)
+});

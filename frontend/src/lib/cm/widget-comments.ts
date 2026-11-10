@@ -4,8 +4,9 @@ export { touchMovedBeyond, type WidgetSelection } from './widget-selection-types
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey } from './widget-open';
-import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
-import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
+import { blockRange, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
+import { selectionIn } from './widget-selection';
+import { CELL_EDITOR } from './widget-cell-state';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
 
@@ -15,76 +16,6 @@ import { caretToWidget } from './widget-caret';
  * source range, and raises the same selection the editor raises for text. It also paints the comment marks inside the
  * widget, because the widget replaces the range the mark decorations would sit on.
  */
-
-
-/** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
-export function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {
-	const block = blockRange(view, el);
-	if (!block || block.to <= block.from) return null;
-	const rects = [...range.getClientRects()];
-	const end = rects[rects.length - 1] ?? range.getBoundingClientRect();
-	const top = Math.min(...(rects.length ? rects : [end]).map((r) => r.top));
-	const place = { top, left: end.right, above: true, inWidget: true as const };
-	const { state } = view;
-	if (el.matches(DIAGRAM)) {
-		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => widgetCommentLabel(state, block.from, block.to, '') ?? undefined, anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
-	}
-	const src = view.state.sliceDoc(block.from, block.to);
-	const origin = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
-	const collapsedCell = range.collapsed ? origin?.closest<HTMLTableCellElement>('td, th') ?? null : null;
-	const covered = tableCells(src).map((span) => ({ span, cell: cellElement(el, span) }))
-		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell && (range.intersectsNode(hit.cell) || hit.cell === collapsedCell))
-		.map(({ span, cell }) => {
-			// The selection's share of this cell: it starts and ends inside the cell, or at the cell's own edges. A collapsed
-		// range at an empty cell's edge does not intersect that element in Chromium, so `collapsedCell` above includes it.
-			const part = range.cloneRange(), inCell = document.createRange();
-			inCell.selectNodeContents(cell);
-			if (range.compareBoundaryPoints(Range.START_TO_START, inCell) < 0) part.setStart(cell, 0);
-			if (range.compareBoundaryPoints(Range.END_TO_END, inCell) > 0) part.setEnd(cell, cell.childNodes.length);
-			return { span, cell, part, picked: part.toString() };
-		})
-		.filter(({ span, picked }) => picked.trim() !== '' || (range.collapsed && span.from === span.to));
-	if (covered.length === 0) return null;
-	const rows = (items: Array<{ cell: HTMLTableCellElement }> = covered) => {
-		const trs = items.map(({ cell }) => cell.parentElement).filter((tr): tr is HTMLElement => !!tr?.isConnected);
-		if (trs.length === 0) return null;
-		const top = Math.min(...trs.map((tr) => tr.getBoundingClientRect().top));
-		const bottom = Math.max(...trs.map((tr) => tr.getBoundingClientRect().bottom));
-		const wide = el.getBoundingClientRect();
-		return new DOMRect(wide.left, top, wide.width, bottom - top);
-	};
-	const first = covered[0], last = covered[covered.length - 1];
-	// The label comes from the one shared function, from the same offsets and quote the card is later given.
-	const whole = (start: { span: CellSpan; cell: HTMLTableCellElement } = first, end: { span: CellSpan; cell: HTMLTableCellElement } = last, items: Array<{ cell: HTMLTableCellElement }> = covered): WidgetSelection => {
-		const from = block.from + start.span.from, to = block.from + end.span.to, text = src.slice(start.span.from, end.span.to);
-		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: () => rows(items) };
-	};
-	const snapped = snappedTableRows(src, covered.map(({ span }) => span));
-	if (snapped && snapped.rows > 1) {
-		const all = snapped.cells.map((span) => ({ span, cell: cellElement(el, span) }))
-			.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell);
-		return whole(all[0] ?? first, all[all.length - 1] ?? last, all);
-	}
-	if (covered.length > 1) return whole();
-	// One cell: the occurrence the person selected, by its place among the same text in the rendered cell.
-	const { span, cell, part, picked } = first;
-	if (range.collapsed && span.from === span.to) {
-		const from = block.from + span.anchorFrom, to = block.from + span.anchorTo, text = src.slice(span.anchorFrom, span.anchorTo);
-		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
-	}
-	const rendered = cell.textContent ?? '';
-	const before = document.createRange();
-	before.selectNodeContents(cell);
-	before.setEnd(part.startContainer, part.startOffset);
-	const index = occurrences(rendered, picked).filter((at) => at < before.toString().length).length;
-	const inSource = occurrences(src.slice(span.from, span.to), picked);
-	if (inSource.length === occurrences(rendered, picked).length && inSource[index] !== undefined) {
-		const from = block.from + span.from + inSource[index];
-		return { from, to: from + picked.length, text: picked, ...place, label: () => widgetCommentLabel(state, from, from + picked.length, picked) ?? undefined, anchor: rows as () => DOMRect | null };
-	}
-	return whole();
-}
-
 export interface WidgetCommentHooks {
 	onSelect: (selection: WidgetSelection | null) => void;
 	/** Every comment drawn where the click landed, with the painted element it landed on; several open the list, as the margin marker does. */
@@ -118,6 +49,9 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private readonly click = (event: MouseEvent) => {
 			if (this.pointer === 'touch' && !this.touchMoved) caretToWidget(this.view, event);
 			const origin = event.target instanceof Element ? event.target : null;
+			// A click inside an open cell editor belongs to that editor: it places a caret there, and its own selection is read
+			// by `read` below like any other selection made inside the widget.
+			if (origin?.closest(CELL_EDITOR)) return;
 			const widget = origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();
 			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
@@ -136,7 +70,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			if ((this.pointer !== 'touch' && !this.recentTouch()) || this.touchMoved) return;
 			const target = event.target instanceof Element ? event.target : null;
 			const widget = target && widgetOf(this.view, target);
-			if (!widget || target.closest('a')) return;
+			if (!widget || target.closest('a') || target.closest(CELL_EDITOR)) return;
 			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
 			const range = document.createRange();
@@ -149,7 +83,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		// starts in a widget therefore draws its own selection (press, drag, release) and leaves links and double clicks to the browser.
 		private readonly press = (event: MouseEvent) => {
 			const target = event.target as Element;
-			if (event.button !== 0 || event.shiftKey || event.detail > 1 || !widgetOf(this.view, target) || target.closest('a')) return;
+			if (event.button !== 0 || event.shiftKey || event.detail > 1 || !widgetOf(this.view, target) || target.closest('a') || target.closest(CELL_EDITOR)) return;
 			const widget = widgetOf(this.view, target)!;
 			// A tap is read on its click; its mouse press must not focus the editor, which would collapse the selection the tap makes.
 			if (this.pointer === 'touch' || this.recentTouch()) { event.preventDefault(); return; }
@@ -197,7 +131,11 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			window.addEventListener('mouseup', up);
 		};
 
-		private readonly key = (event: KeyboardEvent) => { if (openWidgetOnKey(this.view, event)) { event.preventDefault(); event.stopPropagation(); } };
+		private readonly key = (event: KeyboardEvent) => {
+			// Keys inside an open cell editor are the editor's: Tab, Enter and Escape move between cells there.
+			if (event.target instanceof Element && event.target.closest(CELL_EDITOR)) return;
+			if (openWidgetOnKey(this.view, event)) { event.preventDefault(); event.stopPropagation(); }
+		};
 		private readonly rendered = () => this.paint();
 		private readonly observer = new MutationObserver(this.rendered);
 		private readonly openableSignatures = new WeakMap<HTMLElement, string>();

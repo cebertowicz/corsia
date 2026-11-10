@@ -83,6 +83,12 @@ export const docTheme = EditorView.theme({
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
+	// A cell's own editor is the one thing inside a table that is written to, so it takes back what the rule above takes
+	// away; WebKit honours `contenteditable` only where user-modify allows it.
+	'.cm-md-cell-editor, .cm-md-cell-editor *': { userSelect: 'text', WebkitUserModify: 'read-write' },
+	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
+	// for the comment flows, would otherwise be a second caret on the same text.
+	'&.cm-md-cell-open .cm-cursorLayer': { display: 'none' },
 	'.cm-md-table .table-wrap': { margin: '0' },
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },

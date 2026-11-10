@@ -9,7 +9,8 @@ import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
 import { imageOpener } from './markdown-image';
 import { markOpenable } from './widget-open';
-import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
+import { selectionIn } from './widget-selection';
+import { widgetComments, type WidgetSelection } from './widget-comments';
 
 const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
 const DOC = `intro\n\n${TABLE}\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
