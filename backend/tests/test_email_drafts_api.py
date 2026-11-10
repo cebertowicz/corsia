@@ -62,7 +62,7 @@ def _artifact(saved: dict) -> str:
     return registered["id"]
 
 
-def _serve(mail, thread: list[dict], *, failing: set[str] = frozenset()) -> None:
+def _serve(mail, thread: list[dict], *, failing: frozenset[str] = frozenset()) -> None:
     """Gmail answers with this thread from now on; a listed message id fails with a 500."""
     inner = mail.fake.handler
     by_id = {item["id"]: item for item in thread}
@@ -100,7 +100,7 @@ async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answer
 @pytest.mark.asyncio
 async def test_an_email_that_cant_be_read_is_counted_and_the_rest_still_show(mail):
     saved = await _draft(mail, reply_to_message_id="m-100")
-    _serve(mail, [OLDER, ANSWERED, NEWER], failing={"m-090"})
+    _serve(mail, [OLDER, ANSWERED, NEWER], failing=frozenset({"m-090"}))
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert context["status"] == "partial" and context["unreadable"] == 1
     assert [m["id"] for m in context["conversation"]] == ["m-110", "m-100"]
