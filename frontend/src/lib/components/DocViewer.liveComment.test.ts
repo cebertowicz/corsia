@@ -439,7 +439,11 @@ it('returns focus to the editor without scrolling when the comment popover is di
 	docComments.set({ artifact: [{ id: 'c1', from: 6, to: 10, anchor: 'beta', author: 'you', text: 'note', at: '2026-10-07T00:00:00Z', resolved: false, replies: [] }] });
 	flushSync();
 	await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
-	EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!.dispatch({ selection: { anchor: 8 } }); flushSync();
+	// Below the margin width (this canvas has no width) only a click on the text opens its popover.
+	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1 }));
+	view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+	window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
 	const viewFocus = vi.spyOn(EditorView.prototype, 'focus');
 	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
@@ -456,13 +460,17 @@ async function openWithComment() {
 	return EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
 }
 const scrolledTo = (spy: { mock: { calls: unknown[][] } }, at: number) => spy.mock.calls.some(([pos]) => pos === at);
-it('scrolls to a comment the caret reaches by keyboard, even right after a press elsewhere in the text', async () => {
+it('below the margin width, a caret reaching a comment by keyboard opens no popover over the text, and typing closes a clicked one', async () => {
 	const view = await openWithComment();
-	const scroll = vi.spyOn(EditorView, 'scrollIntoView');
-	view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 400 }));
-	view.contentDOM.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 40, clientY: 400 }));
-	view.dispatch({ selection: { anchor: 7 } }); flushSync();
-	await vi.waitFor(() => expect(scrolledTo(scroll, 6)).toBe(true));
+	view.dispatch({ selection: { anchor: 7 }, userEvent: 'select' }); flushSync();
+	await new Promise((done) => requestAnimationFrame(() => done(null)));
+	expect(document.querySelector('[data-popover]')).toBeNull();
+	view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1 }));
+	view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+	window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
+	view.dispatch({ changes: { from: 8, insert: 'x' }, selection: { anchor: 9 }, userEvent: 'input.type' }); flushSync();
+	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).toBeNull());
 });
 it('opens a comment where its text is clicked without scrolling to it', async () => {
 	const view = await openWithComment();

@@ -73,21 +73,21 @@ describe('typing across the connection', () => {
 		const view = mountEditor();
 		agentATypes();
 		expect(hidden(view)).toBe(TYPED.length);
-		vi.advanceTimersByTime(400);
+		vi.advanceTimersByTime(100);
 		const mid = hidden(view);
 		expect(mid).toBeGreaterThan(0);
 		expect(mid).toBeLessThan(TYPED.length);
 		connected.set(false);
 		flushSync();
 		expect(hidden(view)).toBe(mid);
-		vi.advanceTimersByTime(400);
+		vi.advanceTimersByTime(100);
 		const during = hidden(view);
 		expect(during).toBeGreaterThan(0);
 		expect(during).toBeLessThan(mid);
 		connected.set(true);
 		flushSync();
 		// Typing on to the end is the driver's own test; every simulated frame re-renders the editor, so stop here.
-		vi.advanceTimersByTime(400);
+		vi.advanceTimersByTime(100);
 		expect(hidden(view)).toBeLessThan(during);
 	});
 

@@ -8,6 +8,7 @@
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
@@ -39,7 +40,8 @@
 		saveError,
 		pendingSel,
 		commentSheetOpen = false,
-		commentsAsSheet = false,
+		cardMode,
+		onTyping,
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
@@ -69,8 +71,9 @@
 		pendingSel: PendingSelection | null;
 		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
 		commentSheetOpen?: boolean;
-		/** Cards open as the phone sheet (the pane-drawer width): a caret in a suggestion is editing and opens none. */
-		commentsAsSheet?: boolean;
+		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
+		cardMode?: CardMode;
+		onTyping?: () => void;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
@@ -106,7 +109,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

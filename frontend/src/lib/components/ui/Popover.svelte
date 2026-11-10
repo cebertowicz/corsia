@@ -9,7 +9,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -28,6 +28,8 @@
 		avoidRect?: () => DOMRect | null;
 		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
 		initialFocus?: string;
+		/** False leaves the focus where it is on open, for a card that opens beside text the person is editing. */
+		takeFocus?: boolean;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
 		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
@@ -152,7 +154,7 @@
 			if (cancelled) return;
 			position();
 			await tick(); // Apply placement and visibility before moving focus into the card.
-			if (cancelled || !open || hidden) return;
+			if (cancelled || !open || hidden || !takeFocus) return;
 			const preferred = initialFocus ? surface?.querySelector<HTMLElement>(initialFocus) : null;
 			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
 		});

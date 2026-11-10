@@ -118,9 +118,12 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
+	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
+	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -327,7 +330,9 @@
 		onSave={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={openCards.comment}
-		onCaretAway={() => void commentUI.release()}
+		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
+		onTyping={closeTextCard}
+		cardMode={commentSurface?.cardMode()}
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
@@ -339,11 +344,11 @@
 		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetUp}
-		commentsAsSheet={$isMobile}
 		onStartComment={draftController.start}
 	/>
 	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={serverReadOnly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
+		bind:this={commentSurface}
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}
 		state={commentUI.state}

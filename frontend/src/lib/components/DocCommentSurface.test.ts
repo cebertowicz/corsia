@@ -371,6 +371,22 @@ describe('DocCommentSurface suggestions', () => {
 		}
 	});
 
+	it('leaves the focus in the text a card was picked from, and moves it into a card opened any other way', async () => {
+		const reading = () => new DOMRect(520, 100, 20, 20);
+		const text = document.body.appendChild(document.createElement('textarea'));
+		try {
+			text.focus();
+			render({ anchor: reading, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id } });
+			await vi.waitFor(() => expect(document.body.querySelector('[data-popover]')?.contains(document.activeElement)).toBe(true));
+			unmount(component!); host.remove(); component = null;
+			text.focus();
+			render({ anchor: reading, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id, fromText: true } });
+			await vi.waitFor(() => expect(document.body.querySelector('[data-popover]')?.hasAttribute('aria-hidden')).toBe(false));
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(document.activeElement).toBe(text);
+		} finally { text.remove(); }
+	});
+
 	it('keeps a document text-comment sheet above the keyboard on narrow screens', () => {
 		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
 		expect(document.body.querySelector('.drawer-backdrop')?.classList.contains('follow-keyboard')).toBe(true);
