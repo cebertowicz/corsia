@@ -18,7 +18,7 @@
 	import EmailAttachments from './EmailAttachments.svelte';
 	import { badEntries, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
-	import type { EmailHeaderOptions } from '$lib/cm/email-header';
+	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -53,9 +53,8 @@
 		onTyping,
 		onStartComment,
 		tabInstanceId = null,
-		artifactId = null,
 		onDocumentPlace,
-		emailDraft = false,
+		emailDraftId = null,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -87,10 +86,9 @@
 		onTyping?: () => void;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
-		artifactId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
-		/** The backend's presentation says this document is an email draft: it opens as an email, its context read from the draft's account. */
-		emailDraft?: boolean;
+		/** Set when the backend's presentation says this document is an email draft: its artifact id, so it opens as an email with its context read from the draft's account. */
+		emailDraftId?: string | null;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
@@ -101,7 +99,7 @@
 	let context = $state<{ artifactId: string; read: EmailDraftContext } | null>(null);
 	const LOADING: EmailDraftContext = { status: 'loading', conversation: [], notes: [], attachments: [] };
 	$effect(() => {
-		const id = emailDraft && docState === 'ready' ? artifactId : null;
+		const id = docState === 'ready' ? emailDraftId : null;
 		readAttempt;
 		if (!id) { context = null; return; }
 		let current = true;
@@ -123,6 +121,8 @@
 			return () => void unmount(chips);
 		} : null,
 	} : null);
+	// The header lines are drawn as a compact block over the editable text (cm/email-header.ts).
+	useEmailHeader(() => editor?.editorView(), () => emailHeader);
 	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
@@ -143,7 +143,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap">
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {emailHeader} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		{#if saveError}
 			<div class="save-error" role="alert">{saveError}</div>
 		{/if}

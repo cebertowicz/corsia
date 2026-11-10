@@ -21,7 +21,6 @@
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
-	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -54,8 +53,7 @@
 		pendingComment = null,
 		scrollTo = null,
 		tabInstanceId = null,
-		onDocumentPlace,
-		emailHeader = null
+		onDocumentPlace
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -90,8 +88,6 @@
 		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
-		/** An email draft: its header lines are drawn as a compact block over the editable text (cm/email-header.ts). */
-		emailHeader?: EmailHeaderOptions | null;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -101,7 +97,6 @@
 	let view = $state<EditorView>();
 	const roComp = new Compartment();
 	const documentComp = new Compartment();
-	useEmailHeader(() => view, () => emailHeader);
 	let activeText: Y.Text | null = null;
 	let binding: ReturnType<typeof liveDocumentBinding> | undefined;
 	const localHistory = [history(), keymap.of(historyKeymap)];
@@ -178,6 +173,9 @@
 
 	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
 	export function widgetLabelStamp(): unknown { return view?.state.doc; }
+
+	/** This editor's view while it is up, for a caller that adds its own extension slot (an email draft's header). */
+	export function editorView(): EditorView | undefined { return view; }
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent) {

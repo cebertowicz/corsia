@@ -14,4 +14,6 @@ export interface DocViewerTarget {
 	artifactId: string | null;
 	/** Tab-scoped arrival instruction, cleared after the viewer uses it. */
 	landOn?: DocumentLanding;
+	/** The icon the backend's presentation gives the document, as the tab's last load read it: 'mail' opens it as an email draft. */
+	icon?: string;
 }

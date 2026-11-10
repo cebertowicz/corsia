@@ -79,7 +79,6 @@
 	let openRefusal = $state<DocOpenRefusal | null>(null);
 	let liveUnavailable = $state<ViewerContent['liveUnavailable']>(null);
 	let loadedArtifactId = $state<string | null>(null);
-	let emailDraft = $state(false); // The backend's presentation of the loaded file marks it an email draft, so it opens as an email.
 	let readonly = $state(false);
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
@@ -194,7 +193,7 @@
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
 				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
-				emailDraft = value.presentation?.icon === 'mail'; freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
+				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
 	}
@@ -321,7 +320,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
-		{emailDraft}
+		emailDraftId={target?.icon === 'mail' ? loadedArtifactId : null}
 		{docState}
 		documentName={target?.name ?? 'this document'}
 		onRetry={() => reloadNonce += 1}
@@ -344,7 +343,6 @@
 		imageBase={target && { ...target, imageCacheKey: imageKey.current }}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		tabInstanceId={target?.instanceId ?? null}
-		artifactId={loadedArtifactId}
 		{onDocumentPlace}
 		saveError={save.error}
 		pendingSel={draftController.pending}
