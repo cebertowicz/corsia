@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { renderMentions, type TaggedAgent } from './mentionMarkup';
+	import './comment-link.css';
 	import type { MentionOccurrence } from './mentionSelection';
 
 	let { text, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();

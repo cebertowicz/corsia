@@ -376,8 +376,7 @@
 	}
 	button.ct-num { position: relative; font-family: inherit; cursor: pointer; }
 	button.ct-num:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* A 44 px target around the 18 px number on touch. */
-	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
+	/* Its target grows around the 18 px number in comment-link.css. */
 	.ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }

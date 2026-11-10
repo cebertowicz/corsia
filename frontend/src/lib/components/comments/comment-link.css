@@ -1,2 +1,8 @@
 .ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; padding: 0; cursor: pointer; }
 .ct-link:hover { text-decoration: underline; }
+
+/* A comment control drawn smaller than its target keeps its drawn size; its hit area grows to an icon button's 24px
+   (DESIGN-SYSTEM §0), 44px on a touch screen, centred on it. A control already that large adds nothing. */
+.ct-link, .ct-more, .ct-act, button.ct-num, .ct-suggestion-accept { --ct-hit: var(--space-6); position: relative; }
+@media (pointer: coarse) { .ct-link, .ct-more, .ct-act, button.ct-num, .ct-suggestion-accept { --ct-hit: var(--touch-target); } }
+.ct-link::after, .ct-more::after, .ct-act::after, button.ct-num::after, .ct-suggestion-accept::after { content: ''; position: absolute; inset: min(0px, calc(50% - var(--ct-hit) / 2)); }
