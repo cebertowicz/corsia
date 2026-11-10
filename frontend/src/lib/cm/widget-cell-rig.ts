@@ -22,6 +22,12 @@ export const cellTo = () => cellFrom() + 7;
 
 export const { make, cleanup } = trackRigs();
 
+// jsdom lays nothing out and gives a Range no rects, so the caret a click places has nowhere to be read from; without these,
+// CodeMirror's `posAtCoords` throws in the middle of opening a cell and the rest of the open is never run.
+const rangeLayout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+rangeLayout.getClientRects ??= () => [] as unknown as DOMRectList;
+rangeLayout.getBoundingClientRect ??= () => new DOMRect();
+
 export function build(doc: string, extensions: Extension[] = []) {
 	const r = make(doc, [markdown({ extensions: GFM }), markdownLivePreview, ...extensions]);
 	if (!forceParsing(r.view, r.view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');

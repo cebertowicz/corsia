@@ -1,4 +1,4 @@
-import { Transaction, type Text } from '@codemirror/state';
+import { ChangeSet, EditorSelection, Transaction, type Text } from '@codemirror/state';
 
 /**
  * What a cell's editor accepts, which is what cannot break the table it sits in: a pipe that would end the cell is stored
@@ -57,7 +57,16 @@ export function cellShapeOnly(transaction: Transaction) {
 		changes.push({ from, to, insert: text });
 	});
 	if (!rewritten) return transaction;
-	// The caret follows the rewritten change rather than a position computed for the text the reader typed.
 	const userEvent = transaction.annotation(Transaction.userEvent);
-	return [userEvent ? { changes, userEvent } : { changes }];
+	// The caret follows the text that actually went in, which is longer than what the reader typed once an escape was added:
+	// mapped through the original change it would sit before the escaped pipe, and the next keystroke would land there.
+	const applied = ChangeSet.of(changes, doc.length);
+	// So the caret the transaction asked for is taken back to where it stood before the change, then carried past whatever
+	// the rewritten change put in at that place.
+	const back = transaction.changes.invertedDesc;
+	const asked = transaction.selection;
+	const heads = asked ? asked.ranges.map((range) => back.mapPos(range.head, -1)) : transaction.startState.selection.ranges.map((range) => range.head);
+	const main = asked ? asked.mainIndex : transaction.startState.selection.mainIndex;
+	const selection = EditorSelection.create(heads.map((head) => EditorSelection.cursor(applied.mapPos(head, 1))), main);
+	return [userEvent ? { changes, userEvent, selection } : { changes, selection }];
 }

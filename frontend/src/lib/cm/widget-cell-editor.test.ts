@@ -227,6 +227,9 @@ describe('nothing typed or pasted breaks the table', () => {
 		expect(text).not.toContain('Login|no');
 		expect(table(r)!.rows[1].cells).toHaveLength(2);
 		expect(cellText(r), 'the cell editor holds the escaped source too').toBe(' Login\\|no ');
+		expect(cellCaret(r), 'the caret is after what went in, escape included, so the next key lands after it').toBe(10);
+		typed(r, cellCaret(r), '!');
+		expect(cellText(r)).toBe(' Login\\|no! ');
 	});
 
 	it('leaves the pipe escaped when a backslash was typed a keystroke earlier', () => {
@@ -245,6 +248,7 @@ describe('nothing typed or pasted breaks the table', () => {
 		clicked(r);
 		pasted(r, 6, 'two\nlines');
 		expect(cellText(r), 'the break became a space where it was pasted').toBe(' Logintwo lines ');
+		expect(cellCaret(r), 'the caret is at the end of the paste').toBe(15);
 		const text = r.view.state.doc.toString();
 		expect(text).toContain('| Logintwo lines | Done |');
 		expect(text.split('\n'), 'nothing was added to or taken from the table\'s lines').toHaveLength(DOC.split('\n').length);
@@ -265,6 +269,7 @@ describe('nothing typed or pasted breaks the table', () => {
 		expect(r.view.state.doc.toString()).toContain('Login\\|');
 		deleted(r, 6, 7);
 		expect(r.view.state.doc.toString()).toBe(DOC);
+		expect(cellCaret(r), 'the caret is where the pair was').toBe(6);
 		expect(table(r)!.rows[1].cells).toHaveLength(2);
 	});
 });
