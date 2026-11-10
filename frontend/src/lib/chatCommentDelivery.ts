@@ -4,14 +4,15 @@ import type { ChatComment, Message } from '$lib/stores/threads';
 const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
 
 /**
- * The empty comment envelopes in one thread that need no row of their own, because every comment they carry
- * is already shown on a loaded (and, when given, visible) target. One pass builds the keys; each envelope then
+ * Empty comment envelopes whose comments are attached to a loaded target. Placement alone does not
+ * decide visibility: suppressibleCommentEnvelopes also preserves delivery and recovery controls.
+ * One pass builds the keys; each envelope then
  * checks its comments against them, so the transcript asks once per change instead of rescanning per row.
  */
-export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined, visibleTargets?: ReadonlySet<string>): Set<string> {
+export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
 	const byId = new Map<string, Message>();
 	const retries = new Map<string, string[]>();
-	// A send still on its way is placed once its comment's thread is shown; a delivered one once its own copy is.
+	// A send still on its way is placed once its comment's thread is loaded; a delivered one once its own copy is.
 	const roots = new Set<string>();
 	const shown = new Set<string>();
 	for (const row of rows) {
@@ -19,7 +20,6 @@ export function placedCommentEnvelopes(rows: Message[], threadId: string | null 
 		byId.set(row.id, row);
 		const from = row.metadata?.retried_from_message_id;
 		if (from) retries.set(from, [...(retries.get(from) ?? []), row.id]);
-		if (visibleTargets && !visibleTargets.has(row.id)) continue;
 		for (const root of row.chat_comments ?? []) {
 			const key = replyKey(root.user_message_id, root.cid);
 			if (key) { roots.add(key); shown.add(key); }
@@ -48,6 +48,26 @@ export function placedCommentEnvelopes(rows: Message[], threadId: string | null 
 	return placed;
 }
 
+function supersededReplies(rows: Message[], threadId: string | null | undefined): Set<string> {
+	const superseded = new Set<string>();
+	for (const row of rows) {
+		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
+		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
+	}
+	return superseded;
+}
+
+/** Placed replies still needing delivery or recovery retain their transcript controls. */
+export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
+	const placed = placedCommentEnvelopes(rows, threadId);
+	const superseded = supersededReplies(rows, threadId);
+	for (const row of rows) {
+		if (row.thread_id === threadId && (row._optimistic || row.delivery_state === 'queued'
+			|| (row.delivery_state && row.delivery_state !== 'delivered' && !superseded.has(row.id)))) placed.delete(row.id);
+	}
+	return placed;
+}
+
 const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {
 	if (seen.has(`${key}|${row.id}`)) return;
 	seen.add(`${key}|${row.id}`);
@@ -68,11 +88,7 @@ export type ChatReplyIndex = {
  */
 export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
 	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.
-	const superseded = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
-		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
-	}
+	const superseded = supersededReplies(rows, threadId);
 	const pendingByKey = new Map<string, Message[]>();
 	const failedByKey = new Map<string, Message[]>();
 	const pendingSeen = new Set<string>();
