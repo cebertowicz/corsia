@@ -90,7 +90,8 @@ async def test_turn_complete_preview_omits_placed_answer(isolated_db, monkeypatc
         db.commit()
     finally:
         db.close()
-    assert await _turn_complete_preview(monkeypatch) == ""
+    # The answer-only message shows nothing in chat, so the preview is the message before it.
+    assert await _turn_complete_preview(monkeypatch) == "text"
 
 
 def test_marked_summary_reads_the_saved_text_whole(isolated_db):

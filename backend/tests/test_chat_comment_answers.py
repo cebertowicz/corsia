@@ -15,6 +15,7 @@ from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
 from infra.reply_context import RejectedComments, require_every_comment
 from infra.schema import SCHEMA_VERSION
+from infra.sidebar_preview import sidebar_update
 
 
 def _seed(db):
@@ -73,7 +74,9 @@ def test_thread_list_preview_hides_answer_tags(isolated_db):
     finally:
         db.close()
     listed = TestClient(app).get(f"/api/threads?token={OWNER_TOKEN}").json()["threads"]
-    assert [t["last_message"] for t in listed if t["id"] == "thread"] == [""]
+    # The answer is answer-only, so chat's last visible message (and the preview) is the one before it.
+    assert [t["last_message"] for t in listed if t["id"] == "thread"] == ["text"]
+    assert sidebar_update("thread")["last_message"] == "text"
 
 
 @pytest.mark.parametrize(('text', 'before', 'visible'), TAG_CASES)

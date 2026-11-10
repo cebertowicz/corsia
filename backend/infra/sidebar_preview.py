@@ -4,9 +4,11 @@ from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, st
 from infra.database import get_db
 
 # The first 100 characters of thread ``s``'s newest user or assistant message, as chat shows it.
+# An answer-only message shows nothing in chat (its saved chat text is empty), so it is skipped.
 # Callers strip the tags of sections that were not placed.
 LAST_MESSAGE_PREVIEW = f"""(SELECT substr({VISIBLE_CONTENT}, 1, 100) FROM messages m {VISIBLE_CONTENT_JOIN}
-    WHERE m.thread_id=s.id AND m.role IN ('user','assistant') ORDER BY m.created_at DESC LIMIT 1)"""
+    WHERE m.thread_id=s.id AND m.role IN ('user','assistant') AND (cv.content IS NULL OR cv.content != '')
+    ORDER BY m.created_at DESC LIMIT 1)"""
 
 
 def sidebar_update(thread_id: str) -> dict | None:
