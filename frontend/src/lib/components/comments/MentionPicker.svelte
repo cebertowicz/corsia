@@ -7,9 +7,11 @@
 	import { agentOptionIndex } from '../reviews/agentOptionKeys';
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
 	import { createMentionSelection, withTypedMentions } from './mentionSelection';
+	import { shownAsTags } from './mentionMarkup';
 	export function occurrences(text: string) {
 		// Typed names resolve only where picking could: a chat to carry the tag and a roster that loaded.
-		return withTypedMentions(text, canTag ? roster.taggableAgents : [], selectedTags.occurrences(text));
+		// A tag is only what reads as one: a name in code or a link stays plain text and notifies no one.
+		return shownAsTags(text, withTypedMentions(text, canTag ? roster.taggableAgents : [], selectedTags.occurrences(text)));
 	}
 	import type { TaggableAgent } from '$lib/api/docReviews';
 	let { input, selectedTags = createMentionSelection() }: { input: HTMLTextAreaElement | undefined; selectedTags?: ReturnType<typeof createMentionSelection> } = $props();
