@@ -314,7 +314,7 @@ def _save(
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
     write: Callable[[Path, bytes], object], timing: dict[str, float],
 ) -> SaveResult:
-    from infra.history_record import Version, put_back, record, save_queued, write_checked
+    from infra.history_record import Version, on_disk, put_back, record, save_queued, write_checked
 
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
@@ -350,6 +350,8 @@ def _save(
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
     with _locked(handle) as db:
         if isinstance(prior := write_checked(writes, expected, write), SaveResult):
+            if atomic and prior.outcome == "stale":  # a refused restore keeps the outside edit behind it
+                record(repo, [on_disk(rels, author, message, target.kind)], directory)
             return prior
         started = time.monotonic()
         version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, target.kind)

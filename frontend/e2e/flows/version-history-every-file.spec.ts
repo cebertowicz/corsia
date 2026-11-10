@@ -46,7 +46,7 @@ async function register(request: APIRequestContext, file: string, threadId: stri
 }
 
 // Opens one document tab in the chat's canvas, with the file tray tucked away on a wide screen.
-// The tab carries no chat, so opening it registers nothing.
+// The canvas opens it with the chat, which registers the file to that chat.
 async function openDocument(page: Page, info: TestInfo, title: string, artifactId: string | null, file: string, threadId: string) {
 	const phone = info.project.name === 'chromium-mobile';
 	// The newest init script runs last, so each call opens its own file.
@@ -124,9 +124,12 @@ test('@flow:version-history-every-file a workspace document shows every History 
 	const file = path.join(root, 'docs', `plan-${width}-${Date.now()}.md`);
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, FIRST);
-	// An ordinary document is recorded from its first save: the text it had, then each save.
-	for (const text of [...EDITS, THIRD]) await save(request, file, text, threadId);
-	await expect.poll(() => commits(root, file)).toBe(4);
+	// An ordinary document is recorded from its first save: the text it had, then each save. Saves that
+	// queue together are recorded as one, so each is let land before the next.
+	for (const [index, text] of [...EDITS, THIRD].entries()) {
+		await save(request, file, text, threadId);
+		await expect.poll(() => commits(root, file), { timeout: 15_000 }).toBe(index + 2);
+	}
 	// The person restores the first text (a save with a reason), then the chat's agent edits it.
 	await restoreThroughApi(request, file, oldestCommit(root, file), threadId);
 	await agentEdit(browser, request, info, title, threadId, file, 'Delete this line.', 'Agent line.');
@@ -225,12 +228,14 @@ test('@flow:version-history-every-file a registered chat file has History from t
 	const working = path.join(dir, 'working', `draft-${width}.md`);
 	for (const each of [kept, loose, working]) fs.writeFileSync(each, FIRST);
 	await register(request, kept, threadId);
-	for (const text of EDITS) await save(request, kept, text, threadId);
+	for (const [index, text] of EDITS.entries()) {
+		await save(request, kept, text, threadId);
+		await expect.poll(() => commits(root, kept), { timeout: 15_000 }).toBe(index + 2);
+	}
 	await save(request, loose, EDITS[0], null);
 	// A chat's working/ file stays out of history even when a save with the chat registers it.
 	const workingSave = await request.put(`/api/files/content${authQuery}`, { data: { path: working, text: EDITS[0], thread_id: threadId } });
 	expect.soft(workingSave.ok(), await workingSave.text()).toBe(true);
-	await expect.poll(() => commits(root, kept)).toBe(3);
 	// Git ignores chat folders; the registered file is recorded anyway, the others never.
 	expect(execFileSync('git', ['-C', root, 'check-ignore', '--no-index', '--', path.relative(root, kept)], { encoding: 'utf8' }).trim()).toBe(path.relative(root, kept));
 	await page.waitForTimeout(1000);
@@ -257,7 +262,8 @@ test('@flow:version-history-every-file a registered chat file has History from t
 	await rows.first().click();
 	await expect(page.locator('.diff-line.del')).toContainText('Delete this line.');
 	await shot(page, 'history-thread-file-version');
-	// No history, no control: the header offers no History and no empty panel.
+	// No version recorded, no control: the header offers no History and no empty panel. Opening the
+	// unregistered file in the chat registers it, but it has nothing to list until it is saved.
 	for (const [file, name] of [[working, 'history-none-working'], [loose, 'history-none-unregistered']] as const) {
 		await openDocument(page, info, title, null, file, threadId);
 		await expect(page.locator('.cm-content')).toContainText('Keep this line.');
@@ -267,7 +273,6 @@ test('@flow:version-history-every-file a registered chat file has History from t
 		await expect(page.locator('[data-doc-history-drawer]')).toHaveCount(0);
 		await shot(page, name);
 	}
-	// Opening a file without a chat registers nothing, so it still has no history.
 	expect(commits(root, loose)).toBe(0);
 });
 

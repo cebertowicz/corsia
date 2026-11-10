@@ -84,6 +84,23 @@ async def test_agent_edit_after_display_is_stale(skill):
 
 
 @pytest.mark.asyncio
+async def test_an_outside_edit_behind_a_refused_restore_is_kept_as_a_version(skill):
+    workspace, _thread, path, _user = skill
+    first = await recorded(skill, SKILL_BODY)
+    second = SKILL_BODY + '\nSecond.\n'
+    await recorded(skill, second)
+    outside = SKILL_BODY + '\nOutside edit.\n'
+    path.write_text(outside)
+    before = commits(workspace)
+    assert refusal(await restore(skill, first, sha(second))) == (409, 'stale')
+    assert path.read_text() == outside
+    # Kept before the refusal answers, by no one's name: the history the person reloads ends at the text they see.
+    assert commits(workspace) == before + 1
+    assert 'Reason: unrecorded' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+    assert _git(['show', f'HEAD:{path.resolve().relative_to(workspace.resolve()).as_posix()}'], cwd=workspace) == outside
+
+
+@pytest.mark.asyncio
 async def test_typing_during_restore_is_its_own_version(skill):
     workspace, _thread, path, _user = skill
     first = await recorded(skill, SKILL_BODY)

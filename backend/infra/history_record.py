@@ -7,7 +7,8 @@ writes its bytes, answers, and is recorded here afterwards (:func:`save_queued`)
 time, in save order, consecutive saves of one document by one author under one message joined, the
 person's ignore rules read once per batch so the save itself asks Git nothing. A version that cannot be recorded is kept and retried with the next save in that workspace, and the
 next save of that document says so. A restore (``atomic``) queues behind every earlier save and
-answers only once its own version is recorded, putting the old bytes back when it is not.
+answers only once its own version is recorded, putting the old bytes back when it is not. A restore
+refused as stale first records the outside edit that made it stale, so a reloaded list ends at that text.
 """
 
 from __future__ import annotations
@@ -127,6 +128,8 @@ def save_queued(
     puts the old bytes back when it is not recorded."""
     prior = write_checked(writes, expected, write)
     if isinstance(prior, SaveResult):
+        if atomic and prior.outcome == "stale":
+            _keep_outside(repo, on_disk(rels, author, message, "document", tray))
         return prior
     version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, "document", tray)
     done: Future | None = Future() if atomic else None
@@ -139,6 +142,24 @@ def save_queued(
         put_back(prior, writes)
         return SaveResult("failed", str(exc), line=SAVE_FAILED.format(error=exc))
     return SaveResult("written", sha=landed.sha) if landed is not None and landed.changed else SaveResult("unchanged")
+
+
+def on_disk(rels: dict[Path, str], author: str, message: str, kind: str, tray: bool = False) -> Version:
+    """Each file as it is on disk, over itself: recording it adds only the outside version of an edit
+    history lacks, since its own bytes change nothing."""
+    files = {rel: (data, data) for path, rel in rels.items() for data in [read_regular(path)]}
+    return Version(files, author, message, kind, tray)
+
+
+def _keep_outside(repo: Path, version: Version) -> None:
+    """Blocking. Record the outside edit that made a restore stale before the refusal answers, so the
+    history the person reloads ends at the text they see. A failure leaves the refusal as it is."""
+    done: Future = Future()
+    _enqueue(repo, _Queued(version, done))
+    try:
+        done.result()
+    except Exception:
+        logger.opt(exception=True).warning("history could not keep the outside edit behind a refused restore in {}", repo)
 
 
 def wait_recorded(timeout: float = 60.0) -> bool:
