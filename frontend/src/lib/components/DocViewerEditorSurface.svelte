@@ -9,6 +9,7 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
+	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -139,7 +140,10 @@
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
 
-	// The button follows the selection's end but never leaves the visible document column.
+	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
+	// selection is drawn on, as chat's does, so it never covers selected text. A table cell or diagram has already placed it above.
+	const coarse = coarsePointer();
+	const place = $derived(!pendingSel ? null : pendingSel.above ? { top: pendingSel.top, above: true } : selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse));
 	const EDGE = 8;
 	let column: HTMLDivElement | undefined = $state();
 	let buttonWidth = $state(0);
@@ -182,7 +186,7 @@
 </div>
 
 {#if pendingSel && !commentSheetOpen}
-	<button class="sel-comment" class:above={pendingSel.above} out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" class:above={place?.above} class:below={!place?.above} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment

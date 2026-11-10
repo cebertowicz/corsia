@@ -3,6 +3,15 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createComment, openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { routeDocumentSaves } from '../support/docSaveCue';
+import type { Page } from '@playwright/test';
+
+/** Whether the Comment button's box overlaps any rectangle the selected text is drawn in. */
+const coversSelection = (page: Page) => page.evaluate(() => {
+	const button = document.querySelector('.sel-comment')!.getBoundingClientRect();
+	const selection = document.getSelection();
+	const rects = selection && selection.rangeCount ? [...selection.getRangeAt(0).getClientRects()] : [];
+	return rects.some((rect) => rect.width > 0 && rect.left < button.right && rect.right > button.left && rect.top < button.bottom && rect.bottom > button.top);
+});
 
 for (const width of [1440, 393]) {
 	test(`@surface:live-document the selection Comment button stays inside the document column and clickable at ${width}`, async ({ page, request, context }) => {
@@ -52,6 +61,20 @@ for (const width of [1440, 393]) {
 		expect(box.x + box.width, 'button ends inside the column').toBeLessThanOrEqual(column.x + column.width);
 		const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.sel-comment') !== null, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
 		expect(hit, 'the button is the element under its own centre').toBe(true);
+		expect(await coversSelection(page), 'the button covers none of the selected text').toBe(false);
+		// A heading's larger line is selected whole: the button still sits clear of it.
+		const heading = page.locator('.cm-line').filter({ hasText: `Clamp ${stamp}` });
+		await heading.click();
+		await page.keyboard.press('Home');
+		await page.keyboard.press('Shift+End');
+		await expect(button).toBeVisible();
+		await expect.poll(() => page.evaluate(() => document.getSelection()?.toString().length ?? 0)).toBeGreaterThan(10);
+		expect(await coversSelection(page), 'the button covers none of the selected heading').toBe(false);
+		await firstLine.click({ position: { x: textInset + 1, y: 2 } });
+		await page.keyboard.press('Home');
+		await page.keyboard.press('Shift+End');
+		for (let step = 0; step < 3; step += 1) await page.keyboard.press('Shift+ArrowLeft');
+		await expect(button).toBeVisible();
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
 		await page.getByRole('button', { name: /^1 comment\b/ }).click();
 		await expect(comments).toBeVisible();
