@@ -4,7 +4,7 @@ import { currentRecipients, headerLayout, type ServerHeader } from '$lib/emailDr
 import { showAutolinkMarks } from './markdown-live';
 import { emailHeaderTheme } from './email-header-theme';
 import {
-	AddedMarkWidget, AddressHintWidget, AttachmentsWidget, CcButtonWidget, FromWidget, HiddenNotesWidget, QuietNotesWidget,
+	AddedMarkWidget, AddressHintWidget, AttachmentsWidget, CcButtonWidget, FromWidget, QuietNotesWidget,
 	type MountAttachments,
 } from './email-header-widgets';
 
@@ -12,8 +12,8 @@ export type { MountAttachments } from './email-header-widgets';
 
 // The compact header block of an email draft, drawn over the draft's own text: the header lines stay the document's
 // text (editing them edits the draft), only their look changes. The lines are short and muted-labelled, a divider
-// closes them, and the body below keeps the document's reading size. `Note:` lines are hidden here because the notes
-// are drawn above the header (loud) and under it (quiet). The `From:` line is the sending account: shown, not editable.
+// closes them, and the body below keeps the document's reading size. Notes live on the draft record and are drawn
+// under the header. The `From:` line is the sending account: shown, not editable.
 
 /** Fields whose value is an address list (or a line being typed): at every width the value wraps, its continuation under the value column. */
 const ADDRESS_FIELDS = new Set(['to', 'cc']);
@@ -44,14 +44,8 @@ function build(state: EditorState, { quiet, attachmentsKey, mountAttachments }: 
 	const editable = !state.readOnly && state.facet(EditorView.editable);
 	const ccButtonAt = !lines.some((line) => line.key === 'cc') && editable ? lines.find((line) => line.key === 'to') : undefined;
 	let lastShown: { from: number; to: number } | null = null;
-	let noteRun: { from: number; to: number } | null = null;
 	for (const line of lines) {
 		const { key } = line;
-		if (key === 'note') {
-			noteRun = noteRun ? { from: noteRun.from, to: line.to } : { from: line.from, to: line.to };
-			continue;
-		}
-		if (noteRun) { decos.push(Decoration.replace({ widget: new HiddenNotesWidget(), block: true }).range(noteRun.from, noteRun.to)); noteRun = null; }
 		lastShown = line;
 		const value = doc.sliceString(line.valueFrom, line.to);
 		if (key === 'from') {
@@ -66,7 +60,6 @@ function build(state: EditorState, { quiet, attachmentsKey, mountAttachments }: 
 		if (emptyCc) decos.push(Decoration.widget({ widget: new AddressHintWidget(), side: 1 }).range(line.to));
 		if (key) decos.push(Decoration.mark({ class: 'cm-email-head-label' }).range(line.from, line.valueFrom));
 	}
-	if (noteRun) decos.push(Decoration.replace({ widget: new HiddenNotesWidget(), block: true }).range(noteRun.from, noteRun.to));
 	if (!lastShown) return Decoration.none;
 	const last = lastShown;
 	if (quiet.length) {

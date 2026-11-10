@@ -94,12 +94,6 @@ export class AttachmentsWidget extends WidgetType {
 	ignoreEvent() { return true; }
 }
 
-export class HiddenNotesWidget extends WidgetType {
-	eq() { return true; }
-	toDOM() { const hidden = document.createElement('div'); hidden.className = 'cm-email-notes-hidden'; return hidden; }
-	ignoreEvent() { return true; }
-}
-
 /** The From line as the person sees it: the other fields' look, a step quieter, and no caret (a block widget holds none). */
 export class FromWidget extends WidgetType {
 	constructor(readonly account: string) { super(); }

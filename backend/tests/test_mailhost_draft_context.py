@@ -50,6 +50,9 @@ async def test_a_reply_draft_saved_with_the_old_in_reply_to_line_still_sends_thr
     saved = await _draft(host, to=[], cc=[], subject="Lunch plans", reply_to_message_id=_id(host))
     path = host.workspace / saved["path"]
     path.write_text(path.read_text().replace("Subject: Lunch plans\n", 'Subject: Lunch plans\nIn reply to: "Lunch plans" from Sam\n'))
+    from connections.mail.draft_format_conversion import convert_open_drafts
+    await convert_open_drafts()
+    assert "In reply to:" not in path.read_text()
     out = await _send(host, saved)
     assert not out.startswith("Error"), out
     [(_, raw)] = host.built.smtp.sent

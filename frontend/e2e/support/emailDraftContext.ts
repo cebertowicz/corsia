@@ -49,7 +49,7 @@ export const NEWER: Record<1 | 2 | 6, ServerEmail[]> = {
 };
 
 /** The quiet notes the draft tools write (tools/mail_guard.py same-subject note, tools/google_email.py font note). */
-export const SAME_SUBJECT = 'Dana Whitfield wrote about the same subject in another thread.';
+export const SAME_SUBJECT = 'Dana Whitfield wrote about the same subject in another conversation.';
 export const FONT = 'Couldn’t read your usual font, so this email may go out in your mail’s default font.';
 
 /** A reply to Dana's email: the answered email went to Alex from Dana, so only those two addresses are on it. */

@@ -71,7 +71,7 @@ export interface EmailDraftContext {
 }
 
 /** The labels the header view knows; any other line is still a header line, drawn as one being typed. */
-const HEADER_FIELD = /^(from|to|cc|subject|note)\s*:/i;
+const HEADER_FIELD = /^(from|to|cc|subject)\s*:/i;
 
 /** One header line as the view lays it out: the field its label names ('' for none) and its document range. */
 export interface HeaderLine {

@@ -56,7 +56,7 @@ def _changed(artifact_id: str, entry: LiveEntry, update: bytes, sender, author: 
              "update": _encoded(update), "digest": entry.live.digest,
              "ranges": [{"id": identifier, "from_off": start, "to_off": end}
                         for identifier, (start, end) in entry.live.ranges.items()],
-             **document_email.header(artifact_id, entry.live)}
+             **document_email.header(entry)}
     if author is not None:
         frame["author"] = author
     _broadcast(artifact_id, frame, exclude=sender)
@@ -106,7 +106,7 @@ async def _open(socket, user: dict, data: dict) -> None:
         await send_to_client(socket, {"type": "doc_opened", "live": False, "request_id": data.get("request_id")})
         return
     artifact_id = artifact["id"]
-    document_email.remember(artifact_id, loaded)
+    entry.email_draft_id = (loaded.get("email_draft") or {}).get("id")
     _subscriptions.setdefault(socket, {})[artifact_id] = Subscription(entry, actor, loaded["writable"], user["id"])
     entry.live.acknowledge = lambda ids: _broadcast(artifact_id, {
         "type": "doc_ack", "store_id": entry.live.store.store_id, "message_ids": list(ids)})
@@ -134,7 +134,7 @@ async def _open(socket, user: dict, data: dict) -> None:
                                 "writable": loaded["writable"], "request_id": data.get("request_id"),
                                 "ranges": anchors["ranges"], "states": anchors["states"], **state,
                                 "setup_incarnation": manager.setup_incarnation, **failures,
-                                **document_email.header(artifact_id, entry.live)})
+                                **document_email.header(entry)})
     for failure in failures["blocking"]:
         provenance = {key: value for key, value in failure.items() if key not in {"kind", "message"}}
         failure_changed(failure["kind"], failure["message"], provenance)
@@ -271,7 +271,7 @@ async def _operate(socket, user: dict, data: dict) -> None:
         section_turn.note_edit(socket, user, artifact_id, live, before)
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
                                     "store_id": live.store.store_id, "message_ids": [identifier],
-                                    **document_email.header(artifact_id, live)})
+                                    **document_email.header(entry)})
         _schedule_commit(artifact_id, entry)
         return
     if kind == "doc_flush" and data.get("retry") is True:

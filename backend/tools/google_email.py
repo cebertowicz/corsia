@@ -105,13 +105,6 @@ GUARD_GUIDANCE = (
 )
 
 
-def _size(count: int) -> str:
-    kb = round(count / 1024)
-    if kb < 1024:
-        return f"{max(1, kb) if count else 0} KB"
-    return f"{count / (1024 * 1024):.1f} MB"
-
-
 async def _check_message_size(
     backend: MailBackend, thread_id: str, account_id: str, text: str, target: dict, attached: list,
     limit: int, original: Any, font: tuple[str | None, str | None],
@@ -202,7 +195,7 @@ class EmailDraftTool(Tool):
             raise DraftRefused(NO_OPEN_DRAFT)
         target, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
         notes: list[str] = []
-        quiet: list[str] = []  # context the person sees under the draft's header (api/email_drafts.py reads it)
+        quiet: list[str] = []  # Context under the header; facts without a complete view elsewhere stay as notes.
         original = None
         if target.get("reply_to"):
             if not target.get("in_reply_to"):
@@ -225,7 +218,6 @@ class EmailDraftTool(Tool):
         if target.get("prefix_reply_subject"):
             subject = reply_subject(subject)
         face, size, font_note = await _font(backend, account_id)
-        notes.extend([font_note] if font_note else [])
         quiet.extend([font_note] if font_note else [])
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
@@ -235,9 +227,11 @@ class EmailDraftTool(Tool):
             if str(exc).startswith("Not sent: "):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
-        target = {**target, "account_id": account_id, "account": address, "attachments": attached, "notes": quiet}
-        notes.extend(f"Attachment: {item['name']} ({_size(item['size'])})" for item in attached)
-        text = compose_document(address, to, cc, subject, body, signature, notes)
+        # Chips show attachment names and sizes. Guard evidence includes read state and outside-conversation
+        # details the conversation list does not carry, so those notes remain available in the quiet row.
+        target = {**target, "account_id": account_id, "account": address, "attachments": attached,
+                  "notes": list(dict.fromkeys([*quiet, *notes]))}
+        text = compose_document(address, to, cc, subject, body, signature)
         if applies_to_message and limit is not None:
             await _check_message_size(backend, thread_id, account_id, text, target, attached, limit, original, (face, size))
         try:

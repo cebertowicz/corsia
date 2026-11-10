@@ -51,6 +51,7 @@ class LiveEntry:
     artifact_id: str = ""
     policy: SharedLivePolicy | None = None
     lifetime: DocumentLifetime | None = None
+    email_draft_id: str | None = None
 
 
 class LiveDocuments:
