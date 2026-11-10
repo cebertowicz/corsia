@@ -41,6 +41,7 @@ def iter_backend_sources():
     excluded_files = {
         # E2E fixtures seed state deliberately.
         BACKEND_ROOT / "e2e_mock.py",
+        BACKEND_ROOT / "e2e_mock_catalog.py",
         BACKEND_ROOT / "e2e_app.py",
         BACKEND_ROOT / "e2e_pressure_fixture.py",
     }

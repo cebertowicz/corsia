@@ -106,6 +106,7 @@ def test_owned_writes_and_non_calls_are_not_errors(guard_engine, source):
     "backend/infra/database.py",
     "backend/tests/example.py",
     "backend/e2e_mock.py",
+    "backend/e2e_mock_catalog.py",
     "backend/e2e_app.py",
     "backend/e2e_pressure_fixture.py",
     "backend/eval/fixtures/blank_session.py",
