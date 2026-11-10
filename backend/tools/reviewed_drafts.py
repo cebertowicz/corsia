@@ -92,13 +92,16 @@ def open_draft(thread_id: str, draft_id: str, kind: str, *, db: sqlite3.Connecti
 
 
 def draft_at(path: Path, kind: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
-    """The newest draft record of this kind for a workspace file: the one source for whether a file is such a draft."""
+    """The open draft record of this kind for a workspace file: the one source for whether a file is such a draft.
+
+    A sent or discarded draft opens as the file it was saved as; only open drafts were converted to the current format.
+    """
     relative = os.path.relpath(path.resolve(), _workspace_root().resolve())
     row = db.execute(
         "SELECT id,thread_id,path,state,target_json FROM action_drafts WHERE kind=? AND path=? ORDER BY created_at DESC LIMIT 1",
         (kind, relative),
     ).fetchone()
-    return dict(row) if row else None
+    return dict(row) if row and row["state"] == "open" else None
 
 
 def checked_open_draft(thread_id: str, draft_id: object, kind: str, account_id: str) -> dict[str, Any] | None:
