@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
 import { get } from 'svelte/store';
-import { tick } from 'svelte';
+import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
@@ -59,6 +59,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let quiet = $state(false);
 	/** The draft was started with the margin column up: the column stays while it is written, and closing the draft goes back to it. */
 	let overColumn = $state(false);
+	/** Counts what the reader opened (a pick, a draft, the list, a saved comment, the next unread), never a change nobody asked for: the resolved list gives the canvas back on these alone. */
+	let opened = $state(0);
+	const bump = () => untrack(() => opened++);
 	/** Closes everything, the column under a draft included: another document, the history view. */
 	function closeAll() {
 		state = null;
@@ -78,11 +81,12 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		anchor = rect;
 		atClick = false;
 		state = { kind: 'draft' };
+		bump();
 	}
 	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. The highlight is how a thread is opened now that no marker stands by it: its card, once shown, stamps the replies viewed. */
 	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
 		const margin = marginUp?.();
-		// A document canvas with no room for the column shows its list as a sheet: a highlight picked there opens that one thread in its place.
+		// A document canvas with no room for the column shows its list as a popover (a phone's as a sheet): a highlight picked there opens that one thread in its place.
 		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
 		if (changed) arrivedDocComments.set(new Set([id]));
 		return changed;
@@ -97,6 +101,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
 		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
+		bump();
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id, fromText: true };
@@ -107,6 +112,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	}
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false) {
 		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
+		bump();
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
@@ -147,12 +153,13 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list') { close(); return; }
 		quiet = false;
 		state = { kind: 'list' };
+		bump();
 		anchor = opener;
 		atClick = false;
 		restoreFocus = () => opener.focus();
 	}
 	return {
-		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
+		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; bump(); }, get opened() { return opened; },
 		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
 		get atClick() { return atClick; },
 		get restoreFocus() { return restoreFocus; },

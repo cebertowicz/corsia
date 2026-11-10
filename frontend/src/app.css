@@ -211,7 +211,7 @@ body { max-width: 100vw; }
 	font-size: var(--text-footnote); padding: 1px 4px;
 }
 
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: var(--scrollbar-size); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-2xs); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }

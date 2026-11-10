@@ -279,7 +279,7 @@
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
 		unreadCount={unreadThreads.length}
-		{resolvedCount} {resolvedOpen} onOpenResolved={() => resolvedOpen = !resolvedOpen}
+		{resolvedCount} {resolvedOpen} resolvedInColumn={columnFits()} onOpenResolved={() => resolvedOpen = !resolvedOpen}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -387,6 +387,7 @@
 		{covered}
 		{readStampSuppressed}
 		draftOverColumn={commentUI.draftOverColumn}
+		opened={commentUI.opened}
 		bind:resolvedCount bind:resolvedOpen
 	/>
 </div>

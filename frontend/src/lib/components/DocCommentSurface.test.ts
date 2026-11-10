@@ -86,7 +86,7 @@ describe('DocCommentSurface suggestions', () => {
 		},
 	);
 
-	it('shows open threads as cards in the margin, with text navigation, and lists only resolved ones in their own drawer', () => {
+	it('shows open threads as cards in the margin, with text navigation, and lists only resolved ones in the column\'s place while they are open', () => {
 		const onFocus = vi.fn();
 		const open = resolvedDrawerProps();
 		render(Object.defineProperties({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }], onFocus }, open.props));
@@ -99,10 +99,64 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer!.querySelector('[data-drawer-filter]')).toBeNull();
 		// No heading or close in the column: the header's control opens the resolved drawer.
 		expect(drawer!.querySelector('.drawer-heading')).toBeNull();
-		expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+		expect(document.body.querySelector('[data-resolved-column]')).toBeNull();
 		open.set(true); flushSync();
-		const list = document.body.querySelector('.resolved-drawer')!;
+		const list = document.body.querySelector('[data-resolved-column]')!;
 		expect([...list.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
+		// It takes the column's place, with no sheet or scrim, and the cards are back once it closes.
+		expect(document.body.querySelector('[data-adaptive-drawer], [data-popover]')).toBeNull();
+		expect(list.querySelector('.drawer-heading')?.textContent).toContain('Resolved 1');
+		open.set(false); flushSync();
+		expect(document.body.querySelector('[data-resolved-column]')).toBeNull();
+		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]')).not.toBeNull();
+	});
+
+	it('gives the column back to the cards when a comment is picked while the resolved list holds its place', () => {
+		const open = resolvedDrawerProps();
+		const state = writable<{ kind: 'list' } | { kind: 'thread'; id: string }>({ kind: 'list' }), liveState = fromStore(state);
+		const opened = writable(0), liveOpened = fromStore(opened);
+		render(Object.defineProperties({ get state() { return liveState.current; }, get opened() { return liveOpened.current; }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		open.set(true); flushSync();
+		expect(document.body.querySelector('[data-resolved-column]')).not.toBeNull();
+		state.set({ kind: 'thread', id: suggestion.id }); opened.set(1); flushSync();
+		expect(open.isOpen()).toBe(false);
+		expect(document.body.querySelector('[data-resolved-column], [data-popover]')).toBeNull();
+		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]')).not.toBeNull();
+	});
+
+	it('keeps the resolved list open when what is shown changes without the reader opening anything', () => {
+		const open = resolvedDrawerProps();
+		const state = writable<{ kind: 'list' } | { kind: 'thread'; id: string; ids?: string[] }>({ kind: 'thread', id: suggestion.id, ids: [suggestion.id, 'other'] }), liveState = fromStore(state);
+		render(Object.defineProperties({ get state() { return liveState.current; }, opened: 3, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		open.set(true); flushSync();
+		// The shown thread resolved by someone else moves to the next in its stack, then a picked card is let go back to the column.
+		state.set({ kind: 'thread', id: 'other', ids: [suggestion.id, 'other'] }); flushSync();
+		state.set({ kind: 'list' }); flushSync();
+		expect(open.isOpen()).toBe(true);
+		expect(document.body.querySelector('[data-resolved-column]')).not.toBeNull();
+	});
+
+	it('opens the resolved list and the comment list as popovers from their controls on a desktop canvas with no room for the column', () => {
+		const bounds = noRoomCanvas();
+		const control = bounds.appendChild(document.createElement('button'));
+		control.setAttribute('data-resolved-entry', '');
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ bounds, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		open.set(true); flushSync();
+		const pop = document.body.querySelector('[data-popover]')!;
+		expect([...pop.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
+		expect(document.body.querySelector('[data-adaptive-drawer], [data-resolved-column]')).toBeNull();
+		// A press on its own control is the control's toggle, not an outside press.
+		control.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
+		expect(open.isOpen()).toBe(true);
+		document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); flushSync();
+		expect(open.isOpen()).toBe(false);
+		unmount(component!); component = null; host.remove();
+		const pill = document.createElement('button');
+		render({ bounds, anchor: pill, state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('[data-popover] [data-doc-comments-drawer] [data-comment-id="comment-1"]')).not.toBeNull();
+		expect(document.body.querySelector('[data-popover] .drawer-heading')?.textContent).toContain('Comments 1');
+		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
 	});
 
 	it('shows no Reply field and no quote line on a margin card nobody picked, and both on the picked one', () => {
@@ -142,7 +196,7 @@ describe('DocCommentSurface suggestions', () => {
 		const open = resolvedDrawerProps();
 		render(Object.defineProperties({ state: { kind: 'list' }, comments: [resolved('old', '2026-11-01T10:00:00Z'), resolved('newest', '2026-11-05T10:00:00Z'), resolved('middle', '2026-11-03T10:00:00Z')] }, open.props));
 		open.set(true); flushSync();
-		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
+		expect([...document.body.querySelectorAll('[data-resolved-column] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
 	});
 
 	it.each([true, false])('keeps the margin cards up while a new comment is written, the composer a card among them when the column is up (%s)', (overColumn) => {
@@ -195,7 +249,7 @@ describe('DocCommentSurface suggestions', () => {
 		render(Object.defineProperties({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] }, open.props));
 		const ids = (selector: string) => [...document.body.querySelectorAll(`${selector} [data-comment-id]`)].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids('[data-doc-comments-drawer]')).toEqual(['comment-1']);
-		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('1 open');
+		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('Comments 1');
 		expect(open.count()).toBe(2);
 		open.set(true); flushSync(); await tick();
 		expect(ids('.resolved-drawer')).toEqual(['new', 'old']);

@@ -46,6 +46,7 @@
 		onOpenHistory,
 		resolvedCount = 0,
 		resolvedOpen = false,
+		resolvedInColumn = false,
 		onOpenResolved,
 	}: {
 		title?: string;
@@ -85,6 +86,8 @@
 		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
 		resolvedCount?: number;
 		resolvedOpen?: boolean;
+		/** The resolved list opens in the margin column's place, a plain region rather than a dialog. */
+		resolvedInColumn?: boolean;
 		onOpenResolved?: () => void;
 	} = $props();
 
@@ -190,9 +193,9 @@
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
+			<CommentsPill class="doc-tool comment-status" data-comments-entry count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
-			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
+			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup={resolvedInColumn ? undefined : 'dialog'} aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
 			{#if artifactId}
 				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>

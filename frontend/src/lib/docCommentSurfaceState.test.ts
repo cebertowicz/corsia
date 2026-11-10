@@ -121,6 +121,26 @@ describe('comment surface state', () => {
 		expect(surface.atClick).toBe(false);
 	});
 
+	it('counts what the reader opens, and not a pick let go or a resolved thread moving to the next in its stack', () => {
+		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const button = document.createElement('button');
+		surface.focusMarker(['c1', 'c2'], button);
+		expect(surface.opened).toBe(1);
+		surface.focusRemainingThread(['c2']);
+		surface.selectMarkerThread('c1');
+		expect(surface.opened).toBe(1);
+		surface.closeAll();
+		surface.focusComment('c1', new DOMRect());
+		surface.release();
+		expect(surface.state).toEqual({ kind: 'list' });
+		expect(surface.opened).toBe(2);
+		surface.openDraft(new DOMRect());
+		surface.state = { kind: 'thread', id: 'saved' };
+		surface.closeAll();
+		surface.openList(button);
+		expect(surface.opened).toBe(5);
+	});
+
 	it('tracks the hovered suggestion without moving focus', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.hover('s1');

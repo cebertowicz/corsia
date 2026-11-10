@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { toasts } from '$lib/stores/toast';
 
 const mocks = vi.hoisted(() => {
@@ -324,7 +324,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'), { timeout: MOUNT_WAIT_MS });
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
 			paneOpen.set(true);
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
@@ -338,7 +338,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		}
 	});
 
-	it('opens the resolved threads from the header control beside the margin column, and only from it', async () => {
+	it('opens the resolved threads from the header control in the margin column\'s place, and only from it', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
 		const measure = HTMLElement.prototype.getBoundingClientRect;
 		const wide = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -354,16 +354,18 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			] });
 			openArtifactTab(THREAD, { path: '/resolved.md', title: 'resolved.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'), { timeout: MOUNT_WAIT_MS });
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 comment'), { timeout: MOUNT_WAIT_MS });
 			if (!host.querySelector('.doc [data-doc-comments-drawer]')) { host.querySelector<HTMLButtonElement>('.comment-status')!.click(); flushSync(); }
 			const entry = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('[data-resolved-entry]'); expect(found).not.toBeNull(); return found!; });
 			expect(entry.textContent).toBe('Resolved · 1');
 			expect(entry.getAttribute('aria-expanded')).toBe('false');
-			expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+			expect(host.querySelector('[data-resolved-column]')).toBeNull();
 			entry.click(); flushSync();
-			await vi.waitFor(() => expect(document.body.querySelector('.resolved-drawer [data-comment-id="done"]')).not.toBeNull());
+			// The resolved list holds the column itself: nothing dims the document, and the open cards come back when it closes.
+			await vi.waitFor(() => expect(host.querySelector('.doc [data-resolved-column] [data-comment-id="done"]')).not.toBeNull());
 			expect(entry.getAttribute('aria-expanded')).toBe('true');
-			expect(host.querySelector('.doc [data-doc-comments-drawer] [data-comment-id="open"]')).not.toBeNull();
+			expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
+			await vi.waitFor(() => expect(host.querySelector('.doc [data-doc-comments-drawer] [data-comment-id="open"]')).toBeNull());
 		} finally {
 			wide.mockRestore();
 		}
@@ -379,8 +381,12 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		expect(host.querySelector('.orphan-status')).toBeNull();
 	});
 
-	it('opens the comment list as a sheet contained by the document column on a narrow viewport without changing the right pane', async () => {
+	it('opens the comment list as a sheet contained by the document column on a phone without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 });
+		// Only a phone dims the document with the sheet; a narrow desktop canvas opens the list as a popover (DocCommentSurface.test.ts).
+		const matchMedia = window.matchMedia;
+		window.matchMedia = ((query: string) => ({ matches: query === '(max-width: 768px)', media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+		onTestFinished(() => { window.matchMedia = matchMedia; });
 		mocks.fetchContent.mockResolvedValue({ text: 'Document', revision: 'r-1', writable: true, artifact: { id: 'art-narrow' } });
 		mocks.setComments({ 'art-narrow': [{ id: 'comment', from: 0, to: 1, anchor: 'D', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 		openArtifactTab(THREAD, { path: '/narrow.md', title: 'narrow.md' });

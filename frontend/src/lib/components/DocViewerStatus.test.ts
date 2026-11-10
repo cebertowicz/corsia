@@ -84,6 +84,14 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
 	});
 
+	it('announces a dialog from the Resolved control only where the resolved list opens as one', () => {
+		render(value(), undefined, { resolvedCount: 2, onOpenResolved: vi.fn(), resolvedInColumn: true });
+		const control = () => host.querySelector<HTMLButtonElement>('[data-resolved-entry]')!;
+		expect(control().hasAttribute('aria-haspopup')).toBe(false);
+		component!.$set({ resolvedInColumn: false }); flushSync();
+		expect(control().getAttribute('aria-haspopup')).toBe('dialog');
+	});
+
 	it('does not claim a zero comment count before the document is ready', () => {
 		render(value(), undefined, { ready: false, commentCount: 0 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;

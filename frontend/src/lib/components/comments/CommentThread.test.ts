@@ -275,6 +275,9 @@ describe('CommentThread', () => {
 	it('re-opens a resolved thread from its expanded summary', () => {
 		const { onResolve } = render(thread({ resolved: true, replies: [{ author: 'agent-1', authorKind: 'agent', text: 'done', at: 'later' }] }));
 		expect(host.textContent).toContain('Resolved · 2 messages');
+		// Who started it and when, before the summary.
+		expect(host.querySelector('.ct.resolved > .ct-res-meta')?.textContent).toContain('You');
+		expect(host.querySelector('.ct.resolved > .ct-res-meta .ct-at')?.textContent).toBe('now');
 		button('.ct-res-head').click(); flushSync();
 		button('.ct-link').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', false);
@@ -408,7 +411,8 @@ describe('CommentThread', () => {
 
 	it('collapses a decided suggestion with attribution', () => {
 		render(thread({ replacement: 'new text', decision: 'accepted', decidedBy: 'Ada', resolved: true }));
-		expect(host.textContent).toContain('Suggested by You · Accepted by Ada');
+		expect(host.textContent).toContain('Accepted by Ada');
+		expect(host.querySelector('.ct-res-meta')?.textContent).toContain('You');
 		expect(host.querySelector('.ct-suggestion-actions')).toBeNull();
 	});
 
@@ -473,7 +477,8 @@ describe('CommentThread', () => {
 
 	it('marks a rejected suggestion with a cross and an accepted one with a check', () => {
 		render(thread({ replacement: 'new text', decision: 'rejected', decidedBy: 'Ada', resolved: true }));
-		expect(host.textContent).toContain('Suggested by You · Rejected by Ada');
+		expect(host.textContent).toContain('Rejected by Ada');
+		expect(host.querySelector('.ct-res-meta')?.textContent).toContain('You');
 		expect(host.querySelector('.ct-res-head .ct-cross path')?.getAttribute('d')).toBe('M18 6L6 18M6 6l12 12');
 		expect(host.querySelector('.ct-res-head .ct-check')).toBeNull();
 		unmount(component!); host.remove();

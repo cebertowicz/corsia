@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { get } from 'svelte/store';
+import { get, type Writable } from 'svelte/store';
+import { isMobile } from '$lib/stores/viewport';
 import { EditorView } from '@codemirror/view';
 import DocViewer from './DocViewer.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -22,6 +23,8 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 } }));
 // The legacy (non-live) open: the document is the saved file, which is all these tests need.
 vi.mock('$lib/stores/liveDocuments', async importOriginal => ({ ...await importOriginal<typeof import('$lib/stores/liveDocuments')>(), openLiveDocument: vi.fn(async () => null) }));
+// The phone's sheet is chosen from this store; a test sets it.
+vi.mock('$lib/stores/viewport', async importOriginal => ({ ...await importOriginal<typeof import('$lib/stores/viewport')>(), isMobile: (await import('svelte/store')).writable(false) }));
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
 
 const TEXT = 'Alpha opens the plan.\n\n![shot](shot.png)\n\nBeta closes the plan.\n';
@@ -128,14 +131,26 @@ describe('the document jump control', () => {
 		expect(onOpenImage.mock.calls[1][0]).toMatchObject({ focus: { id: 'pin-two' } });
 	});
 
-	it('steps aside while the comments it opened are up, and is back, still counting, once they close', async () => {
+	it('steps aside while the phone sheet it opened is up, and is back, still counting, once it closes', async () => {
+		(isMobile as Writable<boolean>).set(true);
+		try {
+			await open([ALPHA, BETA]);
+			await vi.waitFor(() => expect(control()).not.toBeNull());
+			control()!.click();
+			await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
+			await vi.waitFor(() => expect(control()).toBeNull());
+			document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
+			await vi.waitFor(() => expect(control()?.textContent).toContain('1 new'), { timeout: 2000 });
+		} finally { (isMobile as Writable<boolean>).set(false); }
+	});
+
+	it('stays beside the popover list it opened on a desktop canvas, which dims nothing', async () => {
 		await open([ALPHA, BETA]);
 		await vi.waitFor(() => expect(control()).not.toBeNull());
 		control()!.click();
-		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
-		await vi.waitFor(() => expect(control()).toBeNull());
-		document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
-		await vi.waitFor(() => expect(control()?.textContent).toContain('1 new'), { timeout: 2000 });
+		await vi.waitFor(() => expect(document.querySelector('[data-popover] [data-doc-comments-drawer]')).not.toBeNull());
+		expect(document.querySelector('[data-adaptive-drawer]')).toBeNull();
+		expect(control()).not.toBeNull();
 	});
 
 	it('counts down as answers are read and leaves with the last', async () => {
