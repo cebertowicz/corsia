@@ -471,14 +471,26 @@ describe('DocCommentSurface suggestions', () => {
 		document.body.querySelector<HTMLTextAreaElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
-	it('consumes drawer Escape once and restores its opener without reaching the document', () => {
+	it('consumes Escape in the margin column once: focus goes back, the column stays, and the document never sees it', () => {
 		const onClose = vi.fn(), restoreFocus = vi.fn(), documentEscape = vi.fn();
 		render({ state: { kind: 'list' }, onClose, restoreFocus });
 		window.addEventListener('keydown', documentEscape);
 		try {
-			document.body.querySelector('[data-doc-comments-drawer]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-			expect(onClose).toHaveBeenCalledOnce();
+			document.body.querySelector('.canvas-comment-drawer.margin')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).not.toHaveBeenCalled();
 			expect(restoreFocus).toHaveBeenCalledOnce();
+			expect(documentEscape).not.toHaveBeenCalled();
+		} finally { window.removeEventListener('keydown', documentEscape); }
+	});
+
+	it('closes the comments sheet on Escape without reaching the document', () => {
+		const onClose = vi.fn(), documentEscape = vi.fn();
+		render({ state: { kind: 'list' }, narrow: true, onClose });
+		window.addEventListener('keydown', documentEscape);
+		try {
+			document.body.querySelector('[data-doc-comments-drawer]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			// The sheet is modal: it hands focus back itself once it has closed.
+			expect(onClose).toHaveBeenCalledOnce();
 			expect(documentEscape).not.toHaveBeenCalled();
 		} finally { window.removeEventListener('keydown', documentEscape); }
 	});

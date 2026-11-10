@@ -826,7 +826,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
 			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
-			await expect(page.getByText('3 open', { exact: true })).toBeVisible();
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			// Beside the document, Chat counts the same waiting replies in its one chip; none enters the Needs-you dock.
 			// The pill counts the three unread threads; the chip counts their replies: the later three, plus the seeded

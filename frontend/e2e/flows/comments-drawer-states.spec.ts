@@ -65,7 +65,7 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	const drawer = drawerOf(page);
 	await expect(drawer).toBeVisible();
 	await settled(page);
-	await expect(drawer.locator('.drawer-heading h2')).toContainText('2 open');
+	if (mode === 'phone') await expect(drawer.locator('.drawer-heading h2')).toHaveText('Comments 2');
 	await expect(drawer.locator('.ct-reply-count')).toContainText('2 replies');
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await shot(page, 'rs-13a-thread-replies-visible', info);

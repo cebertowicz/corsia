@@ -6,6 +6,7 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
+import { resolvedList } from '../support/commentDrawer';
 
 /**
  * Margin comments: open threads sit as cards beside their text, a cluster stacks, a picked card keeps its own line and pushes its
@@ -101,6 +102,35 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
 });
 
+test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in document order with a focus ring, and Escape goes back', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	const text = page.locator('.cm-content');
+	const before = await text.textContent();
+	await page.locator('.cm-line', { hasText: 'Handoff plan' }).click();
+	// Tab in the text indents, as in any editor; Escape first lets the next Tab leave it.
+	await page.keyboard.press('Escape');
+	const reached: string[] = [];
+	for (let i = 0; i < 40 && reached.length < 2; i++) {
+		await page.keyboard.press('Tab');
+		const at = await page.evaluate(() => {
+			const el = document.activeElement as HTMLElement;
+			const style = getComputedStyle(el);
+			return { card: el.closest<HTMLElement>('[data-margin-card]')?.dataset.marginCard ?? null, ring: `${style.outlineStyle} ${style.outlineWidth}` };
+		});
+		if (!at.card) continue;
+		expect(at.ring, 'a focused card control shows the focus ring').toBe('solid 2px');
+		if (reached.at(-1) !== at.card) reached.push(at.card);
+	}
+	expect(reached, 'the cards are reached in the order of their text').toEqual([doc.ids[FIRST], doc.ids[SUGGESTION]]);
+	expect(await text.textContent(), 'leaving the text typed nothing into it').toBe(before);
+	await page.keyboard.press('Escape');
+	await expect(text).toBeFocused();
+	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
+});
+
 test('@flow:doc-margin-cards each suggestion is its own card with Accept and Reject', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
 	test.setTimeout(120_000);
@@ -155,8 +185,8 @@ test('@flow:doc-margin-cards the drawer lists only resolved threads, newest reso
 	await expect(card(page, doc, ALPHA)).toHaveCount(0);
 	await expect(card(page, doc, BRAVO)).toHaveCount(1);
 	await page.locator('[data-resolved-entry]').click();
-	const order = await page.locator('.resolved-drawer [data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
-	expect(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
+	const order = () => resolvedList(page).locator('[data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
+	await expect.poll(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
 });
 
 test('@flow:doc-margin-cards below the margin width a thread opens as a popover at the click, and on a phone as the sheet', async ({ page, request }, info) => {
@@ -214,7 +244,7 @@ test('@flow:doc-margin-cards the column comes back when version history closes, 
 		if (close === 'the History button') await history.click(); else await page.getByRole('button', { name: 'Close history', exact: true }).click();
 		await expect(page.locator('[data-doc-history-drawer]'), close).toHaveCount(0);
 		await expect(card(page, doc, FIRST), `cards are back after ${close}`).toBeVisible();
-		await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+		await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first()).toBeVisible();
 		expect(await page.locator('[data-margin-card]').count()).toBe(ITEMS.length);
 	}
 	// A reader who had the column closed before History opened does not get it opened after.

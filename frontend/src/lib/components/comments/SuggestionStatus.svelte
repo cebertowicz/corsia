@@ -24,6 +24,7 @@
 	.suggestion-status button { min-height: var(--space-6); background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
 	@media (pointer: coarse) { .suggestion-status button { min-height: var(--touch-target); } }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
+	.suggestion-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
 	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: calc(var(--space-1) / 2) calc(var(--space-3) / 2); margin: calc(var(--space-1) / -2) calc(var(--space-3) / -2); opacity: 1; }
 	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }

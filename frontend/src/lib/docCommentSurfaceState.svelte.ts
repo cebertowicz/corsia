@@ -156,7 +156,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		bump();
 		anchor = opener;
 		atClick = false;
-		restoreFocus = () => opener.focus();
+		// The column sits beside the text, so focus leaving it goes back to the caret; a list over the text hands it back to its button.
+		restoreFocus = marginUp?.() ? restoreEditor : () => opener.focus();
 	}
 	return {
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; bump(); }, get opened() { return opened; },

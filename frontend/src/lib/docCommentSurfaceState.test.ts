@@ -30,6 +30,22 @@ describe('comment surface state', () => {
 		expect(get(focusedDocComment)).toBe('c1');
 	});
 
+	it('hands focus back to the caret from a margin column opened by the comments button, and to the button from a list over the text', () => {
+		let caret = 0;
+		const button = document.createElement('button');
+		document.body.append(button);
+		const wide = createCommentSurfaceState(() => { caret += 1; }, undefined, () => true);
+		wide.openList(button);
+		wide.restoreFocus();
+		expect(caret).toBe(1);
+		const narrow = createCommentSurfaceState(() => { caret += 1; }, undefined, () => false);
+		narrow.openList(button);
+		narrow.restoreFocus();
+		expect(document.activeElement).toBe(button);
+		expect(caret).toBe(1);
+		button.remove();
+	});
+
 	it('keeps the margin column under a new comment and goes back to it when the draft closes', () => {
 		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
 		surface.openOnLoad();

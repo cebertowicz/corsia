@@ -30,7 +30,7 @@ export async function widen(page: Page, doc: Doc) {
 		await expect.poll(() => docWidth(page)).toBeGreaterThan(600);
 	}
 	if (!(await page.locator('[data-margin-card]').count())) await pill(page).click();
-	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+	await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first()).toBeVisible();
 	return doc;
 }
 

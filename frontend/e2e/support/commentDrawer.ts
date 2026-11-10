@@ -36,14 +36,17 @@ export async function closeComments(scope: Page | Locator): Promise<void> {
 	await viewer.locator('.comment-status').click();
 }
 
-/** The control that opens a text document's resolved threads: the document header's "Resolved" button, at every width. */
+/**
+ * The control that opens a text document's resolved threads: the document header's "Resolved" button, at every width. Found
+ * on the page, not above the list: the list's popover is drawn at the page's top level, outside the document it belongs to.
+ */
 export function resolvedEntry(drawer: Locator): Locator {
-	return drawer.locator('xpath=ancestor::*[.//*[@data-resolved-entry]][1]').locator('[data-resolved-entry]');
+	return drawer.page().locator('[data-resolved-entry]');
 }
 
-/** Where the opened resolved threads are listed: the resolved drawer. */
+/** Where the opened resolved threads are listed: in the margin column's place, a popover from its control, or the phone's sheet. */
 export function resolvedList(page: Page): Locator {
-	return page.locator('.resolved-drawer');
+	return page.locator('[data-resolved-column], .resolved-pop, .resolved-drawer');
 }
 
 /** The "Resolved" list opened, when the document has resolved threads. */

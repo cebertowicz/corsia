@@ -274,7 +274,7 @@ test('@surface:live-document the column opening with a row cut off at the top ke
 		await readAtRow(page, 'steer2-r3', -30);
 		results.push({ step: 'before', ...await placement(page, 'steer2-r4') });
 		await pill(page).click();
-		await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+		await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first()).toBeVisible();
 		for (const ms of [100, 400, 1_500]) {
 			await page.waitForTimeout(ms);
 			results.push({ step: `after ${ms} ms`, ...await placement(page, 'steer2-r4') });
