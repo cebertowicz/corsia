@@ -4,9 +4,13 @@ import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
-export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number }
+export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number }
 
-/** The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty cells; the delimiter row is skipped. */
+/**
+ * The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty
+ * cells; the delimiter row is skipped. `rawFrom`/`rawTo` are the same cell between its two pipes, padding included — the
+ * only span that can hold a space the reader types at either edge of the cell.
+ */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
 	let lineStart = 0;
@@ -32,7 +36,7 @@ export function tableCells(src: string): CellSpan[] {
 			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
 			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
-			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo });
+			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
 		}
 	});
 	return cells;

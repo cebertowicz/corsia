@@ -11,6 +11,7 @@ import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
 import { BlockWidget, priorWidget } from './block-widget';
+import { cellEditorExtensions, markdownCellEditing } from './widget-cell-editor';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -286,5 +287,8 @@ export const markdownLivePreview: Extension = [
 	selectImageOnClick,
 	openSelectedImageOnEnter,
 	openLinkOnClick,
-	openLinkOnAltEnter
+	openLinkOnAltEnter,
+	markdownCellEditing,
+	// A cell's own editor drops the same markdown syntax marks the document does, over the cell's own source.
+	cellEditorExtensions.of(markdownInlinePreview)
 ];
