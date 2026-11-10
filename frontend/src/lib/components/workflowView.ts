@@ -76,7 +76,8 @@ export function format(value: number | null, measure: Measure): string {
 export function versions(entry: WorkflowEntry): string[] {
   return entry.versions.map((version) => version.id);
 }
-/** A shared weekly axis; values themselves are served by Measurement. */
+/** A shared weekly axis; values themselves are served by Measurement. `n` is the version's runs that week,
+ * so a week it ran with nothing recorded reads as missing rather than as a week with no runs. */
 export function chartPoints(entry: WorkflowEntry, version: string, measure: Measure): BarPoint[] {
   const starts = [...new Set(entry.weekly.map((point) => point.start))].sort();
   if (!starts.length) return [];
@@ -91,6 +92,6 @@ export function chartPoints(entry: WorkflowEntry, version: string, measure: Meas
     const point = entry.weekly.find((item) => item.start === start && item.version_id === version);
     const observation = point?.measures[measure];
     const raw = observation?.value ?? null;
-    return { start, n: observation?.n ?? 0, value: raw === null ? null : measure === 'first_try' ? raw * 100 : raw, ma: null };
+    return { start, n: point?.runs ?? 0, value: raw === null ? null : measure === 'first_try' ? raw * 100 : raw, ma: null };
   });
 }

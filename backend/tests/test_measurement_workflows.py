@@ -288,6 +288,14 @@ def test_collecting_copy_reports_engine_counts_without_predicting_runs() -> None
         [{"name": "cost_per_outcome", "call": "worse", "reason": None}])
 
 
+def test_changed_early_copy_counts_one_run_in_the_singular() -> None:
+    from api.measurement_workflow_copy import summary
+
+    assert summary({"word": "changed_early", "inputs": {"k": 1}}, {}, False) == [
+        "The earlier version was replaced after 1 run, before a call."]
+    assert "replaced after 3 runs," in summary({"word": "changed_early", "inputs": {"k": 3}}, {}, False)[0]
+
+
 @pytest.mark.parametrize("reason", ["no_shared_groups", "coverage_under_half", "kpi_unconfirmed",
                                     "cost_unknown", "no_baseline", "no_independent_quality_measure",
                                     "kpi_engine_missing"])
