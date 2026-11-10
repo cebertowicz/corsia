@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from connections.account_errors import AccountError
+from connections.account_errors import AccountError, AccountUnavailable
 from connections.account_resolver import Refusals, resolve
 from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
 from connections.google import accounts as google_accounts
@@ -52,7 +52,9 @@ def _mail_host_usable(account: dict, db: sqlite3.Connection) -> dict:
     if account["state"] == "connected":
         return account
     status = store.read(str(account["id"]), db=db)[1].get("status")
-    raise AccountError(_BY_STATUS.get(status, UNAVAILABLE).format(address=account["address"]))
+    # A check still running, or a state with no named fix, clears on its own; the others need the person.
+    error = AccountUnavailable if status == store.CHECKING or status not in _BY_STATUS else AccountError
+    raise error(_BY_STATUS.get(status, UNAVAILABLE).format(address=account["address"]))
 
 
 def _usable(account: dict, db: sqlite3.Connection) -> dict:

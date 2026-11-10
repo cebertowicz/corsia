@@ -12,8 +12,8 @@ export interface EmailMessage {
 export type ConversationStatus = 'ready' | 'loading' | 'error';
 
 /**
- * Why the conversation couldn't be read: the draft's account is signed out or removed, the account answered but the read
- * failed, the person's CORSIA sign-in ended, or the draft can't be found for them.
+ * Why the conversation couldn't be read: the draft's account needs the person in Connected apps, the read failed in a
+ * way trying again can fix, the person's CORSIA sign-in ended, or the draft can't be found for them.
  */
 export type ConversationFailure = 'account' | 'unreadable' | 'signin' | 'missing';
 

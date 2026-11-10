@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from connections.account_errors import AccountError
+from connections.account_errors import AccountError, AccountUnavailable
 from infra import key_store
 from infra.db_async import run_in_db
 
@@ -53,6 +53,10 @@ _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 class GoogleError(AccountError):
     """Base of every Google-only error this package raises; its text is safe to show."""
+
+
+class GoogleUnavailable(GoogleError, AccountUnavailable):
+    """A Google account that isn't usable right now for a reason that clears on its own."""
 
 
 class GoogleNotConnected(GoogleError):

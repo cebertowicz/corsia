@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from connections.account_errors import AccountError
+from connections.account_errors import AccountError, AccountUnavailable
 from connections.google.client import GoogleNotConnected, GoogleSignInRejected
 from connections.mail.email_document import DraftRefused
 from connections.mail_accounts import resolve_for_thread
@@ -35,8 +35,8 @@ from tools.reviewed_drafts import draft_at, draft_target, working_root
 
 router = APIRouter(prefix="/api/email-drafts", tags=["email-drafts"])
 
-#: Why a conversation could not be read: the draft's account can't be used here (signed out, removed or not an
-#: email account), or the account answered but the read failed.
+#: Why a conversation could not be read: the draft's account needs the person (signed out, removed, a password or
+#: host setting to fix, or not an email account), or the read failed in a way trying again can fix.
 ACCOUNT, UNREADABLE = "account", "unreadable"
 
 
@@ -103,13 +103,16 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     failed = {**base, "status": "error", "replied_to": str(reply_to), "answered": None, "conversation": []}
     if not target.get("account_id"):
         return {**failed, "reason": ACCOUNT}
+    # A failed read shows a reference the person can quote, and the log line carries it (copy C10).
+    reference = new_error_reference()
     try:
         account = await run_in_db(resolve_for_thread, target["account_id"], draft["thread_id"])
         backend = backend_for(account)
+    except AccountUnavailable as exc:
+        logger.warning("A draft's account isn't usable right now (reference {}): {}", reference, type(exc).__name__)
+        return {**failed, "reason": UNREADABLE, "reference": reference}
     except AccountError:
         return {**failed, "reason": ACCOUNT}
-    # A failed read shows a reference the person can quote, and the log line carries it (copy C10).
-    reference = new_error_reference()
     try:
         return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)})}
     except (AccountError, DraftRefused) as exc:

@@ -260,7 +260,7 @@ const SCENARIOS: Scenario[] = [
 		await expect(page.locator('.email-conversation').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	} },
 	{ name: '8b-account-signed-out', doc: 'reply', context: failed('account'), act: async (page) => {
-		await expect(page.getByRole('alert').filter({ hasText: 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.' })).toBeVisible();
+		await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t use this draft’s email account. Check it in Settings › Connected apps.' })).toBeVisible();
 		await expect(page.locator('.email-retry')).toHaveCount(0);
 	} },
 	{ name: '10-loading', doc: 'reply', context: 'hold', act: async (page) => { await expect(page.locator('.email-conversation [role="status"]')).toHaveText('Loading the earlier emails…'); } },

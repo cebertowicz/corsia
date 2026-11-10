@@ -21,7 +21,7 @@
 
 	/** One message per cause, each saying what to do. */
 	const FAILURE: Record<ConversationFailure, string> = {
-		account: 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.',
+		account: 'Couldn’t use this draft’s email account. Check it in Settings › Connected apps.',
 		signin: 'You’re signed out of CORSIA. Sign in again to see the earlier emails.',
 		missing: 'Couldn’t find this email draft. Ask the agent that wrote it to save it again.',
 		unreadable: 'Couldn’t load the earlier emails in this conversation.',

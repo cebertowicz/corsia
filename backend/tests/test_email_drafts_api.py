@@ -194,6 +194,50 @@ async def test_a_mail_host_account_with_no_saved_password_is_the_account_state(m
 
 
 @pytest.mark.asyncio
+async def test_an_account_that_is_only_briefly_unusable_offers_retry_not_reconnecting(mail, monkeypatch):
+    import api.email_drafts as route
+    from connections.account_errors import AccountError, AccountUnavailable
+    from connections.mail_accounts import NONE_AVAILABLE
+
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    for refusal, reason in ((AccountUnavailable("x is still being checked."), "unreadable"),
+                            (AccountError(NONE_AVAILABLE), "account")):
+        def refuse(*_args, refusal=refusal):
+            raise refusal
+        monkeypatch.setattr(route, "resolve_for_thread", refuse)
+        context = await draft_context(_artifact(saved), _owner(mail.thread))
+        assert (context["status"], context["reason"]) == ("error", reason)
+        assert ("reference" in context) == (reason == "unreadable")
+
+
+@pytest.mark.parametrize(("status", "passing"), [
+    ("checking", True), ("some_new_state", True), ("waiting", False), ("refused", False), ("revoked", False),
+    ("imap_off", False), ("unreachable", False),
+])
+def test_only_mail_host_states_that_clear_on_their_own_are_unavailable(monkeypatch, status, passing):
+    from connections import mail_accounts
+    from connections.account_errors import AccountError, AccountUnavailable
+
+    monkeypatch.setattr(mail_accounts.store, "read", lambda _id, db=None: (None, {"status": status}))
+    with pytest.raises(AccountError) as refused:
+        mail_accounts._mail_host_usable({"id": "a", "address": "me@host.example", "state": "pending"}, None)
+    assert isinstance(refused.value, AccountUnavailable) is passing
+
+
+def test_a_google_account_in_no_named_state_is_unavailable_and_a_signed_out_one_is_not(monkeypatch):
+    from connections.account_errors import AccountUnavailable
+    from connections.google import accounts
+    from connections.google.client import GoogleError
+
+    with pytest.raises(GoogleError) as unknown:
+        accounts.usable({"id": "g", "address": "me@gmail.example", "state": "paused"}, None)
+    assert isinstance(unknown.value, AccountUnavailable)
+    with pytest.raises(GoogleError) as signed_out:
+        accounts.usable({"id": "g", "address": "me@gmail.example", "state": "signed_out"}, None)
+    assert not isinstance(signed_out.value, AccountUnavailable)
+
+
+@pytest.mark.asyncio
 async def test_a_new_email_reads_nothing_from_the_account(mail):
     saved = await _draft(mail)
     before = len(mail.requests)
