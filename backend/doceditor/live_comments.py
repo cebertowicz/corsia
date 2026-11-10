@@ -4,7 +4,7 @@ from __future__ import annotations
 from doceditor import comments
 from doceditor.comment_anchoring import resolve_threads
 from infra.db_async import run_in_db
-from doceditor.live_text import clone, map_offset
+from doceditor.live_text import clone, follow_spans
 
 
 def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
@@ -15,11 +15,12 @@ def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
     projection = clone(live.doc.get_update())
     text = projection["text"]
     before = str(text)
+    ids = list(ranges)
+    opened = {index for index, identifier in enumerate(ids) if identifier in live.open_ends}
     def changed(event):
-        for identifier, (start, end) in tuple(ranges.items()):
-            first = map_offset(start, before, event.delta, right=start == end)
-            last = map_offset(end, before, event.delta, right=True)
-            ranges[identifier] = (first, max(first, last))
+        nonlocal opened
+        spans, opened = follow_spans(list(ranges.values()), before, event.delta, opened)
+        ranges.update(zip(ids, spans))
     observer = text.observe(changed)
     try:
         projection.apply_update(fork.get_update())
