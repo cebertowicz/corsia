@@ -158,7 +158,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('navigating to a table row and a prose comment lands inside the editor, and saving on visible text does not scroll', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { ids } = await openDocument(page, { width: 2400, height: 900 });
-		await page.getByRole('button', { name: /^2 comments\b/ }).click();
+		// At this width the comment column opens with the document, so the comments button would close it.
 		const side = page.locator('[data-doc-comments-drawer]');
 		await expect(side).toBeVisible();
 		await expect(page.locator('[data-adaptive-drawer]'), 'the list is the side-by-side drawer, not a sheet').toHaveCount(0);
@@ -167,20 +167,19 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		expect(Math.abs(drawerBox.y - editorBox.y), 'the drawer beside the editor starts at the editor top').toBeLessThanOrEqual(2);
 
 		const row = page.locator('.cm-md-table tr', { hasText: 'owner-07' });
-		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
+		// A resting margin card keeps its Go to text control for the keyboard only, so these jumps press it.
+		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').press('Enter');
 		await landsInside(page, row, band, 'the table row lands inside the editor');
 		await evidence(page, testInfo, 'desktop-table-row-navigation');
 
 		await handle.evaluate((element) => element.scrollTo(0, 0));
 		const prose = page.locator('.cm-line', { hasText: 'Prose anchor sentence' });
-		await side.locator(`[data-comment-id="${ids.prose}"]`).locator('[data-comment-jump]').click();
+		await side.locator(`[data-comment-id="${ids.prose}"]`).locator('[data-comment-jump]').press('Enter');
 		await landsInside(page, prose, band, 'the prose line lands inside the editor');
 		await evidence(page, testInfo, 'desktop-prose-navigation');
 
-		// A save on text that is already in view leaves the reader where they are. The list closes first: closing it widens the editor and
-		// rewraps the text, so that reflow, which is not a scroll, would otherwise sit between the two measurements.
-		await closeComments(side);
-		await expect(side).toHaveCount(0);
+		// A save on text that is already in view leaves the reader where they are. The column stays open: a new comment's composer opens in
+		// it at this width, so closing it first would make the draft reopen it and rewrap the text, a reflow that is not a scroll.
 		await settle(page);
 		const target = page.locator('.cm-line', { hasText: 'Visible save target line.' });
 		await landsInside(page, target, band, 'the line to comment on is in view');

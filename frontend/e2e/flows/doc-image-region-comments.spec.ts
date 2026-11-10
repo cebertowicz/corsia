@@ -8,7 +8,7 @@ import { drag, settled, shoot } from '../support/imageRegionComments';
 import { headerSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
 import { beginComment, submitButton } from '../support/liveCommentProof';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
-import { expectBarFits } from '../support/docImageComments';
+import { clickDocImage, expectBarFits } from '../support/docImageComments';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
 // the comments pill, the drawer group and the image itself back in it, and the one feedback batch both show and send.
@@ -155,7 +155,7 @@ async function reopenDocument(page: Page) {
 }
 /** Opens the document's image in the viewer and waits until it has drawn and fitted. */
 async function openImage(page: Page, which = 0) {
-	await page.locator('.cm-md-image img').nth(which).click();
+	await clickDocImage(page, which);
 	await expect(overlay(page)).toBeVisible();
 	const img = overlay(page).locator('.frame img');
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(NATURAL.width);

@@ -255,8 +255,10 @@ async function awaitFocusedRead(page: Page): Promise<void> {
 	await expect(page.locator('[data-comment-id].focused .ct-reply.new')).toHaveCount(0);
 }
 
-/** The control's face is its touch target: like chat's control, no pseudo-element padding. */
+/** The control's face is its touch target: like chat's control, no pseudo-element padding. Measured at rest: mid-arrival
+ * its 4px rise is a fractional translate, which rounds the measured height a hair under its size. */
 async function controlFace(page: Page) {
+	await controlBox(page).evaluate((wrap) => Promise.all(wrap.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))));
 	return await controlButton(page).boundingBox() as { x: number; y: number; width: number; height: number };
 }
 
@@ -288,6 +290,32 @@ async function landedBox(page: Page, id: string): Promise<{ from: string; top: n
 		}
 		return null;
 	}, id);
+}
+
+/** A point on text the reader can see that carries no thread, clear of the list popover and the jump control: where a
+ * reader taps to go back to the text, opening nothing of its own. A paragraph is one line that wraps, and most hold a
+ * thread somewhere, so each row it wraps onto is tried on its own. The control moves as its count changes, so the point
+ * keeps clear of the whole box it and the list occupy, not only of what is under the point right now. */
+async function awayFromList(page: Page): Promise<[number, number]> {
+	const point = await page.evaluate(() => {
+		const pane = document.querySelector<HTMLElement>('.doc .cm-scroller')!.getBoundingClientRect();
+		const taken = [...document.querySelectorAll<HTMLElement>('[data-doc-bottom-band], [data-popover]')].map((el) => el.getBoundingClientRect());
+		const clear = (x: number, y: number) => taken.every((box) => x < box.left - 8 || x > box.right + 8 || y < box.top - 8 || y > box.bottom + 8);
+		for (const line of document.querySelectorAll<HTMLElement>('.doc .cm-line')) {
+			if (!(line.textContent ?? '').trim()) continue;
+			const range = document.createRange();
+			range.selectNodeContents(line);
+			for (const row of range.getClientRects()) {
+				const [x, y] = [row.left + 24, row.top + row.height / 2];
+				if (row.width < 48 || y < pane.top + 4 || y > pane.bottom - 4 || !clear(x, y)) continue;
+				const hit = document.elementFromPoint(x, y);
+				if (hit && line.contains(hit) && !hit.closest('.cm-comment-anchor, [data-comment-ids], [data-popover], [data-doc-jump]')) return [x, y] as [number, number];
+			}
+		}
+		return null;
+	});
+	expect(point, 'text with no thread is on screen, clear of the list and the control').not.toBeNull();
+	return point!;
 }
 
 /** The line the reader came to read: the document's own line box that holds a thread's anchor text, against the pane
@@ -593,8 +621,8 @@ for (const width of [1440, 393]) {
 			await expect.poll(async () => {
 				const editor = await page.locator('.doc .ed-wrap').boundingBox();
 				const pill = await activity.boundingBox();
-				return !!editor && !!pill && editor.y + editor.height <= pill.y + 0.5;
-			}, { message: 'mobile editor text clears the below activity notice' }).toBe(true);
+				return !!editor && !!pill && editor.y + editor.height >= pill.y + pill.height - 0.5;
+			}, { message: 'the mobile editor runs on under the below activity notice' }).toBe(true);
 		}
 
 		{
@@ -671,10 +699,18 @@ for (const width of [1440, 393]) {
 				await holdDwell(page, true);
 				await controlButton(page).focus();
 				await page.keyboard.press('Enter');
-				const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
+				// A phone lists the comments in a sheet over a scrim. At 1440 the canvas beside the chat and the Workspace panel is too
+				// narrow for the margin column, so the list is a popover from its control: nothing is dimmed, and a tap on the
+				// document away from it is what closes it.
+				const sheet = width === 393;
+				const backdrop = sheet ? page.locator('[data-adaptive-drawer].drawer-backdrop') : page.locator('[data-popover] .list-pop');
 				await expect(backdrop).toBeVisible();
+				// The reader sees the thread the control took them to before closing the list: its card being shown is what marks it
+				// read. A popover can be visible a few frames before its card is, so wait for the read itself.
+				await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
 				await startMotionProbe(page);
 				if (route === 'Escape') await page.keyboard.press('Escape');
+				else if (!sheet) await page.mouse.click(...await awayFromList(page));
 				else {
 				// The strip of document above the sheet is what a scrim tap has to hit: at 393 the point mid-viewport is inside
 				// the sheet itself, so it opens nothing and closes nothing.
@@ -695,7 +731,9 @@ for (const width of [1440, 393]) {
 	}
 }
 
-for (const width of [1440, 393]) {
+// Only a phone lists the comments in a modal sheet. At 1440 the canvas beside the chat and the Workspace panel is too narrow
+// for the margin column, so the list is a popover that leaves the document and the control usable: the test below.
+for (const width of [393]) {
 	test(`${TAG} modal ${width}px: reply notice stays unavailable through sheet outro`, async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
@@ -730,6 +768,46 @@ for (const width of [1440, 393]) {
 		await holdDwell(page, false);
 	});
 }
+
+test(`${TAG} list popover 1440px: the control still jumps while the list is open`, async ({ page, request }, testInfo) => {
+	test.setTimeout(90_000);
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+	skipMismatchedProject(1440, testInfo.project.name);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const threadId = await createSession(request, threadTitle);
+	await replacePreviousFixtureThread(request, threadId);
+	// Two replies far apart: after the first jump the second thread's line is still below the fold, so the control stays.
+	const doc = await seedTextDocument(page, request, threadId, 'list-popover-1440', 'launch-plan.md', [5, 11]);
+	await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
+	await openThread(page, threadTitle);
+	await expectControl(page, '2 new');
+	await holdDwell(page, true);
+	const inPopover = async (id: string) => await page.evaluate((wanted) => {
+		const card = document.querySelector<HTMLElement>(`[data-popover] [data-comment-id="${wanted}"]`);
+		if (!card) return false;
+		let host: HTMLElement | null = card.parentElement;
+		while (host && !/(auto|scroll)/.test(getComputedStyle(host).overflowY)) host = host.parentElement;
+		const [box, pane] = [card.getBoundingClientRect(), (host ?? card).getBoundingClientRect()];
+		return box.top >= pane.top - 0.5 && (box.bottom <= pane.bottom + 0.5 || box.height >= pane.height);
+	}, id);
+
+	await controlButton(page).click();
+	await expect(page.locator('[data-popover] .list-pop')).toBeVisible();
+	await expect(page.locator(`[data-comment-id="${doc.roots[5]}"]`)).toHaveClass(/focused/);
+	await expect.poll(() => inPopover(doc.roots[5]), { message: 'the first jump shows its thread inside the list' }).toBe(true);
+
+	// The list is not modal: the control stays on the document beside it, clear of it, and still points at the next reply.
+	await expectControlPoints(page, 1, 'below');
+	const [control, list] = await Promise.all([controlBox(page).boundingBox(), page.locator('[data-popover]').boundingBox()]);
+	const overlaps = control!.x < list!.x + list!.width && list!.x < control!.x + control!.width && control!.y < list!.y + list!.height && list!.y < control!.y + control!.height;
+	expect(overlaps, 'the control and the list popover stay clear of each other').toBe(false);
+
+	await controlButton(page).click();
+	await expect(page.locator('[data-popover] .list-pop')).toBeVisible();
+	await expect(page.locator(`[data-comment-id="${doc.roots[11]}"]`)).toHaveClass(/focused/);
+	await expect.poll(() => inPopover(doc.roots[11]), { message: 'the second jump shows the next thread inside the list' }).toBe(true);
+	await holdDwell(page, false);
+});
 
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {

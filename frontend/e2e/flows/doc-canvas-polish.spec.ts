@@ -116,12 +116,13 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(pill).toBeVisible();
 	await pill.focus();
 	await expect(pill).toBeFocused();
-	// The notice never covers document text: the editor ends above it at every width (#1703).
+	// The notice floats over the text: the editor keeps its whole height, running on under the notice to the pane's foot,
+	// so the text the person reads does not move or shrink as a notice comes and goes.
 	await expect.poll(async () => {
 		const editor = await page.locator('.doc .ed-wrap').boundingBox();
 		const notice = await pill.boundingBox();
-		return !!editor && !!notice && editor.y + editor.height <= notice.y + 0.5;
-	}, { message: 'editor text clears the below activity notice' }).toBe(true);
+		return !!editor && !!notice && editor.y + editor.height >= notice.y + notice.height - 0.5;
+	}, { message: 'the editor runs on under the below activity notice' }).toBe(true);
 	await saveEvidenceScreenshot(page, testInfo, 'canvas-offscreen-pill', { fullPage: false });
 	await pill.click();
 	await expect(page.locator('.cm-comment-anchor').filter({ hasText: quote })).toBeInViewport();

@@ -74,13 +74,16 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		const geometry = await page.locator('.document-header').evaluate((header) => {
 			const who = header.querySelector('.rb-who')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = header.getBoundingClientRect(), style = getComputedStyle(header);
-			return { text: text.toJSON(), contentRight: box.right - parseFloat(style.paddingRight),
+			// The tool row's own box is clamped to the header; its buttons are what can run past the left edge.
+			const toolsLeft = Math.min(...[...header.querySelectorAll('.document-tools button')].map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0).map((rect) => rect.left));
+			return { text: text.toJSON(), contentLeft: box.left + parseFloat(style.paddingLeft), contentRight: box.right - parseFloat(style.paddingRight), toolsLeft,
 				name: who.textContent, tools: header.querySelector('.document-tools')!.getBoundingClientRect().toJSON(),
 				paneOverlay: !!document.querySelector('.pane.overlay') };
 		});
 		console.info('Delivery header geometry:', JSON.stringify({ width, theme, ...geometry }));
 		expect(geometry.name).toBe(`${doc.title}:`);
 		expect(geometry.text.right, 'full name stays before the pane').toBeLessThanOrEqual(geometry.contentRight + 0.5);
+		expect(geometry.toolsLeft, 'every header tool starts inside the header').toBeGreaterThanOrEqual(geometry.contentLeft - 0.5);
 		for (const button of await page.locator('.document-header button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
 		expect(await hitAtCentre(bar(page).getByRole('button', { name: 'Done', exact: true }))).toBe(true);
 		if (width === 1280) expect(geometry.paneOverlay).toBe(true);

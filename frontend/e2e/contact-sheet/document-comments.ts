@@ -21,7 +21,13 @@ const doc = [
   ...Array.from({ length: 24 }, (_, i) => `## Review section ${i + 1}\n\nThe team can compare the layout at each width and return to the original comment without losing its context. The review should describe what changed and what remains to be decided.\n`),
 ].join('\n');
 
-const longReply = Array.from({ length: 6 }, () => 'The narrow layout keeps the toolbar, but the comment column moves below the text and the reader loses the line each thread refers to.').join(' ');
+const longReply = [
+  'I checked this on a phone, a small tablet and a laptop with the sidebar open.',
+  'On the phone the toolbar keeps its four controls, but the overflow menu hides the zoom setting, so a reader has to open it twice to reach the text size.',
+  'On the tablet in portrait the comment list opens as a sheet over the lower half of the page, which hides the paragraph the thread is about.',
+  'The laptop is fine once the sidebar is closed; with it open the comment column drops below the text and the reader loses the line each thread refers to.',
+  'I suggest we list these three widths in the test plan, note which controls must stay visible at each, and add the tablet case to the release checklist so it is checked before every build we share.',
+].join(' ');
 
 export const scrollAnchor = '.cm-content';
 
@@ -29,10 +35,46 @@ export function seed(page: Page, request: APIRequestContext) {
   return seedDocument(page, request, true);
 }
 
+/** The canvas with the Workspace panel, and the sidebar too if asked, tucked away: the canvas widths a laptop gives. */
+async function closePanes(page: Page, sidebar: boolean) {
+  if (sidebar) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+  if (!(await page.locator('.pane').evaluate((element) => element.classList.contains('collapsed')))) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+/** The cards beside the text, opened from the comments button if the canvas was narrower when the document loaded. */
+async function showMargin(page: Page) {
+  if (!(await page.locator('[data-margin-card]').count())) await page.locator('.comment-status').click();
+  await expect(page.locator('[data-margin-card]').first()).toBeVisible();
+}
+
+export const variants = {
+  // Too narrow for the column: a highlight opens its thread as a popover at the click.
+  'panel-closed': { widths: [1440], apply: async (page: Page) => {
+    await closePanes(page, false);
+    await page.locator('.cm-comment-anchor', { hasText: 'narrow widths' }).first().click();
+    await expect(page.locator('[data-popover]')).toBeVisible();
+  } },
+  'sidebar-and-panel-closed': { widths: [1440], apply: async (page: Page) => { await closePanes(page, true); await showMargin(page); } },
+  // A thread picked from its highlight: its card keeps its line and its neighbours step aside.
+  picked: { widths: [1440, 1920], apply: async (page: Page) => {
+    if ((page.viewportSize()?.width ?? 0) < 1920) await closePanes(page, true);
+    await showMargin(page);
+    await page.locator('.cm-comment-anchor', { hasText: 'narrow widths' }).first().click();
+    await expect(page.locator('[data-margin-card] .ct.focused')).toHaveCount(1);
+  } },
+  'resolved-open': { widths: [1440, 1920], apply: async (page: Page) => {
+    if ((page.viewportSize()?.width ?? 0) < 1920) await closePanes(page, true);
+    await page.locator('[data-resolved-entry]').click();
+    await expect(page.locator('[data-resolved-column], .resolved-pop').getByText('This explanation now includes the expected behavior.')).toBeVisible();
+  } },
+};
+
 /** The review document, with every kind of comment at its extremes, or with none (the empty state). With the sidebar
  * collapsed, desktop widths that otherwise show the document alone show it beside the chat. */
 export async function seedDocument(page: Page, request: APIRequestContext, withComments: boolean, collapseSidebar = false) {
-  const title = `Responsive Design Review and Accessibility Coordination Agent ${Date.now()}`;
+  // Each capture runs on a fresh database, so the title needs no id to be told apart.
+  const title = 'Responsive Design Review and Accessibility Coordination Agent';
   const thread = await createSession(request, title);
   const params = { token: TEST_TOKEN };
   const roots = (await (await request.get('/api/files/tree', { params })).json()).roots as Array<{ kind: string; path: string }>;

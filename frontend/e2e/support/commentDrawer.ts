@@ -8,16 +8,13 @@ export async function replyField(thread: Locator): Promise<Locator> {
 }
 
 /**
- * Everything the drawer can show. An image's drawer opens on Open, where a thread that is accepted or resolved leaves the list;
- * its filter set to All keeps it in view. A text document's drawer has no filter: its open threads are always listed and its
- * resolved ones sit behind the "Resolved" control, which this opens.
+ * Every thread the list can show. An image's drawer opens on Open, where a thread that is accepted or resolved leaves the list;
+ * its filter set to All keeps it in view. A text document's list has no filter and always lists its open threads, so this leaves
+ * it as it is: its resolved threads open in their own list, which takes the open list's place (`inResolved`, `openResolved`).
  */
 export async function showAllThreads(drawer: Locator): Promise<void> {
 	const filter = drawer.locator('[data-drawer-filter]');
-	if (!(await filter.count())) {
-		await showResolved(drawer);
-		return;
-	}
+	if (!(await filter.count())) return;
 	await filter.click();
 	await drawer.getByRole('menu', { name: 'Filter comments', exact: true }).getByRole('menuitemradio', { name: 'All', exact: true }).click();
 	await expect(filter).toHaveAttribute('aria-label', 'Filter comments: All');
@@ -27,13 +24,15 @@ export async function showAllThreads(drawer: Locator): Promise<void> {
 
 /**
  * Closes the comments as a person does. The sheet and the inline drawer have a Close button; the margin column beside a text
- * document has none and closes with the document header's comments control.
+ * document has none and closes with the document header's comments control. A list that is already closed is left closed.
  */
 export async function closeComments(scope: Page | Locator): Promise<void> {
+	if (!('goto' in scope) && !(await scope.count())) return;
 	const close = scope.getByRole('button', { name: 'Close comments', exact: true });
 	if (await close.count()) return close.click();
+	// The list's popover is drawn at the page's top level, outside its document, so it has no document above it to search.
 	const viewer = 'goto' in scope ? scope : scope.locator('xpath=ancestor::*[.//*[contains(concat(" ", @class, " "), " comment-status ")]][1]');
-	await viewer.locator('.comment-status').click();
+	await ('goto' in scope || (await viewer.count()) ? viewer : scope.page()).locator('.comment-status').click();
 }
 
 /**
@@ -49,25 +48,57 @@ export function resolvedList(page: Page): Locator {
 	return page.locator('[data-resolved-column], .resolved-pop, .resolved-drawer');
 }
 
+/** A phone's comments list is a modal sheet over the document header, so it is closed first, as a person does, to reach "Resolved". */
+async function leaveSheet(drawer: Locator): Promise<void> {
+	if (!(await drawer.locator('xpath=ancestor::*[@data-adaptive-drawer]').count())) return;
+	await closeComments(drawer);
+	await expect(drawer).toHaveCount(0);
+}
+
+/** Closes the "Resolved" list: its sheet's Close button on a phone, otherwise its header control again. */
+async function closeResolved(drawer: Locator): Promise<void> {
+	const page = drawer.page();
+	const sheet = page.locator('[data-adaptive-drawer]').filter({ has: page.locator('.resolved-drawer') });
+	if (await sheet.count()) await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+	else {
+		const entry = resolvedEntry(drawer);
+		if ((await entry.count()) && (await entry.getAttribute('aria-expanded')) === 'true') await entry.click();
+	}
+	await expect(resolvedList(page)).toHaveCount(0);
+}
+
 /** The "Resolved" list opened, when the document has resolved threads. */
 export async function showResolved(drawer: Locator): Promise<void> {
 	const entry = resolvedEntry(drawer);
-	if ((await entry.count()) && (await entry.getAttribute('aria-expanded')) !== 'true') await entry.click();
+	if (!(await entry.count()) || (await entry.getAttribute('aria-expanded')) === 'true') return;
+	await leaveSheet(drawer);
+	await entry.click();
 }
 
 /**
  * Runs `check` with the "Resolved" list open, then closes it again. A decided suggestion and a resolved thread leave the open
- * cards for that list, which covers the margin while it is open, so a spec that goes on to press a card button must close it first.
+ * cards for that list, which takes the margin's place while it is open, so a spec that goes on to press a card button must close
+ * it first. Below the margin's width the open list is a popover, which pressing "Resolved" closes, and on a phone a sheet, which
+ * is closed to reach "Resolved"; either is opened again afterwards, as a person would to go on with the open threads.
  */
 export async function inResolved<T>(drawer: Locator, check: () => Promise<T>): Promise<T> {
+	const page = drawer.page();
 	const entry = resolvedEntry(drawer);
 	await expect(entry).toBeVisible();
 	const opened = (await entry.getAttribute('aria-expanded')) !== 'true';
-	if (opened) await entry.click();
+	const listWasOpen = (await drawer.count()) > 0;
+	if (opened) {
+		await leaveSheet(drawer);
+		await entry.click();
+	}
 	try {
 		return await check();
 	} finally {
-		if (opened && (await entry.getAttribute('aria-expanded')) === 'true') await entry.click();
+		if (opened) {
+			await closeResolved(drawer);
+			if (listWasOpen && !(await drawer.count())) await page.locator('.comment-status').click();
+			if (listWasOpen) await expect(drawer).toBeVisible();
+		}
 	}
 }
 
@@ -75,6 +106,9 @@ export async function inResolved<T>(drawer: Locator, check: () => Promise<T>): P
 export async function openResolved(drawer: Locator): Promise<void> {
 	const entry = resolvedEntry(drawer);
 	await expect(entry).toBeVisible();
-	if ((await entry.getAttribute('aria-expanded')) !== 'true') await entry.click();
+	if ((await entry.getAttribute('aria-expanded')) !== 'true') {
+		await leaveSheet(drawer);
+		await entry.click();
+	}
 	await expect(entry).toHaveAttribute('aria-expanded', 'true');
 }

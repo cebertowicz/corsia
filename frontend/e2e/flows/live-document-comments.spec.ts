@@ -59,10 +59,9 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-line').filter({ hasText: quote })).toHaveCount(2);
 			await expect(reader.locator('.cm-content')).toContainText(`reply anchor ${stamp}`);
 			await expect(reader.locator('.cm-content')).toContainText(`remote edit ${stamp}`);
-			// The comments say nothing about placement. Lost threads whose quote is back in the text are placed again in the same
-			// live load, without a reload; the reload below shows the server kept them there.
+			// The comments say nothing about placement. Lost threads whose quote is back in the text are placed again on the
+			// next comments load, never on an edit, so the reader's reload below is the load that places them.
 			await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
-			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
 			await reader.reload();
 			if (width <= 768) await reader.getByRole('button', { name: 'Toggle sidebar' }).click();
