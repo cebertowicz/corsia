@@ -314,7 +314,7 @@ def test_an_accepted_lesson_is_recorded_with_its_decision(env: Env) -> None:
 
 
 def test_a_folded_save_records_before_and_after_lesson_items(env: Env) -> None:
-    from infra.guidance_git import save_guidance
+    from infra.guidance_git import save_with_history
     from infra.guidance_targets import HistoryTarget
 
     path = env.tray / "context" / "RESPONSIBILITY.md"
@@ -323,7 +323,7 @@ def test_a_folded_save_records_before_and_after_lesson_items(env: Env) -> None:
         "# Role\n\n## Lessons\n\n- Keep commits focused.\n- Run the smaller checks first.\n"
     )
 
-    saved = save_guidance(
+    saved = save_with_history(
         {path: b"# Role\n\n## Lessons\n\n- Keep commits small and run the smaller checks first.\n"},
         workspace=env.workspace, target=HistoryTarget("agent"),
         author=f"Lane <{THREAD}@agents.corsia.local>",
@@ -338,11 +338,11 @@ def test_a_folded_save_records_before_and_after_lesson_items(env: Env) -> None:
 
 def test_a_file_edit_refusal_is_recorded_and_the_learning_report_counts_it(env: Env) -> None:
     from core.lesson_gate import gate_counts
-    from infra.guidance_git import save_guidance
+    from infra.guidance_git import save_with_history
     from infra.guidance_targets import HistoryTarget
 
     path = env.tray / "context" / "RESPONSIBILITY.md"
-    saved = save_guidance(
+    saved = save_with_history(
         {path: b"# Role\n\n## Lessons\n\n- 2026-10-23: read the stamp on this frame.\n"},
         workspace=env.workspace, target=HistoryTarget("agent"),
         author=f"Lane <{THREAD}@agents.corsia.local>",
@@ -358,7 +358,7 @@ def test_a_file_edit_refusal_is_recorded_and_the_learning_report_counts_it(env: 
 
 def test_a_file_edit_refusal_surfaces_when_its_metric_cannot_be_recorded(env: Env, monkeypatch) -> None:
     from core import lesson_gate
-    from infra.guidance_git import save_guidance
+    from infra.guidance_git import save_with_history
     from infra.guidance_targets import HistoryTarget
 
     def unavailable(*_args, **_kwargs):
@@ -366,7 +366,7 @@ def test_a_file_edit_refusal_surfaces_when_its_metric_cannot_be_recorded(env: En
 
     monkeypatch.setattr(lesson_gate, "record", unavailable)
     path = env.tray / "context" / "RESPONSIBILITY.md"
-    saved = save_guidance(
+    saved = save_with_history(
         {path: b"# Role\n\n## Lessons\n\n- 2026-10-23: read the stamp on this frame.\n"},
         workspace=env.workspace, target=HistoryTarget("agent"),
         author=f"Lane <{THREAD}@agents.corsia.local>",

@@ -21,7 +21,7 @@ from core.skill_sidecar import (
 )
 from core.skill_validation import parse_frontmatter
 from core.skill_workflow_validation import WORKFLOW_KEYS, validate_workflow
-from infra.guidance_git import SaveResult, save_guidance
+from infra.guidance_git import SaveResult, save_with_history
 from infra.guidance_messages import saver_author
 from infra.guidance_targets import HistoryTarget
 from library.installed import local_bundle
@@ -230,7 +230,7 @@ def install_skill_bundle(
     writes = {target / relative: data for relative, data in files.items()}
     target_info = HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope")
     try:
-        saved = save_guidance(
+        saved = save_with_history(
             writes,
             workspace=workspace,
             target=target_info,
@@ -299,7 +299,7 @@ def update_skill_bundle(
         for relative, data in previous.items() if relative not in files
     }
     try:
-        saved = save_guidance(
+        saved = save_with_history(
             writes,
             workspace=workspace,
             target=HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
@@ -344,7 +344,7 @@ def remove_skill_bundle(
                 **({"reason": "unreadable_bundle"} if target.exists() else {})}
     deletes = {target / relative: hashlib.sha256(data).hexdigest() for relative, data in previous.items()}
     try:
-        saved = save_guidance(
+        saved = save_with_history(
             {},
             workspace=workspace,
             target=HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),

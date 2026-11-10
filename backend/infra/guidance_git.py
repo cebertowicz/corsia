@@ -1,6 +1,6 @@
 """The single writer of the workspace history: guidance (issue #2272) and documents (C11).
 
-:func:`save_guidance` checks a save once (text, the person's ignore rules, the file unchanged since the
+:func:`save_with_history` checks a save once (text, the person's ignore rules, the file unchanged since the
 caller read it), writes the caller's bytes and records them through :func:`infra.history_record.record`
 under one lock under ``.git/`` (every server process): outside edits at its paths first, as
 ``Reason: unrecorded``, then the save. Guidance records before it answers and then sweeps other dirty
@@ -256,7 +256,7 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
         return [f"Guidance sweep failed: {exc}. Outside edits remain on disk and not in history. Report this."]
 
 
-def save_guidance(
+def save_with_history(
     writes: dict[Path, bytes],
     *,
     workspace: Path,

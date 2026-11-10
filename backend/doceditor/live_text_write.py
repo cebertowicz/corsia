@@ -9,7 +9,7 @@ from doceditor import document_save
 from doceditor.document_save import DocumentSaveError, FileChangedOutside
 from doceditor.document_scope import UI_THREAD
 from infra import config
-from infra.guidance_git import save_guidance
+from infra.guidance_git import save_with_history
 from infra.guidance_messages import saver_author
 from infra.guidance_targets import history_target
 
@@ -26,7 +26,7 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         document_save.write_atomic_plain(path, text, prior_sha256)
         return
     required = bool(operation and operation.history_required)
-    saved = save_guidance(
+    saved = save_with_history(
         {path: text.encode("utf-8")}, workspace=Path(config.WORKSPACE), target=target,
         author=_live_author(operation.actor if operation else None), reason=operation.reason if operation else None,
         expected={path: prior_sha256}, atomic=required,

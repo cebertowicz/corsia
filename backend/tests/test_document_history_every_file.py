@@ -222,14 +222,14 @@ async def test_a_restore_lands_after_every_earlier_save_or_not_at_all(history_sc
 
 
 def test_a_document_delete_goes_through_the_same_writer(history_scope):
-    from infra.guidance_git import save_guidance
+    from infra.guidance_git import save_with_history
     from infra.guidance_history_paths import digest
     from infra.guidance_messages import saver_author
 
     workspace, thread_id = history_scope
     path = placed(workspace / 'notes' / 'gone.md', 'Bye.\n')
     target = history_target(path, workspace)
-    saved = save_guidance({}, workspace=workspace, target=target, author=saver_author(thread_id=thread_id),
+    saved = save_with_history({}, workspace=workspace, target=target, author=saver_author(thread_id=thread_id),
                           deletes={path: digest(b'Bye.\n')})
     assert saved.outcome == 'written' and not path.exists()
     # The text it held (never recorded) is kept first, then the delete.

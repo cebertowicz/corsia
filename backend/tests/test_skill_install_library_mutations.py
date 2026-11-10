@@ -151,13 +151,13 @@ def test_update_refuses_if_a_file_changed_after_the_writer_read_it(library_skill
     from infra.skill_install import origin_metadata, update_skill_bundle
 
     workspace, target = library_skill
-    original_save = skill_install.save_guidance
+    original_save = skill_install.save_with_history
 
     def save_after_local_edit(*args, **kwargs):
         (target / "notes.md").write_text("edited after read\n")
         return original_save(*args, **kwargs)
 
-    monkeypatch.setattr(skill_install, "save_guidance", save_after_local_edit)
+    monkeypatch.setattr(skill_install, "save_with_history", save_after_local_edit)
     result = update_skill_bundle(
         workspace,
         "example",
@@ -199,7 +199,7 @@ def test_mutations_report_history_off_without_writing(library_skill, monkeypatch
 
     workspace, target = library_skill
     before = {path.relative_to(target): path.read_bytes() for path in target.rglob("*") if path.is_file()}
-    monkeypatch.setattr(skill_install, "save_guidance", lambda *_args, **_kwargs: SaveResult("history-off"))
+    monkeypatch.setattr(skill_install, "save_with_history", lambda *_args, **_kwargs: SaveResult("history-off"))
     if writer == "update":
         result = update_skill_bundle(
             workspace,
@@ -243,13 +243,13 @@ def test_reviewed_binary_bundle_is_recorded_and_uses_raw_byte_cas(tmp_path, monk
     assert (updated["outcome"], updated["history_outcome"]) == ("updated", "written")
     assert (target / "assets" / "image.bin").read_bytes() == b"\x89PNG\x00new"
 
-    original_save = skill_install.save_guidance
+    original_save = skill_install.save_with_history
 
     def save_after_binary_edit(*args, **kwargs):
         (target / "assets" / "image.bin").write_bytes(b"\x89PNG\x00local")
         return original_save(*args, **kwargs)
 
-    monkeypatch.setattr(skill_install, "save_guidance", save_after_binary_edit)
+    monkeypatch.setattr(skill_install, "save_with_history", save_after_binary_edit)
     result = update_skill_bundle(
         workspace, "binary", b"---\nname: binary\ndescription: binary three\n---\nbody\n",
         {"assets/image.bin": b"\x89PNG\x00newer"}, "binary three",
@@ -275,14 +275,14 @@ def test_token_confirmed_snapshot_refuses_later_text_and_binary_edits(library_sk
     token = skill_library._local_edits_token("owner", "example", target)
     confirmed = skill_library._confirmed_bundle("owner", "example", target, token)
     assert confirmed is not None
-    original_save = skill_install.save_guidance
+    original_save = skill_install.save_with_history
 
     def save_after_late_edit(*args, **kwargs):
         (target / "notes.md").write_text("late text edit\n")
         asset.write_bytes(b"\x89PNG\x00late binary edit")
         return original_save(*args, **kwargs)
 
-    monkeypatch.setattr(skill_install, "save_guidance", save_after_late_edit)
+    monkeypatch.setattr(skill_install, "save_with_history", save_after_late_edit)
     if operation == "update":
         result = update_skill_bundle(
             workspace, "example", b"---\nname: example\ndescription: second version\n---\n# Second\n",

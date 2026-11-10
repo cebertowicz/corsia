@@ -24,7 +24,7 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
-from infra.guidance_git import save_guidance
+from infra.guidance_git import save_with_history
 from infra.guidance_targets import HistoryTarget, guidance_target, history_target
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
@@ -133,7 +133,7 @@ def _guided_write(
     under the history lock."""
     payloads: list[dict] = []
     reports: list[Callable[[], None]] = []
-    saved = save_guidance(
+    saved = save_with_history(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
         atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),

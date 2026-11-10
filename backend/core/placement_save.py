@@ -17,7 +17,7 @@ def save_placement(
     from core.context_source_paths import append_context_source_change
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import find_commit, save_guidance, workspace_repository
+    from infra.guidance_git import find_commit, save_with_history, workspace_repository
     from infra.guidance_targets import HistoryTarget
     from infra.skill_save_validation import REFUSED, invalid_skill_write
 
@@ -33,7 +33,7 @@ def save_placement(
     sha = find_commit(repo, trailer, path)
     if sha is not None:
         return sha
-    result = save_guidance(
+    result = save_with_history(
         encoded, workspace=Path(WORKSPACE), target=HistoryTarget("placement"), expected=expected,
         atomic=True, author=author(place), message=message(entry, decision, relative, trailer, operations),
         lesson_gate=False,  # the writer behind ``place``

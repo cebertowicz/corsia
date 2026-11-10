@@ -2,7 +2,7 @@
 
 :func:`record` commits saves in order under the history lock, each preceded by an outside version
 (``Reason: unrecorded``, by an unknown editor) when the bytes it replaced are not what history holds.
-A guidance save runs it before answering (:func:`infra.guidance_git.save_guidance`). A document save
+A guidance save runs it before answering (:func:`infra.guidance_git.save_with_history`). A document save
 writes its bytes, answers, and is recorded here afterwards (:func:`save_queued`): one workspace at a
 time, in save order, consecutive saves of one document by one author under one message joined, the
 person's ignore rules read once per batch so the save itself asks Git nothing. A version that cannot be recorded is kept and retried with the next save in that workspace, and the
