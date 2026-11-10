@@ -359,7 +359,7 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 10ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.identity-owner { flex: 1; min-width: 13ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		/* The verified phrase carries the picker when the owner cannot fit. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }
