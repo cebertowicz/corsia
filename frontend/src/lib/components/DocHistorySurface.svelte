@@ -31,7 +31,7 @@
 	// Each refusal kind's line and the one action that can help: sending the restore again, reloading the list, or none.
 	const REFUSALS: Record<string, { line: string; action: 'restore' | 'reload' | null }> = {
 		failed: { line: 'Couldn’t restore this version. The document is unchanged.', action: 'restore' },
-		stale: { line: 'Couldn’t restore this version. The document changed since you opened it.', action: 'restore' },
+		stale: { line: 'Couldn’t restore this version. The document is unchanged.', action: 'restore' },
 		unsaved_typing: { line: 'Couldn’t restore this version. Your latest typing isn’t saved yet, so nothing was restored.', action: 'restore' },
 		not_loaded: { line: 'Couldn’t restore this version. The document is still loading.', action: 'restore' },
 		unconfirmed: { line: 'Couldn’t confirm the restore. The newest version doesn’t hold this version’s text.', action: 'restore' },
@@ -59,6 +59,8 @@
 	let refusal = $state<string | null>(null);
 	// The answer to a restore never arrived; the reloaded list decides whether it landed (settleLost).
 	let lost = $state(false);
+	// A stale refusal reloads the document and the list first; Retry is offered once both have landed.
+	let reloading = $state(false);
 	let pressHead: string | undefined;
 	let pressed: DocVersion | undefined;
 	let alive = true;
@@ -174,7 +176,7 @@
 		showList();
 	}
 	async function restore(): Promise<void> {
-		if (!shown || restoreBlock || restoring || versionLoad !== 'ready') return;
+		if (!shown || restoreBlock || restoring || reloading || versionLoad !== 'ready') return;
 		pressHead = versions[0]?.id;
 		pressed = shown;
 		restoring = true;
@@ -188,8 +190,10 @@
 			restoring = false;
 			refusal = error instanceof RequestRefused && error.kind && error.kind in REFUSALS ? error.kind : 'failed';
 			if (refusal === 'stale') {
-				try { await onRestored(); } catch { /* The line still says the document changed. */ }
+				reloading = true;
+				try { await onRestored(); } catch { /* The reloaded list still shows what changed. */ }
 				await retry();
+				reloading = false;
 			}
 			return;
 		}
@@ -265,7 +269,7 @@
 {#snippet versionDiff()}
 	{#if offline}<div class="status" role="status">Showing the last loaded history. Restore needs a connection to CORSIA.<Button size="sm" onclick={retry}>Retry</Button></div>
 	{:else if readOnly && !isCurrent}<div class="status" role="status">This file is read-only, so an earlier version can't be restored.</div>
-	{:else if refusal}<div class="status" role="status">{REFUSALS[refusal].line}{#if REFUSALS[refusal].action === 'restore'}<Button size="sm" onclick={restore}>Retry</Button>{:else if REFUSALS[refusal].action === 'reload'}<Button size="sm" onclick={reload}>Reload history</Button>{/if}</div>{/if}
+	{:else if refusal}<div class="status" role="status">{REFUSALS[refusal].line}{#if REFUSALS[refusal].action === 'restore' && !reloading && versionLoad === 'ready'}<Button size="sm" onclick={restore}>Retry</Button>{:else if REFUSALS[refusal].action === 'reload'}<Button size="sm" onclick={reload}>Reload history</Button>{/if}</div>{/if}
 	<div class="scroll" bind:this={diffScroll}>
 		{#if versionLoad === 'loading'}<p class="status">Loading history…</p>
 		{:else if versionLoad === 'error'}<div class="status" role="status">{versionFailure}<Button size="sm" onclick={retry}>Retry</Button></div>
