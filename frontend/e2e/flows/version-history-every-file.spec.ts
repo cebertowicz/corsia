@@ -56,8 +56,7 @@ async function openDocument(page: Page, info: TestInfo, title: string, artifactI
 		}));
 	}, { id: artifactId, tabPath: file, thread: threadId, name: path.basename(file) });
 	await loginByUrl(page, { waitForComposer: false });
-	if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.getByText(title).first().click();
+	await openChat(page, title);
 	await expect(page.locator('.cm-content')).toBeVisible();
 	if (!phone) await page.getByRole('button', { name: 'Toggle panel' }).click();
 }
@@ -73,8 +72,7 @@ async function agentEdit(browser: Browser, request: APIRequestContext, info: Tes
 	const phone = info.project.name === 'chromium-mobile';
 	const agent = await (await browser.newContext({ viewport: { width: phone ? 393 : 1440, height: phone ? 852 : 900 } })).newPage();
 	await loginByUrl(agent);
-	if (phone) await agent.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await agent.locator('.thread-item').filter({ hasText: title }).click({ timeout: 10_000 });
+	await openChat(agent, title);
 	await seedMockResponses(request, [
 		{ tool_calls: [{ id: `read-${title}`, name: 'read_file', arguments: JSON.stringify({ path: file }) }], finish_reason: 'tool_calls', match_thread: threadId },
 		{ tool_calls: [{ id: `edit-${title}`, name: 'edit_file', arguments: JSON.stringify({ path: file, old_string: from, new_string: to }) }], finish_reason: 'tool_calls', match_thread: threadId },
@@ -84,6 +82,18 @@ async function agentEdit(browser: Browser, request: APIRequestContext, info: Tes
 	await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(3);
 	await expect.poll(() => fs.readFileSync(file, 'utf8'), { timeout: 15_000 }).toContain(to);
 	await agent.context().close();
+}
+
+/** Opens a chat from the rail. On a phone the rail sits behind the main surface, which slides right to
+ *  open it, and a run once saw it shut again while the app finished loading; so the open is retried until
+ *  the chat's row takes the click. */
+async function openChat(page: Page, title: string) {
+	const row = page.locator('aside.sidebar .thread-item').filter({ hasText: title });
+	await expect(async () => {
+		const shut = ((await page.locator('main.main').boundingBox())?.x ?? 0) <= 40;
+		if ((page.viewportSize()?.width ?? 1440) <= 768 && shut) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await row.click({ timeout: 3_000 });
+	}).toPass({ timeout: 20_000 });
 }
 
 /** Open the right pane when it is visually closed (as in artifact-pane-pin.spec.ts): measure, since a
@@ -246,8 +256,7 @@ test('@flow:version-history-every-file a registered chat file has History from t
 	expect(commits(root, working)).toBe(0);
 	// The route a person takes: the chat's file tray, the file, then History in its header.
 	await loginByUrl(page, { waitForComposer: false });
-	if (phone) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.getByText(title).first().click();
+	await openChat(page, title);
 	await ensurePaneOpen(page);
 	const trayRow = page.locator('aside.pane .row-outer').filter({ hasText: path.basename(kept) });
 	await expect(trayRow).toBeVisible();
