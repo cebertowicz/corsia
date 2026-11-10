@@ -81,14 +81,18 @@ export function holdWritingPlace(live: () => string | null) {
 	/** Focuses the carried place in this surface, if it holds it and takes focus. */
 	function tryPlace(area: HTMLElement | undefined) {
 		if (!pending || !area?.isConnected) return;
-		const field = area.querySelector<HTMLElement>(pending.where);
-		if (!field) return;
-		if (field !== document.activeElement) field.focus({ preventScroll: true });
-		// A field in a form the surface has not drawn yet takes no focus.
-		if (document.activeElement !== field || placed.has(field)) return;
-		// Once per field: a form may have focused it already, with the caret at the end.
-		placed.add(field);
-		if (pending.caret && field instanceof HTMLTextAreaElement) field.setSelectionRange(...pending.caret);
+		// While the shell is moving, two forms of the same card can be in the document at once — the one on its way out
+		// keeps its element through its outro — and only the form the surface has drawn takes focus. So every copy is
+		// offered the place, and the first that accepts it keeps it.
+		for (const field of area.querySelectorAll<HTMLElement>(pending.where)) {
+			if (field !== document.activeElement) field.focus({ preventScroll: true });
+			if (document.activeElement !== field) continue;
+			// Once per field: a form may have focused it already, with the caret at the end.
+			if (placed.has(field)) return;
+			placed.add(field);
+			if (pending.caret && field instanceof HTMLTextAreaElement) field.setSelectionRange(...pending.caret);
+			return;
+		}
 	}
 
 	// The list can still be on its way in when the panel closes: the width eases back over a few hundred
@@ -126,9 +130,13 @@ export function holdWritingPlace(live: () => string | null) {
 		// The place focus last left, to be carried if it goes on to the panel's own control: from a reply to the toggle by
 		// keyboard the way crosses the card's own buttons, which are not the reader moving on.
 		let left: WritingPlace | null = null;
+		// Set by a press outside the surface and cleared by the next focus: it says the reader moved on. It outlives the
+		// field's own focus-out, which lands after the press and would otherwise record the place they pressed away from.
+		let pressAway = false;
 		const onFocusIn = (event: FocusEvent) => {
 			const place = placeOf(event.target);
 			const target = event.target instanceof Element ? event.target : null;
+			pressAway = false;
 			if (!place) {
 				if (toPanelControl(target)) { carried ??= left; return; }
 				// Another field, or the document's text, is the reader moving on: nothing is carried and nothing is placed.
@@ -141,13 +149,24 @@ export function holdWritingPlace(live: () => string | null) {
 		};
 		const onFocusOut = (event: FocusEvent) => {
 			const place = placeOf(event.target);
-			if (place) left = place;
+			if (place && !pressAway) left = place;
+		};
+		// A press outside the comment surface is the reader moving on: another pane, another field, the document. Going to
+		// the panel's toggle by keyboard crosses the app's other controls, so only a press says they left, and the toggle
+		// itself and anywhere the writing lives keep the place.
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target instanceof Element ? event.target : null;
+			pressAway = !target?.closest('[data-doc-comments-drawer], [data-popover], [aria-label="Toggle panel"]');
+			if (!pressAway) return;
+			left = null; carried = null; pending = null; stopTrying();
 		};
 		document.addEventListener('focusin', onFocusIn);
 		document.addEventListener('focusout', onFocusOut);
+		document.addEventListener('pointerdown', onPointerDown, true);
 		return () => {
 			document.removeEventListener('focusin', onFocusIn);
 			document.removeEventListener('focusout', onFocusOut);
+			document.removeEventListener('pointerdown', onPointerDown, true);
 		};
 	});
 
