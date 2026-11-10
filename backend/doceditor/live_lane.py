@@ -334,8 +334,11 @@ class DocumentLane:
 
     async def restore(self, operation: Operation, expected_sha256: str) -> WriteResult:
         """Run a whole-text replace only while the live text still hashes to ``expected_sha256``, the
-        text the person restored from; checked in this lane's turn, so no write lands in between."""
+        text the person restored from; checked in this lane's turn, so no write lands in between. An
+        edit made outside CORSIA is taken in first, so it counts as a change and is never replaced."""
         async def run() -> WriteResult:
+            await self._barrier()
+            await self._import()
             if file_hash(self.live.text.encode("utf-8")) != expected_sha256:
                 from doceditor.document_save import DocumentSaveError, STALE_MESSAGE
                 raise DocumentSaveError("stale", STALE_MESSAGE)
