@@ -4,8 +4,9 @@
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
-	let { artifactId, ownership, onChange, compact = false, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null) }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null } = $props();
-	let anchor = $state<HTMLButtonElement>();
+	let { artifactId, ownership, onChange, compact = false, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null), open = $bindable(false), externalAnchor = null }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null; open?: boolean; externalAnchor?: HTMLButtonElement | null } = $props();
+	let ownAnchor = $state<HTMLButtonElement>();
+	const anchor = $derived(externalAnchor ?? ownAnchor);
 	let paneWidth = $state(360);
 	function measurePane() {
 		const header = anchor?.closest<HTMLElement>('.document-header');
@@ -13,7 +14,7 @@
 		const style = getComputedStyle(header);
 		paneWidth = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 	}
-	let open = $state(false);
+	$effect(() => { if (open) measurePane(); });
 	let picker = $state<'owner' | 'supervisor' | null>(null);
 	let search = $state('');
 	let typing = $state(false);
@@ -64,7 +65,7 @@
 </script>
 
 <svelte:window onresize={measurePane} />
-<button bind:this={anchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
+<button bind:this={ownAnchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
 	<span class="compact-owner">Owner: {ownerLabel}</span>
 	<span class="full-owner">{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
 	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}

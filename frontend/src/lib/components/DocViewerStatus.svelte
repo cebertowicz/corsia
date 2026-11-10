@@ -92,6 +92,17 @@
 	let feedbackStatus = $state<DocFeedbackStatus>();
 	let detailsOpen = $state(false);
 	let ownershipInDetails = $state(true);
+	let compactOwnerOpen = $state(false);
+	let ownerAnchor = $state<HTMLButtonElement | null>(null);
+	$effect(() => { if (!compactOwnerOpen) ownerAnchor = null; });
+
+	function openDetails(button: HTMLButtonElement) {
+		const owner = button.parentElement?.querySelector<HTMLElement>('.identity-owner');
+		if (ownership && artifactId && owner && getComputedStyle(owner).display === 'none') {
+			ownerAnchor = button;
+			compactOwnerOpen = true;
+		} else detailsOpen = !detailsOpen;
+	}
 	let ownershipSaving = $state(false);
 	let ownershipError = $state('');
 	let ownershipErrorFor = $state<'owner' | 'supervisor' | null>(null);
@@ -219,7 +230,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation?.phrase ?? 'Document details'}</button></span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation?.phrase ?? 'Document details'}</button></span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
