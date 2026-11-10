@@ -10,6 +10,7 @@
 	import MeasurementOutcomeRates from './MeasurementOutcomeRates.svelte';
 	import MeasurementCost from './MeasurementCost.svelte';
 	import MeasurementKpiRow from './MeasurementKpiRow.svelte';
+	import MeasurementWorkflows from './MeasurementWorkflows.svelte';
 
 	let { onClose = null }: {
 		/** The doorway that opened this surface; Close returns to exactly that origin (PL-2). */
@@ -55,7 +56,13 @@
 		return [...measured, ...navigationOnly] satisfies PickerAgent[];
 	});
 
-	onMount(() => { void loadProjects(); return startMeasurementUrlSync(); });
+	let scopeReady = $state(false);
+	onMount(() => {
+		void loadProjects();
+		const stop = startMeasurementUrlSync();
+		scopeReady = true;
+		return stop;
+	});
 	$effect(() => {
 		$measurementGrain;
 		$measurementScope;
@@ -146,6 +153,7 @@
 	<MeasurementWhereToLook state={$measurementWhereToLook} onRetry={() => void loadMeasurementWhereToLook()}>
 		<MeasurementAgentsTable state={$measurementAgents} embedded />
 	</MeasurementWhereToLook>
+	{#if scopeReady}<MeasurementWorkflows />{/if}
 </div>
 
 <style>

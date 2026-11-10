@@ -55,7 +55,7 @@ export const subagentMeta = writable<Map<string, SubagentRef>>(new Map());
 /** A worker's thread row, by worker id: the fields the thread list would hold if it held workers. */
 export const subagentThreadRows = writable<Map<string, SubagentThreadFields>>(new Map());
 
-export const openSubagentRequest = writable<string | null>(null);
+export const openSubagentRequest = writable<string | { threadId: string; onOpened: () => void; onError?: (error: unknown) => void } | null>(null);
 
 export function registerSubagent(
 	parentId: string,

@@ -37,6 +37,8 @@ export interface ChartSpec {
 	/** Axis 0 to 100 in steps of 25. */
 	percent100?: boolean;
 	showN?: boolean;
+	scaleMax?: number;
+	missingText?: string;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -77,14 +79,15 @@ export function chartGeometry(spec: ChartSpec, W: number, ML: number, MR: number
 	const known = pts.filter((p) => p.value !== null).map((p) => p.value as number);
 	const base = ok.length ? Math.max(...ok) : known.length ? Math.max(...known) : 1;
 	const vals = [...ok, ...pts.filter((p) => p.ma !== null && p.ma <= 1.25 * base).map((p) => p.ma as number)];
-	const { step, count: nt } = spec.percent100 ? { step: 25, count: 4 } : niceAxis(vals.length ? Math.max(...vals) : base);
+	const { step, count: nt } = spec.percent100 ? { step: 25, count: 4 } : niceAxis(spec.scaleMax ?? (vals.length ? Math.max(...vals) : base));
 	const ymax = step * nt;
 	const y = (v: number) => MT + PH - (PH * Math.min(v, ymax)) / ymax;
 	const slot = (W - ML - MR) / N;
 	const bw = slot * 0.62;
 	const y0 = MT + PH;
 	const items: ChartItem[] = [{ kind: 'text', cls: 'at', x: 0, y: Number(f1(fs + 1)), anchor: 'start', text: spec.axisTitle }];
-	const decimals = Math.abs(step - Math.round(step)) < 1e-9 ? 0 : Math.abs(step * 10 - Math.round(step * 10)) < 1e-6 ? 1 : 2;
+	let decimals = 0;
+	while (decimals < 12 && (step * 10 ** decimals < 1e-6 || Math.abs(step * 10 ** decimals - Math.round(step * 10 ** decimals)) > 1e-6)) decimals++;
 	for (let i = 0; i <= nt; i++) {
 		const v = i * step;
 		items.push({ kind: 'line', cls: i === 0 ? 'zero' : 'grid', x1: ML, x2: W - MR, y: Number(f1(y(v))) });
@@ -103,7 +106,7 @@ export function chartGeometry(spec: ChartSpec, W: number, ML: number, MR: number
 	const nText = (n: number) => (n >= 10000 || (needsCompact && n >= 1000) ? compact(n) : full(n));
 	const nSize = nrow && pts.length ? Math.max(8.5, Math.min(fs, (slot - 3) / (Math.max(...pts.map((p) => nText(p.n).length)) * 0.6))) : fs;
 	// The state of a period is spelled under its own n; a phone writes it downward so it can never sit under a neighbour.
-	const stateOf = (p: BarPoint) => (p.partial ? 'today so far' : p.value === null ? (isWithheld(p) ? 'too few' : '') : isLow(p, minN) ? 'low n' : '');
+	const stateOf = (p: BarPoint) => (p.partial ? 'today so far' : p.value === null ? (isWithheld(p) ? (spec.missingText ?? 'too few') : '') : isLow(p, minN) ? 'low n' : '');
 	let stateLen = 0;
 	// The latest highlight is the last completed period; a running one is outlined instead.
 	let latest = N - 1;
