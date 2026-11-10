@@ -97,10 +97,23 @@ test('@flow:doc-margin-defects the column closed and reopened at once keeps its 
 	await pill(page).click();
 	await expect(card(page, doc, FIRST)).toBeVisible();
 	await page.waitForTimeout(600);
-	await expect(page.locator('.canvas-comment-drawer.margin.leaving')).toHaveCount(0);
 	expect(await room(), 'the room is back, so no card sits over the text').toBe(shown);
 	const [text, first] = [await page.locator('.cm-line', { hasText: 'Paragraph 1 of the plan' }).first().boundingBox(), await card(page, doc, FIRST).boundingBox()];
 	expect(first!.x, 'the card starts right of the text').toBeGreaterThanOrEqual(text!.x + text!.width);
+	// Closed again after the cancelled fade: the room starts closing while the column is still fading, not when it unmounts.
+	const closing = await page.evaluate(async (button) => {
+		(button as HTMLElement).click();
+		for (let frame = 0; frame < 2; frame += 1) await new Promise(requestAnimationFrame);
+		const scroller = document.querySelector('.cm-scroller')!;
+		return {
+			fading: !!document.querySelector('.canvas-comment-drawer.margin'),
+			roomClosing: scroller.getAnimations().some((a) => (a as CSSTransition).transitionProperty === 'padding-right'),
+		};
+	}, await pill(page).elementHandle());
+	expect(closing, 'the room closes with the fade').toEqual({ fading: true, roomClosing: true });
+	await page.waitForTimeout(600);
+	await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
+	expect(await room(), 'the text widens back once the column is gone').toBeLessThan(50);
 });
 
 test('@flow:doc-margin-defects a narrow desktop width opens the popover at the click, and a phone the sheet', async ({ page, request }, info) => {

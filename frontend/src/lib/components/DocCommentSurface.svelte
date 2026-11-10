@@ -27,7 +27,7 @@
 	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
-	import { marginIn, marginOut } from '$lib/docCommentDrawerMotion';
+	import { marginOut } from '$lib/docCommentDrawerMotion';
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import { imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
@@ -122,6 +122,8 @@
 	const columnFits = $derived(!narrow && !image && roomForMargin); // the one margin rule: the card mode and the column both read it
 	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : columnFits ? 'margin' : 'popover'; }
 	const margin = $derived(columnFits && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
+	/** Whether the margin column is up: the editor's room beside the text follows this, never the leaving column's transition. */
+	export function marginShown(): boolean { return margin; }
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
 	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text isn’t in the document" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });
@@ -321,7 +323,7 @@
 
 {#if surfaceState || sheet.closing}
 	{#if margin && surfaceState}
-		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} in:marginIn|global out:marginOut|global>{@render listBody()}</section>
+		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
 		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}

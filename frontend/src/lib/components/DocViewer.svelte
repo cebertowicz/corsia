@@ -267,7 +267,7 @@
 <svelte:window onkeydown={(event) => handleDocumentKey(event, keyState())} onkeydowncapture={(event) => closeCardPopover(event, keyState())} />
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
 
-<div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
+<div class="doc" class:margin-room={commentSurface?.marginShown()} use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
