@@ -10,3 +10,12 @@ export function marginOut(node: Element) {
 	node.classList.add('leaving');
 	return { duration: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-spring')) || 380, css: (t: number) => `opacity: ${t}` };
 }
+
+/**
+ * The column comes back: reopened while it is still leaving, Svelte keeps the same section and cancels its fade, so the
+ * `leaving` class `marginOut` set has to go here, or the editor keeps no room for the cards and they sit over the text.
+ */
+export function marginIn(node: Element) {
+	node.classList.remove('leaving');
+	return { duration: 0 };
+}

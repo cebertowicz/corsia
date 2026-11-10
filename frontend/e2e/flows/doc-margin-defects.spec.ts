@@ -1,6 +1,6 @@
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
-import { ITEMS, BRAVO, SUGGESTION2, card, geometry, open, type Doc } from '../support/marginCards';
+import { ITEMS, BRAVO, FIRST, SUGGESTION2, card, geometry, open, pill, type Doc } from '../support/marginCards';
 
 /**
  * Margin comments, the defects found in the built column: a picked card lets go on a click into plain text and on Escape; the
@@ -82,6 +82,25 @@ test('@flow:doc-margin-defects Send reply of a card near the bottom of the windo
 	await expect(wrap.locator('.ct-decision-error')).toBeVisible();
 	await expect(wrap.locator('.ct-act.resolve'), 'the card stays, Resolve can be tried again').toBeVisible();
 	expect(held).toBe(1);
+});
+
+test('@flow:doc-margin-defects the column closed and reopened at once keeps its room beside the text', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	await page.waitForTimeout(600);
+	const room = () => page.locator('.cm-scroller').evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingRight));
+	const shown = await room();
+	expect(shown, 'the editor keeps room for the column').toBeGreaterThan(200);
+	// Reopened while the column is still fading out: the same section comes back.
+	await pill(page).click();
+	await pill(page).click();
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	await page.waitForTimeout(600);
+	await expect(page.locator('.canvas-comment-drawer.margin.leaving')).toHaveCount(0);
+	expect(await room(), 'the room is back, so no card sits over the text').toBe(shown);
+	const [text, first] = [await page.locator('.cm-line', { hasText: 'Paragraph 1 of the plan' }).first().boundingBox(), await card(page, doc, FIRST).boundingBox()];
+	expect(first!.x, 'the card starts right of the text').toBeGreaterThanOrEqual(text!.x + text!.width);
 });
 
 test('@flow:doc-margin-defects a narrow desktop width opens the popover at the click, and a phone the sheet', async ({ page, request }, info) => {
