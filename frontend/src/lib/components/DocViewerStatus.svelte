@@ -219,7 +219,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation.phrase}</button></span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner">{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span><button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen} onclick={() => detailsOpen = !detailsOpen}>{freshnessPresentation?.phrase ?? 'Document details'}</button></span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -300,7 +300,6 @@
 		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
-		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
@@ -339,6 +338,7 @@
 		}
 	}
 	@container doc-canvas (max-width: 37.5rem) {
+		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
 		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
