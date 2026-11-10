@@ -33,8 +33,6 @@ export interface ArtifactTab {
 	status: ArtifactTabStatus;
 	/** Where the viewer should go once this tab's comments load; consumed once. */
 	landOn?: DocumentLanding;
-	/** The icon the backend's presentation gives this document ('mail' for an email draft), as its last load read it. */
-	icon?: string;
 }
 
 export interface ThreadArtifactWorkspace {
@@ -96,8 +94,6 @@ export interface TabLoadSignal {
 	 * leaf reads it, the workspace store ignores it, and each load decides it again.
 	 */
 	renderer?: 'image' | 'document';
-	/** The icon the backend's presentation gives the loaded document. */
-	icon?: string;
 }
 
 export interface RevisionCheck {

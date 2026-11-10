@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
 from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
+from connections.mail.conversation import ConversationEmail
 from connections.mail.received_attachments import Attachment
 from tools.mail_guard import Message
 from tools.gmail_backend import GMAIL
@@ -63,6 +64,9 @@ class MailBackend(Protocol):
 
     async def fetch_body(self, account_id: str, message_id: str) -> str:
         """Fetch the body for one guard evidence message or reply quote."""
+
+    async def conversation(self, account_id: str, target: dict) -> list[ConversationEmail]:
+        """Every email of the conversation a saved reply draft answers, with its text, read in one go."""
 
     async def sent_html(self, account_id: str) -> list[str]:
         """HTML from at most five recent messages sent by this account."""

@@ -242,9 +242,39 @@ async def test_a_reply_target_is_kept_in_the_record_and_never_written_into_the_d
     assert not any(line.lower().startswith("in reply to") for line in _header_lines(mail, again))
 
 
-def test_an_in_reply_to_line_is_not_a_draft_header():
+def test_an_in_reply_to_line_from_an_older_draft_is_read_past():
     text = 'From: me@example.com\nTo: a@example.com\nSubject: Re: Hi\nIn reply to: "Hi" from Pat\n\nBody.\n'
-    assert email_document.parse_document(text) is None
+    parsed = email_document.parse_document(text)
+    assert parsed is not None and parsed["subject"] == "Re: Hi" and "in reply to" not in parsed
+
+
+async def test_a_reply_draft_saved_with_the_old_in_reply_to_line_still_sends_threaded(mail, approve):
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    path = mail.workspace / saved["path"]
+    path.write_text(path.read_text().replace("Subject: Lunch\n", 'Subject: Lunch\nIn reply to: "Lunch plans" from Pat Kim\n'))
+    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    message = _mime(mail.sends[0])
+    assert message["In-Reply-To"] == "<abc@mail.example>" and "In reply to" not in message.get_body(("plain",)).get_content()
+
+
+def test_the_header_reader_gives_each_line_and_recipient_its_range_and_judges_each_address():
+    text = "From: me@example.com\nTo: sam@example.com,  priya.raman, Pat <pat@x.io>\nCc: 😀@example.com, dana@​x.io\n" \
+           "Subject: Hi\n\nBody, with a comma.\n"
+    header = email_document.read_header(text)
+    assert header["text"] == text.partition("\n\n")[0]
+    assert [(f["name"], f["from"]) for f in header["fields"]] == [("from", 0), ("to", 21), ("cc", 71), ("subject", 102)]
+    utf16 = text.encode("utf-16-le")
+    shown = [(r["field"], r["text"], r["full"], utf16[r["from"] * 2:r["to"] * 2].decode("utf-16-le"))
+             for r in header["recipients"]]
+    assert shown == [
+        ("to", "sam@example.com", True, "sam@example.com"),
+        ("to", "priya.raman", False, "priya.raman"),
+        ("to", "Pat <pat@x.io>", False, "Pat <pat@x.io>"),
+        ("cc", "😀@example.com", True, "😀@example.com"),
+        ("cc", "dana@​x.io", False, "dana@​x.io"),
+    ]
+    # What the header reader calls full is exactly what the send accepts.
+    assert email_document.parse_document(text.replace(",  priya.raman, Pat <pat@x.io>", "").replace(", dana@​x.io", ""))
 
 
 async def test_a_reply_target_with_no_readable_headers_is_refused(mail):

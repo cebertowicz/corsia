@@ -1,7 +1,7 @@
 import { EditorView, WidgetType } from '@codemirror/view';
 import { cubicOut } from 'svelte/easing';
 import { slide } from 'svelte/transition';
-import { recipientLines } from './email-header-recipients';
+import { headerLayout } from '$lib/emailDraft';
 
 // The pieces the compact email header draws over the draft text: quiet notes, the attachments row, the From line,
 // the "!" on an added address, the Cc button and the empty-Cc hint. `email-header.ts` decides where each one goes.
@@ -165,7 +165,8 @@ export class AddedMarkWidget extends WidgetType {
 
 /** The quiet "Cc" text button at the end of the To line: adds an empty Cc line under it, with the caret in it. */
 function addCc(view: EditorView) {
-	const { to, cc } = recipientLines(view.state);
+	const { lines } = headerLayout(view.state.doc.iterLines());
+	const to = lines.find((line) => line.key === 'to'), cc = lines.find((line) => line.key === 'cc');
 	if (!cc && to) {
 		view.dispatch({ changes: { from: to.to, insert: '\nCc: ' }, selection: { anchor: to.to + 5 }, scrollIntoView: true, userEvent: 'input' });
 	}

@@ -47,6 +47,7 @@ ANSWERED = {**THREADED, "payload": {**_text("Noon or one?"), "headers": [
 ]}}
 OLDER = _email("m-090", "Sam Lee <sam@example.com>", 1793000000000, "Lunch this week?", labels=("SENT",))
 NEWER = _email("m-110", "Lee Park <lee@mail.example>", 1793100000000, "I can come too.")
+UNSENT = _email("m-120", "Sam Lee <sam@example.com>", 1793200000000, "Half-written.", labels=("DRAFT",))
 
 
 def _owner(thread_id: str) -> dict:
@@ -62,31 +63,30 @@ def _artifact(saved: dict) -> str:
     return registered["id"]
 
 
-def _serve(mail, thread: list[dict], *, failing: frozenset[str] = frozenset()) -> None:
-    """Gmail answers with this thread from now on; a listed message id fails with a 500."""
-    inner = mail.fake.handler
-    by_id = {item["id"]: item for item in thread}
+def _serve(mail, thread: list[dict]) -> list[httpx.Request]:
+    """Gmail answers ``threads.get`` with this thread from now on; returns every Gmail request it gets."""
+    inner, seen = mail.fake.handler, []
 
     def handle(request: httpx.Request):
-        url = str(request.url).split("?")[0]
-        if url == f"{GMAIL}/threads/t-9":
+        if str(request.url).startswith(GMAIL):
+            seen.append(request)
+        if str(request.url).split("?")[0] == f"{GMAIL}/threads/t-9":
             return httpx.Response(200, json={"messages": thread})
-        mid = url.rsplit("/", 1)[1]
-        if url.startswith(f"{GMAIL}/messages/") and mid in failing:
-            return httpx.Response(500, json={})
-        if url.startswith(f"{GMAIL}/messages/") and mid in by_id:
-            return httpx.Response(200, json=by_id[mid])
         return inner(request)
 
     mail.fake.handler = handle
+    return seen
 
 
 @pytest.mark.asyncio
 async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answered_emails_addresses(mail):
     saved = await _draft(mail, reply_to_message_id="m-100")
-    _serve(mail, [OLDER, ANSWERED, NEWER])
+    seen = _serve(mail, [OLDER, ANSWERED, NEWER, UNSENT])
     context = await draft_context(_artifact(saved), _owner(mail.thread))
-    assert context["status"] == "ready" and context["reason"] is None and context["unreadable"] == 0
+    # One provider call reads the whole conversation; the account's own unsent drafts are left out.
+    [read] = seen
+    assert str(read.url).split("?")[0] == f"{GMAIL}/threads/t-9" and read.url.params["format"] == "full"
+    assert context["status"] == "ready" and context["reason"] is None and "unreadable" not in context
     assert [m["id"] for m in context["conversation"]] == ["m-110", "m-100", "m-090"]
     assert context["replied_to"] == "m-100"
     assert [m["body"] for m in context["conversation"]] == ["I can come too.", "Noon or one?", "Lunch this week?"]
@@ -95,15 +95,6 @@ async def test_a_reply_draft_reads_its_conversation_newest_first_with_the_answer
     # Only quiet notes live in the record: no newer-email or recipient note, no 30-day count.
     assert all("emails from" not in note and "wrote again" not in note for note in context["notes"])
     assert context["attachments"] == []
-
-
-@pytest.mark.asyncio
-async def test_an_email_that_cant_be_read_is_counted_and_the_rest_still_show(mail):
-    saved = await _draft(mail, reply_to_message_id="m-100")
-    _serve(mail, [OLDER, ANSWERED, NEWER], failing=frozenset({"m-090"}))
-    context = await draft_context(_artifact(saved), _owner(mail.thread))
-    assert context["status"] == "partial" and context["unreadable"] == 1
-    assert [m["id"] for m in context["conversation"]] == ["m-110", "m-100"]
 
 
 @pytest.mark.asyncio
@@ -125,6 +116,14 @@ async def test_a_draft_whose_account_is_gone_is_the_named_account_state(mail):
     db.execute("UPDATE action_drafts SET target_json=? WHERE id=?",
                (json.dumps({**target, "account_id": "no-such-account"}), saved["draft_id"]))
     db.commit()
+    context = await draft_context(_artifact(saved), _owner(mail.thread))
+    assert (context["status"], context["reason"]) == ("error", "account")
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_account_is_the_account_state_not_a_retry(mail):
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    mail.fake.refresh_status = 400
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert (context["status"], context["reason"]) == ("error", "account")
 
@@ -166,13 +165,17 @@ async def test_someone_elses_draft_and_a_plain_document_are_not_found(mail):
 
 
 @pytest.mark.asyncio
-async def test_the_document_read_names_a_draft_an_email_draft_and_any_other_document_a_document(mail):
+async def test_only_the_draft_record_makes_a_file_an_email_draft(mail):
     from api.files_load import read_document
 
     saved = await _draft(mail)
     user = _owner(mail.thread)["id"]
-    draft = read_document(str(config.WORKSPACE / saved["path"]), user, None, mail.thread)
-    assert draft["presentation"] == {"label": "Email draft", "icon": "mail"}
-    note = config.WORKSPACE / ".threads" / mail.thread / "working" / "notes.md"
-    note.write_text("plain\n", encoding="utf-8")
-    assert read_document(str(note), user, None, mail.thread)["presentation"] == {"label": "Document", "icon": "file-text"}
+    path = config.WORKSPACE / saved["path"]
+    draft = read_document(str(path), user, None, mail.thread)["email_draft"]
+    assert draft["id"] == saved["draft_id"]
+    assert draft["header"]["text"] == path.read_text().partition("\n\n")[0]
+    assert [r["text"] for r in draft["header"]["recipients"]] == ["sam@example.com"]
+    # Same folder, same format, no record: an ordinary document.
+    copy = path.with_name("copy.md")
+    copy.write_text(path.read_text(), encoding="utf-8")
+    assert read_document(str(copy), user, None, mail.thread)["email_draft"] is None

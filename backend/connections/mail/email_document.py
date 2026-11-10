@@ -21,6 +21,12 @@ SIGNATURE_DELIMITER = "-- "
 # A plain address: no display name, quotes, brackets, separators or whitespace.
 _ADDRESS = re.compile(r"""^[^\s,;<>"()\[\]\\@]+@[^\s,;<>"()\[\]\\@]+$""")
 _HEADERS = ("from", "to", "cc", "subject")
+#: Header lines the send reads past: notes for the person, and the line older reply drafts carry (the message a reply
+#: answers is on the draft record, so the line chooses nothing).
+_IGNORED = ("note", "in reply to")
+
+#: The workspace folder the draft tools save email drafts into.
+EMAIL_DRAFT_FOLDER = "email-drafts"
 
 NEEDS_RECIPIENT = "A draft needs at least one recipient."
 BAD_ADDRESS = "Recipients must be plain email addresses such as name@example.com."
@@ -133,6 +139,49 @@ def compose_document(
     return text + "\n"
 
 
+def _header_lines(head: str) -> list[tuple[str | None, str, int, int]]:
+    """Each header line as ``(field, value, start, end)``: the field lowercase, or None when the line has no colon."""
+    lines, start = [], 0
+    for line in head.split("\n"):
+        key, colon, value = line.partition(":")
+        lines.append((key.strip().lower() if colon else None, value, start, start + len(line)))
+        start += len(line) + 1
+    return lines
+
+
+def _utf16(text: str, index: int) -> int:
+    return len(text[:index].encode("utf-16-le")) // 2
+
+
+def read_header(text: str) -> dict:
+    """The header block as the send reads it, for the draft view: each line's field and range, and each To and Cc
+    entry with its range and whether the send takes it as an address.
+
+    ``text`` is the header (every line up to the first blank line) and ranges are UTF-16 offsets into the document,
+    as the editor counts them, so the view can mark them while its header still reads the same.
+    """
+    head = text.replace("\r\n", "\n").partition("\n\n")[0]
+    fields, recipients = [], []
+    for key, value, start, end in _header_lines(head):
+        fields.append({"name": key or "", "from": _utf16(head, start), "to": _utf16(head, end)})
+        if key not in ("to", "cc"):
+            continue
+        at = end - len(value)
+        for part in value.split(","):
+            entry = part.strip()
+            if entry:
+                first = at + len(part) - len(part.lstrip())
+                recipients.append({"field": key, "text": entry, "from": _utf16(head, first),
+                                   "to": _utf16(head, first + len(entry)), "full": is_plain_address(entry)})
+            at += len(part) + 1
+    return {"text": head, "fields": fields, "recipients": recipients}
+
+
+def email_draft_view(draft_id: str, text: str) -> dict:
+    """What a document load or live frame tells the view about an email draft: its record and its header."""
+    return {"id": draft_id, "header": read_header(text)}
+
+
 def parse_document(text: str) -> dict | None:
     """The headers and exact body of a draft document, or None when it isn't one.
 
@@ -142,12 +191,10 @@ def parse_document(text: str) -> dict | None:
     if not separator:
         return None
     found: dict[str, str] = {}
-    for line in head.split("\n"):
-        key, colon, value = line.partition(":")
-        key = key.strip().lower()
-        if colon and key == "note":
+    for key, value, _, _ in _header_lines(head):
+        if key in _IGNORED:
             continue
-        if not colon or key not in _HEADERS or key in found:
+        if key is None or key not in _HEADERS or key in found:
             return None
         found[key] = value.strip()
     if not found.get("to") or not found.get("subject") or not body.strip():

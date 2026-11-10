@@ -193,7 +193,7 @@ function commitTab(ws: ThreadArtifactWorkspace, idx: number, next: ArtifactTab, 
 }
 
 function unchanged(a: ArtifactTab, b: ArtifactTab): boolean {
-	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.title === b.title && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision && a.icon === b.icon;
+	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.title === b.title && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision;
 }
 
 /**
@@ -217,7 +217,6 @@ export function applyLoadSignal(ws: ThreadArtifactWorkspace, signal: TabLoadSign
 		loadedRevision: loaded ? signal.revision! : prev.loadedRevision,
 		latestRevision: loaded ? signal.revision! : prev.latestRevision,
 		artifactId: signal.artifactId ?? prev.artifactId,
-		icon: signal.icon ?? prev.icon,
 	};
 	if (unchanged(prev, next)) return null;
 	return commitTab(ws, idx, next, canMergeDuplicate);

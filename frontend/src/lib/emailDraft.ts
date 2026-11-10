@@ -8,8 +8,14 @@ export interface EmailMessage {
 	body: string;
 }
 
-/** Where the conversation read stands. `partial` shows the emails that could be read and says how many could not. */
-export type ConversationStatus = 'ready' | 'loading' | 'error' | 'partial';
+/** Where the conversation read stands. */
+export type ConversationStatus = 'ready' | 'loading' | 'error';
+
+/**
+ * Why the conversation couldn't be read: the draft's account is signed out or removed, the account answered but the read
+ * failed, the person's CORSIA sign-in ended, or the draft can't be found for them.
+ */
+export type ConversationFailure = 'account' | 'unreadable' | 'signin' | 'missing';
 
 /** A file the draft sends, as the draft record pins it. */
 export interface EmailAttachment {
@@ -21,10 +27,32 @@ export interface EmailAttachment {
 	unavailable?: boolean;
 }
 
+/** One To or Cc entry as the server read the draft's header: its range in the document and whether the send takes it. */
+export interface HeaderRecipient {
+	field: 'to' | 'cc';
+	text: string;
+	/** UTF-16 offsets into the document, as the editor counts them. */
+	from: number;
+	to: number;
+	/** The send takes it as an address (connections/mail/email_document.py `is_plain_address`). */
+	full: boolean;
+}
+
+/** The draft's header as the server read it (`read_header`): its text, and each To and Cc entry. */
+export interface ServerHeader {
+	text: string;
+	recipients: HeaderRecipient[];
+}
+
+/** What a document load or live frame says about an email draft: its record's id and its header as the server read it. */
+export interface EmailDraftInfo {
+	id: string;
+	header: ServerHeader;
+}
+
 /**
- * What the canvas shows around an email draft, as `GET /api/email-drafts/{artifact_id}/context` returns it. An added
- * recipient, a bad address and newer emails are not stored anywhere: each is read here from the draft's own To and Cc
- * and from the conversation.
+ * What the canvas shows around an email draft, as `GET /api/email-drafts/{artifact_id}/context` returns it. Newer emails
+ * are read here from the conversation; an added recipient and a bad address from the server's reading of the header.
  */
 export interface EmailDraftContext {
 	/** Context the person may want, shown folded into one line under the header. */
@@ -38,15 +66,43 @@ export interface EmailDraftContext {
 	/** Newest first: the emails that came after the one being replied to, then that one, then the older ones. */
 	conversation: EmailMessage[];
 	status: ConversationStatus;
-	/** With `error`: the draft's account can't be used here, or the account answered but the read failed. */
-	reason?: 'account' | 'unreadable';
-	/** With `partial`: how many of the conversation's emails could not be read. */
-	unreadable?: number;
+	/** With `error`: why the read failed. */
+	reason?: ConversationFailure;
 }
 
-// The backend's plain address (connections/mail/email_document.py `_ADDRESS`): the send refuses anything else.
-const PLAIN_ADDRESS = /^[^\s,;<>"()[\]\\@]+@[^\s,;<>"()[\]\\@]+$/;
-const CONTROL = /[\p{Cc}\p{Cf}]/u;
+/** The labels the header view knows; any other line is still a header line, drawn as one being typed. */
+const HEADER_FIELD = /^(from|to|cc|subject|note)\s*:/i;
+
+/** One header line as the view lays it out: the field its label names ('' for none) and its document range. */
+export interface HeaderLine {
+	key: string;
+	from: number;
+	to: number;
+	/** Where the value starts, after the label. */
+	valueFrom: number;
+}
+
+/**
+ * The draft's header as the view lays it out: every line up to the first blank line, as the server splits it, each with
+ * the field its label names. Layout only: which entries are addresses the send takes is the server's reading.
+ */
+export function headerLayout(lines: Iterable<string>): { text: string; lines: HeaderLine[] } {
+	const found: HeaderLine[] = [], texts: string[] = [];
+	let at = 0;
+	for (const line of lines) {
+		if (line === '') break;
+		const match = HEADER_FIELD.exec(line);
+		found.push({ key: match ? match[1].toLowerCase() : '', from: at, to: at + line.length, valueFrom: at + (match?.[0].length ?? 0) });
+		texts.push(line);
+		at += line.length + 1;
+	}
+	return { text: texts.join('\n'), lines: found };
+}
+
+/** The server's reading of the recipients while it read this same header text; null while an edit it hasn't read is in. */
+export function currentRecipients(header: ServerHeader | null | undefined, headerText: string): HeaderRecipient[] | null {
+	return header && header.text === headerText ? header.recipients : null;
+}
 
 /** Where the email the draft answers sits in the conversation (newest first); -1 when it isn't there. */
 function repliedToIndex(context: Pick<EmailDraftContext, 'conversation' | 'repliedTo'>): number {
@@ -72,27 +128,6 @@ export function newerEmailsLine(newer: readonly EmailMessage[] | undefined): str
 	}
 	const names = [...new Set(newer.map((email) => senderName(email.sender)))];
 	return `${newer.length} emails came after the one you’re replying to: ${names.join(', ')}.`;
-}
-
-/** The entries of the draft's To and Cc lines as typed, trimmed, without empty ones (the header is every line up to the first blank line). */
-export function recipientEntries(text: string): string[] {
-	const entries: string[] = [];
-	for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
-		if (line === '') break;
-		const match = /^(to|cc)\s*:(.*)$/i.exec(line);
-		if (match) entries.push(...match[2].split(',').map((entry) => entry.trim()).filter(Boolean));
-	}
-	return entries;
-}
-
-/** Whether the send takes this entry as an address: the backend's plain-address rule, read the same way. */
-export function isFullAddress(entry: string): boolean {
-	return PLAIN_ADDRESS.test(entry) && !CONTROL.test(entry);
-}
-
-/** The entries in To or Cc the send would refuse, as typed. */
-export function badEntries(text: string): string[] {
-	return recipientEntries(text).filter((entry) => !isFullAddress(entry));
 }
 
 /** The amber line for entries in To or Cc that are not full email addresses, or null when there are none. */

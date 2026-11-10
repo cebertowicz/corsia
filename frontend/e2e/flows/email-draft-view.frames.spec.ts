@@ -13,7 +13,7 @@ import { expect, type APIRequestContext, type Browser, type Page, type TestInfo 
 import { createSession, lastAssistantMessage, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
-import { FONT, FOUR, NEWER, SAME_SUBJECT, failed, fresh, mockEmailDraftContext, reply, type ServerAttachment, type ServerContext } from '../support/emailDraftContext';
+import { FONT, FOUR, NEWER, SAME_SUBJECT, failed, fresh, markEmailDraft, mockEmailDraftContext, reply, type ServerAttachment, type ServerContext } from '../support/emailDraftContext';
 
 const OUT = process.env.EMAIL_FRAMES_OUT ?? '';
 const ONLY = process.env.EMAIL_FRAMES_ONLY?.split(',');
@@ -42,6 +42,9 @@ const DOCS = {
 		'Hi Marcus,', '', 'The 8:30 start works. Could you lead the brush crew again and walk the drainage cut with the county contact before the rest of us arrive?', '',
 		'Thanks,', 'Alex', '', '-- ', 'Alex Rivera', 'Trail Volunteer Coordinator', ''].join('\n'),
 };
+
+/** The entries the send refuses in each draft, as the server's reading of its header names them. */
+const REFUSED: Partial<Record<keyof typeof DOCS, string[]>> = { badto: ['priya.raman'], badto2: ['priya.raman', 'dana@'] };
 
 // The chat beside a draft says what the draft says: who it goes to is read from the draft's own To and Cc, so the two never disagree.
 const REPLY_SUMMARY = 'I drafted a reply to Dana Whitfield and saved it as a document. It confirms twelve volunteers, says you will bring the sign-in sheet and a cooler of water, and asks her to confirm the north trailhead lot instead of the church lot.';
@@ -231,14 +234,16 @@ const SCENARIOS: Scenario[] = [
 		await expectNewer('6 emails came after the one you’re replying to: Jordan Lee, Priya Raman, Marcus Obi, Dana Whitfield.', 6)(page);
 		await scroll('top')(page);
 	} },
-	// Journey 3: the read fails, is slow, or is partial, and the person retries.
-	{ name: '8-read-error', doc: 'reply', context: failed('unreadable'), act: async (page) => { await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t load the earlier emails' })).toBeVisible(); } },
-	{ name: '8b-account-signed-out', doc: 'reply', context: failed('account'), act: async (page) => { await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t load the earlier emails' })).toBeVisible(); } },
-	{ name: '10-loading', doc: 'reply', context: 'hold', act: async (page) => { await expect(page.locator('.email-conversation [role="status"]')).toHaveText('Loading the earlier emails…'); } },
-	{ name: '11-partial', doc: 'reply', context: reply({ status: 'partial', conversation: FOUR.filter((m) => m.id !== 'f4-3'), unreadable: 1 }), act: async (page) => {
-		await expect(page.getByRole('alert')).toContainText('1 email in this conversation couldn’t be loaded.');
-		await expect(page.locator('.email-row')).toHaveCount(3);
+	// Journey 3: the read fails or is slow, and the person retries where a retry can help.
+	{ name: '8-read-error', doc: 'reply', context: failed('unreadable'), act: async (page) => {
+		await expect(page.getByRole('alert').filter({ hasText: 'Couldn’t load the earlier emails' })).toBeVisible();
+		await expect(page.locator('.email-conversation').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	} },
+	{ name: '8b-account-signed-out', doc: 'reply', context: failed('account'), act: async (page) => {
+		await expect(page.getByRole('alert').filter({ hasText: 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.' })).toBeVisible();
+		await expect(page.locator('.email-retry')).toHaveCount(0);
+	} },
+	{ name: '10-loading', doc: 'reply', context: 'hold', act: async (page) => { await expect(page.locator('.email-conversation [role="status"]')).toHaveText('Loading the earlier emails…'); } },
 	{ name: '12-retry-works', doc: 'reply', context: (_files, reads) => reads === 0 ? failed('unreadable') : reply(), act: async (page) => {
 		await page.locator('.email-conversation').getByRole('button', { name: 'Retry', exact: true }).click();
 		await expectConversation(page, 4, 0);
@@ -266,7 +271,8 @@ const SCENARIOS: Scenario[] = [
 async function seedAndOpen(request: APIRequestContext, browser: Browser, testInfo: TestInfo, scenario: Scenario, workspace: string, stamp: number, vp: typeof VIEWPORTS[number], theme: typeof THEMES[number]) {
 	const variant = `${scenario.name}-${vp.name}-${theme}-${stamp}`;
 	const threadId = await createSession(request, CHAT_TITLE);
-	// The draft tools name a draft email-<12 hex>.md in the draft folder (`backend/registry/presentation.py` EMAIL_DRAFT_FOLDER).
+	// The draft tools name a draft email-<12 hex>.md in the draft folder (`connections/mail/email_document.py` EMAIL_DRAFT_FOLDER);
+	// the draft record, not the folder, makes it an email draft, which `markEmailDraft` stands in for below.
 	const name = `email-${createHash('md5').update(variant).digest('hex').slice(0, 12)}.md`;
 	const docPath = path.join(workspace, 'email-drafts', name);
 	const files = path.join(workspace, `work-day-files-${createHash('md5').update(variant).digest('hex').slice(0, 8)}`);
@@ -284,6 +290,7 @@ async function seedAndOpen(request: APIRequestContext, browser: Browser, testInf
 	const page = await context.newPage();
 	const answer = scenario.context;
 	const reads = await mockEmailDraftContext(page, (id, count) => id !== artifactId ? fresh() : typeof answer === 'function' ? answer(files, count) : answer);
+	await markEmailDraft(page, docPath, REFUSED[scenario.doc] ?? []);
 	// The mock backend's one model row is named `Mock Test Model`; the frame shows the catalog name a person sees instead (fixture rename only).
 	await page.route((url) => url.pathname === '/api/models', async (route) => {
 		const response = await route.fetch();

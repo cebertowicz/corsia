@@ -1,4 +1,5 @@
 import type { DocumentFreshness } from '$lib/docFreshness';
+import type { EmailDraftInfo } from '$lib/emailDraft';
 
 export interface ArtifactRow {
 	id: string;
@@ -23,13 +24,8 @@ export interface DocContent {
 	/** On a live_open read: false with a reason when the document opens as a non-live file. */
 	live?: boolean;
 	live_unavailable?: string;
-	/** How the app names and marks this file, from the backend's one descriptor rule (`icon` 'mail' is an email draft). */
-	presentation?: DocPresentation;
-}
-
-export interface DocPresentation {
-	label: string;
-	icon: string;
+	/** Set when the file's draft record says it is an email draft: the record's id and the header as the server read it. */
+	email_draft?: EmailDraftInfo | null;
 }
 
 export interface DocRevision {

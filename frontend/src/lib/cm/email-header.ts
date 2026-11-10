@@ -1,14 +1,13 @@
-import { EditorState, StateField, Transaction, type ChangeSpec, type Extension, type Range } from '@codemirror/state';
+import { EditorState, Facet, StateField, Transaction, type ChangeSpec, type Extension, type Range } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
+import { currentRecipients, headerLayout, type ServerHeader } from '$lib/emailDraft';
 import { showAutolinkMarks } from './markdown-live';
 import { emailHeaderTheme } from './email-header-theme';
-import { FIELD, addedRecipients, badRecipientRanges, recipientLines } from './email-header-recipients';
 import {
 	AddedMarkWidget, AddressHintWidget, AttachmentsWidget, CcButtonWidget, FromWidget, HiddenNotesWidget, QuietNotesWidget,
 	type MountAttachments,
 } from './email-header-widgets';
 
-export { addedRecipients, badRecipientRanges } from './email-header-recipients';
 export type { MountAttachments } from './email-header-widgets';
 
 // The compact header block of an email draft, drawn over the draft's own text: the header lines stay the document's
@@ -27,64 +26,49 @@ export interface EmailHeaderOptions {
 	quiet: readonly string[];
 	/** Lowercase addresses on the email being answered; an address in To or Cc that is not one of them is marked as added. Null: nothing to compare with. */
 	answered: readonly string[] | null;
+	/** The header as the server last read it: which To and Cc entries the send takes, and where they are. */
+	header: ServerHeader | null;
 	/** Identifies the attachments drawn; the row is redrawn when it changes. */
 	attachmentsKey: string;
 	/** Draws the attachment chips; none means no row. */
 	mountAttachments: MountAttachments | null;
 }
 
-function build(state: EditorState, { quiet, answered, attachmentsKey, mountAttachments }: EmailHeaderOptions): DecorationSet {
+function build(state: EditorState, { quiet, attachmentsKey, mountAttachments }: EmailHeaderOptions): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
-	// The Cc button shows while the header has no Cc line and the draft can be edited; once the line is there it is the field.
-	const recipients = recipientLines(state);
-	const editable = !state.readOnly && state.facet(EditorView.editable);
-	const ccButtonAt = !recipients.cc && editable ? recipients.to : null;
-	let lastShown = 0;
-	let noteRun: { from: number; to: number } | null = null;
-	let end = 1;
 	// The header is every line up to the first blank line, as the backend's parse_document reads it, so a line being typed
 	// (`C` on its way to `Cc:`) keeps the header look and the fields below it do not jump to body size.
-	for (let n = 1; n <= doc.lines; n++) {
-		const line = doc.line(n);
-		if (line.text === '') break;
-		end = n + 1;
-		const match = FIELD.exec(line.text);
-		const key = match ? match[1].toLowerCase() : '';
+	const { lines } = headerLayout(doc.iterLines());
+	// The Cc button shows while the header has no Cc line and the draft can be edited; once the line is there it is the field.
+	const editable = !state.readOnly && state.facet(EditorView.editable);
+	const ccButtonAt = !lines.some((line) => line.key === 'cc') && editable ? lines.find((line) => line.key === 'to') : undefined;
+	let lastShown: { from: number; to: number } | null = null;
+	let noteRun: { from: number; to: number } | null = null;
+	for (const line of lines) {
+		const { key } = line;
 		if (key === 'note') {
 			noteRun = noteRun ? { from: noteRun.from, to: line.to } : { from: line.from, to: line.to };
 			continue;
 		}
 		if (noteRun) { decos.push(Decoration.replace({ widget: new HiddenNotesWidget(), block: true }).range(noteRun.from, noteRun.to)); noteRun = null; }
-		lastShown = n;
-		if (key === 'from' && match) {
-			decos.push(Decoration.replace({ widget: new FromWidget(line.text.slice(match[0].length).trim()), block: true }).range(line.from, line.to));
+		lastShown = line;
+		const value = doc.sliceString(line.valueFrom, line.to);
+		if (key === 'from') {
+			decos.push(Decoration.replace({ widget: new FromWidget(value.trim()), block: true }).range(line.from, line.to));
 			continue;
 		}
-		const ccButton = ccButtonAt && ccButtonAt.number === n ? ' cm-email-head-to-cc' : '';
+		const ccButton = ccButtonAt === line ? ' cm-email-head-to-cc' : '';
 		// An empty Cc line is an open field: outlined, with a hint, while the draft can be edited.
-		const emptyCc = key === 'cc' && match && !line.text.slice(match[0].length).trim() && editable;
+		const emptyCc = key === 'cc' && !value.trim() && editable;
 		decos.push(Decoration.line({ class: `cm-email-head ${!key || ADDRESS_FIELDS.has(key) ? 'cm-email-head-address' : ''}${ccButton}${emptyCc ? ' cm-email-head-empty' : ''}` }).range(line.from));
 		if (ccButton) decos.push(Decoration.widget({ widget: new CcButtonWidget(), side: 1 }).range(line.to));
 		if (emptyCc) decos.push(Decoration.widget({ widget: new AddressHintWidget(), side: 1 }).range(line.to));
-		if (match) decos.push(Decoration.mark({ class: 'cm-email-head-label' }).range(line.from, line.from + match[0].length));
-		// An entry the send would refuse is amber where it sits, with no "!".
-		if (match && (key === 'to' || key === 'cc')) {
-			for (const entry of badRecipientRanges(line.text.slice(match[0].length), line.from + match[0].length)) decos.push(Decoration.mark({ class: 'cm-email-bad' }).range(entry.from, entry.to));
-		}
-		if (match && answered && (key === 'to' || key === 'cc')) {
-			for (const added of addedRecipients(line.text.slice(match[0].length), line.from + match[0].length, new Set(answered))) {
-				// The last characters of the address and the "!" are one no-wrap piece, so the "!" is never alone on a line (the rest of the address still breaks anywhere).
-				const tailFrom = Math.max(added.from, added.to - ADDED_TAIL);
-				if (tailFrom > added.from) decos.push(Decoration.mark({ class: 'cm-email-added' }).range(added.from, tailFrom));
-				decos.push(Decoration.mark({ class: 'cm-email-added-tail', inclusiveEnd: true }).range(tailFrom, added.to));
-				decos.push(Decoration.widget({ widget: new AddedMarkWidget(), side: -1 }).range(added.to));
-			}
-		}
+		if (key) decos.push(Decoration.mark({ class: 'cm-email-head-label' }).range(line.from, line.valueFrom));
 	}
 	if (noteRun) decos.push(Decoration.replace({ widget: new HiddenNotesWidget(), block: true }).range(noteRun.from, noteRun.to));
 	if (!lastShown) return Decoration.none;
-	const last = doc.line(lastShown);
+	const last = lastShown;
 	if (quiet.length) {
 		// The divider closes the quiet line instead of the last field.
 		decos.push(Decoration.line({ class: 'cm-email-head-before-notes' }).range(last.from));
@@ -92,6 +76,8 @@ function build(state: EditorState, { quiet, answered, attachmentsKey, mountAttac
 	} else {
 		decos.push(Decoration.line({ class: 'cm-email-head-last' }).range(last.from));
 	}
+	// The line number just after the header: the blank line, when there is one.
+	const end = lines.length + 1;
 	if (mountAttachments) {
 		// Directly below the body, above the signature divider (`-- `), or at the end when there is no signature.
 		let signature = -1;
@@ -112,14 +98,50 @@ function field(options: EmailHeaderOptions) {
 	});
 }
 
+type RecipientSource = Pick<EmailHeaderOptions, 'header' | 'answered'>;
+
+/** The server's reading of the header and the addresses on the email being answered, for the recipient marks. */
+const recipientSource = Facet.define<RecipientSource, RecipientSource>({
+	combine: (values) => values.at(-1) ?? { header: null, answered: null },
+	compare: (a, b) => a.header === b.header && a.answered === b.answered,
+});
+
+/** The To and Cc marks from the server's reading: an entry the send would refuse, and an address added to the reply. Null while the header reads differently. */
+function recipientMarks(state: EditorState): DecorationSet | null {
+	const { header, answered } = state.facet(recipientSource);
+	const recipients = currentRecipients(header, headerLayout(state.doc.iterLines()).text);
+	if (!recipients) return null;
+	const known = new Set(answered ?? []);
+	const decos: Range<Decoration>[] = [];
+	for (const entry of recipients) {
+		// An entry the send would refuse is amber where it sits, with no "!".
+		if (!entry.full) { decos.push(Decoration.mark({ class: 'cm-email-bad' }).range(entry.from, entry.to)); continue; }
+		if (!answered || known.has(entry.text.toLowerCase())) continue;
+		// The last characters of the address and the "!" are one no-wrap piece, so the "!" is never alone on a line (the rest of the address still breaks anywhere).
+		const tailFrom = Math.max(entry.from, entry.to - ADDED_TAIL);
+		if (tailFrom > entry.from) decos.push(Decoration.mark({ class: 'cm-email-added' }).range(entry.from, tailFrom));
+		decos.push(Decoration.mark({ class: 'cm-email-added-tail', inclusiveEnd: true }).range(tailFrom, entry.to));
+		decos.push(Decoration.widget({ widget: new AddedMarkWidget(), side: -1 }).range(entry.to));
+	}
+	return Decoration.set(decos, true);
+}
+
+/**
+ * The marks follow the server's reading only while the header reads as the server read it. Between an edit and the
+ * server's next reading (one round trip), the marks it last placed move with the text instead of disappearing.
+ */
+const recipientField = StateField.define<DecorationSet>({
+	create: (state) => recipientMarks(state) ?? Decoration.none,
+	update: (deco, tr) => {
+		if (!tr.docChanged && tr.startState.facet(recipientSource) === tr.state.facet(recipientSource)) return deco;
+		return recipientMarks(tr.state) ?? deco.map(tr.changes);
+	},
+	provide: (f) => EditorView.decorations.from(f),
+});
+
 /** The From line's range, or null. A person's edit is trimmed around it; an agent's or a remote write is not. */
 function fromLine(state: EditorState): { from: number; to: number } | null {
-	for (let n = 1; n <= state.doc.lines; n++) {
-		const line = state.doc.line(n);
-		if (line.text === '') return null;
-		if (/^from\s*:/i.test(line.text)) return { from: line.from, to: line.to };
-	}
-	return null;
+	return headerLayout(state.doc.iterLines()).lines.find((line) => line.key === 'from') ?? null;
 }
 
 /**
@@ -152,7 +174,7 @@ const keepFrom = EditorState.transactionFilter.of((tr: Transaction) => {
 	};
 });
 
-/** The compact header for an email draft; reconfigure it when the notes or attachments change. */
+/** The compact header for an email draft; reconfigure it when the notes, the server's reading or the attachments change. */
 export function emailHeader(options: EmailHeaderOptions): Extension {
-	return [field(options), keepFrom, emailHeaderTheme, showAutolinkMarks.of(true)];
+	return [field(options), recipientSource.of({ header: options.header, answered: options.answered }), recipientField, keepFrom, emailHeaderTheme, showAutolinkMarks.of(true)];
 }

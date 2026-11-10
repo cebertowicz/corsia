@@ -23,6 +23,7 @@ from connections.mailhost.errors import MailHostError, PASSWORD_REFUSED
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mail import attachments, mail_compose
 from connections.mail.email_document import (
+    EMAIL_DRAFT_FOLDER,
     NEEDS_BODY,
     NEEDS_RECIPIENT,
     NEEDS_SUBJECT,
@@ -35,7 +36,6 @@ from connections.mail.email_document import (
     text_arg,
 )
 from infra.db_async import run_in_db
-from registry.presentation import EMAIL_DRAFT_FOLDER
 from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
 from tools.action_gate import Approved, check_action

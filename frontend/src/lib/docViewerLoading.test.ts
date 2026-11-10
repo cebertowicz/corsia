@@ -48,12 +48,6 @@ describe('a document opened over HTTP', () => {
 		expect(viewerContent({ ...response, history: true }, null).history).toBe(true);
 		expect(viewerContent(response, null).history).toBe(false);
 	});
-
-	it('carries how the backend presents the file, so an email draft opens as an email', () => {
-		const response = { text: 't', size: 1, mtime: 0, revision: 'r', writable: true, artifact: null, freshness: null };
-		expect(viewerContent({ ...response, presentation: { label: 'Email draft', icon: 'mail' } }, null).presentation?.icon).toBe('mail');
-		expect(viewerContent(response, null).presentation).toBeNull();
-	});
 });
 
 describe('a tab whose document relocated before its draft followed', () => {

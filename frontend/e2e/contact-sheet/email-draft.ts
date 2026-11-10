@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support/corsia';
-import { FONT, FOUR, NEWER, SAME_SUBJECT, mockEmailDraftContext, reply, type ServerContext } from '../support/emailDraftContext';
+import { FONT, FOUR, NEWER, SAME_SUBJECT, markEmailDraft, mockEmailDraftContext, reply, type ServerContext } from '../support/emailDraftContext';
 
 // The email draft view (a reply to Dana Whitfield) in the states its header and conversation list change with. Each state is its own
 // draft in one chat; the runner captures every state at every width in both themes. The conversation each draft reads is a route
@@ -18,7 +18,8 @@ const BODY = [
 const DANA = 'To: dana.whitfield@example.com';
 const draft = (...head: string[]) => [FROM, ...head, SUBJECT, '', BODY, ''].join('\n');
 
-type State = { head: string[]; context: ServerContext };
+/** `refused`: the entries the send refuses, as the server's reading of the header names them. */
+type State = { head: string[]; context: ServerContext; refused?: string[] };
 const STATES: Record<string, State> = {
   // Several people added to To and Cc, with addresses long enough to wrap at a phone width.
   'long-added-recipients': {
@@ -30,7 +31,7 @@ const STATES: Record<string, State> = {
   },
   'one-newer-email': { context: reply({ conversation: [...NEWER[1], ...FOUR] }), head: [DANA] },
   'six-newer-emails': { context: reply({ conversation: [...NEWER[6], ...FOUR] }), head: [DANA] },
-  'bad-address': { context: reply(), head: [`${DANA}, priya.raman, dana@`] },
+  'bad-address': { context: reply(), head: [`${DANA}, priya.raman, dana@`], refused: ['priya.raman', 'dana@'] },
   'quiet-notes-only': { context: reply({ notes: [SAME_SUBJECT, FONT] }), head: [DANA] },
   'none': { context: reply(), head: [DANA] },
 };
@@ -47,7 +48,8 @@ export async function seed(page: Page, request: APIRequestContext) {
   if (!workspace) throw new Error('Disposable workspace was not returned by the mock backend');
   const drafts: Record<string, { artifact: string; docPath: string; name: string }> = {};
   for (const [index, [state, { head }]] of Object.entries(STATES).entries()) {
-    // The draft tools name a draft email-<12 hex>.md in the email-drafts folder; the backend's presentation marks it an email draft.
+    // The draft tools name a draft email-<12 hex>.md in the email-drafts folder; the draft record makes it an email draft, which
+    // `markEmailDraft` stands in for when the state opens.
     const name = `email-${String(index).padStart(2, '0')}${thread.replace(/[^0-9a-f]/g, '').padEnd(10, '0').slice(0, 10)}.md`;
     const docPath = path.join(workspace, 'email-drafts', name);
     const saved = await request.put('/api/files/content', { params, data: { path: docPath, text: draft(...head), thread_id: thread, create: true } });
@@ -58,6 +60,7 @@ export async function seed(page: Page, request: APIRequestContext) {
   async function open(target: Page, state: string = states[0]) {
     const { artifact, docPath, name } = drafts[state];
     await mockEmailDraftContext(target, (id) => contexts.get(id) ?? reply());
+    await markEmailDraft(target, docPath, STATES[state].refused);
     await target.addInitScript(({ thread, artifact, docPath, name }) => {
       localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'contact-sheet', artifactId: artifact, path: docPath, title: name, loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'contact-sheet', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
     }, { thread, artifact, docPath, name });

@@ -66,7 +66,7 @@ def test_the_person_sees_only_the_same_subject_note_as_quiet_context():
     other = replace(TARGET, message_id="b", thread_id="thread-b", date=NOW, subject="Re: Budget")
     newer = replace(TARGET, message_id="c", date=NOW, sender="Another <another@example.test>")
     result = check(thread=[newer], sender=[other], to=["other@example.test"])
-    assert result.quiet == ["Taylor wrote about the same subject in another thread."]
+    assert result.quiet == ["Taylor wrote about the same subject in another conversation."]
 
 
 def test_same_display_name_at_different_address_is_not_same_sender():

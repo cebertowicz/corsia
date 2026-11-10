@@ -11,9 +11,10 @@ from connections.microsoft.mail import thread_key
 from connections.microsoft.provider import MICROSOFT
 from connections.microsoft.errors import MicrosoftError
 from connections.mail import email_screen
-from connections.mail.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
+from connections.mail.email_document import (
+    EMAIL_DRAFT_FOLDER, DraftRefused, addresses, compose_document, parse_document, text_arg,
+)
 from infra.db_async import run_in_db
-from registry.presentation import EMAIL_DRAFT_FOLDER
 from tools.action_delivery import deliver_claimed
 from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft

@@ -181,7 +181,7 @@ def _not_exempt_artifact_ids(db, thread_id: str) -> set[str]:
 
 def _artifact_item(a: dict, not_exempt_ids: set[str]) -> dict:
     meta = parse_metadata(a.get("metadata"))
-    descriptor = presentation.resolve_descriptor(a["integration"], a["type"], a.get("path"))
+    descriptor = presentation.resolve_descriptor(a["integration"], a["type"])
     disabled_reason = (
         None
         if descriptor.capability != presentation.CAPABILITY_UNSUPPORTED

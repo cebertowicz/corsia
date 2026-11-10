@@ -3,17 +3,26 @@
 	import { cubicOut } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { formatMoment, parseUTC } from '$lib/time';
-	import { previewLine, senderAddress, senderName, type ConversationStatus, type EmailMessage } from '$lib/emailDraft';
+	import { previewLine, senderAddress, senderName, type ConversationFailure, type ConversationStatus, type EmailMessage } from '$lib/emailDraft';
 
-	let { messages, repliedTo = null, status = 'ready', unreadable = 0, onretry }: {
+	let { messages, repliedTo = null, status = 'ready', reason = 'unreadable', onretry }: {
 		/** Newest first: the emails that came after the one the draft answers, that one, then the older ones. */
 		messages: EmailMessage[];
 		/** The id of the email the draft answers; its row says so. */
 		repliedTo?: string | null;
 		status?: ConversationStatus;
-		unreadable?: number;
+		/** With `error`: why the read failed. Only a failed read can be retried from here; the others need the person elsewhere. */
+		reason?: ConversationFailure;
 		onretry?: () => void;
 	} = $props();
+
+	/** One message per cause, each saying what to do. */
+	const FAILURE: Record<ConversationFailure, string> = {
+		account: 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.',
+		signin: 'You’re signed out of CORSIA. Sign in again to see the earlier emails.',
+		missing: 'Couldn’t find this email draft. Ask the agent that wrote it to save it again.',
+		unreadable: 'Couldn’t load the earlier emails in this conversation.',
+	};
 
 	const uid = $props.id();
 	let expanded = $state<Set<string>>(new Set());
@@ -26,7 +35,7 @@
 	}
 	const moment = (iso: string) => formatMoment(parseUTC(iso), now, { clock: true });
 	const label = $derived(
-		status === 'ready' || status === 'partial'
+		status === 'ready'
 			? `In this conversation · ${messages.length} ${messages.length === 1 ? 'email' : 'emails'}`
 			: 'In this conversation',
 	);
@@ -38,13 +47,8 @@
 		<p class="email-status" role="status">Loading the earlier emails…</p>
 	{:else if status === 'error'}
 		<p class="email-status failed" role="alert">
-			<span>Couldn’t load the earlier emails in this conversation.</span>
-			<button type="button" class="email-retry" onclick={onretry}>Retry</button>
-		</p>
-	{:else if status === 'partial'}
-		<p class="email-status failed" role="alert">
-			<span>{unreadable} {unreadable === 1 ? 'email' : 'emails'} in this conversation couldn’t be loaded.</span>
-			<button type="button" class="email-retry" onclick={onretry}>Retry</button>
+			<span>{FAILURE[reason]}</span>
+			{#if reason === 'unreadable'}<button type="button" class="email-retry" onclick={onretry}>Retry</button>{/if}
 		</p>
 	{/if}
 	{#if messages.length}

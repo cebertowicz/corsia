@@ -6,12 +6,11 @@ import type { Page } from '@playwright/test';
 export type ServerEmail = { id: string; sender: string; date: string; body: string };
 export type ServerAttachment = { name: string; path: string; size: number; type: 'image' | 'document'; unavailable: boolean };
 export type ServerContext = {
-	status: 'ready' | 'partial' | 'error';
+	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
 	replied_to: string | null;
 	answered: string[] | null;
 	conversation: ServerEmail[];
-	unreadable: number;
 	attachments: ServerAttachment[];
 	notes: string[];
 };
@@ -57,13 +56,13 @@ export const FONT = 'Couldn’t read your usual font, so this email may go out i
 export function reply(over: Partial<ServerContext> = {}): ServerContext {
 	return {
 		status: 'ready', reason: null, replied_to: ANSWERED_ID, answered: ['dana.whitfield@example.com', 'alex.rivera@example.com'],
-		conversation: FOUR, unreadable: 0, attachments: [], notes: [], ...over,
+		conversation: FOUR, attachments: [], notes: [], ...over,
 	};
 }
 
 /** A new email: no conversation to read. */
 export function fresh(over: Partial<ServerContext> = {}): ServerContext {
-	return { status: 'ready', reason: null, replied_to: null, answered: null, conversation: [], unreadable: 0, attachments: [], notes: [], ...over };
+	return { status: 'ready', reason: null, replied_to: null, answered: null, conversation: [], attachments: [], notes: [], ...over };
 }
 
 /** The read failed: the draft's account can't be used, or the account answered but the thread couldn't be read. */
@@ -86,4 +85,41 @@ export async function mockEmailDraftContext(page: Page, answer: (artifactId: str
 		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 	});
 	return { reads: (artifactId: string) => reads.get(artifactId) ?? 0 };
+}
+
+/**
+ * The header as the server reads it (connections/mail/email_document.py `read_header`), for a document load the test marks as
+ * an email draft. Which entries the send refuses is named by the test, so no address rule lives here.
+ */
+export function serverHeader(doc: string, refused: readonly string[] = []) {
+	const text = doc.split('\n\n')[0];
+	const recipients: Array<{ field: 'to' | 'cc'; text: string; from: number; to: number; full: boolean }> = [];
+	let at = 0;
+	for (const line of text.split('\n')) {
+		const label = /^(to|cc)\s*:/i.exec(line);
+		if (label) {
+			let start = at + label[0].length;
+			for (const part of line.slice(label[0].length).split(',')) {
+				const entry = part.trim(), from = start + part.length - part.trimStart().length;
+				if (entry) recipients.push({ field: label[1].toLowerCase() as 'to' | 'cc', text: entry, from, to: from + entry.length, full: !refused.includes(entry) });
+				start += part.length + 1;
+			}
+		}
+		at += line.length + 1;
+	}
+	return { text, recipients };
+}
+
+/**
+ * Makes the document at `docPath` load as an email draft, as a draft record does on the real route (`read_document`
+ * `email_draft`): its load carries the record's id and the server's reading of the header. Live frames carry no reading here,
+ * so after an edit the marks keep moving with the text, as they do between two server readings.
+ */
+export async function markEmailDraft(page: Page, docPath: string, refused: readonly string[] = []) {
+	await page.route((url) => url.pathname === '/api/files/content' && url.searchParams.get('path') === docPath, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const response = await route.fetch();
+		const body = await response.json();
+		await route.fulfill({ response, json: { ...body, email_draft: { id: 'draft-frames', header: serverHeader(body.text ?? '', refused) } } });
+	});
 }

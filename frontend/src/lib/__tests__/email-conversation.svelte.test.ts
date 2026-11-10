@@ -111,16 +111,13 @@ describe('EmailConversation read states', () => {
 		expect(tries).toBe(1);
 	});
 
-	it('a partial read lists the emails it has, counts the missing ones and offers Retry', () => {
-		component = mount(EmailConversation, { target: host, props: { messages, status: 'partial', unreadable: 3 } });
-		expect(host.querySelector('h3')?.textContent).toContain('2 emails');
-		expect(host.querySelector('[role="alert"]')?.textContent).toContain('3 emails in this conversation couldn’t be loaded.');
-		expect(toggles()).toHaveLength(2);
-		expect(host.querySelector('.email-retry')).not.toBeNull();
-	});
-
-	it('says "1 email" for a single unreadable email', () => {
-		component = mount(EmailConversation, { target: host, props: { messages, status: 'partial', unreadable: 1 } });
-		expect(host.querySelector('[role="alert"]')?.textContent).toContain('1 email in this conversation');
+	it.each([
+		['account', 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.'],
+		['signin', 'You’re signed out of CORSIA. Sign in again to see the earlier emails.'],
+		['missing', 'Couldn’t find this email draft. Ask the agent that wrote it to save it again.'],
+	] as const)('says what to do when the read failed for %s, with no Retry', (reason, text) => {
+		component = mount(EmailConversation, { target: host, props: { messages: [], status: 'error', reason } });
+		expect(host.querySelector('[role="alert"]')?.textContent?.trim()).toBe(text);
+		expect(host.querySelector('.email-retry')).toBeNull();
 	});
 });

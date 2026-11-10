@@ -12,11 +12,13 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
 from connections.google import client
 from connections.google.email_gmail import GMAIL
+from connections.mail.conversation import ConversationEmail, header_addresses
 from connections.mail.received_attachments import Attachment
 
 log = logging.getLogger(__name__)
@@ -173,3 +175,25 @@ async def fetch(account_id: str, message_id: str) -> Message:
     payload = data.get("payload") or {}
     return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload),
                    attachments_of(payload))
+
+
+async def conversation(account_id: str, thread_id: str) -> list[ConversationEmail]:
+    """Every email of one Gmail thread with its text, in one ``threads.get`` call; the account's drafts are left out."""
+    if not isinstance(thread_id, str) or not _ID.match(thread_id):
+        raise GmailRequestError("That conversation can't be found.")
+    data = await client.request_json(
+        "GET", f"{GMAIL}/threads/{quote(thread_id, safe='')}", account_id=account_id,
+        params={"format": "full", "fields": "messages(id,labelIds,internalDate,payload)"},
+    )
+    emails = []
+    for raw in data.get("messages") or []:
+        if "DRAFT" in (raw.get("labelIds") or []):
+            continue
+        payload = raw.get("payload") or {}
+        headers = headers_from_payload(payload)
+        emails.append(ConversationEmail(
+            message_id=str(raw["id"]), sender=headers.get("from", ""),
+            date=datetime.fromtimestamp(int(raw["internalDate"]) / 1000, timezone.utc), body=body_text(payload),
+            addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", "")),
+        ))
+    return emails

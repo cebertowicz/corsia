@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from connections.calendar_document import Invite
+from connections.mail.conversation import ConversationEmail
 from connections.mail.attachments import OVERSIZE
 from connections.google import client as google_client, gmail_read, guard_read
 from connections.google.accounts import thread_key
@@ -71,6 +72,9 @@ class GmailBackend:
 
     async def fetch_body(self, account_id: str, message_id: str) -> str:
         return (await gmail_read.fetch(account_id, message_id)).body
+
+    async def conversation(self, account_id: str, target: dict) -> list[ConversationEmail]:
+        return await gmail_read.conversation(account_id, target.get("thread_id") or "")
 
     async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
         return 25_000_000, True

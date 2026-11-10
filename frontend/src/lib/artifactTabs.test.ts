@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { targetForTab } from './artifactViewerTarget';
 import { applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, getActiveTab, hasChangedTab, isTabChanged, openLegacyDiscussionTab, openSubagentTab, openTab, renameTab, resolveTabArtifact, restoreWorkspace, type RevisionCheck, type ThreadArtifactWorkspace } from './artifactTabs';
 
 function withTabs(...opens: { artifactId?: string | null; path: string; title: string }[]): ThreadArtifactWorkspace {
@@ -135,18 +134,6 @@ describe('load signals apply to the tab that initiated them', () => {
 		})!;
 		expect(ws.tabs.find((t) => t.instanceId === slowTab)!.status).toBe('ready');
 		expect(getActiveTab(ws)!.status).toBe('loading'); // untouched
-	});
-
-	it('keeps the icon the backend gives the loaded document, and a load that names none keeps the last one', () => {
-		let ws = withTabs({ path: '/email-drafts/email-1.md', title: 'email-1.md' });
-		const tab = idOf(ws, '/email-drafts/email-1.md');
-		ws = applyLoadSignal(ws, { instanceId: tab, status: 'ready', revision: 'r1', icon: 'mail' })!;
-		expect(ws.tabs[0].icon).toBe('mail');
-		ws = applyLoadSignal(ws, { instanceId: tab, status: 'loading' })!;
-		expect(ws.tabs[0].icon).toBe('mail');
-		expect(applyLoadSignal(ws, { instanceId: tab, status: 'loading', icon: 'mail' })).toBeNull();
-		// The viewer opens the document as an email from that same icon.
-		expect(targetForTab(ws.tabs[0], null, 'thread').icon).toBe('mail');
 	});
 
 	it('drops a signal whose tab has already been closed', () => {

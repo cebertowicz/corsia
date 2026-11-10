@@ -13,7 +13,6 @@ one here, never by branching pane control flow.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from registry.provider_continuity import HARNESS_CONTINUITY_TYPES
 
@@ -74,24 +73,12 @@ NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
-#: The folder the draft tools write email drafts into (tools/google_email.py and tools/microsoft_actions.py import it).
-#: An email draft is a workspace document in that folder; the descriptor below is the one rule that says so.
-EMAIL_DRAFT_FOLDER = "email-drafts"
-
-_EMAIL_DRAFT = PresentationDescriptor(
-    label="Email draft", icon="mail", capability=CAPABILITY_LEAF_PACKAGE,
-)
-
-
-def resolve_descriptor(integration: str, type_: str, path: str | None = None) -> PresentationDescriptor:
+def resolve_descriptor(integration: str, type_: str) -> PresentationDescriptor:
     """Return the trusted descriptor for an artifact's integration and type.
 
     Never raises: an unregistered type renders as the honest unsupported
-    state rather than breaking the pane. An email draft (a workspace document in the draft folder) gets the
-    envelope, here and nowhere else.
+    state rather than breaking the pane.
     """
-    if (integration, type_) == ("workspace", "document") and path and Path(path).parent.name == EMAIL_DRAFT_FOLDER:
-        return _EMAIL_DRAFT
     return _DESCRIPTORS.get((integration, type_), _UNSUPPORTED)
 
 

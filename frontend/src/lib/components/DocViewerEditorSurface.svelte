@@ -16,7 +16,8 @@
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
-	import { badEntries, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
+	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
@@ -54,7 +55,7 @@
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
-		emailDraftId = null,
+		artifactId = null,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -87,8 +88,8 @@
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
-		/** Set when the backend's presentation says this document is an email draft: its artifact id, so it opens as an email with its context read from the draft's account. */
-		emailDraftId?: string | null;
+		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
+		artifactId?: string | null;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
@@ -98,6 +99,8 @@
 	let readAttempt = $state(0);
 	let context = $state<{ artifactId: string; read: EmailDraftContext } | null>(null);
 	const LOADING: EmailDraftContext = { status: 'loading', conversation: [], notes: [], attachments: [] };
+	const draft = $derived(artifactId ? $emailDraftHeaders[artifactId] ?? null : null);
+	const emailDraftId = $derived(draft ? artifactId : null);
 	$effect(() => {
 		const id = docState === 'ready' ? emailDraftId : null;
 		readAttempt;
@@ -109,12 +112,19 @@
 	});
 	const email = $derived<EmailDraftContext | null>(context?.read ?? null);
 	const attachments = $derived(email?.attachments ?? []);
-	// Who the email goes to is read from the draft's own text, so the warnings follow each edit.
-	const refused = $derived(email ? badEntries(value) : []);
+	// Which entries the send would refuse is the server's reading of the header. Between an edit and its next reading the
+	// line keeps what the server last said, so it doesn't flicker while the reading is on its way.
+	let refused = $state<string[]>([]);
+	$effect(() => {
+		const recipients = currentRecipients(draft?.header, headerLayout(value.split('\n')).text);
+		if (!draft) refused = [];
+		else if (recipients) refused = recipients.filter((entry) => !entry.full).map((entry) => entry.text);
+	});
 	const loudLines = $derived(email ? [newerEmailsLine(newerEmails(email)), notFullAddressLine(refused)].filter((line): line is string => !!line) : []);
 	const emailHeader = $derived<EmailHeaderOptions | null>(email ? {
 		quiet: email.notes,
 		answered: email.answered ?? null,
+		header: draft?.header ?? null,
 		attachmentsKey: JSON.stringify(attachments),
 		mountAttachments: attachments.length ? (host) => {
 			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: $activeThreadId } });
@@ -164,7 +174,7 @@
 			{#if email}<EmailNotes lines={loudLines} />{/if}
 			{@render editorBlock()}
 			{#if email && (email.conversation.length || email.status !== 'ready')}
-				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} unreadable={email.unreadable} onretry={() => readAttempt += 1} />
+				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} onretry={() => readAttempt += 1} />
 			{/if}
 		</div>
 	{/if}

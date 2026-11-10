@@ -4,6 +4,7 @@ import { enrichDraftTarget, existingDraft, seedDraft } from '$lib/stores/docSave
 import { reloadDocumentFeedback } from '$lib/docViewerOperations';
 import type { TabLoadSignal } from '$lib/artifactTabs';
 import type DocViewerStatus from '$lib/components/DocViewerStatus.svelte';
+import { noteDocumentLoad } from '$lib/stores/emailDraftHeaders';
 
 // Feedback loads share the comment store; each call only decides whether this tab may apply its result.
 // The freshness state remains with the viewer; the verifier performs only the API transition.
@@ -18,7 +19,8 @@ export function applyDocumentContent(d: DocViewerTarget, content: ViewerContent,
 	seedDraft(d, content.text, content.revision);
 	if (content.artifactId && !d.artifactId) enrichDraftTarget(d, content.artifactId);
 	const shown = options.shown();
+	if (content.emailDraft !== undefined) noteDocumentLoad(content.artifactId, content.emailDraft);
 	options.apply(content, !content.live && Boolean(existingDraft(d)?.editText !== existingDraft(d)?.savedText));
-	options.signal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId, icon: content.presentation?.icon });
+	options.signal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId });
 	reloadDocumentFeedback(content.artifactId, seq, options.loadSeq, options.feedback());
 }

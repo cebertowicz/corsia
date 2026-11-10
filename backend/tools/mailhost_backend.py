@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
+from connections.mail.conversation import ConversationEmail
 from connections.mail.email_document import build_message, parse_document
 from connections.mailhost import agenda, guard_read, outbound, read as mailhost_read, reply, smtp
 from tools.action_delivery import deliver_claimed
@@ -71,6 +72,9 @@ class MailHostBackend:
     guard_data = staticmethod(guard_read.guard_data)
     sent_html = staticmethod(guard_read.sent_html)
     fetch_body = staticmethod(guard_read.fetch_body)
+
+    async def conversation(self, account_id: str, target: dict) -> list[ConversationEmail]:
+        return await guard_read.conversation(account_id, target.get("references") or target.get("in_reply_to") or "")
 
     async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
         sender = await outbound.sender(account_id)

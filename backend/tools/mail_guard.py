@@ -121,7 +121,7 @@ def check_reply(
         else:
             result.warnings.append(detail)
         name, address = parseaddr(message.sender)
-        result.quiet.append(f"{name or address or message.sender} wrote about the same subject in another thread.")
+        result.quiet.append(f"{name or address or message.sender} wrote about the same subject in another conversation.")
     if not target.own:
         result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
     return result

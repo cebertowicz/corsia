@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	badEntries, isFullAddress, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, recipientEntries, repliedToId, senderAddress, senderName,
-	type EmailMessage,
+	currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, repliedToId, senderAddress, senderName,
+	type EmailMessage, type ServerHeader,
 } from '$lib/emailDraft';
 import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
 
@@ -52,29 +52,27 @@ describe('newer emails', () => {
 	});
 });
 
+describe('the header layout', () => {
+	const DRAFT = ['From: Alex', 'To: dana@example.com, priya.raman', 'Cc: ', 'C', 'Subject: S', '', 'To: not a header'];
+
+	it('lays out every line up to the first blank line, each with the field its label names and its range', () => {
+		const { text, lines } = headerLayout(DRAFT);
+		expect(text).toBe(DRAFT.slice(0, 5).join('\n'));
+		expect(lines.map((line) => line.key)).toEqual(['from', 'to', 'cc', '', 'subject']);
+		expect(lines[1]).toEqual({ key: 'to', from: 11, to: 44, valueFrom: 14 });
+		// A line being typed is still a header line, with no label.
+		expect(lines[3]).toEqual({ key: '', from: 50, to: 51, valueFrom: 50 });
+	});
+
+	it('uses the server’s recipients only while the header reads as the server read it', () => {
+		const header: ServerHeader = { text: 'To: priya.raman', recipients: [{ field: 'to', text: 'priya.raman', from: 4, to: 15, full: false }] };
+		expect(currentRecipients(header, 'To: priya.raman')).toBe(header.recipients);
+		expect(currentRecipients(header, 'To: priya.raman@')).toBeNull();
+		expect(currentRecipients(null, 'To: priya.raman')).toBeNull();
+	});
+});
+
 describe('a bad address', () => {
-	const DRAFT = ['From: Alex', 'To: dana@example.com, priya.raman, dana@', 'Cc: ', 'Subject: S', '', 'To: not a header'].join('\n');
-
-	it('reads the entries of To and Cc as typed, stopping at the first blank line', () => {
-		expect(recipientEntries(DRAFT)).toEqual(['dana@example.com', 'priya.raman', 'dana@']);
-		expect(recipientEntries('To: a@b.co\r\nCc: c@d.co , e@f.co\r\n\r\nTo: x')).toEqual(['a@b.co', 'c@d.co', 'e@f.co']);
-	});
-
-	it('follows the send’s plain-address rule: a name, angle brackets, a missing part or a hidden character fail', () => {
-		expect(isFullAddress('dana@example.com')).toBe(true);
-		expect(isFullAddress('Dana Whitfield <dana@example.com>')).toBe(false);
-		expect(isFullAddress('priya.raman')).toBe(false);
-		expect(isFullAddress('dana@')).toBe(false);
-		expect(isFullAddress('a@b@c.co')).toBe(false);
-		expect(isFullAddress('dana​@example.com')).toBe(false);
-	});
-
-	it('names the entries the send would refuse, in the order typed', () => {
-		expect(badEntries(DRAFT)).toEqual(['priya.raman', 'dana@']);
-		expect(badEntries(DRAFT.replace('priya.raman', 'priya.raman@example.com'))).toEqual(['dana@']);
-		expect(badEntries('To: a@b.co\nSubject: S\n\nbody')).toEqual([]);
-	});
-
 	it('names one entry as "<entry> isn’t a full email address." and several with a count', () => {
 		expect(notFullAddressLine([])).toBeNull();
 		expect(notFullAddressLine(['priya.raman'])).toBe('priya.raman isn’t a full email address.');
@@ -87,8 +85,8 @@ describe('reading a draft’s context', () => {
 
 	it('asks the draft’s route by artifact id and maps the server’s answer to the view’s names', async () => {
 		const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-			status: 'partial', reason: null, replied_to: 'r-1', answered: ['dana.whitfield@example.com'],
-			conversation: [DANA, ANSWERED], unreadable: 1,
+			status: 'ready', reason: null, replied_to: 'r-1', answered: ['dana.whitfield@example.com'],
+			conversation: [DANA, ANSWERED],
 			attachments: [{ name: 'map.png', path: '/w/map.png', size: 10, type: 'image', unavailable: false }],
 			notes: ['Same subject as an email from Oct 2.'],
 		}), { status: 200 }));
@@ -96,8 +94,8 @@ describe('reading a draft’s context', () => {
 		const context = await fetchEmailDraftContext('art/1');
 		expect((fetchMock.mock.calls[0] as unknown[])[0]).toBe('/api/email-drafts/art%2F1/context');
 		expect(context).toEqual({
-			status: 'partial', reason: undefined, repliedTo: 'r-1', answered: ['dana.whitfield@example.com'],
-			conversation: [DANA, ANSWERED], unreadable: 1,
+			status: 'ready', reason: undefined, repliedTo: 'r-1', answered: ['dana.whitfield@example.com'],
+			conversation: [DANA, ANSWERED],
 			attachments: [{ name: 'map.png', path: '/w/map.png', size: 10, type: 'image', unavailable: false }],
 			notes: ['Same subject as an email from Oct 2.'],
 		});
@@ -105,14 +103,18 @@ describe('reading a draft’s context', () => {
 
 	it('passes a named failure through', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-			status: 'error', reason: 'account', replied_to: 'r-1', answered: null, conversation: [], unreadable: 0, attachments: [], notes: [],
+			status: 'error', reason: 'account', replied_to: 'r-1', answered: null, conversation: [], attachments: [], notes: [],
 		}), { status: 200 })));
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'account', conversation: [] });
 	});
 
-	it('turns a refused or failed request into the same failed read, so the view offers its retry', async () => {
+	it('names an ended sign-in and a draft that isn’t found, and turns any other failure into a failed read the view can retry', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+		expect(await fetchEmailDraftContext('a')).toEqual({ status: 'error', reason: 'signin', conversation: [], notes: [], attachments: [] });
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
-		expect(await fetchEmailDraftContext('a')).toEqual({ status: 'error', reason: 'unreadable', conversation: [], notes: [], attachments: [] });
+		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'missing' });
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable' });
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable' });
 	});

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 
+from connections.mail.conversation import ConversationEmail, header_addresses
 from connections.mail.email_document import DraftRefused, reply_addresses
 
 from connections.mailhost import folders, imap, read
@@ -123,9 +124,13 @@ def _thread_ids(messages: list[_Mail]) -> dict[tuple[str, int], str]:
     return {(mail.folder, mail.uid): root(mail.own_id) for mail in messages}
 
 
+def _message_id(account_id: str, folder: str, validity: int, uid: int) -> str:
+    return (read.mint_message_id(account_id, validity, uid) if folder == imap.MAILBOX
+            else f"sent:{read.account_tag(account_id)}:{validity}:{uid}")
+
+
 def _message(account_id: str, mail: _Mail, thread_id: str) -> Message:
-    mid = (read.mint_message_id(account_id, mail.validity, mail.uid) if mail.folder == imap.MAILBOX
-           else f"sent:{read.account_tag(account_id)}:{mail.validity}:{mail.uid}")
+    mid = _message_id(account_id, mail.folder, mail.validity, mail.uid)
     msg = mail.parsed
     return Message(message_id=mid, thread_id=thread_id, sender=str(msg.get("From", "")),
                    subject=str(msg.get("Subject", "")), date=mail.arrival, body="",
@@ -228,6 +233,41 @@ async def fetch_body(account_id: str, message_id: str) -> str:
         folder_kind = "inbox"
     ep, username, password, check = await run_in_db(read.credentials, account_id)
     return await read.guarded(account_id, check, lambda: _read_body(ep, username, password, account_id, folder_kind, validity, uid))
+
+
+def _conversation(ep, username: str, password: str, account_id: str, ids: set[str]) -> list[ConversationEmail]:
+    # One session: in Inbox and then Sent, one SEARCH for the thread's Message-IDs and one FETCH of what it finds.
+    with imap.account_lock(account_id), imap.session(ep, username, password) as conn:
+        try:
+            names = (imap.MAILBOX, _sent_folder(conn, ep, username))
+        except _SentFolderMissing:
+            names = (imap.MAILBOX,)
+        emails = []
+        for folder in names:
+            validity = imap.select(conn, ep, folder)
+            uids = _search(conn, ep, _thread_search(ids))
+            found = _batch(conn, ep, uids, f"(UID FLAGS INTERNALDATE BODY.PEEK[]<0.{read.MAX_FETCH_BYTES}>)", flags=True)
+            for uid, (raw, _, arrival) in found.items():
+                headers, body = read.parse(raw, with_body=True)
+                try:
+                    date = datetime.strptime(arrival.decode("ascii"), "%d-%b-%Y %H:%M:%S %z").astimezone(timezone.utc)
+                except (ValueError, UnicodeError):
+                    raise imap.unreachable(ep) from None
+                emails.append(ConversationEmail(
+                    message_id=_message_id(account_id, folder, validity, uid),
+                    sender=headers.get("from", ""), date=date, body=body,
+                    addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", "")),
+                ))
+    return emails
+
+
+async def conversation(account_id: str, references: str) -> list[ConversationEmail]:
+    """Every email in Inbox and Sent that carries one of the draft's thread Message-IDs, with its text."""
+    ids = set(_IDS.findall(references or ""))
+    if not ids:
+        raise read.MessageNotFound(read.NOT_FOUND)
+    ep, username, password, check = await run_in_db(read.credentials, account_id)
+    return await read.guarded(account_id, check, lambda: _conversation(ep, username, password, account_id, ids))
 
 
 def _sent_html(ep, username: str, password: str, account_id: str) -> list[str]:

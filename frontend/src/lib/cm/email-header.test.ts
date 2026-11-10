@@ -1,16 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { history, undo } from '@codemirror/commands';
-import { addedRecipients, badRecipientRanges, emailHeader } from './email-header';
+import { emailHeader } from './email-header';
+import { headerLayout, type HeaderRecipient, type ServerHeader } from '$lib/emailDraft';
 
 const HEAD = ['From: alex@example.com', 'To: dana@example.com', 'Subject: Saturday'];
 let view: EditorView | null = null;
+const slot = new Compartment();
 
-function mount(lines: string[], readOnly = false, answered: string[] | null = null) {
+/** The server's reading of a draft's header, in read_header's shape, with the entries the send refuses named by the test. */
+function reading(doc: string, refused: string[] = []): ServerHeader {
+	const { text, lines } = headerLayout(doc.split('\n'));
+	const recipients: HeaderRecipient[] = [];
+	for (const line of lines.filter(({ key }) => key === 'to' || key === 'cc')) {
+		let at = line.valueFrom;
+		for (const part of doc.slice(line.valueFrom, line.to).split(',')) {
+			const entry = part.trim(), from = at + part.length - part.trimStart().length;
+			if (entry) recipients.push({ field: line.key as 'to' | 'cc', text: entry, from, to: from + entry.length, full: !refused.includes(entry) });
+			at += part.length + 1;
+		}
+	}
+	return { text, recipients };
+}
+
+const options = (header: ServerHeader | null, answered: string[] | null) => ({ quiet: [], answered, header, attachmentsKey: '', mountAttachments: null });
+
+function mount(lines: string[], readOnly = false, answered: string[] | null = null, refused: string[] = []) {
 	const parent = document.body.appendChild(document.createElement('div'));
-	const extensions = [history(), emailHeader({ quiet: [], answered, attachmentsKey: '', mountAttachments: null }), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
-	view = new EditorView({ parent, state: EditorState.create({ doc: `${lines.join('\n')}\n\nHi Dana,\n`, extensions }) });
+	const doc = `${lines.join('\n')}\n\nHi Dana,\n`;
+	const extensions = [history(), slot.of(emailHeader(options(reading(doc, refused), answered))), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
+	view = new EditorView({ parent, state: EditorState.create({ doc, extensions }) });
 	return view;
 }
 const button = () => document.querySelector<HTMLButtonElement>('.cm-email-cc-add');
@@ -97,8 +117,7 @@ describe('an added recipient', () => {
 		expect(marks()).toEqual([]);
 	});
 
-	it('leaves an address that is still being typed alone, and opens and closes its text on a tap', () => {
-		expect(addedRecipients(' dana@example.com, priya@exam', 3, new Set(['dana@example.com']))).toEqual([]);
+	it('opens and closes its text on a tap', () => {
 		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ANSWERED);
 		const bang = document.querySelector<HTMLButtonElement>('.cm-email-added-mark')!;
 		expect(bang.hasAttribute('data-open')).toBe(false);
@@ -111,23 +130,42 @@ describe('an added recipient', () => {
 
 describe('a bad address', () => {
 	it('is every entry in To or Cc the send would refuse, amber where it sits, with no "!", and the other entries are left alone', () => {
-		mount([HEAD[0], 'To: dana@example.com, priya.raman', 'Cc: dana@, Sam Lee <sam@example.com>', HEAD[2]], false, ['dana@example.com']);
+		mount([HEAD[0], 'To: dana@example.com, priya.raman', 'Cc: dana@, Sam Lee <sam@example.com>', HEAD[2]], false, ['dana@example.com'], ['priya.raman', 'dana@', 'Sam Lee <sam@example.com>']);
 		expect([...document.querySelectorAll('.cm-email-bad')].map((node) => node.textContent)).toEqual(['priya.raman', 'dana@', 'Sam Lee <sam@example.com>']);
 		expect(document.querySelector('.cm-email-added')).toBeNull();
 		expect(document.querySelector('.cm-email-added-mark')).toBeNull();
 	});
 
 	it('has its own class, apart from an added recipient', () => {
-		mount([HEAD[0], 'To: priya@example.com, priya.raman', HEAD[2]], false, ['dana@example.com']);
+		mount([HEAD[0], 'To: priya@example.com, priya.raman', HEAD[2]], false, ['dana@example.com'], ['priya.raman']);
 		expect(document.querySelectorAll('.cm-email-bad')).toHaveLength(1);
 		expect(document.querySelector('.cm-email-bad')!.classList.contains('cm-email-added')).toBe(false);
 		expect(document.querySelectorAll('.cm-email-added-mark')).toHaveLength(1);
 	});
 
-	it('marks nothing when every entry is a full address, and finds an entry by its text as typed', () => {
+	it('marks nothing when the server takes every entry', () => {
 		mount(HEAD);
 		expect(document.querySelector('.cm-email-bad')).toBeNull();
-		expect(badRecipientRanges(' dana@example.com, priya.raman', 3)).toEqual([{ from: 22, to: 33 }]);
+	});
+
+	it('moves with the text after an edit the server hasn’t read, then follows its next reading', () => {
+		const editor = mount([HEAD[0], 'To: priya.raman', HEAD[2]], false, null, ['priya.raman']);
+		const bad = () => [...document.querySelectorAll('.cm-email-bad')].map((node) => node.textContent);
+		expect(bad()).toEqual(['priya.raman']);
+		// Typed before the entry: the header no longer reads as the server read it, so the mark keeps its place on the entry.
+		const at = editor.state.doc.line(2).from + 4;
+		editor.dispatch({ changes: { from: at, insert: 'sam@example.com, ' }, userEvent: 'input.type' });
+		expect(bad()).toEqual(['priya.raman']);
+		// The server's reading of the new text arrives: it takes both, so nothing is marked.
+		editor.dispatch({ effects: slot.reconfigure(emailHeader(options(reading(editor.state.doc.toString()), null))) });
+		expect(bad()).toEqual([]);
+	});
+
+	it('ignores a reading of a header that no longer matches the text', () => {
+		const editor = mount([HEAD[0], 'To: priya.raman', HEAD[2]]);
+		const stale = reading([HEAD[0], 'To: dana@', HEAD[2], '', 'Hi Dana,', ''].join('\n'), ['dana@']);
+		editor.dispatch({ effects: slot.reconfigure(emailHeader(options(stale, null))) });
+		expect(document.querySelector('.cm-email-bad')).toBeNull();
 	});
 
 	it('reads an old "In reply to:" line as a plain line, not a field', () => {
