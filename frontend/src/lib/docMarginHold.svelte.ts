@@ -21,10 +21,10 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 	// Where a thread is picked (the click on its text that opens the column, or the one being read when the panel moves) the line held
 	// is that thread's row, so the text just clicked stays where it was and its card comes beside it (the cards above it stack up from
 	// that row); else the top row. Rows between the top and the picked one rewrap taller as the text narrows, and would push it away.
-	let wasMargin = false, wasPane = false, stopHold: (() => void) | null = null;
+	let wasMargin = false, wasPane = collapsed.current, stopHold: (() => void) | null = null;
 	$effect.pre(() => {
 		const now = margin(), pane = collapsed.current;
-		if (now === wasMargin && (!now || pane === wasPane)) return;
+		if (now === wasMargin && pane === wasPane) return;
 		wasPane = pane;
 		wasMargin = now;
 		stopHold?.();

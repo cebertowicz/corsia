@@ -31,7 +31,6 @@
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
 	import { imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
-	import { paneOverlay } from '$lib/stores/artifactCanvas';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false, quiet = false, draftOverColumn = false, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
@@ -116,7 +115,7 @@
 	let canvasWidth = $state(Number.POSITIVE_INFINITY);
 	$effect(() => observeCanvasWidth(bounds, (width) => canvasWidth = width));
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it, today's sheet. Image viewers already decide whether their canvas is a sheet.
-	const roomForMargin = $derived(hasRoomForMargin(canvasWidth, $paneOverlay));
+	const roomForMargin = $derived(hasRoomForMargin(canvasWidth));
 	const sheetDrawer = $derived(narrow || (!image && !roomForMargin));
 	/** How a card opened from the text shows: the phone sheet; else the margin column on any desktop canvas with room, cards beside their anchors; else a popover over the text. The editor reads it, so only a press opens a card over the text. */
 	const columnFits = $derived(!narrow && !image && roomForMargin); // the one margin rule: the card mode and the column both read it
@@ -341,7 +340,7 @@
 	.rb-sheet-host:empty, .rb-sheet-host[hidden] { display: none; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
-	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: calc(var(--space-2) + var(--pane-overlay-inset, 0px)); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
+	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
 	.canvas-comment-drawer.margin:global(.on-canvas) { display: flex; }
 	/* The resolved drawer's cards share the margin cards' corners. */
 	.resolved-drawer { --ct-radius: var(--radius); }

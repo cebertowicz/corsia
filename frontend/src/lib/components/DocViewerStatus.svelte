@@ -274,9 +274,8 @@
 	}
 
 	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
-	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
-	   The header is a container, so the ask's line 1 can rearrange when that leaves it too narrow (ReviewBar). */
-	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
+	/* The header is a container, so the ask's line 1 can rearrange when it is narrow (ReviewBar). */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); container: doc-header / inline-size; }
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }

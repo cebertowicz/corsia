@@ -6,12 +6,12 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 
 	import { pushBackLayer } from '$lib/historyBackLayer';
-	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
+	import { canvasCompact, artifactTabSheetOpen, paneOverlay } from '$lib/stores/artifactCanvas';
 	import {
 		threadWorkspaces, splitWidth as splitWidthStore, emptyWorkspace, setActiveSurface,
 		setActiveTab, setLeafVisible,
 	} from '$lib/stores/artifactWorkspace';
-	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, isCompactCanvas } from '$lib/artifactSplitLayout';
+	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, PANE_DRAWER_WIDTH, isCompactCanvas } from '$lib/artifactSplitLayout';
 	import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 	import { visibleDocumentArtifactId } from '$lib/heldDocFeedbackScope';
 	import { tabDocumentImage } from '$lib/stores/tabViewState';
@@ -48,18 +48,19 @@
 		if (!el) return;
 		canvasWidth = el.getBoundingClientRect().width;
 		if (typeof ResizeObserver === 'undefined') return;
-		const ro = new ResizeObserver((entries) => {
-			const entry = entries[0];
-			if (entry) canvasWidth = entry.contentRect.width;
+		const ro = new ResizeObserver(() => {
+			// The split's compact padding reserves the overlay, so measure its full box before subtracting it once below.
+			canvasWidth = el.getBoundingClientRect().width;
 		});
 		ro.observe(el);
 		return () => ro.disconnect();
 	});
 
-	const layout = $derived(computeSplitLayout(canvasWidth, hasTabs, workspace.visible, $splitWidthStore));
+	const visibleCanvasWidth = $derived(canvasWidth > 0 && $paneOverlay ? Math.max(1, canvasWidth - PANE_DRAWER_WIDTH) : canvasWidth);
+	const layout = $derived(computeSplitLayout(visibleCanvasWidth, hasTabs, workspace.visible, $splitWidthStore));
 	// Requests can add the first tab, so retain the measured compact state even
 	// while the workspace is still chat-only.
-	const compact = $derived(isCompactCanvas(canvasWidth));
+	const compact = $derived(isCompactCanvas(visibleCanvasWidth));
 	// Compact shows exactly one surface; the artifact takes the canvas only when
 	// it is the active surface, so Back always has chat to return to.
 	const artifactFullCanvas = $derived(compact && workspace.activeSurface === 'artifact');
@@ -198,6 +199,8 @@
 		flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden;
 		margin-top: calc(-1 * var(--status-banners-height, 0px)); padding-top: var(--status-banners-height, 0px);
 	}
+	/* In compact, the visible surface ends at the Workspace overlay. */
+	.split.compact { padding-inline-end: var(--pane-overlay-inset, 0px); }
 	.chat-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 	/* Hidden, not unmounted — see the comment on the element. */
 	.chat-col.offscreen { display: none; }
