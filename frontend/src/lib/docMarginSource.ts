@@ -9,14 +9,14 @@ export type MarginAnchorSource = {
 	/** The element whose scroll the cards ride. */
 	scroller: () => HTMLElement | null;
 	/** The column the cards sit in: its top is their origin. Read from the stack mounted inside it. */
-	clip: (stack: HTMLElement) => HTMLElement | null;
+	column: (stack: HTMLElement) => HTMLElement | null;
 	/** Where the reader sees the scroller's content, for a column drawn on it: a picked card is brought into it. The scroller's own box unless something floats over its edge. */
 	view?: () => { top: number; bottom: number } | null;
 	/** The element a card is placed beside: the first line of its comment's anchor, or null when the comment has no line at all. */
 	anchor: (id: string) => Element | null;
 	/** Nodes whose change moves a line: watched for mutation. */
 	moved: () => Element[];
-	/** Nodes whose own resize moves a line, besides the scroller, the clip and the cards. */
+	/** Nodes whose own resize moves a line, besides the scroller, the column and the cards. */
 	resized: () => Element[];
 };
 
@@ -30,7 +30,7 @@ export type MarginComposer = { id: string; anchor: () => DOMRect | null; body: S
 export function codeMarginSource(canvas: () => HTMLElement | null): MarginAnchorSource {
 	return {
 		scroller: () => canvas()?.querySelector<HTMLElement>('.cm-scroller') ?? null,
-		clip: (stack) => stack.closest<HTMLElement>('.drawer-comments'),
+		column: (stack) => stack.closest<HTMLElement>('.drawer-comments'),
 		anchor: (id) => canvas()?.querySelector(`.cm-comment-line[data-comment-ids*="${id}"], .cm-suggestion-del[data-suggestion-id="${id}"]`) ?? null,
 		moved: () => [...(canvas()?.querySelectorAll('.cm-content, .cm-comment-rail') ?? [])],
 		resized: () => [...(canvas()?.querySelectorAll('.cm-content') ?? [])],

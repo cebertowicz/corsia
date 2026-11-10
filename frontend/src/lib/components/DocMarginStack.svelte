@@ -20,8 +20,8 @@
 	// cards sit beside their lines and scroll with the text natively, and the content already reaches as far as the last card.
 	$effect(() => {
 		if (!stackEl) return;
-		const scroller = source.scroller(), clip = source.clip(stackEl);
-		if (!scroller || !clip) return;
+		const scroller = source.scroller(), column = source.column(stackEl);
+		if (!scroller || !column) return;
 		const writing = composer;
 		const ids = [...pinned.map((comment) => comment.id), ...(writing ? [writing.id] : [])], selected = writing?.id ?? selectedId;
 		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in view by scrolling the text, which the cards ride with. Its view is the scroller's, where the reader sees the content.
@@ -35,13 +35,13 @@
 		};
 		let frame = 0;
 		const read = () => {
-			const clipTop = clip.getBoundingClientRect().top;
+			const columnTop = column.getBoundingClientRect().top;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {
 				const at = id === writing?.id ? writing.anchor()?.top : source.anchor(id)?.getBoundingClientRect().top;
 				const card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
 				if (at !== undefined && card) {
-					items.push({ id, y: Math.max(0, at - clipTop), h: card.offsetHeight });
+					items.push({ id, y: Math.max(0, at - columnTop), h: card.offsetHeight });
 				} else if (card) loose.push({ id, y: 0, h: card.offsetHeight });
 			}
 			// A thread with no line at all (its text and its place both gone) sits after the last card that has one.
@@ -53,7 +53,7 @@
 			reveal();
 		};
 		// Placement is read once per frame only after something that moves a line or a card: the text or its commented lines change, or the
-		// scroller, clip or a card resizes. Scrolling moves every line and card together, so it needs nothing.
+		// scroller, column or a card resizes. Scrolling moves every line and card together, so it needs nothing.
 		const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; read(); }); };
 		const sizes = new ResizeObserver(schedule), sized = new WeakSet<Element>();
 		const size = (el: Element) => { if (!sized.has(el)) { sized.add(el); sizes.observe(el); } };
@@ -68,7 +68,7 @@
 			schedule();
 		});
 		for (const el of source.moved()) mutations.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
-		for (const el of [scroller, clip, ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
+		for (const el of [scroller, column, ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
 		// Untracked: read() both reads and writes `tops`, which would otherwise rerun this setup on every placement it makes.
 		untrack(read);
 		return () => { cancelAnimationFrame(frame); mutations.disconnect(); sizes.disconnect(); };

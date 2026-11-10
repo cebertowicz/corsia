@@ -129,7 +129,7 @@ describe('image pins', () => {
 		expect(sign.dataset.commentId).toBe('gone');
 		expect(sign.classList.contains('removed')).toBe(true);
 		expect(sign.textContent).toBe('');
-		expect(sign.getAttribute('aria-label')).toBe('Original text deleted');
+		expect(sign.getAttribute('aria-label')).toBe('Comment on text that isn’t in the document');
 		// Centred on the line, a disc's width past its last character, so no character is covered and no line moves.
 		expect([sign.style.left, sign.style.top]).toEqual(['195px', '50px']);
 		sign.click();

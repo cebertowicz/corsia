@@ -201,7 +201,13 @@ describe('comment placement in a live document (4.2)', () => {
 		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
 		expect(row()).toMatchObject({ orphaned: true, placement: 'placing' });
 		doc.answer(doc.asks()[1], orphaned);
+		// Its words are still in the text, so the load asks once more to place it (a reload); that answer settles it.
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(3));
+		expect(doc.asks()[2]).toMatchObject({ reload: true });
+		doc.answer(doc.asks()[2], orphaned);
 		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: true, placement: undefined, drawn: false }));
+		await settled();
+		expect(doc.asks()).toHaveLength(3);
 	});
 
 	it('asks nothing for edits outside every comment, including at its edges', async () => {
@@ -635,5 +641,48 @@ describe('placement classification by cleanliness (4.2 revision 13)', () => {
 		expect(row()).toMatchObject({ placement: 'placing', drawn: false });
 		expect(errors).not.toHaveBeenCalled();
 		expect(doc.asks()).toHaveLength(2);
+	});
+});
+
+describe('lost comments are placed again in the same live load', () => {
+	const lostRow = (id: string, anchor: string) => ({ ...serverRow(id, anchor, 0, 0), orphaned: true });
+	const reloads = (doc: ReturnType<typeof live>) => doc.asks().filter(ask => ask.reload);
+
+	it('asks once for a lost comment whose words are in the text, and not again while it stays lost', async () => {
+		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
+		doc.answer(doc.asks()[0]);
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
+		doc.answer(reloads(doc)[0]); // names only c1: the reload can't place c2
+		await settled();
+		expect(row('c2')).toMatchObject({ orphaned: true, drawn: false });
+		await loadComments('artifact');
+		await settled();
+		expect(reloads(doc)).toHaveLength(1);
+	});
+
+	it('asks again in the same load when more are lost than it last asked about', async () => {
+		const doc = await opened('alpha beta gamma', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
+		doc.answer(doc.asks()[0]);
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
+		doc.answer(reloads(doc)[0]);
+		await settled();
+		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma'), lostRow('c3', 'alpha')], feedback: {} });
+		await loadComments('artifact');
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(2));
+		doc.answer(reloads(doc)[1]);
+		await settled();
+		await loadComments('artifact');
+		await settled();
+		expect(reloads(doc)).toHaveLength(2);
+	});
+
+	it('asks nothing while a lost comment’s words are gone, and asks once they come back', async () => {
+		const doc = await opened('alpha beta', [serverRow('c1', 'beta', 6), lostRow('c2', 'gamma')]);
+		doc.answer(doc.asks()[0]);
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed' }));
+		await settled();
+		expect(reloads(doc)).toHaveLength(0);
+		doc.remote(text => text.insert(10, ' gamma'));
+		await vi.waitFor(() => expect(reloads(doc)).toHaveLength(1));
 	});
 });

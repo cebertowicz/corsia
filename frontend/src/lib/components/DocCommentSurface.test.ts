@@ -169,7 +169,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [deleted, secondSuggestion] });
 		const card = document.body.querySelector<HTMLElement>('[data-margin-card="comment-1"]');
 		expect(card).not.toBeNull();
-		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
+		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
 		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
 		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();
@@ -879,7 +879,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		canvases.push(bounds);
 		render({ bounds, state: { kind: 'list' } });
 		const surface = component as unknown as { cardMode(): string };
-		const column = () => document.body.querySelector('.drawer-comments.margin-clip') !== null;
+		const column = () => document.body.querySelector('.drawer-comments.in-margin') !== null;
 		const resize = (to: number) => { width = to; resized.forEach((callback) => callback()); flushSync(); };
 		expect([surface.cardMode(), column()]).toEqual(['margin', true]);
 		resize(600); // under MARGIN_MIN: the column leaves (after its exit motion) as the mode stops being 'margin'

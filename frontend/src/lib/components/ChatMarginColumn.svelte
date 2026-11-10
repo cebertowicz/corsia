@@ -39,7 +39,7 @@
 	});
 	const anchors: MarginAnchorSource = {
 		scroller: () => scroller,
-		clip: (stack) => stack.closest<HTMLElement>('.chat-margin'),
+		column: (stack) => stack.closest<HTMLElement>('.chat-margin'),
 		// The composer floats over the transcript's lower edge, so a picked card is brought above it.
 		view: () => {
 			if (!scroller) return null;

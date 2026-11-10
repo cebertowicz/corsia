@@ -123,7 +123,7 @@
 	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : columnFits ? 'margin' : 'popover'; }
 	const margin = $derived(columnFits && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
-	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "Original text deleted" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
+	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text isn’t in the document" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
 	let detent = $state<'full' | 'half'>('full');
@@ -310,7 +310,7 @@
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 	<!-- Accept all belongs to the column too, but takes no room unless there is something to say. -->
 	{#if margin && !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="margin-accept-all">{@render acceptAllBar()}</div>{/if}
-	<div class="drawer-comments" class:margin-clip={margin}>
+	<div class="drawer-comments" class:in-margin={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
 		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
@@ -346,7 +346,7 @@
 	/* The column grows in from nothing; its content keeps the final width so the reply fields measure at it. */
 	.canvas-comment-drawer.margin > :global(*) { min-width: 287px; }
 	/* The column never scrolls on its own: its cards are part of the page and overflow it downward, so the scroller reaches them. */
-	.drawer-comments.margin-clip { position: relative; overflow: visible; scrollbar-gutter: auto; }
+	.drawer-comments.in-margin { position: relative; overflow: visible; scrollbar-gutter: auto; }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */

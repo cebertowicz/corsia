@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { get, type Writable } from 'svelte/store';
 import type { DocComment } from './docComments';
+import { anchoredQuote } from './docCommentProjection';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
@@ -17,6 +18,8 @@ const unplaced = (row: DocComment): DocComment => ({ ...row, placement: undefine
 /** A reload places lost comments again: every anchored row goes back to Placing; a row never drawn keeps its orphan eligibility meanwhile. */
 const markReloading = (rows: DocComment[]): DocComment[] => rows.map(row => row.anchor && !row.review
 	? { ...row, placement: row.placement === undefined && !row.drawn ? undefined : 'placing' } : row);
+/** A lost comment: the server's range for it is gone, and it is not resolved. */
+const lost = (row: DocComment) => row.orphaned && !row.resolved;
 
 /**
  * One live document's placement. Composed only by the comments store, and writes only its rows:
@@ -31,6 +34,8 @@ class LivePlacement {
 	private marked: { reload: boolean } | null = null;
 	/** A reload is queued or in flight. It runs on its own, once per live load, with nothing shown: a refusal leaves rows lost and is only logged. */
 	private reloading = false;
+	/** How many lost comments with their words in the text the last reload was asked for in this live load (`placeLost`). */
+	private lostAsked = 0;
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
@@ -70,6 +75,7 @@ class LivePlacement {
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
 		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows }));
 		if (ask) this.ask();
+		this.placeLost();
 	}
 
 	retry(): void {
@@ -119,7 +125,7 @@ class LivePlacement {
 
 	/** A disconnect releases the request; rows keep their state and reconnect sync asks again. */
 	private observed(): void {
-		if (this.session.connection === 'connected') return;
+		if (this.session.connection === 'connected') { this.placeLost(); return; }
 		const reload = this.inFlight?.reload || this.marked?.reload;
 		if (reload) this.settleReload();
 		this.inFlight = null;
@@ -198,6 +204,7 @@ class LivePlacement {
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
 		if (reload) this.settleReload();
 		this.next();
+		this.placeLost();
 	}
 
 	private place(ranges: Range[], snapshotText: string, reload = false, states?: DocumentFrame['states']): void {
@@ -224,9 +231,26 @@ class LivePlacement {
 
 	private settleReload(): void { this.reloading = false; }
 
+	/**
+	 * Places lost comments again whose words are in the text, through `reload`. A row is lost when the text its server range
+	 * held is deleted; words that come back (an undo, a paste, retyping) are new text the range never held, so only a
+	 * reload, which looks for the quote, finds them. Asked once per live load, and again when more are lost than it last
+	 * asked about, so one a reload can't place is not asked about again in this load.
+	 */
+	private placeLost = (): void => {
+		if (this.destroyed || this.session.connection !== 'connected') return;
+		const rows = this.current().filter(lost);
+		const text = rows.length ? this.session.text.toString() : '';
+		const count = rows.filter(row => { const quote = anchoredQuote(row); return !!quote && text.includes(quote); }).length;
+		this.lostAsked = Math.min(this.lostAsked, count);
+		if (count > this.lostAsked && this.reload()) this.lostAsked = count;
+	};
+
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {
 		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
+		// After the edit's transaction: its words may bring a lost comment's quote back.
+		if (this.current().some(lost)) queueMicrotask(this.placeLost);
 		if (!this.positions.size) return;
 		this.write(rows => rows.map(row => {
 			const at = row.drawn ? this.positions.get(row.id) : undefined;

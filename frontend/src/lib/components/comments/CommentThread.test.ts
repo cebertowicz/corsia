@@ -309,7 +309,7 @@ describe('CommentThread', () => {
 
 	it('labels a card whose original text is gone with the amber note and keeps its place', () => {
 		render(thread({ orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(host.querySelector('.ct.orphaned')).not.toBeNull();
 	});
 
@@ -565,7 +565,7 @@ describe('CommentComposer', () => {
 describe('a comment whose text was deleted', () => {
 	it('says the original text was deleted and keeps the old text in quotes', () => {
 		render(thread({ anchor: 'two extra liters', orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(host.textContent).toContain('two extra liters');
 	});
 

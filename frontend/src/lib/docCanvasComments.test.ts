@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awaitsFirstMark, canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder, placeLostOnLoad } from './docCanvasComments';
+import { awaitsFirstMark, canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from './docCanvasComments';
 import { agentColor } from './docPresence';
 import type { DocComment } from './stores/docComments';
 
@@ -119,7 +119,7 @@ describe('orphaned is the text on screen, plus a refused accept', () => {
 	])('never counts a resolved $name whose quote is gone as unplaced', ({ overrides }) => {
 		// A decision resolves its suggestion on the server; the header count is the list's open 'Text changed' group.
 		const rows = commentsInDocumentOrder([comment('done', 5, 'quote', { ...overrides, resolved: true }), comment('lost', 5, 'quote')], 'keep other here');
-		expect(commentSurfaceStatus(rows, 'keep other here').orphanedCount).toBe(1);
+		expect(commentSurfaceStatus(rows).orphanedCount).toBe(1);
 	});
 });
 
@@ -208,27 +208,13 @@ describe('inline suggestions in the highlight ranges', () => {
 
 describe('comment surface status', () => {
 	it('counts orphaned cards', () => {
-		expect(commentSurfaceStatus([], '')).toEqual({ commentCount: 0, orphanedCount: 0, replaceableCount: 0 });
+		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0 });
 		expect(commentSurfaceStatus([
 			comment('a', 0, 'x', { orphaned: true }), comment('b', 0, 'x'), comment('c', 0, 'x'),
-		], 'x')).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1 });
+		])).toEqual({ commentCount: 3, orphanedCount: 1 });
 	});
 
-	it('counts as replaceable only orphaned comments whose quote remains in the text', () => {
-		const deleted = commentsInDocumentOrder([comment('deleted', 0, 'quote')], 'other');
-		const restored = commentsInDocumentOrder([comment('restored', 8, 'quote')], 'restored quote', { restored: 'Refused' });
-		const elsewhere = commentsInDocumentOrder([comment('elsewhere', 20, 'quote')], 'quote elsewhere');
-		const refused = commentsInDocumentOrder([comment('refused', 8, 'quote')], 'refused quote', { refused: 'Refused' });
-
-		expect(deleted[0].detached).toBe(true);
-		expect(commentSurfaceStatus(deleted, 'other')).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
-		for (const rows of [restored, elsewhere, refused]) {
-			expect(rows[0].detached).toBe(false);
-			expect(commentSurfaceStatus(rows, 'quote')).toMatchObject({ orphanedCount: 1, replaceableCount: 1 });
-		}
-	});
-
-	it('offers recovery for a returned quote while keeping the collapsed anchor at its last line', () => {
+	it('keeps the collapsed anchor of a lost comment at its last line when its quote returns', () => {
 		const original = comment('deleted', 4, 'quote', { to: 4, drawn: true });
 		const goneText = 'The  fox';
 		const returnedText = 'The  fox; quote returned';
@@ -236,14 +222,12 @@ describe('comment surface status', () => {
 		const returned = commentsInDocumentOrder([original], returnedText);
 
 		expect(gone[0]).toMatchObject({ orphaned: true, detached: true });
-		expect(commentSurfaceStatus(gone, goneText).replaceableCount).toBe(0);
 		expect(returned[0]).toMatchObject({ orphaned: true, detached: true });
 		expect(canvasCommentHighlights(returned, returnedText, null, undefined)).toMatchObject([{ id: 'deleted', from: 4, to: 4, point: true }]);
-		expect(commentSurfaceStatus(returned, returnedText).replaceableCount).toBe(1);
 	});
 
 	it('counts only open threads for the header pill', () => {
-		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })], 'x').commentCount).toBe(1);
+		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })]).commentCount).toBe(1);
 	});
 });
 
@@ -371,7 +355,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		const text = 'Lunch is at noon. Train leaves at .';
 		const rows = commentsInDocumentOrder([accepted()], text);
 		expect(rows[0]).toMatchObject({ orphaned: false, detached: false });
-		expect(commentSurfaceStatus(rows, text)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
+		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true }]);
 	});
 
@@ -382,7 +366,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 
 	it('is not counted as text that could not be placed', () => {
 		const rows = commentsInDocumentOrder([accepted()], after);
-		expect(commentSurfaceStatus(rows, after)).toMatchObject({ orphanedCount: 0, replaceableCount: 0, commentCount: 1 });
+		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
 	});
 
 	it('reads as accepted on its new text while its own Accept is in flight and the replacement already stands where the quote was', () => {
@@ -438,65 +422,5 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 			const [row] = commentsInDocumentOrder([insertion(16, { decision: undefined, replies: [] })], inserted, {}, 's2');
 			expect(row).toMatchObject({ orphaned: false, decision: 'accepted', from: 19, to: 25 });
 		});
-	});
-});
-
-describe('placeLostOnLoad: lost comments are placed again in the same live load', () => {
-	const setup = () => { const asks: string[] = []; return { asks, place: placeLostOnLoad((id) => { asks.push(id); return true; }) }; };
-	it('asks nothing when no lost comment has its quote in the text', () => {
-		const { asks, place } = setup(), load = {};
-		place(load, 'doc', commentSurfaceStatus([comment('a', 0, 'x')], 'x').replaceableCount);
-		place(load, 'doc', commentSurfaceStatus([comment('a', 0, 'gone', { orphaned: true })], 'x').replaceableCount);
-		expect(asks).toEqual([]);
-	});
-	it('asks once when one is, and not again while it stays lost in the same load', () => {
-		const { asks, place } = setup(), load = {};
-		const lost = commentSurfaceStatus([comment('a', 0, 'x', { orphaned: true })], 'x').replaceableCount;
-		place(load, 'doc', lost);
-		place(load, 'doc', lost);
-		expect(asks).toEqual(['doc']);
-		place({}, 'doc', lost);
-		expect(asks).toEqual(['doc', 'doc']);
-	});
-	it('places a comment that loses its text after load in the same load, without a reload', () => {
-		const { asks, place } = setup(), load = {}, text = 'Intro\nConfirm the page\nEnd';
-		const status = (comments: DocComment[], body: string) => commentSurfaceStatus(comments, body);
-		place(load, 'doc', status([comment('a', 6, 'Confirm the page')], text).replaceableCount);
-		expect(asks).toEqual([]);
-		// Its text is deleted: the session marks it lost. Nothing to place while the quote is gone; its card shows it at the nearest line.
-		const deleted = status([comment('a', 6, 'Confirm the page', { orphaned: true })], 'Intro\n\nEnd');
-		expect(deleted).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
-		place(load, 'doc', deleted.replaceableCount);
-		expect(asks).toEqual([]);
-		// The text comes back while it is still lost: the same load asks the session to place it.
-		place(load, 'doc', status([comment('a', 6, 'Confirm the page', { orphaned: true })], text).replaceableCount);
-		expect(asks).toEqual(['doc']);
-		// Placed, then another comment is lost later in the same load: one more pass, for it.
-		place(load, 'doc', 0);
-		place(load, 'doc', status([comment('b', 0, 'Intro', { orphaned: true })], text).replaceableCount);
-		expect(asks).toEqual(['doc', 'doc']);
-	});
-	it('asks again in the same load only when more are lost than it last asked about', () => {
-		const { asks, place } = setup(), load = {};
-		place(load, 'doc', 1);
-		place(load, 'doc', 1);
-		place(load, 'doc', 2);
-		place(load, 'doc', 2);
-		expect(asks).toEqual(['doc', 'doc']);
-	});
-	it('asks again in the same load only when the session could not take the ask', () => {
-		let taken = false;
-		const asks: string[] = [], place = placeLostOnLoad((id) => { asks.push(id); return taken; }), load = {};
-		place(load, 'doc', 1);
-		taken = true;
-		place(load, 'doc', 1);
-		place(load, 'doc', 1);
-		expect(asks).toEqual(['doc', 'doc']);
-	});
-	it('waits for a live session and a loaded document', () => {
-		const { asks, place } = setup();
-		place(undefined, 'doc', 1);
-		place({}, null, 1);
-		expect(asks).toEqual([]);
 	});
 });

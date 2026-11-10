@@ -22,9 +22,9 @@ it('scrolls a picked card on the canvas that is taller than the window until its
 	const bounds = document.createElement('div');
 	bounds.innerHTML = '<div class="cm-scroller"><div class="cm-content"></div></div>';
 	const scroller = bounds.querySelector<HTMLElement>('.cm-scroller')!;
-	const clip = document.createElement('div');
-	clip.className = 'drawer-comments';
-	scroller.append(clip);
+	const column = document.createElement('div');
+	column.className = 'drawer-comments';
+	scroller.append(column);
 	document.body.append(bounds);
 	const windowHeight = 900, card = { top: 250, bottom: 250 + 1085 + 95 };
 	let scrolled = 0;
@@ -35,7 +35,7 @@ it('scrolls a picked card on the canvas that is taller than the window until its
 		// The column's own box on the canvas is no view: it sits at the top of the text and has no height.
 		return { top: 0, bottom: 0 } as DOMRect;
 	});
-	component = mount(DocMarginStack, { target: clip, props: { bounds, pinned: [thread('a')], selectedId: 'a', card: snippet } });
+	component = mount(DocMarginStack, { target: column, props: { bounds, pinned: [thread('a')], selectedId: 'a', card: snippet } });
 	flushSync();
 
 	// Send ends inside the window, under the header: not left below the fold, nor scrolled past.

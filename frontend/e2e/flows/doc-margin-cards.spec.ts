@@ -90,13 +90,13 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 	const doc = await open(page, request);
 	await expect(card(page, doc, FIRST)).toBeVisible();
 	// The lowest card sits below the visible document; the cards scroll with it, so moving focus into one may scroll the document but never moves a card off its text.
-	const clipTop = await page.evaluate(() => {
-		const clip = document.querySelector<HTMLElement>('.drawer-comments.margin-clip')!;
+	const columnScroll = await page.evaluate(() => {
+		const column = document.querySelector<HTMLElement>('.drawer-comments.in-margin')!;
 		const lowest = [...document.querySelectorAll<HTMLElement>('[data-margin-card]')].sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
 		lowest.querySelector<HTMLElement>('button, textarea, [contenteditable]')?.focus();
-		return clip.scrollTop;
+		return column.scrollTop;
 	});
-	expect(clipTop, 'the column itself did not scroll').toBe(0);
+	expect(columnScroll, 'the column itself did not scroll').toBe(0);
 	const [first] = await geometry(page, doc.ids);
 	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
 });
@@ -133,7 +133,7 @@ test('@flow:doc-margin-cards a thread whose text was deleted keeps its card at t
 	await page.keyboard.press('Backspace');
 	await expect(card(page, doc, FIRST)).toHaveCount(1);
 	await expect(card(page, doc, FIRST).locator('.ct.orphaned')).toHaveCount(1);
-	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('Original text deleted');
+	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('This text isn’t in the document');
 	expect(await page.locator('.margin-aside-orphans, .orphans-button').count()).toBe(0);
 });
 

@@ -87,33 +87,14 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 
 /**
  * Shared comment state for the document surface: the header's comment count, and its lost comments. The orphaned
- * count is the list's 'Text changed' group, so a resolved thread is never in it. The replaceable count is the part of
- * that group a placement reload can place: an orphaned unresolved comment whose quote remains in the text.
+ * count is the list's 'Text changed' group, so a resolved thread is never in it. Placing lost comments again is the
+ * live placement's (`docCommentPlacement.ts`).
  */
-export function commentSurfaceStatus(comments: DocComment[], text: string) {
+export function commentSurfaceStatus(comments: DocComment[]) {
 	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
 		orphanedCount: comments.filter(lost).length,
-		replaceableCount: comments.filter((comment) => {
-			const quote = anchoredQuote(comment);
-			return lost(comment) && !!quote && text.includes(quote);
-		}).length,
-	};
-}
-
-/**
- * Places lost comments again: when the status reports any whose quote is still in the text (`replaceableCount`), the
- * live session is asked to re-resolve them (`reload`, which says whether it asked). In one live load it asks again only
- * when that count rises, so a comment lost mid-session gets its own pass, and one the pass can't place is not asked
- * about again until the next load.
- */
-export function placeLostOnLoad(reload: (artifactId: string) => boolean) {
-	let asked: object | null = null, askedCount = 0;
-	return (load: object | undefined, artifactId: string | null, replaceableCount: number): void => {
-		if (asked === load) askedCount = Math.min(askedCount, replaceableCount);
-		if (!load || !artifactId || !replaceableCount || (asked === load && replaceableCount <= askedCount)) return;
-		if (reload(artifactId)) { asked = load; askedCount = replaceableCount; }
 	};
 }
 

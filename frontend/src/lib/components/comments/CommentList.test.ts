@@ -156,7 +156,7 @@ it('shows a deleted-text card its quote once, in the card, with no quote line ab
 	expect(card('a').textContent!.split('The deleted words').length - 1).toBe(1);
 	expect(card('a').querySelector('[data-comment-jump]')).toBeNull();
 	expect(card('a').querySelector('.quote')?.textContent).toBe('“The deleted words”');
-	expect(card('a').querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
+	expect(card('a').querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 	// A card whose text only changed keeps the line that takes the reader to it.
 	expect(card('b').querySelector('[data-comment-jump]')?.textContent).toContain('Changed words');
 });

@@ -7,7 +7,7 @@
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -23,7 +23,7 @@
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
 	import { handleViewerFailure } from '$lib/docViewerFailure';
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
-	import { bindViewerSession, placeLostWhenLive, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
+	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
@@ -111,8 +111,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
-	const commentStatus = $derived(commentSurfaceStatus(listedComments, editText));
-	placeLostWhenLive(reloadPlacements, () => liveConnection === 'connected' ? liveSession : undefined, () => loadedArtifactId, () => commentStatus.replaceableCount);
+	const commentStatus = $derived(commentSurfaceStatus(listedComments));
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
