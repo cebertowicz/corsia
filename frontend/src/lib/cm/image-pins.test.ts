@@ -135,4 +135,16 @@ describe('image pins', () => {
 		sign.click();
 		expect(onFocus).toHaveBeenCalledWith(['gone'], sign, expect.any(MouseEvent));
 	});
+
+	it('keeps the deleted passage sign’s full hit target within a narrow scroller', async () => {
+		const layout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+		layout.getClientRects = () => [] as unknown as DOMRectList;
+		layout.getBoundingClientRect = () => box(0, 0, 0, 0)() as DOMRect;
+		const { view } = mount('A long line.\n', StateField.define({ create: () => Decoration.none, update: (value) => value }));
+		view.scrollDOM.getBoundingClientRect = box(0, 0, 393, 600);
+		view.contentDOM.getBoundingClientRect = box(20, 0, 373, 600);
+		vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 390, right: 390, top: 40, bottom: 60 });
+		await show(view, [{ from: 1, to: 1, id: 'gone', point: true }]);
+		expect(pins(view)[0].style.left).toBe('371px');
+	});
 });

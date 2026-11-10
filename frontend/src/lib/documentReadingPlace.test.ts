@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt } from './documentReadingPlace';
 import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
@@ -134,6 +134,15 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 const off = (painted: number[], top: number, px = 1) => painted.filter((at) => Math.abs(at - top) > px);
 
 describe('keepPlaceWhenEditorMoves', () => {
+	it('anchors after a clipped paragraph when that paragraph can rewrap above the first whole line', async () => {
+		const page = pane();
+		await page.readAt(1000);
+		const block = page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop);
+		const anchor = placeAnchorAt(page.view, page.screen.header, page.screen.height);
+		expect(anchor.from).toBe(page.view.lineBlockAt(block.to + 1).from);
+		page.stop();
+	});
+
 	it('holds the reader\'s line on screen while the review bar eases open mid-document', async () => {
 		const page = pane();
 		const top = await page.readAt(2000);

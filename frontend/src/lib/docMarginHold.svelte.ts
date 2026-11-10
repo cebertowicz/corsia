@@ -22,9 +22,12 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 	// is that thread's row, so the text just clicked stays where it was and its card comes beside it (the cards above it stack up from
 	// that row); else the top row. Rows between the top and the picked one rewrap taller as the text narrows, and would push it away.
 	let wasMargin = false, wasPane = collapsed.current, stopHold: (() => void) | null = null;
+	let panelPlace: { view: EditorView; pos: number; offset: number; table: boolean } | null = null;
 	$effect.pre(() => {
 		const now = margin(), pane = collapsed.current;
 		if (now === wasMargin && pane === wasPane) return;
+		const returning = pane && !wasPane && now === wasMargin;
+		if (!returning) panelPlace = null;
 		wasPane = pane;
 		wasMargin = now;
 		stopHold?.();
@@ -43,13 +46,23 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const table = drawnTableAt(view, pos);
 		let row: { pos: number } | null = null;
 		if (table && picked) row = tableRowAtHeight(view, table, y);
-		else if (table) ({ row, from: pos } = placeAnchorAt(view, box.top, box.bottom));
+		else if (!picked) {
+			const next = placeAnchorAt(view, box.top, box.bottom);
+			// If one paragraph fills the view, retain the character at the edge, not its off-screen start.
+			if (table || next.from !== view.lineBlockAt(pos).from) pos = next.from;
+			row = next.row;
+		}
 		if (row) pos = row.pos;
 		// A blank line at the top does not rewrap and holds nothing the reader reads; anchor the first text row below it instead.
 		const doc = view.state.doc;
 		let line = doc.lineAt(pos);
 		while (line.length === 0 && line.number < doc.lines) line = doc.line(line.number + 1);
 		if (line.from > pos) pos = view.posAtCoords({ x, y: (view.coordsAtPos(line.from)?.top ?? box.top) + 2 }, false);
+		const returningPlace = returning && panelPlace?.view === view ? panelPlace : null;
+		if (returningPlace) {
+			pos = returningPlace.pos;
+			row = returningPlace.table ? { pos } : null;
+		}
 		// The anchor's row is read from the browser's own layout of its character (a DOM range), not from the editor's height estimates, which can lag a frame while the text rewraps.
 		const rowTop = (): number | null => {
 			if (row) {
@@ -63,8 +76,9 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 			const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
 			return rect.height ? rect.top : null;
 		};
-		const offset = rowTop();
+		const offset = returningPlace?.offset ?? rowTop();
 		if (offset === null) return;
+		panelPlace = !pane ? { view, pos, offset, table: !!row } : null;
 		const hold = (here: number | null) => { if (here !== null && Math.abs(here - offset) > 0.5) scroller.scrollTop += here - offset; };
 		// A width change leaves the editor's height estimates for the lines it is not drawing stale until its next measure, which would be a frame late: measure first, then hold.
 		const observer = new ResizeObserver(() => {
@@ -79,9 +93,13 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		});
 		observer.observe(view.contentDOM);
 		observer.observe(scroller);
-		const timer = setTimeout(() => stopHold?.(), 1500);
-		// The reader taking over (scrolling, pressing a card, typing) ends the hold, or its next resize would pull them back.
-		const takeOver = () => stopHold?.();
+		const timer = setTimeout(() => observer.disconnect(), 1500);
+		// Keep the opening anchor for the return unless the reader acts elsewhere in the meantime.
+		const takeOver = (event: Event) => {
+			if (event.target instanceof Element && event.target.closest('[aria-label="Toggle panel"]')) return;
+			panelPlace = null;
+			stopHold?.();
+		};
 		for (const kind of TAKE_OVER) document.addEventListener(kind, takeOver, { capture: true, passive: true });
 		stopHold = () => {
 			observer.disconnect(); clearTimeout(timer); stopHold = null;

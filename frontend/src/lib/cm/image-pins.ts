@@ -97,7 +97,8 @@ export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement,
 			const end = view.coordsAtPos(view.state.doc.lineAt(range.from).to, -1);
 			if (!end) return [];
 			const scroller = view.scrollDOM.getBoundingClientRect(), content = view.contentDOM.getBoundingClientRect();
-			const x = Math.min(end.right + PIN_RADIUS + 4, content.right - PIN_RADIUS);
+			// The 44px hit target extends 22px from the centre; keep it inside the scroller too.
+			const x = Math.min(end.right + PIN_RADIUS + 4, content.right - PIN_RADIUS, scroller.right - 2 * PIN_RADIUS);
 			return [{ range, x: x - scroller.left + view.scrollDOM.scrollLeft, y: (end.top + end.bottom) / 2 - scroller.top + view.scrollDOM.scrollTop }];
 		}
 

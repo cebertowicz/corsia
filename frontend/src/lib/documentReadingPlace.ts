@@ -53,6 +53,9 @@ export function placeAnchorAt(view: EditorView, edge: number, bottom: number): {
 		const next = tableRowAtHeight(view, table!, row.rect.bottom);
 		if (next && next.pos !== row.pos) row = next;
 		else if (block.to < view.state.doc.length) [row, from] = [null, view.lineBlockAt(block.to + 1).from];
+	} else if (!row && view.documentTop + block.top < edge - 0.5 && view.documentTop + block.bottom < bottom && block.to < view.state.doc.length) {
+		// A partially visible paragraph may rewrap; hold the first whole line after it instead.
+		from = view.lineBlockAt(block.to + 1).from;
 	}
 	return { from: row ? row.pos : from, row: row || null };
 }
