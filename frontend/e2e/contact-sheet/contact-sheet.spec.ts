@@ -18,6 +18,17 @@ async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'botto
     current.scrollTop = scroll === 'top' ? 0 : current.scrollHeight;
   }, { selector, scroll });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  // CodeMirror allows scrolling past the document end. Align its last rendered text
+  // with the viewport bottom instead of capturing the blank scroll-past-end area.
+  if (scroll === 'bottom') {
+    await page.locator(selector).evaluate(content => {
+      if (!content.classList.contains('cm-content')) return;
+      const scroller = content.closest('.cm-scroller');
+      const last = [...content.querySelectorAll('.cm-line')].filter(line => line.textContent?.trim()).at(-1);
+      if (scroller && last) scroller.scrollTop += last.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom + 12;
+    });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  }
 }
 
 async function capture(page: Page, request: APIRequestContext, name: string, output: string, selectedWidths?: number[]) {
