@@ -80,6 +80,7 @@ vi.mock('$lib/documentImagePlace', async (importOriginal) => {
 });
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
+import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 import { updateDocumentOpenCapability } from '$lib/ws/presence';
 import { threadWorkspaces, openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab, setActiveTab, splitWidth } from '$lib/stores/artifactWorkspace';
@@ -309,7 +310,7 @@ describe('ArtifactLeaf legacy discussion compatibility', () => {
 });
 
 describe('ArtifactLeaf in-canvas comments', () => {
-	it('shows an orphan marker and opens its list inside the canvas without changing the right pane', async () => {
+	it('keeps an orphan in its own card, counted on the pill, and opens its list inside the canvas without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
 		// jsdom lays nothing out, so give the document column the width a wide canvas has: wide enough for the inline drawer.
 		const measure = HTMLElement.prototype.getBoundingClientRect;
@@ -323,7 +324,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'), { timeout: MOUNT_WAIT_MS });
 			paneOpen.set(true);
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
@@ -331,6 +332,38 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			expect(document.body.querySelector('.popover')).toBeNull();
 			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 			expect(get(paneOpen)).toBe(true);
+			expect(host.querySelector('[data-doc-comments-drawer] [data-comment-id="orphan"] .ct.orphaned')).not.toBeNull();
+		} finally {
+			wide.mockRestore();
+		}
+	});
+
+	it('opens the resolved threads from the header control beside the margin column, and only from it', async () => {
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		const wide = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
+		giveRangesLayout();
+		try {
+			mocks.fetchContent.mockResolvedValue({ text: 'Document text', revision: 'r-1', writable: true, artifact: { id: 'art-resolved' } });
+			mocks.setComments({ 'art-resolved': [
+				{ id: 'open', from: 0, to: 8, anchor: 'Document', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] },
+				{ id: 'done', from: 9, to: 13, anchor: 'text', author: 'you', text: 'settled', at: 'now', resolved: true, replies: [] },
+			] });
+			openArtifactTab(THREAD, { path: '/resolved.md', title: 'resolved.md' });
+			render();
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'), { timeout: MOUNT_WAIT_MS });
+			if (!host.querySelector('.doc [data-doc-comments-drawer]')) { host.querySelector<HTMLButtonElement>('.comment-status')!.click(); flushSync(); }
+			const entry = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('[data-resolved-entry]'); expect(found).not.toBeNull(); return found!; });
+			expect(entry.textContent).toBe('Resolved · 1');
+			expect(entry.getAttribute('aria-expanded')).toBe('false');
+			expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+			entry.click(); flushSync();
+			await vi.waitFor(() => expect(document.body.querySelector('.resolved-drawer [data-comment-id="done"]')).not.toBeNull());
+			expect(entry.getAttribute('aria-expanded')).toBe('true');
+			expect(host.querySelector('.doc [data-doc-comments-drawer] [data-comment-id="open"]')).not.toBeNull();
 		} finally {
 			wide.mockRestore();
 		}
@@ -375,7 +408,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			await vi.waitFor(() => expect(mocks.loadComments).toHaveBeenCalledWith('art-clean'));
 			mocks.loadComments.mockClear();
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-clean', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 2, to: 3 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
-			await vi.waitFor(() => expect(get(docSaveDrafts)[tab.instanceId]?.editText).toBe('# remote edit'), { timeout: 1_500 });
+			await vi.waitFor(() => expect(get(docSaveDrafts)[tab.instanceId]?.editText).toBe('# remote edit'), { timeout: MOUNT_WAIT_MS });
 			expect(mocks.fetchContent).toHaveBeenCalledTimes(2);
 			expect(mocks.loadComments).toHaveBeenCalledWith('art-clean');
 		} finally {
@@ -461,7 +494,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-dirty-race', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 0, to: 1 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
 			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull());
 			setDraftText(target, '# local draft');
-			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).toBeNull(), { timeout: 1_500 });
+			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).toBeNull(), { timeout: MOUNT_WAIT_MS });
 			expect(get(docSaveDrafts)[tab.instanceId]).toMatchObject({ editText: '# local draft', savedText: '# saved' });
 		} finally {
 			stopPresence();
@@ -478,10 +511,10 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		const stopPresence = startDocPresence();
 		try {
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('local draft'));
+			await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('local draft'), { timeout: MOUNT_WAIT_MS });
 			mocks.fetchContent.mockClear();
 			emit('doc_activity', { type: 'doc_activity', artifact_id: 'art-dirty', thread_id: 'agent-a', agent: 'Reviewer', kind: 'edit', span: { from: 0, to: 8 }, comment_id: null, revision: 'r-2', at: new Date().toISOString() });
-			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull());
+			await vi.waitFor(() => expect(host.querySelector('.participant-trigger.arrival')).not.toBeNull(), { timeout: MOUNT_WAIT_MS });
 			expect(mocks.fetchContent).not.toHaveBeenCalled();
 			expect(get(docSaveDrafts)[tab.instanceId].editText).toBe('# local draft');
 		} finally {

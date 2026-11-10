@@ -106,7 +106,7 @@ test('quiet save narrow Reload precedence 393 component layout', async ({ page, 
 		original.style.display = 'none';
 		const target = document.createElement('div'); original.after(target);
 		mount(Status, { target, props: { ready: true, stale: true, readonly: false,
-			saveStatus: 'saving', commentCount: 1, orphanedCount: 0, artifactId: null,
+			saveStatus: 'saving', commentCount: 1, artifactId: null,
 			targetInstanceId: null, freshness: null, onOpenComments: () => {} } });
 	});
 	await expect(page.getByRole('button', { name: 'File changed · Reload' })).toBeVisible();

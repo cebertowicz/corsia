@@ -355,12 +355,12 @@
 		border-radius: 8px;
 	}
 	/* Padding-top would be added to a sticky child's `top`, so the lead-in under the header is a spacer; sticky chrome
-	   pins at `--sticky-top`, 8px under it. Bottom padding also carries `--margin-overhang`: the comment margin's room. */
+	   pins at `--sticky-top`, 8px under it. */
 	.messages {
 		flex: 1; overflow-y: auto; min-width: 0;
 		--sticky-top: calc(var(--header-bottom) + 8px);
 		--messages-lead: calc(var(--header-bottom) + 24px);
-		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px + var(--margin-overhang, 0px));
+		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {

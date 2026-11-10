@@ -46,8 +46,6 @@ export const commentLoads = writable<Record<string, CommentLoad>>({});
 const placements = trackPlacements(docComments);
 /** Retry a live row's placement: one new positions request for its document. */
 export const retryPlacement = (commentId: string) => placements.retry(commentId);
-/** Re-resolve orphaned live placements without reloading or changing document text. */
-export const reloadPlacements = (artifactId: string) => placements.reload(artifactId);
 
 /**
  * The one way a lane hold changes what is shown. The document's current rows, edited, go through the placement

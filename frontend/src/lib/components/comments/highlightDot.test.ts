@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { placeHighlightDot } from './highlightDot';
 
-afterEach(() => { document.body.replaceChildren(); document.documentElement.style.removeProperty('--space-1'); Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.restoreAllMocks(); });
+afterEach(() => { document.body.replaceChildren(); Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.restoreAllMocks(); });
 
-it('keeps the unread marker when the previous line leaves only a 5.9px band', () => {
-	document.documentElement.style.setProperty('--space-1', '4px');
+it('pins the New sign over the highlight\'s end, out of text flow, even when the previous line leaves only a narrow band', () => {
+	vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(28);
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(5);
 	const scroller = document.createElement('div');
 	scroller.className = 'messages';
 	scroller.innerHTML = '<div>previous <span>highlight</span></div>';
@@ -18,7 +19,11 @@ it('keeps the unread marker when the previous line leaves only a 5.9px band', ()
 	const cleanup = placeHighlightDot(body, anchor);
 	const marker = document.querySelector<HTMLElement>('[data-highlight-dot]')!;
 	expect(marker.style.display).toBe('inline-flex');
-	expect(marker.querySelector('.ct-new-dot')).not.toBeNull();
+	expect(marker.style.position).toBe('fixed');
+	expect(marker.querySelector('.ct-new-dot'), 'the dot is gone').toBeNull();
+	expect(marker.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('New reply');
+	expect(marker.textContent).toBe('New');
+	expect(marker.style.left).toBe('52px');
 	cleanup();
 	Reflect.deleteProperty(Range.prototype, 'getClientRects');
 });

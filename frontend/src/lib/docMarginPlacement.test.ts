@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { GAP, placeCards, revealShift } from './docMarginPlacement';
-import { MARGIN_MIN, hasRoomForMargin } from './docCommentSurfaceState.svelte';
+import { MARGIN_MIN, hasRoomForMargin, marginFits } from './docCommentSurfaceState.svelte';
+import { PANE_DRAWER_WIDTH } from './artifactSplitLayout';
+import { paneOverlay } from './stores/artifactCanvas';
 
 const card = (id: string, y: number, h = 100) => ({ id, y, h });
 const overlaps = (items: { id: string; h: number }[], tops: Record<string, number>) =>
@@ -54,19 +56,37 @@ describe('hasRoomForMargin: the one width rule', () => {
 		expect(hasRoomForMargin(1440)).toBe(true);
 		expect(hasRoomForMargin(393)).toBe(false);
 	});
+
+	describe('under a Workspace panel the shell shows over the canvas', () => {
+		afterEach(() => paneOverlay.set(false));
+		const root = (width: number) => ({ getBoundingClientRect: () => ({ width }) }) as HTMLElement;
+
+		it('counts only the canvas the panel leaves uncovered', () => {
+			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH, true)).toBe(true);
+			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH - 1, true)).toBe(false);
+			expect(hasRoomForMargin(MARGIN_MIN, true)).toBe(false);
+		});
+
+		it('reads the shell\'s answer when none is passed, so marginFits agrees with the surface', () => {
+			expect(marginFits(root(800), false)).toBe(true);
+			paneOverlay.set(true);
+			expect(hasRoomForMargin(800)).toBe(false);
+			expect(marginFits(root(800), false)).toBe(false);
+			expect(marginFits(root(MARGIN_MIN + PANE_DRAWER_WIDTH), false)).toBe(true);
+		});
+	});
 });
 
-describe('revealShift: the text scrolls so a grown card shows whole', () => {
-	const clip = { top: 100, bottom: 700 };
-	it('is nothing when the card already ends inside the clip with its gap', () => {
-		expect(revealShift({ top: 300, bottom: 500 }, clip)).toBe(0);
-		expect(revealShift({ top: 300, bottom: 700 - GAP }, clip)).toBe(0);
+describe('revealShift: the text scrolls so a grown card shows its lower end', () => {
+	const view = { bottom: 700 };
+	it('is nothing when the card already ends inside the view with its gap', () => {
+		expect(revealShift({ bottom: 500 }, view)).toBe(0);
+		expect(revealShift({ bottom: 700 - GAP }, view)).toBe(0);
 	});
-	it('is how far the card reaches below the clip, gap included', () => {
-		expect(revealShift({ top: 500, bottom: 720 }, clip)).toBe(720 + GAP - 700);
+	it('is how far the card reaches below the view, gap included', () => {
+		expect(revealShift({ bottom: 720 }, view)).toBe(720 + GAP - 700);
 	});
-	it('never moves the card top above the clip top', () => {
-		expect(revealShift({ top: 120, bottom: 900 }, clip)).toBe(20);
-		expect(revealShift({ top: 90, bottom: 900 }, clip)).toBe(0);
+	it('is that far even for a card taller than the view, whose top then goes above it', () => {
+		expect(revealShift({ bottom: 1900 }, view)).toBe(1900 + GAP - 700);
 	});
 });

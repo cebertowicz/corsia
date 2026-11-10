@@ -12,7 +12,7 @@
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './comments/comment-link.css';
 
-	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column: no rail, since the card is its frame. */ margin?: boolean } = $props();
+	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false, picked = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean } = $props();
 	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
 	const replies = $derived(chatReplyIndex($messages, threadId));
 	const agentName = $derived.by(() => {
@@ -52,8 +52,8 @@
 	<div class="chat-comment-threads" class:margin>
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
-				{#if !detached}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatReplyDrafts.get(comment.id), (text) => chatReplyDrafts.set(comment.id, text)} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				{#if !detached && !margin}<CommentQuote quote={comment.quote} />{/if}
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatReplyDrafts.get(comment.id), (text) => chatReplyDrafts.set(comment.id, text)} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
 				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">

@@ -63,9 +63,9 @@ test('@flow:doc-margin-defects Send reply of a card near the bottom of the windo
 	await wrap.locator('textarea').fill('Is the intro the right place?');
 	const send = wrap.getByRole('button', { name: 'Send reply' });
 	await expect.poll(async () => {
-		const [box, clip, clipScroll] = [await send.boundingBox(), await page.locator('.drawer-comments.margin-clip').boundingBox(), await page.locator('.drawer-comments.margin-clip').evaluate((el) => el.scrollTop)];
-		return !!box && !!clip && box.y + box.height <= clip.y + clip.height + 0.5 && clipScroll === 0;
-	}, { message: 'Send reply inside the column, and the column itself not scrolled' }).toBe(true);
+		const [box, canvas, columnScroll] = [await send.boundingBox(), await page.locator('.cm-scroller').boundingBox(), await page.locator('.drawer-comments.in-margin').evaluate((el) => el.scrollTop)];
+		return !!box && !!canvas && box.y + box.height <= canvas.y + canvas.height + 0.5 && columnScroll === 0;
+	}, { message: 'Send reply inside the visible document, and the column itself not scrolled' }).toBe(true);
 	await send.click();
 	await expect(wrap).toContainText('Is the intro the right place?');
 	// A suggestion with a reply stays an open conversation once decided: accept it, then Resolve it with the server refusing.

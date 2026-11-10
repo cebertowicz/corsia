@@ -8,7 +8,7 @@
 	import { leaveRow } from '$lib/actions/leaveRow';
 	import { commentTurn } from '$lib/ws/commentTurn';
 	type Comment = CommentThreadData & { review?: boolean };
-	/** A card whose text was deleted draws that text itself (quote and "no longer in the document"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
+	/** A card whose text was deleted draws that text itself (quote and "This text isn’t in the document"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
 	const showsOwnQuote = (comment: Comment) => !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
@@ -119,7 +119,8 @@
 <div class="list" bind:this={listElement} data-doc-path={docPath} role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
 	{#if documentOrder}
 		{#each rows as row (row.key ?? row.comments[0].id)}
-			{#if row.key !== null}{@render groupHead?.(row.comments)}{/if}
+			<!-- In the margin an image's thumbnail and caption sit inside the top of its first card; in a list they head the image's cards. -->
+			{#if row.key !== null && !restCards}{@render groupHead?.(row.comments)}{/if}
 			{#each row.comments as comment (comment.id)}
 			{@const region = comment.regionNumber != null}
 			<!-- An image comment's card and its mark light up together; the card itself selects its tag, so it needs no link. -->
@@ -134,6 +135,7 @@
 				onfocusout={region && onHover ? leaveCard : undefined}
 			>
 				{#snippet header()}
+					{#if restCards && row.key !== null && comment === row.comments[0]}{@render groupHead?.(row.comments)}{/if}
 					{#if !region && !showsOwnQuote(comment)}
 						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
 							{#if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
@@ -145,7 +147,7 @@
 			{/each}
 		{/each}
 	{:else}
-	{#each current as comment, index (comment.id)}{#if !underTextChanged && sectionOf(comment) !== (current[index - 1] && sectionOf(current[index - 1]))}<h3>{sectionOf(comment)}</h3>{/if}<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} drawerCard hideOrphan={documentOrder && !underTextChanged} />{/each}
+	{#each current as comment, index (comment.id)}{#if !underTextChanged && sectionOf(comment) !== (current[index - 1] && sectionOf(current[index - 1]))}<h3>{sectionOf(comment)}</h3>{/if}<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} drawerCard {flat} hideOrphan={documentOrder && !underTextChanged} />{/each}
 	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} diagram={diagramOf?.(comment) ?? false} focused={focusedIds ? focusedIds.includes(comment.id) : focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} drawerCard hideOrphan={documentOrder && !underTextChanged} />{/each}</details>{/if}
 	{/if}
 </div>

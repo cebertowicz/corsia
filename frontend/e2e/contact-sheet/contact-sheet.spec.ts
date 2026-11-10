@@ -20,6 +20,16 @@ async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'botto
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
+// A passing notice (such as a sent confirmation) can arrive after the screen settles, so each shot dismisses it first.
+// Pinned notices are part of the screen's state and stay.
+async function dismissToasts(page: Page) {
+  const close = page.locator('.toast:not(.toast--pinned) .toast-close');
+  for (let left = await close.count(); left > 0; left = await close.count()) {
+    await close.first().click();
+    await expect(close).toHaveCount(left - 1);
+  }
+}
+
 async function capture(page: Page, request: APIRequestContext, name: string, output: string, selectedWidths?: number[]) {
   if (!/^[a-z0-9-]+$/.test(name) || !path.isAbsolute(output)) throw new Error('Invalid scenario or non-absolute output path');
   const scenario = await import(`./${name}.ts`);
@@ -70,6 +80,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
       await expect(captured.locator('html')).toHaveAttribute('data-theme', theme);
       for (const scroll of ['top', 'bottom'] as const) {
         await scrollScreen(captured, scenario.scrollAnchor, scroll);
+        await dismissToasts(captured);
         const file = `${width}-${theme}-${scroll}.png`;
         await captured.screenshot({ path: path.join(folder, file), animations: 'disabled' });
         figures.push(`<figure><figcaption>${state ? `${state} · ` : ''}${width}px · ${theme} · ${scroll}</figcaption><img loading="lazy" src="${href(file)}" alt="${state ? `${state}, ` : ''}${width} pixels, ${theme}, ${scroll}"></figure>`);

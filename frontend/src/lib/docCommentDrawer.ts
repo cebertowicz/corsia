@@ -43,47 +43,6 @@ export function observeSheetTyping(panel: HTMLElement | null, update: (typing: b
 	return () => { panel.removeEventListener('focusin', onIn); panel.removeEventListener('focusout', onOut); };
 }
 
-/** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
-export function drawerFooterHeight(node: HTMLElement) {
-	const doc = node.closest<HTMLElement>('.doc');
-	const update = () => doc?.style.setProperty('--doc-drawer-footer-height', `${node.getBoundingClientRect().height}px`);
-	update();
-	const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
-	observer?.observe(node);
-	return { destroy() { observer?.disconnect(); doc?.style.removeProperty('--doc-drawer-footer-height'); } };
-}
-
-/**
- * Keeps keyboard focus in the drawer when its footer takes it away: Send now is disabled while it sends and the footer
- * leaves once nothing is left to send, and either drops focus to the page, where Escape would close the document.
- * Focus lost to nowhere from a control that was disabled or removed, or held inside the footer when it goes, moves to
- * `home`, a stable place in the drawer that nothing activates, so a following Enter does nothing and Escape closes
- * only the drawer.
- */
-export function footerFocusHome(node: HTMLElement, home: () => HTMLElement | null | undefined) {
-	let held = false;
-	const land = () => {
-		const target = home();
-		const active = document.activeElement;
-		if (target?.isConnected && (!active || active === document.body)) target.focus({ preventScroll: true });
-	};
-	const onIn = () => { held = true; };
-	const onOut = (event: FocusEvent) => {
-		held = false;
-		const lost = event.target as HTMLElement;
-		if (event.relatedTarget === null && (!lost.isConnected || lost.matches(':disabled'))) queueMicrotask(land);
-	};
-	node.addEventListener('focusin', onIn);
-	node.addEventListener('focusout', onOut);
-	return {
-		destroy() {
-			node.removeEventListener('focusin', onIn);
-			node.removeEventListener('focusout', onOut);
-			if (held || node.contains(document.activeElement)) queueMicrotask(land);
-		},
-	};
-}
-
 /** The card or image thumbnail a click in the drawer landed on, if any: what may open an image over the document. */
 export function clickedOpener(event: MouseEvent): Element | null {
 	return event.target instanceof Element ? event.target.closest('[data-comment-id], [data-region-thumb]') : null;

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import { liveDocumentBinding } from '$lib/cm/live-document-binding';
 	import { EditorView, keymap } from '@codemirror/view';
-	import { EditorState, Compartment, Transaction, type ChangeDesc } from '@codemirror/state';
+	import { EditorState, Compartment, type ChangeDesc } from '@codemirror/state';
 	import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { GFM } from '@lezer/markdown';
@@ -15,18 +15,21 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, coveredByMove, openCommentIds, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, openCommentIds, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { imagePins } from '$lib/cm/image-pins';
+	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
+	import { jumpToComment, type JumpTarget } from '$lib/cm/comment-jump';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import { captureDocumentPlace, dispatchKeepingPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
 
@@ -84,7 +87,7 @@
 		highlights?: CommentRange[];
 		presence?: PresenceRange[];
 		pendingComment?: CommentSelection | null;
-		scrollTo?: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
+		scrollTo?: JumpTarget | null;
 		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
@@ -234,6 +237,8 @@
 				suggestionMarks(() => ({ focus: (id, click) => onAnchorFocus?.(id, liveAnchor(id), true, click), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
 				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
+				imagePins({ onFocus: focusWidgetComments }),
+				commentNewSigns,
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,
@@ -379,15 +384,11 @@
 	});
 
 	$effect(() => {
-		const target = scrollTo;
-		if (!view || !target) return;
-		revealTypedUnder(view, [target]);
-		scrollToRange(view, target.from, target.to, target.origin);
-		if (target.focus) {
-			view.dispatch({ selection: { anchor: Math.min(target.from, view.state.doc.length) }, annotations: Transaction.userEvent.of('select.doc-comment') });
-			if (window.matchMedia?.('(pointer: coarse)').matches) host?.focus({ preventScroll: true });
-			else view.focus();
-		}
+		const target = scrollTo, editor = view;
+		if (!editor || !target) return;
+		// Only a new target moves the reader. The jump reads other state (the visible band asks whether a sheet is over the
+		// text); tracked, a sheet closing would replay the jump and pull focus back to the text from the sheet's opener.
+		untrack(() => jumpToComment(editor, target, host));
 	});
 </script>
 

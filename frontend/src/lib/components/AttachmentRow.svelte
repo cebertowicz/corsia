@@ -138,7 +138,7 @@
 {/snippet}
 {#snippet chipFace()}
 	{@render glyph()}
-	<span class="text"><span class="head"><span class="title" class:split={middleEllipsis}>{#if middleEllipsis}{@const parts = splitFileName(card.title)}<span class="name-start" use:fitMiddleEllipsis={parts.head}>{parts.head}</span>{#if parts.tail}<span class="name-end">{parts.tail}</span>{/if}{:else}{card.title}{/if}</span>{#if newMarker}<NewMarker />{/if}</span></span>
+	<span class="text"><span class="head"><span class="title" class:split={middleEllipsis}>{#if middleEllipsis}{@const parts = splitFileName(card.title)}<span class="name-start" use:fitMiddleEllipsis={parts.head}>{parts.head}</span>{#if parts.tail}<span class="name-end">{parts.tail}</span>{/if}{:else}{card.title}{/if}</span>{#if newMarker}<NewMarker dot />{/if}</span></span>
 	{#if chipAside}<span class="chip-aside">{chipAside}</span>{/if}
 {/snippet}
 

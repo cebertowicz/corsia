@@ -3,7 +3,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
-import { openResolved } from '../support/commentDrawer';
+import { openResolved, resolvedEntry } from '../support/commentDrawer';
 import { isolatedDb } from '../support/imageRegionComments';
 import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
 
@@ -78,15 +78,15 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	}
 	await shot(page, 'rs-13b-thread-replies-rendered', info);
 
-	// The resolved thread sits under its own entry; opening it lists that thread and leaves the open list as it was.
-	const resolvedEntry = drawer.locator('[data-aside-kind="resolved"]');
-	await expect(resolvedEntry).toContainText('Resolved · 1');
+	// The resolved thread sits behind its own control; opening it lists that thread and leaves the open list as it was.
+	const resolved = resolvedEntry(drawer);
+	await expect(resolved).toContainText('Resolved · 1');
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	await openResolved(drawer);
-	await expect(drawer.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(1);
+	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(1);
 	await shot(page, 'rs-14-resolved-entry-open', info);
-	await resolvedEntry.click();
-	await expect(drawer.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
+	await resolved.click();
+	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
 
 	// A writable open thread shows its reply field in place; a margin card beside the text shows it only once picked.
@@ -159,7 +159,7 @@ journey('with nothing resolved the drawer offers no Resolved entry and no filter
 	await pill(page).click();
 	const drawer = drawerOf(page);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
-	await expect(drawer.locator('[data-aside-kind="resolved"]')).toHaveCount(0);
+	await expect(resolvedEntry(drawer)).toHaveCount(0);
 	await expect(drawer.locator('[data-drawer-filter]')).toHaveCount(0);
 	await settled(page);
 	await shot(page, 'rs-20-nothing-resolved', info);
