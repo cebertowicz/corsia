@@ -415,15 +415,6 @@ def _no_held_usage_between_tests():
     yield
 
 
-@pytest.fixture(autouse=True)
-def _document_versions_recorded_before_teardown():
-    """A document's version is recorded after its save returns; none may outlive its test's workspace."""
-    yield
-    recorder = sys.modules.get("infra.history_record")
-    if recorder is not None:
-        recorder.wait_recorded()
-
-
 @pytest.fixture(autouse=True, scope="session")
 def _imported_bindings_bound_before_any_patch():
     """Load modules that bind patched dependencies by name before test fixtures run.

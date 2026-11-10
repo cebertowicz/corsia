@@ -106,12 +106,13 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	}, { times: 1 });
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toBeDisabled();
-	await expect.poll(count).toBe(before + 1);
+	// The refusal recorded nothing; the restore keeps the outside edit it replaces, then itself.
+	await expect.poll(count).toBe(before + 2);
 	if (out) await page.screenshot({ path: path.join(out, `history-restoring-${width}.png`), animations: 'disabled' });
 	await other.locator('.cm-content').click();
 	await other.keyboard.press('ControlOrMeta+End');
 	await other.keyboard.type(' Typed while restoring.');
-	await expect.poll(count, { timeout: 15_000 }).toBe(before + 2);
+	await expect.poll(count, { timeout: 15_000 }).toBe(before + 3);
 	release();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toHaveCount(0, { timeout: 30_000 });
 	// Typing just after a restore may show within the restore's version, so look for it in either of the newest two.
@@ -123,6 +124,6 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	const log = execFileSync('git', ['-C', root, 'log', '--format=%B%x00', '-n', '2', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\0');
 	expect(log[1]).toContain('Restored');
 	await page.waitForTimeout(2500);
-	expect(count()).toBe(before + 2);
+	expect(count()).toBe(before + 3);
 	expect(fs.readFileSync(file, 'utf8')).toContain('Typed while restoring.');
 });

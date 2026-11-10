@@ -17,7 +17,7 @@ def after_save(
 ) -> SaveResult:
     """Report the save, then do the instruction-only follow-up a landed guidance commit owes (the lesson
     observation, the carry-in record). A document gets neither, and keeps a line only when a version
-    could not be recorded (this save's, or an earlier queued one's) or it was not written. The log line
+    could not be recorded or it was not written. The log line
     and product event name the kind, so guidance and document saves stay apart in the metrics."""
     if target.document and result.outcome in ("written", "unchanged", "history-off", "ordinary") and not result.unsynced:
         # A document's writer has nothing to act on when its version was recorded, or never would be.

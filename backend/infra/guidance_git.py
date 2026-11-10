@@ -1,11 +1,11 @@
 """The single writer of the workspace history: guidance (issue #2272) and documents (C11).
 
 :func:`save_with_history` checks a save once (text, the person's ignore rules, the file unchanged since the
-caller read it), writes the caller's bytes and records them through :func:`infra.history_record.record`
-under one lock under ``.git/`` (every server process): outside edits at its paths first, as
-``Reason: unrecorded``, then the save. Guidance records before it answers and then sweeps other dirty
-guidance; a document is recorded after it answers. A fault never fails a save, and no path writes over
-a file that changed since the caller read it.
+caller read it), then under one lock under ``.git/`` (every server process) writes the caller's bytes and
+records them through :func:`infra.history_record.record`: outside edits at its paths first, as
+``Reason: unrecorded``, then the save. Guidance and documents alike are recorded before the save answers;
+guidance then sweeps other dirty guidance. A fault never fails a save, and no path writes over a file that
+changed since the caller read it.
 """
 
 from __future__ import annotations
@@ -277,10 +277,8 @@ def save_with_history(
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
-    A document target (no lesson check, carry-in record or sweep of other guidance) is written, and its
-    version recorded after the save answers (``queued``); its line names only a save history could not
-    record: this one when ``atomic`` or the history lock is busy, else an earlier queued save of it,
-    which the record retries.
+    A document target is recorded the same way, with no lesson check, carry-in record or sweep of other
+    guidance; its line names only a save history could not record.
     """
     lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
@@ -315,7 +313,7 @@ def _save(
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
     write: Callable[[Path, bytes], object], timing: dict[str, float],
 ) -> SaveResult:
-    from infra.history_record import Version, on_disk, put_back, record, save_queued, write_checked
+    from infra.history_record import Version, put_back, record, write_checked
 
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
@@ -337,12 +335,8 @@ def _save(
         return unrecorded("history-off", why or "", SAVE_HISTORY_OFF.format(why=why))
     try:
         rels = {path: path.resolve(strict=False).relative_to(repo).as_posix() for path in writes}
-        # A plain document save answers without Git: its ignore rules are read as it is recorded.
-        if not (target.document and not atomic) and ignored(repo, list(rels.values()), tray=target.registered):
+        if ignored(repo, list(rels.values()), tray=target.registered):
             return unrecorded("history-off", "ignored", SAVE_HISTORY_OFF.format(why="the path is ignored by Git"))
-        if target.document:  # recorded after the save answers, so never under the lock here
-            return save_queued(repo, writes, rels, author=author, message=message, expected=expected, atomic=atomic,
-                               write=write, tray=target.registered)
         directory = git_dir(repo)
         handle, timing["lock_wait_ms"] = _acquire(repo, directory)
     except _LockBusy as exc:
@@ -351,9 +345,7 @@ def _save(
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
     with _locked(handle) as db:
         if isinstance(prior := write_checked(writes, expected, write), SaveResult):
-            if atomic and prior.outcome == "stale":  # a refused restore keeps the outside edit behind it
-                record(repo, [on_disk(rels, author, message, target.kind)], directory)
-            return prior
+            return prior  # the edit that made it stale is recorded by the next save at its path
         started = time.monotonic()
         version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, target.kind)
         landed_all, lines, fault = record(repo, [version], directory)
@@ -365,7 +357,8 @@ def _save(
         landed = landed_all[0]
         if landed is not None:
             lines += ([done.format(sha=landed.sha[:7])] if done and landed.changed and not landed.unsynced else []) + landed.unsynced_line()
-        lines += _sweep_others(repo, workspace, db, set(rels.values()))
+        if not target.document:
+            lines += _sweep_others(repo, workspace, db, set(rels.values()))
         if landed is None or not landed.changed:
             return SaveResult("unchanged", line="\n".join(lines) or None)
         return SaveResult(
