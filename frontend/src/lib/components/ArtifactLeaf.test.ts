@@ -62,7 +62,6 @@ vi.mock('$lib/stores/docComments', async () => ({
 	hasUnread: (await import('$lib/stores/docCommentProjection')).hasUnread,
 	rangeFor: mocks.rangeFor,
 	remapComments: () => {},
-	reloadPlacements: () => false,
 	loadComments: mocks.loadComments,
 	addReply: mocks.addReply,
 	markThreadViewed: mocks.markThreadViewed,

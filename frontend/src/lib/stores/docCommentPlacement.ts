@@ -24,7 +24,8 @@ const lost = (row: DocComment) => row.orphaned && !row.resolved;
 /**
  * One live document's placement. Composed only by the comments store, and writes only its rows:
  * there is no second collection, timer or retry registry. Cleanliness is read from the session's
- * durability bookkeeping (4.1), never kept here.
+ * durability bookkeeping (4.1), never kept here. Lost quotes are re-placed when comments are shown again
+ * (a load, or a held comment arriving, shown or released).
  */
 class LivePlacement {
 	readonly session: LiveDocumentSession;
@@ -32,10 +33,8 @@ class LivePlacement {
 	private seq = 0;
 	private inFlight: { seq: number; requestId: string; reload: boolean } | null = null;
 	private marked: { reload: boolean } | null = null;
-	/** A reload is queued or in flight. It runs on its own, with nothing shown: a refusal is logged, and the next trigger asks again. */
+	/** A reload is queued or in flight. A refusal is logged; the next time comments are shown can ask again. */
 	private reloading = false;
-	/** How many lost comments with their words in the text the last reload was asked for in this live load (`placeLost`). */
-	private lostAsked = 0;
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
@@ -57,7 +56,7 @@ class LivePlacement {
 
 	holds(id: string): boolean { return this.current().some(row => row.id === id); }
 
-	/** A comments load: rows whose server range is new or changed, or that are not placed, are asked for. */
+	/** Comments are shown again: rows whose server range is new or changed, or that are not placed, are asked for. */
 	show(next: DocComment[]): void {
 		const previous = new Map(this.current().map(row => [row.id, row]));
 		let ask = false;
@@ -74,8 +73,9 @@ class LivePlacement {
 		const ids = new Set(next.map(row => row.id));
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
 		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows }));
-		if (ask) this.ask();
-		this.placeLost();
+		const text = this.session.text.toString();
+		if (rows.some(row => { const quote = anchoredQuote(row); return lost(row) && !!quote && text.includes(quote); })) this.reload();
+		else if (ask) this.ask();
 	}
 
 	retry(): void {
@@ -83,8 +83,8 @@ class LivePlacement {
 		this.ask(true);
 	}
 
-	/** Re-resolve the live document's orphaned quotes through this placement lifecycle. */
-	reload(): boolean {
+	/** Re-resolve lost quotes when comments are shown again through this placement lifecycle. */
+	private reload(): boolean {
 		if (this.destroyed || this.session.connection !== 'connected' || this.reloading) return false;
 		this.reloading = true;
 		this.write(markReloading);
@@ -125,7 +125,7 @@ class LivePlacement {
 
 	/** A disconnect releases the request; rows keep their state and reconnect sync asks again. */
 	private observed(): void {
-		if (this.session.connection === 'connected') { this.placeLost(); return; }
+		if (this.session.connection === 'connected') return;
 		const reload = this.inFlight?.reload || this.marked?.reload;
 		if (reload) this.settleReload();
 		this.inFlight = null;
@@ -146,7 +146,7 @@ class LivePlacement {
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 			if (request.reload) {
 				console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
-				this.settleReload(); this.lostAsked = 0; // the next edit, load, answer or reconnect asks again
+				this.settleReload();
 			}
 			this.next();
 		} else if (frame.type === 'doc_opened') {
@@ -204,7 +204,6 @@ class LivePlacement {
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
 		if (reload) this.settleReload();
 		this.next();
-		this.placeLost();
 	}
 
 	private place(ranges: Range[], snapshotText: string, reload = false, states?: DocumentFrame['states']): void {
@@ -231,26 +230,9 @@ class LivePlacement {
 
 	private settleReload(): void { this.reloading = false; }
 
-	/**
-	 * Places lost comments again whose words are in the text, through `reload`. A row is lost when the text its server range
-	 * held is deleted; words that come back (an undo, a paste, retyping) are new text the range never held, so only a
-	 * reload, which looks for the quote, finds them. Asked once per live load, and again when more are lost than it last
-	 * asked about, so one a reload can't place is not asked about again in this load. A refused reload asked about none.
-	 */
-	private placeLost = (): void => {
-		if (this.destroyed || this.session.connection !== 'connected') return;
-		const rows = this.current().filter(lost);
-		const text = rows.length ? this.session.text.toString() : '';
-		const count = rows.filter(row => { const quote = anchoredQuote(row); return !!quote && text.includes(quote); }).length;
-		this.lostAsked = Math.min(this.lostAsked, count);
-		if (count > this.lostAsked && this.reload()) this.lostAsked = count;
-	};
-
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {
 		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
-		// After the edit's transaction: its words may bring a lost comment's quote back.
-		if (this.current().some(lost)) queueMicrotask(this.placeLost);
 		if (!this.positions.size) return;
 		this.write(rows => rows.map(row => {
 			const at = row.drawn ? this.positions.get(row.id) : undefined;
@@ -292,9 +274,6 @@ export function trackPlacements(rows: Rows) {
 		},
 		retry(commentId: string): void {
 			for (const placement of live.values()) if (placement.holds(commentId)) placement.retry();
-		},
-		reload(artifactId: string): boolean {
-			return live.get(artifactId)?.reload() ?? false;
 		},
 	};
 }
