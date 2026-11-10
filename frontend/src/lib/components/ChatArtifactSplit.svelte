@@ -52,7 +52,9 @@
 			// The split's compact padding reserves the overlay, so measure its full box before subtracting it once below.
 			canvasWidth = el.getBoundingClientRect().width;
 		});
-		ro.observe(el);
+		// Watch the box that is kept: the compact padding can leave in the same re-layout
+		// that shrinks the box, so the content box alone may not change and never report.
+		ro.observe(el, { box: 'border-box' });
 		return () => ro.disconnect();
 	});
 
