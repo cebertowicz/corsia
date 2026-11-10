@@ -313,6 +313,8 @@
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
+		/* Reload is the one action a changed file needs, so while it shows the row wraps within the header, as a held sender's does, rather than push Reload past the left edge. */
+		.document-tools:has(.stale-control) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
 	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }

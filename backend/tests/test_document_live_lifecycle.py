@@ -36,10 +36,10 @@ async def test_evict_drains_started_write_and_blocks_reopen_until_finished(owner
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
     entered, release = asyncio.Event(), asyncio.Event()
     write = entry.lane.write
-    async def held(text, prior_hash):
+    async def held(text, prior_hash, *actor_and_reason):
         entered.set()
         await release.wait()
-        await write(text, prior_hash)
+        await write(text, prior_hash, *actor_and_reason)
     entry.lane.write = held
     actor = WriteActor(scope["owner"], "project-alpha")
     call = asyncio.create_task(entry.lane.submit(Operation("replace", content="DRAINED", actor=actor)))
@@ -101,7 +101,7 @@ async def test_refused_clear_retries_as_priority_lane_item(ownership_scope, tmp_
         if len(attempts) == 1:
             raise StoreRefused("clear refused")
         return discard(op_id, *args)
-    async def no_write(text, prior_hash):
+    async def no_write(text, prior_hash, *_operation):
         raise OSError("write refused")
     monkeypatch.setattr(entry.live.store, "discard", refused_once)
     entry.lane.write = no_write

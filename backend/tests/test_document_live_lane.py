@@ -22,7 +22,11 @@ async def open_lane(tmp_path, *, validate=None, write=None):
         if validate:
             validate(text)
 
-    async def writer(text, prior_hash):
+    async def writer(text, prior_hash, operation=None):
+        from doceditor.live_lane import Operation
+
+        # Every lane write (lane item, recovery choice, damage save) passes the operation it records.
+        assert operation is None or isinstance(operation, Operation), operation
         if write is not None:
             await asyncio.to_thread(write, path, text)
         else:

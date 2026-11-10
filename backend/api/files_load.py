@@ -120,16 +120,17 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     finally:
         db.close()
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
-    from infra.guidance_targets import guidance_target
+    from infra.guidance_targets import document_target, guidance_target
 
-    # Only guidance files are recorded. Whether this file has history is decided by its one owner,
-    # api/files.py content, which also asks Git whether history is off for the whole workspace, off
-    # the database pool.
+    # Guidance files and documents are recorded, a faulted one included so History shows its fault.
+    # Whether this file has history is decided by its one owner, api/files.py content, which also asks
+    # Git whether history is off for the whole workspace, off the database pool.
     target = guidance_target(p, config.WORKSPACE)
-    recorded = target is not None and not target.fault
+    document = document_target(p, config.WORKSPACE) if target is None else None
+    recorded = target is not None or document is not None
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "_recorded": recorded,
+            "freshness": freshness, "_recorded": recorded, "_document": (p, document) if document else None,
             "_notification": notification}
 
 

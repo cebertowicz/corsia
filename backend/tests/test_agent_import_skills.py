@@ -248,7 +248,7 @@ def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monke
         raise OSError("disk full")
 
     offers = _offers(home)
-    monkeypatch.setattr(skill_install, "save_guidance", partial)
+    monkeypatch.setattr(skill_install, "save_with_history", partial)
     assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "failed"
     assert not (home[1] / "skills" / "rfc-writer").exists()
     monkeypatch.undo()
@@ -266,7 +266,7 @@ def test_a_save_without_history_is_installed_and_passes_its_line_on_unchanged(ho
             path.write_bytes(data)
         return SaveResult(outcome, "history fault", line="Saved, but the commit failed. Report this.")
 
-    monkeypatch.setattr(skill_install, "save_guidance", unrecorded)
+    monkeypatch.setattr(skill_install, "save_with_history", unrecorded)
     installed = _install(home, _ids(_offers(home), "rfc-writer"))[0]
     assert (installed["outcome"], installed["history_outcome"], installed["guidance_history"]) == (
         "installed", outcome, "Saved, but the commit failed. Report this.")
@@ -278,7 +278,7 @@ def test_a_save_that_writes_nothing_keeps_its_line(home, monkeypatch, outcome, s
     from infra import skill_install
     from infra.guidance_git import SaveResult
 
-    monkeypatch.setattr(skill_install, "save_guidance", lambda _writes, **_kwargs: SaveResult(outcome, line="why"))
+    monkeypatch.setattr(skill_install, "save_with_history", lambda _writes, **_kwargs: SaveResult(outcome, line="why"))
     result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
     assert (result["outcome"], result["history_outcome"], result["guidance_history"]) == (state, outcome, "why")
 
@@ -300,7 +300,7 @@ def test_a_commit_with_an_unsynced_index_is_shown_and_never_removed(home, monkey
         return SaveResult("written", "index-unsynced", sha="a" * 40, line="index sync failed",
                           unsynced=("skills/rfc-writer/SKILL.md",))
 
-    monkeypatch.setattr(skill_install, "save_guidance", landed)
+    monkeypatch.setattr(skill_install, "save_with_history", landed)
     result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
     assert (result["outcome"], result["history_outcome"], result["guidance_history"]) == (
         "installed", "written", "index sync failed")

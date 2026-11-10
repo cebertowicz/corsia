@@ -30,6 +30,8 @@ async def test_live_edit_matches_legacy_receipt(ownership_scope, tmp_path, monke
         path.write_text(text)
         return success
     monkeypatch.setattr(filesystem_edit, "managed_write", plain_write)
+    # A closed document's write goes through its history writer, which writes the same way.
+    monkeypatch.setattr("tools.file_write_completion.managed_write", plain_write)
     scope = ownership_scope
     manager, entry, context = await opened(scope, tmp_path, monkeypatch)
     path = entry.live.path

@@ -283,7 +283,7 @@ def _save_guidance_calls() -> dict[str, list[ast.Call]]:
             continue
         for node in ast.walk(ast.parse(source.read_text())):
             name = getattr(node.func, "id", getattr(node.func, "attr", None)) if isinstance(node, ast.Call) else None
-            if name == "save_guidance":
+            if name == "save_with_history":
                 found.setdefault(relative, []).append(cast(ast.Call, node))
     return found
 
