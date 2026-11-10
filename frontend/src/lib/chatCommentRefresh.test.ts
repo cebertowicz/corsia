@@ -155,24 +155,12 @@ it('shows a mid-turn update\'s answers in their threads without waiting for the 
   stop();
 });
 
-it('keeps a written answer hidden until the server says which sections it placed', async () => {
-  messages.set([row('answer', 3, { content: 'Intro\n\n[c1.1] placed\n\n[c1.9] unknown' })]);
-  let answer: (value: unknown) => void = () => {};
-  vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { answer = resolve; })));
-  const stop = watchChatCommentThreads(50);
-  state.handlers.get('step_text')!({ thread_id: 'thread', message_id: 'answer', content: 'Intro\n\n[c1.1] placed\n\n[c1.9] unknown' });
-  expect(get(messages)[0].chat_visible_content).toBe('Intro');
-  answer({ ok: true, json: async () => ({ messages: [{ id: 'answer', chat_answer_cids: ['c1.1'], chat_visible_content: 'Intro\n\n[c1.9] unknown' }] }) });
-  await vi.waitFor(() => expect(get(messages)[0].chat_visible_content).toBe('Intro\n\n[c1.9] unknown'));
-  stop();
-});
-
-it('leaves a written message without answer sections alone', () => {
-  messages.set([row('plain', 3, { content: 'See [c1.1] inline' })]);
+it('does not replace the server projection on a saved step', () => {
+  messages.set([row('answer', 3, { chat_answer_cids: ['c1.1'], chat_visible_content: 'Intro\n\n[c1.9] unknown' })]);
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   const stop = watchChatCommentThreads(50);
-  state.handlers.get('step_text')!({ thread_id: 'thread', message_id: 'plain', content: 'See [c1.1] inline' });
-  expect(get(messages)[0].chat_visible_content).toBeUndefined();
+  expect(state.handlers.has('step_text')).toBe(false);
+  expect(get(messages)[0].chat_visible_content).toBe('Intro\n\n[c1.9] unknown');
   expect(fetcher).not.toHaveBeenCalled();
   stop();
 });

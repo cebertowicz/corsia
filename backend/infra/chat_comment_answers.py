@@ -10,6 +10,32 @@ from infra.chat_comment_ids import CID_PATTERN, parse_cid
 
 _TAGGED = re.compile(rf"(?:\A|\r?\n[ \t]*\r?\n)([ \t]*(?:\[{CID_PATTERN}\][ \t]*)+)")
 _TAG = re.compile(rf"\[({CID_PATTERN})\]")
+# Hold a possible section boundary, including an incomplete first newline.
+_PARTIAL_TAG = re.compile(
+    r"(?:\A|\r?\n[ \t]*\r?\n)[ \t]*(?:\[(?:c(?:[1-9][0-9]*(?:\.(?:[1-9][0-9]*)?)?)?)?)?$"
+    r"|\r?\n[ \t]*\r?$|\r$"
+)
+
+
+class VisibleAnswerStream:
+    """Hold a possible answer until the saved row establishes its placement."""
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.sent = 0
+
+    def reset(self) -> None:
+        self.text = ""
+        self.sent = 0
+
+    def feed(self, chunk: str) -> str:
+        self.text += chunk
+        tag = _TAGGED.search(self.text)
+        partial = _PARTIAL_TAG.search(self.text)
+        end = min((m.start() for m in (tag, partial) if m), default=len(self.text))
+        visible = self.text[self.sent:end]
+        self.sent = end
+        return visible
 
 
 def parse_answers(text: str, message_id: str) -> dict[str, list[dict[str, str]]]:
@@ -44,6 +70,13 @@ def shown_answer_cids(db: sqlite3.Connection, thread_id: str, message_id: str) -
         f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.assistant_message_id=?",
         (thread_id, message_id),
     )]
+
+
+def projected_saved_content(db: sqlite3.Connection, thread_id: str, message_id: str, text: str | None) -> str | None:
+    """Project a saved message using the same placed-answer index as chat."""
+    if not text or "[c" not in text:
+        return text
+    return visible_answer_content(text, shown_answer_cids(db, thread_id, message_id))
 
 
 def strip_answer_tags(text: str | None) -> str | None:

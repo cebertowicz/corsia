@@ -153,6 +153,10 @@ class TestSessionList:
                 # list so this test tracks the response contract instead of the table shape.
                 item = {key: value for key, value in dict(row).items()
                         if key not in threads_api._LIST_INTERNAL_COLUMNS}
+                message_id = item.pop("last_message_id")
+                content = threads_api.projected_saved_content(db, row["id"], message_id, item["last_message"]) if message_id else None
+                content = threads_api.strip_answer_tags(content)
+                item["last_message"] = content[:100] if content is not None else None
                 item["archived"] = 1 if row["lifecycle_state"] == "archived" and row["archived_reason"] == "user" else 0
                 expected.append(item)
             add_local_only_payload_fields(expected, db=db)

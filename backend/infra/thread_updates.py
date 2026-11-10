@@ -29,7 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.chat_comment_answers import strip_answer_tags
+from infra.chat_comment_answers import projected_saved_content, strip_answer_tags
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -255,7 +255,10 @@ def latest_by_thread_with_attention(
     width = len(_COLUMNS.split(","))
     for row in rows:
         update = _public(tuple(row)[:width])
-        update["summary"] = _summary(update, row["message_content"])
+        content = row["message_content"]
+        if update["kind"] == "marked" and update["message_id"]:
+            content = projected_saved_content(db, update["thread_id"], update["message_id"], content)
+        update["summary"] = _summary(update, content)
         if row["row_key"] == row["display_key"]:
             display[update["thread_id"]] = update
         if row["row_key"] == row["attention_key"]:
@@ -315,8 +318,6 @@ def seen_by_thread(
             "opened": row is not None,
         }
     return seen
-
-
 
 
 def read_newest_cards(

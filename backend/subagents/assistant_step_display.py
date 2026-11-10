@@ -22,12 +22,24 @@ def load_assistant_step_display(
     """Load one Assistant Step with authoritative and legacy result lineage."""
     _db = db or get_db()
     try:
-        return _project_assistant_step(
+        step = _project_assistant_step(
             _lineage_rows(_db, child_thread_id, assistant_step_id), assistant_step_id,
         )
+        step.update(answer_projection(_db, child_thread_id, assistant_step_id, step.get("content", "")))
+        return step
     finally:
         if not db:
             _db.close()
+
+
+def answer_projection(db, thread_id: str, message_id: str, content: str) -> dict:
+    """Project the saved answer placements onto a step frame."""
+    from infra.chat_comment_answers import shown_answer_cids, visible_answer_content
+
+    if "[c" not in content:
+        return {}
+    cids = shown_answer_cids(db, thread_id, message_id)
+    return {"chat_answer_cids": cids, "chat_visible_content": visible_answer_content(content, cids)} if cids else {}
 
 
 def assistant_step_payload(step: dict, *, message_id: str) -> dict:
@@ -38,6 +50,7 @@ def assistant_step_payload(step: dict, *, message_id: str) -> dict:
         "metadata": step.get("metadata") or {},
         "created_at": step["created_at"],
         "seq": step.get("seq"),
+        **{key: step[key] for key in ("chat_answer_cids", "chat_visible_content") if key in step},
     }
 
 

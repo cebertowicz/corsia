@@ -72,6 +72,8 @@ async function queueComments(page: Page, request: any, title: string, count: num
   await expect(row).toBeVisible();
   await chatComposer(page).fill('Start');
   await page.getByRole('button', { name: 'Send message' }).click();
+  // Ensure the first response is held before a later seed replaces the mock queue.
+  await expect.poll(async () => (await (await request.get(`${BACKEND}/api/test/mock-responses`)).json()).call_count).toBe(1);
   for (let index = 0; index < count; index++) await comment(page, target, quotes[index], `Note ${index + 1}`);
   let cids: string[] = [];
   await expect.poll(async () => {
@@ -107,6 +109,7 @@ for (const count of [1, 2]) test(`${count} queued comment(s): an answer sent mid
   // While the Turn still runs, the update adds no chat row and each answer reads in its own thread.
   await expect(page.locator(`[data-message-id="${updateId}"]`)).toHaveCount(0);
   expect(await chatText(page)).not.toContain(answers[0]);
+  if (!narrow(page)) await expect(sidebarThread(page, `Batched comments ${count}`)).not.toContainText(answers[0]);
   await capture(page, `midturn-${count}`);
   for (let index = 0; index < count; index++) {
     const surface = await answerReadsInItsThread(page, row, quotes[index], answers[index]);

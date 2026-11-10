@@ -14,7 +14,7 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 
 from infra.auth import authenticate
-from infra.chat_comment_answers import strip_answer_tags
+from infra.chat_comment_answers import projected_saved_content, strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
@@ -84,12 +84,15 @@ async def list_threads(token: str, archived: int = 0):
         visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
                CASE WHEN {visible} THEN
-                 (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
-               END as last_message
+                 (SELECT m.content FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
+               END as last_message,
+               CASE WHEN {visible} THEN
+                 (SELECT m.id FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
+               END as last_message_id
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
-        params: list = [*identity, user["id"]]
+        params: list = [*identity, *identity, user["id"]]
         if conductor_ids:
             placeholders = ','.join('?' * len(conductor_ids))
             sql += f" AND (s.id NOT IN ({placeholders}) OR NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.status = 'archived'))"
@@ -104,7 +107,10 @@ async def list_threads(token: str, archived: int = 0):
                 item = project_thread(reader, row)
                 for column in _LIST_INTERNAL_COLUMNS:
                     item.pop(column, None)
-                item['last_message'] = strip_answer_tags(item['last_message'])
+                message_id = item.pop('last_message_id', None)
+                content = projected_saved_content(db, row['id'], message_id, item['last_message']) if message_id else None
+                content = strip_answer_tags(content)
+                item['last_message'] = content[:100] if content is not None else None
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'

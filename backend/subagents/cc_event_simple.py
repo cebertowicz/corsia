@@ -107,7 +107,7 @@ async def on_final_call_usage(ctx: CCEventContext, ev: dict) -> None:
 async def on_text_delta(ctx: CCEventContext, ev: dict) -> None:
     ctx.bcast(ctx.child_id, frame(ctx, ev, {
         "type": "text_delta", "thread_id": ctx.child_id,
-        "content": ev.get("text", ""),
+        "content": ctx.live.answer_stream.feed(ev.get("text", "")),
     }))
 
 
