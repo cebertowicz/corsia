@@ -23,7 +23,11 @@ export const emptyCellKey = (state: EditorState) => {
 	return cell ? `${cell.tableFrom}:${cell.row}:${cell.col}` : null;
 };
 
-/** The whole-cell selection the Comment offer is raised for while the open cell is empty, placed as a tap on that cell places it. */
+/**
+ * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed as a tap on that cell places
+ * it; null otherwise. A caret raises this rather than nothing, in the editor's own selection flow and in the widget comment
+ * flow alike, so whichever reports last the answer is the same.
+ */
 export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	const cell = emptyOpenCell(view.state);
 	const widget = cell && drawnTableAt(view, cell.tableFrom);

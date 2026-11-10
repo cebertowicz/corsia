@@ -25,9 +25,8 @@
 	import { imagePins } from '$lib/cm/image-pins';
 	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
-	import { emptyCellSelection } from '$lib/cm/widget-cell-comment';
-	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
-	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import { selectionOffer, type SelectionOffer } from '$lib/cm/selection-offer';
+	import { cardQuoteLabel } from '$lib/cm/widget-cells';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
@@ -73,7 +72,7 @@
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
+		onSelect?: (sel: SelectionOffer | null) => void;
 		/** `click` is the press that opened it, when a pointer did; the card then opens at that point. */
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		/** A caret came to rest in text no comment covers: whatever card was picked lets go. */
@@ -107,19 +106,6 @@
 	const localHistory = [history(), keymap.of(historyKeymap)];
 	let syncing = false;
 	let curHighlights: CommentRange[] = [];
-
-	function emitSelection(v: EditorView) {
-		if (!onSelect) return;
-		const r = v.state.selection.main;
-		if (r.empty) { onSelect(null); return; }
-		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to), { state } = v;
-		onSelect({
-			from: r.from, to: r.to, text,
-			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
-			anchor: composerAnchor(v, r.from, r.to),
-			label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
-		});
-	}
 
 	/**
 	 * Where the new-comment card sits. Once its composer is open the draft's own captured range is the answer, because
@@ -192,10 +178,8 @@
 
 	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
 		const r = v.state.selection.main;
-		if (r.empty) {
-			// A caret in an empty cell's editor has no text to select: the offer there is the whole cell's.
-			const wholeCell = emptyCellSelection(v);
-			if (wholeCell) { caretRule.range(); onSelect?.(wholeCell); return; }
+		const offer = selectionOffer(v, composerAnchor);
+		if (r.empty && !offer) {
 			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to));
 			if (!read) return;
 			onSelect?.(null);
@@ -207,7 +191,7 @@
 			} else if (!hit) onCaretAway?.();
 		} else {
 			caretRule.range();
-			emitSelection(v);
+			onSelect?.(offer);
 		}
 	}
 
