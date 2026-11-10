@@ -127,16 +127,17 @@ describe('the "!" hint', () => {
 	const TEXT_WIDTH = 230;
 	const rect = (left: number, width: number) => ({ ...ROW, left, right: left + width, width, height: 20, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
 
-	/** `editor` is the editor's right edge, `markLeft` where the "!" sits; the hint is placed by its data-side and max-width as the CSS would. */
+	/** `editor` is the editor's right edge, `markLeft` where the "!" sits; the hint is placed by its data-side and left as the CSS would. */
 	function layout(editor: number, markLeft: number, text: { from: string; left: number } | null) {
 		const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
 			if (this.classList.contains('cm-scroller')) return rect(0, editor);
 			if (this.classList.contains('cm-email-added-mark')) return rect(markLeft, 12);
 			if (this.classList.contains('cm-email-cc-add')) return rect(editor - 30, 24);
 			if (!this.classList.contains('cm-email-added-tip')) return rect(0, 0);
-			const wrapped = this.style.whiteSpace === 'normal';
-			const width = wrapped ? Math.min(TEXT_WIDTH, parseFloat(this.style.maxWidth)) : TEXT_WIDTH;
-			return this.getAttribute('data-side') === 'left' ? rect(markLeft - width, width) : rect(markLeft + 12 + 4, width);
+			const side = this.getAttribute('data-side');
+			if (side === 'left') return rect(markLeft - TEXT_WIDTH, TEXT_WIDTH);
+			if (side === 'clamp') return rect(markLeft + parseFloat(this.style.left), TEXT_WIDTH);
+			return rect(markLeft + 12 + 4, TEXT_WIDTH);
 		});
 		// Text before the mark starts at 40 (the value column); `text.from` is a piece of text after the mark, at `text.left`.
 		const ranges = vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
@@ -170,22 +171,34 @@ describe('the "!" hint', () => {
 		restore();
 	});
 
-	it('wraps inside the room over its own address when the address is shorter than the text', () => {
+	it('stays one line on the "!" row, as close to the "!" as fits and inside the editor, when neither side has room for it', () => {
 		const restore = layout(360, 150, null);
-		mount([HEAD[0], 'To: priya@example.com', HEAD[2]], false, ['dana@example.com']);
+		mount([HEAD[0], 'To: a@b.co', HEAD[2]], false, ['dana@example.com']);
 		open();
-		expect(tip().getAttribute('data-side')).toBe('left');
-		expect(tip().style.maxWidth).toBe('110px');
-		expect(tip().getBoundingClientRect().left).toBe(40);
+		expect(tip().getAttribute('data-side')).toBe('clamp');
+		const box = tip().getBoundingClientRect();
+		expect(box.width).toBe(TEXT_WIDTH);
+		expect(box.left).toBe(122);
+		expect(box.right).toBe(352);
+		expect(tip().style.whiteSpace).toBe('');
+		restore();
+	});
+
+	it('does the same with a recipient after the short address on the row, and starts at the left edge of the editor when it is narrower than the hint', () => {
+		const restore = layout(230, 150, { from: 'dana@example.com', left: 170 });
+		mount([HEAD[0], 'To: a@b.co, dana@example.com', HEAD[2]], false, ['dana@example.com']);
+		open();
+		expect(tip().getAttribute('data-side')).toBe('clamp');
+		expect(tip().getBoundingClientRect().left).toBe(8);
 		restore();
 	});
 
 	it('opens leftward, not over the next address on the row, even where there is room on the right', () => {
-		const restore = layout(1000, 200, { from: 'dana@example.com', left: 216 });
+		const restore = layout(1000, 300, { from: 'dana@example.com', left: 316 });
 		mount([HEAD[0], 'To: priya@example.com, dana@example.com', HEAD[2]], false, ['dana@example.com']);
 		open();
 		expect(tip().getAttribute('data-side')).toBe('left');
-		expect(tip().getBoundingClientRect().right).toBe(200);
+		expect(tip().getBoundingClientRect().right).toBe(300);
 		restore();
 	});
 

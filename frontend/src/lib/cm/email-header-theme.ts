@@ -24,7 +24,7 @@ export const emailHeaderTheme = EditorView.theme({
 		'&:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '1px' },
 	},
 	'.cm-email-added-tip': {
-		// On the mark's own row, centered on it, one line unless the room is narrower than the text (see AddedMarkWidget). The ring is a shadow so it adds no height.
+		// On the mark's own row, centered on it, always one line (see AddedMarkWidget for where). The ring is a shadow so it adds no height.
 		display: 'none', position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: '5', width: 'max-content',
 		padding: 'calc(var(--space-1) / 4) var(--space-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', lineHeight: '1.15',
 		boxShadow: 'var(--shadow-chip), 0 0 0 1px var(--border-subtle)', fontWeight: 'var(--fw-regular)', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'default',

@@ -161,21 +161,21 @@ export class AddedMarkWidget extends WidgetType {
 		tip.setAttribute('aria-hidden', 'true');
 		tip.textContent = NOT_ON_EMAIL;
 		mark.append(tip);
-		// The hint sits on the mark's own row: just right of the "!" when nothing else is on the row to its right and it fits,
-		// else ending at the "!" and opening leftward over this entry's own address text only (wrapping if that is narrower than the text).
+		// The hint is one line on the mark's own row, centered on it: just right of the "!" when nothing else is on the row to its right and it fits,
+		// else ending at the "!" and opening leftward over this entry's own address text, else (neither is wide enough) as close to the "!" as fits,
+		// clamped inside the editor's edges, where it may cover other text on that row. It never wraps and never grows past the row.
 		const place = () => {
-			tip.style.maxWidth = '';
-			tip.style.whiteSpace = '';
+			tip.style.left = '';
 			tip.setAttribute('data-side', 'right');
 			const scroller = mark.closest('.cm-scroller')?.getBoundingClientRect();
-			const edge = Math.min(scroller?.right ?? window.innerWidth, window.innerWidth) - 8;
+			const inner = { left: (scroller?.left ?? 0) + 8, right: Math.min(scroller?.right ?? window.innerWidth, window.innerWidth) - 8 };
 			const row = mark.getBoundingClientRect();
 			const { next, start } = rowNeighbours(mark, row);
 			const box = tip.getBoundingClientRect();
-			if (box.right <= Math.min(edge, next ?? edge)) return;
-			tip.setAttribute('data-side', 'left');
-			const room = Math.max(row.left - start, 0);
-			if (box.width > room) { tip.style.maxWidth = `${room}px`; tip.style.whiteSpace = 'normal'; }
+			if (box.right <= Math.min(inner.right, next ?? inner.right)) return;
+			if (box.width <= row.left - start) { tip.setAttribute('data-side', 'left'); return; }
+			tip.setAttribute('data-side', 'clamp');
+			tip.style.left = `${Math.max(inner.left, Math.min(box.left, inner.right - box.width)) - row.left}px`;
 		};
 		const close = () => { mark.removeAttribute('data-open'); document.removeEventListener('pointerdown', outside, true); };
 		const outside = (event: Event) => { if (!mark.contains(event.target as Node)) close(); };

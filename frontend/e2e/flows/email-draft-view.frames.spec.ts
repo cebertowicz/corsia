@@ -54,6 +54,7 @@ const LONG_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>, Priya
 // Priya was not on the email being answered: she sits in Cc here, and in To (with Jordan in Cc) below.
 const CC_ADDED_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>', 'Cc: Priya Raman <priya.raman@example.com>', `Subject: ${SUBJECT}`];
 const BOTH_ADDED_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>, Priya Raman <priya.raman@example.com>', 'Cc: Jordan Lee <jordan.lee@example.com>', `Subject: ${SUBJECT}`];
+const SHORT_ADDED_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>, a@b.co, Marcus Obi <marcus.obi@example.com>', `Subject: ${SUBJECT}`];
 const BAD_TO_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>, priya.raman', `Subject: ${SUBJECT}`];
 const BAD_TO2_HEAD = [FROM, 'To: Dana Whitfield <dana.whitfield@example.com>, priya.raman, dana@', `Subject: ${SUBJECT}`];
 
@@ -79,6 +80,7 @@ const DOCS = {
 	ccadded: CC_ADDED_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
 	bothadded: BOTH_ADDED_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
 	longhead: LONG_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
+	shortadded: SHORT_ADDED_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
 	badto: BAD_TO_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
 	badto2: BAD_TO2_HEAD.join('\n') + `\n\n${REPLY_BODY}\n\n${SIGNATURE}\n`,
 	fresh: [FROM, 'To: Marcus Obi <marcus.obi@example.com>', 'Subject: Brush crew start time for Saturday'].join('\n')
@@ -96,6 +98,7 @@ const REPLY_CHAT = (recipients: string) => ({
 const CHATS: Record<keyof typeof DOCS, { user: string; assistant: string; tail: string }> = {
 	before: REPLY_CHAT('The reply goes to Dana only. Priya was on the earlier emails, so add her if she should see it.'),
 	reply: REPLY_CHAT('The reply goes to Dana only. Priya wasn’t on Dana’s email, so add her if she should see it.'),
+	shortadded: REPLY_CHAT('The reply goes to Dana, a@b.co and Marcus. a@b.co wasn’t on Dana’s email, so remove it if it shouldn’t see it.'),
 	ccadded: REPLY_CHAT('The reply goes to Dana, with Priya in Cc. Priya wasn’t on Dana’s email, so remove her if she shouldn’t see it.'),
 	bothadded: REPLY_CHAT('The reply goes to Dana and Priya, with Jordan Lee in Cc. Priya and Jordan weren’t on Dana’s email, so remove them if they shouldn’t see it.'),
 	longhead: REPLY_CHAT('The reply goes to Dana, Priya, Marcus and Jordan Ellis, with Scout Troop 214 in Cc. Only Dana was on her email.'),
@@ -442,6 +445,37 @@ const AFTER: Scenario[] = [
 		const centre = markBox.y + markBox.height / 2;
 		expect(box.y).toBeGreaterThanOrEqual(centre - rowHeight / 2 - 0.5);
 		expect(box.y + box.height).toBeLessThanOrEqual(centre + rowHeight / 2 + 0.5);
+		await page.waitForTimeout(300);
+	} },
+	{ name: '4g2-added-hint-short', doc: 'shortadded', fixture: 'reply4', thin: true, keepPointer: true, act: async (page) => {
+		// A short address with a recipient after it on its row: neither side of the "!" has room, so the hint stays one line on that row, inside the editor.
+		const mark = page.locator('.cm-email-added-mark').first();
+		await expect(mark).toBeVisible();
+		if (isPhone(page)) await mark.click(); else await mark.hover();
+		const tip = page.locator('.cm-email-added-tip').first();
+		await expect(tip).toBeVisible();
+		await expect(tip).toHaveText('Not on the email you’re replying to.');
+		const box = (await tip.boundingBox())!;
+		const markBox = (await mark.boundingBox())!;
+		const facts = await mark.evaluate((node) => {
+			const line = node.closest('.cm-line')!;
+			const row = node.getBoundingClientRect();
+			const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+			let after = false;
+			for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+				if (!text.textContent?.includes('Marcus')) continue;
+				const range = document.createRange();
+				range.selectNodeContents(text);
+				after = [...range.getClientRects()].some((box) => box.bottom > row.top && box.top < row.bottom);
+			}
+			return { rowHeight: parseFloat(getComputedStyle(line).lineHeight), recipientAfterOnRow: after, editorRight: node.closest('.cm-scroller')!.getBoundingClientRect().right };
+		});
+		const centre = markBox.y + markBox.height / 2;
+		expect(box.y).toBeGreaterThanOrEqual(centre - facts.rowHeight / 2 - 0.5);
+		expect(box.y + box.height).toBeLessThanOrEqual(centre + facts.rowHeight / 2 + 0.5);
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(facts.editorRight);
+		fs.writeFileSync(path.join(OUT, `${PHASE}-4g2-added-hint-short-${isPhone(page) ? '393-dark' : '1440-light'}.hint.json`), JSON.stringify({ tip: box, mark: markBox, ...facts }, null, 1));
 		await page.waitForTimeout(300);
 	} },
 	{ name: '4h-added-cc', doc: 'ccadded', fixture: 'reply4', thin: true },
