@@ -97,7 +97,7 @@ export const docTheme = EditorView.theme({
 	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
 	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
 	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
-	// A mark on a whole table cell: the text highlight's amber underline, drawn inside the cell so its own border stays as it is.
+	// A mark on an empty table cell, which has no text to highlight: the text highlight's amber underline, drawn inside the cell so its own border stays as it is.
 	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { boxShadow: 'inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent)' },
 	'.cm-md-table td.cm-comment-focused, .cm-md-table th.cm-comment-focused, .cm-md-table td.cm-comment-pending, .cm-md-table th.cm-comment-pending': { boxShadow: 'inset 0 -2px 0 var(--amber)' },
 	// The rail is a positioned layer holding one empty element per commented line, which the margin cards read their line from;

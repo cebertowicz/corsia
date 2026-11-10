@@ -123,6 +123,16 @@ function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLElement {
 	return insert;
 }
 
+/** A cell's visible text nodes, leaving out a diagram's or image's own text and the blank nodes between elements. */
+function cellTextNodes(cell: HTMLElement): Text[] {
+	const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, {
+		acceptNode: (node) => node.parentElement?.closest('svg, [contenteditable="false"]') || !(node as Text).data.trim() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+	});
+	const nodes: Text[] = [];
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+	return nodes;
+}
+
 export function paintTable(el: HTMLElement, base: number, src: string, marks: Mark[]) {
 	const cells = tableCells(src);
 	for (const mark of marks) {
@@ -153,6 +163,19 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 					seen += length;
 				}
 				if (startSet) { wrapRange(range, mark); continue; }
+			}
+			// A whole cell is marked on its text, as a text comment is; only a cell with no text is marked as a cell.
+			const texts = mark.suggestion ? [] : cellTextNodes(cell);
+			if (texts.length) {
+				for (const text of texts) {
+					// Another whole-cell comment already drew this text: it joins that mark, in paint order, as it did on the cell.
+					const drawn = text.parentElement;
+					if (drawn?.classList.contains('cm-comment-wrap') && drawn.childNodes.length === 1 && !drawn.dataset.suggestionId) { drawn.classList.add(...markClasses(mark.kind)); addCommentId(drawn, mark); continue; }
+					const range = document.createRange();
+					range.selectNodeContents(text);
+					wrapRange(range, mark);
+				}
+				continue;
 			}
 			cell.classList.add(...markClasses(mark.kind));
 			addCommentId(cell, mark);
