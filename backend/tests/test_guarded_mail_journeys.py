@@ -16,7 +16,7 @@ import pytest
 from tests.test_google_email import (  # fixtures and existing provider fake
     EMAIL, GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
 )
-from tools import mail_guard_runtime
+from tools import google_email, mail_guard_runtime
 from tools.google_email import EmailDraftTool, EmailSendTool
 from tools.reviewed_drafts import working_root
 
