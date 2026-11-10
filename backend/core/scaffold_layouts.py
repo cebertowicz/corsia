@@ -39,7 +39,15 @@ def _workspace_layout() -> _Layout:
                 "\n# Project source checkouts are separate repositories.\n"
                 "projects/*/source/\n"
                 "\n# Finder metadata is not workspace truth.\n"
-                ".DS_Store\n",
+                ".DS_Store\n"
+                "\n# Credentials never enter workspace history.\n"
+                ".env\n"
+                ".env.*\n"
+                "*.pem\n"
+                "*.key\n"
+                "*.p12\n"
+                "id_rsa*\n"
+                "id_ed25519*\n",
             ),
             (
                 "shared/INDEX.md",
