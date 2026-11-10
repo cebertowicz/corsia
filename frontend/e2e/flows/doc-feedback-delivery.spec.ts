@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { showAllThreads, showResolved } from '../support/commentDrawer';
+import { closeComments, showAllThreads, showResolved } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
@@ -227,7 +227,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	// The re-opened comment is held for the owner: the header's Send is its one sender, reachable once the drawer is closed.
-	await page.getByRole('region', { name: 'Document comments', exact: true }).getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
 	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
 	else {
 		await expect(headerSend(page)).toHaveText('Send 1 comment');

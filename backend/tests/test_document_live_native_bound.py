@@ -38,12 +38,12 @@ async def test_native_stalled_write_persists_pending_receipt_then_resolves(owner
     entered, release = asyncio.Event(), asyncio.Event()
     reason = "late write refused: volume is read-only"
     writer = entry.lane.write
-    async def stalled(text, prior_hash):
+    async def stalled(text, prior_hash, *actor_and_reason):
         entered.set()
         await release.wait()
         if outcome == "fails":
             raise OSError(reason)
-        await writer(text, prior_hash)
+        await writer(text, prior_hash, *actor_and_reason)
     monkeypatch.setattr(entry.lane, "write", stalled)
     path = str(entry.live.path)
     await ReadFileTool(workspace=scope["workspace"]).execute(path, **context)

@@ -292,7 +292,7 @@ class FaultController:
         from doceditor.live_store import StoreRefused
         if kind == "rename":
             original = entry.lane.write
-            async def rename_refused(text, prior_hash):
+            async def rename_refused(text, prior_hash, *_actor_and_reason):
                 entry.lane.write = original
                 raise PermissionError("test-only canonical rename refusal")
             entry.lane.write = rename_refused

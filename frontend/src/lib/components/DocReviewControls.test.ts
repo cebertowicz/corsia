@@ -26,7 +26,7 @@ async function settle() { await new Promise((resolve) => setTimeout(resolve, 0))
 function render(extra: Record<string, unknown> = {}) {
 	host = document.createElement('div'); host.className = 'doc'; document.body.appendChild(host);
 	component = createClassComponent({ target: host, component: DocViewerStatus, props: {
-		ready: true, stale: false, readonly: false, commentCount: 0, orphanedCount: 0,
+		ready: true, stale: false, readonly: false, commentCount: 0,
 		artifactId: 'doc-a', targetInstanceId: 'tab-a', viewingThreadId: 'thread-a', reviewTargetKey: 'target-a',
 		onOpenComments: vi.fn(), freshness: null, ...extra,
 	} });

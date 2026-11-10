@@ -309,26 +309,23 @@ describe('CommentThread', () => {
 
 	it('labels a card whose original text is gone with the amber note and keeps its place', () => {
 		render(thread({ orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(host.querySelector('.ct.orphaned')).not.toBeNull();
 	});
 
-	it('keeps a margin card header on one row when it is focused, naming the author as it reads at rest', () => {
+	it('keeps the card header on one row, the long name shortened in the middle, at rest, focused, in the margin and in the popover or sheet', () => {
 		const name = 'Suggestion Reviewer 1793988264642';
 		const rows = (extra: Record<string, unknown>) => {
 			render(thread({ author: name, createdAt: new Date().toISOString(), replies: [{ ...reply, author: name }] }), false, extra);
-			const out = { stacked: host.querySelector('.ct-author.stacked') !== null, name: host.querySelector('.ct-author')!.textContent, replyName: host.querySelector('.ct-msg-author')!.textContent };
+			const out = { name: host.querySelector('.ct-author')!.textContent, tail: host.querySelector('.ct-author .name-tail')?.textContent, replyTail: host.querySelector('.ct-msg-author .name-tail')?.textContent, label: host.querySelector('.ct-author')!.getAttribute('aria-label') };
 			unmount(component!); component = null; host.remove();
 			return out;
 		};
 		const rest = rows({ inMargin: true, focused: false, scrollOnFocus: false });
-		const focusedInMargin = rows({ inMargin: true, focused: true, scrollOnFocus: false });
-		expect(rest.stacked).toBe(false);
-		expect(focusedInMargin).toEqual(rest);
-		// Elsewhere (the popover and the sheet) a focused card still gives the whole name its own row.
-		const focusedElsewhere = rows({ focused: true, scrollOnFocus: false });
-		expect(focusedElsewhere.stacked).toBe(true);
-		expect(focusedElsewhere.name).toBe(name);
+		expect(rest).toEqual({ name, tail: '4642', replyTail: '4642', label: name });
+		expect(rows({ inMargin: true, focused: true, scrollOnFocus: false })).toEqual(rest);
+		expect(rows({ focused: true, scrollOnFocus: false })).toEqual(rest);
+		expect(rows({ focused: true, flat: true, scrollOnFocus: false })).toEqual(rest);
 	});
 
 	it('lets the person read a long deleted text in full, and clamps it again, with the Show more control chat comments use', () => {
@@ -568,7 +565,7 @@ describe('CommentComposer', () => {
 describe('a comment whose text was deleted', () => {
 	it('says the original text was deleted and keeps the old text in quotes', () => {
 		render(thread({ anchor: 'two extra liters', orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(host.textContent).toContain('two extra liters');
 	});
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from eval.tool_allowlist import carry_in_hides
 from infra.db_async import run_off_db
-from infra.guidance_targets import guidance_target
+from infra.guidance_targets import history_target
 from infra.guidance_history_paths import read_regular
 from tools.base import Tool
 from tools.file_write_completion import (
@@ -104,8 +104,8 @@ class EditFileTool(Tool):
                 for_write=True,
             )
             file_path = authorized.resolved
-            target = await asyncio.to_thread(guidance_target, file_path)
-            if target is None:
+            target = await asyncio.to_thread(history_target, file_path)
+            if target is None or target.document:
                 result = await write_live(file_path, kwargs, producer=self.name,
                                           edits=(TextEdit(old_string, new_string, replace_all),), edit_path=path)
                 if result is not None:
@@ -210,8 +210,8 @@ class MultiEditTool(Tool):
                 for_write=True,
             )
             file_path = authorized.resolved
-            target = await asyncio.to_thread(guidance_target, file_path)
-            if target is None:
+            target = await asyncio.to_thread(history_target, file_path)
+            if target is None or target.document:
                 captured = tuple(TextEdit(edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))) for edit in edits)
                 result = await write_live(file_path, kwargs, producer=self.name, edits=captured, edit_path=path)
                 if result is not None:

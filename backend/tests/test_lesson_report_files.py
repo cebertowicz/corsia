@@ -61,7 +61,7 @@ def _store(repo, data: bytes) -> str:
 
 def _recorded_fixture(repo):
     """Reads covering every reader outcome: valid, repeated, missing, wrong type, oversize, bad bytes."""
-    from infra.guidance_git import MAX_GUIDANCE_BYTES
+    from core.document_history_paths import MAX_HISTORY_BYTES
     subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
     lessons = []
     for index in range(6):
@@ -86,7 +86,7 @@ def _recorded_fixture(repo):
     add(None, "0" * 64)
     bad = b"\xff\xfe not utf-8"
     add(_store(repo, bad), hashlib.sha256(bad).hexdigest())           # unreadable
-    big = b"x" * (MAX_GUIDANCE_BYTES + 1)
+    big = b"x" * (MAX_HISTORY_BYTES + 1)
     add(_store(repo, big), hashlib.sha256(big).hexdigest())           # over the guidance limit
     empty_tree = subprocess.run(["git", "-C", str(repo), "mktree"], input=b"", check=True,
                                 capture_output=True).stdout.decode().strip()
@@ -220,13 +220,13 @@ def test_a_watchdog_that_fires_after_the_response_is_read_restarts_the_next_read
 
 
 def test_batched_reader_keeps_nonblob_and_oversize_objects_on_the_same_process(tmp_path):
-    from infra.guidance_git import MAX_GUIDANCE_BYTES
+    from core.document_history_paths import MAX_HISTORY_BYTES
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)
     good = b"valid after the skipped objects"
     tree = subprocess.run(["git", "-C", str(tmp_path), "mktree"], input=b"100644 blob " +
                           _store(tmp_path, good).encode() + b"\tf\n", check=True,
                           capture_output=True).stdout.decode().strip()
-    big = b"x" * (MAX_GUIDANCE_BYTES + 1)
+    big = b"x" * (MAX_HISTORY_BYTES + 1)
     receipts = [(tree, "0" * 64), (_store(tmp_path, big), hashlib.sha256(big).hexdigest()),
                 (git_blob_oid(good), hashlib.sha256(good).hexdigest())]
     expected = [(None, "exact recorded file object unavailable"),

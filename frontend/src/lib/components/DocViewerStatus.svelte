@@ -24,7 +24,6 @@
 		readonly,
 		commentCount,
 		unreadCount = 0,
-		orphanedCount,
 		artifactId,
 		targetInstanceId,
 		viewingThreadId = null,
@@ -45,6 +44,9 @@
 		historyAvailable = false,
 		historyOpen = false,
 		onOpenHistory,
+		resolvedCount = 0,
+		resolvedOpen = false,
+		onOpenResolved,
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -58,7 +60,6 @@
 		readonly: boolean;
 		commentCount: number;
 		unreadCount?: number;
-		orphanedCount: number;
 		artifactId: string | null;
 		targetInstanceId: string | null;
 		viewingThreadId?: string | null;
@@ -81,6 +82,10 @@
 		historyAvailable?: boolean;
 		historyOpen?: boolean;
 		onOpenHistory?: () => void;
+		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
+		resolvedCount?: number;
+		resolvedOpen?: boolean;
+		onOpenResolved?: () => void;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -185,8 +190,9 @@
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent} unplaced={orphanedCount}
+			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
+			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
 			{#if artifactId}
 				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>
@@ -307,6 +313,8 @@
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
+		/* Reload is the one action a changed file needs, so while it shows the row wraps within the header, as a held sender's does, rather than push Reload past the left edge. */
+		.document-tools:has(.stale-control) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
 	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }

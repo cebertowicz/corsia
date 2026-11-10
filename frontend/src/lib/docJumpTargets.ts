@@ -51,7 +51,7 @@ function landingsById(root: ParentNode): Map<string, Landing> {
 		const surface = el.closest('.image-overlay');
 		if (surface && !surface.contains(root)) continue;
 		if (el.dataset.marginCard) {
-			if (el.matches('.margin-card.placed:not(.under)') && !el.closest('.margin-stack.behind')) put(el.dataset.marginCard, { elements: [el], view: 'column' });
+			if (el.matches('.margin-card.placed')) put(el.dataset.marginCard, { elements: [el], view: 'column' });
 			continue;
 		}
 		if (el.dataset.regionTag) {

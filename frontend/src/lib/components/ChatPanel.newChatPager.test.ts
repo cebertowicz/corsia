@@ -140,7 +140,7 @@ describe('ChatPanel new chat', () => {
 		await vi.waitFor(() => expect(get(messages).find(row => row.id === 'old')?.chat_comments?.length).toBe(1));
 		await vi.waitFor(() => expect(host.innerHTML).toContain('data-comment-ids'));
 		const mark = host.querySelector<HTMLElement>('[data-message-id="old"] [data-comment-ids]')!;
-		expect(document.querySelector('[data-highlight-dot] .ct-new-dot')).not.toBeNull();
+		expect(document.querySelector('[data-highlight-dot] [aria-label="New reply"]')).not.toBeNull();
 		await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('answer'));
 		expect(landed).toBe(true);
 		expect(mark.textContent).toContain('old');

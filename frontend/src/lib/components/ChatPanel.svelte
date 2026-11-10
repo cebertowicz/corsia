@@ -332,7 +332,7 @@
 			onRetryFirstLoad={retryFirstPage}
 		/>
 		{#if commentMargin.shown && $activeThreadId}
-			<ChatMarginColumn threadId={$activeThreadId} scroller={messagesEl ?? null} selectedId={commentMargin.selectedId} onSelect={(id) => commentMargin.selectedId = id} onSendReply={(reply) => inputBarRef?.sendReply(reply)} />
+			<ChatMarginColumn threadId={$activeThreadId} scroller={messagesEl ?? null} selectedId={commentMargin.selectedId} onSelect={(id) => commentMargin.selectedId = id} onSendReply={(reply) => inputBarRef?.sendReply(reply)} composer={commentMargin.composer} />
 		{/if}
 		</div>
 		{#if isDraggingOver}
@@ -378,6 +378,7 @@
 			bind:this={inputBarRef}
 			marginComments={commentMargin.shown}
 			bind:selectedCommentId={commentMargin.selectedId}
+			bind:marginComposer={commentMargin.composer}
 			onSend={scrollToBottom}
 			onTriggerWarm={triggerWarm}
 			{onAutoCreateThread}

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_store import BrowserMessage, LiveStore
-from doceditor.live_text import clone, create, map_offsets, state_clocks, text_digest, utf16_length
+from doceditor.live_text import clone, create, follow_spans, map_spans, state_clocks, text_digest, utf16_length
 from doceditor.section_log import SectionLog
 
 if TYPE_CHECKING:
@@ -66,6 +66,8 @@ class LiveDocument:
         self.backlog_limit = backlog_limit
         self.backlog_bytes = 0
         self.ranges: dict[str, tuple[int, int]] = {}
+        # Ranges whose text was just typed over: the rest of the word typed at their end joins them (``follow_spans``).
+        self.open_ends: set[str] = set()
         # Selections a capture tracks before their comment exists, oldest first. They move with the text
         # but stay out of ``ranges``, which only comments own.
         self._reservations: dict[str, Reservation] = {}
@@ -126,15 +128,14 @@ class LiveDocument:
         return text_digest(self.text)
 
     def _changed(self, event) -> None:
-        spans = [*self.ranges.values(), *(held.span for held in self._reservations.values())]
-        edges = [(offset, right) for start, end in spans
-                 for offset, right in ((start, start == end), (end, True))]
-        mapped = map_offsets(edges, self._before, event.delta) if edges else []
-        moved = [(first, max(first, last)) for first, last in zip(mapped[::2], mapped[1::2])]
-        for identifier, span in zip(self.ranges, moved):
-            self.ranges[identifier] = span
-        for held, span in zip(self._reservations.values(), moved[len(self.ranges):]):
-            held.span = span
+        ids = list(self.ranges)
+        spans, opened = follow_spans(list(self.ranges.values()), self._before, event.delta,
+                                     {index for index, identifier in enumerate(ids) if identifier in self.open_ends})
+        self.ranges.update(zip(ids, spans))
+        self.open_ends = {ids[index] for index in opened}
+        held = list(self._reservations.values())
+        for reservation, span in zip(held, map_spans([item.span for item in held], self._before, event.delta)):
+            reservation.span = span
         self._before = self.text
         self.snapshot = (self._before, dict(self.ranges))
         self.text_changed()
@@ -193,6 +194,8 @@ class LiveDocument:
 
     def track_range(self, identifier: str, start: int, end: int) -> None:
         self._observe(start, end)
+        if self.ranges.get(identifier) != (start, end):
+            self.open_ends.discard(identifier)
         self.ranges[identifier] = (start, end)
         self.snapshot = (self.text, dict(self.ranges))
 

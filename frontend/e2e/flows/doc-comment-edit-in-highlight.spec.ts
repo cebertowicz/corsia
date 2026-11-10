@@ -1,6 +1,6 @@
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
-import { ITEMS, FIRST, card, open } from '../support/marginCards';
+import { ITEMS, FIRST, card, open, widen } from '../support/marginCards';
 
 /**
  * Text under a comment's highlight is the document's text, so it edits like any other: a click or tap into it, or the arrow keys,
@@ -105,6 +105,93 @@ test('@flow:doc-comment-edit-in-highlight below the margin width, a click opens 
 	await page.setViewportSize({ width: 900, height: 900 });
 	await open(page, request, { wide: false });
 	await editInsideHighlight(page, () => expect(popover(page)).toContainText(ITEMS[FIRST].body), 'popover');
+});
+
+const GONE = 'This text is no longer in the document';
+
+/** The caret at the start of the first highlight's line, where the highlight begins (the first comment's quote starts its paragraph). */
+async function caretAtLineStart(page: Page) {
+	await highlight(page).click();
+	await expect.poll(() => focusIn(page)).toBe('editor');
+	await page.keyboard.press('Home');
+	await page.keyboard.press('Home');
+}
+
+/** Selects the first highlight's whole text from its first character, `skip` characters into the line, by the keys. */
+async function selectHighlight(page: Page, skip = 0) {
+	await caretAtLineStart(page);
+	for (let i = 0; i < skip; i++) await page.keyboard.press('ArrowRight');
+	for (let i = 0; i < QUOTE.length; i++) await page.keyboard.press('Shift+ArrowRight');
+	await expect.poll(() => page.evaluate(() => getSelection()?.toString())).toBe(QUOTE);
+}
+
+/** Reloads the page once the saved file holds `saved`, and opens the document again with its column. */
+async function reloadOnceSaved(page: Page, doc: Awaited<ReturnType<typeof open>>, saved: string) {
+	await expect.poll(() => doc.storedText(), { message: 'the edit is saved before the reload', timeout: 15_000 }).toContain(saved);
+	await page.reload();
+	await page.locator('.thread-item').filter({ hasText: 'suggestions-owner-' }).first().click();
+	await expect(page.locator('.cm-scroller')).toBeVisible();
+	await widen(page, doc);
+}
+
+test('@flow:doc-comment-edit-in-highlight text typed at either edge of a highlight lands outside it, and typing over all of it keeps the comment through a reload', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The margin column is a desktop layout.');
+	test.setTimeout(150_000);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const doc = await open(page, request);
+	// At the first character: the caret before it, so what is typed goes before the highlight.
+	await caretAtLineStart(page);
+	await page.keyboard.type('A');
+	await expect.poll(() => highlighted(page), { message: 'typed at the first character, outside the highlight' }).toBe(QUOTE);
+	await expect(paragraph(page)).toContainText(`A${QUOTE} says`);
+	// At the last character: the caret after it, so what is typed goes after the highlight.
+	for (let i = 0; i < QUOTE.length; i++) await page.keyboard.press('ArrowRight');
+	await page.keyboard.type('B');
+	await expect.poll(() => highlighted(page), { message: 'typed at the last character, outside the highlight' }).toBe(QUOTE);
+	await expect(paragraph(page)).toContainText(`A${QUOTE}B says`);
+	// The whole highlight selected and typed over: the comment moves onto what was typed.
+	await selectHighlight(page, 1);
+	await page.keyboard.type('Handoff overview');
+	await expect.poll(() => highlighted(page), { message: 'typing over the whole highlight keeps the comment on the typed text' }).toBe('Handoff overview');
+	await expect(card(page, doc, FIRST)).not.toContainText(GONE);
+	await reloadOnceSaved(page, doc, 'AHandoff overviewB says');
+	await expect.poll(() => highlighted(page), { message: 'the comment stays on the typed text after a reload' }).toBe('Handoff overview');
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	await expect(card(page, doc, FIRST)).not.toContainText(GONE);
+});
+
+test('@flow:doc-comment-edit-in-highlight deleting all of a highlight with nothing typed leaves its comment with the text gone', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The margin column is a desktop layout.');
+	test.setTimeout(150_000);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const doc = await open(page, request);
+	await selectHighlight(page);
+	await page.keyboard.press('Backspace');
+	await expect(card(page, doc, FIRST)).toContainText(GONE);
+	await reloadOnceSaved(page, doc, `# Handoff plan\n\n says that agents`);
+	await expect(card(page, doc, FIRST)).toContainText(GONE);
+});
+
+test('@flow:doc-comment-edit-in-highlight on a phone, a key typed with the sheet up closes it and lands at the tapped place; Escape closes it and keeps the caret', async ({ page, request }, info) => {
+	test.skip(!info.project.name.includes('mobile'), 'The sheet is the phone layout.');
+	test.setTimeout(120_000);
+	await page.setViewportSize({ width: 393, height: 852 });
+	await open(page, request, { wide: false });
+	await highlight(page).tap();
+	await expect(sheet(page)).toBeVisible();
+	await page.keyboard.type('Z');
+	await expect(sheet(page), 'the first key typed closes the sheet').toHaveCount(0);
+	await expect.poll(() => highlighted(page), { message: 'the key lands at the tapped place, inside the highlight' }).toContain('Z');
+	expect((await highlighted(page)).replace('Z', '')).toBe(QUOTE);
+	await expect.poll(() => focusIn(page)).toBe('editor');
+	await highlight(page).tap();
+	await expect(sheet(page)).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(sheet(page), 'Escape closes the sheet').toHaveCount(0);
+	await expect.poll(() => focusIn(page), { message: 'Escape gives the text its caret back' }).toBe('editor');
+	await page.keyboard.type('Y');
+	await expect.poll(() => highlighted(page), { message: 'typed after Escape lands at the tapped place' }).toContain('Y');
+	expect((await highlighted(page)).replace(/[ZY]/g, '')).toBe(QUOTE);
 });
 
 test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight places the caret and opens its sheet, and Close returns to typing there', async ({ page, request }, info) => {

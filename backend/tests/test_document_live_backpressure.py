@@ -55,7 +55,7 @@ async def gated(tmp_path, monkeypatch, registration, *, bound=3, wait=5.0):
         return Publication(operation.actor.thread_id, None, operation.kind, mirror.state,
                            {"path": str(path), "plain": True})
 
-    async def writer(text, prior_hash):
+    async def writer(text, prior_hash, *_operation):
         await asyncio.to_thread(write_atomic_plain, path, text, prior_hash)
 
     async def valid(text, actor):
