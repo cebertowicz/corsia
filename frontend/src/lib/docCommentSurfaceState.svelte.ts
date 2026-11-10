@@ -173,21 +173,19 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 /** How a card opened from the text shows: in the margin column beside it, as a popover over it, or as the phone sheet. */
 export type CardMode = 'margin' | 'popover' | 'sheet';
 
-/** Whether the margin column fits beside the text now: the canvas is wide enough and the pane is not a drawer over it. */
-export function marginFits(root: HTMLElement | undefined, paneDrawer: boolean) {
-	return !paneDrawer && hasRoomForMargin(root?.getBoundingClientRect().width ?? 0);
-}
-
 /**
  * A canvas that is already wide enough for the text and the margin column shows the column on load, with the shell left alone;
- * a narrower one waits for the reader to open comments. Checked once per document, when its comments are ready. Call it while a component initialises.
+ * a narrower one waits for the reader to open comments. Checked once per document, when its comments are ready. `fits` is the
+ * surface's own margin rule, the one its column follows. A list shown this way (`quietList`) was never opened by the reader, so
+ * when the column stops fitting it closes rather than taking another form over the text. Call it while a component initialises.
  */
-export function openColumnOnLoad(inputs: { artifactId: () => string | null; ready: () => boolean; root: () => HTMLElement | undefined; paneDrawer: () => boolean; hasComments: () => boolean; shown: () => boolean; open: () => void }) {
+export function openColumnOnLoad(inputs: { artifactId: () => string | null; ready: () => boolean; paneDrawer: () => boolean; fits: () => boolean; hasComments: () => boolean; shown: () => boolean; open: () => void; quietList: () => boolean; close: () => void }) {
 	let checked: string | null = null;
 	$effect(() => {
-		const id = inputs.artifactId(), root = inputs.root();
-		if (!id || checked === id || !inputs.ready() || !root || inputs.paneDrawer()) return;
+		const id = inputs.artifactId();
+		if (!id || checked === id || !inputs.ready() || inputs.paneDrawer()) return;
 		checked = id;
-		if (inputs.hasComments() && !inputs.shown() && marginFits(root, false)) inputs.open();
+		if (inputs.hasComments() && !inputs.shown() && inputs.fits()) inputs.open();
 	});
+	$effect(() => { if (inputs.quietList() && !inputs.fits()) inputs.close(); });
 }

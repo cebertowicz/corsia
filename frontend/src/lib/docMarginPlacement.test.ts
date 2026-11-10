@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { GAP, placeCards, revealShift } from './docMarginPlacement';
-import { MARGIN_MIN, hasRoomForMargin, marginFits } from './docCommentSurfaceState.svelte';
+import { MARGIN_MIN, hasRoomForMargin } from './docCommentSurfaceState.svelte';
 import { PANE_DRAWER_WIDTH } from './artifactSplitLayout';
 import { paneOverlay } from './stores/artifactCanvas';
 
@@ -70,7 +70,6 @@ describe('hasRoomForMargin: the one width rule', () => {
 
 	describe('under a Workspace panel the shell shows over the canvas', () => {
 		afterEach(() => paneOverlay.set(false));
-		const root = (width: number) => ({ getBoundingClientRect: () => ({ width }) }) as HTMLElement;
 
 		it('counts only the canvas the panel leaves uncovered', () => {
 			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH, true)).toBe(true);
@@ -78,12 +77,11 @@ describe('hasRoomForMargin: the one width rule', () => {
 			expect(hasRoomForMargin(MARGIN_MIN, true)).toBe(false);
 		});
 
-		it('reads the shell\'s answer when none is passed, so marginFits agrees with the surface', () => {
-			expect(marginFits(root(800), false)).toBe(true);
+		it('reads the shell\'s answer when none is passed', () => {
+			expect(hasRoomForMargin(800)).toBe(true);
 			paneOverlay.set(true);
 			expect(hasRoomForMargin(800)).toBe(false);
-			expect(marginFits(root(800), false)).toBe(false);
-			expect(marginFits(root(MARGIN_MIN + PANE_DRAWER_WIDTH), false)).toBe(true);
+			expect(hasRoomForMargin(MARGIN_MIN + PANE_DRAWER_WIDTH)).toBe(true);
 		});
 	});
 });
