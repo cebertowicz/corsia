@@ -119,6 +119,34 @@ export class FromWidget extends WidgetType {
 
 const NOT_ON_EMAIL = 'Not on the email you’re replying to.';
 
+/** Where the hint can go on the mark's own row: the left edge of whatever is to its right (the next address, its comma, the Cc button; null when the row ends at the mark) and of this entry's own address text before it. */
+function rowNeighbours(mark: HTMLElement, row: DOMRect): { next: number | null; start: number } {
+	const line = mark.closest('.cm-line');
+	let next: number | null = null;
+	let start = row.left;
+	if (!line) return { next, start };
+	const onRow = (box: DOMRect) => box.bottom > row.top && box.top < row.bottom;
+	const texts: Text[] = [];
+	const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) if (!mark.contains(node) && !node.parentElement?.closest('.cm-email-cc-add')) texts.push(node as Text);
+	const rects = (node: Text) => {
+		const range = document.createRange();
+		range.selectNodeContents(node);
+		return [...range.getClientRects()].filter(onRow);
+	};
+	const after = texts.filter((node) => /\S/.test(node.data) && mark.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+	for (const node of after) for (const box of rects(node)) next = Math.min(next ?? box.left, box.left);
+	const button = line.querySelector('.cm-email-cc-add')?.getBoundingClientRect();
+	if (button && onRow(button)) next = Math.min(next ?? button.left, button.left);
+	// The amber pieces just before the mark are this entry; the first other text ends it.
+	const before = texts.filter((node) => mark.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING).reverse();
+	for (const node of before) {
+		if (!node.parentElement?.closest('.cm-email-added, .cm-email-added-tail')) break;
+		for (const box of rects(node)) start = Math.min(start, box.left);
+	}
+	return { next, start };
+}
+
 /** The "!" after an address that was not on the email being answered: hover or focus on a desktop, a tap on a phone, shows why. */
 export class AddedMarkWidget extends WidgetType {
 	eq() { return true; }
@@ -133,16 +161,21 @@ export class AddedMarkWidget extends WidgetType {
 		tip.setAttribute('aria-hidden', 'true');
 		tip.textContent = NOT_ON_EMAIL;
 		mark.append(tip);
-		// Keep the tip inside the editor, which clips what runs past its right edge: shift it left by however far it would.
+		// The hint sits on the mark's own row: just right of the "!" when nothing else is on the row to its right and it fits,
+		// else ending at the "!" and opening leftward over this entry's own address text only (wrapping if that is narrower than the text).
 		const place = () => {
-			tip.style.marginLeft = '0px';
-			tip.removeAttribute('data-below');
+			tip.style.maxWidth = '';
+			tip.style.whiteSpace = '';
+			tip.setAttribute('data-side', 'right');
 			const scroller = mark.closest('.cm-scroller')?.getBoundingClientRect();
-			const edge = Math.min(scroller?.right ?? window.innerWidth, window.innerWidth);
+			const edge = Math.min(scroller?.right ?? window.innerWidth, window.innerWidth) - 8;
+			const row = mark.getBoundingClientRect();
+			const { next, start } = rowNeighbours(mark, row);
 			const box = tip.getBoundingClientRect();
-			if (box.right - (edge - 8) > 0) tip.style.marginLeft = `${-(box.right - (edge - 8))}px`;
-			// The hint opens above the line, so the next header line (Subject) stays readable; below only where the editor has no room above.
-			if (box.top < (scroller?.top ?? 0) + 4) tip.setAttribute('data-below', '');
+			if (box.right <= Math.min(edge, next ?? edge)) return;
+			tip.setAttribute('data-side', 'left');
+			const room = Math.max(row.left - start, 0);
+			if (box.width > room) { tip.style.maxWidth = `${room}px`; tip.style.whiteSpace = 'normal'; }
 		};
 		const close = () => { mark.removeAttribute('data-open'); document.removeEventListener('pointerdown', outside, true); };
 		const outside = (event: Event) => { if (!mark.contains(event.target as Node)) close(); };

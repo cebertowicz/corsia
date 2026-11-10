@@ -436,6 +436,12 @@ const AFTER: Scenario[] = [
 		const width = page.viewportSize()!.width;
 		expect(box.x).toBeGreaterThanOrEqual(0);
 		expect(box.x + box.width).toBeLessThanOrEqual(width);
+		// The hint stays on the "!" row: it never reaches the header line above or below (Subject).
+		const markBox = (await mark.boundingBox())!;
+		const rowHeight = await mark.evaluate((node) => parseFloat(getComputedStyle(node.closest('.cm-line')!).lineHeight));
+		const centre = markBox.y + markBox.height / 2;
+		expect(box.y).toBeGreaterThanOrEqual(centre - rowHeight / 2 - 0.5);
+		expect(box.y + box.height).toBeLessThanOrEqual(centre + rowHeight / 2 + 0.5);
 		await page.waitForTimeout(300);
 	} },
 	{ name: '4h-added-cc', doc: 'ccadded', fixture: 'reply4', thin: true },
