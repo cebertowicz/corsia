@@ -117,25 +117,28 @@ def _title(author: str, document: str, items: list[dict[str, Any]]) -> str:
     return _trim_title(author + suffix, suffix)
 
 
-def _authors(db, node_id: str, batch: Any, author: str) -> str:
-    """The label for everyone who wrote what the task holds: one name, two names, or a count."""
-    names = [
-        feedback_display(db, earlier)[0]
-        for earlier in feedback_join.earlier_batches(db, node_id, batch)
-        if batch_value(earlier, "author_id") != batch_value(batch, "author_id")
-    ]
-    names = list(dict.fromkeys([*names, author]))
-    if len(names) > 2:
-        return f"{len(names)} authors"
-    return " and ".join(names)
+def _authors(db, delivered: list[tuple[Any, list[dict[str, Any]]]], batch: Any, author: str) -> str:
+    """The label for everyone who wrote what the task holds, in the order they first wrote: one name, two names, or a count."""
+    current = str(batch_value(batch, "author_id"))
+    names: dict[str, str] = {}
+    for row, items in delivered:
+        author_id = str(batch_value(row, "author_id"))
+        if author_id not in names:
+            names[author_id] = author if author_id == current else feedback_display(db, row, items)[0]
+    names[current] = author
+    labels = list(dict.fromkeys(names.values()))
+    if len(labels) > 2:
+        return f"{len(labels)} authors"
+    return " and ".join(labels)
 
 
-def _joined_blocks(db, node_id: str, batch: Any, items: list[dict[str, Any]]) -> str:
-    """The batch's items for the task it joins, with its own framing when no earlier batch there came from its kind of author."""
+def _joined_blocks(batch: Any, items: list[dict[str, Any]], delivered: list[tuple[Any, list[dict[str, Any]]]]) -> str:
+    """The batch's items for the task it joins, with its own framing unless an earlier batch there from its kind of author held comments."""
     blocks = item_blocks(batch, items)
     kind = batch_value(batch, "author_kind")
     if not any(item["kind"] == "comment" for item in items) or any(
-        batch_value(earlier, "author_kind") == kind for earlier in feedback_join.earlier_batches(db, node_id, batch)
+        batch_value(row, "author_kind") == kind and any(item["kind"] == "comment" for item in prior)
+        for row, prior in delivered
     ):
         return blocks
     return f"{USER_FRAMING if kind == 'user' else AGENT_FRAMING}\n\n{blocks}"
@@ -275,11 +278,12 @@ def create_feedback_node(
     author, document = feedback_display(db, batch, loaded)
     joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
-        held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
-        blocks = _joined_blocks(db, joined.node_id, batch, loaded)
+        delivered = feedback_join.earlier(db, joined.node_id, batch)
+        held = feedback_join.held_items(delivered) + loaded
+        blocks = _joined_blocks(batch, loaded, delivered)
         restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(_authors(db, joined.node_id, batch, author), document, held),
+            db, joined.node_id, title=_title(_authors(db, delivered, batch, author), document, held),
             blocks=blocks,
             intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
             provenance=PROVENANCE,

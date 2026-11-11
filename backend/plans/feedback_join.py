@@ -154,24 +154,23 @@ def delivered_task(db, batch_id: str) -> str | None:
     return str(row["delivered_node_id"]) if row and row["delivered_node_id"] else None
 
 
-def earlier_batches(db, node_id: str, batch: Any) -> list[Any]:
-    """The batches already delivered into the task, oldest first."""
-    return db.execute(
+def earlier(db, node_id: str, batch: Any) -> list[tuple[Any, list[dict[str, Any]]]]:
+    """The batches already delivered into the task, oldest first, each with its items, read once."""
+    rows = db.execute(
         "SELECT * FROM doc_feedback_batches WHERE delivered_node_id=? AND id<>? ORDER BY created_at,id",
         (node_id, batch_value(batch, "id")),
     ).fetchall()
+    return [(row, load_feedback_items(db, row)) for row in rows]
 
 
-def earlier_items(db, node_id: str, batch: Any) -> list[dict[str, Any]]:
+def held_items(delivered: list[tuple[Any, list[dict[str, Any]]]]) -> list[dict[str, Any]]:
     """The items of the batches already delivered into the task, oldest first.
 
     Delivery clears a batch's edit item, so a batch whose count exceeds its
     comments held one, and it counts as one edit.
     """
-    rows = earlier_batches(db, node_id, batch)
     held: list[dict[str, Any]] = []
-    for row in rows:
-        items = load_feedback_items(db, row)
+    for row, items in delivered:
         held += items + ([{"kind": "edit"}] if int(row["item_count"]) > len(items) else [])
     return held
 
