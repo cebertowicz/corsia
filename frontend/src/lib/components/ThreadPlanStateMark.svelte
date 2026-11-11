@@ -93,14 +93,14 @@
 </script>
 
 {#if owes(entry) && count === 0}
-	<span class="plan-state update-dot needs-you-dot" role="img" aria-label="Needs you" title="Needs you"></span>
+	<span class="plan-state update-dot needs-you-dot" role="img" aria-label={label} title={line ? label : title}></span>
 {:else if owes(entry)}
 	<span
 		class="plan-state update-dot needs-you-dot"
 		role="button"
 		tabindex="0"
-		title="Needs you"
-		aria-label="Needs you"
+		title={line ? label : title}
+		aria-label={`${label}: ${count} item${count === 1 ? '' : 's'}`}
 		onclick={show}
 		onkeydown={(event) => activate(event, show)}
 		onpointerdown={(event) => event.stopPropagation()}

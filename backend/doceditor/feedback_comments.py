@@ -107,6 +107,13 @@ def recipients(
     root_id = str(root["id"] if root else comment["id"])
     tagged = set(comment.get("tagged_agent_ids") or ())
     resolved = {owner, *tagged}
+    if comment.get("tagged_user_id"):
+        resolved.add(USER_AUTHOR_ID)
+    if comment["author_kind"] == "agent":
+        from plans.public import open_ask_artifacts
+
+        if open_ask_artifacts(db, str(comment["artifact_id"])):
+            resolved.add(USER_AUTHOR_ID)
     if root is not None:
         resolved.add(_recipient_for_author(root))
         resolved.update(_agent_authors(db, root_id))

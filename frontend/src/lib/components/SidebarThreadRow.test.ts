@@ -121,7 +121,8 @@ describe('SidebarThreadRow update summary', () => {
 		expect(host.querySelector('.thread-title-row .plan-state')).toBe(control);
 		expect(host.querySelector('.thread-update-summary')?.textContent).toBe('An update the owed line replaces');
 		expect(control.textContent).toBe('');
-		expect(control.getAttribute('aria-label')).toBe('Needs you');
+		expect(control.getAttribute('aria-label')).toBe('Needs you · Choose a model: 1 item');
+		expect(control.title).toBe('Needs you · Choose a model');
 		control.click();
 		expect(onOpenAttention).toHaveBeenCalledWith(thread.id, 'Decide');
 		expect(analytics).toHaveBeenCalledTimes(1);

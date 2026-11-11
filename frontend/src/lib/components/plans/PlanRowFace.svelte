@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
+	import { feedbackLine } from '$lib/api/messageCards';
 	import { activeToolsByThread } from '$lib/stores/threads';
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
@@ -69,7 +70,9 @@
 		{#if branchProgress}<span class="branch-progress">{branchProgress}<span class="sr-only">{' done'}</span></span>{/if}
 		<span class="row-status sr-only">{label}</span>
 	</span>
-	{#if liveStep}
+	{#if node.comment_attention}
+		<span class="row-subline {state} {tone}" style:color={node.comment_attention.system_task ? undefined : 'var(--accent)'}>{feedbackLine(node.comment_attention)}</span>
+	{:else if liveStep}
 		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
 	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>

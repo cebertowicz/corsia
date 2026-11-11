@@ -267,6 +267,15 @@ def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[
     new_by_root: dict[str, list[str]] = {}
     for root_id, item_id in _unread_items(db, user_id, artifact_id):
         new_by_root.setdefault(root_id, []).append(item_id)
+    # The same directed items that make the plan task actionable must also
+    # receive a read stamp when their visible comment card is read.
+    from doceditor import person_comment_attention
+
+    for item in person_comment_attention.unread_items(db, artifact_id, user_id):
+        root_id = str(item['parent_id'] or item['id'])
+        ids = new_by_root.setdefault(root_id, [])
+        if item['id'] not in ids:
+            ids.append(str(item['id']))
     for thread in threads:
         unread = new_by_root.get(thread["id"], [])
         thread["new_comment"] = thread["id"] in unread
@@ -287,9 +296,9 @@ def mark_thread_viewed(
     if root is None:
         raise ValueError("root_not_found")
     item = db.execute(
-        f"""SELECT item.id,item.created_at FROM doc_comments item
-           WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
-        (seen_item_id, root_id, root_id, user_id),
+        """SELECT item.id,item.created_at FROM doc_comments item
+           WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND item.author_kind='agent'))""",
+        (seen_item_id, root_id, root_id),
     ).fetchone()
     if item is None:
         raise ValueError("reply_not_found")
