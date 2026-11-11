@@ -15,6 +15,7 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
+	import { CaretRule } from '$lib/cm/caret-rule';
 	import { commentMarks, coveredByMove, highlightAtPress, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
@@ -186,26 +187,25 @@
 		if (open) open(ids, opener, undefined, click); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
 	}
 
-	/** The highlight the caret last came to rest in: a caret moving inside it (typing, Backspace, the arrow keys) is editing there, and does not pick its card again. */
-	let caretIn: string | null = null;
+	/** Which highlight the reader is in: a press decides until a key or a later press moves the caret (`caret-rule.ts`). */
+	const caretRule = new CaretRule();
 	/** A press waiting for its frame; a key pressed before then supersedes it. Until then the press, not the caret's report, picks the card. */
 	let pendingPress: MouseEvent | null = null;
 
-	function handleSelection(v: EditorView, click?: MouseEvent) {
+	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
 		const r = v.state.selection.main;
 		if (r.empty) {
+			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to));
+			if (!read) return;
 			onSelect?.(null);
-			const hit = click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
-			const arrived = !!hit && hit.id !== caretIn;
-			caretIn = hit?.id ?? null;
-			// Where a card would cover the text (the phone sheet, the popover), only a tap or click opens it; typing and the arrow keys
-			// are editing. On the phone a caret in a suggestion opens none; a press on its insert does (suggestionMarks).
+			const { hit, arrived } = read;
+			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
 			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
 			if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {
-			caretIn = null;
+			caretRule.range();
 			emitSelection(v);
 		}
 	}
@@ -255,7 +255,7 @@
 					}
 				}),
 				// The caret a press placed can be reported after mouseup as a plain 'select' (CodeMirror labels any report 50 ms past the pointer so, as a phone tap's can be): only a key pressed since drops the press.
-				EditorView.domEventObservers({ keydown() { pendingPress = null; } }),
+				EditorView.domEventObservers({ keydown() { pendingPress = null; caretRule.keyed(); } }),
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) {
 						value = u.state.doc.toString();
@@ -265,7 +265,7 @@
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);
 					if (u.selectionSet && !dragging && !pendingPress && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
-						handleSelection(u.view);
+						handleSelection(u.view, undefined, u.docChanged);
 					}
 				})
 			]

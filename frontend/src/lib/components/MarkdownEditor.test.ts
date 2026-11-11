@@ -232,6 +232,61 @@ describe('MarkdownEditor edits', () => {
 			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
 		});
 
+		describe('one rule for the highlight the reader is in: a press decides until a key or a later press moves the caret', () => {
+			const frame = async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); flushSync(); };
+			/** A press at `x`, `y` (the row is 20 to 36, the caret's box 10 to 18) that the editor reads a frame after the pointer is up; `at` is the position under it. */
+			const press = async (view: EditorView, at: number, x: number, y = 25) => {
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(at);
+				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: x, clientY: y }));
+				view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' });
+				window.dispatchEvent(new MouseEvent('mouseup'));
+				await frame();
+			};
+			const key = (view: EditorView, name: string) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: name }));
+
+			it('a phone tap on a highlight that stops short of its word opens it and the card stays open when the browser then reports the caret at the word end', async () => {
+				const onAnchorFocus = vi.fn(), onCaretAway = vi.fn();
+				const view = open({ highlights: [{ from: 6, to: 9, id: 'stem' }], onAnchorFocus, onCaretAway, cardMode: 'sheet' });
+				await press(view, 7, 14);
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+				// The caret the press left with the browser arrives as a plain select, at the end of the tapped word: outside the highlight.
+				view.dispatch({ selection: { anchor: 11 }, userEvent: 'select' }); flushSync();
+				view.dispatch({ selection: { anchor: 11 }, userEvent: 'select' }); flushSync();
+				expect(onCaretAway).not.toHaveBeenCalled();
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+			});
+
+			it('a press that opened nothing leaves the caret beside a highlight, and typing or deleting there opens nothing', async () => {
+				const onAnchorFocus = vi.fn();
+				const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });
+				// Right after the highlighted word, on its row but past its last character: no highlight, the caret at its end.
+				await press(view, 11, 100);
+				expect(onAnchorFocus).not.toHaveBeenCalled();
+				key(view, 'Backspace');
+				view.dispatch({ changes: { from: 10, to: 11 }, selection: { anchor: 10 }, userEvent: 'delete.backward' }); flushSync();
+				expect(onAnchorFocus).not.toHaveBeenCalled();
+				// And before it: a press left of its first character, then a typed letter that carries the caret in.
+				await press(view, 6, 0);
+				key(view, 'x');
+				view.dispatch({ changes: { from: 6, insert: 'x' }, selection: { anchor: 7 }, userEvent: 'input.type' }); flushSync();
+				expect(onAnchorFocus).not.toHaveBeenCalled();
+			});
+
+			it('a caret that a key carries into a highlight after a press opens it, and a later press decides again', async () => {
+				const onAnchorFocus = vi.fn();
+				const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });
+				await press(view, 2, 0);
+				key(view, 'ArrowRight');
+				view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+				// A press on the highlight now is a new answer, not the arrow key's.
+				await press(view, 12, 100);
+				key(view, 'ArrowLeft');
+				view.dispatch({ selection: { anchor: 9 }, userEvent: 'select' }); flushSync();
+				expect(onAnchorFocus).toHaveBeenCalledTimes(2);
+			});
+		});
+
 		it('where cards open as a popover over the text, the caret arriving by keys opens none, and typing is reported so an open one can close', () => {
 			const onAnchorFocus = vi.fn(), onTyping = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onTyping, cardMode: 'popover' });
