@@ -321,7 +321,7 @@ def initialize_project(
     transition = (
         # The project does not exist yet, so only the projects already holding
         # the linked path, if any, can meet this transition.
-        repo_policy_transition(claim=repo_claim(None, Path(repo_path_str)))
+        repo_policy_transition(read_claim=lambda: repo_claim(None, Path(repo_path_str)))
         if repo_path_str else nullcontext()
     )
     with transition:

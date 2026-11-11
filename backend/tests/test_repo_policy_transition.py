@@ -78,7 +78,7 @@ def test_effect_in_another_project_does_not_block_transition():
 
     with admit_repo_effect(_only("q")):
         with repo_policy_transition(
-            claim=Claim(frozenset({"p"})),
+            read_claim=lambda: Claim(frozenset({"p"})),
             active_process_reaches=lambda: [_only("q")],
         ):
             # An unrelated project's effect is still admitted mid-transition.
@@ -100,12 +100,35 @@ def test_effect_that_can_meet_the_claim_blocks_transition(reach):
     claim = Claim(frozenset({"p"}))
     with admit_repo_effect(held):
         with pytest.raises(RepoPolicyTransitionBusy, match="tool effect"):
-            with repo_policy_transition(claim=claim, active_process_reaches=lambda: ()):
+            with repo_policy_transition(read_claim=lambda: claim, active_process_reaches=lambda: ()):
                 pass
-    with repo_policy_transition(claim=claim, active_process_reaches=lambda: ()):
+    with repo_policy_transition(read_claim=lambda: claim, active_process_reaches=lambda: ()):
         with pytest.raises(RepoPolicyTransitionBusy, match="policy transition"):
             with admit_repo_effect(held):
                 pass
+
+
+def test_holder_added_before_publication_refuses_transition():
+    """Another project registers an overlapping path between the claim's first read and publication."""
+    from infra.repo_policy_transition import (
+        Claim,
+        RepoPolicyTransitionBusy,
+        admit_repo_effect,
+        repo_policy_transition,
+    )
+
+    reads = iter([Claim(frozenset({"p"})), Claim(frozenset({"p", "q"}))])
+    # q's effect does not meet the stale claim {p}, so only the second read can catch it.
+    with admit_repo_effect(_only("q")):
+        with pytest.raises(RepoPolicyTransitionBusy, match="holders changed"):
+            with repo_policy_transition(read_claim=lambda: next(reads), active_process_reaches=lambda: ()):
+                pytest.fail("transition ran under a claim missing q")
+    # The refusal leaves no quarantine behind.
+    with admit_repo_effect(_only("p")):
+        pass
+    unchanged = Claim(frozenset({"p"}))
+    with repo_policy_transition(read_claim=lambda: unchanged, active_process_reaches=lambda: ()):
+        pass
 
 
 def test_project_created_after_admission_counts_as_reachable():
@@ -129,9 +152,9 @@ def test_process_in_claimed_project_blocks_but_other_project_does_not():
 
     claim = Claim(frozenset({"p"}))
     with pytest.raises(RepoPolicyTransitionBusy, match="owned process"):
-        with repo_policy_transition(claim=claim, active_process_reaches=lambda: [_only("p")]):
+        with repo_policy_transition(read_claim=lambda: claim, active_process_reaches=lambda: [_only("p")]):
             pass
-    with repo_policy_transition(claim=claim, active_process_reaches=lambda: [_only("q")]):
+    with repo_policy_transition(read_claim=lambda: claim, active_process_reaches=lambda: [_only("q")]):
         pass
 
 
@@ -143,7 +166,7 @@ def test_unreadable_process_activity_blocks():
 
     for reaches in (unreadable, lambda: [1]):
         with pytest.raises(RepoPolicyTransitionBusy, match="could not be verified"):
-            with repo_policy_transition(claim=Claim(frozenset({"p"})), active_process_reaches=reaches):
+            with repo_policy_transition(read_claim=lambda: Claim(frozenset({"p"})), active_process_reaches=reaches):
                 pass
 
 
@@ -173,7 +196,7 @@ def test_process_reads_hold_no_lock_but_the_transition_is_already_published():
             assert not other.is_alive(), "tool admission waited on the process read"
         return ()
 
-    with repo_policy_transition(claim=Claim(frozenset({"p"})), active_process_reaches=reaches):
+    with repo_policy_transition(read_claim=lambda: Claim(frozenset({"p"})), active_process_reaches=reaches):
         pass
     assert outcomes == ["admitted", "refused"]
 

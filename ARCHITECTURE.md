@@ -546,7 +546,8 @@ unreadable claim. A path outside the workspace that no project holds is
 writable only under a permit, so it claims only the projects holding part of it.
 Effects and the transition meet under one lock; owned processes are read after
 the transition is published and outside the lock, since a process starts only
-inside an admitted effect.
+inside an admitted effect. The claim is read again at that point; a holder added
+between the first read and publication refuses the transition.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect(reach)`
 except the tools whose own execution enters the stronger transition:

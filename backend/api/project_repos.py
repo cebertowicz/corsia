@@ -541,7 +541,7 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
         created = _workspace_dir_for(project_id) / "source" / body.name if body.name else None
         target = (Path(body.path) if body.path else None) if body.mode == "link" else created
         try:
-            with repo_policy_transition(claim=repo_claim(project_id, target)):
+            with repo_policy_transition(read_claim=lambda: repo_claim(project_id, target)):
                 return _add()
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -600,7 +600,7 @@ async def update_repo(token: str, project_id: str, name: str, body: RepoUpdate):
             verify_checkout = changes_policy or selects_pin
             transition = (
                 repo_policy_transition(
-                    claim=repo_claim(project_id, repo_path),
+                    read_claim=lambda: repo_claim(project_id, repo_path),
                 )
                 if verify_checkout
                 else nullcontext()
@@ -769,7 +769,7 @@ async def detach_repo(token: str, project_id: str, name: str):
     def _transitioned_detach():
         entry = _workspace_dir_for(project_id) / "source" / name
         try:
-            with repo_policy_transition(claim=repo_claim(project_id, entry)):
+            with repo_policy_transition(read_claim=lambda: repo_claim(project_id, entry)):
                 return _detach()
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc

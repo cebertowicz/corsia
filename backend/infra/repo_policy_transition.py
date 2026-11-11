@@ -27,7 +27,10 @@ only the projects holding part of it; permit holders reach everything anyway.
 Effects and transitions meet under one lock. Owned processes are read after the
 transition is published and outside the lock, so tool admission never waits on
 those reads: a process starts only inside an admitted effect, and once the
-transition is published an effect that meets it is refused.
+transition is published an effect that meets it is refused. The claim is read
+again at that point too: only one transition runs at a time, so holders added
+between the first read and publication show up there, and the transition is
+refused rather than run under a claim that leaves them out.
 """
 
 from __future__ import annotations
@@ -54,6 +57,10 @@ class Claim:
 
     projects: frozenset[str] = frozenset()
     everywhere: bool = False
+
+    def covers(self, other: Claim) -> bool:
+        """Whether every project ``other`` touches is already claimed here."""
+        return self.everywhere or (not other.everywhere and other.projects <= self.projects)
 
 
 #: The fail-closed claim: meets every reach.
@@ -169,9 +176,10 @@ class _RepoPolicyTransitionCoordinator:
     def transition(
         self,
         *,
-        claim: Claim,
+        read_claim: Callable[[], Claim],
         active_process_reaches: Callable[[], Iterable[Reach]],
     ) -> Iterator[None]:
+        claim = read_claim()
         with self._lock:
             if self._transition is not None:
                 raise RepoPolicyTransitionBusy(
@@ -184,6 +192,11 @@ class _RepoPolicyTransitionCoordinator:
                 )
             self._transition = claim
         try:
+            if not claim.covers(read_claim()):
+                raise RepoPolicyTransitionBusy(
+                    "Repository holders changed while the policy transition "
+                    "started; try again."
+                )
             try:
                 reaches = list(active_process_reaches())
             except Exception as exc:
@@ -229,10 +242,13 @@ def owned_process_reaches() -> list[Reach]:
 @contextmanager
 def repo_policy_transition(
     *,
-    claim: Claim = EVERYWHERE,
+    read_claim: Callable[[], Claim] = lambda: EVERYWHERE,
     active_process_reaches: Callable[[], Iterable[Reach]] | None = None,
 ) -> Iterator[None]:
-    """Quarantine one durable repo policy change from the effects it can meet."""
+    """Quarantine one durable repo policy change from the effects it can meet.
+
+    ``read_claim`` is called before publication and once after it.
+    """
     reaches = active_process_reaches or (lambda: owned_process_reaches())
-    with _COORDINATOR.transition(claim=claim, active_process_reaches=reaches):
+    with _COORDINATOR.transition(read_claim=read_claim, active_process_reaches=reaches):
         yield
