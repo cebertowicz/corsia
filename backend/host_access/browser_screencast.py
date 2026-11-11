@@ -74,6 +74,11 @@ class PaneScreencast:
                         self._starts.discard(answered)
             finally:
                 self._cdp = None
+                try:
+                    # The page session can outlive this client, and Chrome would keep encoding frames for nobody.
+                    await cdp.send("Page.stopScreencast")
+                except websockets.ConnectionClosed:
+                    pass  # Chrome closed the page, and its screencast with it.
 
     def capture_at(self, width: int, height: int, *, compact: bool = False) -> None:
         """Capture at most this many device pixels from the next start on."""
