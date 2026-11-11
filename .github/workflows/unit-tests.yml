@@ -291,8 +291,10 @@ jobs:
 
       - name: Upload backend timing report
         if: always()
-        # Diagnostics only: a failed upload must not turn a passing job red.
+        # Diagnostics only: a failed or stalled upload must not turn a passing job red.
+        # The artifact service has stalled this step for ~10 min, past the job cap.
         continue-on-error: true
+        timeout-minutes: 2
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-report-${{ github.run_id }}
