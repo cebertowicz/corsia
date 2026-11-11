@@ -7,7 +7,7 @@ runpy.run_path('frontend/e2e/support/focus-outcomes.py')['assert_disposable_root
 from doc_feedback_helpers import add_comment
 from doceditor import comments, feedback_batches
 from infra.database import get_db, write_transaction
-from plans import artifact_links, person_comment_task, service
+from plans import artifact_links, mutations, person_comment_task, service
 
 mode, artifact_id, thread_id = sys.argv[1:]
 db = get_db()
@@ -21,11 +21,27 @@ try:
             artifact_links.link(node.id, artifact_id, 'input', actor_id=None,
                                 provenance='test', db=connection)
     elif mode == 'feedback':
+        # The person's comments are sent as the Send button sends them, and the agent finishes the
+        # feedback task they make before replying; the delivery sweep never races the capture.
         reply_ids = []
+        feedback_nodes = []
         for _ in range(2):
-            root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
+            root, sent = add_comment(db, artifact_id, author_kind='user', author_id=None)
+            [batch_id] = sent['batch_ids']
+            feedback_batches.close_batch(db, batch_id, 'send')
+            node_id = db.execute('SELECT delivered_node_id FROM doc_feedback_batches WHERE id=?',
+                                 (batch_id,)).fetchone()[0]
+            assert node_id, batch_id
+            if node_id not in feedback_nodes:
+                feedback_nodes.append(node_id)
             reply, _ = add_comment(db, artifact_id, author_id=thread_id, parent_id=root['id'])
             reply_ids.append([root['id'], reply['id']])
+        with write_transaction(db, scope='finish_feedback') as connection:
+            for node_id in feedback_nodes:
+                mutations.request_review(node_id, evidence='Answered on the document', owner_thread_id=thread_id,
+                                         actor_id=thread_id, db=connection)
+                service.transition_node(node_id, 'accepted', actor_id=thread_id, verification_result='passed',
+                                        verified_by=thread_id, db=connection)
         user_id = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0]
         suggestion_ids = []
         with write_transaction(db, scope='seed_suggestions') as connection:

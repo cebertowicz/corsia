@@ -23,6 +23,8 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	if (!workspace || !state || !python || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires disposable mock environment');
 	const title = `Comment task ${Date.now()}`;
 	const threadId = await createSession(request, title);
+	const unreadTitle = `Unread only ${Date.now()}`;
+	const unreadThreadId = await createSession(request, unreadTitle);
 	const folder = path.join(workspace, 'comment-task-evidence');
 	mkdirSync(folder, { recursive: true });
 	const docFolder = path.join(folder, String(width));
@@ -41,27 +43,35 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		'from infra.database import get_db',
 		'from doc_feedback_helpers import add_comment',
 		'db = get_db()',
-		'root, _ = add_comment(db, sys.argv[1], author_kind="user", author_id=None, delivery_policy="document-held")',
-		'add_comment(db, sys.argv[1], author_id=sys.argv[2], parent_id=root["id"])',
-		'second_root, _ = add_comment(db, sys.argv[3], author_kind="user", author_id=None, delivery_policy="document-held")',
-		'add_comment(db, sys.argv[3], author_id=sys.argv[2], parent_id=second_root["id"])',
 		'from doceditor import comments, feedback_batches',
 		'from infra.database import write_transaction',
-		'from plans import service, artifact_links',
-		'with write_transaction(db, scope="seed_agent_feedback") as connection:',
-		'    plan = service.ensure_plan("thread", sys.argv[2], db=connection)',
-		'    feedback = service.add_node(plan.id, kind="task", title="Author left 1 comment on Second plan", acceptance_criteria="Review feedback", actor_id=None, provenance="document.feedback_batch", db=connection)',
-		'    artifact_links.link(feedback.id, sys.argv[3], "input", actor_id=None, provenance="document.feedback_batch", db=connection)',
-		'    service.transition_node(feedback.id, "active", actor_id=sys.argv[2], db=connection)',
+		'from plans import mutations, service',
+		// The person's comments are sent the way the Send button sends them, so the agent holds a feedback task per
+		// document before it replies. The agent finishes Launch plan's task; Second plan's stays open and covers that file.
+		'def send(artifact):',
+		'    root, sent = add_comment(db, artifact, author_kind="user", author_id=None)',
+		'    [batch_id] = sent["batch_ids"]',
+		'    feedback_batches.close_batch(db, batch_id, "send")',
+		'    node_id = db.execute("SELECT delivered_node_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0]',
+		'    assert node_id, batch_id',
+		'    add_comment(db, artifact, author_id=sys.argv[2], parent_id=root["id"])',
+		'    return node_id',
+		'finished = send(sys.argv[1])',
+		'send(sys.argv[3])',
+		'with write_transaction(db, scope="finish_feedback") as connection:',
+		'    mutations.request_review(finished, evidence="Answered on the document", owner_thread_id=sys.argv[2], actor_id=sys.argv[2], db=connection)',
+		'    service.transition_node(finished, "accepted", actor_id=sys.argv[2], verification_result="passed", verified_by=sys.argv[2], db=connection)',
 		'user_id = db.execute("SELECT user_id FROM threads WHERE id=?", (sys.argv[2],)).fetchone()[0]',
 		'from infra.presence_records import enter',
 		'from infra.time import utc_now',
 		'enter(db, user_id, sys.argv[2], utc_now())',
+		// Only an opened thread can be marked unread; the unread-only thread is entered once, as the person would.
+		'enter(db, user_id, sys.argv[4], utc_now())',
 		'with write_transaction(db, scope="seed_suggestion") as connection:',
 		'    row, created = comments.create_with_status(sys.argv[1], body="Please review", author="Reviewer", author_kind="agent", author_thread_id=sys.argv[2], anchor_text="Launch plan", from_off=0, to_off=11, replacement="Revised launch plan", tagged_user_id=user_id, db=connection)',
 		'    feedback_batches.record_comment(connection, row, created=created, delivery_policy=feedback_batches.IMMEDIATE)',
 		'db.close()',
-	].join('\n'), artifactId, threadId, secondArtifactId], { cwd: repo, env: { ...process.env, PYTHONPATH: 'backend:backend/tests', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
+	].join('\n'), artifactId, threadId, secondArtifactId, unreadThreadId], { cwd: repo, env: { ...process.env, PYTHONPATH: 'backend:backend/tests', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
 	const queueResponse = await request.get(`/api/attention/queue?${query}`);
 	expect(queueResponse.ok(), await queueResponse.text()).toBeTruthy();
 	const queue = await queueResponse.json();
@@ -75,13 +85,20 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await settled(page);
 	console.log(`build stamp ${width} orange: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-orange.png`) });
-	const marked = await request.post(`/api/threads/${threadId}/seen?${query}`, { data: { unread: true }, headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
-	expect(marked.ok(), await marked.text()).toBeTruthy();
-	const stateResponse = await request.get(`/api/plans/operator/thread-states?ids=${threadId}`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
+	for (const id of [threadId, unreadThreadId]) {
+		const marked = await request.post(`/api/threads/${id}/seen?${query}`, { data: { unread: true }, headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
+		expect(marked.ok(), await marked.text()).toBeTruthy();
+	}
+	const stateResponse = await request.get(`/api/plans/operator/thread-states?ids=${threadId},${unreadThreadId}`, { headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
 	expect(stateResponse.ok()).toBeTruthy();
-	expect((await stateResponse.json()).states[threadId].has_update).toBe(true);
+	const states = (await stateResponse.json()).states;
+	expect(states[threadId].has_update).toBe(true);
+	expect(states[unreadThreadId].has_update).toBe(true);
 	await expect(sidebarRow.getByRole('button', { name: /Needs you/ })).toBeVisible();
 	await expect(sidebarRow.getByRole('button', { name: 'Update since your last visit' })).toHaveCount(0);
+	const unreadRow = page.locator('aside.sidebar').getByRole('listitem').filter({ hasText: unreadTitle });
+	await expect(unreadRow.getByRole('button', { name: 'Update since your last visit' })).toBeVisible();
+	await expect(unreadRow.getByRole('button', { name: /Needs you/ })).toHaveCount(0);
 	console.log(`build stamp ${width} orange over unread: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-orange-over-unread.png`) });
 	await sidebar.click();
@@ -96,10 +113,10 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const row = plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' }).first();
 	await expect(row).toContainText('1 comment, 1 suggestion');
 	await expect(plan.getByRole('listitem').filter({ hasText: 'Second plan.md' })).toHaveCount(0);
-	const agentFeedback = plan.getByRole('listitem').filter({ hasText: 'Author left 1 comment on Second plan' });
+	const agentFeedback = plan.getByRole('listitem').filter({ hasText: /left 1 comment on Second plan/ });
 	await expect(agentFeedback).toHaveCount(1);
 	await expect(agentFeedback).toContainText('1 comment');
-	await expect(agentFeedback).toContainText('Set aside');
+	console.log(`agent feedback row ${width}: ${await agentFeedback.innerText()}`);
 	await settled(page);
 	console.log(`build stamp ${width} task: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-comment-task.png`) });
@@ -152,13 +169,18 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const ask = page.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
 	await expect(ask).toBeVisible();
 	await capture('ask-before-comments');
+	const askSubtext = (await ask.locator('.row-subline').first().innerText()).trim();
+	console.log(`ask subtext ${width}: ${askSubtext}`);
 	const output = seed('feedback');
 	const resultLine = output.split('\n').find((line) => line.startsWith('FIXTURE_RESULT='));
 	if (!resultLine) throw new Error('Missing feedback fixture IDs');
 	const ids = JSON.parse(resultLine.slice('FIXTURE_RESULT='.length)) as { replies: string[][]; suggestions: string[] };
 	await reopenPlan();
 	await expect(ask).toContainText('2 comments, 2 suggestions');
-	await expect(ask.locator('.row-subline')).toHaveCSS('color', await ask.evaluate((element) => {
+	// The ask keeps its own subtext; the needs-you dot and the accent count follow it.
+	if (askSubtext) await expect(ask.locator('.row-subline').first()).toContainText(askSubtext);
+	await expect(ask.locator('.comment-dot')).toHaveCount(1);
+	await expect(ask.locator('.comment-count')).toHaveCSS('color', await ask.evaluate((element) => {
 		const probe = document.createElement('span');
 		probe.style.color = 'var(--accent)';
 		element.appendChild(probe);

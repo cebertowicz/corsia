@@ -51,6 +51,9 @@
 			? `${node.branch_progress.done}/${node.branch_progress.total}`
 			: null,
 	);
+	const attention = $derived(node.comment_attention);
+	// An open ask keeps its own subtext and gains the count after it; a file task's subtext is the count.
+	const countFollows = $derived(!!attention && !attention.system_task && node.requires_user_action);
 	const symbol = $derived.by(() => {
 		if (state === 'needs-you') return '!';
 		if (state === 'waiting') return isNext ? '→' : '•';
@@ -70,13 +73,17 @@
 		{#if branchProgress}<span class="branch-progress">{branchProgress}<span class="sr-only">{' done'}</span></span>{/if}
 		<span class="row-status sr-only">{label}</span>
 	</span>
-	{#if node.comment_attention}
-		<span class="row-subline {state} {tone}" style:color={node.comment_attention.system_task ? undefined : 'var(--accent)'}>{feedbackLine(node.comment_attention)}</span>
+	{#if attention && !countFollows}
+		<span class="row-subline {state} {tone}">{@render commentCount(attention)}</span>
 	{/if}
-	{#if (!node.comment_attention || (!node.comment_attention.system_task && !node.requires_user_action)) && liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
-	{:else if (!node.comment_attention || (!node.comment_attention.system_task && !node.requires_user_action)) && (subline.lead || subline.moment)}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
+	{#if !attention?.system_task && liveStep}
+		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}{#if attention && countFollows}<span class="subline-text">{' · '}</span>{@render commentCount(attention)}{/if}</span>
+	{:else if !attention?.system_task && (subline.lead || subline.moment)}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}{#if attention && countFollows}<span class="subline-text">{' · '}</span>{@render commentCount(attention)}{/if}</span>
+	{:else if attention && countFollows}<span class="row-subline {state} {tone}">{@render commentCount(attention)}</span>{/if}
 </span>
+
+<!-- Comments waiting for the person: the needs-you dot, then the count in the accent colour. -->
+{#snippet commentCount(counted: NonNullable<OperatorNode['comment_attention']>)}<span class="comment-count">{#if counted.system_task || node.requires_user_action}<span class="comment-dot" aria-hidden="true"></span>{/if}{feedbackLine(counted)}</span>{/snippet}
 
 <style>
 	.row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
@@ -104,6 +111,12 @@
 	.row-subline.needs-you { color: var(--amber-text); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
+	.comment-count { color: var(--accent); white-space: pre; }
+	/* The sidebar's needs-you dot (ThreadPlanStateMark), set in the text line. */
+	.comment-dot {
+		display: inline-block; width: 8px; height: 8px; margin-right: var(--space-1);
+		border-radius: var(--radius-circle); background: var(--amber); vertical-align: 0.05em;
+	}
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;
