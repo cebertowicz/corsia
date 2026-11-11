@@ -65,9 +65,9 @@ def node_paused(execution: dict) -> bool:
     return pause is not None and user_steering.is_user_pause(pause)
 
 
-def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> bool:
+def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False, covered: bool = False) -> bool:
     """The one rule for suppressing a plan-owned ask's attention until resume."""
-    return plan_paused or node_paused
+    return plan_paused or node_paused or covered
 
 
 def review_deferred(
@@ -89,9 +89,52 @@ def node_paused_sql(node_id_sql: str) -> str:
     )"""
 
 
+def covered_sql(node_id_sql: str) -> str:
+    """Whether a comment task is covered by another live ask on its document."""
+    from plans import node_states, user_ask
+
+    return f"""EXISTS (
+        SELECT 1 FROM plan_node_artifact_links comment_link
+        JOIN plan_nodes comment_node ON comment_node.id=comment_link.node_id
+        JOIN plans comment_plan ON comment_plan.id=comment_node.plan_id
+        JOIN threads comment_owner ON comment_owner.id=comment_plan.owner_id
+        JOIN plan_node_artifact_links other_link ON other_link.artifact_id=comment_link.artifact_id
+        JOIN plan_nodes other_node ON other_node.id=other_link.node_id
+        JOIN plans other_plan ON other_plan.id=other_node.plan_id
+        JOIN threads other_owner ON other_owner.id=other_plan.owner_id
+        WHERE comment_link.node_id={node_id_sql}
+          AND comment_link.provenance='document.person_comment_task'
+          AND other_link.node_id<>comment_link.node_id
+          AND COALESCE(other_link.provenance,'')<>'document.person_comment_task'
+          AND comment_owner.user_id=other_owner.user_id
+          AND {node_states.open_sql('other_node')}
+          AND other_plan.state<>'paused' AND NOT {node_paused_sql('other_node.id')}
+          AND ((other_link.role='input' AND other_node.kind='task' AND other_node.assignee='user')
+            OR (other_link.role='attention' AND EXISTS (
+                SELECT 1 FROM plan_node_holds h
+                LEFT JOIN plan_ask_deferrals d ON d.hold_id=h.id
+                WHERE h.node_id=other_node.id AND h.owner_id=other_link.artifact_id
+                  AND {user_ask.open_user_block_sql('h')} AND d.hold_id IS NULL
+            )))
+    )"""
+
+
+def covered_nodes(node_ids, *, db) -> set[str]:
+    """Read coverage once for a batch of projected nodes."""
+    import json
+
+    if not node_ids:
+        return set()
+    rows = db.execute(
+        f"SELECT n.id FROM plan_nodes n WHERE n.id IN (SELECT value FROM json_each(?)) "
+        f"AND {covered_sql('n.id')}", (json.dumps(list(node_ids)),),
+    )
+    return {str(row['id']) for row in rows}
+
+
 def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
     """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
-    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
+    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)} OR {covered_sql(node_id_sql)})"
 
 
 def asks_user_from_facts(

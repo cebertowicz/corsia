@@ -95,6 +95,7 @@ def _present_node(
         "updated_at": node["updated_at"],
         "last_transition_at": state["last_transition_at"],
         "requires_user_action": state["requires_user_action"],
+        "comment_task_covered": state["comment_task_covered"],
         "executor": state["executor"],
         "execution": execution,
         "display": state["display"],

@@ -65,6 +65,39 @@ def raised_attention_nodes(node_ids, *, db) -> set[str]:
     }
 
 
+def open_asks_for_artifacts(artifact_ids, *, db) -> list[dict]:
+    """Open asks directly linked to any of the supplied artifacts, in one read."""
+    import json
+
+    if not artifact_ids:
+        return []
+    rows = db.execute(
+        f"""SELECT DISTINCT l.artifact_id, n.id AS node_id,
+                   CASE WHEN l.role='input' THEN 'person_step'
+                        WHEN i.type='plan-decision' THEN 'decision'
+                        ELSE 'review_hold' END AS kind,
+                   p.owner_id AS owner_thread_id, t.user_id AS owner_user_id,
+                   l.provenance
+              FROM plan_node_artifact_links l
+              JOIN artifact_identities i ON i.id=l.artifact_id
+              JOIN plan_nodes n ON n.id=l.node_id
+              JOIN plans p ON p.id=n.plan_id
+              LEFT JOIN threads t ON t.id=p.owner_id AND p.owner_kind='thread'
+             WHERE l.artifact_id IN (SELECT value FROM json_each(?)) AND {node_states.open_sql('n')}
+               AND ((l.role='input' AND n.kind='task' AND n.assignee='user')
+                    OR (l.role='attention' AND (i.type='plan-decision' OR {askable_sql('i')})
+                        AND {_ATTENTION_STATE_SQL}='raised'))
+             ORDER BY n.id""",
+        (json.dumps(list(artifact_ids)),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def open_asks_for_artifact(artifact_id: str, *, db) -> list[dict]:
+    """Open person steps and raised attention linked directly to this artifact."""
+    return open_asks_for_artifacts([artifact_id], db=db)
+
+
 def _attention_owner(connection, node) -> str:
     """Resolve the owning surface for a genuine plan attention artifact."""
 
