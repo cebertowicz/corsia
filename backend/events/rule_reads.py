@@ -83,10 +83,10 @@ def unrouted_projects(
 
     Only a writer's deliver rule to itself can fire there, so :func:`type_rules`
     first asks whether any exists for the type, unless the caller's ``self_rule``
-    already says. With none, the connector's scope lookup (for GitHub a policy
-    query and git config per registered repository) never runs. ``None``: the
-    lookup failed, which is not the same as an empty scope. GitHub's runs git, so
-    call it outside any write transaction and the preparation gate.
+    already says. With none, the connector's scope lookup (which may query policy
+    and run a subprocess per registered source) never runs. ``None``: the
+    lookup failed, which is not the same as an empty scope. A lookup may run a
+    subprocess, so call it outside any write transaction and the preparation gate.
     """
     manifest = _manifest(connector)
     if manifest is None or manifest.unrouted_scope is None:

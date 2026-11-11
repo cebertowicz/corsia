@@ -218,7 +218,7 @@ def _owner_project(conn, owner: str) -> str | None:
 
 def _unrouted_projects(event_type: str, facts: dict[str, Any]) -> frozenset[str] | None:
     """A connector event routing may give no thread: its connector's unrouted scope,
-    read before the write transaction because GitHub's runs git (``None``: the lookup
+    read before the write transaction because a scope lookup may run a subprocess (``None``: the lookup
     failed, so no self-rule fires)."""
     split = _split_type(event_type)
     return rule_reads.unrouted_projects(*split, facts) if split else frozenset()
