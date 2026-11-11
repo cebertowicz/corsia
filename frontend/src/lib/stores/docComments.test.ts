@@ -305,6 +305,21 @@ describe('prepared comment arrivals', () => {
 		revealCommentArrival('held-doc', arrival);
 		expect(get(docComments)['held-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
 	});
+
+	it('reveals the prepared copy when the only copy kept aside is the one showing before the hold', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		// A load shows it first (a reload that found it unseen), then its lane holds that shown copy aside.
+		mocks.fetchComments.mockResolvedValueOnce(note(false));
+		await loadComments('shown-doc');
+		holdCommentArrival('shown-doc', 'note');
+		// Resolved before its lane's turn: the prepared fetch is the newer copy, and no load comes in between.
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		const arrival = await prepareCommentArrival('shown-doc', 'note');
+		revealCommentArrival('shown-doc', arrival);
+		expect(get(docComments)['shown-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
+	});
 });
 
 describe('resolving a comment', () => {

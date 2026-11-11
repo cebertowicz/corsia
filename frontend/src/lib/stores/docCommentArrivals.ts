@@ -1,11 +1,13 @@
 import { get } from 'svelte/store';
 import { fetchComments, type CommentFeedback } from '$lib/api/docs';
 import { docComments, fromServer, loadComments, reshow, type DocComment } from './docComments';
-import { endHold, heldIds, holdCall, startHold } from './docCommentHolds';
+import { copyStamp, endHold, heldIds, holdCall, startHold } from './docCommentHolds';
 
 export interface PreparedCommentArrival {
 	comment: DocComment | null;
 	feedback: CommentFeedback;
+	/** When this copy was fetched, against the copies a hold keeps aside (`copyStamp`). */
+	at: number;
 }
 
 export async function prepareCommentArrival(
@@ -14,7 +16,7 @@ export async function prepareCommentArrival(
 ): Promise<PreparedCommentArrival> {
 	const { comments, feedback } = await fetchComments(artifactId);
 	const row = commentId ? comments.find((comment) => comment.id === commentId) : null;
-	return { comment: row ? fromServer(row) : null, feedback };
+	return { comment: row ? fromServer(row) : null, feedback, at: copyStamp() };
 }
 
 /** The rows with this comment added at the top, or in place of its current copy when `replace`. */
@@ -27,8 +29,9 @@ const merged = (comment: DocComment, replace: boolean) => (rows: DocComment[]): 
 export function revealCommentArrival(artifactId: string, arrival: PreparedCommentArrival): void {
 	const comment = arrival.comment;
 	if (!comment) return;
-	// A load while it was held kept a newer copy aside (resolved or replied to since); the prepared copy is only as new as its own fetch.
-	const kept = endHold(artifactId, comment.id);
+	// Whichever copy came last: one a load kept aside after this fetch (resolved or replied to since), else the prepared one,
+	// never the copy that was showing when the hold began.
+	const kept = endHold(artifactId, comment.id, arrival.at);
 	reshow(artifactId, merged(kept ?? comment, true));
 }
 

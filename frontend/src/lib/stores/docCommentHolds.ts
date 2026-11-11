@@ -6,7 +6,11 @@ import type { DocComment } from './docComments';
  * `docComments.ts` still writes everything that is shown, and `docCommentArrivals.ts` holds and releases.
  */
 const held = new Map<string, Set<string>>();
-const withheld = new Map<string, Map<string, DocComment>>();
+/** Each row kept aside, with when it was kept (`copyStamp`), so a reveal shows whichever copy was fetched last. */
+const withheld = new Map<string, Map<string, { row: DocComment; at: number }>>();
+let copies = 0;
+/** A stamp for a copy of a comment just fetched or kept aside: a later copy has a higher stamp. */
+export const copyStamp = (): number => ++copies;
 /** The agent call each held suggestion was made by, so that call's streamed preview can wait out the hold. */
 const heldCalls = new Map<string, Map<string, string>>();
 
@@ -16,10 +20,10 @@ export const heldIds = (artifactId: string): string[] => [...(held.get(artifactI
 export function withhold(artifactId: string, rows: DocComment[]): DocComment[] {
 	const ids = held.get(artifactId);
 	if (!ids?.size) return rows;
-	const stash = withheld.get(artifactId) ?? new Map<string, DocComment>();
+	const stash = withheld.get(artifactId) ?? new Map<string, { row: DocComment; at: number }>();
 	withheld.set(artifactId, stash);
 	return rows
-		.filter((row) => { if (ids.has(row.id)) stash.set(row.id, row); return !ids.has(row.id); })
+		.filter((row) => { if (ids.has(row.id)) stash.set(row.id, { row, at: copyStamp() }); return !ids.has(row.id); })
 		.map((row) => ({ ...row, replies: row.replies.filter((reply) => !reply.id || !ids.has(reply.id)) }));
 }
 
@@ -35,11 +39,12 @@ export const isCallHeld = (artifactId: string, callId: string): boolean => heldC
 /** Start holding; `shown` is the row already on screen, if any, which is set aside. */
 export function startHold(artifactId: string, commentId: string, shown?: DocComment): void {
 	held.set(artifactId, (held.get(artifactId) ?? new Set()).add(commentId));
-	if (shown) withheld.set(artifactId, (withheld.get(artifactId) ?? new Map()).set(commentId, shown));
+	if (shown) withheld.set(artifactId, (withheld.get(artifactId) ?? new Map()).set(commentId, { row: shown, at: copyStamp() }));
 }
 
-/** Stop holding. Returns undefined when it was not held, else the row kept aside (null when none was). */
-export function endHold(artifactId: string, commentId: string): DocComment | null | undefined {
+/** Stop holding. Returns undefined when it was not held, else the row kept aside (null when none was, or when it was kept
+ *  before `newerThan`, a copy fetched since). */
+export function endHold(artifactId: string, commentId: string, newerThan = 0): DocComment | null | undefined {
 	const ids = held.get(artifactId);
 	if (!ids?.delete(commentId)) return undefined;
 	const calls = heldCalls.get(artifactId);
@@ -47,7 +52,8 @@ export function endHold(artifactId: string, commentId: string): DocComment | nul
 	if (calls && !calls.size) heldCalls.delete(artifactId);
 	if (!ids.size) held.delete(artifactId);
 	const stash = withheld.get(artifactId);
-	const row = stash?.get(commentId) ?? null;
+	const kept = stash?.get(commentId);
+	const row = kept && kept.at > newerThan ? kept.row : null;
 	stash?.delete(commentId);
 	if (stash && !stash.size) withheld.delete(artifactId);
 	return row;
