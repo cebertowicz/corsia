@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from infra import sqlite_clone
 from infra.database_migrations import (
     MIGRATIONS,
     MigrationError,
@@ -512,6 +513,10 @@ def restart_clock(monkeypatch):
     return None
 
 
+def _refuse_clone(_source, _target):
+    raise sqlite_clone.CloneUnsupported("test file system")
+
+
 def _shrinking_disk(*sizes: int):
     """Report free space that falls as copies land, the way a real disk does."""
     remaining = list(sizes)
@@ -548,11 +553,14 @@ def test_a_crash_restart_loop_halts_before_the_host_runs_out(
         int(migrations._database_bytes(path) * migrations._BACKUP_MIN_FREE_RATIO)
         + migrations._BACKUP_FREE_FLOOR_BYTES
     )
+    # A file system that cannot clone, so every backup is a full copy. Each
+    # attempt reads free space once for the clone's reserve, then for the copy.
+    monkeypatch.setattr(sqlite_clone, "_clone_file", _refuse_clone)
     # Room for two copies above the reserve, then not enough for a third.
     monkeypatch.setattr(
         migrations.shutil,
         "disk_usage",
-        _shrinking_disk(required + 1, required + 1, required - 1),
+        _shrinking_disk(required + 1, required + 1, required + 1, required + 1, required - 1),
     )
 
     for _ in range(5):

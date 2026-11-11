@@ -52,7 +52,7 @@ async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monke
     monkeypatch.setattr(browser_download, 'is_private_download', lambda _: True)
     chrome = SimpleNamespace(process=SimpleNamespace(pid=99), closed=False, release_stream=Mock())
     async def launch(*args, **kwargs):
-        events.append(('launched', kwargs['profile']))
+        events.append(('launched', kwargs['profile'], kwargs['record']))
         return chrome
     monkeypatch.setattr(browser_chrome.ChromeProcess, 'launch', launch)
     monkeypatch.setattr(browser_session_launch, 'apply_kept_signins', AsyncMock())
@@ -66,8 +66,9 @@ async def test_sweep_closes_orphan_then_starts_and_preserves_other_holders(monke
                             _invoke=AsyncMock(), _session_argv=lambda *_: (), _observe_attempt=AsyncMock())
     with caplog.at_level('INFO'):
         await browser_session_launch.start_chrome(owner, runtime)
-    assert events == [('closed', 11), ('launched', profile)]
-    record.assert_called_once_with(tmp_path, 'session', chrome, profile)
+    # The launch is handed where to record, and records at its spawn; nothing writes one later.
+    assert events == [('closed', 11), ('launched', profile, (tmp_path, 'session'))]
+    record.assert_not_called()
     assert 'pid=11 profile=profile' in caplog.text and profile not in caplog.text
 
 

@@ -246,15 +246,15 @@ def _project_repositories(project_id: str) -> frozenset[str] | None:
         return None
 
 
-def _repository_projects(repository: str) -> frozenset[str] | None:
-    """The projects whose registered source repositories track ``repository``."""
-    from events.connectors.github_notifications_feed import (
-        FeedError,
-        projects_tracking_github_repository,
-    )
+def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
+    """The projects whose registered source repositories track the event's repository."""
+    from events.connectors.github_notifications_feed import FeedError, projects_tracking_github_repository
 
+    repository = facts.get(MANIFEST.repository_fact or "")
+    if not repository:
+        return frozenset()
     try:
-        return projects_tracking_github_repository(repository)
+        return projects_tracking_github_repository(str(repository))
     except FeedError:
         return None
 
@@ -345,7 +345,7 @@ MANIFEST = register(ConnectorManifest(
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,
-    repository_projects=_repository_projects,
+    unrouted_scope=_unrouted_scope,
     receiver=GITHUB_RECEIVER,
 ))
 

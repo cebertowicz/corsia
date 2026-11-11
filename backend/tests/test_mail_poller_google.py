@@ -71,9 +71,9 @@ def _stored_cursor(account_id: str) -> dict:
 def _capture_deliveries(monkeypatch) -> list[dict]:
     delivered: list[dict] = []
 
-    def deliver(connector: str, raw: dict, *, target_filter=None, db=None):
+    def deliver(connector: str, raw: dict, *, target_filter=None, unrouted_projects=None, db=None):
         assert connector == "gmail"
-        assert target_filter is not None
+        assert target_filter is not None and unrouted_projects is not None
         delivered.append(raw)
         return []  # designation=None is handled, not a Gmail polling error.
 
@@ -123,6 +123,7 @@ async def test_delivery_uses_flat_facts_and_advances_only_after_handling(monkeyp
         "date": "2026-10-15T09:12:00-07:00", "subject": "Next week",
         "screen_status": "screened", "needs_person": "now", "injection": False,
         "injection_rule": "none", "kind": "scheduling", "screen_model": "local",
+        "from_address": "sam@example.com", "from_domain": "example.com",
     }]
     assert _stored_cursor(account)["history_id"] == "new-history"
 
