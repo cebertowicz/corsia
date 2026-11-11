@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
@@ -44,6 +45,28 @@ describe('comment surface state', () => {
 		expect(document.activeElement).toBe(button);
 		expect(caret).toBe(1);
 		button.remove();
+	});
+
+	it('hands focus back to the jump control when it can take it, and to the text when the control refuses it on its way out', async () => {
+		const root = document.body.appendChild(document.createElement('div'));
+		const button = root.appendChild(document.createElement('div')).appendChild(document.createElement('button'));
+		button.parentElement!.setAttribute('data-doc-jump', '');
+		try {
+			const restoreEditor = vi.fn();
+			const surface = createCommentSurfaceState(restoreEditor);
+			surface.restoreReplyFocus(() => root);
+			surface.restoreFocus(); await tick(); await tick();
+			expect(document.activeElement).toBe(button);
+			expect(restoreEditor).not.toHaveBeenCalled();
+			// Leaving, the control is inert, and focus() on it does nothing.
+			button.blur();
+			button.focus = () => {};
+			surface.restoreReplyFocus(() => root);
+			surface.restoreFocus(); await tick(); await tick();
+			expect(restoreEditor).toHaveBeenCalledTimes(1);
+		} finally {
+			root.remove();
+		}
 	});
 
 	it('keeps the margin column under a new comment and goes back to it when the draft closes', () => {

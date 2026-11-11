@@ -50,7 +50,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	function restoreReplyFocus(root: () => HTMLElement | undefined) {
 		restoreFocus = () => void tick().then(() => {
 			const button = root()?.querySelector<HTMLElement>('[data-doc-jump] button');
-			if (button) button.focus({ preventScroll: true }); else restoreEditor();
+			button?.focus({ preventScroll: true });
+			// A control on its way out is inert and refuses focus: then the text takes it.
+			if (!button || document.activeElement !== button) restoreEditor();
 		});
 	}
 	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
