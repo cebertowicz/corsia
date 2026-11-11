@@ -43,7 +43,7 @@ export function postChatComment(reply: ChatComment, threadId: string | null | un
 	const inputId = sendMessage(threadId, '', modelId, [], undefined, 'apply_now', payload);
 	if (!inputId) {
 		toasts.show(REPLY_SEND_FAILURE.notAccepted, 'error');
-		throw new Error(REPLY_SEND_FAILURE.notAccepted);
+		throw new Error('Cannot send reply: not accepted');
 	}
 	return inputId;
 }

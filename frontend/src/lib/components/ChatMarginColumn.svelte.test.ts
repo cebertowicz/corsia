@@ -40,6 +40,9 @@ function thread() {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
+	chatReplyDrafts.settle('thread', 'test-input');
+	chatReplyDrafts.set('kept', '');
+	chatReplyDrafts.set('lost', '');
 	messages.set([]);
 	host?.remove();
 	document.body.innerHTML = '';
@@ -76,7 +79,7 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	transcript(); thread();
 	messages.update(current => [...current, { id: 'm2', thread_id: 'other', role: 'assistant', content: 'elsewhere', seq: 2, created_at: '2026-11-08T00:00:00Z', chat_comments: [{ id: 'else', cid: 'c9', user_message_id: 's9', quote: 'elsewhere', note: 'No', from_off: 0, to_off: 9, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-08T00:00:00Z', answers: [] }] } as never]);
 	const sent: unknown[] = [];
-	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => { sent.push(reply); return 'test-input'; } } });
 	flushSync();
 
 	expect(host.querySelectorAll('[data-margin-card]')).toHaveLength(2);
