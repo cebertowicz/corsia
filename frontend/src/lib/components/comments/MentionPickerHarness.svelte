@@ -7,6 +7,6 @@
 	provideMentionRoster({ get taggableAgents() { return agents; }, get loadState() { return status; }, get rosterError() { return rosterError; }, get noViewingThread() { return noViewingThread; }, load: () => retry() });
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
-	export function taggedAgentIds() { return picker?.taggedAgentIds(input?.value ?? '') ?? []; }
+	export function taggedAgentIds() { return [...new Set((picker?.occurrences(input?.value ?? '') ?? []).map(item => item.agent_id))]; }
 </script>
 <textarea bind:this={input} aria-label="Comment" value={body}></textarea><MentionPicker bind:this={picker} {input} {selectedTags} />

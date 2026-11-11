@@ -157,17 +157,26 @@ describe('document history', () => {
 		buttons('Retry')[0].click(); await flush();
 		expect(applyRestore).toHaveBeenCalledTimes(2);
 	});
-	it('shows the changed document when it changed after the version was opened', async () => {
-		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('409 stale', 'stale'));
-		const onRestored = vi.fn(async () => {});
+	it('reloads the changed document and the list before offering Retry when it changed after the version was opened', async () => {
+		const applyRestore = vi.fn().mockRejectedValueOnce(new RequestRefused('409 stale', 'stale')).mockResolvedValueOnce(undefined);
+		let reloaded!: () => void;
+		const onRestored = vi.fn().mockReturnValueOnce(new Promise<void>((resolve) => { reloaded = resolve; })).mockResolvedValue(undefined);
 		render({ within: wide(), applyRestore, onRestored }); await flush(); await open(2);
 		vi.mocked(fetchHistory).mockClear();
+		versions = [{ ...versions[0], id: 'outside', author: 'Unknown editor', reason: null }, ...versions];
 		await press();
-		expect(host.textContent).toContain('Couldn’t restore this version. The document changed since you opened it.');
-		expect(buttons('Retry')).toHaveLength(1);
+		expect(host.textContent).toContain('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.');
+		// The document and the list are still reloading: Retry would send a restore against the old text.
+		expect(buttons('Retry')).toHaveLength(0);
+		reloaded(); await flush();
 		expect(onRestored).toHaveBeenCalledOnce();
 		expect(fetchHistory).toHaveBeenCalledOnce();
-		expect(host.textContent).not.toContain('Open History again');
+		expect(rows()).toHaveLength(5);
+		expect(rows()[3].getAttribute('aria-current')).toBe('true');
+		expect(buttons('Retry')).toHaveLength(1);
+		buttons('Retry')[0].click(); await flush();
+		expect(applyRestore).toHaveBeenCalledTimes(2);
+		expect(applyRestore).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'v2' }));
 	});
 	it('says what to do when history is off, with no Retry', async () => {
 		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('409 refused', 'history_off'));

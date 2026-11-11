@@ -29,7 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.chat_comment_answers import strip_answer_tags
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, strip_answer_tags
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -240,14 +240,15 @@ def latest_by_thread_with_attention(
                  WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
                  GROUP BY thread_id
             )
-            SELECT {columns}, messages.content AS message_content,
+            SELECT {columns}, {VISIBLE_CONTENT} AS message_content,
                    selected.display_key, selected.attention_key,
                    {row_key} AS row_key
               FROM selected
               CROSS JOIN thread_updates u INDEXED BY idx_thread_updates_thread_time
                 ON u.thread_id=selected.thread_id
                 AND ({row_key}=selected.display_key OR {row_key}=selected.attention_key)
-              LEFT JOIN messages ON messages.id=u.source_id AND u.source_kind='message'""",
+              LEFT JOIN messages m ON m.id=u.source_id AND u.source_kind='message'
+              {VISIBLE_CONTENT_JOIN}""",
         ids,
     ).fetchall()
     display: dict[str, dict] = {}
@@ -315,8 +316,6 @@ def seen_by_thread(
             "opened": row is not None,
         }
     return seen
-
-
 
 
 def read_newest_cards(

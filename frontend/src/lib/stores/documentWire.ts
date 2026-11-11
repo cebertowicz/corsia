@@ -1,4 +1,5 @@
 import type { FailureObservation } from './documentFailures';
+import type { EmailDraftInfo } from '$lib/emailDraft';
 
 export interface HeldDocument {
 	corsia_text: string;
@@ -43,6 +44,8 @@ export interface DocumentFrame extends FailureObservation {
 	reserved?: boolean;
 	ranges?: { id: string; from_off: number; to_off: number }[];
 	states?: { id: string; orphaned: boolean; text_changed: boolean }[];
+	/** On an email draft's open, receipt and update frames: the header as the server read it from the live text. */
+	email_draft?: EmailDraftInfo;
 }
 
 /** A comment's own id, minted at capture so the live range and the posted comment share it. */
@@ -63,6 +66,11 @@ export function decodeUpdate(value: string): Uint8Array {
 
 /** The server's wire digest: the first 16 lowercase hex characters of SHA-256 over UTF-8. */
 export async function textDigest(text: string): Promise<string> {
+	return (await textSha256(text)).slice(0, 16);
+}
+
+/** Lowercase hex SHA-256 over UTF-8: the hash the server compares a document's text by. */
+export async function textSha256(text: string): Promise<string> {
 	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-	return Array.from(new Uint8Array(digest).subarray(0, 8), byte => byte.toString(16).padStart(2, '0')).join('');
+	return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }

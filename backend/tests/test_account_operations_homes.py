@@ -1199,12 +1199,17 @@ def test_added_account_warm_home_is_where_its_own_transcript_lives(vendors, tmp_
 
 
 @pytest.mark.asyncio
-async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors, tmp_path, monkeypatch):
+@pytest.mark.parametrize('off_loop_guard', [False, True])
+async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(
+    vendors, tmp_path, monkeypatch, off_loop_guard,
+):
     """The adapter forks an added account's warm rollout into a disposable home instead of refusing it.
 
     Drives capture through the real registry and rollout, then the actual
     ``invoke_fork`` up to the checkpoint launch, with a fake provider that
-    never spawns a process and never reaches inference.
+    never spawns a process and never reaches inference. With the loop-write
+    guard armed, the operation home's establish and retirement writes must
+    already be off the event loop, or their outermost write transaction raises.
     """
     from connections.vendor_accounts import get_account
     from core import fork_codex as adapter
@@ -1258,6 +1263,8 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
         return session
 
     monkeypatch.setattr(adapter, '_fork_session', disposable_launch)
+    if off_loop_guard:
+        monkeypatch.setenv('CORSIA_DB_LOOP_WRITE_STRICT', '1')
     with pytest.raises(ProviderForkRejected):
         await adapter.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert facts, 'the adapter never reached a disposable checkpoint launch'

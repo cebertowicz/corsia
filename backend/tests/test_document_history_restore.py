@@ -84,6 +84,27 @@ async def test_agent_edit_after_display_is_stale(skill):
 
 
 @pytest.mark.asyncio
+async def test_an_outside_edit_behind_a_refused_restore_is_kept_by_the_next_save(skill):
+    workspace, _thread, path, _user = skill
+    first = await recorded(skill, SKILL_BODY)
+    second = SKILL_BODY + '\nSecond.\n'
+    await recorded(skill, second)
+    outside = SKILL_BODY + '\nOutside edit.\n'
+    path.write_text(outside)
+    before = commits(workspace)
+    assert refusal(await restore(skill, first, sha(second))) == (409, 'stale')
+    # The refusal writes and records nothing.
+    assert path.read_text() == outside
+    assert commits(workspace) == before
+    # The next save keeps the outside edit first, by no one's name, then its own text.
+    await recorded(skill, outside + 'Typed.\n')
+    rel = path.resolve().relative_to(workspace.resolve()).as_posix()
+    assert commits(workspace) == before + 2
+    assert 'Reason: unrecorded' in _git(['log', '-1', '--format=%B', 'HEAD~1'], cwd=workspace)
+    assert _git(['show', f'HEAD~1:{rel}'], cwd=workspace) == outside
+
+
+@pytest.mark.asyncio
 async def test_typing_during_restore_is_its_own_version(skill):
     workspace, _thread, path, _user = skill
     first = await recorded(skill, SKILL_BODY)
@@ -108,7 +129,9 @@ async def test_unknown_version_is_unavailable(skill):
 @pytest.mark.asyncio
 async def test_file_without_history_is_history_off(skill):
     workspace, thread_id, _path, _user = skill
-    plain = workspace / 'notes.md'
+    # An unregistered file in a thread's tray is never recorded.
+    plain = workspace / '.threads' / thread_id / 'scratch' / 'notes.md'
+    plain.parent.mkdir(parents=True)
     plain.write_text('notes')
     response = await files.restore_version('test', files.RestoreBody(
         path=str(plain), version='a' * 40, base_sha256=sha('notes'), thread_id=thread_id))
@@ -271,10 +294,12 @@ def test_document_open_says_whether_the_file_is_recorded(history_scope):
     path = workspace / '.threads' / thread_id / 'skills' / 'demo' / 'SKILL.md'
     path.parent.mkdir(parents=True)
     path.write_text(SKILL_BODY)
-    plain = workspace / 'notes.md'
+    plain = workspace / '.threads' / thread_id / 'scratch' / 'notes.md'
+    plain.parent.mkdir(parents=True)
     plain.write_text('notes')
     assert read_document(str(path), user_id, None, thread_id)['_recorded'] is True
-    assert read_document(str(plain), user_id, None, thread_id)['_recorded'] is False
+    # Opened with no thread, the tray file stays unregistered (a thread's open registers it, and records it).
+    assert read_document(str(plain), user_id, None, None)['_recorded'] is False
 
 
 @pytest.mark.asyncio
@@ -285,7 +310,7 @@ async def test_document_open_asks_git_only_off_the_database_pool(skill, monkeypa
 
     _workspace, thread_id, path, user_id = skill
     asked = []
-    monkeypatch.setattr(document_history, 'history_off', lambda workspace: asked.append(workspace) or False)
+    monkeypatch.setattr(document_history, 'repository', lambda workspace: asked.append(workspace) or workspace)
     files_load.read_document(str(path), user_id, None, thread_id)
     assert asked == []
     off_db = []
@@ -297,4 +322,4 @@ async def test_document_open_asks_git_only_off_the_database_pool(skill, monkeypa
 
     monkeypatch.setattr(files, 'run_off_db', counted)
     assert (await files.content('test', str(path), thread_id=thread_id))['history'] is True
-    assert len(asked) == 1 and off_db == [document_history.history_off]
+    assert len(asked) == 1 and off_db == [document_history.history_offered]

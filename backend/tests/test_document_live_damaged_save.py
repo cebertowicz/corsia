@@ -111,6 +111,9 @@ async def damaged_mid_session(scope, tmp_path, monkeypatch, *, outside=None):
     monkeypatch.setattr(document_control, "_schedule_commit", schedule)
     schedule(entry.artifact_id, entry)
     await asyncio.sleep(.2)
+    # The damage save queued on the lane by now; a recorded document's save also commits its version,
+    # so wait for the lane to run it rather than for a fixed time.
+    await entry.lane._submit(lambda: asyncio.sleep(0))
     return {"manager": manager, "entry": entry, "context": context, "user": user, "socket": socket,
             "base": base, "damaged": damaged}
 
@@ -194,15 +197,16 @@ async def test_damage_save_never_replaces_a_file_changed_outside(ownership_scope
 
 @pytest.mark.asyncio
 async def test_damage_save_writes_the_file_once_across_classification_points(ownership_scope, tmp_path, monkeypatch):
-    from doceditor import live_runtime
+    from doceditor import document_save
     from ws import document_control
     from tests.test_document_live_damaged_fallback import _tools
     calls = []
-    plain = live_runtime.write_atomic_plain
+    plain = document_save.write_atomic_plain
     def counted(path, text, prior=None):
         calls.append(text)
         plain(path, text, prior)
-    monkeypatch.setattr(live_runtime, "write_atomic_plain", counted)
+    # The live lane's one file write, whether or not its version is recorded.
+    monkeypatch.setattr(document_save, "write_atomic_plain", counted)
     session = await damaged_mid_session(ownership_scope, tmp_path, monkeypatch)
     entry, socket, user, base = session["entry"], session["socket"], session["user"], session["base"]
     saved = "RECEIVED ACKED " + ORIGINAL

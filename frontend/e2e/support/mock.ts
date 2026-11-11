@@ -10,6 +10,8 @@ export interface MockReply {
     reasoning_content?: string;
     response_gate?: string;
     completion_gate?: string;
+    // Holds the reply after the first half of its content has streamed, until released.
+    content_gate?: string;
     delay_ms?: number;
     tool_calls?: Array<{
         id: string;

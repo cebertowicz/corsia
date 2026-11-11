@@ -356,11 +356,11 @@ async def test_a_hypothesis_becomes_a_reviewed_trial_the_next_install_offers(env
 
 
 FAULTS = {
-    "the file write": ("infra.guidance_git.save_guidance", 0, False, 0),
+    "the file write": ("infra.guidance_git.save_with_history", 0, False, 0),
     "the artifact registration": ("registry.service.register_write_strict", 0, True, 0),
     "the artifact link": ("plans.artifact_links.link", 0, True, 0),
     "the schedule": ("plans.scheduled_wait.schedule_task", 0, True, 0),
-    "the review reference write": ("infra.guidance_git.save_guidance", 1, True, 1),
+    "the review reference write": ("infra.guidance_git.save_with_history", 1, True, 1),
 }
 
 

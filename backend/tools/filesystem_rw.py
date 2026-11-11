@@ -10,7 +10,7 @@ from host_access.credential_sanitizer import CredentialSafeText, sanitize_creden
 from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from infra.db_async import run_in_db, run_off_db
-from infra.guidance_targets import guidance_target
+from infra.guidance_targets import history_target
 from tools.base import Tool
 from tools.filesystem_binary import open_bound_binary
 from tools.file_write_receipt import write_success_path, write_success_result
@@ -368,12 +368,14 @@ class WriteFileTool(Tool):
                 "update_trigger": update_trigger,
                 "success": write_success_result(file_path, len(content)),
             }
-            target = await asyncio.to_thread(guidance_target, file_path)
+            target = await asyncio.to_thread(history_target, file_path)
+            if target is None or target.document:
+                # Guidance never goes live; an open document's lane records its own version.
+                result = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
+                if result is not None:
+                    return result
             if target is not None:
                 return await save_guided_write_and_announce(file_path, content, target, kwargs, **write_args)
-            result = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
-            if result is not None:
-                return result
             return announce_published_write(
                 await run_off_db(managed_write, file_path, content, kwargs, notify=False, **write_args)
             )

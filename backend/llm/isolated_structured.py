@@ -2080,10 +2080,10 @@ async def _invoke_codex_structured(
     request = admit_structured(target, request)
     terminal = (terminal_factory or _new_terminal_future)()
     capture = _CodexInvocationCapture(request=request, terminal=terminal)
-    from connections.account_operation import operation_directory
+    from connections.account_operation import operation_home
 
-    with operation_directory(request, prefix='corsia-isolated-codex-', kind='detached',
-                             home_subdir='home', model=target.catalog_id) as (request, root):
+    async with operation_home(request, prefix='corsia-isolated-codex-', kind='detached',
+                              home_subdir='home', model=target.catalog_id) as (request, root):
         working_dir = root / 'cwd'
         codex_home = root / 'home'
         working_dir.mkdir()

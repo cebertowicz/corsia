@@ -175,14 +175,14 @@ def test_multiple_tagged_reply_contexts_name_each_root_when_cut(isolated_db):
         for _ in range(2):
             root, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Person")
             db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("prior " * 140, root["id"]))
+            db.commit()
             roots.append(root)
-        db.commit()
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
         for root in roots:
             reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
                                           author="Person", parent_id=root["id"])
             comment_recipients.save_tags(db, reply, ["owner"])
-        db.commit()
+            db.commit()
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
         wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
         context = json.loads(wake[0].split("\n", 1)[1])["thread_context"]

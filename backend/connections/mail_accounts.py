@@ -52,7 +52,9 @@ def _mail_host_usable(account: dict, db: sqlite3.Connection) -> dict:
     if account["state"] == "connected":
         return account
     status = store.read(str(account["id"]), db=db)[1].get("status")
-    raise AccountError(_BY_STATUS.get(status, UNAVAILABLE).format(address=account["address"]))
+    # A check still running, or a state with no named fix, clears on its own; the others need the person.
+    raise AccountError(_BY_STATUS.get(status, UNAVAILABLE).format(address=account["address"]),
+                       person_fixes=status != store.CHECKING and status in _BY_STATUS)
 
 
 def _usable(account: dict, db: sqlite3.Connection) -> dict:

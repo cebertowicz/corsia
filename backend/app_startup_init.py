@@ -42,3 +42,30 @@ def initialize_startup(logger) -> None:
     recover_interrupted_held_replies()
     sweep_owed_status()
     initialize_workspace(WORKSPACE, logger)
+
+
+async def initialize_startup_off_loop(logger) -> None:
+    """Run :func:`initialize_startup` on a worker thread, with nothing else started yet.
+
+    Its steps are synchronous SQLite work: an outermost ``BEGIN IMMEDIATE`` on
+    the event-loop thread waits out the busy timeout while every request
+    freezes, which is what ``infra/db_loop_guard`` reports. Two things change
+    by moving it, both intended:
+
+    * ``infra/write_admission._wait_bound`` gives a contended write on a worker
+      thread 30 s instead of the 5 s a loop-thread write may spend waiting.
+    * ``infra.database.get_db`` is thread-local, so init now writes on the
+      worker thread's own connection.
+
+    It runs through ``run_off_db`` (the default executor, not the DB pool), so a
+    cancelled lifespan joins the worker before unwinding and never reports
+    startup failed while a migration is still writing.
+
+    Nothing else does: none of the modules these steps live in imports asyncio,
+    ``infra.app_loop`` still has no captured loop here (``lifespan`` captures it
+    after this returns), and the sequence inside ``initialize_startup`` is
+    untouched, so startup still finishes before anything else starts.
+    """
+    from infra.db_async import run_off_db
+
+    await run_off_db(initialize_startup, logger)

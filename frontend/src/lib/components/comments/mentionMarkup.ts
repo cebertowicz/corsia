@@ -3,14 +3,14 @@ import { renderMarkdown } from '$lib/markdown';
 import type { MentionOccurrence } from './mentionSelection';
 export type TaggedAgent = { id: string; name: string };
 
-/** Render only explicitly identified occurrences; never infer identity from a display name. */
-export function renderMentions(
-	text: string, taggedAgents: TaggedAgent[], occurrences: MentionOccurrence[] = [], taggedPerson: string | null = null,
-): string {
-	if (typeof document === 'undefined') return renderMarkdown(text);
-	const agents = new Map(taggedAgents.map(agent => [agent.id, agent]));
-	const valid = [...occurrences].sort((a, b) => a.start - b.start).filter((item, index, all) =>
-		agents.has(item.agent_id) && Number.isInteger(item.start) && Number.isInteger(item.end) && item.start >= 0 && item.end > item.start && item.end <= text.length && (index === 0 || all[index - 1].end <= item.start));
+/** Occurrences in order and in bounds, with no overlap: the ones the comment can show. */
+function placeable(text: string, occurrences: MentionOccurrence[], known: (id: string) => boolean) {
+	return [...occurrences].sort((a, b) => a.start - b.start).filter((item, index, all) =>
+		known(item.agent_id) && Number.isInteger(item.start) && Number.isInteger(item.end) && item.start >= 0 && item.end > item.start && item.end <= text.length && (index === 0 || all[index - 1].end <= item.start));
+}
+
+/** The comment's Markdown rendered with each occurrence as a numbered token (`valid[n]`), and its text nodes. */
+function tokenized(text: string, valid: MentionOccurrence[]) {
 	let prefix = 'CORSIAMENTIONTOKEN'; while (text.includes(prefix)) prefix += 'X';
 	let marked = '', cursor = 0;
 	valid.forEach((item, i) => { marked += text.slice(cursor, item.start) + `${prefix}${i}END`; cursor = item.end; });
@@ -27,6 +27,33 @@ export function renderMentions(
 	}
 	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 	const nodes: Text[] = []; while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+	return { root, prefix, nodes };
+}
+
+/** Code, preformatted text and links show an occurrence as plain text, so it reads as no tag. */
+const plainHere = (node: Text) => !!node.parentElement?.closest('code, pre, a');
+
+/** The occurrences a reader sees as tags: those outside code, preformatted text, links and link destinations. */
+export function shownAsTags(text: string, occurrences: MentionOccurrence[]): MentionOccurrence[] {
+	if (typeof document === 'undefined') return occurrences;
+	const valid = placeable(text, occurrences, () => true);
+	const { prefix, nodes } = tokenized(text, valid);
+	const shown: MentionOccurrence[] = [];
+	for (const node of nodes) {
+		if (plainHere(node)) continue;
+		for (const match of node.data.matchAll(new RegExp(`${prefix}(\\d+)END`, 'g'))) { const item = valid[Number(match[1])]; if (item) shown.push(item); }
+	}
+	return shown.sort((a, b) => a.start - b.start);
+}
+
+/** Render only explicitly identified occurrences; never infer identity from a display name. */
+export function renderMentions(
+	text: string, taggedAgents: TaggedAgent[], occurrences: MentionOccurrence[] = [], taggedPerson: string | null = null,
+): string {
+	if (typeof document === 'undefined') return renderMarkdown(text);
+	const agents = new Map(taggedAgents.map(agent => [agent.id, agent]));
+	const valid = placeable(text, occurrences, id => agents.has(id));
+	const { root, prefix, nodes } = tokenized(text, valid);
 	const shown = new Set<string>();
 	for (const node of nodes) {
 		let remaining = node.data, changed = false; const fragment = document.createDocumentFragment();
@@ -35,7 +62,7 @@ export function renderMentions(
 			const item = valid[Number(match[1])]; if (!item) continue;
 			fragment.append(remaining.slice(at, match.index));
 			const value = text.slice(item.start, item.end);
-			if (node.parentElement?.closest('code, pre, a')) fragment.append(value);
+			if (plainHere(node)) fragment.append(value);
 			else { const span = document.createElement('span'); span.className = 'comment-mention'; span.dataset.agentId = item.agent_id; span.textContent = value; fragment.append(span); shown.add(item.agent_id); }
 			at = match.index + match[0].length; changed = true;
 		}

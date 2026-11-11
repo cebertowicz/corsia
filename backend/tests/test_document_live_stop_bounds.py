@@ -69,10 +69,10 @@ async def test_stalled_write_cannot_stall_canonical_stop_owner(tmp_path, monkeyp
     live, lane = await open_lane(tmp_path)
     if stage == "write":
         writer = lane.write
-        async def stalled_writer(text, prior_hash):
+        async def stalled_writer(text, prior_hash, *actor_and_reason):
             entered.set()
             await release.wait()
-            await writer(text, prior_hash)
+            await writer(text, prior_hash, *actor_and_reason)
         monkeypatch.setattr(lane, "write", stalled_writer)
     jobs = []
     enqueue = lane._enqueue

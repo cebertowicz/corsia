@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from core.message_display import llm_to_display
+from infra.chat_comment_answers import message_answer_fields
 from infra.database import get_db
 from infra.message_activity import DISPLAY_ROW_SELECT
 
@@ -22,9 +23,11 @@ def load_assistant_step_display(
     """Load one Assistant Step with authoritative and legacy result lineage."""
     _db = db or get_db()
     try:
-        return _project_assistant_step(
+        step = _project_assistant_step(
             _lineage_rows(_db, child_thread_id, assistant_step_id), assistant_step_id,
         )
+        step.update(message_answer_fields(child_thread_id, assistant_step_id, _db))
+        return step
     finally:
         if not db:
             _db.close()
@@ -38,6 +41,7 @@ def assistant_step_payload(step: dict, *, message_id: str) -> dict:
         "metadata": step.get("metadata") or {},
         "created_at": step["created_at"],
         "seq": step.get("seq"),
+        **{key: step[key] for key in ("chat_answer_cids", "chat_visible_content") if key in step},
     }
 
 

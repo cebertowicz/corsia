@@ -156,7 +156,7 @@ def _plan(db: sqlite3.Connection, sql: str, *bindings) -> list[str]:
 
 
 def test_schema_186_registers_the_migration_step():
-    assert SCHEMA_VERSION == 186
+    assert SCHEMA_VERSION == 189
     assert MIGRATIONS[185] is migrate_185_to_186
 
 

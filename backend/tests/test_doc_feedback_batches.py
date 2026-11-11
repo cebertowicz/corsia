@@ -45,7 +45,7 @@ def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
         db.close()
 
 
-def test_person_delivery_announces_once_after_all_recipient_batches_close(isolated_db, monkeypatch):
+def test_person_reply_announces_at_commit_and_once_after_all_recipient_batches_close(isolated_db, monkeypatch):
     frames: list[str] = []
     monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", lambda artifact_id, **_kwargs: frames.append(artifact_id))
     db = get_db()
@@ -60,9 +60,10 @@ def test_person_delivery_announces_once_after_all_recipient_batches_close(isolat
         )
 
         assert len(feedback["batch_ids"]) == 2
+        assert frames == [artifact_id]
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
 
-        assert frames == [artifact_id]
+        assert frames == [artifact_id, artifact_id]
         assert all(row["state"] == "delivered" for row in batches(db) if row["id"] in feedback["batch_ids"])
     finally:
         db.close()

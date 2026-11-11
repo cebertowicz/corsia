@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from connections.account_errors import AccountError
 from connections.calendar_document import Invite
+from connections.mail.conversation import ConversationEmail
 from connections.mail.email_document import build_message, parse_document
 from connections.mailhost import agenda, guard_read, outbound, read as mailhost_read, reply, smtp
 from tools.action_delivery import deliver_claimed
@@ -72,6 +73,9 @@ class MailHostBackend:
     sent_html = staticmethod(guard_read.sent_html)
     fetch_body = staticmethod(guard_read.fetch_body)
 
+    async def conversation(self, account_id: str, target: dict) -> list[ConversationEmail]:
+        return await guard_read.conversation(account_id, target.get("references") or target.get("in_reply_to") or "")
+
     async def attachment_limit(self, account_id: str) -> tuple[int | None, bool]:
         sender = await outbound.sender(account_id)
 
@@ -85,14 +89,14 @@ class MailHostBackend:
 
         return await mailhost_read.guarded(account_id, sender.check, read_limit), True
 
-    async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str | None, str]:
+    async def draft_metadata(self, account: dict, existing: dict | None, reply_id: object) -> tuple[dict, str]:
         """The reply target named now or kept from the draft it replaces, and a new Message-ID for this copy."""
         account_id = str(account["id"])
         if reply_id:
-            target, label = await reply.reply_target(account_id, str(reply_id))
+            target = await reply.reply_target(account_id, str(reply_id))
         else:
-            target, label = draft_target(existing), await reply.kept_reply_label(account_id, existing)
-        return {**target, COPY_ID: outbound.new_message_id(str(account["address"]))}, label, ""
+            target = draft_target(existing)
+        return {**target, COPY_ID: outbound.new_message_id(str(account["address"]))}, ""
 
     async def keep_draft_copy(self, account: dict, text: str, target: dict, previous: dict) -> str | None:
         """Append this revision to the host's Drafts folder and remove the copy it replaces."""

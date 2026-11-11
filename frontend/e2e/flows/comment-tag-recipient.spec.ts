@@ -86,7 +86,7 @@ test('@flow:document-comments tagging an agent in a reply delivers only to parti
 		], rootId, `%Tag recipient ${stamp}%`, tagged, other))).toEqual([tagged]);
 		await captureFrames(page, delivered, 'delivered');
 
-		// A cut and paste moves plain text, not the selected agent identity.
+		// A cut and paste drops the picked identity, but the agent's full name typed after @ still tags it at send.
 		await reply.fill('@Tag recipient');
 		await page.getByRole('option', { name: new RegExp(`Tag recipient ${stamp}`) }).click();
 		await reply.press('ControlOrMeta+A');
@@ -96,10 +96,16 @@ test('@flow:document-comments tagging an agent in a reply delivers only to parti
 		const posted = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes(`/api/artifacts/${doc.artifactId}/comments`));
 		await card.getByRole('button', { name: 'Send reply', exact: true }).click();
 		const payload = (await posted).postDataJSON();
-		expect(payload.tagged_agent_ids).toEqual([]);
-		expect(payload.tagged_agent_mentions).toEqual([]);
-		await expect(card.getByText(`@Tag recipient ${stamp}`, { exact: true }).and(card.locator('p'))).toBeVisible();
-		await expect(card.locator('.comment-mention').filter({ hasText: `@Tag recipient ${stamp}` })).toHaveCount(1);
+		expect(payload.tagged_agent_ids).toEqual([tagged]);
+		expect(payload.tagged_agent_mentions).toEqual([{ agent_id: tagged, start: 0, end: `@Tag recipient ${stamp}`.length }]);
+		await expect(card.locator('.comment-mention').filter({ hasText: `@Tag recipient ${stamp}` })).toHaveCount(2);
+
+		// A name typed without opening the list at all tags too; text that only starts like a name doesn't.
+		const typed = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes(`/api/artifacts/${doc.artifactId}/comments`));
+		await reply.pressSequentially(`Over to @Tag recipient ${stamp}. Not @Tag recipient ${stamp}x`);
+		await card.getByRole('button', { name: 'Send reply', exact: true }).click();
+		expect((await typed).postDataJSON().tagged_agent_ids).toEqual([tagged]);
+		await expect(card.locator('.comment-mention').filter({ hasText: `@Tag recipient ${stamp}` })).toHaveCount(3);
 	} finally {
 		await demoteAgent(request, tagged);
 		await demoteAgent(request, other);

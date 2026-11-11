@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from loguru import logger
 
 from infra.guidance_git import _git_bytes, workspace_repository
 from infra.guidance_states import GitFault, history_is_off
@@ -11,6 +13,8 @@ from infra.guidance_messages import parse_recorded_reason
 
 # The most versions one list returns; ``truncated`` says older ones exist.
 HISTORY_CAP = 500
+# Consecutive saves by one author this close together show as one version.
+GROUP_GAP = timedelta(minutes=10)
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
@@ -33,6 +37,25 @@ def history_off(workspace: Path) -> bool:
         return False
 
 
+def history_offered(workspace: Path, document=None) -> bool:
+    """Whether an open recorded file offers History: the workspace records history, and ``document`` (its
+    path and target; a guidance file passes None) is in the latest version, so a file with none recorded
+    has no History control (VH7). One lookup in HEAD, whatever the history's length (an unborn HEAD or
+    a path not in it exits 1). A fault, the target's own or Git's, offers History, so the panel's load
+    shows it."""
+    try:
+        repo = repository(workspace)
+        if repo is None or document is None or document[1].fault:
+            return repo is not None
+        relative = document[0].resolve(strict=False).relative_to(repo).as_posix()
+        return _git_bytes(repo, "rev-parse", "--verify", "--quiet", f"HEAD:{relative}", ok=(0, 1)).strip() != b""
+    except GitFault as exc:
+        logger.warning("history check failed for {}: {}", document, exc)
+        return True
+    except ValueError:  # outside this history: nothing to list
+        return False
+
+
 def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | None]], bool]:
     """The newest versions that hold this file's text, and whether older ones exist past the cap."""
     repo = repository(workspace)
@@ -47,7 +70,30 @@ def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | 
     for index in range(0, len(fields) - 3, 4):
         commit, author, saved_at, message = fields[index:index + 4]
         rows.append({"id": commit, "author": author, "savedAt": saved_at, "reason": parse_recorded_reason(message)})
-    return rows[:HISTORY_CAP], len(rows) > HISTORY_CAP
+    return grouped(rows[:HISTORY_CAP]), len(rows) > HISTORY_CAP
+
+
+def grouped(rows: list[dict[str, str | None]]) -> list[dict[str, str | None]]:
+    """Newest-first saves shown as versions: a save joins the version just before it when the same
+    author made both, within ``GROUP_GAP`` of that version's first save, and the later one states no
+    reason. The window never slides, so a long session still shows a version at least every
+    ``GROUP_GAP``. The shown version is the group's newest save, under the reason that started it.
+    Display only: every commit stays in history."""
+    shown: list[dict[str, str | None]] = []
+    started = None
+    for row in reversed(rows):
+        last = shown[-1] if shown else None
+        if (last is not None and started is not None and row["reason"] is None
+                and row["author"] == last["author"] and _at(row) - started <= GROUP_GAP):
+            shown[-1] = {**row, "reason": last["reason"]}
+        else:
+            shown.append(row)
+            started = _at(row)
+    return shown[::-1]
+
+
+def _at(row: dict[str, str | None]) -> datetime:
+    return datetime.fromisoformat(str(row["savedAt"]))
 
 
 def version_bytes(repo: Path, relative: str, commit: str) -> bytes:

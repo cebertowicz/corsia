@@ -24,8 +24,8 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
-from infra.guidance_git import save_guidance
-from infra.guidance_targets import GuidanceTarget, guidance_target
+from infra.guidance_git import save_with_history
+from infra.guidance_targets import HistoryTarget, guidance_target, history_target
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
 from registry.durable_writes import write_text
@@ -111,9 +111,9 @@ async def _save_validated(
     path: Path, text: str, author: Callable[[], str], reason: str | None, write, *,
     expected_sha256: str | None = None, history_required: bool = False,
 ) -> dict:
-    """Write a validated editor save. Guidance goes through history off the DB executor, whose
-    workers its lock wait and sweep would otherwise hold (issue #2272)."""
-    target = await run_in_db(guidance_target, path, Path(config.WORKSPACE))
+    """Write a validated editor save. Guidance and recorded documents go through history off the DB
+    executor, whose workers its lock wait and sweep would otherwise hold (issue #2272)."""
+    target = await run_in_db(history_target, path, Path(config.WORKSPACE))
     if target is None:
         if history_required:
             raise DocumentSaveError("history_off", "This file has no recorded history")
@@ -123,18 +123,20 @@ async def _save_validated(
 
 
 def _guided_write(
-    path: Path, target: GuidanceTarget, text: str, author: Callable[[], str], reason: str | None, write,
+    path: Path, target: HistoryTarget, text: str, author: Callable[[], str], reason: str | None, write,
     expected_sha256: str | None = None, history_required: bool = False,
 ) -> dict:
-    """Blocking. Run a validated editor save of a guidance file through guidance history (issue #2272).
+    """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
     ``expected_sha256`` is checked once, by the history lock's compare-and-swap; ``history_required``
-    writes nothing unless the version is recorded."""
+    writes nothing unless the version is recorded. The owner report's diff runs after the save, never
+    under the history lock."""
     payloads: list[dict] = []
-    saved = save_guidance(
+    reports: list[Callable[[], None]] = []
+    saved = save_with_history(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
-        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None)),
+        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
     )
     if saved.outcome == "refused":
         assert saved.line is not None
@@ -148,8 +150,11 @@ def _guided_write(
         raise DocumentSaveError(kind, saved.line or "History could not be recorded")
     if not payloads:
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
+    # Only a save that stays written reaches its owner; a refused one was put back.
+    for report in reports:
+        report()
     if saved.line is not None:
-        payloads[0]["guidance_history"] = saved.line
+        payloads[0][f"{target.kind}_history"] = saved.line
     payloads[0]["version"] = saved.sha
     return payloads[0]
 
@@ -241,8 +246,10 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
 
 def _write_document(
     body: DocumentSave, resolved: Path, direct_user: bool, expected_sha256: str | None = None,
+    reports: list[Callable[[], None]] | None = None,
 ) -> dict:
-    """Blocking. Write a validated document and resolve its artifact identity."""
+    """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
+    owner report is left there for the caller to run once it holds no lock."""
     if expected_sha256 is not None:
         current_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
         if current_sha256 != expected_sha256:
@@ -290,11 +297,10 @@ def _write_document(
                     db, artifact, previous_sha256=prior_sha256,
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )
-        try:
-            # The bytes are saved and recorded: a report failure never fails the save.
-            report_plain_write(decision, resolved, before, thread_id=actor, db=db)
-        except Exception as exc:
-            _log.warning("owner report failed for saved artifact %s: %s", decision.artifact_id, type(exc).__name__)
+        if reports is None:
+            _report(decision, resolved, before, actor, db)
+        else:
+            reports.append(lambda: _report(decision, resolved, before, actor))
     finally:
         db.close()
     notification = artifact or {
@@ -303,6 +309,19 @@ def _write_document(
         "external_id": str(resolved),
     }
     return _saved_payload(resolved, actor, {"artifact": artifact, "_notification": notification})
+
+
+def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None) -> None:
+    """Report a saved write to its owner; the bytes are saved, so a failure never fails the save."""
+    own = db is None
+    db = db or get_db()
+    try:
+        report_plain_write(decision, resolved, before, thread_id=actor, db=db)
+    except Exception as exc:
+        _log.warning("owner report failed for saved artifact %s: %s", decision.artifact_id, type(exc).__name__)
+    finally:
+        if own:
+            db.close()
 
 
 async def save_document_text(
@@ -346,8 +365,8 @@ async def _save_legacy_document(
         body.text,
         lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
         reason,
-        lambda path, expected: _write_document(
-            body, path, direct_user=not by_agent, expected_sha256=expected,
+        lambda path, expected, reports=None: _write_document(
+            body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
         ),
         expected_sha256=expected_sha256, history_required=history_required,
     )

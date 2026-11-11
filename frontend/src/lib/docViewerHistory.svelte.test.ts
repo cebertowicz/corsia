@@ -12,10 +12,10 @@ vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 const target = { instanceId: 'tab', path: '/file.md', name: 'file.md', projectId: null, threadId: null, artifactId: null };
 const version = { id: 'a'.repeat(40), author: 'Author', savedAt: '2026-11-03T16:02:00Z', reason: null };
 
-function create() {
+function create(liveText?: () => string | null) {
 	let history!: ReturnType<typeof createViewerHistory>;
 	const dispose = $effect.root(() => {
-		history = createViewerHistory({ key: () => 'tab', target: () => target, closeComments: vi.fn(), columnShown: () => false, showColumn: vi.fn(), root: () => undefined });
+		history = createViewerHistory({ key: () => 'tab', target: () => target, closeComments: vi.fn(), columnShown: () => false, showColumn: vi.fn(), root: () => undefined, liveText });
 	});
 	flushSync();
 	return { history, dispose };
@@ -65,6 +65,16 @@ it('saves pending typing first and asks the server to restore against what was s
 	await history.restore(version);
 	expect(order).toEqual(['flush', 'restore']);
 	expect(restoreVersion).toHaveBeenCalledExactlyOnceWith(target, version.id, 'after-flush');
+	dispose();
+});
+
+it('restores an open live document against the full SHA-256 of the text it shows', async () => {
+	const shown = 'Live text.\n';
+	const { history, dispose } = create(() => shown);
+	await history.restore(version);
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(shown));
+	const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+	expect(restoreVersion).toHaveBeenCalledExactlyOnceWith(target, version.id, hex);
 	dispose();
 });
 

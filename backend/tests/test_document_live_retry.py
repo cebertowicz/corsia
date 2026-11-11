@@ -21,9 +21,9 @@ async def test_runtime_retries_promote_without_another_file_write(ownership_scop
         if len(attempts) == 1:
             raise StoreRefused("promote refused")
         return promote(op_id, *clears_through)
-    async def counted(text, prior_hash):
+    async def counted(text, prior_hash, *actor_and_reason):
         writes.append(text)
-        return await write(text, prior_hash)
+        return await write(text, prior_hash, *actor_and_reason)
     monkeypatch.setattr(entry.live.store, "promote", once)
     entry.lane.write = counted
     try:

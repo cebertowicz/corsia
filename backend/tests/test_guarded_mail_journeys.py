@@ -66,13 +66,17 @@ async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):
     saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-100')
     draft = json.loads(saved)
     document = (mail.workspace / draft['path']).read_text()
-    assert 'New details from Pat' in document and '<untrusted-email>' in document
-    assert 'quoted below the reply' in document
+    notes = '\n'.join(json.loads(_row(draft['draft_id'])['target_json'])['notes'])
+    # The newer email is the agent's evidence; the view shows it live from the conversation (E5).
+    assert 'New details from Pat' in '\n'.join(draft['guard_notes'])
+    assert 'New details from Pat' not in notes and '<untrusted-email>' not in notes
+    assert 'quoted below the reply' in notes
+    assert 'Note:' not in document and 'In reply to:' not in document
     saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-101')
     retargeted = json.loads(saved)
-    document = (mail.workspace / retargeted['path']).read_text()
-    assert '<untrusted-email>New details from Pat</untrusted-email>' in document
-    assert document.index('New details from Pat') < document.index('quoted below the reply')
+    notes = '\n'.join(json.loads(_row(retargeted['draft_id'])['target_json'])['notes'])
+    assert 'The message being replied to' not in notes
+    assert 'quoted below the reply' in notes
     assert json.loads(_row(retargeted['draft_id'])['target_json'])['reply_to'] == 'm-101'
     result = await send(mail, retargeted)
     assert not result.startswith('Error'), result
@@ -107,7 +111,9 @@ async def test_font_and_attachment_in_sent_mime_and_missing_file_refused(mail, a
     assert 'missing' in bad.lower() and not mail.sends
     saved = await _draft(mail, to=['pat@mail.example'], attachments=['report.txt'])
     document = (mail.workspace / saved['path']).read_text()
-    assert 'Attachment: report.txt (1 KB)' in document
+    target = json.loads(_row(saved['draft_id'])['target_json'])
+    assert [(a['name'], a['size']) for a in target['attachments']] == [('report.txt', 19)]
+    assert 'Attachment:' not in document and not any(n.startswith('Attachment:') for n in target['notes'])
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     message = _mime(mail.sends[0])
@@ -223,7 +229,7 @@ async def test_font_read_failure_still_saves_and_sends_with_default(mail, approv
     mail.fake.handler = handler
     saved = await _draft(mail, to=['pat@mail.example'])
     note = "Couldn’t read your usual font, so this email may go out in your mail’s default font."
-    assert note in (mail.workspace / saved['path']).read_text()
+    assert note in json.loads(_row(saved['draft_id'])['target_json'])['notes']
     assert saved['font_note'] == note
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
@@ -321,9 +327,9 @@ async def test_thirty_day_sender_count_counts_messages_without_fetching_each(mai
         return inner(request)
     mail.fake.handler = handler
     saved = await _draft(mail, to=[], reply_to_message_id='m-100')
-    document = (mail.workspace / saved['path']).read_text().lower()
+    notes = '\n'.join(json.loads(_row(saved['draft_id'])['target_json'])['notes']).lower()
     assert count_queries and 'from:pat@mail.example' in count_queries[0]
-    assert re.search(r'\b3\s+emails?\b', document), document
+    assert re.search(r'\b3\s+emails?\b', notes), notes
     assert not count_fetches
 
 
@@ -334,11 +340,6 @@ async def test_same_second_target_is_not_a_new_arrival(mail, approve):
     result = await send(mail, saved)
     assert not result.startswith('Error'), result
     assert len(mail.sends) == 1
-
-
-@pytest.mark.parametrize('count, shown', [(0, '0 KB'), (100, '1 KB'), (1_048_064, '1.0 MB'), (5 * 1024 * 1024, '5.0 MB')])
-def test_attachment_size_label(count, shown):
-    assert google_email._size(count) == shown
 
 
 def _from(message, value, **fields):
@@ -378,7 +379,9 @@ async def test_reply_to_own_sent_mail_is_a_clean_draft(mail, screen_calls):
 
 async def test_own_target_still_warns_when_someone_else_wrote_later(mail, screen_calls, clean_screen):
     provider_state(mail, [_own(), _from(_arrival(newer(), datetime.now(timezone.utc) + timedelta(days=1)), 'Friend <f@mail.example>')])
-    assert 'Another person wrote' in (await _document(mail))[1]
+    saved = (await _document(mail))[0]
+    assert any('Another person wrote' in note for note in saved['guard_notes'])
+    assert not any('Another person wrote' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
 
 
 async def test_own_target_send_is_not_refused_by_unrelated_own_mail(mail, approve, screen_calls):
@@ -396,4 +399,7 @@ async def test_own_target_send_is_not_refused_by_unrelated_own_mail(mail, approv
 
 async def test_forged_from_without_sent_label_is_guarded_as_today(mail, screen_calls):
     provider_state(mail, [_own(sent=False)])
-    assert 'emails from' in (document := (await _document(mail))[1]) and 'quoted below' in document and screen_calls == ['m-100']
+    saved, document = await _document(mail)
+    notes = '\n'.join(json.loads(_row(saved['draft_id'])['target_json'])['notes'])
+    assert 'emails from' in notes and 'quoted below' in notes and screen_calls == ['m-100']
+    assert 'Note:' not in document

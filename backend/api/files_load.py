@@ -12,6 +12,8 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
+from connections.mail.email_document import email_draft_view
+from tools.reviewed_drafts import draft_at
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
 from registry.identity_bridge import written_row
@@ -117,19 +119,23 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)
+        draft = draft_at(p, "email", db=db)
     finally:
         db.close()
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
-    from infra.guidance_targets import guidance_target
+    from infra.guidance_targets import document_target, guidance_target
 
-    # Only guidance files are recorded. Whether this file has history is decided by its one owner,
-    # api/files.py content, which also asks Git whether history is off for the whole workspace, off
-    # the database pool.
+    # Guidance files and documents are recorded, a faulted one included so History shows its fault.
+    # Whether this file has history is decided by its one owner, api/files.py content, which also asks
+    # Git whether history is off for the whole workspace, off the database pool.
     target = guidance_target(p, config.WORKSPACE)
-    recorded = target is not None and not target.fault
+    document = document_target(p, config.WORKSPACE) if target is None else None
+    recorded = target is not None or document is not None
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "_recorded": recorded,
+            # The draft record makes this file an email draft, which the viewer opens as an email.
+            "email_draft": email_draft_view(draft["id"], text) if draft else None,
+            "freshness": freshness, "_recorded": recorded, "_document": (p, document) if document else None,
             "_notification": notification}
 
 

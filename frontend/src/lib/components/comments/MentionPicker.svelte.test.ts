@@ -28,6 +28,25 @@ describe('comment mentions', () => {
   field.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));flushSync();expect(host.querySelector<HTMLElement>('.mention-region')?.inert).toBe(true); await vi.waitFor(() => expect(host.querySelector('[role=listbox]')).toBeNull()); expect(field.hasAttribute('aria-autocomplete')).toBe(false); expect(field.hasAttribute('aria-controls')).toBe(false); expect(field.hasAttribute('aria-activedescendant')).toBe(false);
  });
  it.each([
+  { case:'ready', tagged:['b','a'] },
+  { case:'no chat', noViewingThread:true, tagged:[] },
+  { case:'loading', status:'loading' as const, tagged:[] },
+  { case:'load error', status:'error' as const, tagged:[] },
+  { case:'roster error', rosterError:true, tagged:[] },
+ ])('tags agents whose names were typed, not picked, only where picking could ($case)', ({noViewingThread, status, rosterError, tagged}) => {
+  host=document.createElement('div');document.body.append(host);component=mount(MentionPickerHarness,{target:host,props:{agents,noViewingThread,status,rosterError,body:'Over to @Beta Agent and @alpha agent.'}});flushSync();
+  expect((component as { taggedAgentIds: () => string[] }).taggedAgentIds()).toEqual(tagged);
+ });
+ it.each([
+  { case:'inline code', body:'Run `@Beta Agent` then ask @Alpha Agent.', tagged:['a'] },
+  { case:'fenced code', body:'Log:\n```\n@Beta Agent failed\n```\nOver to @Alpha Agent', tagged:['a'] },
+  { case:'indented code', body:'Log:\n\n    @Beta Agent failed\n\nOver to @Alpha Agent', tagged:['a'] },
+  { case:'link text', body:'See [@Beta Agent](https://example.com) and @Alpha Agent', tagged:['a'] },
+ ])('tags no name that reads as plain text ($case)', ({body, tagged}) => {
+  host=document.createElement('div');document.body.append(host);component=mount(MentionPickerHarness,{target:host,props:{agents,body}});flushSync();
+  expect((component as { taggedAgentIds: () => string[] }).taggedAgentIds()).toEqual(tagged);
+ });
+ it.each([
   { state:'loading' as const, agents, copy:'Loading agents…' },
   { state:'error' as const, agents, copy:"Couldn’t load agents." },
   { state:'ready' as const, agents:[], copy:'No agents in this project to tag.' },
@@ -47,13 +66,15 @@ describe('comment mentions', () => {
   const next=host.querySelector('textarea')!; next.value='@'; next.setSelectionRange(1,1); next.dispatchEvent(new Event('input',{bubbles:true})); flushSync(); host.querySelector('button')!.click(); expect(retry).toHaveBeenCalledOnce();
  });
  it('keeps the selected identity when the picker is destroyed and recreated with its draft',()=>{
+  // A name two agents share never resolves when typed, so only the kept pick can tag the second one.
+  const twins=[agent('a','Same'), agent('b','Same')];
   const selectedTags=createMentionSelection(); host=document.createElement('div'); document.body.append(host);
-  component=mount(MentionPickerHarness,{target:host,props:{agents,selectedTags}}); flushSync();
+  component=mount(MentionPickerHarness,{target:host,props:{agents:twins,selectedTags}}); flushSync();
   const field=host.querySelector('textarea')!; field.value='@'; field.setSelectionRange(1,1); field.dispatchEvent(new Event('input',{bubbles:true})); flushSync();
-  field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); flushSync();
-  const body=field.value; expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['a']);
-  unmount(component); component=mount(MentionPickerHarness,{target:host,props:{agents,selectedTags,body}}); flushSync();
-  expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['a']);
+  field.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true})); field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); flushSync();
+  const body=field.value; expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['b']);
+  unmount(component); component=mount(MentionPickerHarness,{target:host,props:{agents:twins,selectedTags,body}}); flushSync();
+  expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['b']);
  });
  it('colors only the selected occurrence when names and typed text are identical',()=>{
   const el=document.createElement('div');

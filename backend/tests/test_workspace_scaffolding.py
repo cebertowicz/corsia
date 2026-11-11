@@ -107,6 +107,14 @@ def test_workspace_scaffold_creates_exact_canonical_layout_and_bytes(tmp_path):
         "projects/*/source/\n"
         "\n# Finder metadata is not workspace truth.\n"
         ".DS_Store\n"
+        "\n# Credentials never enter workspace history.\n"
+        ".env\n"
+        ".env.*\n"
+        "*.pem\n"
+        "*.key\n"
+        "*.p12\n"
+        "id_rsa*\n"
+        "id_ed25519*\n"
     )
     assert not (workspace / "working").exists()
     assert not (workspace / "PROJECT.md").exists()

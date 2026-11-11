@@ -8,7 +8,7 @@ from events.connectors.github_pr_quiet_watch import pr_quiet_watch_loop
 from events.connectors.mail_poller import mail_poll_loop
 from infra import state
 from infra.cpu_sampler import apply_cpu_profiler, stop_cpu_sampler
-from infra.otel_logs.lifecycle import start_corsia_logs, stop_corsia_logs
+from infra.otel_logs.lifecycle import stop_corsia_logs
 from jobs.nightly import nightly_job_loop
 from library.producer import library_refresh_loop
 from subagents.cc_idle_retirement import idle_retirement_loop
@@ -179,10 +179,9 @@ def _schedule_current_corrections_classifier() -> None:
 
 
 async def _start_runtime_services() -> None:
-    # The database is initialized by now; diagnostics and capture start before
-    # the services below so their startup lines reach the conductor log store.
+    # The database is initialized by now; capture already started in the
+    # lifespan, before the first database write.
     await asyncio.to_thread(_apply_saved_cpu_profiler)
-    await asyncio.to_thread(start_corsia_logs)
     await _start_github_ownership_refresh()
     try:
         from llm.network_discovery import health_sweep_loop

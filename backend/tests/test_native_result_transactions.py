@@ -9,7 +9,7 @@ import pytest
 
 from core import step_handler, tool_result_delivery
 from core.turn_core import TurnIdentity
-from infra import database
+from infra import database, sidebar_preview
 from infra.queries import insert_message
 
 
@@ -128,7 +128,7 @@ def test_native_commit_failure_keeps_prior_rows(native_result, monkeypatch):
     db = sqlite3.connect(str(path), factory=FailedCommit)
     db.row_factory = sqlite3.Row
     monkeypatch.setattr(database, "get_db", lambda: db)
-    monkeypatch.setattr(step_handler, "get_db", lambda: db)
+    monkeypatch.setattr(sidebar_preview, "get_db", lambda: db)
     try:
         with pytest.raises(sqlite3.OperationalError, match="native commit rejected"):
             _complete(handler)
