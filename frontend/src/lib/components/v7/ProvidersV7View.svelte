@@ -50,7 +50,7 @@
 		if (!current) return;
 		try {
 			const existed = localSource?.corsia_omlx === true;
-			sources = await (strict ? recheckSources(current) : fetchSources(current));
+			sources = await (strict ? recheckSources() : fetchSources());
 			// CORSIA's oMLX registers while setup runs: its row replaces Set up the moment it exists.
 			if (!existed && localSource?.corsia_omlx === true) void loadHostGroups();
 		} catch { /* Keep the last projected state; a failed read must not invent a setup action. */ }

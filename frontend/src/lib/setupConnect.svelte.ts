@@ -95,13 +95,13 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const stopped = () => flow[source.source]?.phase !== 'signing-in';
 		let result: Signin | null = null;
 		try {
-			const lookup = await fetchCorsiaAgent(current);
+			const lookup = await fetchCorsiaAgent();
 			if (stopped()) return;
 			if (lookup.kind !== 'target') { signinFailed(source.source, null, 'agent_unavailable'); return; }
-			const accountId = await accountToSignIn(current, source.source, source.name);
+			const accountId = await accountToSignIn(source.source, source.name);
 			if (stopped()) return;
-			result = await startSignin(current, accountId, lookup.target.thread_id);
-			if (stopped()) { await cancelSignin(current, accountId).catch(() => undefined); return; }
+			result = await startSignin(accountId, lookup.target.thread_id);
+			if (stopped()) { await cancelSignin(accountId).catch(() => undefined); return; }
 			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result); return; }
 			setConnect(source.source, { phase: 'signing-in', accountId });
 			await tickConnect();
@@ -114,7 +114,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 	}
 	async function openSignInAgain(source: ModelSource) {
 		const current = deps.token(), accountId = flow[source.source]?.accountId;
-		if (current && accountId) await cancelSignin(current, accountId).catch(() => undefined);
+		if (current && accountId) await cancelSignin(accountId).catch(() => undefined);
 		await beginSignIn(source);
 	}
 	async function afterInstalled(vendor: string, shadowedBinary: string | null = null) {
@@ -133,8 +133,8 @@ export function createSetupConnect(deps: ConnectDeps) {
 		starting.add(source.source);
 		setConnect(source.source, { phase: 'installing' });
 		try {
-			const refusal = await startCliInstall(current, source.source);
-			if (refusal === 'invisible_binary') await linkCli(current, source.source);
+			const refusal = await startCliInstall(source.source);
+			if (refusal === 'invisible_binary') await linkCli(source.source);
 			if (refusal) { await afterInstalled(source.source); return; }
 		} catch { setConnect(source.source, { phase: 'failed', failed: 'install' }); return; }
 		finally { starting.delete(source.source); }
@@ -171,7 +171,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const current = deps.token();
 		if (!current) return;
 		try {
-			const install = await cancelCliInstall(current, source.source);
+			const install = await cancelCliInstall(source.source);
 			if (install.state === 'done') await afterInstalled(source.source, install.path_shadowed_by);
 			else if (install.state === 'failed') setConnect(source.source, { phase: 'failed', failed: 'install', reason: install.reason, cause: install.cause ?? undefined, ref: install.ref });
 			else if (install.state !== 'running') setConnect(source.source, undefined);
@@ -186,7 +186,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			if (source) await cancelInstall(source);
 		} else if (entry?.phase === 'signing-in') {
 			setConnect(vendor, undefined);
-			if (entry.accountId && current) await cancelSignin(current, entry.accountId).catch(() => undefined);
+			if (entry.accountId && current) await cancelSignin(entry.accountId).catch(() => undefined);
 		}
 	}
 	let ticking = false;
@@ -198,7 +198,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			if (Object.values(flow).some((entry) => entry?.phase === 'awaiting-source')) await deps.refreshSources(true);
 			for (const [vendor, entry] of Object.entries(flow)) {
 				if (entry?.phase === 'installing' && !starting.has(vendor)) {
-					const install = await getCliInstall(current, vendor).catch(() => null);
+					const install = await getCliInstall(vendor).catch(() => null);
 					if (install?.state === 'done' || install?.state === 'idle') await afterInstalled(vendor, install.path_shadowed_by);
 					else if (install?.state === 'cancelled') setConnect(vendor, undefined);
 					else if (install?.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', reason: install.reason, cause: install.cause ?? undefined, ref: install.ref });
@@ -206,7 +206,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 					const source = deps.sources().find((candidate) => candidate.source === vendor);
 					if (source && sourceIsReady(source)) setConnect(vendor, undefined);
 				} else if (entry?.phase === 'signing-in' && entry.accountId) {
-					const signin = await checkSignin(current, entry.accountId).catch(() => undefined);
+					const signin = await checkSignin(entry.accountId).catch(() => undefined);
 					if (signin?.status === 'completed' && signin.outcome == null) setConnect(vendor, { ...entry, checkingModels: true });
 					else if (signin === null || signin?.status === 'completed' || (signin?.status === 'failed' && signin.cause === 'same_account' && signin.outcome === 'ready')) { await deps.refreshSources(); setConnect(vendor, undefined); }
 					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin);

@@ -11,7 +11,6 @@
 	import type ChatPanel from './ChatPanel.svelte';
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
-	import { token } from '$lib/stores/auth';
 	import { settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { fetchSetupProgress } from '$lib/setupProgress';
 	import { finishSetupWindow } from '$lib/setupWindow';
@@ -103,7 +102,7 @@
 		if ($setupMode === 'flow') { setupChecked = true; return; }
 		if (setupChecked) return;
 		setupChecked = true;
-		void fetchSetupProgress(get(token)).then((progress) => {
+		void fetchSetupProgress().then((progress) => {
 			// An unreadable record leaves the app as it is: a failed read must never lock out someone who finished setup.
 			if (progress && !progress.setup_completed) { setupResume = true; $setupMode = 'flow'; }
 		});

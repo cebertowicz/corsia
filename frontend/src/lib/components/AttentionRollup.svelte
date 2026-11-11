@@ -35,7 +35,7 @@
 		try {
 			const tok = get(token);
 			if (!tok) return;
-			const res = await fetchRollup(tok, parentThreadId);
+			const res = await fetchRollup(parentThreadId);
 			items = res.items;
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : 'Failed';

@@ -39,7 +39,7 @@
 	// per spawn marker, so this asks once per thread per page load. A peer
 	// thread has no worker status to read — its slot is a link.
 	$effect(() => {
-		if (childId && isSubagent && $token) hydrateSubagentThreadOnce(childId, $token, parentId);
+		if (childId && isSubagent && $token) hydrateSubagentThreadOnce(childId, parentId);
 	});
 
 	function kindName(value: string): string {

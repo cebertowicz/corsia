@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 
 import {
 	_resetCheckpointsForTests,
@@ -36,7 +37,10 @@ function row(status: string, id = `checkpoint-${status}`) {
 	};
 }
 
+beforeEach(() => { sessionStore.set(TOKEN); });
+
 afterEach(() => {
+	sessionStore.set(null);
 	_resetCheckpointsForTests();
 	vi.restoreAllMocks();
 });
@@ -51,7 +55,7 @@ describe('checkpoint history', () => {
 			unknownEnvelopeField: true,
 		})));
 
-		const loaded = await loadCheckpoints(THREAD_ID, TOKEN);
+		const loaded = await loadCheckpoints(THREAD_ID);
 
 		expect(loaded.map(checkpoint => checkpoint.status)).toEqual(statuses);
 		expect(get(checkpointsByThread).get(THREAD_ID)?.checkpoints).toEqual(loaded);
@@ -76,7 +80,7 @@ describe('checkpoint actions', () => {
 		const fetchMock = vi.fn(async () => response({ checkpoint: row('running') }, 202));
 		vi.stubGlobal('fetch', fetchMock);
 
-		const checkpoint = await requestManualCheckpoint(THREAD_ID, TOKEN);
+		const checkpoint = await requestManualCheckpoint(THREAD_ID);
 
 		expect(checkpoint.id).toBe('checkpoint-running');
 		expect(fetchMock).toHaveBeenCalledWith(
@@ -92,7 +96,7 @@ describe('checkpoint actions', () => {
 			409,
 		)));
 
-		await expect(requestManualCheckpoint(THREAD_ID, TOKEN)).rejects.toMatchObject({
+		await expect(requestManualCheckpoint(THREAD_ID)).rejects.toMatchObject({
 			message: 'Nothing new since the last checkpoint.',
 			reason: 'no_new_history',
 		});
@@ -101,7 +105,7 @@ describe('checkpoint actions', () => {
 	it('falls back to the generic message for an unrecognized or missing detail', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response({}, 409)));
 
-		const error = await requestManualCheckpoint(THREAD_ID, TOKEN).catch((exc) => exc);
+		const error = await requestManualCheckpoint(THREAD_ID).catch((exc) => exc);
 
 		expect(error).toBeInstanceOf(CheckpointRefusalError);
 		expect(error.message).toBe('Could not start a checkpoint. Try again.');
@@ -117,7 +121,6 @@ describe('checkpoint actions', () => {
 		const checkpoint = await cancelCheckpoint(
 			THREAD_ID,
 			'checkpoint-exact',
-			TOKEN,
 		);
 
 		expect(checkpoint.status).toBe('cancelled');

@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import type { ModelSource } from './conductorSources';
 import { createSetupConnect } from './setupConnect.svelte';
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => { sessionStore.set('fixture'); });
+afterEach(() => { sessionStore.set(null); });
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe('setup installation before sign-in', () => {

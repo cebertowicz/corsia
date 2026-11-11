@@ -1,4 +1,5 @@
 import { messages } from '$lib/stores/threads';
+import { apiFetch } from '$lib/api/request';
 
 export type ToolResultState = 'absent' | 'deferred' | 'loading' | 'failed' | 'loaded';
 
@@ -27,7 +28,6 @@ export async function loadDeferredToolResult(
 	threadId: string,
 	messageId: string,
 	toolCallId: string,
-	authToken: string,
 ): Promise<void> {
 	updateToolCall(threadId, messageId, toolCallId, (call) => ({
 		...call,
@@ -35,8 +35,9 @@ export async function loadDeferredToolResult(
 		result_error: undefined,
 	}));
 	try {
-		const response = await fetch(
-			`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/tool-results/${encodeURIComponent(toolCallId)}?token=${encodeURIComponent(authToken)}`,
+		const response = await apiFetch(
+			`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/tool-results/${encodeURIComponent(toolCallId)}`,
+			{ sessionInAddress: true },
 		);
 		const data = response.ok ? await response.json() : null;
 		if (typeof data?.result !== 'string') throw new Error('Tool result unavailable');

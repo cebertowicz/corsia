@@ -43,7 +43,7 @@ describe('threadPlanStates', () => {
 		const ids = Array.from({ length: 230 }, (_, i) => `t${i}`);
 		watchThreadPlanStates(ids);
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk.length)).toEqual([100, 100, 30]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk.length)).toEqual([100, 100, 30]);
 	});
 
 	it('reads only threads new to the list', async () => {
@@ -52,7 +52,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		watchThreadPlanStates(['a', 'b']);
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a'], ['b']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['b']]);
 	});
 
 	it('drops a thread the server no longer reports', async () => {
@@ -111,7 +111,7 @@ describe('threadPlanStates', () => {
 
 		releaseFirst({ a: { state: 'moving', label_key: 'working' } });
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['a', 'b']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['a', 'b']]);
 		expect(get(threadPlanStates).a?.state).toBe('blocked_on_you');
 		expect(get(threadPlanStates).b?.state).toBe('moving');
 	});
@@ -156,7 +156,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		mocks.handlers.get('host_access_changed')?.({ lease_id: 'lease-1', thread_ids: ['b', 'z'] });
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b'], ['b']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b'], ['b']]);
 	});
 
 	it('re-reads only the listed root and visible rows a host-access nudge maps', async () => {
@@ -165,7 +165,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		mocks.handlers.get('host_access_changed')?.({ lease_id: 'lease-1', thread_ids: ['hidden-child', 'a', 'c'] });
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['a', 'c']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['a', 'c']]);
 	});
 
 	it('re-reads every listed thread when a host-access nudge names none (lookup failed or older server)', async () => {
@@ -174,7 +174,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		mocks.handlers.get('host_access_changed')?.({ lease_id: 'lease-1' });
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b'], ['a', 'b']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b'], ['a', 'b']]);
 	});
 
 	it('reads nothing for a host-access nudge whose named threads are not listed or invalid', async () => {
@@ -196,7 +196,7 @@ describe('threadPlanStates', () => {
 			plans: [{ owner: { kind: 'thread', id: 'c' } }, { owner: { kind: 'project_scope', id: 'a' } }],
 		});
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['c']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['c']]);
 	});
 
 	it('issues no read on a timer, however long the list stays open', async () => {
@@ -226,7 +226,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		mocks.handlers.get('thread_updates_changed')?.({ thread_ids: ['b', 'z', 42] });
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b'], ['b']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a', 'b'], ['b']]);
 	});
 
 	it('reloads a thread this device just marked, and nothing outside the list', async () => {
@@ -235,7 +235,7 @@ describe('threadPlanStates', () => {
 		await settle();
 		reloadThreadPlanStates(['a', 'z']);
 		await settle();
-		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a'], ['a']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['a']]);
 		expect(get(threadPlanStates).a?.has_update).toBe(true);
 	});
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiFetch } from '$lib/api/request';
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
@@ -43,7 +44,7 @@
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean | null; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState; usage_sharing_default?: boolean };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	const warm = createSetupWarm();
-	$effect(() => { warm.start(catalog, $token); });
+	$effect(() => { if ($token) warm.start(catalog); });
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
@@ -146,7 +147,7 @@
 	function recordPicks(next: SetupPicks) {
 		picks = next; toolsOff = [];
 		// Kept so the first chat knows which subscriptions the person said they pay for.
-		void recordSetupProgress({ picks: next }, get(token));
+		void recordSetupProgress({ picks: next });
 	}
 	/** The row's switch: the tool is unpicked as on the subscriptions screen, and what it started stops. */
 	function turnOffTool(vendor: string) {
@@ -183,7 +184,7 @@
 	async function readStatus() {
 		page = 'checking'; statusError = '';
 		try {
-			const response = await fetch('/api/setup/status');
+			const response = await apiFetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
 			status = await response.json(); setFolderState(status); sharing = status.usage_sharing_default === true; // the server owns the default (off only where the region needs opt-in); a missing one never reads as a yes
@@ -200,7 +201,7 @@
 	async function checkLocal() {
 		const current = get(token);
 		if (current) {
-			const progress = await fetchSetupProgress(current);
+			const progress = await fetchSetupProgress();
 			if (progress?.status) status = progress.status as Status;
 			await startLocal();
 			return;
@@ -214,7 +215,7 @@
 		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
-			const { result, reference, fix } = await requestLocalStart(current);
+			const { result, reference, fix } = await requestLocalStart();
 			localStartReference = reference ?? '';
 			if (result === 'failed') { localStartError = 'other'; startFix = fix; }
 			if (current) await refreshSources();
@@ -223,13 +224,13 @@
 	}
 	async function stopLocal() {
 		const current = get(token);
-		if (current) { await cancelLocalDownload(current); await refreshSources(); }
-		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+		if (current) { await cancelLocalDownload(); await refreshSources(); }
+		else await apiFetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 	}
 	async function turnOffLocal() {
 		const current = get(token);
 		if (!current) return;
-		const stopped = await stopLocalServer(current).catch(() => ({ ok: false, ref: undefined }));
+		const stopped = await stopLocalServer().catch(() => ({ ok: false, ref: undefined }));
 		localOffFailed = stopped.ok ? undefined : { reference: stopped.ref };
 		await refreshSources();
 	}
@@ -245,7 +246,7 @@
 				if (!folderApplyPath) throw new Error('work folder path is unavailable');
 				await applyWorkFolder(folderApplyPath); folderChanged = false;
 			}
-			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null, usage_sharing: sharing }) });
+			const response = await apiFetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null, usage_sharing: sharing }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
 			if (!response.ok) {
@@ -289,11 +290,11 @@
 	async function refreshSources(strict = false) {
 		const current = get(token); if (!current) return;
 		try {
-			sources = await (strict ? recheckSources(current) : fetchSources(current));
+			sources = await (strict ? recheckSources() : fetchSources());
 			connectFlow.sourcesChanged();
-			catalog = await setupCatalog(current);
+			catalog = await setupCatalog();
 			sourceError = '';
-		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources(current).then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
+		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; if (strict) await fetchSources().then((next) => { sources = next; connectFlow.sourcesChanged(); }, () => undefined); }
 	}
 	async function retrySources() {
 		sourceRetry = { error: sourceError, vendors: CLI_VENDORS.filter((vendor) => !sources.some((row) => row.source === vendor) || connectFlow.awaitingSource(vendor)) };
@@ -302,13 +303,13 @@
 	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
 	function finishSetup() {
 		return finishSetupWarmHandoff({
-			session: get(token), isFinishing: finishing, setFinishing: (next) => { finishing = next; }, setSourceError: (next) => { sourceError = next; },
-			recordProgress: (current) => recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current),
+			signedIn: !!get(token), isFinishing: finishing, setFinishing: (next) => { finishing = next; }, setSourceError: (next) => { sourceError = next; },
+			recordProgress: () => recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }),
 			getCatalog: () => catalog, warm, exitMark: () => shell?.exitMark(), onFinished: () => onFinished(),
 		});
 	}
 	async function resumeSetup() {
-		const progress = await fetchSetupProgress(get(token));
+		const progress = await fetchSetupProgress();
 		if (!progress) { page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
 		status = (progress.status ?? {}) as Status; setFolderState(status); picks = progress.picks ?? null; // the saved answer keeps a declined tool's row hidden
@@ -329,7 +330,7 @@
 		const current = get(token);
 		if (!current || pollingLocal) return;
 		pollingLocal = true;
-		try { const row = await readLocalRow(current); if (row) sources = withLocalRow(sources, row); }
+		try { const row = await readLocalRow(); if (row) sources = withLocalRow(sources, row); }
 		catch { /* Keep the last reading until the next one succeeds. */ } finally { pollingLocal = false; }
 	}
 	$effect(() => {

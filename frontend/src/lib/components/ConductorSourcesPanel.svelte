@@ -21,9 +21,9 @@
 	const ready = $derived(sources ? anyReady(sources) : false);
 	const waiting = $derived($messages.some((message) => message.role === 'user'));
 
-	async function refresh(t: string, isActive: () => boolean = () => true) {
+	async function refresh(isActive: () => boolean = () => true) {
 		try {
-			const rows = await fetchSources(t);
+			const rows = await fetchSources();
 			if (!isActive()) return;
 			sources = rows;
 			readFailed = false;
@@ -40,9 +40,9 @@
 		let active = true;
 		// Read once, untracked: a catalog refresh must not refetch the sources.
 		if (get(models).length === 0) void loadModels();
-		void refresh(t, () => active);
+		void refresh(() => active);
 		// Every models_updated while the screen shows: a sign-in, an install, a download or a limit reset.
-		const stop = onWebSocketEvent('models_updated', () => { void refresh(t, () => active); });
+		const stop = onWebSocketEvent('models_updated', () => { void refresh(() => active); });
 		return () => { active = false; stop(); };
 	});
 
@@ -50,7 +50,7 @@
 		const t = get(token);
 		if (!t || retrying) return;
 		retrying = true;
-		try { await refresh(t); } finally { retrying = false; }
+		try { await refresh(); } finally { retrying = false; }
 	}
 </script>
 

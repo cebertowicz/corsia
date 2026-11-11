@@ -1,7 +1,5 @@
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import type { ConversationFailure, EmailDraftContext } from '$lib/emailDraft';
-
+import { apiFetch } from './request';
 /** The server's answer for one draft (backend/api/email_drafts.py), before the view's own names. */
 interface ContextResponse {
 	status: 'ready' | 'error';
@@ -30,9 +28,7 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 	const failed = (reason: ConversationFailure, reference?: string): EmailDraftContext => ({ status: 'error', reason, reference, conversation: [], notes: [], attachments: [] });
 	let body: ContextResponse;
 	try {
-		const res = await fetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/context`, {
-			headers: { Authorization: `Bearer ${get(token) ?? ''}` },
-		});
+		const res = await apiFetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/context`);
 		// A server error answers with the reference it logged (backend/main.py).
 		if (!res.ok) return failed(REFUSED[res.status] ?? 'unreadable', (await res.json().catch(() => null))?.reference ?? undefined);
 		body = (await res.json()) as ContextResponse;

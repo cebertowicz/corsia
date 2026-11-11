@@ -98,7 +98,6 @@
 			await requestDeliveryAction(action, {
 				threadId,
 				messageId: msg.id,
-				authToken,
 				failureText: action === 'retry'
 					? 'Could not retry this wake'
 					: 'Could not cancel this wake',

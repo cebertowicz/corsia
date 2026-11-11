@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { flushSync, mount, unmount } from 'svelte';
 
 import ExternalProviderSettings from './ExternalProviderSettings.svelte';
@@ -12,10 +13,13 @@ const server = {
 	has_key: true, metadata: { base_url: 'https://provider.example/v1' },
 };
 
+beforeEach(() => { sessionStore.set('tok'); });
+
 describe('ExternalProviderSettings', () => {
 	let component: ReturnType<typeof mount> | null = null;
 
 	afterEach(() => {
+		sessionStore.set(null);
 		if (component) unmount(component);
 		component = null;
 		document.body.innerHTML = '';

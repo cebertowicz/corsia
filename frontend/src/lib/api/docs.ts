@@ -1,18 +1,13 @@
-import { get } from 'svelte/store';
 import { documentCommentDeliveryPolicy } from '$lib/commentDeliveryPreference';
 import { docOpenFailure } from '$lib/docOpenRefusal';
-import { token } from '$lib/stores/auth';
 import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes';
+import { apiFetch, type ApiInit } from './request';
 
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
-
-function tok(): string {
-	return encodeURIComponent(get(token) ?? '');
-}
 
 /** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
 export class RequestRefused extends Error {
@@ -42,11 +37,11 @@ export class PostTimeoutError extends Error {
 
 export const COMMENT_POST_TIMEOUT_MS = 12_000;
 
-export async function fetchWithTimeout(input: string, init: RequestInit, ms: number): Promise<Response> {
+export async function fetchWithTimeout(input: string, init: ApiInit, ms: number): Promise<Response> {
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), ms);
 	try {
-		return await fetch(input, { ...init, signal: ctrl.signal });
+		return await apiFetch(input, { ...init, signal: ctrl.signal });
 	} catch (e) {
 		if (e instanceof DOMException && e.name === 'AbortError') throw new PostTimeoutError(ms);
 		throw e;
@@ -86,8 +81,8 @@ export interface TreeRoot extends ScopeRoot {
 }
 
 export async function fetchTree(projectId?: string | null): Promise<TreeRoot[]> {
-	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
-	const data = await ok(await fetch(`/api/files/tree?token=${tok()}${q}`));
+	const q = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+	const data = await ok(await apiFetch(`/api/files/tree${q}`, { sessionInAddress: true }));
 	return data.roots;
 }
 
@@ -98,8 +93,8 @@ export async function fetchTree(projectId?: string | null): Promise<TreeRoot[]> 
  * chat asks for these and leaves the server walking nothing.
  */
 export async function fetchRoots(projectId?: string | null): Promise<ScopeRoot[]> {
-	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
-	const data = await ok(await fetch(`/api/files/tree?token=${tok()}${q}&nodes=false`));
+	const q = `?nodes=false${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}`;
+	const data = await ok(await apiFetch(`/api/files/tree${q}`, { sessionInAddress: true }));
 	return data.roots;
 }
 
@@ -114,19 +109,19 @@ export async function fetchRevision(
 	projectId?: string | null,
 	artifactId?: string | null,
 ): Promise<DocRevision> {
-	const q = `&path=${encodeURIComponent(path)}`
+	const q = `?path=${encodeURIComponent(path)}`
 		+ (projectId ? `&project_id=${encodeURIComponent(projectId)}` : '')
 		+ (artifactId ? `&artifact_id=${encodeURIComponent(artifactId)}` : '');
-	return ok(await fetch(`/api/files/revision?token=${tok()}${q}`));
+	return ok(await apiFetch(`/api/files/revision${q}`, { sessionInAddress: true }));
 }
 
 export async function fetchContent(path: string, opts: { projectId?: string | null; threadId?: string | null; liveOpen?: boolean } = {}): Promise<DocContent> {
 	const q =
-		`&path=${encodeURIComponent(path)}` +
+		`?path=${encodeURIComponent(path)}` +
 		(opts.projectId ? `&project_id=${encodeURIComponent(opts.projectId)}` : '') +
 		(opts.threadId ? `&thread_id=${encodeURIComponent(opts.threadId)}` : '') +
 		(opts.liveOpen ? '&live_open=true' : '');
-	return ok(await fetch(`/api/files/content?token=${tok()}${q}`));
+	return ok(await apiFetch(`/api/files/content${q}`, { sessionInAddress: true }));
 }
 
 export interface DocWriteResult {
@@ -141,7 +136,8 @@ export interface DocWriteResult {
 }
 
 export async function writeContent(path: string, text: string, opts: { projectId?: string | null; threadId?: string | null; create?: boolean; description?: string | null } = {}): Promise<DocWriteResult> {
-	return ok(await fetch(`/api/files/content?token=${tok()}`, {
+	return ok(await apiFetch(`/api/files/content`, {
+		sessionInAddress: true,
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path, text, description: opts.description ?? null, project_id: opts.projectId ?? null, thread_id: opts.threadId ?? null, create: opts.create ?? false })
@@ -149,7 +145,8 @@ export async function writeContent(path: string, text: string, opts: { projectId
 }
 
 export async function registerArtifact(path: string, opts: { projectId?: string | null; threadId?: string | null } = {}): Promise<ArtifactRow> {
-	const data = await ok(await fetch(`/api/files/register?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/files/register`, {
+		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path, project_id: opts.projectId ?? null, thread_id: opts.threadId ?? null })
@@ -158,7 +155,8 @@ export async function registerArtifact(path: string, opts: { projectId?: string 
 }
 
 export async function patchDescription(artifactId: string, description: string): Promise<ArtifactRow> {
-	const data = await ok(await fetch(`/api/artifacts/${artifactId}?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/artifacts/${artifactId}`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ description })
@@ -167,7 +165,7 @@ export async function patchDescription(artifactId: string, description: string):
 }
 
 export async function markArtifactVerified(artifactId: string): Promise<ArtifactRow> {
-	const response = await fetch(`/api/artifacts/${artifactId}/verify?token=${tok()}`, { method: 'POST' });
+	const response = await apiFetch(`/api/artifacts/${artifactId}/verify`, { sessionInAddress: true, method: 'POST' });
 	if (!response.ok) {
 		const body = await response.json().catch(() => null);
 		throw new Error(typeof body?.detail === 'string' ? body.detail : 'Could not mark this document verified.');
@@ -176,7 +174,7 @@ export async function markArtifactVerified(artifactId: string): Promise<Artifact
 }
 
 export async function fetchComments(artifactId: string): Promise<CommentList> {
-	const data = await ok(await fetch(`/api/artifacts/${artifactId}/comments?token=${tok()}`));
+	const data = await ok(await apiFetch(`/api/artifacts/${artifactId}/comments`, { sessionInAddress: true }));
 	return data;
 }
 
@@ -185,15 +183,16 @@ export async function postComment(
 	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
-		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
-		{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
+		`/api/artifacts/${artifactId}/comments`,
+		{ sessionInAddress: true, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
 		COMMENT_POST_TIMEOUT_MS
 	));
 	return data.comment;
 }
 
 export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion; diagram_source: string }>): Promise<ServerComment> {
-	const data = await ok(await fetch(`/api/comments/${commentId}?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/comments/${commentId}`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		// A reopen queues feedback in the lane the person's preference names, as a new comment does.
@@ -203,15 +202,16 @@ export async function patchComment(commentId: string, fields: Partial<{ resolved
 }
 
 export async function markCommentThreadViewed(artifactId: string, rootId: string, seenReplyId: string): Promise<{ root_id: string; new_reply_ids: string[] }> {
-	return ok(await fetch(`/api/artifacts/${artifactId}/comments/${rootId}/viewed`, {
-		method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token) ?? ''}` },
+	return ok(await apiFetch(`/api/artifacts/${artifactId}/comments/${rootId}/viewed`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ seen_reply_id: seenReplyId })
 	}));
 }
 
 export async function persistPositions(artifactId: string, updates: { id: string; from_off: number; to_off: number }[]) {
 	if (!updates.length) return;
-	await ok(await fetch(`/api/artifacts/${artifactId}/comments/positions?token=${tok()}`, {
+	await ok(await apiFetch(`/api/artifacts/${artifactId}/comments/positions`, {
+		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ updates })
@@ -219,7 +219,8 @@ export async function persistPositions(artifactId: string, updates: { id: string
 }
 
 export async function linkRepo(projectId: string, path: string) {
-	return ok(await fetch(`/api/projects/${projectId}/repos?token=${tok()}`, {
+	return ok(await apiFetch(`/api/projects/${projectId}/repos`, {
+		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ mode: 'link', path })
@@ -232,7 +233,8 @@ export async function setArtifactDisplay(
 	threadId: string,
 	hidden: boolean
 ): Promise<ArtifactRow> {
-	const data = await ok(await fetch(`/api/artifacts/${artifactId}/display?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/artifacts/${artifactId}/display`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ thread_id: threadId, hidden })
@@ -255,7 +257,8 @@ export async function setArtifactPinned(
 	threadId: string,
 	pinned: boolean
 ): Promise<ArtifactRow> {
-	const data = await ok(await fetch(`/api/artifacts/${artifactId}/pinned?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/artifacts/${artifactId}/pinned`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ thread_id: threadId, pinned })
@@ -265,7 +268,7 @@ export async function setArtifactPinned(
 
 /** Read one thread's artifact pane. Read-only: the server repairs after responding. */
 export async function fetchArtifactPane(threadId: string): Promise<PaneData> {
-	return ok(await fetch(`/api/threads/${threadId}/artifacts?token=${tok()}`));
+	return ok(await apiFetch(`/api/threads/${threadId}/artifacts`, { sessionInAddress: true }));
 }
 
 export interface ReconcileReceipt {
@@ -285,7 +288,8 @@ export interface ReconcileApplyResult {
 
 /** Idempotently retry known artifact repairs for one thread (explicit apply, not a GET side effect). */
 export async function reconcileArtifactsApply(threadId: string): Promise<ReconcileApplyResult> {
-	return ok(await fetch(`/api/threads/${threadId}/artifacts/reconcile?token=${tok()}`, {
+	return ok(await apiFetch(`/api/threads/${threadId}/artifacts/reconcile`, {
+		sessionInAddress: true,
 		method: 'POST'
 	}));
 }

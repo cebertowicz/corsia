@@ -1,6 +1,5 @@
 import { on } from '$lib/ws/events';
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
+import { apiFetch } from '$lib/api/request';
 
 /**
  * Settings › System › Let other devices connect: the host's own state from `GET /api/devices` (corsia#638), reduced to
@@ -102,10 +101,7 @@ export function createDevices(options: Options = {}) {
 	let endsAt: number | null = null;
 	let remaining = $state<number | null>(null);
 
-	const headers = (json = false): Record<string, string> => {
-		const current = get(token);
-		return { ...(current ? { Authorization: `Bearer ${current}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) };
-	};
+	const headers = (json = false): Record<string, string> => json ? { 'Content-Type': 'application/json' } : {};
 
 	function accept(api: DevicesApi) {
 		const next = viewFromApi(api, options.remoteName?.());
@@ -116,7 +112,7 @@ export function createDevices(options: Options = {}) {
 
 	async function read(): Promise<boolean> {
 		try {
-			const response = await fetch('/api/devices', { headers: headers() });
+			const response = await apiFetch('/api/devices', { headers: headers() });
 			if (!response.ok) throw new Error(String(response.status));
 			accept(await response.json() as DevicesApi);
 			return true;
@@ -134,7 +130,7 @@ export function createDevices(options: Options = {}) {
 	}
 
 	async function write(path: string, init: RequestInit, fallback: string): Promise<DevicesApi | null> {
-		const response = await fetch(path, { ...init, headers: headers(init.body !== undefined) });
+		const response = await apiFetch(path, { ...init, headers: headers(init.body !== undefined) });
 		if (response.status === 403) { await read(); return null; }
 		if (!response.ok) {
 			const body: unknown = await response.json().catch(() => null);

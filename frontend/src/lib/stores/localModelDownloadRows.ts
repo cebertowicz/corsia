@@ -11,10 +11,10 @@ export type LocalDownloadRows = {
  * Project the one Settings-owned download record onto an existing canonical oMLX
  * server row. This never creates a row: server models remain the only list owner.
  */
-export async function localDownloadRows(token: string, serverId: string): Promise<LocalDownloadRows> {
+export async function localDownloadRows(serverId: string): Promise<LocalDownloadRows> {
 	const [sources, downloads] = await Promise.allSettled([
-		fetchSources(token),
-		fetchLocalModelDownloads(token),
+		fetchSources(),
+		fetchLocalModelDownloads(),
 	]);
 	const result: LocalDownloadRows = {};
 	if (sources.status === 'fulfilled') {

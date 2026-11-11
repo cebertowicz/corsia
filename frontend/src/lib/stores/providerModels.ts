@@ -1,5 +1,4 @@
 import { writable, get } from 'svelte/store';
-import { token } from './auth';
 import type { ProviderEntry } from './providers';
 import type { NetworkServer } from './networkServers';
 import { preserveTransitional } from './providerModelUtils';
@@ -9,6 +8,7 @@ import {
 	networkProviderModels,
 } from './providerModelRows';
 import { harnessModels } from './harnessProviders';
+import { apiFetch } from '$lib/api/request';
 
 export type ModelState = 'loaded' | 'loading' | 'cache_warming' | 'queued' | 'error' | 'default';
 export type ModelCapability = 'vision' | 'reasoning' | 'tools';
@@ -59,7 +59,6 @@ const _models = writable<Record<string, ProviderModelsState>>({});
 export const providerModels = { subscribe: _models.subscribe };
 
 const BASE = '';
-const t = () => get(token) || '';
 
 function _key(providerName: string, serverId?: string): string {
 	return serverId ? `${providerName}|${serverId}` : providerName;
@@ -91,7 +90,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 	try {
 		if (p.type === 'harness') return _setState(k, { loading: false, models: await harnessModels(p.name) });
 		if (p.type === 'cloud') {
-			const res = await fetch(`${BASE}/api/settings/providers/${p.name}/models?token=${t()}`);
+			const res = await apiFetch(`${BASE}/api/settings/providers/${p.name}/models`, { sessionInAddress: true });
 			if (!res.ok) {
 				const list = fallbackCloudModels(p.models);
 				_setState(k, { loading: false, models: list });
@@ -107,7 +106,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 		}
 
 		if (server) {
-			const res = await fetch(`${BASE}/api/settings/network-servers/${server.id}/models?token=${t()}`);
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models`, { sessionInAddress: true });
 			if (!res.ok) { _setState(k, { loading: false, lastError: `HTTP ${res.status}` }); return; }
 			const data = await res.json();
 			const deduped = networkProviderModels(data);
@@ -127,7 +126,7 @@ export async function pollJobsFor(p: ProviderEntry, server?: NetworkServer): Pro
 	let jobs: any[] = [];
 	try {
 		if (server) {
-			const res = await fetch(`${BASE}/api/settings/network-servers/${server.id}/jobs/active?token=${t()}`);
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/jobs/active`, { sessionInAddress: true });
 			if (res.ok) jobs = (await res.json()).jobs ?? [];
 		}
 	} catch { return; }
