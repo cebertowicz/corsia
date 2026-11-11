@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from automation.turn_end_effects import TurnEndEffects, record_external_turn_end
 from connections.auth_failure import auth_failure_kind
 from core.turn_core import TurnIdentity, TurnTerminalResult
-from infra.chat_comment_receipts import terminal_comment_only_receipt
+from infra.chat_comment_receipts import comment_only_receipt_field
 from infra.db_async import run_in_db_unless_owned
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
@@ -222,6 +222,7 @@ async def _finish_result_postprocessing(
     payload: dict,
     context_message_id: str | None,
     *,
+    turn_id: str,
     quiet_if_unmeasured: bool,
 ) -> None:
     await record_terminal_llm_usage(
@@ -232,6 +233,7 @@ async def _finish_result_postprocessing(
         live=ctx.live, child_id=ctx.child_id, payload=payload,
         message_id=context_message_id, db=ctx.db,
     )
+    payload.update(await comment_only_receipt_field(ctx.child_id, turn_id, db=ctx.db))
     ctx.bcast(ctx.child_id, payload)
     if ctx.live.parent_thread_id:
         ctx.bcast(ctx.live.parent_thread_id, {
@@ -341,8 +343,6 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     if context_message_id is not None:
         payload_body["context_message_id"] = context_message_id
     payload = frame(ctx, ev, payload_body)
-    if outcome == "completed" and await terminal_comment_only_receipt(ctx.child_id, identity.turn_id, db=ctx.db):
-        payload["comment_only_receipt"] = True
     # The returned terminal carrier keeps plan effects with the settlement so
     # the stream owner can deliver them only after the terminal callback exits.
     effects = None
@@ -352,7 +352,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
             metadata=metadata, created_at=created_at,
         )
         await _finish_result_postprocessing(
-            ctx, payload, context_message_id,
+            ctx, payload, context_message_id, turn_id=identity.turn_id,
             quiet_if_unmeasured=is_error and ctx.live.last_assistant_message_id is None,
         )
         if metadata.get("stop_reason") != "interrupted":

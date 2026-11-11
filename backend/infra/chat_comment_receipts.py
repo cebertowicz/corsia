@@ -69,14 +69,21 @@ def _terminal_comment_only_receipt(thread_id: str, turn_id: str, db=None) -> boo
             connection.close()
 
 
-async def terminal_comment_only_receipt(thread_id: str, turn_id: str, *, db=None) -> bool:
-    """Classify the committed terminal without moving a caller-owned connection."""
+async def comment_only_receipt_field(thread_id: str, turn_id: str, *, db=None) -> dict[str, bool]:
+    """Return the terminal frame's receipt field for a committed Turn.
+
+    Every harness publishes its terminal frame only after the terminal commit
+    applied, so the persisted ``completed`` status read by the classifier is the
+    one completion authority; errored, cancelled and limit-downgraded Turns get
+    no field. A caller-owned connection is used in place.
+    """
     from infra.db_async import run_in_db_unless_owned
 
     try:
-        return await run_in_db_unless_owned(db, _terminal_comment_only_receipt, thread_id, turn_id, db=db)
+        hidden = await run_in_db_unless_owned(db, _terminal_comment_only_receipt, thread_id, turn_id, db=db)
     except Exception:
         import logging
 
         logging.getLogger(__name__).exception("Comment-only receipt lookup failed for turn %s", turn_id)
-        return False
+        return {}
+    return {"comment_only_receipt": True} if hidden else {}
