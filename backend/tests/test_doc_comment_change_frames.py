@@ -2,9 +2,8 @@
 stale because the write came through a different adapter.
 
 The frame is ``doc_comment_changed`` from ``comment_notifications``. Store
-writes announce after commit, except browser user creates: they suppress the
-creation announcement and post one frame after their post-response batch
-delivery closes. Anchor position saves and feedback send, leave, return and
+writes announce after commit. A due feedback batch also announces its changed
+delivery state. Anchor position saves and feedback send, leave, return and
 retry are not comment row writes and are not covered here.
 """
 
@@ -67,8 +66,9 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
-    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
     assert [frame for frame in frames if frame == artifact_id] == [artifact_id]
+    _settle(artifact_id)  # Delivery has its own state-change frame.
+    assert [frame for frame in frames if frame == artifact_id] == [artifact_id, artifact_id]
     frames[:] = [artifact_id]
 
     comment_id = created.json()["comment"]["id"]
@@ -90,10 +90,10 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
 
 @pytest.mark.asyncio
-async def test_a_person_comment_announces_once_after_post_response_delivery(
+async def test_a_person_comment_announces_at_commit_and_after_delivery(
     integration_client, doc, _registrable_roots, monkeypatch,
 ):
-    """The sole user-comment frame follows background delivery, never the saved row."""
+    """The commit shows the saved row; the later frame refreshes delivery state."""
     from doceditor import comment_notifications
     from infra.database import get_db
 
@@ -118,8 +118,9 @@ async def test_a_person_comment_announces_once_after_post_response_delivery(
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
     assert created.json()["woken"] == []
-    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
-    assert open_at_frame == [0]
+    assert open_at_frame == [1]
+    _settle(artifact_id)
+    assert open_at_frame == [1, 0]
 
 
 @pytest.mark.asyncio

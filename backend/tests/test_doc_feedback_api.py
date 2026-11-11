@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fastapi import BackgroundTasks
+
 from fastapi.testclient import TestClient
 
-from auth_fixtures import OWNER_TOKEN, OWNER_USER
+from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
@@ -71,7 +71,7 @@ def test_user_immediate_comment_waits_for_the_settle_then_is_delivered_once(clie
 
 
 @pytest.mark.asyncio
-async def test_comment_handler_returns_before_a_blocked_background_delivery(isolated_db, monkeypatch):
+async def test_comment_handler_returns_before_agent_delivery(isolated_db, monkeypatch):
     from api import doc_comments
     from api.doc_comment_models import CommentCreate
     from doceditor import live_runtime
@@ -84,38 +84,18 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
         created_artifact_id = seed_document(db, "owner")
     finally:
         db.close()
-
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def blocked_delivery(_batch_ids, _artifact_id, _delivery_policy):
-        started.set()
-        await release.wait()
-
-    monkeypatch.setattr(doc_comments, "announce_person_comment_after_response", blocked_delivery)
-    background = BackgroundTasks()
     result = await doc_comments.create_comment(
-        created_artifact_id,
-        OWNER_TOKEN,
+        created_artifact_id, OWNER_TOKEN,
         CommentCreate(body="Save before delivery.", client_id="blocked-delivery", delivery_policy="immediate"),
-        background,
     )
-
     assert result["comment"]["id"] == "blocked-delivery"
     assert result["woken"] == []
-    assert not started.is_set()
-    assert len(background.tasks) == 1
     db = get_db()
     try:
         [batch] = batches(db)
         assert (batch["state"], batch["item_count"]) == ("open", 1)
     finally:
         db.close()
-
-    running = asyncio.create_task(background())
-    await asyncio.wait_for(started.wait(), timeout=1)
-    running.cancel()
-    await asyncio.gather(running, return_exceptions=True)
 
 
 def test_held_user_comment_returns_before_delivery_and_keeps_its_policy_batch_open(client, isolated_db, monkeypatch):
@@ -151,12 +131,26 @@ def test_held_user_comment_returns_before_delivery_and_keeps_its_policy_batch_op
         assert (batch["state"], batch["delivery_policy"], batch["attempts"]) == ("open", "document-held", 0)
     finally:
         db.close()
-    assert frames == []
+    assert frames == [created_artifact_id]
     assert drives == []
+    listed = client.get(f"/api/artifacts/{created_artifact_id}/comments?token={OWNER_TOKEN}")
+    assert listed.status_code == 200
+    assert [comment["id"] for comment in listed.json()["comments"]] == ["held-comment"]
+
+
+def test_held_comment_is_visible_to_another_reader_of_shared_document(client, artifact_id):
+    url = f"/api/artifacts/{artifact_id}/comments"
+    posted = client.post(url, params={"token": OWNER_TOKEN}, json={
+        "body": "Shared held comment", "client_id": "shared-held", "delivery_policy": "document-held",
+    })
+    assert posted.status_code == 200, posted.text
+    listed = client.get(url, params={"token": OTHER_TOKEN})
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()["comments"]] == ["shared-held"]
 
 
 def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, monkeypatch):
-    """A user comment on their own document is announced after its empty delivery."""
+    """A user comment on their own document is announced once at commit."""
     from doceditor import comment_notifications, live_runtime
 
     monkeypatch.setattr(live_runtime, "_manager", None)
@@ -182,6 +176,56 @@ def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, 
     assert response.status_code == 200, response.text
     assert response.json()["batch_ids"] == []
     assert frames == [created_artifact_id]
+
+
+def test_person_comment_is_live_before_edit_idle_delivery(client, isolated_db, monkeypatch):
+    from doceditor import comment_notifications, comments, live_runtime
+
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        db.execute("UPDATE threads SET user_id=? WHERE id='owner'", (OWNER_USER,))
+        artifact_id = seed_document(db, "owner")
+        root = comments.create(artifact_id, body="Earlier thread", author_kind="user", announce=False, db=db)
+        reply = comments.create(artifact_id, body="Unread reply", author="Agent", author_kind="agent",
+                                author_thread_id="owner", parent_id=root["id"], announce=False, db=db)
+        frames = []
+        monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed",
+                            lambda aid, **kwargs: frames.append((aid, kwargs)))
+        url = f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}"
+        posted = client.post(url, json={"body": "Visible now", "client_id": "live-person", "delivery_policy": "immediate"})
+        assert posted.status_code == 200, posted.text
+        assert len(frames) == 1
+        assert frames[0][0] == artifact_id
+        assert not frames[0][1]["unread_attention_changed"]
+        before = client.get(url).json()
+        assert {row["id"] for row in before["comments"]} == {root["id"], "live-person"}
+        earlier = next(row for row in before["comments"] if row["id"] == root["id"])
+        assert earlier["new_reply_ids"] == [reply["id"]]
+        assert before["feedback"]["open_count"] == 1
+        [batch] = batches(db, state="open")
+        comment_at = datetime.fromisoformat(batch["last_item_at"])
+        edit_at = comment_at + timedelta(seconds=1)
+        with write_transaction(db, scope="test_edit_after_comment") as connection:
+            feedback_batch_edits.record_edit(
+                connection, artifact_id=artifact_id, recipient_id="owner", author_kind="user",
+                author_id=feedback_batches.USER_AUTHOR_ID, actor_display="Steve",
+                path=Path("/workspace/shared/live.md"), before=b"before", after=b"after", at=edit_at.isoformat(),
+            )
+        [batch] = batches(db, state="open")
+        deadline = datetime.fromisoformat(batch["closes_at"])
+        assert deadline == edit_at + timedelta(seconds=30)
+        assert feedback_batches.close_due((deadline - timedelta(microseconds=1)).isoformat(), db=db) == []
+        assert len(frames) == 1
+        assert feedback_batches.close_due(deadline.isoformat(), db=db) == ["owner"]
+        assert len(frames) == 2
+        assert frames[1] == (artifact_id, {})
+        after = client.get(url).json()
+        assert after["comments"] == before["comments"]
+        assert after["feedback"]["open_count"] == 0
+    finally:
+        db.close()
 
 
 @pytest.mark.parametrize("path", ["send", "retry"])
