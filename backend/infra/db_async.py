@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 
@@ -91,6 +93,28 @@ async def run_read(fn, *args, **kwargs):
 async def run_bulk(fn, *args, **kwargs):
     """Run a long report scan on the bulk lane, which may write TEMP tables but never the main database."""
     return await _run_shielded(_bulk_pool, "bulk", fn, *args, **kwargs)
+
+
+@asynccontextmanager
+async def use_db_context(context, /):
+    """Enter and exit one sync context manager on the DB pool, off the event loop.
+
+    A ``with`` body whose manager opens or closes a SQLite write transaction cannot
+    stay on the loop, and lifting the whole body into a worker function is not
+    always possible. ``with`` treats a failed ``__enter__`` as no exit to run, so a
+    failed enter calls no ``__exit__`` either. The caller's in-flight exception is
+    read here, on the loop, before the exit job is submitted, so a failure inside
+    the manager's own exit replaces the caller's error exactly as an inline exit did.
+    """
+    outcome: tuple = (None, None, None)
+    value = await run_in_db(context.__enter__)
+    try:
+        yield value
+    except BaseException:
+        outcome = sys.exc_info()
+        raise
+    finally:
+        await run_in_db(context.__exit__, *outcome)
 
 
 async def run_in_db_unless_owned(owned_db, fn, /, *args, **kwargs):

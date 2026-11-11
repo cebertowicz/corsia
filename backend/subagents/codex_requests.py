@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from infra.db_async import run_in_db
 from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.vendor_write_admission import require_session_write
 
@@ -71,7 +72,9 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
             if session._closing and method in {"thread/inject_items", "turn/start", "turn/steer"}:
                 raise RuntimeError("Codex app-server terminated before provider write")
             if method in {"turn/start", "turn/steer"}:
-                require_session_write(session, "codex")
+                # Admission writes the account projection: a SQLite write
+                # transaction, which the loop thread may not open.
+                await run_in_db(require_session_write, session, "codex")
             session.request_log.append({"id": msg_id, "method": method, "params": params or {}})
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
             if on_write_observed is not None:
