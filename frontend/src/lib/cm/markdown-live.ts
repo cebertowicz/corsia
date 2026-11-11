@@ -1,6 +1,6 @@
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { StateField, type EditorState, type Extension, type Range } from '@codemirror/state';
+import { Facet, StateField, type EditorState, type Extension, type Range } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
@@ -100,6 +100,9 @@ function mermaidFence(node: SyntaxNodeRef, doc: EditorState['doc']): string | nu
 
 const HEADING = /^ATXHeading(\d)$/;
 
+/** On for an email draft, where `Name <address>` is the address itself: its brackets stay in view so typing lands outside them. */
+export const showAutolinkMarks = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
+
 /**
  * Hides markdown syntax marks so the doc reads as rendered prose. Marks stay
  * hidden regardless of cursor position — the rendered doc never reveals raw
@@ -164,6 +167,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to)); // a web URL shows as a link, never fetched
 						break;
 					case 'LinkMark':
+						if (node.node.parent?.name === 'Autolink' && view.state.facet(showAutolinkMarks)) break;
 						hide(node.from, node.to);
 						break;
 					case 'URL': {
@@ -196,7 +200,7 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 			this.decorations = buildInlineDecorations(view);
 		}
 		update(u: ViewUpdate) {
-			if (u.docChanged || u.viewportChanged || syntaxTree(u.state) !== syntaxTree(u.startState)) {
+			if (u.docChanged || u.viewportChanged || syntaxTree(u.state) !== syntaxTree(u.startState) || u.state.facet(showAutolinkMarks) !== u.startState.facet(showAutolinkMarks)) {
 				this.decorations = buildInlineDecorations(u.view);
 			}
 		}

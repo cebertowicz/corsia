@@ -177,6 +177,9 @@
 	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
 	export function widgetLabelStamp(): unknown { return view?.state.doc; }
 
+	/** This editor's view while it is up, for a caller that adds its own extension slot (an email draft's header). */
+	export function editorView(): EditorView | undefined { return view; }
+
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent) {
 		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;

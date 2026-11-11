@@ -3,6 +3,33 @@ import { hashSeed } from '$lib/typingPace';
 export type MentionOccurrence = { agent_id: string; start: number; end: number };
 type Selection = { id: string; start: number; text: string };
 
+/** At send, a typed `@Name` naming exactly one taggable agent tags it, as if picked; the stored occurrence carries the id.
+ *  Returns every occurrence, in text order. The text decides: the longest name wins, so a picked `@Agent` that now reads
+ *  `@Agent Substrate` tags Agent Substrate. A picked occurrence otherwise stands, which is how a name two agents share
+ *  gets tagged. Offsets are UTF-16 code units of `text`; names compare case-insensitively without changing its length. */
+export function withTypedMentions(text: string, agents: { id: string; name: string }[], picked: MentionOccurrence[]): MentionOccurrence[] {
+	const byName = new Map<string, { name: string; ids: Set<string> }>();
+	for (const agent of agents) {
+		const key = agent.name.toLowerCase();
+		byName.set(key, { name: agent.name, ids: new Set([...(byName.get(key)?.ids ?? []), agent.id]) });
+	}
+	const names = [...byName.values()].filter(({ ids }) => ids.size === 1).sort((a, b) => b.name.length - a.name.length);
+	let kept = [...picked];
+	const found: MentionOccurrence[] = [];
+	for (let at = text.indexOf('@'); at >= 0; at = text.indexOf('@', at + 1)) {
+		if (at > 0 && !/\s/.test(text[at - 1])) continue;
+		const match = names.find(({ name }) => text.slice(at + 1, at + 1 + name.length).toLowerCase() === name.toLowerCase()
+			&& !/[\p{L}\p{N}_]/u.test(text[at + 1 + name.length] ?? ''));
+		if (!match) continue;
+		const end = at + 1 + match.name.length;
+		const overlapping = [...kept, ...found].filter(item => item.start < end && at < item.end);
+		if (!overlapping.every(item => item.start === at && item.end < end)) continue;
+		kept = kept.filter(item => !overlapping.includes(item));
+		found.push({ agent_id: [...match.ids][0], start: at, end });
+	}
+	return [...kept, ...found].sort((a, b) => a.start - b.start);
+}
+
 /** Identifies a draft's text by its length and hash, so a snapshot stays the same size however long the draft grows. */
 const textKey = (text: string) => `${text.length}:${hashSeed(text)}`;
 
@@ -64,6 +91,5 @@ export function createMentionSelection(initial = '') {
 			return selections.filter(item => text.slice(item.start, item.start + item.text.length) === item.text)
 				.map(item => ({ agent_id: item.id, start: item.start, end: item.start + item.text.length }));
 		},
-		ids(text: string) { return [...new Set(this.occurrences(text).map(item => item.agent_id))]; },
 	};
 }

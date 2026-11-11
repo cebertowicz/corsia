@@ -81,19 +81,26 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
     });
   });
   let captured = page;
-  let open: ((page: Page) => Promise<void>) | undefined;
+  let open: ((page: Page, state?: string) => Promise<void>) | undefined;
   const breakpoints = scanBreakpoints(path.resolve('src'));
   const widths = selectedWidths ?? captureWidths(breakpoints);
   const groups: string[] = [];
+  // A scenario may export `states` (names of the screen states it seeds); each is captured at every width into its own folder.
+  const states: string[] = Array.isArray(scenario.states) && scenario.states.length ? scenario.states : [''];
+  if (!states.every(state => state === '' || /^[a-z0-9-]+$/.test(state))) throw new Error('Invalid scenario state name');
   fs.mkdirSync(output, { recursive: true });
-  for (const [index, width] of widths.entries()) {
+  let shots = 0;
+  for (const [state, width] of states.flatMap(state => widths.map(width => [state, width] as const))) {
     const figures: string[] = [];
-    if (index > 0) {
+    const folder = state ? path.join(output, state) : output;
+    const href = (file: string) => state ? `${state}/${file}` : file;
+    fs.mkdirSync(folder, { recursive: true });
+    if (shots++ > 0) {
       await captured.close();
       captured = await context.newPage();
     }
     await captured.setViewportSize({ width, height: 900 });
-    if (open) await open(captured);
+    if (open) await open(captured, state || undefined);
     else {
       open = await scenario.seed(captured, request);
       if (typeof open !== 'function') throw new Error('Scenario seed must return an open function');
@@ -109,8 +116,8 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
           await scrollScreen(captured, scenario.scrollAnchor, scroll);
           await dismissToasts(captured);
           const file = `${width}-${theme}-${scroll}${suffix}.png`;
-          await captured.screenshot({ path: path.join(output, file), animations: 'disabled' });
-          figures.push(`<figure><figcaption>${width}px · ${theme} · ${scroll}${caption}</figcaption><img loading="lazy" src="${file}" alt="${width} pixels, ${theme}, ${scroll}${caption}"></figure>`);
+          await captured.screenshot({ path: path.join(folder, file), animations: 'disabled' });
+          figures.push(`<figure><figcaption>${state ? `${state} · ` : ''}${width}px · ${theme} · ${scroll}${caption}</figcaption><img loading="lazy" src="${href(file)}" alt="${state ? `${state}, ` : ''}${width} pixels, ${theme}, ${scroll}${caption}"></figure>`);
         }
       }
     };
@@ -120,7 +127,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
       await shoot(otherPanelState.suffix, otherPanelState.caption);
       await captured.getByRole('button', { name: 'Toggle panel', exact: true }).click();
     }
-    groups.push(`<section><h2>${width}px</h2><div>${figures.join('\n')}</div></section>`);
+    groups.push(`<section><h2>${state ? `${state} · ` : ''}${width}px</h2><div>${figures.join('\n')}</div></section>`);
   }
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>${name} contact sheet</title><style>body{font:16px system-ui;margin:24px;background:#eee;color:#111}section>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}figure{margin:0;background:white;padding:8px}img{width:100%;height:auto}figcaption{padding:8px}</style><h1>${name}</h1><p>Viewport widths: ${widths.join(', ')} px. Widths cover both sides of media-query boundaries.</p><p>Container coverage depends on the scenario content and panes it opens. Where the Workspace panel overlays the screen, it is shot both open and closed.</p>${groups.join('\n')}</html>`;
   fs.writeFileSync(path.join(output, 'index.html'), html);

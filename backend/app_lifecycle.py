@@ -78,6 +78,9 @@ async def _begin_startup(app: FastAPI, logger) -> None:
         with startup_progress.publishing():
             await app_startup_init.initialize_startup_off_loop(logger)
         app_loop.capture(asyncio.get_running_loop())
+        from connections.mail.draft_format_conversion import convert_open_drafts
+
+        await convert_open_drafts()
         from llm.live_cost_map import start_refresh
 
         if not getattr(app.state, "litellm_cost_map_offline", False):

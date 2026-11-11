@@ -104,6 +104,7 @@ def test_doc_update_frame_includes_author_only_when_given(monkeypatch):
 
     class Entry:
         live = Live()
+        email_draft_id = None
 
     document_control._changed("artifact", Entry(), b"u", None)
     document_control._changed("artifact", Entry(), b"u", None, {"thread_id": "t", "name": "Alpha"})

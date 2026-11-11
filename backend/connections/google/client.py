@@ -57,12 +57,12 @@ class GoogleError(AccountError):
 
 class GoogleNotConnected(GoogleError):
     def __init__(self) -> None:
-        super().__init__(NOT_CONNECTED)
+        super().__init__(NOT_CONNECTED, person_fixes=True)
 
 
 class GoogleSignInRejected(GoogleError):
     def __init__(self, *, published: bool = False) -> None:
-        super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN)
+        super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN, person_fixes=True)
 
 
 class GoogleSignInError(GoogleError):

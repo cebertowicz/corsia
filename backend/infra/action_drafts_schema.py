@@ -7,6 +7,8 @@ and the person's newest message against them, never against a file timestamp.
 
 from __future__ import annotations
 
+ACTION_DRAFTS_PATH_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_action_drafts_kind_path ON action_drafts(kind, path)"
+
 ACTION_DRAFTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS action_drafts (
         id                TEXT PRIMARY KEY,
@@ -22,4 +24,4 @@ ACTION_DRAFTS_SCHEMA_SQL = """
         sent_at           TEXT,
         external_id       TEXT
     );
-"""
+""" + ACTION_DRAFTS_PATH_INDEX_SQL + ";\n"

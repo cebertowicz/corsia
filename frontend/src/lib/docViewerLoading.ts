@@ -1,5 +1,6 @@
 import { fetchContent, fetchRevision, type DocContent } from '$lib/api/docs';
 import type { DocumentFreshness } from '$lib/docFreshness';
+import type { EmailDraftInfo } from '$lib/emailDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { DocOpenError, docOpenRefusal, liveUnavailable, SNAPSHOT_REFUSAL_MESSAGE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
 import { withDraftArtifactId, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
@@ -19,12 +20,14 @@ export interface ViewerContent {
 	liveUnavailable?: LiveUnavailable | null;
 	/** The file has recorded versions to show in History. */
 	history?: boolean;
+	/** Set when the file's draft record makes it an email draft; absent when the load had no content response to read. */
+	emailDraft?: EmailDraftInfo | null;
 }
 /** The viewer's form of an HTTP content response, which never carries a live session. */
 export function viewerContent(response: DocContent, fallbackArtifactId: string | null): ViewerContent {
 	return { text: response.text, artifactId: response.artifact?.id ?? fallbackArtifactId, writable: response.writable !== false,
 		freshness: response.freshness, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response),
-		history: response.history === true };
+		history: response.history === true, emailDraft: response.email_draft ?? null };
 }
 interface LoadOptions {
 	target: DocViewerTarget;
@@ -127,7 +130,7 @@ async function load(options: LoadOptions): Promise<void> {
 	if (!isCurrent()) return;
 	if (live && typeof live !== 'string') {
 		options.onReady({ text: live.text.toString(), artifactId: live.artifactId, writable: live.writable,
-			freshness: response.freshness, revision: null, live, history: response.history === true });
+			freshness: response.freshness, revision: null, live, history: response.history === true, emailDraft: response.email_draft ?? null });
 		// A device copy replayed on reopen changes the document without an edit, so no autosave ever asks for the
 		// file write: request it only when that replay left the file behind the live text. A replay that matches the
 		// file is already written, so closing the tab owes no flush for it.

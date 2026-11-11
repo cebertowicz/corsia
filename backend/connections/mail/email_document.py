@@ -20,9 +20,10 @@ SIGNATURE_DELIMITER = "-- "
 
 # A plain address: no display name, quotes, brackets, separators or whitespace.
 _ADDRESS = re.compile(r"""^[^\s,;<>"()\[\]\\@]+@[^\s,;<>"()\[\]\\@]+$""")
-_HEADERS = ("from", "to", "cc", "subject", "in reply to")
-UNREAD_REPLY_TARGET = "an earlier message"
-_SHOWN_LIMIT = 200
+_HEADERS = ("from", "to", "cc", "subject")
+
+#: The workspace folder the draft tools save email drafts into.
+EMAIL_DRAFT_FOLDER = "email-drafts"
 
 NEEDS_RECIPIENT = "A draft needs at least one recipient."
 BAD_ADDRESS = "Recipients must be plain email addresses such as name@example.com."
@@ -114,47 +115,63 @@ def reply_subject(subject: str) -> str:
     return subject if re.match(r"\s*re\s*:", subject, re.IGNORECASE) else f"Re: {subject}"
 
 
-def reply_target_label(sender: str | None, subject: str | None) -> str:
-    """The original's sender and subject as one safe line, or a fixed phrase when neither read.
-
-    Both come from someone else's email: whitespace and control characters collapse so a header
-    value can never start a line of its own in the document.
-    """
-
-    def clean(value: str | None) -> str:
-        return re.sub(r"[\s\x00-\x1f\x7f]+", " ", value or "").strip()[:_SHOWN_LIMIT]
-
-    sender, subject = clean(sender), clean(subject)
-    if sender and subject:
-        return f'"{subject}" from {sender}'
-    if subject:
-        return f'"{subject}"'
-    if sender:
-        return f"a message from {sender}"
-    return UNREAD_REPLY_TARGET
-
-
 def compose_document(
     sender: str, to: list[str], cc: list[str], subject: str, body: str, signature: str,
-    reply_label: str | None = None, notes: list[str] | None = None,
 ) -> str:
     """The draft document: header lines, a blank line, the body, then the signature.
 
-    ``From:`` shows the person which account sends and ``In reply to:`` which message it
-    answers; the send reads neither, so neither can choose a sender or a thread.
+    ``From:`` shows the person which account sends; the send doesn't read it, so it can't
+    choose a sender. The message a reply answers is in the draft's stored target, not here.
     """
     head = [f"From: {sender}", f"To: {', '.join(to)}"]
     if cc:
         head.append(f"Cc: {', '.join(cc)}")
     head.append(f"Subject: {subject}")
-    if reply_label:
-        head.append(f"In reply to: {reply_label}")
-    for note in notes or []:
-        head.extend(f"Note: {line}" for line in note.splitlines() or [""])
     text = "\n".join(head) + "\n\n" + body.strip("\n")
     if signature:
         text += f"\n\n{SIGNATURE_DELIMITER}\n{signature}"
     return text + "\n"
+
+
+def _header_lines(head: str) -> list[tuple[str | None, str, int, int]]:
+    """Each header line as ``(field, value, start, end)``: the field lowercase, or None when the line has no colon."""
+    lines, start = [], 0
+    for line in head.split("\n"):
+        key, colon, value = line.partition(":")
+        lines.append((key.strip().lower() if colon else None, value, start, start + len(line)))
+        start += len(line) + 1
+    return lines
+
+
+def _utf16(text: str, index: int) -> int:
+    return len(text[:index].encode("utf-16-le")) // 2
+
+
+def read_header(text: str) -> dict:
+    """The header block as the send reads it: each To and Cc entry's range and whether the send takes it as an address.
+
+    ``text`` is the whole document (the header is every line up to the first blank line) and ranges are UTF-16 offsets into it,
+    as the editor counts them, so the view can mark them while its header still reads the same.
+    """
+    head = text.replace("\r\n", "\n").partition("\n\n")[0]
+    recipients = []
+    for key, value, _, end in _header_lines(head):
+        if key not in ("to", "cc"):
+            continue
+        at = end - len(value)
+        for part in value.split(","):
+            entry = part.strip()
+            if entry:
+                first = at + len(part) - len(part.lstrip())
+                recipients.append({"field": key, "text": entry, "from": _utf16(head, first),
+                                   "to": _utf16(head, first + len(entry)), "full": is_plain_address(entry)})
+            at += len(part) + 1
+    return {"text": head, "recipients": recipients}
+
+
+def email_draft_view(draft_id: str, text: str) -> dict:
+    """What a document load or live frame tells the view about an email draft: its record and its header."""
+    return {"id": draft_id, "header": read_header(text)}
 
 
 def parse_document(text: str) -> dict | None:
@@ -166,12 +183,8 @@ def parse_document(text: str) -> dict | None:
     if not separator:
         return None
     found: dict[str, str] = {}
-    for line in head.split("\n"):
-        key, colon, value = line.partition(":")
-        key = key.strip().lower()
-        if colon and key == "note":
-            continue
-        if not colon or key not in _HEADERS or key in found:
+    for key, value, _, _ in _header_lines(head):
+        if key is None or key not in _HEADERS or key in found:
             return None
         found[key] = value.strip()
     if not found.get("to") or not found.get("subject") or not body.strip():

@@ -123,7 +123,7 @@ def credentials(account_id: str) -> tuple[Endpoints, str, str, dict[str, object]
     finally:
         db.close()
     if endpoints is None or not bundle:
-        raise AccountError(NEEDS_PASSWORD)
+        raise AccountError(NEEDS_PASSWORD, person_fixes=True)
     return endpoints, endpoints.imap_username or endpoints.username, str(bundle[PASSWORD]), check
 
 
