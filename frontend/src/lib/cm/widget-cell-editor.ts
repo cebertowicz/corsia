@@ -55,7 +55,7 @@ class CellEditors {
 	private readonly swipe: CellSwipe;
 
 	constructor(private readonly host: EditorView) {
-		this.swipe = new CellSwipe(host);
+		this.swipe = new CellSwipe();
 		host.dom.addEventListener('click', this.openPressed);
 		document.addEventListener('pointerdown', this.pressedElsewhere, true);
 	}
@@ -76,8 +76,10 @@ class CellEditors {
 		}
 	};
 
-	private readonly pressedElsewhere = (press: Event) => {
-		if (this.cell && !this.layer.contains(press.target as Node)) this.close();
+	/** A press outside the open cell closes it. A touch closes it only if it ends as a tap, the rule that opens a cell: a swipe is a scroll. */
+	private readonly pressedElsewhere = (press: PointerEvent) => {
+		if (!this.cell || this.layer.contains(press.target as Node)) return;
+		if (!this.swipe.whenTapped(press, () => { if (this.cell) this.close(); })) this.close();
 	};
 
 	/**

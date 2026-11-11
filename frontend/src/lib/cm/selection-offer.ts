@@ -6,8 +6,9 @@ import type { SelectionOffer } from './widget-selection-types';
 export type { SelectionOffer };
 
 /**
- * What the Comment offer is raised for from the editor's own selection: the selected text, placed beside its end; for a caret
- * in an open empty cell, that whole cell (it has no text to select); null for any other caret.
+ * What the Comment offer is raised for from the editor's own selection: the selected text, placed beside its end, except text
+ * in an open table cell, which is placed beside or below the table so the offer covers no cell's text; for a caret in an open
+ * empty cell, that whole cell (it has no text to select); null for any other caret.
  */
 export function selectionOffer(
 	v: EditorView,
@@ -16,7 +17,9 @@ export function selectionOffer(
 	const r = v.state.selection.main;
 	if (r.empty) return emptyCellSelection(v);
 	const text = v.state.sliceDoc(r.from, r.to), { state } = v;
-	// Text selected in the open cell is placed by the same rule, measured in the cell's own editor (the table hides that source from the document's).
+	// Text selected in the open cell is measured in the cell's own editor (the table hides that source from the document's). Its offer
+	// is the one place that does not follow prose: beside the end of the words it would cover the cell's or the next row's text, so it
+	// goes to the margin beside the table, level with the selected line (`offerBesideTable`).
 	const inCell = openCellText(v, r.from, r.to), coords = inCell ? inCell.inner.coordsAtPos(r.to - inCell.base) : v.coordsAtPos(r.to);
 	const beside = inCell && coords ? offerBesideTable(v, r.from, coords) : null;
 	return {

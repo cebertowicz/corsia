@@ -101,7 +101,7 @@ for (const layout of LAYOUTS) {
 			await frame(page, `05-image-in-cell-${at}`);
 		});
 
-		test('text selected in an open cell is offered Comment, and its composer opens, by the rule prose follows', async ({ page }) => {
+		test('text selected in an open cell is offered Comment beside or below the table, and its composer opens as prose\'s does', async ({ page }) => {
 			test.setTimeout(120_000);
 			await openTableDocument(page, layout);
 			const keys = await keysOf(page);

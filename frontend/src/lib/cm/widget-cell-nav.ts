@@ -14,8 +14,8 @@ function tableOf(state: EditorState, cell: OpenCell): { from: number; to: number
 	return { ...block, cells: tableGrid(state.sliceDoc(block.from, block.to)) };
 }
 
-const stepTo = (block: { from: number }, state: EditorState, cells: CellSpan[], index: number): OpenCell | null =>
-	index < 0 || index >= cells.length ? null : cellAtSpan(state, block.from, cells[index]);
+const stepTo = (block: { from: number }, cells: CellSpan[], index: number): OpenCell | null =>
+	index < 0 || index >= cells.length ? null : cellAtSpan(block.from, cells[index]);
 
 /** Tab and Shift+Tab: the next or previous cell, running on from the end of one row to the start of the next. Null when there is no cell left to move to. */
 export function adjacentCell(state: EditorState, cell: OpenCell, step: 1 | -1): OpenCell | null {
@@ -23,7 +23,7 @@ export function adjacentCell(state: EditorState, cell: OpenCell, step: 1 | -1): 
 	if (!table) return null;
 	const index = table.cells.findIndex((span) => span.row === cell.row && span.col === cell.col);
 	if (index < 0) return null;
-	return stepTo(table, state, table.cells, index + step);
+	return stepTo(table, table.cells, index + step);
 }
 
 /** Enter: the same column one row down. Null on the last row, where there is nowhere below to go. */
@@ -31,7 +31,7 @@ export function cellBelow(state: EditorState, cell: OpenCell): OpenCell | null {
 	const table = tableOf(state, cell);
 	if (!table) return null;
 	const below = table.cells.find((span) => span.row === cell.row + 1 && span.col === cell.col);
-	return below ? cellAtSpan(state, table.from, below) : null;
+	return below ? cellAtSpan(table.from, below) : null;
 }
 
 /** Where the caret goes when the reader leaves the table: the start of the line below it, or the end of the document. */

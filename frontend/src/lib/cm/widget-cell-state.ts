@@ -29,18 +29,17 @@ export const closeCell = StateEffect.define<null>();
 /** The cell's whole source between its two pipes, padding included: what the cell editor holds, byte for byte. */
 export const cellSource = (state: EditorState, cell: OpenCell) => state.sliceDoc(cell.from, cell.to);
 
-/** Whether the source really delimits this cell, as opposed to the renderer padding an empty one in at the row's end. */
-const delimited = (state: EditorState, cell: { from: number; to: number }) =>
-	state.sliceDoc(cell.from - 1, cell.from) === '|' && state.sliceDoc(cell.to, cell.to + 1) === '|';
-
-/** The cell the source span describes, resolved against the document as it stands. */
-export const cellAtSpan = (state: EditorState, block: number, span: CellSpan): OpenCell => ({
+/**
+ * The cell the source span describes. Whether it is padded is the span's own flag, set by `tableGrid` where it pads a short
+ * row: GFM leaves out a row's first or last pipe, so a cell's neighbouring pipes say nothing about it.
+ */
+export const cellAtSpan = (block: number, span: CellSpan): OpenCell => ({
 	tableFrom: block,
 	row: span.row,
 	col: span.col,
 	from: block + span.rawFrom,
 	to: block + span.rawTo,
-	padded: !delimited(state, { from: block + span.rawFrom, to: block + span.rawTo }),
+	padded: span.padded === true,
 });
 
 /**
@@ -65,7 +64,7 @@ export function resolveCell(state: EditorState, cell: OpenCell): OpenCell | null
 		?? grid.find((item) => item.row === cell.row && item.col === cell.col && item.rawFrom <= from && to <= item.rawTo)
 		?? grid.find((item) => item.rawFrom <= from && to <= item.rawTo);
 	if (!span) return null;
-	return cellAtSpan(state, block.from, span);
+	return cellAtSpan(block.from, span);
 }
 
 /** The cell to open from a click on the drawn cell at `row`/`col` of the table that starts at `tableFrom`. */
@@ -74,7 +73,7 @@ export function cellToOpen(state: EditorState, tableFrom: number, row: number, c
 	if (!block) return null;
 	const span = tableGrid(state.sliceDoc(block.from, block.to)).find((item) => item.row === row && item.col === col);
 	if (!span) return null;
-	return resolveCell(state, cellAtSpan(state, block.from, span));
+	return resolveCell(state, cellAtSpan(block.from, span));
 }
 
 export const openCellState = StateField.define<OpenCell | null>({
