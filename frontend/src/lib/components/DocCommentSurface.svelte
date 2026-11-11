@@ -127,7 +127,9 @@
 	/** Where the resolved list shows when its control opens it: the phone's sheet, the margin column's place, or a popover from the control. */
 	const resolvedPlace = $derived(sheetDrawer ? 'sheet' : columnFits ? 'margin' : 'popover');
 	const resolvedInMargin = $derived(resolvedOpen && resolvedPlace === 'margin');
-	const margin = $derived(columnFits && !resolvedInMargin && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
+	/** What the column shows when it is up; while the Resolved list holds the column's place, a picked card or draft waits for it, never over the text. */
+	const forColumn = $derived(columnFits && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
+	const margin = $derived(forColumn && !resolvedInMargin);
 	/** Whether the margin column is up: the editor's room beside the text follows this, never the leaving column's transition. */
 	export function marginShown(): boolean { return margin || resolvedInMargin; }
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
@@ -346,7 +348,7 @@
 	{:else if surfaceState?.kind === 'list' && image}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
-	{:else if surfaceState && surfaceState.kind !== 'list'}{@render cardPopover()}{/if}
+	{:else if surfaceState && surfaceState.kind !== 'list' && !forColumn}{@render cardPopover()}{/if}
 {/if}
 <!-- On a phone its own sheet over the document pane (`within` the leaf body, as the comment sheet is), never inside the comment sheet. -->
 {#if resolvedOpen && resolvedPlace !== 'sheet'}<DocResolvedComments place={resolvedPlace} count={resolvedList.length} entry={resolvedEntry} onClose={resolvedDrawer.close}>{#snippet list()}{@render threadList(resolvedList, true, true, false, true)}{/snippet}</DocResolvedComments>

@@ -129,11 +129,24 @@ describe('DocCommentSurface suggestions', () => {
 		const state = writable<{ kind: 'list' } | { kind: 'thread'; id: string; ids?: string[] }>({ kind: 'thread', id: suggestion.id, ids: [suggestion.id, 'other'] }), liveState = fromStore(state);
 		render(Object.defineProperties({ get state() { return liveState.current; }, opened: 3, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
 		open.set(true); flushSync();
+		// The Resolved list holds the column's place: the picked card waits for the column, never over the text.
+		expect(document.body.querySelector('[data-popover]'), 'no card over the text beside the Resolved list').toBeNull();
 		// The shown thread resolved by someone else moves to the next in its stack, then a picked card is let go back to the column.
 		state.set({ kind: 'thread', id: 'other', ids: [suggestion.id, 'other'] }); flushSync();
+		expect(document.body.querySelector('[data-popover]'), 'no card over the text after the stack moves').toBeNull();
 		state.set({ kind: 'list' }); flushSync();
 		expect(open.isOpen()).toBe(true);
 		expect(document.body.querySelector('[data-resolved-column]')).not.toBeNull();
+	});
+
+	it('shows a picked card in the column again once the Resolved list that held its place closes', () => {
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ state: { kind: 'thread', id: suggestion.id }, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		open.set(true); flushSync();
+		expect(document.body.querySelector('[data-popover]')).toBeNull();
+		open.set(false); flushSync();
+		expect(document.body.querySelector('[data-popover]')).toBeNull();
+		expect(document.body.querySelector(`.canvas-comment-drawer.margin [data-comment-id="${suggestion.id}"]`)).not.toBeNull();
 	});
 
 	it('opens the resolved list and the comment list as popovers from their controls on a desktop canvas with no room for the column', () => {
