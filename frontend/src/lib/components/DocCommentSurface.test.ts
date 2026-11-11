@@ -159,6 +159,28 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
 	});
 
+	it('brings the picked thread into view in the list popover after the popover has moved to the page body, once', async () => {
+		// Moving a node resets its scroll, and the popover moves to the page body after its threads mount: a scroll from the
+		// thread's own mount is undone by the move, so the one that counts lands after the popover is placed.
+		const calls: { id: string | null; inBody: boolean }[] = [];
+		const original = Element.prototype.scrollIntoView;
+		Element.prototype.scrollIntoView = function (this: Element) {
+			calls.push({ id: this.closest('[data-comment-id]')?.getAttribute('data-comment-id') ?? null, inBody: this.closest('[data-popover]')?.parentElement === document.body });
+		};
+		try {
+			render({ bounds: noRoomCanvas(), anchor: document.createElement('button'), state: { kind: 'list' }, comments: [suggestion, secondSuggestion], focusedId: secondSuggestion.id });
+			const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			await tick(); await tick(); await frame();
+			expect(calls.at(-1)).toEqual({ id: secondSuggestion.id, inBody: true });
+			// A later placement (a resize, a scroll elsewhere) leaves the reader's own scroll in the list alone.
+			const count = calls.length;
+			window.dispatchEvent(new Event('resize')); await tick(); await frame();
+			expect(calls.length).toBe(count);
+		} finally {
+			Element.prototype.scrollIntoView = original;
+		}
+	});
+
 	it('shows no Reply field and no quote line on a margin card nobody picked, and both on the picked one', () => {
 		const rest = { ...secondSuggestion, replacement: null, anchor: 'beta', text: 'A plain comment', replies: [{ id: 'r1', author: 'agent-1', authorKind: 'agent' as const, text: 'One reply', at: 'now' }] };
 		render({ state: { kind: 'list' }, comments: [suggestion, rest], focusedId: rest.id });
