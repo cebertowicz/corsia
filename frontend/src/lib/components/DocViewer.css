@@ -20,10 +20,11 @@
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
 /* The bottom notices (the jump control, a delivery note, the below activity pill) float over the text, so the text runs to the pane's foot and
-   never moves or shrinks as one comes or goes. The editor's own bottom padding lets the last line scroll clear of them, and a line brought into
-   view (`--doc-bottom-float`, which the editor's scroll margin reads too) stops above where they sit. */
+   never moves or shrinks as one comes or goes. The editor's own bottom padding lets the last line scroll clear of them, and while one shows a
+   line brought into view (`--doc-bottom-float`, which the editor's scroll margin reads too) stops above where it sits. With none showing the
+   foot is plain text: a click there places the caret without the browser scrolling it up out of a padded strip. */
 .doc { --doc-bottom-float: calc(var(--touch-target) + var(--space-3)); }
-.doc .cm-scroller { scroll-padding-bottom: var(--doc-bottom-float); }
+.doc:has(> [data-doc-bottom-band], [data-doc-activity-pill][data-direction='below']) .cm-scroller { scroll-padding-bottom: var(--doc-bottom-float); }
 .doc > .doc-bottom-band[data-doc-bottom-band] { grid-area: editor; align-self: end; position: relative; z-index: 2; padding-bottom: var(--space-2); pointer-events: none; }
 @media (max-width: 600px) {
   /* A touch pointer at phone width keeps the 24px text inset on the right as well as the left. The editor reads this; ArtifactLeaf's page gutter shares the condition. */
