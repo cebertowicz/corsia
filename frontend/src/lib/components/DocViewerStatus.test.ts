@@ -157,7 +157,7 @@ describe('DocViewerStatus freshness metadata', () => {
 
 	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {
 		render(value({ state: 'overdue' }));
-		const toggle = host.querySelector<HTMLButtonElement>('.identity-details')!;
+		const toggle = host.querySelector<HTMLButtonElement>('.details-toggle')!;
 		toggle.click(); flushSync();
 		const escape = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
 		host.querySelector<HTMLButtonElement>('.comment-status')!.dispatchEvent(escape()); flushSync();
