@@ -1,5 +1,6 @@
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from './docSuggestions';
+import { waitForPanelsToSettle } from './sidebar';
 
 /** The seeded document and helpers the margin-column specs share: six threads (a cluster of two on one line, two suggestions) beside ten paragraphs. */
 
@@ -29,6 +30,7 @@ export async function widen(page: Page, doc: Doc) {
 		await page.getByRole('button', { name, exact: true }).click();
 		await expect.poll(() => docWidth(page)).toBeGreaterThan(600);
 	}
+	await waitForPanelsToSettle(page);
 	if (!(await page.locator('[data-margin-card]').count())) await pill(page).click();
 	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
 	return doc;

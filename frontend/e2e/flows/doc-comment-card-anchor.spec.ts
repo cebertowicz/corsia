@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { waitForPanelsToSettle } from '../support/sidebar';
 
 const SECTIONS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
 const SECTION = 'Third';
@@ -161,10 +162,7 @@ async function expandCanvas(page: Page) {
 		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	}
 	await expect.poll(async () => (await box(page.locator('.doc'))).width).toBeGreaterThan(narrow + 100);
-	// The panels slide shut over a few hundred ms and the text rewraps until they stop: a line placed before then keeps
-	// moving, and a click on it finds it unstable and scrolls it to the canvas edge. Polled, as a cancelled slide rejects `finished`.
-	await page.waitForFunction(() => !document.getAnimations().some((animation) => animation instanceof CSSTransition
-		&& animation.transitionProperty === 'width' && animation.playState === 'running'));
+	await waitForPanelsToSettle(page);
 }
 
 const layouts = [
