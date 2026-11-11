@@ -110,3 +110,36 @@ async def test_capture_is_on_before_startup_logs_its_database_phase(
         contains="startup phase: database initialization started",
     ))
     assert stored, "the database-initialization phase line never reached the log store"
+
+
+async def test_failed_startup_init_still_stores_its_error_and_stops_capture(
+    guard_reports, monkeypatch, tmp_path,
+):
+    """A failed init (for example a migration after a power cut) still reaches the store."""
+    from infra.otel_logs import lifecycle
+    from infra.otel_logs.store import ReadQuery, read_records
+
+    _isolate_lifespan(monkeypatch)
+    store = tmp_path / "otel_logs.db"
+    monkeypatch.setenv(lifecycle.TEST_ENABLE_ENV, "1")
+    monkeypatch.setattr(lifecycle, "default_store_path", lambda: store)
+    lifecycle.stop_corsia_logs()
+
+    def failing_init(logger) -> None:
+        logger.error("startup init failed: simulated migration failure")
+        raise RuntimeError("simulated migration failure")
+
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "initialize_startup", failing_init)
+    try:
+        with pytest.raises(RuntimeError, match="simulated migration failure"):
+            async with app_lifecycle.lifespan(FastAPI()):
+                pass
+        assert lifecycle.capture_status()["state"] == "stopped"
+    finally:
+        lifecycle.stop_corsia_logs()
+
+    stored = read_records(store, ReadQuery(
+        since_ns=0, until_ns=1 << 62, min_severity=0, limit=5,
+        contains="simulated migration failure",
+    ))
+    assert stored, "the failed init's own error never reached the log store"

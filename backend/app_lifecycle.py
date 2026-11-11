@@ -68,17 +68,23 @@ async def _begin_startup(app: FastAPI, logger) -> None:
     """Start log capture, run startup init off the loop, then bind loop services.
 
     Capture starts first, so startup's own phase timings and errors reach the
-    conductor log store. It never raises: a failure leaves capture off.
+    conductor log store. It never raises: a failure leaves capture off. This
+    runs before ``lifespan``'s ``try``, so a failure here stops capture itself,
+    draining the writer so the failure's own records reach the store.
     """
     await asyncio.to_thread(start_corsia_logs)
-    configure_sqlite_fetch_switch_interval()
-    with startup_progress.publishing():
-        await app_startup_init.initialize_startup_off_loop(logger)
-    app_loop.capture(asyncio.get_running_loop())
-    from llm.live_cost_map import start_refresh
+    try:
+        configure_sqlite_fetch_switch_interval()
+        with startup_progress.publishing():
+            await app_startup_init.initialize_startup_off_loop(logger)
+        app_loop.capture(asyncio.get_running_loop())
+        from llm.live_cost_map import start_refresh
 
-    if not getattr(app.state, "litellm_cost_map_offline", False):
-        start_refresh()
+        if not getattr(app.state, "litellm_cost_map_offline", False):
+            start_refresh()
+    except BaseException:
+        stop_runtime_logs(logger)
+        raise
 
 
 @asynccontextmanager

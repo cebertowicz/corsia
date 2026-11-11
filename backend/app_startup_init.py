@@ -1,6 +1,5 @@
 """Synchronous initialization before backend services start."""
 
-import asyncio
 import time
 
 from infra import key_store_values
@@ -56,11 +55,17 @@ async def initialize_startup_off_loop(logger) -> None:
     * ``infra/write_admission._wait_bound`` gives a contended write on a worker
       thread 30 s instead of the 5 s a loop-thread write may spend waiting.
     * ``infra.database.get_db`` is thread-local, so init now writes on the
-      worker's own pooled connection, as every ``run_in_db`` job already does.
+      worker thread's own connection.
+
+    It runs through ``run_off_db`` (the default executor, not the DB pool), so a
+    cancelled lifespan joins the worker before unwinding and never reports
+    startup failed while a migration is still writing.
 
     Nothing else does: none of the modules these steps live in imports asyncio,
     ``infra.app_loop`` still has no captured loop here (``lifespan`` captures it
     after this returns), and the sequence inside ``initialize_startup`` is
     untouched, so startup still finishes before anything else starts.
     """
-    await asyncio.to_thread(initialize_startup, logger)
+    from infra.db_async import run_off_db
+
+    await run_off_db(initialize_startup, logger)
