@@ -2,6 +2,7 @@ import { tick } from 'svelte';
 import { messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 import type { MessagePage, PagerPort } from '$lib/messagePager';
+import { apiFetch } from '$lib/api/request';
 
 /**
  * The transcript pager's port: how an older page of the thread on screen is fetched, hydrated into the
@@ -24,7 +25,7 @@ export function createTranscriptPagerPort(inputs: {
 			const token = inputs.token(), threadId = inputs.threadId();
 			if (!token || !threadId) return null;
 			try {
-				const res = await fetch(`/api/threads/${threadId}/messages?token=${token}&limit=${inputs.pageSize}&before=${cursor}${inputs.querySuffix()}`);
+				const res = await apiFetch(`/api/threads/${threadId}/messages?limit=${inputs.pageSize}&before=${cursor}${inputs.querySuffix()}`, { sessionInAddress: true });
 				if (!res.ok) return null;
 				const data = await res.json() as MessagePage;
 				return { ...data, messages: hydrateFetchedMessages(data.messages ?? []) };

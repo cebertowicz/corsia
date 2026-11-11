@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { get } from 'svelte/store';
 import {
 	_resetSubagentHydrationForTests,
@@ -45,6 +46,7 @@ function respondWith(body: unknown, ok = true): void {
 }
 
 beforeEach(() => {
+	sessionStore.set(TOKEN);
 	subagentMeta.set(new Map());
 	subagentThreadRows.set(new Map());
 	_resetSubagentHydrationForTests();
@@ -52,6 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	sessionStore.set(null);
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 	subagentMeta.set(new Map());
@@ -61,7 +64,7 @@ afterEach(() => {
 describe('subagent chip hydration reads server runtime truth', () => {
 	it('a worker with a turn in flight is running', async () => {
 		respondWith(runtimeTruth({ busy: true, turn_active: true }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(get(subagentMeta).get('child-1')).toMatchObject({
 			parentThreadId: 'parent-1',
 			name: 'tmp inspector',
@@ -72,31 +75,31 @@ describe('subagent chip hydration reads server runtime truth', () => {
 
 	it("holds the worker's saved model with every thread's, where its composer reads it", async () => {
 		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(threadModelFor('child-1')).toBe('claude-code/opus');
 		expect(acceptThreadModelTruth('child-1', 'claude-code/sonnet', '2026-10-20T10:00:00.000000')).toBe(true);
 
 		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(threadModelFor('child-1')).toBe('claude-code/sonnet');
 	});
 
 	it('a live process between turns is ready', async () => {
 		respondWith(runtimeTruth({ cc_live: true }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('ready');
 	});
 
 	it('a worker with no live runtime is idle — never an outcome we cannot see', async () => {
 		respondWith(runtimeTruth());
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('idle');
 	});
 
 	it('never overwrites a terminal outcome observed live', async () => {
 		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'closed');
 		respondWith(runtimeTruth());
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('closed');
 	});
 
@@ -106,21 +109,21 @@ describe('subagent chip hydration reads server runtime truth', () => {
 			return { ok: true, status: 200, json: async () => runtimeTruth() };
 		}) as never);
 
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 
 		expect(get(subagentMeta).get('child-1')?.status).toBe('running');
 	});
 
 	it('leaves an ordinary chat thread out of the subagent map', async () => {
 		respondWith(runtimeTruth({ thread_kind: 'chat' }));
-		await hydrateSubagentThread('peer-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('peer-1', 'parent-1');
 		expect(get(subagentMeta).has('peer-1')).toBe(false);
 	});
 
 	it('evicts a thread the server says is not a worker at all', async () => {
 		registerSubagent('parent-1', 'peer-1', 'Peer', 'cc', 'unknown');
 		respondWith(runtimeTruth({ thread_kind: 'chat' }));
-		await hydrateSubagentThread('peer-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('peer-1', 'parent-1');
 		// Membership decides send routing, so a wrong entry is not cosmetic.
 		expect(get(subagentMeta).has('peer-1')).toBe(false);
 	});
@@ -129,7 +132,7 @@ describe('subagent chip hydration reads server runtime truth', () => {
 		const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
 		respondWith({}, false);
 
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 
 		expect(get(subagentMeta).has('child-1')).toBe(false);
 		expect(logged).toHaveBeenCalled();
@@ -138,55 +141,55 @@ describe('subagent chip hydration reads server runtime truth', () => {
 	it('never downgrades known parent linkage to nothing', async () => {
 		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'unknown');
 		respondWith(runtimeTruth({ busy: true }));
-		await hydrateSubagentThread('child-1', TOKEN, '');
+		await hydrateSubagentThread('child-1', '');
 		expect(get(subagentMeta).get('child-1')?.parentThreadId).toBe('parent-1');
 	});
 
 	it('hydrates a thread once per page load, and retries after a failure', async () => {
 		respondWith(runtimeTruth());
-		hydrateSubagentThreadOnce('child-1', TOKEN, 'parent-1');
-		hydrateSubagentThreadOnce('child-1', TOKEN, 'parent-1');
+		hydrateSubagentThreadOnce('child-1', 'parent-1');
+		hydrateSubagentThreadOnce('child-1', 'parent-1');
 		await vi.waitFor(() => expect(get(subagentMeta).has('child-1')).toBe(true));
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 
 		subagentMeta.set(new Map());
 		respondWith({}, false);
 		vi.spyOn(console, 'error').mockImplementation(() => {});
-		await hydrateSubagentThread('child-2', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-2', 'parent-1');
 		respondWith(runtimeTruth({ thread_id: 'child-2' }));
-		hydrateSubagentThreadOnce('child-2', TOKEN, 'parent-1');
+		hydrateSubagentThreadOnce('child-2', 'parent-1');
 		await vi.waitFor(() => expect(get(subagentMeta).has('child-2')).toBe(true));
 	});
 
 	it('keeps the open thread routable as a subagent after a reload', async () => {
 		respondWith(runtimeTruth({ thread_id: 'child-1', cc_live: true }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		// ws/send.ts and the composer both branch on membership in this map.
 		expect(get(subagentMeta).has('child-1')).toBe(true);
 	});
 
 	it('records the parent the server names when the caller knows none', async () => {
 		respondWith(runtimeTruth({ parent_thread_id: 'parent-9' }));
-		await hydrateSubagentThread('child-1', TOKEN, '');
+		await hydrateSubagentThread('child-1', '');
 		expect(get(subagentMeta).get('child-1')?.parentThreadId).toBe('parent-9');
 	});
 
 	it('records the server parent even when a terminal status keeps its word', async () => {
 		registerSubagent('', 'child-1', 'tmp inspector', 'cc', 'closed');
 		respondWith(runtimeTruth({ parent_thread_id: 'parent-9', busy: true }));
-		await hydrateSubagentThread('child-1', TOKEN, '');
+		await hydrateSubagentThread('child-1', '');
 		expect(get(subagentMeta).get('child-1')).toMatchObject({ parentThreadId: 'parent-9', status: 'closed' });
 	});
 
 	it('never registers a visible thread because it has a lineage parent', async () => {
 		respondWith(runtimeTruth({ thread_kind: 'chat', parent_thread_id: 'conductor' }));
-		await hydrateSubagentThread('coordinator', TOKEN, '');
+		await hydrateSubagentThread('coordinator', '');
 		expect(get(subagentMeta).has('coordinator')).toBe(false);
 	});
 
 	it('a later live status still moves a hydrated chip', async () => {
 		respondWith(runtimeTruth({ busy: true }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		setSubagentStatus('child-1', 'closed');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('closed');
 	});
@@ -196,7 +199,7 @@ describe('hydration folds the worker\'s effort and project', () => {
 	it('lands them on a terminal worker, which the composer still reads', async () => {
 		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'closed');
 		respondWith(runtimeTruth({ model: 'cc/opus', reasoning_effort: 'high', project_id: 'project-1' }));
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		const ref = get(subagentMeta).get('child-1');
 		expect(ref).toMatchObject({ status: 'closed' });
 		expect(get(subagentThreadRows).get('child-1')).toMatchObject({ reasoning_effort: 'high', project_id: 'project-1' });
@@ -208,7 +211,7 @@ describe('hydration folds the worker\'s effort and project', () => {
 			setSubagentStatus('child-1', 'ready');
 			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low' }) };
 		}) as never);
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		expect(get(subagentThreadRows).get('child-1')?.reasoning_effort).toBe('low');
 	});
 
@@ -218,7 +221,7 @@ describe('hydration folds the worker\'s effort and project', () => {
 			patchSubagentThread('child-1', { reasoning_effort: 'high' });
 			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low', project_id: 'project-1' }) };
 		}) as never);
-		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		await hydrateSubagentThread('child-1', 'parent-1');
 		const row = get(subagentThreadRows).get('child-1');
 		expect(row?.reasoning_effort).toBe('high');
 		expect(row?.project_id).toBe('project-1');

@@ -85,7 +85,7 @@
 	const toggleReasoning = (id: string) => { expandedReasoning = toggled(expandedReasoning, id); };
 	function loadToolResult(messageId: string, toolCallId: string): void {
 		if (!renderedThreadId || !$token) return;
-		void loadDeferredToolResult(renderedThreadId, messageId, toolCallId, $token);
+		void loadDeferredToolResult(renderedThreadId, messageId, toolCallId);
 	}
 	const pauseDescriptors = $derived(planLimitPauseDescriptors(messageRows, turnSummaries));
 	const presentation = $derived(buildMessageListPresentation(visibleChatAnswerRows(messageRows), pauseDescriptors.map((pause) => pause.source)));

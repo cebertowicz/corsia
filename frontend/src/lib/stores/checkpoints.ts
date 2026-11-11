@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { apiFetch } from '$lib/api/request';
 
 export type CheckpointTrigger = 'manual' | 'pressure' | 'model_switch' | 'idle' | 'agent';
 export type CheckpointMode = 'warm' | 'cold';
@@ -69,9 +70,8 @@ function checkpointRow(body: unknown): Checkpoint {
 	return checkpoint as Checkpoint;
 }
 
-function checkpointUrl(threadId: string, token: string): string {
-	return `/api/threads/${encodeURIComponent(threadId)}/checkpoints`
-		+ `?token=${encodeURIComponent(token)}`;
+function checkpointUrl(threadId: string): string {
+	return `/api/threads/${encodeURIComponent(threadId)}/checkpoints`;
 }
 
 function upsertCheckpoint(threadId: string, checkpoint: Checkpoint): void {
@@ -125,11 +125,10 @@ export function checkpointStatusCopy(checkpoint: Checkpoint): string {
 
 export async function loadCheckpoints(
 	threadId: string,
-	token: string,
 ): Promise<readonly Checkpoint[]> {
 	updateState(threadId, state => ({ ...state, loading: true, error: null }));
 	try {
-		const response = await fetch(checkpointUrl(threadId, token));
+		const response = await apiFetch(checkpointUrl(threadId), { sessionInAddress: true });
 		if (!response.ok) throw new Error(`Checkpoint refresh failed (${response.status})`);
 		const checkpoints = checkpointRows(await response.json());
 		updateState(threadId, () => ({ checkpoints, loading: false, error: null }));
@@ -143,9 +142,8 @@ export async function loadCheckpoints(
 
 export function invalidateCheckpoints(
 	threadId: string,
-	token: string,
 ): Promise<readonly Checkpoint[]> {
-	return loadCheckpoints(threadId, token);
+	return loadCheckpoints(threadId);
 }
 
 /** A checkpoint request the backend refused, with its exact reason (#1952). */
@@ -190,11 +188,10 @@ async function parseCheckpointRefusal(
 
 async function checkpointAction(
 	threadId: string,
-	token: string,
 	url: string,
 	userMessage: string,
 ): Promise<Checkpoint> {
-	const response = await fetch(url, { method: 'POST' });
+	const response = await apiFetch(url, { sessionInAddress: true, method: 'POST' });
 	if (!response.ok) throw await parseCheckpointRefusal(response, userMessage);
 	const checkpoint = checkpointRow(await response.json());
 	upsertCheckpoint(threadId, checkpoint);
@@ -203,12 +200,10 @@ async function checkpointAction(
 
 export function requestManualCheckpoint(
 	threadId: string,
-	token: string,
 ): Promise<Checkpoint> {
 	return checkpointAction(
 		threadId,
-		token,
-		checkpointUrl(threadId, token),
+		checkpointUrl(threadId),
 		'Could not start a checkpoint. Try again.',
 	);
 }
@@ -216,13 +211,11 @@ export function requestManualCheckpoint(
 export function cancelCheckpoint(
 	threadId: string,
 	checkpointId: string,
-	token: string,
 ): Promise<Checkpoint> {
 	const url = `/api/threads/${encodeURIComponent(threadId)}/checkpoints/`
-		+ `${encodeURIComponent(checkpointId)}/cancel?token=${encodeURIComponent(token)}`;
+		+ `${encodeURIComponent(checkpointId)}/cancel`;
 	return checkpointAction(
 		threadId,
-		token,
 		url,
 		'Could not cancel the checkpoint. Try again.',
 	);

@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 import { threads, type Thread } from './threads';
 import { saveThreadLocalOnly, threadLocalOnly } from './threadLocalOnly';
 
@@ -14,9 +15,11 @@ function reloadBody(overrides: Partial<Thread> = {}) {
 	return { threads: [makeThread(overrides)] };
 }
 
+beforeEach(() => sessionToken.set('tok'));
 afterEach(() => {
 	threads.set([]);
 	vi.unstubAllGlobals();
+	sessionToken.set(null);
 });
 
 describe('threadLocalOnly', () => {
@@ -43,17 +46,17 @@ describe('saveThreadLocalOnly', () => {
 			? ({ ok: true, json: async () => reloadBody({ local_only: true, local_only_effective: true, local_only_cause: 'own' }) })
 			: ({ ok: true }));
 		vi.stubGlobal('fetch', fetchMock);
-		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: true });
+		expect(await saveThreadLocalOnly('t1', true)).toEqual({ ok: true });
 		expect(fetchMock).toHaveBeenCalledWith('/api/threads/t1/local-only', expect.objectContaining({
 			method: 'PUT', body: JSON.stringify({ local_only: true }), headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
 		}));
-		expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/threads?'));
+		expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/threads?'), { headers: { Authorization: 'Bearer tok' } });
 		expect(get(threads)[0]).toMatchObject({ local_only: true, local_only_effective: true, local_only_cause: 'own' });
 	});
 	it('leaves the store alone and returns the save-failure line when the server cannot be reached', async () => {
 		threads.set([makeThread()]);
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Check your connection and try again." });
+		expect(await saveThreadLocalOnly('t1', true)).toEqual({ ok: false, error: "Couldn’t save this change. Check your connection and try again." });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
 	it('reports a successful save whose required reload failed', async () => {
@@ -61,13 +64,13 @@ describe('saveThreadLocalOnly', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).startsWith('/api/threads?')
 			? ({ ok: true, json: async () => { throw new SyntaxError('bad JSON'); } })
 			: ({ ok: true })));
-		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: 'Saved. Reload the page to see it.' });
+		expect(await saveThreadLocalOnly('t1', true)).toEqual({ ok: false, error: 'Saved. Reload the page to see it.' });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
 	it('names the server\'s reason on a refusal', async () => {
 		threads.set([makeThread()]);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ code: 'local_only_set_by_parent', message: 'Turn Local only off in the chat that started this one.' }) })));
-		expect(await saveThreadLocalOnly('t1', false, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Turn Local only off in the chat that started this one." });
+		expect(await saveThreadLocalOnly('t1', false)).toEqual({ ok: false, error: "Couldn’t save this change. Turn Local only off in the chat that started this one." });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
 });

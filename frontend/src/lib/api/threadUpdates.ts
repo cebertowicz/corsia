@@ -1,5 +1,5 @@
 import type { MessageCard } from './messageCards';
-
+import { apiFetch } from './request';
 /** A plan update card: the item's title as it read when the outcome happened, and that outcome (AS17). */
 export interface UpdateCard {
 	id: number;
@@ -39,16 +39,13 @@ export interface UpdateCardsPage {
 
 /** The newest bounded cards from `fromSeq`, returned in transcript order. Null when the read failed. */
 export async function readUpdateCards(
-	bearerValue: string,
 	threadId: string,
 	options: { fromSeq: number; divider?: boolean },
 ): Promise<UpdateCardsPage | null> {
 	const params = new URLSearchParams({ from_seq: String(options.fromSeq) });
 	if (options.divider) params.set('divider', 'true');
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`, {
-			headers: { Authorization: `Bearer ${bearerValue}` },
-		});
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`);
 		if (!res.ok) {
 			console.error('[thread updates] read rejected', threadId, res.status);
 			return null;

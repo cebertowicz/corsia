@@ -21,6 +21,6 @@
 		if (id) bindActiveThreadModel(id, $threads);
 	});
 	$effect(() => {
-		if ($activeThreadId && $token) void loadCheckpoints($activeThreadId, $token).catch(() => null);
+		if ($activeThreadId && $token) void loadCheckpoints($activeThreadId).catch(() => null);
 	});
 </script>

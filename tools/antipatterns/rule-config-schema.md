@@ -176,6 +176,44 @@ body. A server read is `fetch(`, or a call to an identifier matching
   its handler and on reconnect; for a time-driven change, arm one
   `setTimeout` at the deadline.
 
+### `raw-api-request`
+
+```toml
+[rules.raw-api-request]
+enabled  = true
+severity = "error"
+include_globs = ["frontend/src/**/*.ts", "frontend/src/**/*.svelte"]
+allow_files = [
+    "frontend/src/lib/api/request.ts",   # reason required
+]
+```
+
+Flags a `fetch(`, `new EventSource(`, or (in a file that uses
+`XMLHttpRequest`) `.open(method, url)` in frontend `.ts`/`.svelte` files whose
+address targets `/api`, outside the shared request function `apiFetch`.
+`*.test.ts`, `*.spec.ts`, and `__tests__/` are skipped. The devices listener
+(the remote-apps entrance) admits an `/api` request only with the signed-in
+session, and refuses one whose header and address name different sessions; so
+a raw call works on the main computer and can fail from a phone or another
+computer. `apiFetch` owns the session in one place: it puts the signed-in
+session in the `Authorization` header and, with `sessionInAddress: true`, the
+same value in the address.
+
+- **What counts as targeting `/api`:** an address containing `/api` (a literal
+  or template, `${BASE}/api/...` included), a bare name whose same-file
+  `const|let|var` initializer contains `/api`, or a call to a same-file
+  function whose body contains `/api`. An address that arrives as a parameter
+  (`imageFailure.ts`'s `fetch(src)`) or from another file is not visible and
+  is not flagged.
+- **`allow_files`** is the list of accepted exemptions, each with a stated
+  reason; the shared request function is the only entry.
+- **Fix:** call `apiFetch(url, init)` from `$lib/api/request`. For a route that
+  declares the session as a required query parameter, pass
+  `sessionInAddress: true` and let `apiFetch` add it; do not build that
+  parameter yourself. An `<img src>` or download link, which cannot set a
+  header, keeps its session in the URL query, built by a helper such as
+  `artifactImage.ts`.
+
 Each TOML string is passed unmodified to Python's `re.compile()` as a regex.
 TOML *literal* strings (single quotes) avoid backslash escape processing —
 `'\d'` in TOML is the two-character regex `\d`.

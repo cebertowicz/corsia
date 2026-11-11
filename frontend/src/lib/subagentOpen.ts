@@ -1,6 +1,5 @@
 import { get } from 'svelte/store';
 import { openSubagentConversationTab } from './stores/artifactWorkspace';
-import { token } from './stores/auth';
 import {
 	hydrateSubagentThread, openSubagentRequest, resolveSubagentOpenTarget, subagentMeta, type SubagentRef,
 } from './stores/subagents';
@@ -47,7 +46,7 @@ export function watchSubagentOpenRequests(
 		void routeSubagentOpen(threadId, {
 			...page,
 			readMeta: () => get(subagentMeta),
-			hydrate: (id) => hydrateSubagentThread(id, get(token) ?? ''),
+			hydrate: (id) => hydrateSubagentThread(id),
 			openLeaf: openSubagentConversationTab,
 		}).then(() => { if (typeof request !== 'string') request.onOpened(); },
 			(error) => {

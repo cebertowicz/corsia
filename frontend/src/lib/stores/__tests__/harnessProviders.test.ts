@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { harnessProviderModels, harnessSummaries, setModelLabel } from '../harnessProviders';
 import { type Model } from '../models';
 import { pickerCatalogModels } from '../harnessMembership';
@@ -13,6 +14,9 @@ const pickerRow = (over: Partial<Model> = {}): Model => ({
 	connection: 'codex', provider: 'codex', size: '', backend: 'codex', speed: '',
 	status: 'ready', available: true, litellm_model: 'codex/gpt-5.6-sol', ...over,
 });
+
+beforeEach(() => { sessionStore.set('tok'); });
+afterEach(() => { sessionStore.set(null); });
 
 describe('harnessSummaries', () => {
 	it('counts available rows and drops a harness with none', () => {

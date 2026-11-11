@@ -116,7 +116,6 @@
 		for (const file of Array.from(files)) {
 			const { attachment: att, error } = await uploadThreadAttachment(
 				file,
-				t,
 				() => boundThreadId,
 					ensureThread,
 			);

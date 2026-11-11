@@ -66,7 +66,6 @@ export async function submitAnswer(decision: DecisionDetail): Promise<void> {
   activeId.set(follower ? follower.external_id : null);
 
   const outcome = await answerDecision(
-    bearer,
     decisionId,
     pickAny
       ? {

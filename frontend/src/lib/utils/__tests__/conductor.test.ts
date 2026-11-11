@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import {
 	_resetFirstRunLandingForTests,
 	conductorScopeParam,
@@ -23,7 +24,10 @@ import { handleSessionUpdated } from '$lib/ws/handlersSession';
 
 const originalFetch = globalThis.fetch;
 
+beforeEach(() => { sessionStore.set('tok'); });
+
 afterEach(() => {
+	sessionStore.set(null);
 	vi.restoreAllMocks();
 	globalThis.fetch = originalFetch;
 	activeThreadId.set(null);
@@ -61,7 +65,7 @@ describe('fetchConductor', () => {
 			json: async () => ({ scope: 'proj-123', thread_id: null, target: null }),
 		})) as unknown as typeof fetch;
 
-		await fetchConductor('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+		await fetchConductor({ id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
 
 		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/conductor?token=tok&scope=proj-123');
 	});
@@ -83,7 +87,7 @@ describe('fetchConductor', () => {
 		})) as unknown as typeof fetch;
 
 		const scope: UiScope = { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' };
-		const lookup = await fetchConductor('tok', scope);
+		const lookup = await fetchConductor(scope);
 
 		expect(lookup).toEqual({
 			kind: 'target',
@@ -111,7 +115,7 @@ describe('fetchConductor', () => {
 			}),
 		})) as unknown as typeof fetch;
 
-		const lookup = await fetchCorsiaAgent('tok');
+		const lookup = await fetchCorsiaAgent();
 
 		expect(lookup).toMatchObject({ kind: 'target', firstRunPending: true });
 		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toMatch(/^\/api\/corsia-agent\?token=tok$/);
@@ -123,7 +127,7 @@ describe('fetchConductor', () => {
 		activeModelId.set('claude-code/opus');
 		mockConductorTarget('codex/gpt-5-codex', '2026-06-18T00:00:00');
 
-		await fetchCorsiaAgent('tok');
+		await fetchCorsiaAgent();
 
 		expect(get(activeModelId)).toBe('codex/gpt-5-codex');
 	});
@@ -133,7 +137,7 @@ describe('fetchConductor', () => {
 		acceptThreadModelTruth('cond-1', 'omlx/newer', '2026-06-19T00:00:00');
 		mockConductorTarget('codex/gpt-5-codex', '2026-06-18T00:00:00');
 
-		await fetchCorsiaAgent('tok');
+		await fetchCorsiaAgent();
 
 		expect(get(activeModelId)).toBe('omlx/newer');
 	});
@@ -143,7 +147,7 @@ describe('fetchConductor', () => {
 		activeModelId.set('claude-code/opus');
 		mockConductorTarget('codex/gpt-5-codex', undefined);
 
-		await fetchCorsiaAgent('tok');
+		await fetchCorsiaAgent();
 
 		expect(get(activeModelId)).toBe('claude-code/opus');
 	});
@@ -154,7 +158,7 @@ describe('fetchConductor', () => {
 				ok: true,
 				json: async () => ({ thread_id: 'cond-1', target: { thread_id: 'cond-1', ...fields } }),
 			})) as unknown as typeof fetch;
-			return fetchCorsiaAgent('tok');
+			return fetchCorsiaAgent();
 		};
 		const switching = () => get(composerSelectionFor)('cond-1').switching;
 
@@ -183,7 +187,7 @@ describe('fetchConductor', () => {
 					json: async () => ({ thread_id: threadId, target: { thread_id: threadId, ...fields } }),
 				};
 			}) as unknown as typeof fetch;
-			return { done: fetchCorsiaAgent('tok'), release };
+			return { done: fetchCorsiaAgent(), release };
 		}
 
 		// The page has read the target once, so the thread's switch state exists for a 202 or frame to change.
@@ -262,7 +266,7 @@ describe('fetchConductor', () => {
 			json: async () => ({ scope: 'workspace', thread_id: null, target: null }),
 		})) as unknown as typeof fetch;
 
-		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'absent' });
+		await expect(fetchCorsiaAgent()).resolves.toEqual({ kind: 'absent' });
 	});
 
 	it('reports unknown on a failed transport, never absent', async () => {
@@ -270,20 +274,21 @@ describe('fetchConductor', () => {
 			throw new TypeError('network down');
 		}) as unknown as typeof fetch;
 
-		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent()).resolves.toEqual({ kind: 'unknown' });
 	});
 
 	it('reports unknown on a non-OK response, never absent', async () => {
 		globalThis.fetch = vi.fn(async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
 
-		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent()).resolves.toEqual({ kind: 'unknown' });
 	});
 
 	it('reports unknown without a token and never calls the API', async () => {
 		const fetchMock = vi.fn() as unknown as typeof fetch;
 		globalThis.fetch = fetchMock;
+		sessionStore.set(null);
 
-		await expect(fetchCorsiaAgent(null)).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent()).resolves.toEqual({ kind: 'unknown' });
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });
@@ -295,8 +300,8 @@ describe('fetchScopeTarget', () => {
 			json: async () => ({ thread_id: null, target: null }),
 		})) as unknown as typeof fetch;
 
-		await fetchScopeTarget('tok', null);
-		await fetchScopeTarget('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+		await fetchScopeTarget(null);
+		await fetchScopeTarget({ id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
 
 		const urls = vi.mocked(globalThis.fetch).mock.calls.map((call) => String(call[0]));
 		expect(urls[0]).toMatch(/^\/api\/corsia-agent\?/);

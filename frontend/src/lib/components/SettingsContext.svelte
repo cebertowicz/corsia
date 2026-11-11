@@ -12,6 +12,7 @@
 	import SettingsContextCreate from './SettingsContextCreate.svelte';
 	import SettingsProjectContext from './SettingsProjectContext.svelte';
 	import { Button } from '$lib/components/ui';
+	import { apiFetch } from '$lib/api/request';
 
 	// Settings › Context: every level's context files on one page, the workspace first.
 	let { onBrowseContextFiles }: { onBrowseContextFiles?: () => void } = $props();
@@ -45,9 +46,9 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await fetch(url, {
+			const res = await apiFetch(url, {
 				method,
-				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, fallback));
