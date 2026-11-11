@@ -354,7 +354,7 @@ def test_an_unrouted_connector_event_fails_closed_when_its_repository_lookup_fai
     # Not read as untracked: no rule fires, and the one that matched says why.
     assert result.accepted and result.rules_matched == 0 and wakes == []
     assert _decisions(intake_world, "unreadable") == {
-        ("repo-self", OTHER, "dead_lettered", "repository lookup failed")}
+        ("repo-self", OTHER, "dead_lettered", "could not read which projects may see this event")}
 
 
 def test_intake_reads_per_event(intake_world, monkeypatch, tracking):

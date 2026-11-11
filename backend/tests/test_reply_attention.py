@@ -123,7 +123,7 @@ def test_reply_attention_frames_cover_resolution_and_read(isolated_db, tmp_path,
         root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
         add_comment(db, artifact_id, author_id='owner')
         reply, _ = add_comment(db, artifact_id, author_id='owner', parent_id=root['id'])
-        assert frames == [True, True]
+        assert frames == [False, True, True]
         assert unread_items(db, 'owner-token')[0]['detail']['unread_count'] == 2
         comments.update(root['id'], {'resolved': True}, db=db)
         assert frames[-1] is True

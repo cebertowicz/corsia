@@ -465,6 +465,35 @@ def test_a_run_the_agent_failed_names_the_step_and_says_the_agent_caught_it(sect
     assert rows["close-v4-b"]["minutes"] == 15.0
 
 
+def test_a_record_written_before_its_step_fields_existed_still_reads(db) -> None:
+    """Runs that ended before steps recorded node ids and gate fields are still stored; the section reads them."""
+    from plans import run_end
+
+    seed()
+    with raw_plan_seed(db):
+        # Events are append-only, so each run gets an old-shape record one second before its own: a run's
+        # first record is the one read.
+        rows = db.execute("SELECT id,node_id,payload_json,created_at FROM plan_node_events WHERE event=?",
+                          (run_end.EVENT,)).fetchall()
+        assert rows
+        for row in rows:
+            record = json.loads(row["payload_json"])
+            record["steps"] = [{key: value for key, value in step.items()
+                                if key not in {"node_ids", "gate_mode", "gate_answer"}} for step in record["steps"]]
+            earlier = (datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")) - timedelta(seconds=1))
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
+                       "VALUES (?,?,'test',?,?,?)",
+                       (f"old-{row['id']}", row["node_id"], run_end.EVENT, json.dumps(record),
+                        earlier.strftime("%Y-%m-%dT%H:%M:%S.%fZ")))
+        db.commit()
+    rows = rows_by_id(read())
+    failed = rows["close-v4-b"]
+    # The record still says which run failed and that the agent caught it; it no longer names the step
+    # or the gate, because it never recorded them.
+    assert (failed["caught"], failed["failed_step"], failed["gate_rounds"]) == ("agent_closed", None, None)
+    assert rows["close-v3-a"]["first_try"] is True
+
+
 def test_a_send_back_at_the_gate_counts_two_rounds_and_is_how_the_run_was_caught(section) -> None:
     rows = rows_by_id(section)
     assert (rows["close-v4-c"]["caught"], rows["close-v4-c"]["gate_rounds"]) == ("sent_back", 2)

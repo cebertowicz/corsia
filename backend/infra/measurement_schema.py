@@ -23,6 +23,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_measure_break_starts_group
 """
 
 
+# Measurement settles accepted tasks, corrections and send-backs from ``plan_node_events``, where comments are
+# most of the rows. Each partial index holds only the rows one read wants, so the read no longer walks the
+# whole event history; the accepted-by-time index serves the first-accepted-outcome start probes.
+_ACCEPTED_STATES = "new_state IN ('accepted','accepted_with_followup')"
+PLAN_EVENT_MEASUREMENT_INDEXES = (
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_measurement_accepted_node
+        ON plan_node_events(node_id, created_at) WHERE {_ACCEPTED_STATES}""",
+    f"""
+    CREATE INDEX IF NOT EXISTS idx_measurement_accepted_time
+        ON plan_node_events(created_at) WHERE {_ACCEPTED_STATES}""",
+    """
+    CREATE INDEX IF NOT EXISTS idx_measurement_corrections_node
+        ON plan_node_events(node_id) WHERE event='correction_created'""",
+    """
+    CREATE INDEX IF NOT EXISTS idx_measurement_rejected_node
+        ON plan_node_events(node_id) WHERE event='review_rejected'""",
+)
+
+
 MEASUREMENT_INDEXES = (
     # Every scope walks the thread tree from its roots; without this each
     # recursive step scans all threads. Partial, so the many root threads'
@@ -61,6 +81,7 @@ MEASUREMENT_INDEXES = (
         ON outcome_events(json_extract(attributes, '$.rater'), subject_key)
         WHERE event_name='measurement.size_rating' AND retracted_at IS NULL
           AND json_extract(attributes, '$.rater') > ''""",
+    *PLAN_EVENT_MEASUREMENT_INDEXES,
 )
 
 MEASUREMENT_INDEX_SQL = "".join(f"{sql};\n" for sql in MEASUREMENT_INDEXES)

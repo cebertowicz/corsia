@@ -127,7 +127,9 @@ def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
     """Each listed run phase's recorded end, by phase id; a phase that has not ended is absent.
 
     The one reader of ``workflow_run_ended``: a run writes it once, so its first row is its record.
-    ``_recorded_at`` is the event timestamp, not a field in the stored payload.
+    ``_recorded_at`` is the event timestamp, not a field in the stored payload. A record written before a
+    step field existed reads that field as its empty value, so every reader sees one shape: ``gate_mode`` and
+    ``gate_answer`` arrived with #2055 and ``node_ids`` with #2064, and records from before then are still stored.
     """
     ids = list(dict.fromkeys(str(value) for value in phase_ids))
     if not ids:
@@ -138,7 +140,12 @@ def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
         " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
         (EVENT, json.dumps(ids)),
     ):
-        found.setdefault(str(row["node_id"]), {**json.loads(row["payload_json"]), "_recorded_at": row["created_at"]})
+        if str(row["node_id"]) in found:
+            continue
+        record = json.loads(row["payload_json"])
+        record["steps"] = [{"gate_mode": None, "gate_answer": None, "node_ids": [], **step}
+                           for step in record["steps"]]
+        found[str(row["node_id"])] = {**record, "_recorded_at": row["created_at"]}
     return found
 
 

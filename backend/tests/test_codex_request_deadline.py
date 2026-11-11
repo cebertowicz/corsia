@@ -11,11 +11,20 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from subagents import codex_app_server
+from subagents import codex_app_server, codex_requests
 from subagents.codex_app_server import CodexAppServerSession
 from subagents.codex_app_server_errors import CodexAppServerError
 
 pytestmark = pytest.mark.usefixtures("admitted_writes")  # the transport is under test, not account binding
+
+
+@pytest.fixture(autouse=True)
+def inline_admission(monkeypatch):
+    """admitted_writes stubs admission, so its DB-pool hop runs inline and the tests step with sleep(0)."""
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(codex_requests, "run_in_db", inline)
 
 
 @asynccontextmanager
