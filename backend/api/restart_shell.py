@@ -35,43 +35,32 @@ _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
     local refusal_reason="${_corsia_lifecycle_refusal_reason:-}"
     trap - EXIT HUP INT TERM
-    export -n _corsia_cleanup_token _corsia_cleanup_port \
-        _corsia_cleanup_operation _corsia_cleanup_curl
-    _corsia_cleanup_token="${_corsia_lifecycle_token:-${CORSIA_RESTART_CALLER_TOKEN:-}}"
-    _corsia_cleanup_port="${_corsia_lifecycle_port:-${CORSIA_RESTART_BACKEND_PORT:-}}"
-    _corsia_cleanup_operation="${_corsia_lifecycle_operation_id:-${CORSIA_RESTART_OPERATION_ID:-}}"
-    _corsia_cleanup_curl="${_corsia_lifecycle_curl:-${CORSIA_RESTART_CURL:-}}"
-    local -a _corsia_cleanup_refusal_args=()
     local backend_healthy=false
+    local refusal_line=
     if [ "$_corsia_lifecycle_status" -ne 0 ] && [ "$_corsia_lifecycle_is_update" = true ] \
         && [ -z "${_corsia_update_stopping:-}" ] && [ -n "$refusal_reason" ]; then
         printf 'Update refused: %s\n' "$refusal_reason"
         if declare -F is_backend_running > /dev/null && is_backend_running; then
             backend_healthy=true
         fi
-        _corsia_cleanup_refusal_args=(--data-urlencode 'failure_code=update_refused'
-            --data-urlencode "reason=${refusal_reason:0:500}"
-            --data-urlencode "backend_healthy=$backend_healthy")
+        refusal_line="${refusal_reason:0:500}"
+        refusal_line="${refusal_line//$'\n'/ }"
+        refusal_line="${refusal_line//$'\r'/ }"
     fi
+    # The backend that spawned this lifecycle owns its exit: it reads this
+    # record when the child exits and settles the operation once.
     if [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
-        && [ "$_corsia_lifecycle_is_update" = true ] \
-        && [ "$_corsia_unconfirmed_bootout" = true ]; then
-        printf 'Lifecycle drain cleanup held: launchd teardown unconfirmed\n'
-    elif [ "$_corsia_lifecycle_done" != true ] \
-        && [ "$_corsia_lifecycle_status" -ne 0 ] \
-        && [ -n "$_corsia_cleanup_token" ] \
-        && [ -n "$_corsia_cleanup_port" ] \
-        && [ -n "$_corsia_cleanup_operation" ] \
-        && [ -n "$_corsia_cleanup_curl" ]
-    then
-        "$_corsia_cleanup_curl" --silent --fail --max-time 5 \
-            --output /dev/null --write-out 'Lifecycle drain cleanup HTTP %{http_code}\n' \
-            --request DELETE --get "${_corsia_cleanup_refusal_args[@]}" \
-            --data-urlencode "token=$_corsia_cleanup_token" \
-            --data-urlencode "operation_id=$_corsia_cleanup_operation" \
-            "http://127.0.0.1:${_corsia_cleanup_port}/api/system/drain" 2>/dev/null \
-            || printf 'Lifecycle drain cleanup curl exit %s\n' "$?"
+        && [ -n "$_corsia_lifecycle_result_file" ]; then
+        {
+            printf 'status=%s\n' "$_corsia_lifecycle_status"
+            printf 'is_update=%s\n' "$_corsia_lifecycle_is_update"
+            printf 'unconfirmed_bootout=%s\n' "$_corsia_unconfirmed_bootout"
+            printf 'backend_healthy=%s\n' "$backend_healthy"
+            printf 'refusal_reason=%s\n' "$refusal_line"
+        } > "$_corsia_lifecycle_result_file.tmp" \
+            && mv -f "$_corsia_lifecycle_result_file.tmp" "$_corsia_lifecycle_result_file" \
+            || printf 'Lifecycle result record not written\n'
     fi
     exit "$_corsia_lifecycle_status"
 }
@@ -83,10 +72,11 @@ _corsia_lifecycle_token="${CORSIA_RESTART_CALLER_TOKEN:-}"
 _corsia_lifecycle_port="${CORSIA_RESTART_BACKEND_PORT:-}"
 _corsia_lifecycle_operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
 _corsia_lifecycle_curl="${CORSIA_RESTART_CURL:-}"
+_corsia_lifecycle_result_file="${CORSIA_RESTART_RESULT_FILE:-}"
 export -n _corsia_lifecycle_token _corsia_lifecycle_port \
-    _corsia_lifecycle_operation_id _corsia_lifecycle_curl
+    _corsia_lifecycle_operation_id _corsia_lifecycle_curl _corsia_lifecycle_result_file
 readonly _corsia_lifecycle_token _corsia_lifecycle_port \
-    _corsia_lifecycle_operation_id _corsia_lifecycle_curl
+    _corsia_lifecycle_operation_id _corsia_lifecycle_curl _corsia_lifecycle_result_file
 unset CORSIA_RESTART_CALLER_TOKEN CORSIA_RESTART_CURL
 if ! declare -p _CORSIA_REQUEST_BACKEND_PORT > /dev/null 2>&1; then
     readonly _CORSIA_REQUEST_BACKEND_PORT="$_corsia_lifecycle_port"
@@ -176,6 +166,8 @@ def spawn_restart_lifecycle(
     launch_env = _lifecycle_launch_env(
         restart_env, operation_id, caller_credential
     )
+    result_path = Path(log_fh.name).parent / f"lifecycle-{operation_id}.result"
+    launch_env["CORSIA_RESTART_RESULT_FILE"] = str(result_path)
     command = [
         "/bin/bash",
         "-c",
@@ -213,11 +205,14 @@ def spawn_restart_lifecycle(
             # Without go the helper exits on EOF and cannot stop the service.
             process.stdin.close()
             process.stdout.close()
+        setattr(process, "lifecycle_result_path", result_path)
         return process
-    return subprocess.Popen(
+    process = subprocess.Popen(
         command,
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         start_new_session=True,
         env=launch_env,
     )
+    setattr(process, "lifecycle_result_path", result_path)
+    return process

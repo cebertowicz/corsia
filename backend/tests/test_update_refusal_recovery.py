@@ -41,6 +41,18 @@ async def test_regular_delete_still_cancels(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cancel_changed_operation_returns_conflict(monkeypatch):
+    from api import drain
+    from automation import restart
+
+    monkeypatch.setattr(drain, "_require_user", lambda _token: {"id": "owner"})
+    monkeypatch.setattr(restart, "abort_restart_control", AsyncMock(return_value=False))
+    with pytest.raises(HTTPException) as exc:
+        await drain.cancel_drain("token", "a" * 32)
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_unknown_refusal_code_rejected(monkeypatch):
     from api import drain
 
@@ -143,7 +155,7 @@ async def test_lifecycle_appends_to_preparation_log(isolated_db, tmp_path, monke
 
 
 @pytest.mark.parametrize("reachable", [True, False])
-def test_lifecycle_refusal_logs_before_delete_even_when_backend_unreachable(tmp_path, monkeypatch, reachable):
+def test_lifecycle_refusal_records_reason_without_loopback(tmp_path, monkeypatch, reachable):
     import os
     from api.restart_shell import spawn_restart_lifecycle
 
@@ -164,7 +176,5 @@ def test_lifecycle_refusal_logs_before_delete_even_when_backend_unreachable(tmp_
         }, "a" * 32, out, caller_credential="test-credential")
         assert process.wait(timeout=5) != 0
     assert "Prepared frontend build is missing" in log.read_text()
-    calls = trace.read_text()
-    assert "operation_id=" + "a" * 32 in calls
-    assert "failure_code=update_refused" in calls
-    assert "reason=Prepared frontend build is missing" in calls
+    assert not trace.exists()
+    assert "refusal_reason=Prepared frontend build is missing" in process.lifecycle_result_path.read_text()

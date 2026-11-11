@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 import threading
-from unittest.mock import AsyncMock, mock_open, patch
+from unittest.mock import AsyncMock, Mock, mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,7 +52,7 @@ async def test_device_restart_targets_main_http_listener(monkeypatch, mode, conf
     else:
         monkeypatch.setenv("BACKEND_PORT", configured_port)
     request = Request({"type": "http", "server": ("127.0.0.1", 47901), "corsia_listener": "devices"})
-    prelaunch = AsyncMock(return_value=("operation", object()))
+    prelaunch = AsyncMock(return_value=("operation", Mock(wait=Mock(return_value=0))))
     with (
         patch.object(system_admin, "authenticate", return_value={"id": "person"}),
         patch.object(system_admin, "require_human_user"),
@@ -72,7 +72,7 @@ async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
     tmp_path: Path,
     monkeypatch,
 ):
-    """A real shell failure before CLI dispatch releases only its exact operation."""
+    """A real shell failure records its exit without exposing its credential."""
     from api.settings_restart import _launch_settings_restart
 
     operation_id = "d" * 32
@@ -133,7 +133,8 @@ async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
     returncode = await asyncio.to_thread(process.wait, 5)
 
     assert returncode == 17
-    assert curl_result.read_text().strip() == "ok:ok:unset:unset:unset:unset"
+    assert not curl_result.exists()
+    assert "status=17" in process.lifecycle_result_path.read_text()
     assert "CORSIA_RESTART_CALLER_TOKEN=" not in child_env.read_text()
     assert secret not in child_env.read_text()
     assert secret not in (tmp_path / "restart.log").read_text()
@@ -584,7 +585,7 @@ async def test_update_owns_restart_slot_through_preparation(isolated_db):
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),
@@ -631,7 +632,7 @@ async def test_cancelled_update_retains_ownership_until_preparation_settles(
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),

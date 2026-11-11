@@ -7,15 +7,19 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+from threading import Thread
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
+from api.drain import settle_restart_exit
 from api.restart_shell import spawn_restart_lifecycle
 from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
 from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
+from api.system_admin_helpers import own_backend_port as _own_backend_port
+from api.system_admin_helpers import restart_log_path as _restart_log_path
 from infra.auth import authenticate, require_human_user, require_user
-from infra.default_port import DEFAULT_BACKEND_PORT
+
 
 router = APIRouter(tags=["system"])
 
@@ -29,33 +33,9 @@ def _authenticated_user(request: Request) -> dict | None:
     return authenticate(request.query_params.get(_AUTH_QUERY_KEY))
 
 
-def _own_backend_port(request: Request) -> int:
-    server = None if request.scope.get("corsia_listener") == "devices" else request.scope.get("server")
-    if server and isinstance(server[1], int):
-        return server[1]
-    env_port = os.environ.get("BACKEND_PORT")
-    if not env_port and request.scope.get("corsia_listener") == "devices":
-        return DEFAULT_BACKEND_PORT
-    if env_port and env_port.isdigit():
-        return int(env_port)
-    raise HTTPException(500, "Cannot determine this backend's own port for restart")
-
-
-def _restart_log_path(name: str) -> Path:
-    """Return a service-owned log path for detached restart output."""
-    from infra.config import LOGS_DIR
-
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    return LOGS_DIR / name
-
-
 async def launch_update(
-    user: dict,
-    caller_token: str | None,
-    trigger: str,
-    target_version: str | None,
-    *,
-    port: int,
+    user: dict, caller_token: str | None, trigger: str,
+    target_version: str | None, *, port: int,
     claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Launch the one Settings Update lifecycle from any approved trigger."""
@@ -88,6 +68,7 @@ async def launch_update(
     if prelaunch is None:
         return None
     operation_id, process = prelaunch
+    await _monitor_restart_process(process, operation_id)
     return operation_id, process
 
 
@@ -158,22 +139,36 @@ async def system_restart(
     return {"ok": True, "mode": mode, "operation_id": operation_id, "message": message}
 
 
+_RESTART_EXIT_TASKS: set[asyncio.Task] = set()
+
+
 async def _monitor_restart_process(process, operation_id: str) -> None:
-    """Compensate an immediate child exit without joining backend shutdown."""
+    """Own the detached child's exit without joining backend shutdown."""
     poll = getattr(process, "poll", None)
     if poll is None:
         return
     returncode = poll()
-    if not isinstance(returncode, int) or returncode == 0:
+    if isinstance(returncode, int):
+        await settle_restart_exit(process, operation_id, returncode)
         return
-    from automation.restart import abort_restart_control
+    loop = asyncio.get_running_loop()
 
-    await abort_restart_control(
-        operation_id,
-        error=f"restart script exited before restart: {returncode}",
-        failure_code="launch_failed",
-        failure_detail=f'{{"exit_code": {returncode}}}',
-    )
+    def wait_for_exit() -> None:
+        returncode = process.wait()
+        if not isinstance(returncode, int):
+            return
+
+        def schedule() -> None:
+            task = loop.create_task(settle_restart_exit(process, operation_id, returncode))
+            _RESTART_EXIT_TASKS.add(task)
+            task.add_done_callback(_RESTART_EXIT_TASKS.discard)
+
+        try:
+            loop.call_soon_threadsafe(schedule)
+        except RuntimeError:
+            pass  # Startup owns the operation after backend shutdown.
+
+    Thread(target=wait_for_exit, name="restart-child-exit", daemon=True).start()
 
 
 async def _spawn_self_restart_after_response(
