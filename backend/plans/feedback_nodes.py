@@ -117,6 +117,19 @@ def _title(author: str, document: str, items: list[dict[str, Any]]) -> str:
     return _trim_title(author + suffix, suffix)
 
 
+def _authors(db, node_id: str, batch: Any, author: str) -> str:
+    """The label for everyone who wrote what the task holds: one name, two names, or a count."""
+    names = [
+        feedback_display(db, earlier, [])[0]
+        for earlier in feedback_join.earlier_batches(db, node_id, batch)
+        if batch_value(earlier, "author_id") != batch_value(batch, "author_id")
+    ]
+    names = list(dict.fromkeys([*names, author]))
+    if len(names) > 2:
+        return f"{len(names)} authors"
+    return " and ".join(names)
+
+
 def _acceptance(items: list[dict[str, Any]]) -> str:
     edits, comments = feedback_kind_counts(items)
     clauses = []
@@ -231,10 +244,12 @@ def create_feedback_node(
 ) -> FeedbackNodeResult:
     """Create one queued recipient-plan task, idempotently keyed by batch id.
 
-    A batch of replies whose comment thread already has an open task joins that
-    task instead (``plans.feedback_join``). When its owner is working on that
-    task, the owner keeps its selection and receives a wake with the reply;
-    otherwise the person's new comments restate the task's intent.
+    A batch of new top-level comments joins the document's open task its owner has
+    not started; a batch of replies whose comment thread already has an open task
+    joins that task instead (``plans.feedback_join``). When its owner is working on
+    a thread's task, the owner keeps its selection and receives a wake with the
+    reply; otherwise the person's new comments restate the task's intent. The
+    title names everyone who wrote what the task holds.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -251,7 +266,8 @@ def create_feedback_node(
         blocks = item_blocks(batch, loaded)
         restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(author, document, held), blocks=blocks,
+            db, joined.node_id, title=_title(_authors(db, joined.node_id, batch, author), document, held),
+            blocks=blocks,
             intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
             provenance=PROVENANCE,
         )

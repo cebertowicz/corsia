@@ -1,0 +1,176 @@
+"""A new top-level comment joins the document's open task its owner has not started."""
+
+from __future__ import annotations
+
+from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
+from doceditor import comment_actions, comments, feedback_batches
+from infra.database import get_db, write_transaction
+from plans import holds, service
+from test_doc_feedback_reply_join import _feedback_nodes
+
+_HANDED = "SELECT 1 FROM plan_node_attempts WHERE node_id=?"
+
+
+def _agent_comment(db, artifact_id: str, author_id: str = "author", author: str = "Reviewer", **comment) -> dict:
+    row, _ = add_comment(db, artifact_id, author_id=author_id, author=author, **comment)
+    feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+    return row
+
+
+def _queued_document(db) -> tuple[str, dict, dict]:
+    """A document whose owner is busy with the first comment's task while the second comment's task waits."""
+    seed_thread(db, "owner")
+    seed_thread(db, "author", title="Reviewer")
+    seed_thread(db, "second", title="Editor")
+    artifact_id = seed_document(db, "owner")
+    _agent_comment(db, artifact_id)
+    queued_comment = _agent_comment(db, artifact_id)
+    busy, queued = _feedback_nodes(db, "owner")
+    assert db.execute(_HANDED, (busy["id"],)).fetchone() is not None
+    assert db.execute(_HANDED, (queued["id"],)).fetchone() is None
+    return artifact_id, queued_comment, queued
+
+
+def test_comments_before_the_owner_starts_share_one_task_that_settles_with_the_last(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, second, queued = _queued_document(db)
+
+        third = _agent_comment(db, artifact_id)
+
+        assert [node["id"] for node in _feedback_nodes(db, "owner")][1:] == [queued["id"]]
+        joined = service.get_node(queued["id"], db=db)
+        assert f"Comment {third['id']}" in joined.description
+        assert joined.description.startswith(queued["description"])
+        assert "left 2 comments on" in joined.title
+
+        with write_transaction(db, scope="test_document_join_settlement") as connection:
+            comment_actions.record_decision(
+                second["id"], decision="accept", decided_by="Robin", decided_by_thread_id=None, db=connection,
+            )
+        comments.update(second["id"], {"resolved": True}, db=db)
+        assert service.get_node(queued["id"], db=db).state != "accepted"
+
+        comments.update(third["id"], {"resolved": True}, db=db)
+        assert service.get_node(queued["id"], db=db).state == "accepted"
+    finally:
+        db.close()
+
+
+def test_person_comments_before_the_owner_starts_share_one_task_with_restated_intent(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        add_person_comment(db, artifact_id)
+        add_person_comment(db, artifact_id)
+        _, queued = _feedback_nodes(db, "owner")
+
+        third, _ = add_person_comment(db, artifact_id)
+
+        assert len(_feedback_nodes(db, "owner")) == 2
+        joined = service.get_node(queued["id"], db=db)
+        assert f"Comment {third['id']}" in joined.description
+        assert joined.intent == queued["intent"].replace("1 comment on", "2 comments on")
+        assert "2 comments on" in joined.title
+    finally:
+        db.close()
+
+
+def test_comment_after_the_task_was_handed_gets_its_own_task(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        add_person_comment(db, artifact_id)
+        (first,) = _feedback_nodes(db, "owner")
+        assert db.execute(_HANDED, (first["id"],)).fetchone() is not None
+
+        later, _ = add_person_comment(db, artifact_id)
+
+        nodes = _feedback_nodes(db, "owner")
+        assert len(nodes) == 2 and nodes[1]["id"] != first["id"]
+        assert service.get_node(first["id"], db=db).description == first["description"]
+        assert f"Comment {later['id']}" in service.get_node(nodes[1]["id"], db=db).description
+        assert db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'",
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_comment_does_not_join_a_waiting_task(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+        holds.pause(
+            queued["id"], "test", expected_revision=queued["revision"], actor_id="owner",
+            provenance="test", db=db,
+        )
+        db.commit()
+
+        _agent_comment(db, artifact_id)
+
+        nodes = _feedback_nodes(db, "owner")
+        assert len(nodes) == 3 and nodes[2]["id"] != queued["id"]
+        assert service.get_node(queued["id"], db=db).description == queued["description"]
+    finally:
+        db.close()
+
+
+def test_comment_on_another_document_gets_its_own_task(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+        other = seed_document(db, "owner")
+
+        elsewhere = _agent_comment(db, other)
+
+        nodes = _feedback_nodes(db, "owner")
+        assert len(nodes) == 3 and nodes[2]["id"] != queued["id"]
+        assert service.get_node(queued["id"], db=db).description == queued["description"]
+        assert f"Comment {elsewhere['id']}" in service.get_node(nodes[2]["id"], db=db).description
+        assert artifact_id != other
+    finally:
+        db.close()
+
+
+def test_comments_from_two_authors_give_a_title_that_names_both(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+        assert service.get_node(queued["id"], db=db).title.startswith("Reviewer left 1 comment on")
+
+        _agent_comment(db, artifact_id, author_id="second", author="Editor")
+
+        assert len(_feedback_nodes(db, "owner")) == 2
+        title = service.get_node(queued["id"], db=db).title
+        assert title.startswith("Reviewer and Editor left 2 comments on")
+    finally:
+        db.close()
+
+
+def test_a_suggestion_still_gets_its_own_task(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+
+        _agent_comment(db, artifact_id, replacement="New")
+
+        nodes = _feedback_nodes(db, "owner")
+        assert len(nodes) == 3 and nodes[2]["id"] != queued["id"]
+    finally:
+        db.close()
+
+
+def test_a_persons_comment_does_not_join_an_agents_task(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+
+        add_person_comment(db, artifact_id)
+
+        assert len(_feedback_nodes(db, "owner")) == 3
+        assert service.get_node(queued["id"], db=db).description == queued["description"]
+    finally:
+        db.close()

@@ -1,4 +1,12 @@
-"""A reply joins the open task its comment thread already has.
+"""A comment joins the open task its recipient already has, until the owner starts it.
+
+A new top-level comment joins the first open task the recipient has for the same
+document that its owner has not been handed yet (no attempt), whoever wrote the
+earlier comments there, so comments left before the owner starts are read as one
+task. Only a task made from the same kind of author (a person, or agents) is
+joined, because the task's framing differs between them. Once the owner has been
+handed the task, a new top-level comment gets its own task. A top-level comment
+never joins by waking a task its owner is working.
 
 A comment thread is one conversation, so a batch of replies whose thread already
 has an open task for the same recipient, from the same author, goes into that
@@ -41,6 +49,15 @@ _THREAD_TASKS = """
      WHERE c.artifact_id=? AND (c.id=? OR c.parent_id=?)
        AND b.recipient_id=? AND b.author_kind=? AND b.author_id=? AND b.id<>?
        AND b.delivered_node_id IS NOT NULL
+     ORDER BY b.created_at,b.id
+"""
+
+# Open tasks delivered to this recipient from this kind of author for one document, oldest first.
+_DOCUMENT_TASKS = """
+    SELECT b.delivered_node_id FROM doc_feedback_batches b
+      JOIN plan_nodes n ON n.id=b.delivered_node_id
+     WHERE b.recipient_id=? AND b.author_kind=? AND b.artifact_id=? AND b.id<>?
+       AND n.state IN (?,?)
      ORDER BY b.created_at,b.id
 """
 
@@ -90,14 +107,36 @@ def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join
     return working
 
 
+def _document_task(db, recipient_thread_id: str, batch: Any) -> Join | None:
+    """The document's first open task for the recipient whose owner has not been handed it and that waits on nothing."""
+    rows = db.execute(_DOCUMENT_TASKS, (
+        recipient_thread_id, batch_value(batch, "author_kind"), batch_value(batch, "artifact_id"),
+        batch_value(batch, "id"), *_WORKABLE,
+    )).fetchall()
+    for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
+        node = service._node_row(db, node_id)
+        if not _waits(db, node) and not _handed(db, node_id):
+            return Join(node_id, False)
+    return None
+
+
 def open_thread_task(
     db, recipient_thread_id: str, batch: Any, items: list[dict[str, Any]],
 ) -> Join | None:
-    """The one open task a batch of replies joins, or None when it needs its own."""
-    if not items or any(
-        item["kind"] != "comment" or not item.get("parent_id") or item.get("event") == "reopened"
-        for item in items
-    ):
+    """The one open task a batch of plain comments or of replies joins, or None when it needs its own.
+
+    A batch of only new top-level comments joins the document's open task its owner has not
+    started; a batch of only replies joins its comment thread's task. Suggestions, edits,
+    re-opened comments and mixed batches never join.
+    """
+    plain = [item for item in items if item["kind"] == "comment" and item.get("event") != "reopened"]
+    if not items or len(plain) != len(items):
+        return None
+    if not any(item.get("parent_id") for item in items):
+        if any(item.get("replacement") is not None for item in items):
+            return None
+        return _document_task(db, recipient_thread_id, batch)
+    if not all(item.get("parent_id") for item in items):
         return None
     tasks = {
         _thread_task(db, recipient_thread_id, batch, root)
@@ -112,16 +151,21 @@ def delivered_task(db, batch_id: str) -> str | None:
     return str(row["delivered_node_id"]) if row and row["delivered_node_id"] else None
 
 
+def earlier_batches(db, node_id: str, batch: Any) -> list[Any]:
+    """The batches already delivered into the task, oldest first."""
+    return db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE delivered_node_id=? AND id<>? ORDER BY created_at,id",
+        (node_id, batch_value(batch, "id")),
+    ).fetchall()
+
+
 def earlier_items(db, node_id: str, batch: Any) -> list[dict[str, Any]]:
     """The items of the batches already delivered into the task, oldest first.
 
     Delivery clears a batch's edit item, so a batch whose count exceeds its
     comments held one, and it counts as one edit.
     """
-    rows = db.execute(
-        "SELECT * FROM doc_feedback_batches WHERE delivered_node_id=? AND id<>? ORDER BY created_at,id",
-        (node_id, batch_value(batch, "id")),
-    ).fetchall()
+    rows = earlier_batches(db, node_id, batch)
     held: list[dict[str, Any]] = []
     for row in rows:
         items = load_feedback_items(db, row)

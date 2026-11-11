@@ -30,7 +30,8 @@ def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
         )
 
 
-def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
+def test_person_comments_join_the_next_task_their_owner_has_not_started(isolated_db):
+    """The first comment's task is handed at once; the next two share the queued task."""
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents")
@@ -40,7 +41,8 @@ def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
         rows = batches(db)
         assert [(row["state"], row["closed_reason"], row["item_count"]) for row in rows] == [("delivered", "send", 1)] * 3
         assert [linked_comment_ids(db, row["id"]) for row in rows] == [[row["id"]] for row, _feedback in added]
-        assert len({row["delivered_node_id"] for row in rows}) == 3
+        first, second, third = (row["delivered_node_id"] for row in rows)
+        assert first != second and second == third
     finally:
         db.close()
 
