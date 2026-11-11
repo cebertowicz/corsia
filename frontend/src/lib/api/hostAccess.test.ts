@@ -69,7 +69,7 @@ describe('host access API', () => {
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
-		const result = await fetchHostAccessLeases('token-1');
+		const result = await fetchHostAccessLeases();
 
 		expect(result.leases).toEqual([LEASE]);
 		expect(fetchMock).toHaveBeenCalledWith('/api/host-access/leases', {
@@ -88,7 +88,7 @@ describe('host access API', () => {
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
-		await fetchHostAccessLeases('token-1', undefined, {
+		await fetchHostAccessLeases(undefined, {
 			rootThreadId: 'thread / 1',
 			nonterminalOnly: true,
 		});
@@ -114,7 +114,7 @@ describe('host access API', () => {
 			});
 			vi.stubGlobal('fetch', fetchMock);
 
-			await decideHostAccessLease('token-1', LEASE, decision);
+			await decideHostAccessLease(LEASE, decision);
 
 			expect(fetchMock).toHaveBeenCalledWith(
 				`/api/host-access/leases/lease-1/${decision}`,
@@ -142,7 +142,6 @@ describe('host access API', () => {
 		}));
 
 		const error = await decideHostAccessLease(
-			'token-1',
 			LEASE,
 			'approve',
 		).catch((caught) => caught);

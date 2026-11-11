@@ -15,8 +15,8 @@ export async function readPreauthLocal(): Promise<LocalRowState | null> {
 }
 
 /** The local model's row from the sources service; throws when the read fails, so the caller keeps what it shows. */
-export async function readLocalRow(session: string): Promise<ModelSource | undefined> {
-	return (await fetchSources(session)).find((source) => source.source === 'omlx');
+export async function readLocalRow(): Promise<ModelSource | undefined> {
+	return (await fetchSources()).find((source) => source.source === 'omlx');
 }
 
 /** The shown sources with only the local row replaced, so a poll never undoes a newer CLI check. */

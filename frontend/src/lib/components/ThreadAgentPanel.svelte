@@ -92,7 +92,8 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await apiFetch(`/api/agents/${id}?token=${encodeURIComponent(t)}`, {
+			const res = await apiFetch(`/api/agents/${id}`, {
+				sessionInAddress: true,
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -125,7 +126,8 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await apiFetch(`/api/agents/${id}?token=${encodeURIComponent(t)}`, {
+			const res = await apiFetch(`/api/agents/${id}`, {
+				sessionInAddress: true,
 				method: 'DELETE',
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not remove this agent. Try again.'));

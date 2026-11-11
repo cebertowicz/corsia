@@ -1,14 +1,16 @@
 import { get, type Readable } from 'svelte/store';
+import { token } from '$lib/stores/sessionToken';
 import { on } from '$lib/ws';
 import { loadCheckpoints } from '$lib/stores/checkpoints';
 import { hydrateSubagentThread } from '$lib/stores/subagents';
 
-export async function refreshVisibleThread(threadId: string, bearer: string | null, page: Promise<void>): Promise<void> {
+export async function refreshVisibleThread(threadId: string, page: Promise<void>): Promise<void> {
+	const signedIn = !!get(token);
 	try {
 		await Promise.all([
 			page,
-			bearer ? loadCheckpoints(threadId, bearer).catch(() => null) : Promise.resolve(null),
-			bearer ? hydrateSubagentThread(threadId, bearer).catch(() => null) : Promise.resolve(null),
+			signedIn ? loadCheckpoints(threadId).catch(() => null) : Promise.resolve(null),
+			signedIn ? hydrateSubagentThread(threadId).catch(() => null) : Promise.resolve(null),
 		]);
 	} catch { /* ignore */ }
 }

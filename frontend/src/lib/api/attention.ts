@@ -48,14 +48,8 @@ function qs(params: Record<string, string | undefined | null>): string {
 	return s ? `?${s}` : '';
 }
 
-/** GETs carry the token as a Bearer header (not in the URL) — backend accepts it
- * via the shared require_user seam. */
-function bearer(token: string): RequestInit {
-	return {};
-}
-
-export async function fetchRollup(token: string, parentThreadId: string): Promise<RollupResponse> {
+export async function fetchRollup(parentThreadId: string): Promise<RollupResponse> {
 	return req<RollupResponse>(
-		`/api/attention/rollup${qs({ parent_thread_id: parentThreadId })}`, bearer(token)
+		`/api/attention/rollup${qs({ parent_thread_id: parentThreadId })}`
 	);
 }

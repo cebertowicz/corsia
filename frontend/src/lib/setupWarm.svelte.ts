@@ -12,11 +12,11 @@ type WarmProgressEvent = {
 };
 
 type FinishSetupWarmHandoff = {
-	session: string | null;
+	signedIn: boolean;
 	isFinishing: boolean;
 	setFinishing: (finishing: boolean) => void;
 	setSourceError: (error: string) => void;
-	recordProgress: (session: string) => Promise<boolean>;
+	recordProgress: () => Promise<boolean>;
 	getCatalog: () => SetupModel[];
 	warm: Pick<ReturnType<typeof createSetupWarm>, 'start' | 'finish'>;
 	exitMark: () => Promise<void> | undefined;
@@ -25,17 +25,17 @@ type FinishSetupWarmHandoff = {
 
 /** Complete setup, join its local warm-up, then hand off to the first chat. */
 export async function finishSetupWarmHandoff({
-	session, isFinishing, setFinishing, setSourceError, recordProgress, getCatalog, warm, exitMark, onFinished,
+	signedIn, isFinishing, setFinishing, setSourceError, recordProgress, getCatalog, warm, exitMark, onFinished,
 }: FinishSetupWarmHandoff): Promise<void> {
-	if (!session || isFinishing) return;
+	if (!signedIn || isFinishing) return;
 	setFinishing(true);
 	setSourceError('');
 	try {
-		if (!await recordProgress(session)) {
+		if (!await recordProgress()) {
 			setSourceError('CORSIA couldn’t save setup progress. Try again.');
 			return;
 		}
-		warm.start(getCatalog(), session);
+		warm.start(getCatalog());
 		await warm.finish();
 		await exitMark();
 		onFinished();
@@ -68,9 +68,9 @@ export function createSetupWarm() {
 			: null;
 	}
 
-	function start(catalog: SetupModel[], session: string | null): void {
+	function start(catalog: SetupModel[]): void {
 		const candidate = catalog.find((row) => row.connection === 'omlx' && row.backend === 'network' && setupModelWorks(row));
-		if (!session || !candidate) return;
+		if (!candidate) return;
 		const model = getModelDispatchId(candidate);
 		if (!model || attempted === model || running) return;
 		attempted = model;
@@ -80,14 +80,16 @@ export function createSetupWarm() {
 		const signal = controller.signal;
 		pending = (async () => {
 			try {
-				const lookup = await fetchCorsiaAgent(session);
+				const lookup = await fetchCorsiaAgent();
 				if (signal.aborted || lookup.kind !== 'target' || lookup.target.model || !lookup.firstRunPending) return;
 				stopSubscription = on('thread_warm_progress', (event: WarmProgressEvent) => {
 					acceptProgress(event, lookup.target.thread_id, model);
 				});
-				const query = new URLSearchParams({ token: session, model, progress: 'true' });
-				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
-				const response = await apiFetch(`${url}&wait=true`, { method: 'POST', signal });
+				const query = new URLSearchParams({ model, progress: 'true', wait: 'true' });
+				const response = await apiFetch(
+					`/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`,
+					{ sessionInAddress: true, method: 'POST', signal },
+				);
 				const body: { ok?: boolean; message?: string } | null = await response.json().catch(() => null);
 				// A warm that didn't finish leaves the normal cold-turn path; record why for diagnosis.
 				if (!response.ok || body?.ok === false) {

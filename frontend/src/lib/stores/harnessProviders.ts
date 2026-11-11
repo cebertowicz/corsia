@@ -1,5 +1,3 @@
-import { get } from 'svelte/store';
-import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { checkpointsBelowProvider, humanCtx } from './providerModelUtils';
 import { type Model } from './models';
@@ -25,11 +23,10 @@ export interface HarnessSummary {
 
 type CatalogRow = Record<string, any>;
 
-const t = () => get(token) || '';
 
 /** The settings inventory, including unavailable rows kept for existing thread resolution. */
 export async function fetchCatalogInventory(): Promise<CatalogRow[]> {
-	const res = await apiFetch(`/api/settings/models?token=${t()}`);
+	const res = await apiFetch(`/api/settings/models`, { sessionInAddress: true });
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return (await res.json()).models ?? [];
 }
@@ -83,7 +80,8 @@ export async function harnessModels(harness: string): Promise<ProviderModel[]> {
 /** Save the name the picker shows for a model; an empty label restores the discovered one. */
 export async function setModelLabel(dbId: string, label: string): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await apiFetch(`/api/settings/models/${encodeURIComponent(dbId)}?token=${t()}`, {
+		const res = await apiFetch(`/api/settings/models/${encodeURIComponent(dbId)}`, {
+			sessionInAddress: true,
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ alias: label.trim() || null }),

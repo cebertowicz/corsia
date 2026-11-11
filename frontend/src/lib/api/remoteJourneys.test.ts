@@ -81,12 +81,12 @@ describe('the main journeys over the Devices listener', () => {
 		const stub = { firstId: 'm1', lastId: 'm2', firstSeq: 1, lastSeq: 2, count: 2, turnIds: [], weight: 0, kinds: [] } as never;
 		const deps = { pageSize: 20, loads: () => ({}), setLoad: () => undefined, onSummaries: () => undefined };
 		byJourney['thread open'] = await drive('thread open', async () => {
-			await loadThreads(SESSION);
+			await loadThreads();
 			await loadRunRange(stub, deps);
 			await fetchArtifactPane('thread-1');
 		}, seen);
 		byJourney['send'] = await drive('send', async () => {
-			await uploadInputFile(new File(['hello'], 'note.txt', { type: 'text/plain' }), SESSION, 'thread-1');
+			await uploadInputFile(new File(['hello'], 'note.txt', { type: 'text/plain' }), 'thread-1');
 		}, seen);
 		byJourney['document open and comment'] = await drive('document open and comment', async () => {
 			await fetchContent('notes/plan.md', { threadId: 'thread-1' });
@@ -108,7 +108,7 @@ describe('the main journeys over the Devices listener', () => {
 		return byJourney;
 	}
 
-	it('sends every call with the session in the Authorization header, and never a different one in the address', async () => {
+	it('sends every call with the session in the Authorization header, and the same one wherever the address names it', async () => {
 		await runJourneys();
 
 		expect(seen.length).toBeGreaterThan(10);

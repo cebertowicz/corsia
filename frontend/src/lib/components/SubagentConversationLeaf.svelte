@@ -57,8 +57,7 @@
 			return;
 		}
 		try {
-			const query = new URLSearchParams({ token: authToken, limit: '50' });
-			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${query}`);
+			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=50`, { sessionInAddress: true });
 			if (!response.ok) throw new Error(`Child transcript load failed (${response.status})`);
 			const body = await response.json();
 			if (requestGeneration !== generation) return;
@@ -83,7 +82,7 @@
 		const release = claimDisplayedThread(subscribed);
 		void load();
 		// The composer shows this worker's own model and effort, which the server's status carries.
-		if ($token) void hydrateSubagentThread(subscribed, $token);
+		if ($token) void hydrateSubagentThread(subscribed);
 		subscribeThread(subscribed);
 		const offConnected = on('connected', () => {
 			subscribeThread(subscribed);

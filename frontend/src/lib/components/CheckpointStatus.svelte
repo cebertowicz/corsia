@@ -26,7 +26,7 @@
 		if (busy || !cancellable || !threadId || !$token) return;
 		busy = true;
 		try {
-			await cancelCheckpoint(threadId, checkpoint.id, $token);
+			await cancelCheckpoint(threadId, checkpoint.id);
 		} catch (error) {
 			toasts.show(
 				error instanceof Error ? error.message : 'Could not cancel checkpoint',

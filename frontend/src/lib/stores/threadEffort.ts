@@ -18,7 +18,7 @@ const saves = new Map<string, { latest: number; latestFailed: boolean; inflight:
  * Save a thread's effort. Answers null when it saved (or a newer pick took its place), else the sentence
  * to show: a refused or failed newest save leaves the last confirmed effort and says so.
  */
-export async function saveReasoningEffort(threadId: string, effort: string | null, token: string): Promise<string | null> {
+export async function saveReasoningEffort(threadId: string, effort: string | null): Promise<string | null> {
 	let state = saves.get(threadId);
 	if (!state || state.inflight === 0) {
 		const current = threadId === get(activeThreadId)
@@ -32,7 +32,8 @@ export async function saveReasoningEffort(threadId: string, effort: string | nul
 	writeThreadEffort(threadId, effort);
 	let failure: string | null = null;
 	try {
-		const res = await apiFetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
+		const res = await apiFetch(`/api/threads/${threadId}`, {
+			sessionInAddress: true,
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ reasoning_effort: effort }),

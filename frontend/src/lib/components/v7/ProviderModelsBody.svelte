@@ -92,7 +92,7 @@
 	const canLoadAnyway = (m: ProviderModel) => keepsLoaded && canLoadAnywayFor(m, localRows.finishing === m.id);
 	async function setPinned(m: ProviderModel, pinned: boolean): Promise<boolean> {
 		const t = get(token);
-		return !!t && !!provider.server?.id && putPinned(t, provider.server.id, m.id, pinned);
+		return !!t && !!provider.server?.id && putPinned(provider.server.id, m.id, pinned);
 	}
 	const poller = createModelsPoller(async () => {
 		await pollJobsFor(provider.raw, provider.server);
@@ -105,7 +105,7 @@
 		if (provider.name !== 'omlx' || !provider.server?.id) return;
 		const t = get(token);
 		if (!t) return;
-		const rows = await localDownloadRows(t, provider.server.id);
+		const rows = await localDownloadRows(provider.server.id);
 		if (rows.active !== undefined) hasLocalDownload = rows.active;
 		localRows = { ...localRows, ...rows };
 	}
@@ -159,7 +159,7 @@
 	async function _checkAndLoad(m: ProviderModel): Promise<boolean> {
 		const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
 		if (!isLocal || estimatedGb <= 0) return _doLoad(m);
-		const data = await checkLoad(get(token) || '', estimatedGb, provider.name);
+		const data = await checkLoad(estimatedGb, provider.name);
 		if (!data || data.ok || data.remote) return _doLoad(m);
 		return new Promise<boolean>((resolve) => { preloadInfo = {
 			modelName: m.name,

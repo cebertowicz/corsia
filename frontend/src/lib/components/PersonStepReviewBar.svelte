@@ -34,8 +34,7 @@
 		if (!step || !bearer || busy) return;
 		action = 'sending';
 		failure = '';
-		const outcome = await mutateUserTask(
-			bearer, step.plan_id, operation, step.node_id, step.node_revision,
+		const outcome = await mutateUserTask(step.plan_id, operation, step.node_id, step.node_revision,
 			`${operation}:${step.node_id}:${step.node_revision}`,
 		);
 		if (outcome.status === 'success') {

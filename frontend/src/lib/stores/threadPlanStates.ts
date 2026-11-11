@@ -70,7 +70,7 @@ async function drain(): Promise<void> {
 async function loadChunk(ids: string[]): Promise<void> {
 	const bearer = get(token);
 	if (!bearer) return;
-	const states = await readThreadPlanStates(bearer, ids);
+	const states = await readThreadPlanStates(ids);
 	if (states === null) return;
 	threadPlanStates.update((current) => {
 		const next = { ...current };

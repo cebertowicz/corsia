@@ -62,14 +62,14 @@ describe('source routes', () => {
 				: String(input).endsWith('/local/setup') ? { ok: true } : { sources: [{ source: 'omlx' }] },
 		}));
 		vi.stubGlobal('fetch', fetchMock);
-		expect(await fetchSources('tok')).toEqual([{ source: 'omlx' }]);
-		expect(await recheckSources('tok')).toEqual([{ source: 'omlx' }]);
-		expect(await setupLocalSource('tok')).toEqual({ ok: true });
+		expect(await fetchSources()).toEqual([{ source: 'omlx' }]);
+		expect(await recheckSources()).toEqual([{ source: 'omlx' }]);
+		expect(await setupLocalSource()).toEqual({ ok: true });
 		expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ body: JSON.stringify({}) });
-		expect(await fetchLocalModelRecommendations('tok')).toEqual({ state: 'ready', sections: { best: [] } });
-		await startLocalModelDownload('tok', 'org/model');
-		await cancelLocalDownload('tok');
-		await deleteLocalModelDownload('tok', 'org/model');
+		expect(await fetchLocalModelRecommendations()).toEqual({ state: 'ready', sections: { best: [] } });
+		await startLocalModelDownload('org/model');
+		await cancelLocalDownload();
+		await deleteLocalModelDownload('org/model');
 		expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
 			['/api/providers/sources', 'GET'],
 			['/api/providers/sources/recheck', 'POST'],
@@ -86,7 +86,7 @@ describe('source routes', () => {
 
 	it('throws on a failed read so the panel can say it could not read', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
-		await expect(fetchSources('tok')).rejects.toThrow('sources 500');
+		await expect(fetchSources()).rejects.toThrow('sources 500');
 	});
 });
 

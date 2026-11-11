@@ -10,8 +10,8 @@ export function safeErrorMessage(status: number): string {
 	return `Unable to load this scope (HTTP ${status}).`;
 }
 
-/** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
-export function authHeaders(bearerValue: string, etag: string | null): RequestInit {
+/** The conditional-read headers; the session is attached by `apiFetch`. */
+export function conditionalHeaders(etag: string | null): RequestInit {
 	const headers: Record<string, string> = {};
 	if (etag) headers['If-None-Match'] = etag;
 	return { headers };
@@ -19,13 +19,12 @@ export function authHeaders(bearerValue: string, etag: string | null): RequestIn
 
 export async function readPlan<T>(
 	url: string,
-	bearerValue: string,
 	etag: string | null | undefined,
 	decode: (body: unknown) => T | null,
 ): Promise<ReadOutcome<T>> {
 	let res: Response;
 	try {
-		res = await apiFetch(url, authHeaders(bearerValue, etag ?? null));
+		res = await apiFetch(url, conditionalHeaders(etag ?? null));
 	} catch (error) {
 		return { status: 'error', message: error instanceof Error ? error.message : String(error) };
 	}

@@ -250,7 +250,7 @@ export function clearThreadBuffers(threadId: string) {
 export const reasoningEffort = writable<string | null>(null);
 
 /** Optimistically rename a thread and restore its prior title if persistence fails. */
-export async function saveThreadTitle(threadId: string, title: string, token: string): Promise<void> {
+export async function saveThreadTitle(threadId: string, title: string): Promise<void> {
 	const target = get(coordinationThreads).some((thread) => thread.id === threadId) ? coordinationThreads : threads;
 	let previousTitle = '';
 	target.update((rows) => rows.map((thread) => {
@@ -259,8 +259,8 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		return { ...thread, title };
 	}));
 	try {
-		const response = await apiFetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
-			method: 'PATCH',
+		const response = await apiFetch(`/api/threads/${threadId}`, {
+			sessionInAddress: true, method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
 		});
@@ -273,15 +273,15 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 	}
 }
 
-export async function saveThreadProject(threadId: string, projectId: string | null, token: string) {
+export async function saveThreadProject(threadId: string, projectId: string | null) {
 	let prev: string | null = null;
 	threads.update(ss => ss.map(s => {
 		if (s.id === threadId) { prev = s.project_id ?? null; return { ...s, project_id: projectId }; }
 		return s;
 	}));
 	try {
-		const res = await apiFetch(`/api/threads/${threadId}?token=${token}`, {
-			method: 'PATCH',
+		const res = await apiFetch(`/api/threads/${threadId}`, {
+			sessionInAddress: true, method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ project_id: projectId }),
 		});

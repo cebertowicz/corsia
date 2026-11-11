@@ -27,7 +27,7 @@ let uploadLimits: UploadLimits | null = null;
  * Fetch and cache the server's upload ceilings for this session.
  * The session rides in the Authorization header: the Devices listener refuses an unsigned `/api` read.
  */
-export async function loadUploadLimits(authToken: string): Promise<UploadLimits | null> {
+export async function loadUploadLimits(): Promise<UploadLimits | null> {
 	if (uploadLimits) return uploadLimits;
 	try {
 		const res = await apiFetch('/api/upload/limits');
@@ -56,10 +56,9 @@ function limitFor(file: File): { bytes: number; label: string } | null {
 
 export async function uploadInputFile(
 	file: File,
-	authToken: string,
 	threadId: string,
 ): Promise<{ attachment: Attachment | null; error: string }> {
-	await loadUploadLimits(authToken);
+	await loadUploadLimits();
 	const limit = limitFor(file);
 	if (limit && file.size > limit.bytes) {
 		return { attachment: null, error: `${file.name} is too large (max ${limit.label})` };
@@ -68,8 +67,9 @@ export async function uploadInputFile(
 	form.append('file', file);
 	try {
 		const res = await apiFetch(
-			`/api/upload?token=${encodeURIComponent(authToken)}&thread_id=${encodeURIComponent(threadId)}`,
+			`/api/upload?thread_id=${encodeURIComponent(threadId)}`,
 			{
+				sessionInAddress: true,
 				method: 'POST',
 				body: form,
 			},
@@ -99,7 +99,6 @@ export async function uploadInputFile(
 
 export async function uploadThreadAttachment(
 	file: File,
-	authToken: string,
 	getThreadId: () => string | null,
 	ensureThread: () => Promise<void>,
 ): Promise<{ attachment: Attachment | null; error: string }> {
@@ -114,7 +113,7 @@ export async function uploadThreadAttachment(
 			error: 'Could not create a conversation for this attachment',
 		};
 	}
-	return uploadInputFile(file, authToken, threadId);
+	return uploadInputFile(file, threadId);
 }
 
 export function insertTextAtCaret(inputEl: HTMLDivElement | undefined, text: string) {

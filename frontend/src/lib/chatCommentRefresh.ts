@@ -9,7 +9,7 @@ import { apiFetch } from '$lib/api/request';
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;
-	async function read(threadId: string, bearer: string, ids: string[]): Promise<{ rows: Message[]; replies: CommentReplyItem[] | null }> {
+	async function read(threadId: string, ids: string[]): Promise<{ rows: Message[]; replies: CommentReplyItem[] | null }> {
 		const result: Message[] = [];
 		let replies: CommentReplyItem[] | null = null;
 		for (let offset = 0; offset < ids.length; offset += pageSize) {
@@ -26,8 +26,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 	}
 	async function refresh(frame: any, comments: any[] = []) {
 		const threadId = get(activeThreadId);
-		const bearer = get(token);
-		if (!threadId || frame?.thread_id !== threadId || !bearer) return;
+		if (!threadId || frame?.thread_id !== threadId || !get(token)) return;
 		const rows = get(messages).filter(row => row.thread_id === threadId);
 		// The server identifies placed answers; do not parse tags in the client.
 		const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
@@ -40,7 +39,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		const current = ++generation;
 		const sequence = beginChatReplyAttentionRead();
 		try {
-			const answers = await read(threadId, bearer, answerIds);
+			const answers = await read(threadId, answerIds);
 			const cids = new Set(answers.rows.flatMap(row => row.chat_answer_cids ?? []));
 			const contextComments = rows.flatMap(row => row.metadata?.reply_context?.comments ?? []);
 			const knownTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid) || c.answers.some(answer => answer.cid && cids.has(answer.cid)))));
@@ -48,7 +47,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 			// still a target: its row is what draws the notice and carries the quote to announce.
 			const namedTargets = (answers.replies ?? []).map(item => item.detail.destination.id);
 			const targetIds = [...new Set([...knownTargets.map(row => row.id), ...namedTargets])];
-			const targetRows = await read(threadId, bearer, targetIds);
+			const targetRows = await read(threadId, targetIds);
 			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;
 			const byId = new Map(refreshed.map(row => [row.id, row]));

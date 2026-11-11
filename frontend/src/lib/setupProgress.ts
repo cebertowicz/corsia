@@ -1,5 +1,7 @@
 import type { SetupAttempt } from './setupConnect.svelte';
+import { get } from 'svelte/store';
 import { apiFetch } from '$lib/api/request';
+import { token } from '$lib/stores/sessionToken';
 
 export type SetupPicks = { claude: boolean; chatgpt: boolean };
 export type SetupHandoff = { tools: Record<string, SetupAttempt> };
@@ -21,8 +23,8 @@ export type SetupProgressChange = { step?: 'models' | 'local-consent'; local_ai?
 const PROGRESS = '/api/setup/progress';
 
 /** The signed-in person's setup progress, or null when it cannot be read. */
-export async function fetchSetupProgress(sessionToken: string | null): Promise<SetupProgress | null> {
-	if (!sessionToken) return null;
+export async function fetchSetupProgress(): Promise<SetupProgress | null> {
+	if (!get(token)) return null;
 	try {
 		const response = await apiFetch(PROGRESS);
 		if (!response.ok) return null;
@@ -38,7 +40,7 @@ export async function fetchSetupProgress(sessionToken: string | null): Promise<S
  * choice and the subscriptions they pay for are taken, with no session. Returns whether it was saved: a failed step or choice write is not
  * shown (the next change records it), but completion has no next change, so its caller must act on false.
  */
-export async function recordSetupProgress(change: SetupProgressChange, sessionToken: string | null): Promise<boolean> {
+export async function recordSetupProgress(change: SetupProgressChange): Promise<boolean> {
 	try {
 		const response = await apiFetch(PROGRESS, {
 			method: 'PUT',

@@ -19,12 +19,12 @@ describe('security alert connection check', () => {
 
 		const authToken = 'session token';
 		sessionToken.set(authToken);
-		await checkSecurityAlert(authToken);
+		await checkSecurityAlert();
 
 		expect(fetchMock).toHaveBeenCalledWith('/api/security/alert', {
 			headers: { Authorization: `Bearer ${authToken}` },
 		});
-		expect(fetchMock.mock.calls[0][0]).not.toContain('?');
+		expect((fetchMock.mock.calls[0] as unknown as [string])[0]).not.toContain('?');
 		expect(get(securityAlert)).toMatchObject({ vulns: 1, errors: 0 });
 	});
 
@@ -33,7 +33,7 @@ describe('security alert connection check', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		securityAlert.set({ vulns: 1, errors: 0, report: 'report', date: 'today' });
 
-		await checkSecurityAlert(null);
+		await checkSecurityAlert();
 
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(get(securityAlert)).toBeNull();

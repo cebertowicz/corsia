@@ -193,9 +193,11 @@ Flags a `fetch(`, `new EventSource(`, or (in a file that uses
 address targets `/api`, outside the shared request function `apiFetch`.
 `*.test.ts`, `*.spec.ts`, and `__tests__/` are skipped. The devices listener
 (the remote-apps entrance) admits an `/api` request only with the signed-in
-session in the form it accepts, so a raw call works on the main computer and
-fails from a phone or another computer; `apiFetch` adds the session in one
-place.
+session, and refuses one whose header and address name different sessions; so
+a raw call works on the main computer and can fail from a phone or another
+computer. `apiFetch` owns the session in one place: it puts the signed-in
+session in the `Authorization` header and, with `sessionInAddress: true`, the
+same value in the address.
 
 - **What counts as targeting `/api`:** an address containing `/api` (a literal
   or template, `${BASE}/api/...` included), a bare name whose same-file
@@ -205,8 +207,10 @@ place.
   is not flagged.
 - **`allow_files`** is the list of accepted exemptions, each with a stated
   reason; the shared request function is the only entry.
-- **Fix:** call `apiFetch(url, init)` from `$lib/api/request` and leave the
-  session out of the URL. An `<img src>` or download link, which cannot set a
+- **Fix:** call `apiFetch(url, init)` from `$lib/api/request`. For a route that
+  declares the session as a required query parameter, pass
+  `sessionInAddress: true` and let `apiFetch` add it; do not build that
+  parameter yourself. An `<img src>` or download link, which cannot set a
   header, keeps its session in the URL query, built by a helper such as
   `artifactImage.ts`.
 

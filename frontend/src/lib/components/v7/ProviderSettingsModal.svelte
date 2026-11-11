@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { token } from '$lib/stores/auth';
-	import { get } from 'svelte/store';
 	import {
 		updateProvider, deleteProvider, testProvider,
 	} from '$lib/stores/providers';
@@ -100,9 +98,9 @@
 			return;
 		}
 		try {
-			const t = get(token) || '';
 			const res = await apiFetch(
-				`/api/settings/providers/${provider.name}/status?token=${t}`,
+				`/api/settings/providers/${provider.name}/status`,
+				{ sessionInAddress: true },
 			);
 			if (res.ok) {
 				const data = await res.json();
@@ -205,10 +203,9 @@
 		const success = action === 'reload' ? 'Model list refreshed.'
 			: `Model server ${action === 'start' ? 'started' : 'stopped'}.`;
 		try {
-			const t = get(token) || '';
 			const res = await apiFetch(
-				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}?token=${t}`,
-				{ method: 'POST' },
+				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}`,
+				{ sessionInAddress: true, method: 'POST' },
 			);
 			const data = await res.json().catch(() => ({}));
 			if (res.ok && data.ok !== false) {

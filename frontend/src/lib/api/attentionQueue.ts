@@ -164,7 +164,7 @@ export type AnswerOutcome =
 	| { status: 'unauthorized' }
 	| { status: 'error' };
 
-export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueue> {
+export async function fetchAttentionQueue(): Promise<AttentionQueue> {
 	const res = await apiFetch('/api/attention/queue');
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	const data = (await res.json()) as AttentionQueueResponse;
@@ -206,7 +206,6 @@ function closedMessage(res: Response): Promise<string> {
  * and its note whenever it is non-blank: there the note is additive.
  */
 export async function answerDecision(
-	bearer: string,
 	decisionId: string,
 	answer: {
 		optionId?: string;

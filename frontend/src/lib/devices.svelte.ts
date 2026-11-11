@@ -1,6 +1,4 @@
 import { on } from '$lib/ws/events';
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import { apiFetch } from '$lib/api/request';
 
 /**
@@ -103,10 +101,7 @@ export function createDevices(options: Options = {}) {
 	let endsAt: number | null = null;
 	let remaining = $state<number | null>(null);
 
-	const headers = (json = false): Record<string, string> => {
-		const current = get(token);
-		return json ? { 'Content-Type': 'application/json' } : {};
-	};
+	const headers = (json = false): Record<string, string> => json ? { 'Content-Type': 'application/json' } : {};
 
 	function accept(api: DevicesApi) {
 		const next = viewFromApi(api, options.remoteName?.());

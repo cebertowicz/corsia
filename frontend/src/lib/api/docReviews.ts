@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 import { ok, fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
 import { apiFetch } from './request';
 

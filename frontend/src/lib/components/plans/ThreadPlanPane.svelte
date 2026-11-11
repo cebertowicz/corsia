@@ -196,8 +196,7 @@
 		const bearer = $token;
 		if (!current || !bearer || userActionBusy || offline) return 'Not available right now.';
 		userActionBusy = true;
-		const result = await mutateUserTask(
-			bearer, current.plan.id, action, node.id, node.revision,
+		const result = await mutateUserTask(current.plan.id, action, node.id, node.revision,
 			`${action}:${node.id}:${node.revision}`, reason,
 		);
 		userActionBusy = false;

@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { token } from '$lib/stores/auth';
-	import { get } from 'svelte/store';
 	import type { ProviderModel } from '$lib/stores/providerModels';
 	import { IconButton, Modal, Section, StatePill } from '$lib/components/ui';
 	import CheckpointWindowEditor from './CheckpointWindowEditor.svelte';
@@ -48,9 +46,8 @@
 	onMount(async () => {
 		if (!serverId) return;
 		cacheLoading = true;
-		const t = get(token) || '';
 		try {
-			const res = await apiFetch(`/api/settings/network-servers/${serverId}/cache/status?token=${t}`);
+			const res = await apiFetch(`/api/settings/network-servers/${serverId}/cache/status`, { sessionInAddress: true });
 			if (res.ok) {
 				const data = await res.json();
 				cacheStats = (data.caches || []).filter((c: CacheEntry) =>

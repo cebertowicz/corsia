@@ -4,6 +4,7 @@ import { applySwitchRead, beginSwitchRead } from '$lib/stores/threadModelTruth';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 import { apiFetch } from '$lib/api/request';
+import { token } from '$lib/stores/sessionToken';
 
 export interface CoordinationTarget {
 	thread_id: string;
@@ -83,11 +84,11 @@ export function conductorScopeParam(scope: UiScope | null): string {
 	return scope?.id ?? 'workspace';
 }
 
-async function fetchTarget(token: string | null, url: string): Promise<CoordinationLookup> {
-	if (!token) return { kind: 'unknown' };
+async function fetchTarget(url: string): Promise<CoordinationLookup> {
+	if (!get(token)) return { kind: 'unknown' };
 	const startedAt = beginSwitchRead();
 	try {
-		const res = await apiFetch(url);
+		const res = await apiFetch(url, { sessionInAddress: true });
 		if (!res.ok) return { kind: 'unknown' };
 		const data = await res.json();
 		const threadId = data?.target?.thread_id ?? data?.thread_id ?? null;
@@ -114,23 +115,20 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 }
 
 /** Read a project's conductor target and accept its model as that thread's truth. */
-export function fetchConductor(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
+export function fetchConductor(scope: UiScope | null): Promise<CoordinationLookup> {
 	if (!scope) return Promise.resolve({ kind: 'unknown' });
-	return fetchTarget(
-		token,
-		`/api/conductor?token=${encodeURIComponent(token ?? '')}&scope=${encodeURIComponent(scope.id)}`,
-	);
+	return fetchTarget(`/api/conductor?scope=${encodeURIComponent(scope.id)}`);
 }
 
 /** Read the workspace CORSIA agent and accept its model as that thread's truth. */
-export async function fetchCorsiaAgent(token: string | null): Promise<CoordinationLookup> {
-	const lookup = await fetchTarget(token, `/api/corsia-agent?token=${encodeURIComponent(token ?? '')}`);
+export async function fetchCorsiaAgent(): Promise<CoordinationLookup> {
+	const lookup = await fetchTarget('/api/corsia-agent');
 	if (lookup.kind === 'target') corsiaAgentId.set(lookup.target.thread_id);
 	else if (lookup.kind === 'absent') corsiaAgentId.set(null);
 	return lookup;
 }
 
 /** Read the scope's designated thread: a project's conductor, or the workspace's CORSIA agent. */
-export function fetchScopeTarget(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
-	return scope ? fetchConductor(token, scope) : fetchCorsiaAgent(token);
+export function fetchScopeTarget(scope: UiScope | null): Promise<CoordinationLookup> {
+	return scope ? fetchConductor(scope) : fetchCorsiaAgent();
 }

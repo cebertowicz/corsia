@@ -22,7 +22,7 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}?token=${encodeURIComponent(t)}`);
+			const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}`, { sessionInAddress: true });
 			if (!res.ok) throw new Error("Couldn't load this project's context");
 			const body = await res.json();
 			files = Array.isArray(body.context_files) ? body.context_files.map(String) : [];

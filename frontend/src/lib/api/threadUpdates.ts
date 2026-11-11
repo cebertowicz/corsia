@@ -39,7 +39,6 @@ export interface UpdateCardsPage {
 
 /** The newest bounded cards from `fromSeq`, returned in transcript order. Null when the read failed. */
 export async function readUpdateCards(
-	bearerValue: string,
 	threadId: string,
 	options: { fromSeq: number; divider?: boolean },
 ): Promise<UpdateCardsPage | null> {

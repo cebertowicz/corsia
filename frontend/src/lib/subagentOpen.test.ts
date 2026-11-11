@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { get } from 'svelte/store';
 import { routeSubagentOpen, watchSubagentOpenRequests, type SubagentOpenDeps } from './subagentOpen';
 import {
@@ -18,18 +19,20 @@ function respondWith(body: unknown, status = 200): void {
 function deps(): SubagentOpenDeps {
 	return {
 		readMeta: () => get(subagentMeta),
-		hydrate: vi.fn((id: string) => hydrateSubagentThread(id, 'tok')),
+		hydrate: vi.fn((id: string) => hydrateSubagentThread(id)),
 		selectThread: vi.fn(),
 		openLeaf: vi.fn(),
 	};
 }
 
 beforeEach(() => {
+	sessionStore.set('tok');
 	subagentMeta.set(new Map());
 	_resetSubagentHydrationForTests();
 });
 
 afterEach(() => {
+	sessionStore.set(null);
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 	subagentMeta.set(new Map());

@@ -15,6 +15,7 @@
  */
 
 import { get, writable } from 'svelte/store';
+import { token } from './sessionToken';
 import type { Thread } from './threads';
 import { seedThreadModelTruth } from './threadModelTruth';
 import { apiFetch } from '$lib/api/request';
@@ -155,17 +156,17 @@ const hydrated = new Set<string>();
  */
 export async function hydrateSubagentThread(
 	threadId: string,
-	token: string,
 	parentThreadId = '',
 ): Promise<SubStatus | null> {
-	if (!threadId || !token) return null;
+	if (!threadId || !get(token)) return null;
 	const version = (hydrationVersions.get(threadId) ?? 0) + 1;
 	hydrationVersions.set(threadId, version);
 	const statusBefore = get(subagentMeta).get(threadId)?.status ?? null;
 	try {
 		const res = await apiFetch(
 			`/api/delegation/threads/${encodeURIComponent(threadId)}/status`
-			+ `?token=${encodeURIComponent(token)}&messages=0`,
+			+ `?messages=0`,
+			{ sessionInAddress: true },
 		);
 		if (!res.ok) throw new Error(`subagent status refresh failed (${res.status})`);
 		const truth = await res.json();
@@ -223,12 +224,11 @@ export async function hydrateSubagentThread(
 /** Hydrate once per thread per page load; chips re-render constantly. */
 export function hydrateSubagentThreadOnce(
 	threadId: string,
-	token: string,
 	parentThreadId = '',
 ): void {
-	if (!threadId || !token || hydrated.has(threadId)) return;
+	if (!threadId || !get(token) || hydrated.has(threadId)) return;
 	hydrated.add(threadId);
-	void hydrateSubagentThread(threadId, token, parentThreadId);
+	void hydrateSubagentThread(threadId, parentThreadId);
 }
 
 export function _resetSubagentHydrationForTests(): void {

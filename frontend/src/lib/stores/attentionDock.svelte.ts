@@ -237,7 +237,7 @@ export async function reload(): Promise<void> {
   const generation = identityGeneration;
   inFlight = (async () => {
     try {
-      const next = await fetchAttentionQueue(bearer);
+      const next = await fetchAttentionQueue();
       if (generation !== identityGeneration) return;
       if (!Array.isArray(next?.items)) throw new Error("malformed queue");
       queue.set(next);

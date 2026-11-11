@@ -21,7 +21,7 @@
 		const t = get(token);
 		if (!t) return;
 		try {
-			const source = (await fetchSources(t)).find((candidate) => candidate.source === 'omlx');
+			const source = (await fetchSources()).find((candidate) => candidate.source === 'omlx');
 			// A never-local host reports eligible: false, but a remote oMLX there still needs its empty message.
 			showLocalEmpty = !source?.settings_download && (source?.eligible !== false || source?.never_local === true);
 		} catch { showLocalEmpty = true; }

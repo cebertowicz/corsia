@@ -66,7 +66,6 @@ function previewModelFor(threadId: string): string | null {
  */
 export async function refreshUsageAfterInstall(
 	threadId: string,
-	authToken: string,
 	checkpoints: readonly Checkpoint[] | null,
 ): Promise<void> {
 	// Only a fresh durable read counts; a failed read (null) proves nothing.
@@ -83,7 +82,6 @@ export async function refreshUsageAfterInstall(
 	invalidateContextPreview(threadId);
 	const read = await ensureContextPreview({
 		threadId,
-		authToken,
 		modelId,
 		...previewIdentity(threadId, modelId, before, latest),
 	});
@@ -103,9 +101,9 @@ export function handleCheckpointChanged(threadId: unknown): Promise<void> | null
 	if (typeof threadId !== 'string' || !threadId) return null;
 	const authToken = get(token);
 	if (!authToken) return null;
-	return invalidateCheckpoints(threadId, authToken)
+	return invalidateCheckpoints(threadId)
 		.catch(() => null)
-		.then(rows => refreshUsageAfterInstall(threadId, authToken, rows));
+		.then(rows => refreshUsageAfterInstall(threadId, rows));
 }
 
 /** Test seam: what a page reload does, keeping only what session storage holds. */

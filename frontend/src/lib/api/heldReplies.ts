@@ -13,7 +13,7 @@ export type HeldOutcome =
 	/** Delivery failed; the server keeps the reply held and names the failure when it can. */
 	| { status: 'error'; line: string | null; reference?: string };
 
-export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb): Promise<HeldOutcome> {
+export async function decideHeldReply(id: string, verb: HeldVerb): Promise<HeldOutcome> {
 	let res: Response;
 	try {
 		res = await apiFetch(`/api/held-replies/${encodeURIComponent(id)}/${verb}`, {

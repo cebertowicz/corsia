@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { createSetupWarm } from './setupWarm.svelte';
 import type { SetupModel } from './setupModels';
 import { emit } from './ws/events';
 
 const local = { id: 'local', litellm_model: 'omlx@test/model', connection: 'omlx', backend: 'network', status: 'ready' } as SetupModel;
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+beforeEach(() => { sessionStore.set('session'); });
+afterEach(() => { sessionStore.set(null); });
+
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('setup local warm', () => {
@@ -17,14 +21,14 @@ describe('setup local warm', () => {
 			return new Promise<Response>((resolve) => { release = resolve; });
 		}));
 		const warm = createSetupWarm();
-		warm.start([local], 'session');
+		warm.start([local]);
 		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 		expect(warm.running).toBe(true);
 		let finished = false;
 		const completion = warm.finish().then(() => { finished = true; });
 		await Promise.resolve();
 		expect(finished).toBe(false);
-		warm.start([local], 'session');
+		warm.start([local]);
 		release(json({ ok: true }));
 		await completion;
 		expect(warm.running).toBe(false);
@@ -48,7 +52,7 @@ describe('setup local warm', () => {
 			return json({ ok: false, message: 'model not loaded' });
 		}));
 		const warm = createSetupWarm();
-		warm.start([local], 'session');
+		warm.start([local]);
 		await warm.finish();
 		expect(warm.running).toBe(false);
 		expect(warm.percent).toBeNull();
@@ -61,10 +65,9 @@ describe('setup local warm', () => {
 		const fetcher = vi.fn(async () => json({ target: { thread_id: 'agent', model: 'already-picked' }, first_run_pending: true }));
 		vi.stubGlobal('fetch', fetcher);
 		const warm = createSetupWarm();
-		warm.start([{ ...local, status: 'unavailable' }], 'session');
-		warm.start([local], null);
+		warm.start([{ ...local, status: 'unavailable' }]);
 		expect(fetcher).not.toHaveBeenCalled();
-		warm.start([local], 'session');
+		warm.start([local]);
 		await warm.finish();
 		expect(fetcher).toHaveBeenCalledTimes(1);
 		warm.destroy();
@@ -77,7 +80,7 @@ describe('setup local warm', () => {
 			return new Promise<Response>((resolve) => { release = resolve; });
 		}));
 		const warm = createSetupWarm();
-		warm.start([local], 'session');
+		warm.start([local]);
 		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 		emit('thread_warm_progress', { type: 'thread_warm_progress', thread_id: 'other', model: local.litellm_model, progress: { total_blocks: 10, ready_blocks: 9 } });
 		emit('thread_warm_progress', { type: 'thread_warm_progress', thread_id: 'agent', model: local.litellm_model, progress: { total_blocks: 10, ready_blocks: 4 } });
@@ -96,7 +99,7 @@ describe('setup local warm', () => {
 			return new Promise<Response>((resolve) => { release = resolve; });
 		}));
 		const warm = createSetupWarm();
-		warm.start([local], 'session');
+		warm.start([local]);
 		await vi.waitFor(() => expect(release).toBeTypeOf('function'));
 		emit('thread_warm_progress', { type: 'thread_warm_progress', thread_id: 'agent', model: local.litellm_model, progress: { total_blocks: 0, ready_blocks: 0 } });
 		expect(warm.percent).toBeNull();

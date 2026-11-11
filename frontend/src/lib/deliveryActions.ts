@@ -24,7 +24,6 @@ export type DeliveryAction = 'cancel' | 'retry';
 export type DeliveryActionRequest = {
 	threadId: string;
 	messageId: string;
-	authToken: string;
 	/** What to say when the server gave no sentence a human wrote. */
 	failureText: string;
 };
@@ -70,14 +69,14 @@ function adoptDeliveryResponse(
  */
 export async function requestDeliveryAction(
 	action: DeliveryAction,
-	{ threadId, messageId, authToken, failureText }: DeliveryActionRequest,
+	{ threadId, messageId, failureText }: DeliveryActionRequest,
 ): Promise<void> {
 	try {
 		const response = await apiFetch(
 			`/api/threads/${encodeURIComponent(threadId)}`
 			+ `/messages/${encodeURIComponent(messageId)}`
-			+ `/${action}?token=${encodeURIComponent(authToken)}`,
-			{ method: 'POST' },
+			+ `/${action}`,
+			{ sessionInAddress: true, method: 'POST' },
 		);
 		if (!response.ok) {
 			const payload = await response.json().catch(() => null);

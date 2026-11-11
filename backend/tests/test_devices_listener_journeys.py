@@ -2,8 +2,9 @@
 
 ``frontend/src/lib/api/remoteJourneyCalls.json`` lists every call those journeys make; the frontend test
 ``remoteJourneys.test.ts`` fails when a journey makes a call the list lacks, and proves each one carries the session
-in the ``Authorization`` header and never in the address. This test sends each listed call, signed exactly that
-way, through ``DevicesApp`` in front of the real app, from a computer on the same network, and proves the listener
+in the ``Authorization`` header and, for a route that requires it there (``session_in_address``), the same session in
+the address. This test sends each listed call, signed exactly that way, through ``DevicesApp`` in front of the real
+app, from a computer on the same network, and proves the listener
 admits it. The listener's own session gate runs for real (a seeded person session, not a stub), and so do the routes.
 """
 from __future__ import annotations
@@ -111,7 +112,7 @@ def test_a_signed_journey_call_is_admitted_by_the_devices_listener(phone, ids, c
 
 
 def test_a_request_naming_two_different_sessions_is_refused(phone, ids):
-    """Why the app keeps the session out of the address: the listener refuses a header and a query that differ."""
+    """Why the shared request function sets header and address from one value: the listener refuses two that differ."""
     refused = phone.get("/api/settings", params={_SESSION_QUERY: "another-session"}, headers=_SIGNED)
     agreeing = phone.get("/api/settings", params={_SESSION_QUERY: OWNER_SESSION_TOKEN}, headers=_SIGNED)
 

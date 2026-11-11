@@ -1,5 +1,4 @@
-import { writable, get } from 'svelte/store';
-import { token } from './auth';
+import { writable } from 'svelte/store';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { applyFeaturePatch, confirmsFeaturePatch, enqueueFeaturePatch, type FeatureSettings, type SettingsPatch, SettingsSnapshotGate } from './settingsFeaturePatch';
 import { apiFetch } from '$lib/api/request';
@@ -114,8 +113,8 @@ export async function loadModelProfile(modelId: string): Promise<ModelProfile | 
 
 export async function updateModelProfile(modelId: string, patch: Partial<ModelProfile>): Promise<boolean> {
 	try {
-		const t = get(token);
-		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile?token=${t}`, {
+		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile`, {
+			sessionInAddress: true,
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch),

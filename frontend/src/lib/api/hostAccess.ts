@@ -123,12 +123,6 @@ export class HostAccessApiError extends Error {
 	}
 }
 
-function headers(token: string, json = false): Record<string, string> {
-	return {
-		...(json ? { 'Content-Type': 'application/json' } : {}),
-	};
-}
-
 async function responseJson<T>(response: Response): Promise<T> {
 	if (!response.ok) {
 		const body = await response.json().catch(() => null);
@@ -144,7 +138,6 @@ async function responseJson<T>(response: Response): Promise<T> {
 }
 
 export async function fetchHostAccessLeases(
-	token: string,
 	signal?: AbortSignal,
 	filter?: HostAccessLeaseListFilter,
 ): Promise<HostAccessLeaseList> {
@@ -155,17 +148,13 @@ export async function fetchHostAccessLeases(
 		? `/api/host-access/leases?${query.toString()}`
 		: '/api/host-access/leases';
 	const response = await apiFetch(endpoint, {
-		headers: {
-			...headers(token),
-			'X-CORSIA-Interactive-UI': '1',
-		},
+		headers: { 'X-CORSIA-Interactive-UI': '1' },
 		signal,
 	});
 	return responseJson<HostAccessLeaseList>(response);
 }
 
 export async function decideHostAccessLease(
-	token: string,
 	lease: HostAccessItem,
 	decision: HostAccessLeaseDecision,
 ): Promise<HostAccessLease> {
@@ -174,7 +163,7 @@ export async function decideHostAccessLease(
 		{
 			method: 'POST',
 			headers: {
-				...headers(token, true),
+				'Content-Type': 'application/json',
 				'X-CORSIA-User-Decision': lease.decision_capability ?? '',
 			},
 			body: JSON.stringify({

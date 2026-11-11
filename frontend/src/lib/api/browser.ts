@@ -6,7 +6,7 @@ export class BrowserPaneApiError extends Error {
 	}
 }
 
-export async function openBrowserUrl(threadId: string, url: string, authToken: string): Promise<void> {
+export async function openBrowserUrl(threadId: string, url: string): Promise<void> {
 	const response = await apiFetch(`/api/browser/${threadId}/open?url=${encodeURIComponent(url)}`, {
 		method: 'POST',
 	});

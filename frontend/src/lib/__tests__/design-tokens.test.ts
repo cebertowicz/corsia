@@ -65,7 +65,7 @@ const RUNTIME_PROVIDED = new Set([
  */
 const KNOWN_UNRESOLVED_BASELINE_COUNT = 5;
 const KNOWN_UNRESOLVED = new Set([
-	'lib/components/ThreadAgentPanel.svelte:357 → var(--text-quaternary)',
+	'lib/components/ThreadAgentPanel.svelte:359 → var(--text-quaternary)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:138 → var(--surface-2)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:144 → var(--link)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:151 → var(--err)',

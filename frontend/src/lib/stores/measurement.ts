@@ -1,5 +1,4 @@
 import { get, writable } from 'svelte/store';
-import { token } from './auth';
 import { MEASUREMENT_VIEW, clearMeasurementUrl } from './measurementAddress';
 import { grainScopeParams, measurementGrain, parseGrain, type MeasurementGrain } from './measurementGrain';
 import { decodeAveragePeriods, decodePeriod, type MeasurementPeriod } from './measurementPeriod';

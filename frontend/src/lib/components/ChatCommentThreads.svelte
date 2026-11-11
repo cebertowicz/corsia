@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { token } from '$lib/stores/auth';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
@@ -70,7 +69,7 @@
 							<CommentReplyList replies={[{ id: failed.id, author: 'user', authorKind: 'user', text: reply.note, at: formatTime(failed.created_at) }]} />
 						{/each}
 						<span>Not delivered</span>
-						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, authToken: $token ?? '', failureText: 'Couldn’t retry this reply. Try again.' })}>Retry</button>
+						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, failureText: 'Couldn’t retry this reply. Try again.' })}>Retry</button>
 					</div>
 				{/each}
 				{/snippet}

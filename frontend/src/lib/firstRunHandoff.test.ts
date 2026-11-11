@@ -2,17 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFirstRunHandoff } from './firstRunHandoff';
 import { activeThreadId } from '$lib/stores/threads';
 import { _resetFirstRunLandingForTests } from '$lib/utils/conductor';
+import { token as session } from '$lib/stores/sessionToken';
 
 const target = { target: { thread_id: 'first-run' }, first_run_pending: true };
 
 describe('first-run handoff', () => {
 	beforeEach(() => {
 		activeThreadId.set(null);
+		session.set('session');
 		_resetFirstRunLandingForTests();
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(target))));
 	});
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		session.set(null);
 		_resetFirstRunLandingForTests();
 	});
 

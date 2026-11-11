@@ -1,5 +1,4 @@
 import { writable, derived, get } from 'svelte/store';
-import { token } from './auth';
 import { providers as providersStore, type ProviderEntry } from './providers';
 import { networkServers, loadNetworkServers, type NetworkServer } from './networkServers';
 import { fetchCatalogInventory, harnessProviderModels, harnessSummaries, type HarnessSummary } from './harnessProviders';
@@ -9,7 +8,6 @@ import { readWorkspaceModels } from './modelsLoad';
 import { vendorAccounts, visibleVendorAccounts } from './vendorAccounts';
 import { apiFetch } from '$lib/api/request';
 const BASE = '';
-const t = () => get(token) || '';
 
 export interface HostResources {
 	device_name?: string;
@@ -70,7 +68,7 @@ export const harnessInventoryError = writable('');
 
 async function fetchHostResources(): Promise<HostResources | null> {
 	try {
-		const res = await apiFetch(`${BASE}/api/system/host-resources?token=${t()}`);
+		const res = await apiFetch(`${BASE}/api/system/host-resources`, { sessionInAddress: true });
 		if (!res.ok) return null;
 		return await res.json();
 	} catch {

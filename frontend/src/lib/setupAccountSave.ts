@@ -1,4 +1,3 @@
-import { token } from '$lib/stores/auth';
 import { apiFetch } from '$lib/api/request';
 
 export type AccountChanges = { name?: string; email?: string; password?: string; usage_sharing?: boolean };

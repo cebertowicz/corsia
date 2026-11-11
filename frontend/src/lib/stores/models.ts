@@ -232,9 +232,9 @@ export { loadModels, loadThreadCatalog } from './modelsLoad';
 export async function saveThreadModel(
 	threadId: string,
 	modelId: string,
-	token: string,
 ): Promise<ThreadModelSaveResult> {
-	const res = await apiFetch(`/api/threads/${threadId}?token=${token}`, {
+	const res = await apiFetch(`/api/threads/${threadId}`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ model: modelId }),

@@ -30,8 +30,8 @@ export function readySetupEndpoint(sources: ModelSource[], models: SetupModel[])
 }
 
 /** Read the same scope the CORSIA agent will use, never the unscoped catalog. */
-export async function setupCatalog(session: string): Promise<SetupModel[]> {
-	const lookup = await fetchCorsiaAgent(session);
+export async function setupCatalog(): Promise<SetupModel[]> {
+	const lookup = await fetchCorsiaAgent();
 	if (lookup.kind !== 'target') throw new Error('CORSIA agent unavailable');
 	const response = await apiFetch(`/api/models?thread_id=${encodeURIComponent(lookup.target.thread_id)}`);
 	if (!response.ok) throw new Error(`Model catalog returned ${response.status}`);

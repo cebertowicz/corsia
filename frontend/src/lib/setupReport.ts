@@ -1,5 +1,3 @@
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import type { AiRow } from './components/SetupAiRows.svelte';
 import { apiFetch } from '$lib/api/request';
 
@@ -19,7 +17,6 @@ export const DETAILS_UNREAD = 'CORSIA couldn’t read the setup details from its
 
 /** The service's allowlisted report body for these rows; a line saying why when it can't be read, so the report still saves. */
 export async function setupReportDetails(rows: SetupReportRow[]): Promise<string> {
-	const session = get(token);
 	try {
 		const response = await apiFetch('/api/setup/report', {
 			method: 'POST',

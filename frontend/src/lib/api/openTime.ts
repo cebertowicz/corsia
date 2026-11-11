@@ -20,7 +20,6 @@ export interface OpenTimeAnswer {
 
 /** The answers by query key; a thread the user cannot read has none. Null when the read failed. */
 export async function readOpenTime(
-	bearerValue: string,
 	queries: OpenTimeQuery[],
 ): Promise<Record<string, OpenTimeAnswer> | null> {
 	try {

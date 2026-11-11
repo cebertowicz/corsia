@@ -135,16 +135,18 @@ def _check(ctx: RuleContext) -> Iterable[Finding]:
             snippet=snippet,
             message=(
                 f"`{kind}` reaches `/api` without the shared request function. "
-                "It then sends no session, or one the devices listener refuses, "
-                "so it works on the main computer and fails from a phone or "
-                "another computer."
+                "Only that function signs every call the same way, with the "
+                "signed-in session the devices listener needs for an `/api` "
+                "request, so a call that skips it works on the main computer and "
+                "fails from a phone or another computer."
             ),
             fix_hint=(
-                "Call `apiFetch(url, init)` from `$lib/api/request`; it adds the "
-                "signed-in session in the form the devices listener accepts. "
-                "Do not put the session in the URL of an `apiFetch` call. For an "
-                "`<img src>` or download link, which cannot set a header, build "
-                "the URL in a helper like `artifactImage.ts`."
+                "Call `apiFetch(url, init)` from `$lib/api/request`; it signs the "
+                "call with the signed-in session. For a route that declares the "
+                "session as a required query parameter, pass `sessionInAddress: "
+                "true` and let `apiFetch` add it; never build that parameter "
+                "yourself. For an `<img src>` or download link, which cannot set "
+                "a header, build the URL in a helper like `artifactImage.ts`."
             ),
         )
 
@@ -157,9 +159,11 @@ RULE = Rule(
         "in `frontend/src/**/*.{ts,svelte}` (tests excluded) whose address "
         "targets `/api`, outside the shared request function "
         "`frontend/src/lib/api/request.ts`. The devices listener (the "
-        "remote-apps entrance) refuses an `/api` request that does not carry "
-        "the session the way it accepts, so a raw call works on the main "
-        "computer and fails from a phone or another computer."
+        "remote-apps entrance) admits an `/api` request only with the "
+        "signed-in session, and refuses one whose header and address name "
+        "different sessions; the shared function owns the session for every "
+        "call, so a raw call works on the main computer and can fail from a "
+        "phone or another computer."
     ),
     false_positive_examples=[
         "`fetch(src)` where `src` is a function parameter (`imageFailure.ts`): "
@@ -170,8 +174,9 @@ RULE = Rule(
         "in `allow_files`.",
     ],
     fix_hint=(
-        "Call `apiFetch` from `$lib/api/request`; keep an `<img src>` or "
-        "download link's session in its URL query, built by a helper."
+        "Call `apiFetch` from `$lib/api/request` (`sessionInAddress: true` for "
+        "a route that requires the session in the address); keep an `<img "
+        "src>` or download link's session in its URL query, built by a helper."
     ),
     check=_check,
     calibration_note=(

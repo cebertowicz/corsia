@@ -39,11 +39,11 @@ export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: bo
 	return ranges;
 }
 
-async function read(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
+async function read(threadId: string, range: Range): Promise<unknown[]> {
 	const params = new URLSearchParams({
-		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to, token: bearer,
+		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to,
 	});
-	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
+	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
 	if (!res.ok) return [];
 	const page = await res.json();
 	return Array.isArray(page?.messages) ? page.messages : [];
@@ -54,14 +54,13 @@ let turnEnded = false;
 
 async function refresh(): Promise<void> {
 	const threadId = get(activeThreadId);
-	const bearer = get(token);
 	const ended = turnEnded;
 	turnEnded = false;
-	if (!threadId || !bearer) return;
+	if (!threadId || !get(token)) return;
 	const ranges = rangesToRefresh(get(messages), threadId, ended);
 	if (!ranges.length) return;
 	try {
-		const pages = await Promise.all(ranges.map((range) => read(threadId, bearer, range)));
+		const pages = await Promise.all(ranges.map((range) => read(threadId, range)));
 		// A read that returns after the thread on screen changed is dropped.
 		if (get(activeThreadId) !== threadId) return;
 		const rows = pages.flat();

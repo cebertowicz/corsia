@@ -15,7 +15,7 @@
 		if (!threadId || !authToken || pending) return;
 		pending = true;
 		try {
-			await requestDeliveryAction('retry', { threadId, messageId: msg.id, authToken, failureText: 'Could not retry this wake' });
+			await requestDeliveryAction('retry', { threadId, messageId: msg.id, failureText: 'Could not retry this wake' });
 		} finally {
 			pending = false;
 		}

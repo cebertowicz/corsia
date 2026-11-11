@@ -1,20 +1,18 @@
 import type { ProviderEntry } from './providers';
 import type { NetworkServer } from './networkServers';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
-import { token } from './auth';
-import { get } from 'svelte/store';
 import { apiFetch } from '$lib/api/request';
 
 /** What the model rows ask a server to do: load, unload and cancel a job, or switch a catalog row on or off. */
 
 const BASE = '';
-const t = () => get(token) || '';
 
 // Cloud, External and harness models are catalog rows something else runs: offering
 // one is the catalog's enabled flag, written by row id. Only managed servers load.
 async function _setCatalogModelEnabled(modelDbId: string, enable: boolean): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/models/${encodeURIComponent(modelDbId)}?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/models/${encodeURIComponent(modelDbId)}`, {
+			sessionInAddress: true,
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled: enable }),
@@ -58,7 +56,8 @@ export async function loadModel(
 	if (toggled) return toggled;
 	if (server) {
 		try {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/load?token=${t()}`, {
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/load`, {
+				sessionInAddress: true,
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ model: modelId }),
@@ -79,8 +78,8 @@ export async function cancelJob(
 	if (!server) return { ok: false, message: 'no server' };
 	try {
 		const res = await apiFetch(
-			`${BASE}/api/settings/network-servers/${server.id}/jobs/${jobId}?token=${t()}`,
-			{ method: 'DELETE' },
+			`${BASE}/api/settings/network-servers/${server.id}/jobs/${jobId}`,
+			{ sessionInAddress: true, method: 'DELETE' },
 		);
 		const data = await res.json().catch(() => null);
 		if (res.ok) return { ok: true, message: data?.message };
@@ -108,7 +107,8 @@ export async function unloadModel(
 	if (toggled) return toggled;
 	if (server) {
 		try {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/unload?token=${t()}`, {
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/unload`, {
+				sessionInAddress: true,
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ model: modelId }),

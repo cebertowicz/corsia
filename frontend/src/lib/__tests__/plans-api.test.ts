@@ -55,8 +55,7 @@ afterEach(() => {
 describe('plan lifecycle mutations', () => {
 	it('posts a closed pause operation with revision and idempotency evidence', async () => {
 		mockFetch(200, { plan: { id: 'plan-1', state: 'paused', revision: 2 } });
-		const result = await mutatePlanLifecycle(
-			TOKEN, 'plan/1', 'pause', 1, 'pause:plan-1:1',
+		const result = await mutatePlanLifecycle('plan/1', 'pause', 1, 'pause:plan-1:1',
 		);
 		expect(result).toEqual({ status: 'success' });
 		const [url, opts] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
@@ -72,15 +71,15 @@ describe('plan lifecycle mutations', () => {
 
 	it('classifies stale, forbidden, and server failures without exposing bodies', async () => {
 		mockFetch(409, { detail: 'internal revision data' });
-		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
+		expect(await mutatePlanLifecycle('p', 'resume', 2, 'resume:p:2')).toEqual({
 			status: 'conflict',
 		});
 		mockFetch(403, { detail: 'internal principal' });
-		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
+		expect(await mutatePlanLifecycle('p', 'resume', 2, 'resume:p:2')).toEqual({
 			status: 'forbidden',
 		});
 		mockFetch(500, { detail: '/secret/path.py' });
-		expect(await mutatePlanLifecycle(TOKEN, 'p', 'resume', 2, 'resume:p:2')).toEqual({
+		expect(await mutatePlanLifecycle('p', 'resume', 2, 'resume:p:2')).toEqual({
 			status: 'error',
 			message: 'The server had a problem handling this request.',
 		});
@@ -90,13 +89,13 @@ describe('plan lifecycle mutations', () => {
 describe('compact Activity reads', () => {
 	it('uses dedicated workspace/project routes and its own decoder', async () => {
 		mockFetch(200, ACTIVITY_ENVELOPE, { ETag: '"activity-1"' });
-		expect(await readActivityWorkspace(TOKEN)).toEqual({
+		expect(await readActivityWorkspace()).toEqual({
 			status: 'fresh', payload: ACTIVITY_ENVELOPE, etag: '"activity-1"',
 		});
 		expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/plans/activity/scopes/workspace');
 
 		mockFetch(200, ACTIVITY_ENVELOPE, { ETag: '"activity-2"' });
-		await readActivityProject(TOKEN, 'project/weird id', '"activity-1"');
+		await readActivityProject('project/weird id', '"activity-1"');
 		const [url, opts] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
 		expect(url).toBe('/api/plans/activity/scopes/projects/project%2Fweird%20id');
 		expect((opts.headers as Record<string, string>)['If-None-Match']).toBe('"activity-1"');
@@ -104,7 +103,7 @@ describe('compact Activity reads', () => {
 
 	it('rejects the full operator representation on the compact route', async () => {
 		mockFetch(200, ENVELOPE, { ETag: '"operator"' });
-		expect(await readActivityWorkspace(TOKEN)).toEqual({
+		expect(await readActivityWorkspace()).toEqual({
 			status: 'error', message: 'The server sent an unreadable reply.',
 		});
 	});
@@ -113,7 +112,7 @@ describe('compact Activity reads', () => {
 describe('contextual operator reads', () => {
 	it('returns a fresh thread payload with ETag and authorization', async () => {
 		mockFetch(200, ENVELOPE, { ETag: '"rev-1"' });
-		const result = await readOperatorThread(TOKEN, 'thread-1');
+		const result = await readOperatorThread('thread-1');
 		expect(result).toEqual({ status: 'fresh', payload: ENVELOPE, etag: '"rev-1"' });
 		const [url, opts] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
 		expect(url).toBe('/api/plans/operator/threads/thread-1');
@@ -123,7 +122,7 @@ describe('contextual operator reads', () => {
 
 	it('sends If-None-Match and maps 304 without a payload', async () => {
 		mockFetch(304, null);
-		expect(await readOperatorThread(TOKEN, 'thread-1', '"rev-1"')).toEqual({
+		expect(await readOperatorThread('thread-1', '"rev-1"')).toEqual({
 			status: 'not-modified',
 		});
 		const [, opts] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
@@ -132,9 +131,9 @@ describe('contextual operator reads', () => {
 
 	it('maps unavailable targets without disclosing response bodies', async () => {
 		mockFetch(404, { detail: 'nope' });
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'not-found' });
+		expect(await readOperatorThread('thread-1')).toEqual({ status: 'not-found' });
 		mockFetch(403, { detail: 'nope' });
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'forbidden' });
+		expect(await readOperatorThread('thread-1')).toEqual({ status: 'forbidden' });
 	});
 
 	it('a 2xx reply that is not JSON is a failed read, not a hang', async () => {
@@ -142,25 +141,25 @@ describe('contextual operator reads', () => {
 			ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token')),
 			headers: { get: () => null },
 		}));
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'The server sent an unreadable reply.' });
+		expect(await readOperatorThread('thread-1')).toEqual({ status: 'error', message: 'The server sent an unreadable reply.' });
 	});
 
 	it('a 2xx body that is not the envelope is a failed read, not fresh state', async () => {
 		mockFetch(200, { plans: 'none' }, { ETag: '"x"' });
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'error', message: 'The server sent an unreadable reply.' });
+		expect(await readOperatorThread('thread-1')).toEqual({ status: 'error', message: 'The server sent an unreadable reply.' });
 	});
 
 	it('401 is unauthorized, not a retryable error', async () => {
 		mockFetch(401, { detail: 'Not authenticated' });
-		expect(await readOperatorThread(TOKEN, 'thread-1')).toEqual({ status: 'unauthorized' });
+		expect(await readOperatorThread('thread-1')).toEqual({ status: 'unauthorized' });
 	});
 
 	it('normalizes network and server failures', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
-		expect((await readOperatorThread(TOKEN, 'thread-1')).status).toBe('error');
+		expect((await readOperatorThread('thread-1')).status).toBe('error');
 
 		mockFetch(500, { detail: 'internal/secret/path.py:42' });
-		const result = await readOperatorThread(TOKEN, 'thread-1');
+		const result = await readOperatorThread('thread-1');
 		expect(result).toEqual({
 			status: 'error',
 			message: 'The server had a problem handling this request.',
@@ -169,25 +168,25 @@ describe('contextual operator reads', () => {
 
 	it('hits and URL-encodes the scope, thread, and child routes', async () => {
 		mockFetch(200, ENVELOPE, { ETag: '"r"' });
-		await readOperatorWorkspace(TOKEN);
+		await readOperatorWorkspace();
 		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
 			'/api/plans/operator/scopes/workspace',
 		);
 
 		mockFetch(200, ENVELOPE, { ETag: '"r"' });
-		await readOperatorProject(TOKEN, 'project/weird id');
+		await readOperatorProject('project/weird id');
 		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
 			'/api/plans/operator/scopes/projects/project%2Fweird%20id',
 		);
 
 		mockFetch(200, ENVELOPE, { ETag: '"r"' });
-		await readOperatorThread(TOKEN, 'thread/weird id');
+		await readOperatorThread('thread/weird id');
 		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
 			'/api/plans/operator/threads/thread%2Fweird%20id',
 		);
 
 		mockFetch(200, ENVELOPE, { ETag: '"r"' });
-		await readOperatorChild(TOKEN, 'node/weird id');
+		await readOperatorChild('node/weird id');
 		expect(vi.mocked(fetch).mock.calls[0][0]).toBe(
 			'/api/plans/operator/nodes/node%2Fweird%20id/child',
 		);

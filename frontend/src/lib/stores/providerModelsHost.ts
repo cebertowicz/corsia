@@ -18,11 +18,11 @@ export function canLoadAnyway(m: ProviderModel, finishing: boolean): boolean {
 }
 
 /** Writes oMLX's own pin on a model; false when it could not be written. */
-export async function putPinned(token: string, serverId: string, modelId: string, pinned: boolean): Promise<boolean> {
+export async function putPinned(serverId: string, modelId: string, pinned: boolean): Promise<boolean> {
 	try {
 		const res = await apiFetch(
-			`/api/settings/network-servers/${serverId}/models/${encodeURIComponent(modelId)}/settings?token=${encodeURIComponent(token)}`,
-			{ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned }) },
+			`/api/settings/network-servers/${serverId}/models/${encodeURIComponent(modelId)}/settings`,
+			{ sessionInAddress: true, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned }) },
 		);
 		return res.ok;
 	} catch { return false; }
@@ -65,9 +65,10 @@ export type PreloadInfo = {
 };
 
 /** The backend's answer to "can this model load now"; null when it can't be asked. */
-export async function checkLoad(token: string, estimatedGb: number, provider: string): Promise<Record<string, any> | null> {
+export async function checkLoad(estimatedGb: number, provider: string): Promise<Record<string, any> | null> {
 	try {
-		const res = await apiFetch(`/api/system/host-resources/check-load?token=${encodeURIComponent(token)}`, {
+		const res = await apiFetch(`/api/system/host-resources/check-load`, {
+			sessionInAddress: true,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ estimated_gb: estimatedGb, provider }),

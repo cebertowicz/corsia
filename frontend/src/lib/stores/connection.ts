@@ -1,5 +1,6 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/request';
+import { token } from '$lib/stores/sessionToken';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -69,15 +70,14 @@ export function applyDrainStatus(data: any): void {
 }
 
 export async function refreshDrainStatus(
-	authToken: string,
 	isCurrent: () => boolean = () => true,
 ): Promise<void> {
 	if (!isCurrent()) return;
 	const requestedGeneration = drainStatusGeneration;
 	const requestId = ++latestDrainRefreshRequest;
 	const response = await apiFetch(
-		`/api/system/drain?token=${encodeURIComponent(authToken)}`,
-		{ cache: 'no-store' },
+		`/api/system/drain`,
+		{ sessionInAddress: true, cache: 'no-store' },
 	);
 	if (!isCurrent()) return;
 	if (!response.ok) throw new Error(`drain status request failed: ${response.status}`);
@@ -99,8 +99,8 @@ export type SecurityAlert = {
 
 export const securityAlert = writable<SecurityAlert>(null);
 
-export async function checkSecurityAlert(authToken: string | null = null): Promise<void> {
-	if (!authToken) {
+export async function checkSecurityAlert(): Promise<void> {
+	if (!get(token)) {
 		securityAlert.set(null);
 		return;
 	}
@@ -112,9 +112,9 @@ export async function checkSecurityAlert(authToken: string | null = null): Promi
 	} catch {}
 }
 
-export async function dismissSecurityAlert(token: string): Promise<void> {
+export async function dismissSecurityAlert(): Promise<void> {
 	try {
-		await apiFetch(`/api/security/alert?token=${token}`, { method: 'DELETE' });
+		await apiFetch(`/api/security/alert`, { sessionInAddress: true, method: 'DELETE' });
 		securityAlert.set(null);
 	} catch {}
 }
