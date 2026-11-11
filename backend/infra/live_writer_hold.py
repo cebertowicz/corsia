@@ -66,14 +66,20 @@ def hold_for_live_writer(
 
 
 def clear_live_writer_holds(db: sqlite3.Connection, thread_id: str | None = None) -> bool:
-    """Lift live-writer holds (one thread's, or all); true when any input became claimable."""
+    """Lift live-writer holds (one thread's, or all); true when any input became claimable.
+
+    Only claimed FIFO inputs are ever held, and every one has an ``input_order`` that is never
+    cleared, so ``input_order IS NOT NULL`` selects the same rows. It lets SQLite read the small
+    queued-inputs index instead of every message: boot recovery runs this for all threads while
+    holding the write lock, and the full scan was most of that hold on a large database.
+    """
     if not db.in_transaction:
         raise RuntimeError("live-writer hold release requires a write transaction")
     return db.execute(
         "UPDATE messages SET write_outcome=NULL,delivery_error=NULL,"
         "delivery_revision=delivery_revision+1 WHERE "
         + ("" if thread_id is None else "thread_id=? AND ")
-        + "delivery_state='queued' AND active_turn_id IS NULL "
+        + "input_order IS NOT NULL AND delivery_state='queued' AND active_turn_id IS NULL "
         "AND write_outcome='proved_no_write' AND delivery_error=?",
         (() if thread_id is None else (thread_id,)) + (LIVE_WRITER_HOLD,),
     ).rowcount > 0
