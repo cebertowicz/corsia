@@ -3,6 +3,7 @@ import { subagentThreadRows } from './subagents';
 import { updateThreadRow } from './threadRow';
 import { activeThreadId, reasoningEffort, threads } from './threads';
 import { apiFetch } from '$lib/api/request';
+
 /** A thread's effort wherever it lives: the open thread's global, its list row, or a worker's own row. */
 function writeThreadEffort(threadId: string, effort: string | null): void {
 	updateThreadRow(threadId, { reasoning_effort: effort });

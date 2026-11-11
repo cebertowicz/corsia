@@ -4,7 +4,8 @@
 	import { threads, demoteAgentLocally, type Thread } from '$lib/stores/threads';
 	import { Button } from './ui';
 	import { plainResponseError } from '$lib/plainError';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	let { thread }: { thread: Thread | null } = $props();
 
 	let editing = $state(false);

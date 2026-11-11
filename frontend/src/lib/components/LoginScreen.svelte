@@ -9,7 +9,8 @@
 	import LivingMark from './LivingMark.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	interface Props { onNoAccount?: () => void; }
 	const { onNoAccount }: Props = $props();
 	type Phase = 'checking' | 'no-account' | 'form' | 'error';

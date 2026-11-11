@@ -99,7 +99,7 @@ describe('ExternalProviderSettings billing', () => {
 		const calls = fetch.mock.calls as unknown as [string, RequestInit][];
 		expect(calls[0][0]).toContain('/api/settings/network-servers/ns-external/billing');
 		expect(JSON.parse(calls[0][1].body as string)).toEqual({ mode: 'pay_per_use', monthly_price_cents: null, charge_day: null, expected_billing_revision: 7 });
-		expect(calls.some(([url]) => /\/api\/settings\/network-servers\?/.test(url)), 'the open card reloads its server list after a billing save').toBe(true);
+		expect(calls.some(([url]) => url === '/api/settings/network-servers'), 'the open card reloads its server list after a billing save').toBe(true);
 	});
 
 	it('shows the server text when an endpoint billing save fails, keeps the editor open and does not reload', async () => {

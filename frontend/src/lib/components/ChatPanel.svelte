@@ -1,5 +1,5 @@
 <script lang="ts">
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';

@@ -3,6 +3,7 @@ import { messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
 import type { MessagePage, PagerPort } from '$lib/messagePager';
 import { apiFetch } from '$lib/api/request';
+
 /**
  * The transcript pager's port: how an older page of the thread on screen is fetched, hydrated into the
  * message store, and prepended under the reader's place. It is one contract (`PagerPort`) and holds none of

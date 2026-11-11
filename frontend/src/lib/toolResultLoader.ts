@@ -1,5 +1,6 @@
 import { messages } from '$lib/stores/threads';
 import { apiFetch } from '$lib/api/request';
+
 export type ToolResultState = 'absent' | 'deferred' | 'loading' | 'failed' | 'loaded';
 
 function updateToolCall(

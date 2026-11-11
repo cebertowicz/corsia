@@ -130,7 +130,7 @@ describe('setModelLabel', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		expect(await setModelLabel('claude-code/opus[1m]', '   ')).toEqual({ ok: true });
 		const [url, init] = fetchMock.mock.calls[0];
-		expect(url).toContain('/api/settings/models/claude-code%2Fopus%5B1m%5D?');
+		expect(url).toBe('/api/settings/models/claude-code%2Fopus%5B1m%5D');
 		expect(JSON.parse(init.body)).toEqual({ alias: null });
 	});
 });

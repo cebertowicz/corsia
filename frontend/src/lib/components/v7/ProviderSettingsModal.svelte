@@ -18,7 +18,8 @@
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
 	import AccountsBlock from './AccountsBlock.svelte';
 	import type { ProviderSettingsTab } from './providerSettingsTypes';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	interface Props {
 		provider: HostProvider;
 		initialTab?: ProviderSettingsTab;

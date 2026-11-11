@@ -18,6 +18,7 @@ import { get, writable } from 'svelte/store';
 import type { Thread } from './threads';
 import { seedThreadModelTruth } from './threadModelTruth';
 import { apiFetch } from '$lib/api/request';
+
 /**
  * `unknown` is the absence of information, never a claim about the worker.
  * `idle` is a server-confirmed "not running" — it does NOT say how the worker

@@ -4,7 +4,8 @@
 	import { plainResponseError } from '$lib/plainError';
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsContextCreate from './SettingsContextCreate.svelte';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	// One project's level on Settings › Context: the markdown files in its context/.
 	let { projectId }: { projectId: string } = $props();
 

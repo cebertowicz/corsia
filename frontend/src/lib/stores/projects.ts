@@ -6,6 +6,7 @@ import { enterScope, exitScope } from './uiScope';
 import { projectAccent } from '$lib/utils/projectColors';
 import type { Thread } from './threads';
 import { apiFetch } from '$lib/api/request';
+
 export interface ProjectInfo {
 	id: string;
 	name: string;

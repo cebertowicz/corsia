@@ -7,7 +7,8 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { Button, IconButton } from './ui';
 	import { plainResponseError } from '$lib/plainError';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	let {
 		threadId = null,
 		hiddenThread = null,

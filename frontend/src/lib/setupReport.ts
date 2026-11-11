@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import type { AiRow } from './components/SetupAiRows.svelte';
 import { apiFetch } from '$lib/api/request';
+
 /** The desktop shell's way to save a setup report; absent in a browser. */
 export const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 

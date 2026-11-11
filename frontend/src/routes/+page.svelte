@@ -45,7 +45,8 @@
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
 	let sidebarOpen = $state(false);
 	let conductorLookup = $state<CoordinationLookup>({ kind: 'unknown' });

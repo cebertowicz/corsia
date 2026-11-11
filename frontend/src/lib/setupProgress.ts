@@ -1,5 +1,6 @@
 import type { SetupAttempt } from './setupConnect.svelte';
 import { apiFetch } from '$lib/api/request';
+
 export type SetupPicks = { claude: boolean; chatgpt: boolean };
 export type SetupHandoff = { tools: Record<string, SetupAttempt> };
 

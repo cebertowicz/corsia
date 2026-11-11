@@ -2,6 +2,7 @@ import { saveFailureText } from '../saveFailure';
 import type { Thread } from './threads';
 import { loadThreads } from './threadsLoad';
 import { apiFetch } from '$lib/api/request';
+
 export interface ThreadLocalOnly {
 	effective: boolean;
 	cause: 'inherited' | 'project' | 'own' | 'off';

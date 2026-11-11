@@ -22,7 +22,8 @@
 	import LinkRepoModal from './LinkRepoModal.svelte';
 	import { plainResponseError } from '$lib/plainError';
 	import { StatePill } from '$lib/components/ui';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	const lens = $derived($docLens);
 	const entries = $derived($docLibrary);
 	const sources = $derived($docSources);

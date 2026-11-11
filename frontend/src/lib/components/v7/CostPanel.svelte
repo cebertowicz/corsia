@@ -2,7 +2,8 @@
 	import { token } from '$lib/stores/auth';
 	import { formatKnownCost, type ModelEntry } from '$lib/stores/costs';
 	import { get } from 'svelte/store';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	interface Props {
 		providerName: string;
 	}

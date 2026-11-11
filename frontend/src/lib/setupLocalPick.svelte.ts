@@ -1,5 +1,6 @@
 import { localHostRefusal } from './localHostRefusal';
 import { apiFetch } from '$lib/api/request';
+
 /** The model CORSIA's oMLX picked for this computer, as `/api/setup/local-model` reports it. */
 export type LocalPickModel = { name: string; repository: string; download_size_bytes: number; download_size_gb: number; context_window: number };
 export type LocalPick = {

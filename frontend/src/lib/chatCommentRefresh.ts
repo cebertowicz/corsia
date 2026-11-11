@@ -5,6 +5,7 @@ import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 import { apiFetch } from '$lib/api/request';
+
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;

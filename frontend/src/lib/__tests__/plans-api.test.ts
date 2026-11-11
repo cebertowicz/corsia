@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 import {
 	readActivityWorkspace,
 	readActivityProject,
@@ -42,8 +43,14 @@ function mockFetch(status: number, body: unknown, headers: Record<string, string
 	vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
 }
 
-beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+	vi.unstubAllGlobals();
+	sessionToken.set(TOKEN);
+});
+afterEach(() => {
+	vi.restoreAllMocks();
+	sessionToken.set(null);
+});
 
 describe('plan lifecycle mutations', () => {
 	it('posts a closed pause operation with revision and idempotency evidence', async () => {

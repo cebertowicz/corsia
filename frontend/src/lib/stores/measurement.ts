@@ -5,6 +5,7 @@ import { grainScopeParams, measurementGrain, parseGrain, type MeasurementGrain }
 import { decodeAveragePeriods, decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 import { decodeSeriesRows } from './measurementRows';
 import { apiFetch } from '$lib/api/request';
+
 export type MeasurementScope = { project: string; agent: string | null };
 
 export interface MeasurementRow {

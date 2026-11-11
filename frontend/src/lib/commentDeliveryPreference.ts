@@ -3,6 +3,7 @@ import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
 import { on } from '$lib/ws/events';
 import { apiFetch } from '$lib/api/request';
+
 const LEGACY_KEY = 'corsia.document-comments.deliver-immediately';
 const ROUTE = '/api/doc-feedback/delivery-preference';
 

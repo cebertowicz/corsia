@@ -92,7 +92,7 @@ describe('Sidebar deactivation', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		deactivate();
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('Agent deactivated'));
-		expect(fetchMock).toHaveBeenCalledWith('/api/agents/agent-b?token=test', { method: 'DELETE' });
+		expect(fetchMock).toHaveBeenCalledWith('/api/agents/agent-b', { method: 'DELETE', headers: { Authorization: 'Bearer test' } });
 		expect(get(threads).find((thread) => thread.id === 'agent-b')?.agent_enabled).toBe(0);
 	});
 });

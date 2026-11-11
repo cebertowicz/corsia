@@ -106,8 +106,8 @@ describe('drain status', () => {
 			expect(get(drainStatus)?.blockingTurns[0]?.threadId).toBe('thread-live');
 		});
 		expect(fetch).toHaveBeenCalledWith(
-			'/api/system/drain?token=test-token',
-			{ cache: 'no-store' },
+			'/api/system/drain',
+			{ cache: 'no-store', headers: { Authorization: 'Bearer test-token' } },
 		);
 		vi.unstubAllGlobals();
 	});

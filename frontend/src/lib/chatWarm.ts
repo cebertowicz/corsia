@@ -12,6 +12,7 @@ import { get } from 'svelte/store';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, findModelById, getModelDispatchId, modelAvailability } from '$lib/stores/models';
 import { apiFetch } from '$lib/api/request';
+
 const warmDedupKeys = new Set<string>();
 const warmAborts = new Map<string, AbortController>();
 

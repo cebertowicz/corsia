@@ -12,6 +12,7 @@ import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe
 import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
 import type { UpdateSchedule, UpdateStatus } from './types';
 import { apiFetch } from '$lib/api/request';
+
 const POLL_MS = 1_000;
 export type { UpdateSchedule, UpdateStatus } from './types';
 export const updateStatus = writable<UpdateStatus | null>(null);

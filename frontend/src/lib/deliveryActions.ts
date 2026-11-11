@@ -7,6 +7,7 @@ import {
 import { isDisplayedThread } from './stores/displayedThreads';
 import { toasts } from './stores/toast';
 import { apiFetch } from '$lib/api/request';
+
 /**
  * The two exits a user has from a message that has not been delivered.
  *

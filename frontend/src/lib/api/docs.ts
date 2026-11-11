@@ -80,7 +80,7 @@ export interface TreeRoot extends ScopeRoot {
 }
 
 export async function fetchTree(projectId?: string | null): Promise<TreeRoot[]> {
-	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
+	const q = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
 	const data = await ok(await apiFetch(`/api/files/tree${q}`));
 	return data.roots;
 }
@@ -93,7 +93,7 @@ export async function fetchTree(projectId?: string | null): Promise<TreeRoot[]> 
  */
 export async function fetchRoots(projectId?: string | null): Promise<ScopeRoot[]> {
 	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
-	const data = await ok(await apiFetch(`/api/files/tree${q}&nodes=false`));
+	const data = await ok(await apiFetch(`/api/files/tree?nodes=false${q}`));
 	return data.roots;
 }
 
@@ -108,7 +108,7 @@ export async function fetchRevision(
 	projectId?: string | null,
 	artifactId?: string | null,
 ): Promise<DocRevision> {
-	const q = `&path=${encodeURIComponent(path)}`
+	const q = `?path=${encodeURIComponent(path)}`
 		+ (projectId ? `&project_id=${encodeURIComponent(projectId)}` : '')
 		+ (artifactId ? `&artifact_id=${encodeURIComponent(artifactId)}` : '');
 	return ok(await apiFetch(`/api/files/revision${q}`));
@@ -116,7 +116,7 @@ export async function fetchRevision(
 
 export async function fetchContent(path: string, opts: { projectId?: string | null; threadId?: string | null; liveOpen?: boolean } = {}): Promise<DocContent> {
 	const q =
-		`&path=${encodeURIComponent(path)}` +
+		`?path=${encodeURIComponent(path)}` +
 		(opts.projectId ? `&project_id=${encodeURIComponent(opts.projectId)}` : '') +
 		(opts.threadId ? `&thread_id=${encodeURIComponent(opts.threadId)}` : '') +
 		(opts.liveOpen ? '&live_open=true' : '');

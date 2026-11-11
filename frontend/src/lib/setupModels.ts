@@ -2,6 +2,7 @@ import type { Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
 import { apiFetch } from '$lib/api/request';
+
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string };
 

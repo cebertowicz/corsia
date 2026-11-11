@@ -74,7 +74,7 @@ describe('saveThreadTitle', () => {
 
 		expect(get(threads)[0].title).toBe('New title');
 		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/threads/agent-1?token=token%20with%20spaces',
+			'/api/threads/agent-1',
 			expect.objectContaining({ method: 'PATCH' }),
 		);
 	});

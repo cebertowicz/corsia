@@ -10,7 +10,7 @@ afterEach(() => { token.set(null); threads.set([]); vi.unstubAllGlobals(); });
 
 it('loads coordination rows and clears them on sign out', async () => {
 	token.set('session');
-	vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ json: async () => url.includes('/api/threads?') ? { threads: [], coordination: [row] } : {} })));
+	vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ json: async () => url === '/api/threads' ? { threads: [], coordination: [row] } : {} })));
 	await loadThreads();
 	expect(get(coordinationThreads).map((item) => item.title)).toEqual(['CORSIA']);
 	token.set(null);

@@ -5,6 +5,7 @@ import { threads } from './threads';
 import { acceptsThreadAccountFrame, loadThreadVendorAccounts, threadAccountFields } from './threadVendorAccounts';
 import { SERVER_UNREACHABLE } from '$lib/plainError';
 import { apiFetch } from '$lib/api/request';
+
 export type PinResult = { ok: true; changed: boolean } | { ok: false; message: string };
 
 /** What the picker tells a person for each reason the backend refuses a pin; any other is the generic sentence. */

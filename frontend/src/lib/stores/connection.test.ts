@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 import { checkSecurityAlert, securityAlert } from './connection';
 
 describe('security alert connection check', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
 		securityAlert.set(null);
+		sessionToken.set(null);
 	});
 
 	it('uses the lifecycle token for the authenticated alert request', async () => {
@@ -16,6 +18,7 @@ describe('security alert connection check', () => {
 		vi.stubGlobal('fetch', fetchMock);
 
 		const authToken = 'session token';
+		sessionToken.set(authToken);
 		await checkSecurityAlert(authToken);
 
 		expect(fetchMock).toHaveBeenCalledWith('/api/security/alert', {

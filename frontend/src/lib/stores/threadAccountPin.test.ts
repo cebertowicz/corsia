@@ -43,7 +43,7 @@ describe('pinThreadAccount', () => {
 		expect(result).toEqual({ ok: true, changed: true });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		const [url, init] = fetchMock.mock.calls[0];
-		expect(String(url)).toMatch(new RegExp(`^/api/threads/${THREAD}/vendor-account\\?token=`));
+		expect(String(url)).toMatch(new RegExp(`^/api/threads/${THREAD}/vendor-account$`));
 		expect(init.method).toBe('PUT');
 		expect(JSON.parse(init.body)).toEqual({ account_id: 'personal' });
 	});

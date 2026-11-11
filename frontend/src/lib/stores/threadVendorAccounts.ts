@@ -4,6 +4,7 @@ import { threads } from './threads';
 import type { VendorAccount } from './vendorAccounts';
 import { plainErrorText, SERVER_UNREACHABLE } from '$lib/plainError';
 import { apiFetch } from '$lib/api/request';
+
 export interface ThreadVendorAccount extends VendorAccount { hold_reason: string | null }
 interface SelectionRead {
 	key: string;

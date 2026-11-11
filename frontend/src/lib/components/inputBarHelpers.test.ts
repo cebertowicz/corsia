@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 
 import { uploadInputFile, loadUploadLimits, resetUploadLimits, updateInputBarHeight } from './inputBarHelpers';
 
@@ -25,9 +26,11 @@ beforeEach(() => {
 	});
 });
 
+beforeEach(() => sessionToken.set('test-token'));
 afterEach(() => {
 	vi.unstubAllGlobals();
 	resetUploadLimits();
+	sessionToken.set(null);
 });
 
 describe('upload limits are server-owned', () => {

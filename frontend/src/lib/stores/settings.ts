@@ -3,6 +3,7 @@ import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { applyFeaturePatch, confirmsFeaturePatch, enqueueFeaturePatch, type FeatureSettings, type SettingsPatch, SettingsSnapshotGate } from './settingsFeaturePatch';
 import { apiFetch } from '$lib/api/request';
+
 export { loadUpdateStatus, updateStatus, type UpdateStatus } from '$lib/update/store';
 
 export interface CoreSettings {

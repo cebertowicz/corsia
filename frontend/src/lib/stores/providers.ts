@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { apiFetch } from '$lib/api/request';
+
 export interface ProviderEntry {
 	name: string;
 	label: string;

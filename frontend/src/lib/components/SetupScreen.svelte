@@ -1,5 +1,5 @@
 <script lang="ts">
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';

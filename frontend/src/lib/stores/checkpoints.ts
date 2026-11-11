@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { apiFetch } from '$lib/api/request';
+
 export type CheckpointTrigger = 'manual' | 'pressure' | 'model_switch' | 'idle' | 'agent';
 export type CheckpointMode = 'warm' | 'cold';
 export type CheckpointStatus =

@@ -11,7 +11,8 @@
 	import CommentReplyList from './comments/CommentReplyList.svelte';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './comments/comment-link.css';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false, picked = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean } = $props();
 	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
 	const replies = $derived(chatReplyIndex($messages, threadId));

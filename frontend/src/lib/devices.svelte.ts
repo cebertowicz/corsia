@@ -2,6 +2,7 @@ import { on } from '$lib/ws/events';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { apiFetch } from '$lib/api/request';
+
 /**
  * Settings › System › Let other devices connect: the host's own state from `GET /api/devices` (corsia#638), reduced to
  * what the row draws. `code.expires_in_seconds` is the only expiry the server sends; the countdown is counted down

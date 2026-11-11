@@ -183,7 +183,7 @@ describe('composer model identity', () => {
 		await vi.waitFor(() => expect(get(activeModelId)).toBe(DISPATCH_ID));
 
 		expect(globalThis.fetch).toHaveBeenCalledWith(
-			'/api/threads/thread-1?token=tok',
+			'/api/threads/thread-1',
 			expect.objectContaining({
 				method: 'PATCH',
 				body: JSON.stringify({ model: DISPATCH_ID }),

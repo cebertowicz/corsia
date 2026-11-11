@@ -1,6 +1,7 @@
 import { writable, derived, type Readable } from 'svelte/store';
 import bundleSelf from './build-info.json';
 import { apiFetch } from '$lib/api/request';
+
 export interface BuildInfo {
 	label: string;
 	short_hash: string;

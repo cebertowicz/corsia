@@ -5,6 +5,7 @@ import { loadThreadVendorAccounts } from '$lib/stores/threadVendorAccounts';
 import { PIN_FAILED } from '$lib/stores/threadAccountPin';
 import { SERVER_UNREACHABLE } from '$lib/plainError';
 import { apiFetch } from '$lib/api/request';
+
 /**
  * The calls the first-run sources panel makes beyond reading the sources: the CLI install and
  * link routes, the conductor's account bind step, and the added-account sign-in. Each takes

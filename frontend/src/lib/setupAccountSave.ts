@@ -1,5 +1,6 @@
 import { token } from '$lib/stores/auth';
 import { apiFetch } from '$lib/api/request';
+
 export type AccountChanges = { name?: string; email?: string; password?: string; usage_sharing?: boolean };
 
 /** A failed account save's line, with the reference its log entry carries when the server gave one. */

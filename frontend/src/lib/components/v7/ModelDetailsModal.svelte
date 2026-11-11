@@ -8,7 +8,8 @@
 	import { canEditCheckpointWindow } from './modelWarning';
 	import ImageInputEditor from './ImageInputEditor.svelte';
 	import ModelLabelEditor from './ModelLabelEditor.svelte';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	interface Props {
 		model: ProviderModel;
 		providerLabel: string;

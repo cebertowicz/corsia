@@ -3,6 +3,7 @@ import { getModelDispatchId } from '$lib/stores/models';
 import { setupModelWorks, type SetupModel } from '$lib/setupModels';
 import { on } from '$lib/ws/events';
 import { apiFetch } from '$lib/api/request';
+
 type WarmProgressEvent = {
 	type: 'thread_warm_progress';
 	thread_id?: string;
@@ -84,7 +85,7 @@ export function createSetupWarm() {
 				stopSubscription = on('thread_warm_progress', (event: WarmProgressEvent) => {
 					acceptProgress(event, lookup.target.thread_id, model);
 				});
-				const query = new URLSearchParams({ token: session, model, progress: 'true' });
+				const query = new URLSearchParams({ model, progress: 'true' });
 				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
 				const response = await apiFetch(`${url}&wait=true`, { method: 'POST', signal });
 				const body: { ok?: boolean; message?: string } | null = await response.json().catch(() => null);

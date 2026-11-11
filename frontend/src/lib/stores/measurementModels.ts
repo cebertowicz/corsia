@@ -3,6 +3,7 @@ import { measurementScope, type MeasurementScope } from './measurement';
 import { decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 import { grainScopeParams, measurementGrain, type MeasurementGrain } from './measurementGrain';
 import { apiFetch } from '$lib/api/request';
+
 export type ModelCostClass = 'priced' | 'local' | 'no_pricing';
 const COST_CLASSES: ReadonlySet<unknown> = new Set(['priced', 'local', 'no_pricing']);
 /** Why the rate cell has no figure; `none` means it has one. */

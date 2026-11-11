@@ -1,12 +1,11 @@
 import { get, writable } from 'svelte/store';
-import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 import { apiFetch } from '$lib/api/request';
+
 export type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 
 const BASE = '';
-const auth = () => get(token) || '';
 
 export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
 	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !removed.some((row) => row.id === account.id)), ...removed];
@@ -40,8 +39,9 @@ function confirmAccounts(update: (accounts: VendorAccount[]) => VendorAccount[])
 }
 
 function url(path: string, query: Record<string, string> = {}): string {
-	const params = new URLSearchParams({ token: auth(), ...query });
-	return `${BASE}${path}?${params.toString()}`;
+	const params = new URLSearchParams(query);
+	const qs = params.toString();
+	return `${BASE}${path}${qs ? `?${qs}` : ''}`;
 }
 
 async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string; ref?: string }> {

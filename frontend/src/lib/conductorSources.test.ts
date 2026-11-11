@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 
 import {
 	anyReady,
@@ -47,7 +48,11 @@ describe('anyReady', () => {
 });
 
 describe('source routes', () => {
-	afterEach(() => vi.unstubAllGlobals());
+	beforeEach(() => sessionToken.set('tok'));
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		sessionToken.set(null);
+	});
 
 	it('owns source and local-model routes with the caller token', async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => ({

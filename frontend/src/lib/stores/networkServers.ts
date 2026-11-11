@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { token } from './auth';
 import { apiFetch } from '$lib/api/request';
+
 export type EndpointKind = 'local' | 'lan' | 'tailscale' | 'public';
 
 export interface NetworkEndpoint {

@@ -4,6 +4,7 @@ import { modelAvailability, type Model } from './models';
 import { activeModelId, getModelDispatchId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { activeThreadId, draftAccountId } from './threads';
 import { apiFetch } from '$lib/api/request';
+
 // The thread the catalog was last read for: its harness rows read that
 // thread's account, so another account's limit does not grey them out.
 let loadedScope: string | null | undefined;

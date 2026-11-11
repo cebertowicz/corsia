@@ -75,7 +75,7 @@ describe('updateNetworkServer', () => {
 		await updateNetworkServer('srv-1', { base_url: 'https://ws.example/v1', dialect: 'openai' });
 
 		const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-		expect(url).toBe('/api/settings/network-servers/srv-1?token=session-under-test');
+		expect(url).toBe('/api/settings/network-servers/srv-1');
 		expect(init.method).toBe('PUT');
 	});
 });

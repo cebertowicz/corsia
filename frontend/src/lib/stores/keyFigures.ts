@@ -3,6 +3,7 @@ import { measurementScope, type MeasurementScope } from './measurement';
 import { grainScopeParams, measurementGrain, viewerTimeZone, type MeasurementGrain } from './measurementGrain';
 import { decodeSpan } from './measurementPeriod';
 import { apiFetch } from '$lib/api/request';
+
 /** A token figure: the sum of what was recorded and how many calls recorded none of it (a lower bound when above zero). */
 export type KpiTokenFigure = { value: number; unknown_records: number };
 export type KpiPeriod = {

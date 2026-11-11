@@ -1,6 +1,7 @@
 import { plainErrorText } from '$lib/plainError';
 import { resizeTextInputToContent } from '$lib/textInputResize';
 import { apiFetch } from '$lib/api/request';
+
 /** Which composer sheet is open above the input bar; null when none is. */
 export type SheetView = 'attachments' | 'model' | 'thinking' | 'context' | null;
 

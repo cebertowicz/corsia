@@ -13,6 +13,7 @@ import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHis
 import { token } from './auth';
 import { activeThreadId, messages, type Message } from './threads';
 import { apiFetch } from '$lib/api/request';
+
 const DEBOUNCE_MS = 400;
 /** The newest carded messages re-read per nudge; older ones refresh when scrolled to and re-read. */
 const MAX_CARDED = 12;
@@ -40,7 +41,7 @@ export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: bo
 
 async function read(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
 	const params = new URLSearchParams({
-		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to, token: bearer,
+		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to,
 	});
 	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
 	if (!res.ok) return [];

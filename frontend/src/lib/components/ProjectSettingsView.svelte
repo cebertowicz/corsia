@@ -15,7 +15,8 @@
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import type { ProjectDetail, AgentRow } from '$lib/api/projectSettingsTypes';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	// Settings › Projects › <name>: what this project can use, then what only it has.
 	let { projectId }: { projectId: string } = $props();
 

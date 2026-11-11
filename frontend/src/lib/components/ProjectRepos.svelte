@@ -9,7 +9,8 @@
 	import { token } from '$lib/stores/auth';
 	import { toasts } from '$lib/stores/toast';
 	import { plainResponseError } from '$lib/plainError';
-import { apiFetch } from '$lib/api/request';
+	import { apiFetch } from '$lib/api/request';
+
 	let { projectId }: { projectId: string } = $props();
 
 

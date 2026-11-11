@@ -5,6 +5,7 @@ import { threads, coordinationThreads, type Thread } from './threads';
 import { uiScope } from './uiScope';
 import { fetchScopeTarget } from '$lib/utils/conductor';
 import { apiFetch } from '$lib/api/request';
+
 /** Refreshes the authoritative thread payload and its dependent scope target. */
 export async function loadThreads(auth: string | null = get(token)): Promise<void> {
 	if (!auth) return;

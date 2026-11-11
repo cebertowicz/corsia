@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { token as sessionToken } from '$lib/stores/sessionToken';
 
 import {
 	decideHostAccessLease,
@@ -51,9 +53,12 @@ const LEASE: HostAccessLease = {
 	updated_at: '2026-07-18T16:01:00+00:00',
 };
 
+beforeEach(() => sessionToken.set('token-1'));
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
+	sessionToken.set(null);
 });
 
 describe('host access API', () => {

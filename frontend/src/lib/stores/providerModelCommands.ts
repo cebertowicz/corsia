@@ -4,6 +4,7 @@ import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { token } from './auth';
 import { get } from 'svelte/store';
 import { apiFetch } from '$lib/api/request';
+
 /** What the model rows ask a server to do: load, unload and cancel a job, or switch a catalog row on or off. */
 
 const BASE = '';

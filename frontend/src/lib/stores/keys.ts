@@ -3,6 +3,7 @@ import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { disconnect } from '$lib/ws/connection';
 import { apiFetch } from '$lib/api/request';
+
 /** One entry's metadata. The API never returns a value. */
 export interface KeyEntry {
 	name: string;

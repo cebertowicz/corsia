@@ -150,8 +150,8 @@ describe('StatusBanners', () => {
 		flushSync();
 
 		expect(fetch).toHaveBeenCalledWith(
-			'/api/system/drain?token=test-token',
-			{ cache: 'no-store' },
+			'/api/system/drain',
+			{ cache: 'no-store', headers: { Authorization: 'Bearer test-token' } },
 		);
 		expect(host.textContent).toContain(
 			'waiting on “Current blocker” (thread-new)',

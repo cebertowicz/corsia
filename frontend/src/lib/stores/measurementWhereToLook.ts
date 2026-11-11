@@ -3,6 +3,7 @@ import { measurementScope, panelSeriesIds, type MeasurementScope } from './measu
 import { grainScopeParams, measurementGrain } from './measurementGrain';
 import { decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 import { apiFetch } from '$lib/api/request';
+
 export type WhereToLookFormat = 'percent' | 'hours' | 'minutes' | 'ratio' | 'tokens' | 'dollars';
 const FORMATS: ReadonlySet<unknown> = new Set(['percent', 'hours', 'minutes', 'ratio', 'tokens', 'dollars']);
 

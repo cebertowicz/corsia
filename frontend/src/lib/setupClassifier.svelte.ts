@@ -1,4 +1,5 @@
 import { apiFetch } from '$lib/api/request';
+
 export type ClassifierState = { state: 'idle' | 'downloading' | 'verifying' | 'self_testing' | 'ready' | 'failed'; bytes_done?: number; bytes_total?: number; interrupted?: boolean; code?: string; reason?: string; retryable?: boolean; bytes_needed?: number };
 
 /** The one required background download. Setup never shows it and never waits on it: it starts, and a failure retries quietly. */

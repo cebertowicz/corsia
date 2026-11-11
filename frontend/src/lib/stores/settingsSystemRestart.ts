@@ -3,6 +3,7 @@ import type { UpdatePhase } from '../update/model';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { apiFetch } from '$lib/api/request';
+
 const BASE = '';
 
 export async function restartSystem(

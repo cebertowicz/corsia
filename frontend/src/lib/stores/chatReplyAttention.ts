@@ -3,6 +3,7 @@ import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { token } from '$lib/stores/auth';
 import { activeThreadId } from '$lib/stores/threads';
 import { apiFetch } from '$lib/api/request';
+
 export const chatReplyAttention = writable<{ threadId: string; items: CommentReplyItem[] } | null>(null);
 // Every endpoint returns a thread-wide snapshot, including message pages.
 // Order requests across all callers so a late response cannot restore older state.

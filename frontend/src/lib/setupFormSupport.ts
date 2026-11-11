@@ -1,6 +1,7 @@
 import type { SetupStep } from '$lib/components/SetupShell.svelte';
 import { localHostRefusal } from './localHostRefusal';
 import { apiFetch } from '$lib/api/request';
+
 type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
 
 export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';

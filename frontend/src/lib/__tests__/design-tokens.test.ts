@@ -65,11 +65,11 @@ const RUNTIME_PROVIDED = new Set([
  */
 const KNOWN_UNRESOLVED_BASELINE_COUNT = 5;
 const KNOWN_UNRESOLVED = new Set([
-	'lib/components/ThreadAgentPanel.svelte:356 → var(--text-quaternary)',
-	'lib/components/v7/OmlxServerInfoPanel.svelte:137 → var(--surface-2)',
-	'lib/components/v7/OmlxServerInfoPanel.svelte:143 → var(--link)',
-	'lib/components/v7/OmlxServerInfoPanel.svelte:150 → var(--err)',
-	'lib/components/v7/OmlxServerInfoPanel.svelte:190 → var(--surface-2)',
+	'lib/components/ThreadAgentPanel.svelte:357 → var(--text-quaternary)',
+	'lib/components/v7/OmlxServerInfoPanel.svelte:138 → var(--surface-2)',
+	'lib/components/v7/OmlxServerInfoPanel.svelte:144 → var(--link)',
+	'lib/components/v7/OmlxServerInfoPanel.svelte:151 → var(--err)',
+	'lib/components/v7/OmlxServerInfoPanel.svelte:191 → var(--surface-2)',
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

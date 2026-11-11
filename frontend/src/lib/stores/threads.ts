@@ -51,6 +51,7 @@ export function isNavAgent(s: Thread): boolean {
 export type { ChatComment } from '../chatCommentTypes';
 import type { ChatComment } from '../chatCommentTypes';
 import { apiFetch } from '$lib/api/request';
+
 export interface Message {
 	id: string;
 	thread_id: string;

@@ -2,6 +2,7 @@ import { derived, get } from 'svelte/store';
 import { threads } from './threads';
 import { token } from './auth';
 import { apiFetch } from '$lib/api/request';
+
 export const pinnedConversations = derived(threads, ($s) => {
 	const set = new Set<string>();
 	for (const thread of $s) {

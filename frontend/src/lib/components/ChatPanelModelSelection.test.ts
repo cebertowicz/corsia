@@ -122,7 +122,7 @@ describe('ChatPanel session model hydration', () => {
 		await panel.selectThread('thread-c');
 		await tick();
 
-		expect(requests.filter((url) => url.includes('/warm?'))).toEqual([]);
+		expect(requests.filter((url) => url.endsWith('/warm'))).toEqual([]);
 	});
 
 	it('deduplicates composer warm intent per session and model across A-B-C-A', async () => {
@@ -152,10 +152,10 @@ describe('ChatPanel session model hydration', () => {
 			await panel.triggerWarm();
 		}
 
-		expect(requests.filter((url) => url.includes('/warm?'))).toEqual([
-			expect.stringContaining('/threads/thread-a/warm?'),
-			expect.stringContaining('/threads/thread-b/warm?'),
-			expect.stringContaining('/threads/thread-c/warm?'),
+		expect(requests.filter((url) => url.endsWith('/warm'))).toEqual([
+			'/api/threads/thread-a/warm',
+			'/api/threads/thread-b/warm',
+			'/api/threads/thread-c/warm',
 		]);
 	});
 
@@ -374,7 +374,7 @@ describe('ChatPanel session model hydration', () => {
 	it('rehydrates checkpoint history when the active thread changes', async () => {
 		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url.includes('/checkpoints?')) {
+			if (url.endsWith('/checkpoints')) {
 				return {
 					ok: true,
 					json: async () => ({

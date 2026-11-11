@@ -1,5 +1,6 @@
 import { localHostRefusal } from './localHostRefusal';
 import { apiFetch } from '$lib/api/request';
+
 export type SourceAccountState = 'ready' | 'limited' | 'signed_out' | 'unchecked' | 'no_usable_model';
 
 /** One account of a Claude Code or Codex source, as the picker's account rows list it. */

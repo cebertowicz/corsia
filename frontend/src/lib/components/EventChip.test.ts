@@ -228,8 +228,8 @@ describe('EventChip', () => {
 
 		await vi.waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledWith(
-				'/api/threads/thread-restart-wake/messages/restart-wake-1/cancel?token=ui-token',
-				{ method: 'POST' },
+				'/api/threads/thread-restart-wake/messages/restart-wake-1/cancel',
+				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});
 		await vi.waitFor(() => {
@@ -278,7 +278,7 @@ describe('EventChip', () => {
 				expect.stringContaining(
 					'/api/threads/thread-restart-wake/messages/restart-wake-1/retry',
 				),
-				{ method: 'POST' },
+				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});
 		// The response carries the projection, so the released row is adopted.

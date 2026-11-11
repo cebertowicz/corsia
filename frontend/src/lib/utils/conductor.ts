@@ -4,6 +4,7 @@ import { applySwitchRead, beginSwitchRead } from '$lib/stores/threadModelTruth';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 import { apiFetch } from '$lib/api/request';
+
 export interface CoordinationTarget {
 	thread_id: string;
 	title?: string | null;

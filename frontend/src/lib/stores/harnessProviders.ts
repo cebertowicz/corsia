@@ -8,6 +8,7 @@ import { HARNESSES, settingsHarnessModelIds } from './harnessMembership';
 import { modelAvailability } from './modelTurn';
 import type { ModelState, ProviderModel } from './providerModels';
 import { apiFetch } from '$lib/api/request';
+
 // Claude Code and Codex run on the user's own CLI sign-in: nothing to configure,
 // so their cards choose which discovered models the picker offers and, per
 // account, whether to spend past the plan limit (vendorAccounts.ts).

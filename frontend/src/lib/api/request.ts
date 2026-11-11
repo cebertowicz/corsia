@@ -15,9 +15,18 @@ import { token } from '$lib/stores/sessionToken';
  * before. WebSocket streams are outside this path: a browser cannot set a header on a socket, so
  * they authenticate in their first frame, which is what the listener expects from them.
  */
-export function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-	const headers = new Headers(init.headers);
+export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
 	const session = get(token);
-	if (session && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${session}`);
+	const given = init?.headers;
+	if (!session || new Headers(given).has('Authorization')) {
+		return init === undefined ? fetch(input) : fetch(input, init);
+	}
+	const authorization = `Bearer ${session}`;
+	// A plain header object stays one, so a caller's own headers keep their names and case.
+	if (!given || (!Array.isArray(given) && !(given instanceof Headers))) {
+		return fetch(input, { ...init, headers: { ...given, Authorization: authorization } });
+	}
+	const headers = new Headers(given);
+	headers.set('Authorization', authorization);
 	return fetch(input, { ...init, headers });
 }

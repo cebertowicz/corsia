@@ -80,7 +80,7 @@ describe('checkpoint actions', () => {
 
 		expect(checkpoint.id).toBe('checkpoint-running');
 		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/threads/thread-1/checkpoints?token=token',
+			'/api/threads/thread-1/checkpoints',
 			expect.objectContaining({ method: 'POST' }),
 		);
 		expect(get(checkpointsByThread).get(THREAD_ID)?.checkpoints[0]).toEqual(checkpoint);
@@ -122,7 +122,7 @@ describe('checkpoint actions', () => {
 
 		expect(checkpoint.status).toBe('cancelled');
 		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/threads/thread-1/checkpoints/checkpoint-exact/cancel?token=token',
+			'/api/threads/thread-1/checkpoints/checkpoint-exact/cancel',
 			expect.objectContaining({ method: 'POST' }),
 		);
 	});
