@@ -9,7 +9,7 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
-	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
@@ -23,7 +23,7 @@
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; exact?: boolean; below?: boolean; end?: boolean; label?: SelectionLabel; inWidget?: boolean };
+	type PendingSelection = SelectionOffer;
 
 	let {
 		docState,

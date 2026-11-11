@@ -6,13 +6,14 @@ const TOUCH_SLOP = 6;
 /** A scroll or horizontal pan is not the tap fallback for a widget comment. */
 export const touchMovedBeyond = (start: { x: number; y: number }, current: { x: number; y: number }) => Math.hypot(current.x - start.x, current.y - start.y) > TOUCH_SLOP;
 
-export interface WidgetSelection {
+/** The one shape of what the Comment offer is raised for: a selection, where its button sits, and how its draft is labelled. */
+export interface SelectionOffer {
 	from: number; to: number; text: string; top: number; left: number;
-	anchor: () => DOMRect | null;
+	anchor?: () => DOMRect | null;
 	/** Read when a draft is started, from the state the selection was made in: the parse it needs is paid once per comment, not per selection change. */
 	label?: SelectionLabel;
 	/** Marks a selection made inside a table or diagram widget. */
-	inWidget: true;
+	inWidget?: boolean;
 	/** The Comment button sits on the selection's top edge instead of beside its end, so it never covers text in the selected row. */
 	above?: boolean;
 	/** `left` and `top` are where the button is drawn, not the selection's end: it sits at that point as given. */
@@ -21,6 +22,12 @@ export interface WidgetSelection {
 	below?: boolean;
 	/** The button ends at `left` rather than starting there. */
 	end?: boolean;
+}
+
+/** A selection made inside a table or diagram widget, which always has its anchor. */
+export interface WidgetSelection extends SelectionOffer {
+	anchor: () => DOMRect | null;
+	inWidget: true;
 }
 
 export function caretAt(x: number, y: number): { node: Node; offset: number } | null {

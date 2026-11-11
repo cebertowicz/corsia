@@ -47,7 +47,7 @@ export function tableCells(src: string): CellSpan[] {
 }
 
 /**
- * Every cell the table is drawn with, in drawn order: the source cells (`tableCells`) plus, for a row shorter than the
+ * Every cell the table is drawn with, in drawn order: the source cells (`tableCells`) up to the header's width plus, for a row shorter than the
  * header, the empty cells the renderer pads it with. A padded cell has no source of its own, so its span is zero-width at
  * the row's end, where the source would gain it; every padded cell of a row sits at that offset. Only the paths that open
  * or walk drawn cells read this; anything that anchors on source reads `tableCells`.
@@ -61,7 +61,8 @@ export function tableGrid(src: string): CellSpan[] {
 	});
 	const columns = real.filter((span) => span.row === 0).length, grid: CellSpan[] = [];
 	ends.forEach((end, row) => {
-		const spans = real.filter((span) => span.row === row);
+		// A row with more cells than the header keeps those spans in the source, and the renderer draws no cell for them.
+		const spans = real.filter((span) => span.row === row && span.col < columns);
 		grid.push(...spans);
 		for (let col = spans.length; col < columns; col++) {
 			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, padded: true });

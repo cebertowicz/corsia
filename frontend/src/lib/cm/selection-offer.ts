@@ -1,18 +1,9 @@
 import type { EditorView } from '@codemirror/view';
-import type { SelectionLabel } from '$lib/stores/commentDraft';
 import { emptyCellSelection, offerBesideTable, openCellText } from './widget-cell-comment';
 import { widgetCommentLabel } from './widget-cells';
+import type { SelectionOffer } from './widget-selection-types';
 
-export interface SelectionOffer {
-	from: number; to: number; text: string; top: number; left: number;
-	anchor?: () => DOMRect | null;
-	label?: SelectionLabel;
-	above?: boolean;
-	exact?: boolean;
-	below?: boolean;
-	end?: boolean;
-	inWidget?: boolean;
-}
+export type { SelectionOffer };
 
 /**
  * What the Comment offer is raised for from the editor's own selection: the selected text, placed beside its end; for a caret

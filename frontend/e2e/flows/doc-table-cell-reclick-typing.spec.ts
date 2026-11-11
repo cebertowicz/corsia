@@ -2,6 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { frame } from '../support/tableCells';
 
 /**
  * Reclicking a commented cell to close its card must not send the next keystroke somewhere the reader never clicked.
@@ -97,6 +98,10 @@ async function savedAfterProseMarker(page: Page, request: Page['request'], docPa
 const TABLE_AND_AFTER = ['| Item | Notes |', '| --- | --- |', `${CELL_ROW} Replace the faded ${QUOTED} |`, '', PARA].join('\n');
 
 /** The typing lands where the press put the caret: the start of the clicked cell's source, and nowhere else. */
+/** The caret is in the open cell's editor now: read once, never retried, so a card that took the focus and gave it back would fail. */
+const caretInCell = async (page: Page, what: string) =>
+	expect(await page.evaluate(() => !!document.activeElement?.closest('.cm-md-cell-editor')), what).toBe(true);
+
 function assertTypedInClickedCell(saved: string) {
 	expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 	expect(saved, 'the text typed after the reclick reached the document').toContain('XYZ');
@@ -116,14 +121,19 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 		await highlight.click();
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.cm-md-table .cm-comment-anchor.cm-comment-focused')).toBeVisible();
+		await settled(page);
+		await caretInCell(page, 'the click that opened the card left the caret in the cell it opened');
 
 		await highlight.click({ force: true });
 		await settled(page);
+		await caretInCell(page, 'the reclick left it there too');
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-reclick');
+		await frame(page, 'g1-reclick-focus-1440');
 
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-typing');
+		await frame(page, 'g1-reclick-typed-1440');
 		expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 		expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
 		expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
@@ -156,11 +166,14 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await highlight.tap();
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.drawer-panel')).toBeVisible();
+		await settled(page);
+		await caretInCell(page, 'the sheet the tap opened left the caret in the cell the same tap opened');
 
 		// The sheet covers the table: the tap lands on whatever is on top of the highlight, as a reader's does.
 		await highlight.tap({ force: true });
 		await settled(page);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-after-reclick');
+		await frame(page, 'g1-reclick-focus-393');
 
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);

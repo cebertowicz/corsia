@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Rig } from './typed-reveal-rig';
+import { openCellAt, openCellState } from './widget-cell-state';
 import { build, caretAt, cellCaret, cellEditor, cellEl, cellText, cleanup, clicked, editingCell, mountedEditor, press, THREEROW, typed } from './widget-cell-rig';
 
 /**
@@ -81,6 +82,40 @@ describe('Tab and Enter move through the table', () => {
 		expect(editingCell(r), 'the editor moved on to the next cell').toBe(cellEl(r, 1, 1));
 		expect(cellEl(r, 1, 0).textContent, 'the cell behind shows what was typed, unseen under nothing').toBe('Login!');
 		expect(r.view.state.doc.toString()).toContain('| Login! | Done | first |');
+	});
+});
+
+describe('a row with more cells than the header', () => {
+	// The renderer draws no cell for the third cell of the first body row, so the walk has none to stop at.
+	const WIDE = '| A | B |\n| --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 |';
+
+	it('Tab from its last drawn cell goes to the next row, and Shift-Tab comes back to that cell', () => {
+		const r = track(build(WIDE));
+		clicked(r, cellEl(r, 1, 1));
+		press(r, 'Tab');
+		expect(openIn(r, 2, 0), 'the next row first drawn cell').toBe(true);
+		press(r, 'Tab', true);
+		expect(openIn(r, 1, 1), 'back on the last drawn cell, past the undrawn one').toBe(true);
+		expect(cellText(r)).toBe(' 2 ');
+	});
+
+	it('leaves the reader a caret in an open cell: nothing opens on a cell that is not drawn', () => {
+		const r = track(build(WIDE));
+		clicked(r, cellEl(r, 1, 1));
+		press(r, 'Tab');
+		expect(mountedEditor(r), 'an editor is open').not.toBeNull();
+		expect(r.view.state.field(openCellState)?.row, 'and the open cell is the drawn one').toBe(2);
+		expect(r.view.dom.classList.contains('cm-md-cell-open')).toBe(true);
+	});
+
+	it('closes the cell, and the document caret shows, when the cell it was moved to is not drawn', () => {
+		const r = track(build(WIDE));
+		clicked(r, cellEl(r, 1, 1));
+		const start = r.view.state.doc.toString().indexOf('| 3 |') + 1;
+		r.view.dispatch({ effects: openCellAt.of({ ...r.view.state.field(openCellState)!, col: 2, from: start, to: start + 3 }) });
+		expect(r.view.state.field(openCellState), 'no cell is left open').toBeNull();
+		expect(mountedEditor(r)).toBeNull();
+		expect(r.view.dom.classList.contains('cm-md-cell-open'), 'so nothing hides the document caret').toBe(false);
 	});
 });
 

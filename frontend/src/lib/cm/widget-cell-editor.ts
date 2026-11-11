@@ -11,7 +11,7 @@ import {
 import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly, inTableCell } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
-import { CellFocusKeeper } from './widget-cell-focus';
+import { CellSwipe } from './widget-cell-swipe';
 import { CELL_THEME } from './widget-cell-theme';
 import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
@@ -52,10 +52,10 @@ class CellEditors {
 	private readonly layer = new CellLayer();
 	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
 	private clickedAt: { x: number; y: number } | null = null;
-	private readonly focus: CellFocusKeeper;
+	private readonly swipe: CellSwipe;
 
 	constructor(private readonly host: EditorView) {
-		this.focus = new CellFocusKeeper(host, () => this.editor);
+		this.swipe = new CellSwipe(host);
 		host.dom.addEventListener('click', this.openPressed);
 		document.addEventListener('pointerdown', this.pressedElsewhere, true);
 	}
@@ -63,7 +63,7 @@ class CellEditors {
 	/** A click on a drawn cell edits it: a caret in that cell, the way a click in prose places one. */
 	private readonly openPressed = (event: MouseEvent) => {
 		const host = this.host;
-		if (this.focus.swiped()) return;
+		if (this.swipe.swiped()) return;
 		const clicked = cellClicked(host, event.target instanceof Element ? event.target : null, { x: event.clientX, y: event.clientY });
 		if (!clicked) return;
 		const { widget, cell, row } = clicked;
@@ -72,7 +72,6 @@ class CellEditors {
 		const open = cellToOpen(host.state, block.from, row.rowIndex, cell.cellIndex);
 		if (open) {
 			this.clickedAt = { x: event.clientX, y: event.clientY };
-			this.focus.opened();
 			host.dispatch({ effects: openCellAt.of(open) });
 		}
 	};
@@ -108,7 +107,7 @@ class CellEditors {
 		if (!this.editor) this.attach(cell);
 		const editor = this.editor;
 		if (!editor) return;
-		this.mount(cell);
+		if (!this.mount(cell)) return;
 		if (moved || update.docChanged) {
 			const text = cellSource(update.state, cell), current = editor.state.doc.toString();
 			if (current !== text) editor.dispatch({ changes: cellDifference(current, text), userEvent: CELL_SYNC });
@@ -117,16 +116,16 @@ class CellEditors {
 		if (moved) this.mirrorToDocument(cell, editor);
 	}
 
-	/** Puts the editor over the cell it edits, or out of the document while that cell is not drawn. */
-	private mount(cell: OpenCell) {
+	/** Puts the editor over the cell it edits. A cell the table does not draw closes: with no cell to lie over, nothing could show the caret. False when it closed. */
+	private mount(cell: OpenCell): boolean {
 		const wrap = this.wrap;
-		if (!wrap) return;
+		if (!wrap) return true;
 		// Looked up by the table's first character, not the cell's: an empty cell's range sits on a delimiter the renderer
 		// does not draw, so its own position can resolve to the node after the table.
 		const widget = drawnTableAt(this.host, cell.tableFrom);
 		const td = widget ? cellElement(widget, cell) : null;
-		if (!td) { this.unmount(); return; }
-		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; this.layer.follow(); return; }
+		if (!td) { this.close(); return false; }
+		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; this.layer.follow(); return true; }
 		const hadFocus = wrap.contains(document.activeElement);
 		this.layer.open(td, wrap, this.host);
 		this.mounted = td;
@@ -141,6 +140,7 @@ class CellEditors {
 			this.placeAtClick();
 		}
 		this.editor?.requestMeasure();
+		return true;
 	}
 
 	/** The caret where the click landed, as a click in prose puts it. */
@@ -151,12 +151,6 @@ class CellEditors {
 		// The nearest place in the cell's text, so a press on padding or a border still leaves the caret where typing lands.
 		const at = editor.posAtCoords(clicked, false);
 		editor.dispatch({ selection: { anchor: at, head: at } });
-	}
-
-	/** Takes the editor off the cell, leaving the cell as a plain rendered cell. */
-	private unmount() {
-		this.layer.close();
-		this.mounted = null;
 	}
 
 	/**
@@ -286,7 +280,7 @@ class CellEditors {
 		this.host.dom.classList.remove('cm-md-cell-open');
 		this.host.dom.removeEventListener('click', this.openPressed);
 		document.removeEventListener('pointerdown', this.pressedElsewhere, true);
-		this.focus.destroy();
+		this.swipe.destroy();
 	}
 }
 

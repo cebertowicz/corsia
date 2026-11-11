@@ -77,15 +77,23 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 	const drawn = el.querySelector('table');
 	if (!fresh || !drawn) return false;
 	const held = tableCells(was);
+	// The delimiter row holds each column's alignment and no cell's text, so a change to it alone moves no cell's source:
+	// it is compared as its own line, and every cell takes the new alignment attributes.
+	const realigned = delimiterRow(src) !== delimiterRow(was);
 	let copied = false;
 	for (const span of tableCells(src)) {
 		const before = held.find((item) => item.row === span.row && item.col === span.col);
 		const unchanged = before && was.slice(before.rawFrom, before.rawTo) === src.slice(span.rawFrom, span.rawTo);
 		const forced = force && span.row === force.row && span.col === force.col;
-		if (unchanged && !forced) continue;
 		const next = fresh.rows[span.row]?.cells[span.col];
 		const now = drawn.rows[span.row]?.cells[span.col];
-		if (next && now) { copyCell(now, next); copied = true; }
+		if (!next || !now) continue;
+		if (unchanged && !forced) {
+			if (realigned) { copyAttributes(now, next); copied = true; }
+			continue;
+		}
+		copyCell(now, next);
+		copied = true;
 	}
 	// A copied cell arrives unpainted, so the comment paint pass must not take the table for already drawn: the same
 	// marks over the same source (a closed cell, an edit that keeps the length) would otherwise leave its comments off.
@@ -99,12 +107,20 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
  * Only its attributes and its inside are replaced, which is also the smaller mutation for the browser to lay out.
  */
 function copyCell(into: HTMLTableCellElement, from: HTMLTableCellElement) {
+	copyAttributes(into, from);
+	into.replaceChildren(...from.childNodes);
+}
+
+/** The table's delimiter line (`| :--- | ---: |`), the second line of its source. */
+const delimiterRow = (src: string) => src.split('\n')[1] ?? '';
+
+/** A cell's attributes only (its alignment among them), leaving its content and anything live inside it where it is. */
+function copyAttributes(into: HTMLTableCellElement, from: HTMLTableCellElement) {
 	// The marker that an editor lies over this cell belongs to the reader's place, not to the source, so it rides through
 	// the patch untouched; the layer takes it off when the cell closes or the editor moves on.
 	if (into.classList.contains(CELL_EDITING)) from.classList.add(CELL_EDITING);
 	for (const attribute of Array.from(from.attributes)) if (into.getAttribute(attribute.name) !== attribute.value) into.setAttribute(attribute.name, attribute.value);
 	for (const { name } of Array.from(into.attributes)) if (!from.hasAttribute(name)) into.removeAttribute(name);
-	into.replaceChildren(...from.childNodes);
 }
 
 /**

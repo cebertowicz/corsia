@@ -48,21 +48,6 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(cellEl(r)!.textContent, 'the cell is rendered text again, with what was typed').toBe('LoginXY');
 	});
 
-	it('takes focus back from a panel the same click opened, but not from a field the reader chose', () => {
-		const r = track(open());
-		const sheet = document.createElement('div'), field = document.createElement('textarea');
-		sheet.tabIndex = -1;
-		document.body.append(sheet, field);
-		clicked(r);
-		r.view.contentDOM.focus();
-		expect(cellEditor(r)!.dom.contains(document.activeElement), 'the document\'s own text, focused by the same tap, gives it back').toBe(true);
-		clicked(r);
-		sheet.focus();
-		expect(cellEditor(r)!.dom.contains(document.activeElement), 'a sheet that took focus right after the click gives it back').toBe(true);
-		field.focus();
-		expect(document.activeElement, 'a field the reader then chose keeps it').toBe(field);
-	});
-
 	it('closes when the reader presses outside the cell', () => {
 		const r = track(open());
 		clicked(r);
