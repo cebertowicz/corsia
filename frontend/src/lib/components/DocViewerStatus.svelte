@@ -125,9 +125,10 @@
 				if (identity && tools && age) {
 					const probe = document.createElement('span');
 					Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', whiteSpace: 'nowrap', font: getComputedStyle(age).font });
-					probe.textContent = 'Owner';
+					const marker = age.querySelector<HTMLElement>('button.identity > .pending, button.identity > .failure');
+					probe.textContent = ownershipPending ? `${ownershipPending.kind === 'owner' ? 'Owner' : 'Supervisor'}: W… Saving…` : marker ? `Owner ${marker.textContent}` : 'Owner';
 					document.body.appendChild(probe);
-					const ownerWidth = probe.getBoundingClientRect().width;
+					const ownerWidth = probe.getBoundingClientRect().width + (marker ? 4 : 0);
 					if (verified) { probe.style.font = getComputedStyle(verified).font; probe.textContent = verified.textContent; }
 					const verifiedWidth = verified ? probe.getBoundingClientRect().width + 6 : 0;
 					probe.remove();
@@ -259,7 +260,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails || compactOwnerOnly} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}<span class="plain-owner-name">Owner: {freshness.owner_name}</span><span class="plain-owner-only">Owner</span>{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={!ownershipSaving && (ownershipInDetails || compactOwnerOnly)} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}<span class="plain-owner-name">Owner: {freshness.owner_name}</span><span class="plain-owner-only">Owner</span>{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -288,7 +289,7 @@
 	</div>
 	{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
 		<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={useMetadataRow || ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={!ownershipSaving && (useMetadataRow || ownershipInDetails)} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 			{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 			{#if freshness && freshnessPresentation}
 				{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>

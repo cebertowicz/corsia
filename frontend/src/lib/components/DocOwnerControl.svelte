@@ -67,7 +67,7 @@
 <svelte:window onresize={measurePane} />
 <button bind:this={ownAnchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
 	<span class="compact-owner"><span class="owner-name">Owner: {ownerLabel}</span><span class="owner-only">Owner</span></span>
-	<span class="full-owner">{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
+	<span class="full-owner">{#if pending}<span class="identity-part">{pending.kind === 'owner' ? 'Owner' : 'Supervisor'}: <span class="identity-name pending">{pending.name}</span></span>{:else if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name">{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name">{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name">{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
 	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}
 </button>
 {#snippet fields()}
@@ -102,6 +102,7 @@
 	.identity.compact .full-owner { display: none; }
 	.identity:hover { color: var(--text-primary); }
 	.pending { opacity: 0.65; }
+	.identity > .pending, .identity > .failure { flex: none; }
 	.failure { color: var(--red-text); }
 	@media (any-pointer: coarse) { .identity { min-height: 44px; align-items: center; } }
 	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
