@@ -5,8 +5,8 @@ others are made only after ``events.rules`` found a matching rule, so an event
 no rule matches never pays them. The artifact's owner and lifecycle are
 routing's, never read again here. A webhook pays its one read before routing's
 ordered preparation (:func:`type_rules`), and none in it when no rule for its
-type is enabled; only with a self-rule of its type are the projects tracking
-its repository read (a policy query and git). Names no connector.
+type is enabled; only with a self-rule of its type is its connector's unrouted
+scope read (:func:`unrouted_projects`). Names no connector.
 """
 
 from __future__ import annotations

@@ -53,10 +53,10 @@ async def test_a_failed_repository_lookup_fires_no_self_rule_and_records_why(
     assert _wakes("a") == [] and sent == []
     [decision] = _decisions(rule_id=rule["id"])
     assert (decision["thread_id"], decision["outcome"], decision["reason"]) == (
-        "a", "dead_lettered", "lookup of the projects it reaches failed")
+        "a", "dead_lettered", "could not read which projects may see this event")
     assert any("unrouted scope lookup failed for github pr.merged" in line for line in warnings)
     [why] = (await _tool("a", operation="explain", event_id=decision["event_id"]))["decisions"]
-    assert why["explanation"] == f"rule {rule['id']} could not deliver it: lookup of the projects it reaches failed"
+    assert why["explanation"] == f"rule {rule['id']} could not deliver it: could not read which projects may see this event"
 
 
 # -- 2. No decision row outlives its rule or thread --------------------------------------------

@@ -194,6 +194,21 @@ def test_the_reach_filter_still_holds_a_writer_the_scope_lets_through(isolated_d
         "outsider", "held", "account_out_of_reach")
 
 
+def test_an_unreadable_reach_wakes_no_one_and_records_nothing_against_any_rule(
+        isolated_db, sent, monkeypatch):
+    _agent("finance", "p")
+    _agent("outsider", "q")
+    account = _account("p")
+    _rule("finance", "from_domain", "acme.com")
+    _rule("outsider", "from_domain", "acme.com")
+    monkeypatch.setattr("connections.connected_accounts.reached_projects",
+                        lambda _account, db: None)
+    _mail(account, "billing@acme.com", "m1")
+    assert (_wakes("finance"), _wakes("outsider")) == ([], [])
+    assert _rows("SELECT 1 FROM event_route_decisions WHERE via='rule'") == []
+    assert len(_no_owner_parked()) == 1  # the mail still parks: no one took it
+
+
 def test_a_domain_rule_wakes_for_its_subdomains_and_never_a_lookalike(isolated_db, sent):
     _agent("finance", "p")
     account = _account()

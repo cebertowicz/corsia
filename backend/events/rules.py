@@ -58,7 +58,7 @@ PAUSED = "paused"
 NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
 OUT_OF_PROJECT = "recipient outside the rule's project"
-LOOKUP_FAILED = "lookup of the projects it reaches failed"
+LOOKUP_FAILED = "could not read which projects may see this event"
 UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's project; rule turned off"
 CREATOR_GONE = "creator gone"
@@ -124,10 +124,14 @@ def reaches_unrouted(rule: Rule) -> bool:
 
 def lookup_failed(db: sqlite3.Connection, event: RuleEvent) -> list[Outcome]:
     """Fail closed, as ``create`` does: no self-rule fires on an event routing gave no
-    thread when its connector's unrouted scope can't be read; each that matched is
-    dead-lettered with the reason."""
+    thread when its connector's unrouted scope can't be read. Where the connector
+    declares a repository fact, each matching rule names a repository its writer's
+    project tracks, so it is dead-lettered with the reason; with none, nothing narrows
+    the rules to writers who may see the event, so none is recorded against it."""
     logger.warning("event rules: unrouted scope lookup failed for {} {}; no self-rule fired",
                    event.connector, event.event_type)
+    if repository_fact(event.connector) is None:
+        return []
     return [
         Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=LOOKUP_FAILED)
         for rule in map(from_row, rule_reads.self_rules(db, event.connector, event.event_type))
