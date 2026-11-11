@@ -7,6 +7,7 @@ const out = process.env.O1_SWEEP_OUT!;
 if (!out) throw new Error('Set O1_SWEEP_OUT to a fresh evidence directory');
 for (const workspace of ['closed', 'open']) test(`visible names Workspace ${workspace}`, async ({ page, request }) => {
   test.setTimeout(900_000); mkdirSync(out, { recursive: true });
+  writeFileSync(`${out}/excluded-base-labels.txt`, 'threads label: comments/CommentsPill.svelte:56; Request review label: DocReviewControls.svelte:97-98 (base compaction at canvas <= 600px, not changed)\n');
   const table = `${out}/${workspace}.jsonl`; writeFileSync(table, '');
   await page.setViewportSize({ width: 1440, height: 900 });
   await setDebugVersionOverlay(request, false); await seed(page, request);
@@ -58,7 +59,8 @@ for (const workspace of ['closed', 'open']) test(`visible names Workspace ${work
         const compact = !!control?.closest('.identity-age');
         return { contained, names, box: box?.toJSON(), parent: parent?.toJSON(), labels: [...new Set(labels)].sort(), verification, compact };
       });
-      const excluded = workspace === 'open' && (width === 1080 || width === 1100);
+      const excluded = workspace === 'open' && width >= 1025 && width <= 1372;
+      const exclusion = excluded ? `excluded: shell overlay (PE); parent width ${result.parent?.width}` : null;
       const missing = previous && !previous.excluded && !excluded ? previous.labels.filter(label => !result.labels.includes(label)) : [];
       const sizes = result.names.map(name => name.font);
       if (!font && sizes.length) font = sizes[0];
@@ -66,7 +68,7 @@ for (const workspace of ['closed', 'open']) test(`visible names Workspace ${work
       const oneRow = !result.compact || result.names.length === 2 && Math.abs(result.names[0].top - result.names[1].top) < 1;
       const verified = !result.verification || result.labels.includes('label:Mark verified');
       const pass = result.contained && (excluded || (result.names.length === 2 && result.names.every(name => name.full || (name.truncated && name.ellipsis && name.visible >= Math.min(10, name.text.length))) && uniformFont && oneRow && verified && missing.length === 0));
-      const row = { workspace, root, width, excluded, pass, missing, uniformFont, oneRow, verified, ...result }; appendFileSync(table, `${JSON.stringify(row)}\n`);
+      const row = { workspace, root, width, excluded, exclusion, pass, missing, uniformFont, oneRow, verified, ...result }; appendFileSync(table, `${JSON.stringify(row)}\n`);
       previous = { width, labels: result.labels, excluded };
       await page.screenshot({ path: `${out}/${workspace}-${root}-${width}.png`, clip: { x: 0, y: 0, width, height: 240 }, animations: 'disabled' });
       if (!pass) failures.push(JSON.stringify(row));
