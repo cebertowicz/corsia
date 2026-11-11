@@ -7,14 +7,6 @@
 	let { artifactId, ownership, onChange, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null), open = $bindable(false), externalAnchor = null }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null; open?: boolean; externalAnchor?: HTMLButtonElement | null } = $props();
 	let ownAnchor = $state<HTMLButtonElement>();
 	const anchor = $derived(externalAnchor ?? ownAnchor ?? null);
-	let paneWidth = $state(360);
-	function measurePane() {
-		const header = anchor?.closest<HTMLElement>('.document-header');
-		if (!header) return;
-		const style = getComputedStyle(header);
-		paneWidth = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-	}
-	$effect(() => { if (open) measurePane(); });
 	let picker = $state<'owner' | 'supervisor' | null>(null);
 	let search = $state('');
 	let typing = $state(false);
@@ -64,8 +56,7 @@
 	}
 </script>
 
-<svelte:window onresize={measurePane} />
-<button bind:this={ownAnchor} type="button" class="identity" aria-label={`Owner: ${ownerLabel}${pending?.kind === 'owner' ? ', saving' : error && errorFor === 'owner' ? ', change failed' : ''}; Supervisor: ${supervisorLabel}${pending?.kind === 'supervisor' ? ', saving' : error && errorFor === 'supervisor' ? ', change failed' : ''}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
+<button bind:this={ownAnchor} type="button" class="identity" aria-label={`Owner: ${ownerLabel}${pending?.kind === 'owner' ? ', saving' : error && errorFor === 'owner' ? ', change failed' : ''}; Supervisor: ${supervisorLabel}${pending?.kind === 'supervisor' ? ', saving' : error && errorFor === 'supervisor' ? ', change failed' : ''}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; }}>
 	{#if sameAgent && !pending && !error}
 		<span class="identity-part">Owner and supervisor: <span class="identity-name">{ownerLabel}</span></span>
 	{:else}
@@ -87,7 +78,7 @@
 		{#if pending?.kind === 'supervisor'}<span role="status">Saving…</span>{/if}
 	</div>
 {/snippet}
-<Popover {anchor} {open} initialFocus={errorFor === 'supervisor' ? '#supervisor-choice' : '#owner-choice'} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
+<Popover {anchor} {open} initialFocus={errorFor === 'supervisor' ? '#supervisor-choice' : '#owner-choice'} placement="bottom" width="min(360px, calc(100vw - 16px))" onClose={() => { open = false; picker = null; }}>
 	{@render fields()}
 </Popover>
 
@@ -100,7 +91,7 @@
 	.identity-part > .pending, .identity-part > .failure { flex: none; }
 	.failure { color: var(--red-text); }
 	@media (any-pointer: coarse) { .identity { min-height: 44px; align-items: center; } }
-	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.owner-picker { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); }
 	label { color: var(--text-secondary); font-size: var(--text-footnote); }
 	input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--touch-target); padding: var(--space-2); color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-lg); font: inherit; }

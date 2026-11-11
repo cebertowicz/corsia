@@ -8,7 +8,7 @@ import type { Page } from '@playwright/test';
 // popover state carries from one frame to the next. Nothing here changes the stored ownership.
 const out = process.env.O1_FRAMES_OUT!;
 if (!out) throw new Error('Set O1_FRAMES_OUT to a fresh evidence directory');
-const widths = (process.env.O1_WIDTHS ?? '375,393,899,1025,1280,1440').split(',').map(Number);
+const widths = (process.env.O1_WIDTHS ?? '375,393,899,1025,1280,1372,1440').split(',').map(Number);
 
 async function measure(page: Page) {
   return page.evaluate(() => {
@@ -30,13 +30,15 @@ async function measure(page: Page) {
 }
 
 test.use({ seedPerTest: true });
-for (const workspace of ['closed', 'open'] as const) for (const width of widths) {
-  test(`frames Workspace ${workspace} ${width}`, async ({ page, request, context }) => {
-    test.setTimeout(240_000); page.setDefaultTimeout(10_000);
+// One seed for the whole set, so an agent keeps its id (and its avatar colour, derived from the id) in every frame.
+test('frames', async ({ page, request, context }) => {
+  test.setTimeout(3_000_000); page.setDefaultTimeout(10_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setDebugVersionOverlay(request, false);
+  const open = await seed(page, request);
+  let pickerMinimum = 0;
+  for (const workspace of ['closed', 'open'] as const) for (const width of widths) {
     const dir = `${out}/${workspace}`; mkdirSync(dir, { recursive: true });
-    await page.setViewportSize({ width, height: 900 });
-    await setDebugVersionOverlay(request, false);
-    const open = await seed(page, request);
     async function fresh() {
       const target = await context.newPage(); target.setDefaultTimeout(10_000);
       // Closing the Workspace panel is a desktop control, so a closed frame loads at 1440 and closes it, then
@@ -76,17 +78,25 @@ for (const workspace of ['closed', 'open'] as const) for (const width of widths)
     const ring = await focused.evaluate(() => {
       const button = [...document.querySelectorAll<HTMLElement>('button.identity')].find(el => el.getBoundingClientRect().width > 0)!;
       const box = button.getBoundingClientRect(); const style = getComputedStyle(button);
-      const reach = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
-      const trail: string[] = []; let clip = { left: 0, right: innerWidth, top: 0, bottom: innerHeight };
+      const offset = parseFloat(style.outlineOffset), thickness = parseFloat(style.outlineWidth);
+      // The ring's inner edge is the button box grown by its offset; the glyphs are measured against it.
+      const inner = { left: box.left - offset, right: box.right + offset, top: box.top - offset, bottom: box.bottom + offset };
+      const range = document.createRange(); range.selectNodeContents(button);
+      // Text cut by the button's own clip (an ellipsized name) is not drawn past the button, so the visible text ends there.
+      const rects = [...range.getClientRects()].filter(rect => rect.width > 0).map(rect => ({ left: Math.max(rect.left, box.left), right: Math.min(rect.right, box.right), top: rect.top, bottom: rect.bottom }));
+      const gap = { left: Math.min(...rects.map(r => r.left)) - inner.left, right: inner.right - Math.max(...rects.map(r => r.right)), top: Math.min(...rects.map(r => r.top)) - inner.top, bottom: inner.bottom - Math.max(...rects.map(r => r.bottom)) };
+      let clip = { left: 0, right: innerWidth, top: 0, bottom: innerHeight };
       for (let node = button.parentElement; node; node = node.parentElement) {
         const s = getComputedStyle(node);
-        if (/(hidden|clip|scroll|auto)/.test(s.overflowX + s.overflowY)) { const r = node.getBoundingClientRect(); trail.push(`${node.className}:${Math.round(r.left)}-${Math.round(r.right)}`); clip = { left: Math.max(clip.left, r.left), right: Math.min(clip.right, r.right), top: Math.max(clip.top, r.top), bottom: Math.min(clip.bottom, r.bottom) }; }
+        if (/(hidden|clip|scroll|auto)/.test(s.overflowX + s.overflowY)) { const r = node.getBoundingClientRect(); clip = { left: Math.max(clip.left, r.left), right: Math.min(clip.right, r.right), top: Math.max(clip.top, r.top), bottom: Math.min(clip.bottom, r.bottom) }; }
       }
-      return { trail, button: [Math.round(box.left), Math.round(box.right)], focusVisible: button.matches(':focus-visible'), reach, room: Math.min(box.left - clip.left, clip.right - box.right, box.top - clip.top, clip.bottom - box.bottom) };
+      const reach = offset + thickness;
+      return { focusVisible: button.matches(':focus-visible'), offset, thickness, gap, room: Math.min(box.left - clip.left, clip.right - box.right, box.top - clip.top, clip.bottom - box.bottom) - reach };
     });
     log('focus', ring);
     expect(ring.focusVisible).toBe(true);
-    expect(ring.room, 'the whole ring is inside the clip').toBeGreaterThanOrEqual(ring.reach);
+    expect(ring.room, 'the whole ring is inside the clip').toBeGreaterThanOrEqual(0);
+    for (const side of ['left', 'right', 'top', 'bottom'] as const) expect(ring.gap[side], `at least 2px between the ring and the text, ${side}`).toBeGreaterThanOrEqual(2);
     await shot(focused, 'focus');
     await focused.close();
 
@@ -95,11 +105,24 @@ for (const workspace of ['closed', 'open'] as const) for (const width of widths)
     await showPicker(picker);
     await expect(picker.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeVisible();
     await expect(picker.locator('[role=dialog] p')).toHaveCount(0);
+    const card = await picker.locator('[role=dialog]').evaluate(dialog => {
+      const box = dialog.getBoundingClientRect();
+      const fields = ['owner-choice', 'supervisor-choice'].map(id => { const input = document.getElementById(id) as HTMLInputElement; return { id, value: input.value, clipped: input.scrollWidth > input.clientWidth }; });
+      return { width: box.width, left: box.left, right: box.right, viewport: innerWidth, fields };
+    });
+    log('picker', card);
+    if (workspace === 'closed' && width === 1025) pickerMinimum = card.width;
+    if (workspace === 'open' && [1025, 1280, 1372].includes(width)) {
+      expect(card.width, 'popover is at least its width at 1025').toBeGreaterThanOrEqual(Math.min(360, width - 16) - 1);
+      expect(card.left, 'inside the viewport, 8px margin').toBeGreaterThanOrEqual(8 - 0.5);
+      expect(card.right, 'inside the viewport, 8px margin').toBeLessThanOrEqual(card.viewport - 8 + 0.5);
+      for (const field of card.fields) expect(field.clipped, `${field.value} is not clipped`).toBe(false);
+    }
     await shot(picker, 'picker');
     await picker.close();
 
     // Save states at the two reference widths: pending then failure, then refusal, each on its own page.
-    if (width !== 1440 && width !== 393) return;
+    if (width !== 1440 && width !== 393) continue;
     const saving = await fresh();
     await showPicker(saving);
     let release!: () => void;
@@ -133,5 +156,5 @@ for (const workspace of ['closed', 'open'] as const) for (const width of widths)
     await expect(refused.getByText('Taking ownership isn’t available when more than one person uses this CORSIA. Choose an agent instead.')).toBeVisible();
     await shot(refused, 'refusal-fallback');
     await refused.close();
-  });
-}
+  }
+});
