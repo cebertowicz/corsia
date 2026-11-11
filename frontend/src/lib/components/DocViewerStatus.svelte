@@ -91,8 +91,6 @@
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
 	let detailsOpen = $state(false);
-	let ownershipInDetails = $state(true);
-	let compactOwnerOnly = $state(true);
 	let useMetadataRow = $state(false);
 	let compactOwnerOpen = $state(false);
 	let ownerAnchor = $state<HTMLButtonElement | null>(null);
@@ -110,9 +108,7 @@
 	let ownershipErrorFor = $state<'owner' | 'supervisor' | null>(null);
 	let ownershipPending = $state<{ kind: 'owner' | 'supervisor'; id: string; name: string } | null>(null);
 
-	// Measure the complete status content, including the full ownership label.
-	// The detached visual probe is independent of the currently selected layout,
-	// so changing to Details does not change the threshold used to return.
+	// Measure minimum readable identity content independently of the current layout.
 	function ownershipFit(header: HTMLElement) {
 		let frame = 0;
 		const measure = () => {
@@ -125,42 +121,19 @@
 				if (identity && tools && age) {
 					const probe = document.createElement('span');
 					Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', whiteSpace: 'nowrap', font: getComputedStyle(age).font });
-					const marker = age.querySelector<HTMLElement>('button.identity > .pending, button.identity > .failure');
-					probe.textContent = ownershipPending ? `${ownershipPending.kind === 'owner' ? 'Owner' : 'Supervisor'}: W… Saving…` : marker ? `Owner ${marker.textContent}` : 'Owner';
+					const parts = age.querySelectorAll<HTMLElement>('button.identity .identity-part');
+					probe.textContent = parts.length ? [...parts].map(part => {
+						const name = part.querySelector<HTMLElement>('.identity-name');
+						const text = name?.textContent ?? '';
+						return part.textContent?.replace(text, text.length > 10 ? `${text.slice(0, 10)}…` : text) ?? '';
+					}).join(' · ') : 'Owner';
 					document.body.appendChild(probe);
-					const ownerWidth = probe.getBoundingClientRect().width + (marker ? 4 : 0);
+					const ownerWidth = probe.getBoundingClientRect().width;
 					if (verified) { probe.style.font = getComputedStyle(verified).font; probe.textContent = verified.textContent; }
 					const verifiedWidth = verified ? probe.getBoundingClientRect().width + 6 : 0;
 					probe.remove();
 					const others = [...identity.children].filter(child => child !== tools && !child.classList.contains('identity-details')).reduce((width, child) => width + child.getBoundingClientRect().width + 6, 0);
 					useMetadataRow = identity.clientWidth < tools.getBoundingClientRect().width + others + ownerWidth + verifiedWidth + 6;
-				}
-				const metadata = header.querySelector<HTMLElement>('.document-metadata.has-ownership');
-				if (!metadata) return;
-				const probe = metadata.cloneNode(true) as HTMLElement;
-				probe.classList.remove('expanded');
-				Object.assign(probe.style, { position: 'fixed', left: '-10000px', top: '0', display: 'flex', width: 'max-content', maxWidth: 'none', overflow: 'visible', flexWrap: 'nowrap', visibility: 'hidden', font: getComputedStyle(metadata).font });
-				const owner = probe.querySelector<HTMLElement>('.metadata-owner');
-				const button = probe.querySelector<HTMLElement>('button.identity');
-				if (owner) Object.assign(owner.style, { flex: 'none', overflow: 'visible' });
-				if (button) { button.classList.remove('compact'); Object.assign(button.style, { width: 'max-content', maxWidth: 'none' }); }
-				probe.querySelectorAll<HTMLElement>('.identity-name').forEach(name => { name.style.overflow = 'visible'; name.style.minWidth = 'max-content'; });
-				document.body.appendChild(probe);
-				const needed = probe.getBoundingClientRect().width;
-				probe.remove();
-				const style = getComputedStyle(header);
-				const available = header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-				ownershipInDetails = available < needed;
-				const slot = header.querySelector<HTMLElement>('.identity-owner');
-				const compactButton = slot?.querySelector<HTMLElement>('button.identity');
-				if (slot && compactButton && slot.getBoundingClientRect().width > 0) {
-					const compactProbe = compactButton.cloneNode(true) as HTMLElement;
-					compactProbe.classList.remove('compact');
-					Object.assign(compactProbe.style, { position: 'fixed', left: '-10000px', top: '0', width: 'max-content', maxWidth: 'none', overflow: 'visible', visibility: 'hidden', font: getComputedStyle(compactButton).font });
-					compactProbe.querySelectorAll<HTMLElement>('.identity-name').forEach(name => { name.style.overflow = 'visible'; name.style.minWidth = 'max-content'; });
-					document.body.appendChild(compactProbe);
-					compactOwnerOnly = slot.getBoundingClientRect().width < compactProbe.getBoundingClientRect().width;
-					compactProbe.remove();
 				}
 			});
 		};
@@ -260,7 +233,7 @@
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={!ownershipSaving && (ownershipInDetails || compactOwnerOnly)} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}<span class="plain-owner-name">Owner: {freshness.owner_name}</span><span class="plain-owner-only">Owner</span>{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}<span class="plain-owner-name">Owner: {freshness.owner_name}</span><span class="plain-owner-only">Owner</span>{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -289,7 +262,7 @@
 	</div>
 	{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
 		<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={!ownershipSaving && (useMetadataRow || ownershipInDetails)} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 			{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 			{#if freshness && freshnessPresentation}
 				{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>
@@ -328,7 +301,7 @@
 	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
 	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.metadata-owner { flex: 1 1 100%; min-width: 0; }
 	.verification-action { margin-left: -10px; }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
 	.metadata-error { color: var(--red); }

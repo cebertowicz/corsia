@@ -4,7 +4,7 @@
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
-	let { artifactId, ownership, onChange, compact = false, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null), open = $bindable(false), externalAnchor = null }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null; open?: boolean; externalAnchor?: HTMLButtonElement | null } = $props();
+	let { artifactId, ownership, onChange, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null), open = $bindable(false), externalAnchor = null }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null; open?: boolean; externalAnchor?: HTMLButtonElement | null } = $props();
 	let ownAnchor = $state<HTMLButtonElement>();
 	const anchor = $derived(externalAnchor ?? ownAnchor ?? null);
 	let paneWidth = $state(360);
@@ -65,10 +65,13 @@
 </script>
 
 <svelte:window onresize={measurePane} />
-<button bind:this={ownAnchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
-	<span class="compact-owner"><span class="owner-name">Owner: {ownerLabel}</span><span class="owner-only">Owner</span></span>
-	<span class="full-owner">{#if pending}<span class="identity-part">{pending.kind === 'owner' ? 'Owner' : 'Supervisor'}: <span class="identity-name pending">{pending.name}</span></span>{:else if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name">{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name">{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name">{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
-	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}
+<button bind:this={ownAnchor} type="button" class="identity" aria-label={`Owner: ${ownerLabel}${pending?.kind === 'owner' ? ', saving' : error && errorFor === 'owner' ? ', change failed' : ''}; Supervisor: ${supervisorLabel}${pending?.kind === 'supervisor' ? ', saving' : error && errorFor === 'supervisor' ? ', change failed' : ''}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
+	{#if sameAgent && !pending && !error}
+		<span class="identity-part">Owner and supervisor: <span class="identity-name">{ownerLabel}</span></span>
+	{:else}
+		<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span>{#if pending?.kind === 'owner'}<span class="pending">&nbsp;Saving…</span>{:else if error && errorFor === 'owner'}<span class="failure">&nbsp;Change failed</span>{/if}</span>
+		<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span>{#if pending?.kind === 'supervisor'}<span class="pending">&nbsp;Saving…</span>{:else if error && errorFor === 'supervisor'}<span class="failure">&nbsp;Change failed</span>{/if}</span>
+	{/if}
 </button>
 {#snippet fields()}
 	<div class="owner-picker">
@@ -76,11 +79,12 @@
 		<input class:pending={pending?.kind === 'owner'} id="owner-choice" aria-describedby={errorFor === 'owner' ? 'owner-error' : undefined} role="combobox" aria-autocomplete="list" aria-expanded={picker === 'owner'} aria-controls="owner-options" aria-activedescendant={picker === 'owner' && matches.length ? `owner-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} disabled={saving} value={picker === 'owner' && typing ? search : ownerLabel} onfocus={(event) => show('owner', event.currentTarget)} oninput={(event) => { typing = true; search = event.currentTarget.value; active = 0; }} onkeydown={keys} onblur={() => picker = null} />
 		{#if picker === 'owner'}<AgentOptions id="owner-options" label="Owners" {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
 		{#if error && errorFor === 'owner'}<p id="owner-error" role="status">{error}</p>{/if}
-		{#if saving}<span role="status">Saving…</span>{/if}
+		{#if pending?.kind === 'owner'}<span role="status">Saving…</span>{/if}
 		<label for="supervisor-choice">Supervisor</label>
 		<input class:pending={pending?.kind === 'supervisor'} id="supervisor-choice" aria-describedby={errorFor === 'supervisor' ? 'supervisor-error' : undefined} role="combobox" aria-autocomplete="list" aria-expanded={picker === 'supervisor'} aria-controls="supervisor-options" aria-activedescendant={picker === 'supervisor' && matches.length ? `supervisor-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} disabled={saving} value={picker === 'supervisor' && typing ? search : pending?.kind === 'supervisor' ? pending.name : ownership.supervisor?.name ?? 'No agents in this scope'} onfocus={(event) => show('supervisor', event.currentTarget)} oninput={(event) => { typing = true; search = event.currentTarget.value; active = 0; }} onkeydown={keys} onblur={() => picker = null} />
 		{#if picker === 'supervisor'}<AgentOptions id="supervisor-options" label="Supervisors" {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
 		{#if error && errorFor === 'supervisor'}<p id="supervisor-error" role="status">{error}</p>{/if}
+		{#if pending?.kind === 'supervisor'}<span role="status">Saving…</span>{/if}
 	</div>
 {/snippet}
 <Popover {anchor} {open} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
@@ -88,21 +92,12 @@
 </Popover>
 
 <style>
-	.identity { display: flex; gap: var(--space-1); min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-	.identity-part { display: flex; min-width: 0; white-space: pre; }
-	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-	.compact-owner { display: none; overflow: hidden; text-overflow: ellipsis; }
-	.owner-only { display: none; }
-	@container identity-owner (width < 13ch) {
-		.owner-name { display: none; }
-		.owner-only { display: inline; }
-	}
-	.full-owner { display: contents; }
-	.identity.compact .compact-owner { display: block; }
-	.identity.compact .full-owner { display: none; }
+	.identity { display: flex; flex-wrap: wrap; column-gap: 0.5em; min-width: 0; max-width: 100%; overflow: hidden; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+	.identity-part { display: flex; min-width: 0; max-width: 100%; white-space: pre; }
+	.identity-name { min-width: min(10ch, 100%); overflow: hidden; text-overflow: ellipsis; }
 	.identity:hover { color: var(--text-primary); }
 	.pending { opacity: 0.65; }
-	.identity > .pending, .identity > .failure { flex: none; }
+	.identity-part > .pending, .identity-part > .failure { flex: none; }
 	.failure { color: var(--red-text); }
 	@media (any-pointer: coarse) { .identity { min-height: 44px; align-items: center; } }
 	.identity:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

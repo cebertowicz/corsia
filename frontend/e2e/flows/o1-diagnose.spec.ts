@@ -3,7 +3,7 @@ import { test, expect } from '../support/test';
 import { seed, showPicker } from '../contact-sheet/document-owner-supervisor';
 import { setDebugVersionOverlay } from '../support/heldComments';
 
-const out = '/Users/jarvis/Corsia/projects/corsia/.threads/a8f17a81-7687-4d22-8b07-819464800949/o1-pack/round2-frames';
+const out = '/Users/jarvis/Corsia/projects/corsia/.threads/a8f17a81-7687-4d22-8b07-819464800949/o1-pack/diagnostic-output';
 
 test('ownership layout at constrained widths', async ({ page, request }) => {
   test.setTimeout(180_000);
@@ -12,7 +12,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await setDebugVersionOverlay(request, false);
   await seed(page, request);
-  await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+  if (process.env.O1_WORKSPACE !== 'open') await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
   const widths = process.env.O1_WIDTHS?.split(',').map(Number) ?? [1024, 1100, 1280, 1440];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
