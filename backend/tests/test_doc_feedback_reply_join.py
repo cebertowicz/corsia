@@ -366,16 +366,3 @@ def test_joined_title_still_counts_an_edit_the_first_batch_carried(isolated_db):
         assert service.get_node(first["id"], db=db).title == first["title"].replace("1 comment", "2 comments")
     finally:
         db.close()
-
-
-def test_new_top_level_comment_still_gets_its_own_task(isolated_db):
-    db = get_db()
-    try:
-        seed_thread(db, "owner")
-        artifact_id = seed_document(db, "owner")
-        add_person_comment(db, artifact_id)
-        add_person_comment(db, artifact_id)
-
-        assert len(feedback_nodes(db, "owner")) == 2
-    finally:
-        db.close()

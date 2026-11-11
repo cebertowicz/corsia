@@ -44,8 +44,8 @@ PROVENANCE = "document.feedback_batch"
 # A feedback task is made active at once; until its owner selects it, it is still queued.
 _WORKABLE = ("pending", "active")
 
-# Earlier delivered batches from this author to this recipient that carried a
-# comment of the thread, oldest first.
+# The thread join: earlier delivered batches from this author to this recipient that
+# carried a comment of the reply's thread, oldest first.
 _THREAD_TASKS = """
     SELECT b.delivered_node_id FROM doc_comments c
       JOIN doc_feedback_batch_items i ON i.comment_id=c.id
@@ -56,7 +56,8 @@ _THREAD_TASKS = """
      ORDER BY b.created_at,b.id
 """
 
-# The recipient's open feedback tasks for one document, whoever wrote their comments, oldest first.
+# The document join: the recipient's open feedback tasks for one document, whoever wrote their
+# comments, oldest first.
 # Each feedback task is linked to its document once, when its first batch creates it.
 _DOCUMENT_TASKS = """
     SELECT l.node_id FROM plan_node_artifact_links l
@@ -69,7 +70,7 @@ _DOCUMENT_TASKS = """
 
 
 class Join(NamedTuple):
-    """The task a batch of replies joins; ``working`` when its owner is already on it."""
+    """The task a batch joins, by thread (replies) or by document (new top-level comments); ``working`` when its owner is already on it."""
 
     node_id: str
     working: bool
@@ -96,7 +97,7 @@ def _being_worked(db, node, batch: Any) -> bool:
 
 
 def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join | None:
-    """The thread's first open task not handed yet, else (for a person's reply) the first one being worked."""
+    """The thread join, for replies: the thread's first open task not handed yet, else (for a person's reply) the first one being worked."""
     rows = db.execute(_THREAD_TASKS, (
         batch_value(batch, "artifact_id"), root_id, root_id, recipient_thread_id,
         batch_value(batch, "author_kind"), batch_value(batch, "author_id"), batch_value(batch, "id"),
@@ -114,7 +115,7 @@ def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join
 
 
 def _document_task(db, recipient_thread_id: str, batch: Any) -> Join | None:
-    """The document's first open task for the recipient whose owner has not been handed it and that waits on nothing."""
+    """The document join, for new top-level comments: the document's first open task for the recipient whose owner has not been handed it and that waits on nothing."""
     rows = db.execute(_DOCUMENT_TASKS, (
         batch_value(batch, "artifact_id"), PROVENANCE, recipient_thread_id, *_WORKABLE,
     )).fetchall()
@@ -125,7 +126,7 @@ def _document_task(db, recipient_thread_id: str, batch: Any) -> Join | None:
     return None
 
 
-def open_thread_task(
+def joining_task(
     db, recipient_thread_id: str, batch: Any, items: list[dict[str, Any]],
 ) -> Join | None:
     """The one open task a batch of plain comments or of replies joins, or None when it needs its own.

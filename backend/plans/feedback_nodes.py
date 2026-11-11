@@ -276,7 +276,7 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
-    joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
+    joined = feedback_join.joining_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
         delivered = feedback_join.earlier(db, joined.node_id, batch)
         held = feedback_join.held_items(delivered) + loaded

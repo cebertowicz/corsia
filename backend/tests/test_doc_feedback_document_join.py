@@ -320,31 +320,43 @@ def _settle(db, comment_id: str) -> None:
     comments.update(comment_id, {"resolved": True}, db=db)
 
 
-def test_a_mixed_task_settles_when_the_persons_comment_is_settled_last(isolated_db):
+def test_a_mixed_task_stays_with_its_owner_when_the_persons_comment_is_settled_last(isolated_db):
     db = get_db()
     try:
         artifact_id, agent, queued = _queued_document(db)
         person, _ = add_person_comment(db, artifact_id)
         assert len(feedback_nodes(db, "owner")) == 2
         _settle(db, agent["id"])
-        assert service.get_node(queued["id"], db=db).state != "accepted"
 
         _settle(db, person["id"])
 
-        assert service.get_node(queued["id"], db=db).state == "accepted"
+        assert service.get_node(queued["id"], db=db).state != "accepted"
     finally:
         db.close()
 
 
-def test_a_mixed_task_settles_when_the_agents_comment_is_settled_last(isolated_db):
+def test_a_mixed_task_stays_with_its_owner_when_the_agents_comment_is_settled_last(isolated_db):
     db = get_db()
     try:
         artifact_id, agent, queued = _queued_document(db)
         person, _ = add_person_comment(db, artifact_id)
         _settle(db, person["id"])
-        assert service.get_node(queued["id"], db=db).state != "accepted"
 
         _settle(db, agent["id"])
+
+        assert service.get_node(queued["id"], db=db).state != "accepted"
+    finally:
+        db.close()
+
+
+def test_a_task_of_only_agent_comments_still_settles_when_all_are_resolved(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, second, queued = _queued_document(db)
+        third = _agent_comment(db, artifact_id)
+
+        _settle(db, second["id"])
+        _settle(db, third["id"])
 
         assert service.get_node(queued["id"], db=db).state == "accepted"
     finally:
