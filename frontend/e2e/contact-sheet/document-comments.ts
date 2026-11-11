@@ -66,7 +66,8 @@ export const variants = {
   'resolved-open': { widths: [1440, 1920], apply: async (page: Page) => {
     if ((page.viewportSize()?.width ?? 0) < 1920) await closePanes(page, true);
     await page.locator('[data-resolved-entry]').click();
-    await expect(page.locator('[data-resolved-column], .resolved-pop').getByText('This explanation now includes the expected behavior.')).toBeVisible();
+    // A resolved thread rests collapsed to its header; its comment shows once the reader opens it.
+    await expect(page.locator('[data-resolved-column], .resolved-pop').getByText('Resolved · 1 message', { exact: true })).toBeVisible();
   } },
 };
 
