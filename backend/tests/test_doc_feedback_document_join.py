@@ -7,8 +7,8 @@ from pathlib import Path
 from doc_feedback_helpers import add_comment, add_person_comment, batches, feedback_nodes, seed_document, seed_thread
 from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches
 from infra.database import get_db, write_transaction
-from plans import holds, service
-from plans.feedback_nodes import AGENT_FRAMING, USER_FRAMING
+from plans import holds, mutations, service
+from plans.feedback_nodes import AGENT_FRAMING, COMMENT_ACCEPTANCE, EDIT_ACCEPTANCE, USER_FRAMING
 
 _HANDED = "SELECT 1 FROM plan_node_attempts WHERE node_id=?"
 
@@ -233,7 +233,9 @@ def test_an_agents_comment_joining_its_own_edit_only_task_brings_the_framing(iso
         _agent_comment(db, artifact_id)
 
         assert len(feedback_nodes(db, "owner")) == 2
-        assert service.get_node(queued["id"], db=db).description.count(AGENT_FRAMING) == 1
+        joined = service.get_node(queued["id"], db=db)
+        assert joined.description.count(AGENT_FRAMING) == 1
+        assert COMMENT_ACCEPTANCE in joined.acceptance_criteria
     finally:
         db.close()
 
@@ -259,6 +261,7 @@ def test_a_persons_comment_joining_their_own_edit_only_task_brings_the_framing(i
         assert len(feedback_nodes(db, "owner")) == 2
         joined = service.get_node(queued["id"], db=db)
         assert joined.description.count(USER_FRAMING) == 1
+        assert COMMENT_ACCEPTANCE in joined.acceptance_criteria
         assert joined.title.startswith("Steve edited ") and joined.title.endswith(" and left 1 comment")
     finally:
         db.close()
@@ -274,5 +277,93 @@ def test_a_later_comment_from_an_earlier_author_keeps_the_names_in_first_seen_or
 
         assert len(feedback_nodes(db, "owner")) == 2
         assert service.get_node(queued["id"], db=db).title.startswith("Reviewer and Editor left 3 comments on")
+    finally:
+        db.close()
+
+
+def test_comment_does_not_join_a_task_set_aside_in_later(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, _, queued = _queued_document(db)
+        mutations.edit_node(queued["id"], later=True, reason="test", provenance="test", db=db)
+        db.commit()
+
+        _agent_comment(db, artifact_id)
+
+        nodes = feedback_nodes(db, "owner")
+        assert len(nodes) == 3 and nodes[2]["id"] != queued["id"]
+        assert service.get_node(queued["id"], db=db).description == queued["description"]
+    finally:
+        db.close()
+
+
+def test_a_comment_joining_an_edit_only_task_recounts_its_acceptance(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner")
+        _agent_comment(db, artifact_id)
+        _agent_edit(db, artifact_id)
+        _, queued = feedback_nodes(db, "owner")
+        assert COMMENT_ACCEPTANCE not in queued["acceptance_criteria"]
+
+        _agent_comment(db, artifact_id)
+
+        joined = service.get_node(queued["id"], db=db)
+        assert COMMENT_ACCEPTANCE in joined.acceptance_criteria and EDIT_ACCEPTANCE in joined.acceptance_criteria
+    finally:
+        db.close()
+
+
+def _settle(db, comment_id: str) -> None:
+    comments.update(comment_id, {"resolved": True}, db=db)
+
+
+def test_a_mixed_task_settles_when_the_persons_comment_is_settled_last(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, agent, queued = _queued_document(db)
+        person, _ = add_person_comment(db, artifact_id)
+        assert len(feedback_nodes(db, "owner")) == 2
+        _settle(db, agent["id"])
+        assert service.get_node(queued["id"], db=db).state != "accepted"
+
+        _settle(db, person["id"])
+
+        assert service.get_node(queued["id"], db=db).state == "accepted"
+    finally:
+        db.close()
+
+
+def test_a_mixed_task_settles_when_the_agents_comment_is_settled_last(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, agent, queued = _queued_document(db)
+        person, _ = add_person_comment(db, artifact_id)
+        _settle(db, person["id"])
+        assert service.get_node(queued["id"], db=db).state != "accepted"
+
+        _settle(db, agent["id"])
+
+        assert service.get_node(queued["id"], db=db).state == "accepted"
+    finally:
+        db.close()
+
+
+def test_a_task_holding_only_persons_comments_is_not_settled_by_resolving_them(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        add_person_comment(db, artifact_id)
+        first, _ = add_person_comment(db, artifact_id)
+        second, _ = add_person_comment(db, artifact_id)
+        _, queued = feedback_nodes(db, "owner")
+
+        _settle(db, first["id"])
+        _settle(db, second["id"])
+
+        assert service.get_node(queued["id"], db=db).state != "accepted"
     finally:
         db.close()

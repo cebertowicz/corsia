@@ -8,7 +8,7 @@ from pathlib import Path
 from doc_feedback_helpers import add_comment, add_person_comment, batches, feedback_nodes, seed_document, seed_thread
 from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches, feedback_delivery
 from infra.database import get_db, write_transaction
-from plans import holds, service
+from plans import holds, mutations, service
 from plans.feedback_nodes import create_feedback_node
 from prompts.plan_wakes import INTENT_INPUT_ANSWER_REPLY
 
@@ -250,6 +250,22 @@ def test_reply_to_a_parked_task_gets_its_own_task(isolated_db):
             first["id"], "test", expected_revision=first["revision"], actor_id="owner",
             provenance="test", db=db,
         )
+        db.commit()
+
+        _person_reply(db, artifact_id, root["id"])
+
+        assert len(feedback_nodes(db, "owner")) == 3
+    finally:
+        db.close()
+
+
+
+def test_reply_to_a_task_set_aside_in_later_gets_its_own_task(isolated_db):
+    """A task in Later is never picked up, so a reply is not hidden in it."""
+    db = get_db()
+    try:
+        artifact_id, root, first = _queued_thread(db)
+        mutations.edit_node(first["id"], later=True, reason="test", provenance="test", db=db)
         db.commit()
 
         _person_reply(db, artifact_id, root["id"])

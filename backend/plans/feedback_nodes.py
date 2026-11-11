@@ -284,7 +284,7 @@ def create_feedback_node(
         restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
             db, joined.node_id, title=_title(_authors(db, delivered, batch, author), document, held),
-            blocks=blocks,
+            acceptance=_acceptance(held), blocks=blocks,
             intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
             provenance=PROVENANCE,
         )

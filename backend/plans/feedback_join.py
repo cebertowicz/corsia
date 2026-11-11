@@ -1,11 +1,13 @@
 """A comment joins the open task its recipient already has, until the owner starts it.
 
 A new top-level comment joins the first open task the recipient has for the same
-document that its owner has not been handed yet (no attempt), whoever wrote the
-earlier comments there, so comments left before the owner starts are read as one
-task and a document never has two open tasks for the same owner. Once the owner
-has been handed the task, a new top-level comment gets its own task. A top-level
-comment never joins by waking a task its owner is working.
+document that its owner has not been handed yet (no attempt), is not set aside
+in Later and waits on nothing, whoever wrote the earlier comments there, so
+comments left before the owner starts are read as one task. Once the owner has
+been handed the task, a new top-level comment gets its own task. Suggestions,
+edits, re-opened comments, mixed batches and replies without a qualifying task
+also get their own task. A top-level comment never joins by waking a task its
+owner is working.
 
 A comment thread is one conversation, so a batch of replies whose thread already
 has an open task for the same recipient, from the same author, goes into that
@@ -61,7 +63,7 @@ _DOCUMENT_TASKS = """
       JOIN plan_nodes n ON n.id=l.node_id
       JOIN plans p ON p.id=n.plan_id
      WHERE l.artifact_id=? AND l.role='input' AND l.provenance=?
-       AND p.owner_kind='thread' AND p.owner_id=? AND n.state IN (?,?)
+       AND p.owner_kind='thread' AND p.owner_id=? AND n.state IN (?,?) AND n.later=0
      ORDER BY l.created_at,l.node_id
 """
 
@@ -102,7 +104,7 @@ def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join
     working = None
     for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
         node = service._node_row(db, node_id)
-        if node["state"] not in _WORKABLE or _waits(db, node):
+        if node["state"] not in _WORKABLE or node["later"] or _waits(db, node):
             continue
         if not _handed(db, node_id):
             return Join(node_id, False)
@@ -175,9 +177,12 @@ def held_items(delivered: list[tuple[Any, list[dict[str, Any]]]]) -> list[dict[s
     return held
 
 
-def join(db, node_id: str, *, title: str, blocks: str, intent: str | None, provenance: str) -> None:
+def join(
+    db, node_id: str, *, title: str, acceptance: str, blocks: str, intent: str | None, provenance: str,
+) -> None:
     """Add a batch's items to the task through the node's one amend path.
 
+    ``acceptance`` is recounted over everything the task now holds, as its title is.
     ``intent`` restates the task's intent when the person's new comments change
     what it must answer; None leaves it as it is.
     """
@@ -185,7 +190,7 @@ def join(db, node_id: str, *, title: str, blocks: str, intent: str | None, prove
         node = service._node_row(connection, node_id)
         restated: dict[str, Any] = {} if intent is None else {"intent": intent}
         mutations.edit_node(
-            node_id, title=title, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
+            node_id, title=title, acceptance_criteria=acceptance, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
             **restated, provenance=provenance, db=connection,
         )
         plan_id = str(node["plan_id"])

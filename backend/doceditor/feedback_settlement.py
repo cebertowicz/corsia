@@ -4,9 +4,12 @@ The owner's task for another agent's batch asks for judgment on each item. A
 suggestion the person accepted or rejected, or a comment resolved, has had it,
 so the last such item settles the task with the outcomes as its evidence.
 Acknowledged or replied-to comments are still owed judgment and never count,
-and a batch that carried an edit item is never settled here. A reply batch can
-join an earlier batch's task (``plans.feedback_join``), so a task settles only
-once every batch delivered into it is settled.
+and a batch that carried an edit item is never settled here. A batch can join
+an earlier batch's task (``plans.feedback_join``), so a task settles only once
+every batch delivered into it is settled. A task settles here only when it holds
+an agent's batch: the person's own comments are answered by the owner, who
+closes a task that holds only those. A task that mixes both settles once all
+its items are, whichever item is settled last.
 """
 
 from __future__ import annotations
@@ -38,21 +41,23 @@ def _batch_evidence(db, batch) -> list[str] | None:
 
 
 def settle_batches_of(db, comment_id: str) -> None:
-    """Settle each agent feedback task holding ``comment_id`` whose batches are now all settled."""
+    """Settle each feedback task holding ``comment_id`` and an agent's batch whose batches are now all settled."""
     from plans import public
 
     tasks = db.execute(
         """SELECT DISTINCT b.recipient_id,b.delivered_node_id FROM doc_feedback_batches b
            JOIN doc_feedback_batch_items i ON i.batch_id=b.id
-           WHERE i.comment_id=? AND b.author_kind='agent' AND b.delivered_node_id IS NOT NULL""",
+           WHERE i.comment_id=? AND b.delivered_node_id IS NOT NULL""",
         (comment_id,),
     ).fetchall()
     for task in tasks:
         batches = db.execute(
-            """SELECT id,item_count FROM doc_feedback_batches
+            """SELECT id,item_count,author_kind FROM doc_feedback_batches
                WHERE delivered_node_id=? AND recipient_id=? ORDER BY created_at,id""",
             (task["delivered_node_id"], task["recipient_id"]),
         ).fetchall()
+        if not any(batch["author_kind"] == "agent" for batch in batches):
+            continue
         evidence = [_batch_evidence(db, batch) for batch in batches]
         if None in evidence:
             continue
