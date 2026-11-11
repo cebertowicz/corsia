@@ -70,7 +70,8 @@
 <style>
 	.ct-compose { margin-top: var(--space-1); }
 	/* A thread popover or drawer scrolls its discussion behind the reply instead of hiding its field below the fold. */
-	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { position: sticky; bottom: 0; z-index: 1; background: var(--bg-elevated); box-shadow: 0 12px var(--bg-elevated); }
+	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { position: sticky; bottom: 0; z-index: 1; background: var(--bg-elevated); }
+	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--space-3); background: var(--bg-elevated); pointer-events: none; }
 	/* Replies grow until their available scroller is full, then scroll inside. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }

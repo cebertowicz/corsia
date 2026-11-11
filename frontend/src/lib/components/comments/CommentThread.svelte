@@ -3,6 +3,7 @@
 	import { fade, slide } from 'svelte/transition';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
+	import { scrollCue } from '$lib/actions/scrollCue';
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -221,21 +222,6 @@
 		}
 	}
 	/** A press on the card focuses it; a link in the body or a press that ends a text selection keeps the press (controls stop their own). */
-	// Match the existing scroll-edge cue: fade only where more content is reachable.
-	function scrollCue(node: HTMLElement) {
-		const sync = () => {
-			node.dataset.more = String(node.scrollTop + node.clientHeight < node.scrollHeight - 1);
-			node.dataset.above = String(node.scrollTop > 1);
-		};
-		node.addEventListener('scroll', sync, { passive: true });
-		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
-		resize?.observe(node);
-		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(sync);
-		mutate?.observe(node, { childList: true, subtree: true });
-		sync();
-		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
-	}
-
 	function pressCard(event: MouseEvent) {
 		if ((event.target as Element).closest('a') || !window.getSelection()?.isCollapsed) return;
 		onFocus?.();
@@ -366,13 +352,9 @@
 	/* Its text was deleted outright: the edge is dashed, as the card says "This text isn’t in the document". */
 	.ct.removed { border-style: dashed; }
 
-	.ct-original:global([data-above='true']), .ct-original:global([data-more='true']), .ct-reply-region:global([data-above='true']), .ct-reply-region:global([data-more='true']) {
-		--cue-top: 0px; --cue-bottom: 0px;
-		mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent);
-	}
+	.ct-original, .ct-reply-region { overflow-y: auto; scrollbar-width: thin; --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
 	.ct-original:global([data-above='true']), .ct-reply-region:global([data-above='true']) { --cue-top: var(--space-2); }
 	.ct-original:global([data-more='true']), .ct-reply-region:global([data-more='true']) { --cue-bottom: var(--space-2); }
-	.ct-original, .ct-reply-region { overflow-y: auto; scrollbar-width: thin; }
 	.ct-original:focus-visible, .ct-reply-region:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.ct-head { display: flex; align-items: center; gap: 7px; }
 	/* One row at every width: a long name shortens in the middle (CommentMeta), so the time and actions never drop below it. */
