@@ -80,6 +80,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   await page.screenshot({ animations: 'disabled', path: `${out}/failure-closed.png` });
   await page.locator('button.identity:visible').first().click();
   await expect(page.getByText('Couldn’t change the supervisor. Try again.')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeFocused();
   await expect(page.locator('body')).not.toContainText('Internal Server Error');
   await page.screenshot({ animations: 'disabled', path: `${out}/failure-open.png` });
   await page.unroute('**/api/artifacts/*/ownership');

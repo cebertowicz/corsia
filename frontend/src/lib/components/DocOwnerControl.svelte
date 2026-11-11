@@ -87,7 +87,7 @@
 		{#if pending?.kind === 'supervisor'}<span role="status">Saving…</span>{/if}
 	</div>
 {/snippet}
-<Popover {anchor} {open} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
+<Popover {anchor} {open} initialFocus={errorFor === 'supervisor' ? '#supervisor-choice' : '#owner-choice'} bounds={anchor?.closest('.doc') as HTMLElement | null} placement="bottom" width={`min(360px, ${Math.max(0, paneWidth - 24)}px)`} onClose={() => { open = false; picker = null; }}>
 	{@render fields()}
 </Popover>
 
