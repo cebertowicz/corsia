@@ -14,9 +14,7 @@
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
 	import { onMount } from 'svelte';
-	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-	import { unreadItemsForThread, subscribeUnreadAttention } from './replyItems';
-	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
+	import { subscribeUnreadAttention } from './replyItems';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -74,8 +72,6 @@
 
 	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
-	const hasUnreadItems = $derived(unreadItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
-		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
@@ -239,12 +235,11 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current || hasUnreadItems}
+{#if current}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
 	>
-		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
 		{#if current}
 		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>

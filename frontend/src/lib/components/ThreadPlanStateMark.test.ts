@@ -176,8 +176,15 @@ describe('ThreadPlanStateMark update dot', () => {
 
 	it('yields to what the user owes and to Failed', () => {
 		renderUpdate({ ...updated, state: 'needs_input', attention_items: [decision] });
-		expect(host.querySelector('.update-dot')).toBeNull();
-		expect(host.querySelector('.plan-state')?.textContent).toBe('Decide');
+		expect(host.querySelectorAll('.update-dot')).toHaveLength(1);
+		expect(host.querySelector('.needs-you-dot')).not.toBeNull();
+	});
+
+	it('keeps needs-you visible on the open thread and uses the unread dot with the amber token', () => {
+		activeThreadId.set('thread-1');
+		renderUpdate({ ...updated, state: 'blocked_on_you', attention_items: [decision] });
+		expect(host.querySelector('.update-dot.needs-you-dot')).not.toBeNull();
+		expect(source).toMatch(/\.update-dot\.needs-you-dot\s*\{\s*background:\s*var\(--amber\)/);
 	});
 
 	it('shows no dot without an update or on the open thread', () => {
@@ -198,8 +205,13 @@ describe('ThreadPlanStateMark', () => {
 	] as const)('names %o in words', ({ state, items }, word) => {
 		render({ state, label_key: null, paused: false, attention_items: [...items] });
 		const mark = host.querySelector<HTMLElement>('.plan-state');
-		expect(mark?.textContent).toBe(word);
-		expect(mark?.classList.contains(state)).toBe(true);
+		if (state === 'failed') {
+			expect(mark?.textContent).toBe(word);
+			expect(mark?.classList.contains(state)).toBe(true);
+		} else {
+			expect(mark?.textContent).toBe('');
+			expect(mark?.classList.contains('needs-you-dot')).toBe(true);
+		}
 	});
 
 	it.each([
@@ -224,7 +236,7 @@ describe('ThreadPlanStateMark', () => {
 			state: 'needs_input', label_key: 'waiting', paused: false, attention_items: [decision],
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state')!;
-		expect(mark.title).toBe('Needs input · Plan: Waiting');
+		expect(mark.title).toBe('Needs you');
 		mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		expect(onOpenAttention).toHaveBeenCalledWith('thread-1', 'Decide');
 		expect(host.querySelector('.attention-item, .bg')).toBeNull();
@@ -237,8 +249,8 @@ describe('ThreadPlanStateMark', () => {
 			attention_items: [{ kind: 'access', title: 'Read diagnostics', node_id: null }],
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state');
-		expect(mark?.textContent).toBe('Allow access');
-		expect(mark?.title).toBe('Blocked on you · Plan: Waiting · Paused');
+		expect(mark?.textContent).toBe('');
+		expect(mark?.title).toBe('Needs you');
 		expect(host.querySelector('.paused-glyph')).toBeNull();
 	});
 
@@ -249,9 +261,13 @@ describe('ThreadPlanStateMark', () => {
 		[[decision, review, hold], '3 for you'],
 		[[access], 'Allow access'],
 		[[hold], 'Needs you'],
-	] as const)('names %o as %s', (items: readonly ThreadAttentionItem[], word) => {
-		render({ state: 'needs_input', label_key: null, paused: false, attention_items: [...items] });
-		expect(host.querySelector<HTMLElement>('.plan-state')?.textContent).toBe(word);
+	] as const)('shows a needs-you dot for %o (previously %s)', (items: readonly ThreadAttentionItem[], _word: string) => {
+		render({ state: 'needs_input', label_key: null, paused: false, attention_items: [...items], has_update: true });
+		const dots = host.querySelectorAll<HTMLElement>('.update-dot');
+		expect(dots).toHaveLength(1);
+		expect(dots[0].classList.contains('needs-you-dot')).toBe(true);
+		expect(dots[0].textContent).toBe('');
+		expect(dots[0].getAttribute('aria-label')).toBe('Needs you');
 	});
 
 	it('names several Failed items with a count', () => {
@@ -274,12 +290,13 @@ describe('ThreadPlanStateMark', () => {
 		expect(onOpenThread).toHaveBeenCalledTimes(2);
 	});
 
-	it('stays a plain word, not a control, when a your-move state carries zero items', () => {
+	it('shows a static accessible dot when a your-move state carries zero items', () => {
 		render({ state: 'needs_input', label_key: 'waiting', paused: false, attention_items: [] });
 		const mark = host.querySelector<HTMLElement>('.plan-state');
-		expect(mark?.textContent).toBe('Needs input');
-		expect(mark?.getAttribute('role')).toBeNull();
-		expect(mark?.classList.contains('static')).toBe(true);
+		expect(mark?.textContent).toBe('');
+		expect(mark?.getAttribute('role')).toBe('img');
+		expect(mark?.getAttribute('aria-label')).toBe('Needs you');
+		expect(mark?.classList.contains('needs-you-dot')).toBe(true);
 	});
 
 	it('gives the phone pointer target at least 44px each way, keeping keyboard focus', () => {
