@@ -78,7 +78,8 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 	if (!fresh || !drawn) return false;
 	const held = tableCells(was);
 	// The delimiter row holds each column's alignment and no cell's text, so a change to it alone moves no cell's source:
-	// it is compared as its own line, and every cell takes the new alignment attributes.
+	// it is compared as its own line, and every drawn cell takes the new alignment attributes, the empty cells the renderer
+	// pads a short row with included, which have no source cell of their own.
 	const realigned = delimiterRow(src) !== delimiterRow(was);
 	let copied = false;
 	for (const span of tableCells(src)) {
@@ -88,12 +89,17 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 		const next = fresh.rows[span.row]?.cells[span.col];
 		const now = drawn.rows[span.row]?.cells[span.col];
 		if (!next || !now) continue;
-		if (unchanged && !forced) {
-			if (realigned) { copyAttributes(now, next); copied = true; }
-			continue;
-		}
+		if (unchanged && !forced) continue;
 		copyCell(now, next);
 		copied = true;
+	}
+	if (realigned) {
+		for (const [row, tr] of Array.from(fresh.rows).entries()) {
+			for (const [col, next] of Array.from(tr.cells).entries()) {
+				const now = drawn.rows[row]?.cells[col];
+				if (now) { copyAttributes(now, next); copied = true; }
+			}
+		}
 	}
 	// A copied cell arrives unpainted, so the comment paint pass must not take the table for already drawn: the same
 	// marks over the same source (a closed cell, an edit that keeps the length) would otherwise leave its comments off.
