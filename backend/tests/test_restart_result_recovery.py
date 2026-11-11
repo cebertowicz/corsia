@@ -1,7 +1,10 @@
 """Detached settlement failures and startup result cleanup."""
 
 import asyncio
+import sqlite3
 from types import SimpleNamespace
+
+import pytest
 
 from automation import restart, self_restart
 from infra.db_async import run_in_db
@@ -56,3 +59,24 @@ async def test_startup_removes_only_terminal_result_files(isolated_db, monkeypat
     assert not terminal.exists()
     assert active.exists() and unknown.exists() and invalid.exists()
     assert (await run_in_db(self_restart.operation_by_id, active_id))["status"] == "in_flight"
+
+
+async def test_startup_cleanup_failure_does_not_hide_a_settlement_failure(monkeypatch):
+    from automation import restart_startup, update_verification
+
+    async def no_work(*_args):
+        return None
+
+    async def failed_settlement(*_args):
+        raise RuntimeError("settlement failed")
+
+    def failed_cleanup(*_args):
+        raise sqlite3.OperationalError("cleanup failed")
+
+    monkeypatch.setattr(restart_startup, "drive_startup_continuity", no_work)
+    monkeypatch.setattr(update_verification, "settle_unconfirmed_update", failed_settlement)
+    monkeypatch.setattr(restart_startup, "_remove_terminal_lifecycle_results", failed_cleanup)
+    logger = SimpleNamespace(info=lambda *_: None, error=lambda *_: None,
+                             warning=lambda *_: None, exception=lambda *_: None)
+    with pytest.raises(RuntimeError, match="settlement failed"):
+        await restart_startup.run_startup_drive(no_work(), None, (), None, logger)

@@ -117,10 +117,11 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
     logger.info("startup phase: restart continuity drive started")
     try:
         outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
-        await run_in_db(_remove_terminal_lifecycle_results, logger)
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 raise outcome
+        # After the outcomes, so a cleanup failure cannot hide a recovery failure.
+        await run_in_db(_remove_terminal_lifecycle_results, logger)
     except asyncio.CancelledError:
         logger.warning("startup phase: restart continuity drive cancelled")
         raise
