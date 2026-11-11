@@ -29,10 +29,13 @@ const WITH_DIAGRAM = DOC.replace(`${PARA}\n`, `${FENCE}\n\n${CLOSING}\n`);
 /** The same document with enough below it to scroll. */
 const LONG = DOC + Array.from({ length: 80 }, (_, i) => `Filler paragraph ${i + 1}.\n`).join('\n');
 
+/** The document's own editor, never an editor nested inside one of its widgets. */
+const HOST = '.md-editor > .cm-editor';
+
 /** The editor at rest: nothing animating and its box unchanged across two frames. The reader's keystroke comes after the page has settled, and CodeMirror writes its own caret into the document only in that time. */
 async function settled(page: Page) {
-	await expect.poll(() => page.locator('.cm-editor').evaluate(async (node) => {
-		const scroller = node.querySelector('.cm-scroller')!;
+	await expect.poll(() => page.locator(HOST).evaluate(async (node) => {
+		const scroller = node.querySelector(':scope > .cm-scroller')!;
 		const before = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 		const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length;
@@ -123,7 +126,7 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 	test('a press on a cell leaves the document scrolled where it was', async ({ page }) => {
 		test.setTimeout(120_000);
 		await openDocument(page, { width: 1440, height: 900 }, LONG);
-		const scroller = page.locator('.cm-scroller');
+		const scroller = page.locator(`${HOST} > .cm-scroller`);
 		await scroller.evaluate((el) => { el.scrollTop = 60; });
 		await settled(page);
 		const before = await scroller.evaluate((el) => el.scrollTop);
@@ -178,7 +181,7 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await settled(page);
 		// The tap leaves the editor unfocused. The next focus() that is not a tap (a card closing hands the keyboard back
 		// this way) gives the keyboard the caret the tap placed. No card is open here, so call it as the card does.
-		expect(await page.locator('.cm-content').evaluate((el) => {
+		expect(await page.locator(`${HOST} > .cm-scroller > .cm-content`).evaluate((el) => {
 			const view = (el as HTMLElement & { cmTile?: { root?: { view?: { focus(): void } } } }).cmTile?.root?.view;
 			view?.focus();
 			return Boolean(view);
