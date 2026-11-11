@@ -7,7 +7,7 @@ import { readWorkspaceModels } from './modelsLoad';
 import { HARNESSES, settingsHarnessModelIds } from './harnessMembership';
 import { modelAvailability } from './modelTurn';
 import type { ModelState, ProviderModel } from './providerModels';
-
+import { apiFetch } from '$lib/api/request';
 // Claude Code and Codex run on the user's own CLI sign-in: nothing to configure,
 // so their cards choose which discovered models the picker offers and, per
 // account, whether to spend past the plan limit (vendorAccounts.ts).
@@ -28,7 +28,7 @@ const t = () => get(token) || '';
 
 /** The settings inventory, including unavailable rows kept for existing thread resolution. */
 export async function fetchCatalogInventory(): Promise<CatalogRow[]> {
-	const res = await fetch(`/api/settings/models?token=${t()}`);
+	const res = await apiFetch(`/api/settings/models`);
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	return (await res.json()).models ?? [];
 }
@@ -82,7 +82,7 @@ export async function harnessModels(harness: string): Promise<ProviderModel[]> {
 /** Save the name the picker shows for a model; an empty label restores the discovered one. */
 export async function setModelLabel(dbId: string, label: string): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await fetch(`/api/settings/models/${encodeURIComponent(dbId)}?token=${t()}`, {
+		const res = await apiFetch(`/api/settings/models/${encodeURIComponent(dbId)}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ alias: label.trim() || null }),

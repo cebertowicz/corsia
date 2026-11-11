@@ -22,7 +22,7 @@
 	import LinkRepoModal from './LinkRepoModal.svelte';
 	import { plainResponseError } from '$lib/plainError';
 	import { StatePill } from '$lib/components/ui';
-
+import { apiFetch } from '$lib/api/request';
 	const lens = $derived($docLens);
 	const entries = $derived($docLibrary);
 	const sources = $derived($docSources);
@@ -178,7 +178,7 @@
 		attachingPath = e.abs;
 		try {
 			const body = attachRequestBody(target, e);
-			const res = await fetch('/api/context/bootloader/attach', {
+			const res = await apiFetch('/api/context/bootloader/attach', {
 				method: 'POST',
 				headers: {
 					Authorization: `Bearer ${t}`,

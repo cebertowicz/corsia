@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '$lib/plainError';
-
+import { apiFetch } from './request';
 export type ProviderEntry = {
 	provider_key: string;
 	capabilities: { units: 'accounts' | 'models' | 'self'; rollover: boolean };
@@ -25,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> 
 	const auth = get(token);
 	if (!auth) return { ok: false, error: 'Sign in to manage subscriptions.', reached: true };
 	try {
-		const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+		const response = await apiFetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
 		const data = await response.json().catch(() => null);
 		if (!response.ok) return { ok: false, error: plainErrorText(data?.detail, init?.method ? 'Couldn’t save this change.' : 'Couldn’t load this setting.'), detail: data?.detail, code: data?.code, reached: true };
 		return { ok: true, value: data as T };

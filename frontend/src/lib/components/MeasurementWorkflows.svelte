@@ -11,7 +11,7 @@
  import Popover from './ui/Popover.svelte';
  import Button from './ui/Button.svelte';
  import { agentName, caughtText, chartPoints, dayName, format, measures, value, versions, workflowName, type Measure, type WorkflowEntry, type WorkflowResponse, type WorkflowRun } from './workflowView';
-
+import { apiFetch } from '$lib/api/request';
  let response = $state<WorkflowResponse | null>(null);
  let loading = $state(true);
  let error = $state(false);
@@ -38,7 +38,7 @@
   if (loadedScope && loadedScope !== nextScope) { response = null; open = null; runList = null; }
   loading = true; error = false;
   try {
-   const result = await fetch(`/api/measurement/workflows?${grainScopeParams(get(measurementGrain), get(measurementScope))}`, { signal: next.signal });
+   const result = await apiFetch(`/api/measurement/workflows?${grainScopeParams(get(measurementGrain), get(measurementScope))}`, { signal: next.signal });
    if (!result.ok) throw new Error(`workflows request failed: ${result.status}`);
    const data = await result.json() as WorkflowResponse;
    if (!Array.isArray(data.workflows) || !data.window || !data.coverage) throw new Error('workflows response shape');

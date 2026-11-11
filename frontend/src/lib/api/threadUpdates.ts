@@ -1,5 +1,5 @@
 import type { MessageCard } from './messageCards';
-
+import { apiFetch } from './request';
 /** A plan update card: the item's title as it read when the outcome happened, and that outcome (AS17). */
 export interface UpdateCard {
 	id: number;
@@ -46,7 +46,7 @@ export async function readUpdateCards(
 	const params = new URLSearchParams({ from_seq: String(options.fromSeq) });
 	if (options.divider) params.set('divider', 'true');
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`, {
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`, {
 			headers: { Authorization: `Bearer ${bearerValue}` },
 		});
 		if (!res.ok) {

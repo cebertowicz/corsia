@@ -4,7 +4,7 @@ import { activeThreadId, messages, type Message } from '$lib/stores/threads';
 import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
-
+import { apiFetch } from '$lib/api/request';
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;
@@ -12,7 +12,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		const result: Message[] = [];
 		let replies: CommentReplyItem[] | null = null;
 		for (let offset = 0; offset < ids.length; offset += pageSize) {
-			const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
+			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
 				method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
 				body: JSON.stringify({ message_ids: ids.slice(offset, offset + pageSize) }),
 			});

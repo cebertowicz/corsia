@@ -1,7 +1,7 @@
 import { saveFailureText } from '../saveFailure';
 import type { Thread } from './threads';
 import { loadThreads } from './threadsLoad';
-
+import { apiFetch } from '$lib/api/request';
 export interface ThreadLocalOnly {
 	effective: boolean;
 	cause: 'inherited' | 'project' | 'own' | 'off';
@@ -27,7 +27,7 @@ export async function saveThreadLocalOnly(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	let response: Response;
 	try {
-		response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/local-only`, {
+		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/local-only`, {
 			method: 'PUT',
 			headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({ local_only: localOnly }),

@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 export class BrowserPaneApiError extends Error {
 	constructor(readonly status: number, message: string) {
 		super(message);
@@ -6,7 +7,7 @@ export class BrowserPaneApiError extends Error {
 }
 
 export async function openBrowserUrl(threadId: string, url: string, authToken: string): Promise<void> {
-	const response = await fetch(`/api/browser/${threadId}/open?url=${encodeURIComponent(url)}`, {
+	const response = await apiFetch(`/api/browser/${threadId}/open?url=${encodeURIComponent(url)}`, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${authToken}` }
 	});

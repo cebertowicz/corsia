@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { token } from './auth';
-
+import { apiFetch } from '$lib/api/request';
 export type EndpointKind = 'local' | 'lan' | 'tailscale' | 'public';
 
 export interface NetworkEndpoint {
@@ -86,7 +86,7 @@ function t() { return get(token) || ''; }
 
 export async function loadNetworkServers(): Promise<void> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers?token=${t()}`);
+		const res = await apiFetch(`${BASE}/api/settings/network-servers`);
 		if (res.ok) {
 			const data = await res.json();
 			networkServers.set(data.servers || []);
@@ -106,7 +106,7 @@ export async function addNetworkServer(
 	extra?: { base_url?: string; dialect?: string; api_key?: string; model_ids?: string[] },
 ): Promise<{ ok: boolean; server_id?: string; status?: string; message?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name, hostname, port, ...(extra ?? {}) }),
@@ -132,7 +132,7 @@ export async function updateNetworkServer(
 	},
 ): Promise<{ ok: boolean; server_id?: string; status?: string; models?: number; message?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${serverId}?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(extra),
@@ -152,7 +152,7 @@ export async function setNetworkServerBilling(
 	input: { mode: ServerBilling['mode'] | null; monthly_price_cents: number | null; charge_day: number | null },
 ): Promise<{ ok: boolean; message?: string; status?: number; code?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${server.id}/billing?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/billing`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ ...input, expected_billing_revision: server.billing_revision ?? 0 }),
@@ -173,7 +173,7 @@ export async function setNetworkServerEnabled(
 	enabled: boolean,
 ): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${serverId}/enabled?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/enabled`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
@@ -195,7 +195,7 @@ export async function setNetworkServerPrivate(
 	isPrivate: boolean,
 ): Promise<{ ok: true } | { ok: false; detail?: unknown; reached: boolean }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ private: isPrivate }),
@@ -214,7 +214,7 @@ export async function setNetworkServerPrivate(
 /** Probe an External endpoint now and rediscover its models. */
 export async function testNetworkServer(serverId: string): Promise<{ ok: boolean; message: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${serverId}/test?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/test`, {
 			method: 'POST',
 		});
 		const data = await res.json().catch(() => ({}));
@@ -234,7 +234,7 @@ export async function setModelImageInput(
 ): Promise<{ ok: boolean; message?: string }> {
 	try {
 		const path = `${serverId}/models/${encodeURIComponent(modelId)}/image-input`;
-		const res = await fetch(`${BASE}/api/settings/network-servers/${path}?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${path}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ mode }),
@@ -249,7 +249,7 @@ export async function setModelImageInput(
 
 export async function removeNetworkServer(serverId: string): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings/network-servers/${serverId}?token=${t()}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}`, {
 			method: 'DELETE',
 		});
 		if (res.ok) {

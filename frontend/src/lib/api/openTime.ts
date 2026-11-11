@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /** One batched read of open time, the server's number for how long running work has had something happening in it. */
 
 export interface OpenTimeQuery {
@@ -23,7 +24,7 @@ export async function readOpenTime(
 	queries: OpenTimeQuery[],
 ): Promise<Record<string, OpenTimeAnswer> | null> {
 	try {
-		const res = await fetch('/api/open-time', {
+		const res = await apiFetch('/api/open-time', {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({

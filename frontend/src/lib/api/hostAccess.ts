@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 export type HostAccessLeaseState =
 	| 'reviewing'
 	| 'awaiting_user'
@@ -154,7 +155,7 @@ export async function fetchHostAccessLeases(
 	const endpoint = query.size
 		? `/api/host-access/leases?${query.toString()}`
 		: '/api/host-access/leases';
-	const response = await fetch(endpoint, {
+	const response = await apiFetch(endpoint, {
 		headers: {
 			...headers(token),
 			'X-CORSIA-Interactive-UI': '1',
@@ -169,7 +170,7 @@ export async function decideHostAccessLease(
 	lease: HostAccessItem,
 	decision: HostAccessLeaseDecision,
 ): Promise<HostAccessLease> {
-	const response = await fetch(
+	const response = await apiFetch(
 		`/api/host-access/leases/${lease.kind === 'script' ? 'scripts/' : ''}${encodeURIComponent(lease.id)}/${decision}`,
 		{
 			method: 'POST',

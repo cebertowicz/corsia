@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-
+import { apiFetch } from '$lib/api/request';
 export type CheckpointTrigger = 'manual' | 'pressure' | 'model_switch' | 'idle' | 'agent';
 export type CheckpointMode = 'warm' | 'cold';
 export type CheckpointStatus =
@@ -129,7 +129,7 @@ export async function loadCheckpoints(
 ): Promise<readonly Checkpoint[]> {
 	updateState(threadId, state => ({ ...state, loading: true, error: null }));
 	try {
-		const response = await fetch(checkpointUrl(threadId, token));
+		const response = await apiFetch(checkpointUrl(threadId, token));
 		if (!response.ok) throw new Error(`Checkpoint refresh failed (${response.status})`);
 		const checkpoints = checkpointRows(await response.json());
 		updateState(threadId, () => ({ checkpoints, loading: false, error: null }));
@@ -194,7 +194,7 @@ async function checkpointAction(
 	url: string,
 	userMessage: string,
 ): Promise<Checkpoint> {
-	const response = await fetch(url, { method: 'POST' });
+	const response = await apiFetch(url, { method: 'POST' });
 	if (!response.ok) throw await parseCheckpointRefusal(response, userMessage);
 	const checkpoint = checkpointRow(await response.json());
 	upsertCheckpoint(threadId, checkpoint);

@@ -4,12 +4,12 @@ import { reconcileThreadModelSnapshots } from './models';
 import { threads, coordinationThreads, type Thread } from './threads';
 import { uiScope } from './uiScope';
 import { fetchScopeTarget } from '$lib/utils/conductor';
-
+import { apiFetch } from '$lib/api/request';
 /** Refreshes the authoritative thread payload and its dependent scope target. */
 export async function loadThreads(auth: string | null = get(token)): Promise<void> {
 	if (!auth) return;
 	const tokenAtStart = get(token);
-	const response = await fetch(`/api/threads?token=${encodeURIComponent(auth)}`);
+	const response = await apiFetch(`/api/threads`);
 	const data = await response.json();
 	if (get(token) !== tokenAtStart) return;
 	const refreshed = reconcileThreadModelSnapshots(data.threads as Thread[]);

@@ -15,7 +15,7 @@
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import type { ProjectDetail, AgentRow } from '$lib/api/projectSettingsTypes';
-
+import { apiFetch } from '$lib/api/request';
 	// Settings › Projects › <name>: what this project can use, then what only it has.
 	let { projectId }: { projectId: string } = $props();
 
@@ -46,7 +46,7 @@
 		if (!t) { loading = false; return; }
 		loading = true;
 		try {
-			const res = await fetch(`/api/projects/${encodeURIComponent(id)}?token=${encodeURIComponent(t)}`);
+			const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}`);
 			if (!res.ok) throw new Error(`Couldn't load project (${res.status})`);
 			const d = await res.json();
 			project = {
@@ -72,7 +72,7 @@
 		agentsLoading = true;
 		agentsError = '';
 		try {
-			const res = await fetch(`/api/agents?token=${encodeURIComponent(t)}&project_id=${encodeURIComponent(id)}`);
+			const res = await apiFetch(`/api/agents?project_id=${encodeURIComponent(id)}`);
 			if (!res.ok) throw new Error(`agent list load failed (${res.status})`);
 			const body = await res.json();
 			agentRows = Array.isArray(body.agents) ? body.agents : [];
@@ -94,7 +94,7 @@
 		if (!t || !project) return;
 		let res: Response;
 		try {
-			res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
+			res = await apiFetch(`/api/agents/${threadId}`, { method: 'DELETE' });
 		} catch {
 			toasts.show(SERVER_UNREACHABLE, 'error');
 			return;
@@ -183,7 +183,7 @@
 		const t = get(token);
 		if (!t) return;
 		try {
-			const res = await fetch(`/api/projects/${project.id}?token=${encodeURIComponent(t)}`, {
+			const res = await apiFetch(`/api/projects/${project.id}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: absPath }),

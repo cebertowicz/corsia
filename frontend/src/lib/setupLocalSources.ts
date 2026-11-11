@@ -1,10 +1,10 @@
 import { fetchSources, type ModelSource } from '$lib/conductorSources';
 import type { LocalRowState } from '$lib/setupProviderRows';
-
+import { apiFetch } from '$lib/api/request';
 /** The local download before an account exists, read from the setup service; null when it can't be read, so the last reading stays. */
 export async function readPreauthLocal(): Promise<LocalRowState | null> {
 	try {
-		const response = await fetch('/api/setup/local-download');
+		const response = await apiFetch('/api/setup/local-download');
 		if (!response.ok) return null;
 		const live = await response.json();
 		return { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,

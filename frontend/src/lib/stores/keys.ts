@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { disconnect } from '$lib/ws/connection';
-
+import { apiFetch } from '$lib/api/request';
 /** One entry's metadata. The API never returns a value. */
 export interface KeyEntry {
 	name: string;
@@ -94,7 +94,7 @@ async function refusal(res: Response): Promise<KeyWriteError> {
 }
 
 export async function listKeys(): Promise<KeyListing> {
-	const res = await fetch('/api/keys', { headers: headers() });
+	const res = await apiFetch('/api/keys', { headers: headers() });
 	if (!res.ok) throw await refusal(res);
 	const body = await res.json();
 	return {
@@ -116,7 +116,7 @@ export function ignoredEnvironmentNote(variable: string): string {
 
 /** A person-only write behind the CORSIA password (the same guard as the key writes). Throws `KeyWriteError`. */
 export async function write(path: string, method: 'PUT' | 'POST', body: Record<string, string>): Promise<void> {
-	const res = await fetch(path, { method, headers: headers(true), body: JSON.stringify(body) });
+	const res = await apiFetch(path, { method, headers: headers(true), body: JSON.stringify(body) });
 	if (!res.ok) throw await refusal(res);
 }
 
@@ -133,7 +133,7 @@ export function removeKey(name: string, password: string): Promise<void> {
 }
 
 export async function checkKey(name: string): Promise<CheckResult> {
-	const res = await fetch(`/api/keys/${encodeURIComponent(name)}/check`, { method: 'POST', headers: headers() });
+	const res = await apiFetch(`/api/keys/${encodeURIComponent(name)}/check`, { method: 'POST', headers: headers() });
 	if (!res.ok) throw await refusal(res);
 	return (await res.json()) as CheckResult;
 }

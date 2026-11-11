@@ -4,7 +4,7 @@
 	import Button from './Button.svelte';
 	import { token } from '$lib/stores/auth';
 	import { plainResponseError } from '$lib/plainError';
-
+import { apiFetch } from '$lib/api/request';
 	let { title = 'Choose…', mode = 'dir', ext = '', startPath = null, rootPath = null, canSelect, onSelect, onClose }: {
 		title?: string;
 		mode?: 'dir' | 'file';
@@ -35,7 +35,7 @@
 				qs.set('files', '1');
 				if (ext) qs.set('ext', ext);
 			}
-			const res = await fetch(`/api/fs/browse?${qs}`);
+			const res = await apiFetch(`/api/fs/browse?${qs}`);
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not browse that folder. Try again.'));
 			const d = await res.json();
 			cwd = d.path;

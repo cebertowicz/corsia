@@ -1,6 +1,6 @@
 /** Shared authenticated, conditional read boundary for both plan representations. */
 import type { OperatorReadOutcome } from './plansTypes';
-
+import { apiFetch } from './request';
 export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
@@ -25,7 +25,7 @@ export async function readPlan<T>(
 ): Promise<ReadOutcome<T>> {
 	let res: Response;
 	try {
-		res = await fetch(url, authHeaders(bearerValue, etag ?? null));
+		res = await apiFetch(url, authHeaders(bearerValue, etag ?? null));
 	} catch (error) {
 		return { status: 'error', message: error instanceof Error ? error.message : String(error) };
 	}

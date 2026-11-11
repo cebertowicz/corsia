@@ -1,7 +1,7 @@
 import type { Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
-
+import { apiFetch } from '$lib/api/request';
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string };
 
@@ -32,7 +32,7 @@ export function readySetupEndpoint(sources: ModelSource[], models: SetupModel[])
 export async function setupCatalog(session: string): Promise<SetupModel[]> {
 	const lookup = await fetchCorsiaAgent(session);
 	if (lookup.kind !== 'target') throw new Error('CORSIA agent unavailable');
-	const response = await fetch(`/api/models?thread_id=${encodeURIComponent(lookup.target.thread_id)}`, { headers: { Authorization: `Bearer ${session}` } });
+	const response = await apiFetch(`/api/models?thread_id=${encodeURIComponent(lookup.target.thread_id)}`, { headers: { Authorization: `Bearer ${session}` } });
 	if (!response.ok) throw new Error(`Model catalog returned ${response.status}`);
 	const body: unknown = await response.json();
 	if (!body || typeof body !== 'object' || !Array.isArray((body as { models?: unknown }).models)) throw new Error('Model catalog unreadable');

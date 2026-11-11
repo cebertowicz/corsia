@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { measurementScope, type MeasurementScope } from './measurement';
 import { grainScopeParams, measurementGrain, type MeasurementGrain } from './measurementGrain';
 import { decodeAveragePeriods, decodePeriod, type MeasurementPeriod } from './measurementPeriod';
-
+import { apiFetch } from '$lib/api/request';
 // Cost counts represent retained ledger usage records.
 export type CostPeriod = {
 	period: string;
@@ -136,7 +136,7 @@ export async function loadMeasurementCost(grain = get(measurementGrain), scope =
 	const key = scopeKey(scope);
 	measurementCost.update((state) => ({ ...state, loading: true, error: null, data: state.scopeKey === key && state.grain === grain ? state.data : null }));
 	try {
-		const response = await fetch(`/api/measurement/cost?${grainScopeParams(grain, scope)}`, { signal: next.signal });
+		const response = await apiFetch(`/api/measurement/cost?${grainScopeParams(grain, scope)}`, { signal: next.signal });
 		if (!response.ok) throw new Error(`cost request failed: ${response.status}`);
 		const data = decodeMeasurementCost(await response.json());
 		if (controller !== next || key !== scopeKey(get(measurementScope))) return;

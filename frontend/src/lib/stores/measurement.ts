@@ -4,7 +4,7 @@ import { MEASUREMENT_VIEW, clearMeasurementUrl } from './measurementAddress';
 import { grainScopeParams, measurementGrain, parseGrain, type MeasurementGrain } from './measurementGrain';
 import { decodeAveragePeriods, decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 import { decodeSeriesRows } from './measurementRows';
-
+import { apiFetch } from '$lib/api/request';
 export type MeasurementScope = { project: string; agent: string | null };
 
 export interface MeasurementRow {
@@ -270,7 +270,7 @@ async function loadPanels(panels: string[], grain: MeasurementGrain, scope: Meas
 	try {
 		const params = grainScopeParams(grain, scope);
 		params.set('ids', panelSeriesIds(panels));
-		const response = await fetch(`/api/measurement/series?${params}`, { signal: controller.signal });
+		const response = await apiFetch(`/api/measurement/series?${params}`, { signal: controller.signal });
 		if (!response.ok) throw new Error('Could not load measurement');
 		const data = await response.json() as { rows?: MeasurementRow[]; period?: unknown; windows?: Record<string, SeriesWindows>; average_periods?: unknown; minimum_n?: unknown };
 		if (selection !== selectionKey(get(measurementGrain), get(measurementScope))) return;

@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { subagentThreadRows } from './subagents';
 import { updateThreadRow } from './threadRow';
 import { activeThreadId, reasoningEffort, threads } from './threads';
-
+import { apiFetch } from '$lib/api/request';
 /** A thread's effort wherever it lives: the open thread's global, its list row, or a worker's own row. */
 function writeThreadEffort(threadId: string, effort: string | null): void {
 	updateThreadRow(threadId, { reasoning_effort: effort });
@@ -31,7 +31,7 @@ export async function saveReasoningEffort(threadId: string, effort: string | nul
 	writeThreadEffort(threadId, effort);
 	let failure: string | null = null;
 	try {
-		const res = await fetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
+		const res = await apiFetch(`/api/threads/${threadId}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ reasoning_effort: effort }),

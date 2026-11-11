@@ -4,7 +4,7 @@
 	import { threads, demoteAgentLocally, type Thread } from '$lib/stores/threads';
 	import { Button } from './ui';
 	import { plainResponseError } from '$lib/plainError';
-
+import { apiFetch } from '$lib/api/request';
 	let { thread }: { thread: Thread | null } = $props();
 
 	let editing = $state(false);
@@ -91,7 +91,7 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await fetch(`/api/agents/${id}?token=${encodeURIComponent(t)}`, {
+			const res = await apiFetch(`/api/agents/${id}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -124,7 +124,7 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await fetch(`/api/agents/${id}?token=${encodeURIComponent(t)}`, {
+			const res = await apiFetch(`/api/agents/${id}`, {
 				method: 'DELETE',
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not remove this agent. Try again.'));

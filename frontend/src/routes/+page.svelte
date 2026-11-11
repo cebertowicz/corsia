@@ -45,7 +45,7 @@
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
-
+import { apiFetch } from '$lib/api/request';
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
 	let sidebarOpen = $state(false);
 	let conductorLookup = $state<CoordinationLookup>({ kind: 'unknown' });
@@ -85,7 +85,7 @@
 	async function pollSystem() {
 		if (!$token) return;
 		try {
-			const res = await fetch(`/api/system?token=${$token}`);
+			const res = await apiFetch(`/api/system`);
 			systemStatus = await res.json();
 		} catch { /* ignore */ }
 	}
@@ -309,7 +309,7 @@
 		const choice = get(draftAccountId);
 		const accountId = draftAccountForModel(choice, inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
-		const res = await fetch(`/api/threads?token=${t}`, {
+		const res = await apiFetch(`/api/threads`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
@@ -372,8 +372,8 @@
 		cancelThreadTypewriters(id);
 		await removeThreadFromView(id);
 		try {
-			const response = await fetch(
-				`/api/threads/${id}?token=${$token}`,
+			const response = await apiFetch(
+				`/api/threads/${id}`,
 				{ method: 'DELETE' },
 			);
 			if (!response.ok) throw new Error(`DELETE thread ${id} -> ${response.status}`);
@@ -388,7 +388,7 @@
 	async function archiveThread(id: string) {
 		if (!$token) return;
 		await removeThreadFromView(id);
-		await fetch(`/api/threads/${id}?token=${$token}`, {
+		await apiFetch(`/api/threads/${id}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ archived: true }),

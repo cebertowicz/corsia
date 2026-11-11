@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
+import { apiFetch } from '$lib/api/request';
 export type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 
 const BASE = '';
@@ -56,7 +57,7 @@ function replace(account: VendorAccount): VendorAccount {
 
 async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string; ref?: string }> {
 	try {
-		const response = await fetch(url(path, query), init);
+		const response = await apiFetch(url(path, query), init);
 		if (!response.ok) return { ok: false, ...await detail(response, fallback), status: response.status };
 		return { ok: true, data: await response.json() as T };
 	} catch {

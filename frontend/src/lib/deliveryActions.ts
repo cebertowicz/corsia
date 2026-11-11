@@ -6,7 +6,7 @@ import {
 } from './stores/threads';
 import { isDisplayedThread } from './stores/displayedThreads';
 import { toasts } from './stores/toast';
-
+import { apiFetch } from '$lib/api/request';
 /**
  * The two exits a user has from a message that has not been delivered.
  *
@@ -72,10 +72,10 @@ export async function requestDeliveryAction(
 	{ threadId, messageId, authToken, failureText }: DeliveryActionRequest,
 ): Promise<void> {
 	try {
-		const response = await fetch(
+		const response = await apiFetch(
 			`/api/threads/${encodeURIComponent(threadId)}`
 			+ `/messages/${encodeURIComponent(messageId)}`
-			+ `/${action}?token=${encodeURIComponent(authToken)}`,
+			+ `/${action}`,
 			{ method: 'POST' },
 		);
 		if (!response.ok) {

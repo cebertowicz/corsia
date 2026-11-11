@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { applyFeaturePatch, confirmsFeaturePatch, enqueueFeaturePatch, type FeatureSettings, type SettingsPatch, SettingsSnapshotGate } from './settingsFeaturePatch';
+import { apiFetch } from '$lib/api/request';
 export { loadUpdateStatus, updateStatus, type UpdateStatus } from '$lib/update/store';
 
 export interface CoreSettings {
@@ -39,7 +40,7 @@ export async function loadSettings(): Promise<void> {
 	settingsLoading.set(true);
 	settingsLoadError.set(false);
 	try {
-		const res = await fetch(`${BASE}/api/settings`, {
+		const res = await apiFetch(`${BASE}/api/settings`, {
 			headers: { Authorization: `Bearer ${get(token)}` },
 		});
 		if (!res.ok) throw new Error(`settings read failed (${res.status})`);
@@ -63,7 +64,7 @@ export function updateSettings(patch: SettingsPatch): Promise<{ ok: boolean; err
 }
 async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/settings`, {
+		const res = await apiFetch(`${BASE}/api/settings`, {
 			method: 'PATCH',
 			headers: {
 				Authorization: `Bearer ${get(token)}`,
@@ -105,7 +106,7 @@ async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean;
 
 export async function loadModelProfile(modelId: string): Promise<ModelProfile | null> {
 	try {
-		const res = await fetch(`${BASE}/api/models/${modelId}/profile`, { headers: { Authorization: `Bearer ${get(token) ?? ''}` } });
+		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile`, { headers: { Authorization: `Bearer ${get(token) ?? ''}` } });
 		if (res.ok) return await res.json();
 		return null;
 	} catch {
@@ -116,7 +117,7 @@ export async function loadModelProfile(modelId: string): Promise<ModelProfile | 
 export async function updateModelProfile(modelId: string, patch: Partial<ModelProfile>): Promise<boolean> {
 	try {
 		const t = get(token);
-		const res = await fetch(`${BASE}/api/models/${modelId}/profile?token=${t}`, {
+		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch),

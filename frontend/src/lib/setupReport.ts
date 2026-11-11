@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import type { AiRow } from './components/SetupAiRows.svelte';
-
+import { apiFetch } from '$lib/api/request';
 /** The desktop shell's way to save a setup report; absent in a browser. */
 export const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 
@@ -20,7 +20,7 @@ export const DETAILS_UNREAD = 'CORSIA couldn’t read the setup details from its
 export async function setupReportDetails(rows: SetupReportRow[]): Promise<string> {
 	const session = get(token);
 	try {
-		const response = await fetch('/api/setup/report', {
+		const response = await apiFetch('/api/setup/report', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
 			body: JSON.stringify({ rows: rows.map(({ key, name, cause, reference }) => ({ key, name, cause: cause || null, reference: reference || null })) }),

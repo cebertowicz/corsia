@@ -3,7 +3,7 @@ import { acceptThreadModelTruth } from '$lib/stores/models';
 import { applySwitchRead, beginSwitchRead } from '$lib/stores/threadModelTruth';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
-
+import { apiFetch } from '$lib/api/request';
 export interface CoordinationTarget {
 	thread_id: string;
 	title?: string | null;
@@ -86,7 +86,7 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 	if (!token) return { kind: 'unknown' };
 	const startedAt = beginSwitchRead();
 	try {
-		const res = await fetch(url);
+		const res = await apiFetch(url);
 		if (!res.ok) return { kind: 'unknown' };
 		const data = await res.json();
 		const threadId = data?.target?.thread_id ?? data?.thread_id ?? null;

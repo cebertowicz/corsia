@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { ok, fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
-
+import { apiFetch } from './request';
 
 export type DocumentReviewLifecycleState = 'forked' | 'submitted' | 'withdrawn' | 'handed_back' | 'failed';
 
@@ -37,7 +37,7 @@ export interface DocumentReviews {
 function headers() { return { Authorization: `Bearer ${get(token) ?? ''}`, 'Content-Type': 'application/json' }; }
 export async function fetchDocumentReviews(artifactId: string, threadId: string | null): Promise<DocumentReviews> {
 	const query = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : '';
-	return ok(await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}/reviews${query}`, { headers: headers() }));
+	return ok(await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/reviews${query}`, { headers: headers() }));
 }
 export async function requestDocumentReview(artifactId: string, threadId: string, reviewer: string, note: string, clientId: string): Promise<void> {
 	const response = await fetchWithTimeout('/api/doc-reviews', {

@@ -1,4 +1,5 @@
 import type { SetupAttempt } from './setupConnect.svelte';
+import { apiFetch } from '$lib/api/request';
 export type SetupPicks = { claude: boolean; chatgpt: boolean };
 export type SetupHandoff = { tools: Record<string, SetupAttempt> };
 
@@ -22,7 +23,7 @@ const PROGRESS = '/api/setup/progress';
 export async function fetchSetupProgress(sessionToken: string | null): Promise<SetupProgress | null> {
 	if (!sessionToken) return null;
 	try {
-		const response = await fetch(PROGRESS, { headers: { Authorization: `Bearer ${sessionToken}` } });
+		const response = await apiFetch(PROGRESS, { headers: { Authorization: `Bearer ${sessionToken}` } });
 		if (!response.ok) return null;
 		const progress = await response.json();
 		return typeof progress?.setup_completed === 'boolean' ? progress as SetupProgress : null;
@@ -38,7 +39,7 @@ export async function fetchSetupProgress(sessionToken: string | null): Promise<S
  */
 export async function recordSetupProgress(change: SetupProgressChange, sessionToken: string | null): Promise<boolean> {
 	try {
-		const response = await fetch(PROGRESS, {
+		const response = await apiFetch(PROGRESS, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json', ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
 			body: JSON.stringify(change),

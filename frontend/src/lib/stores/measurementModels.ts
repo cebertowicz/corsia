@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { measurementScope, type MeasurementScope } from './measurement';
 import { decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 import { grainScopeParams, measurementGrain, type MeasurementGrain } from './measurementGrain';
-
+import { apiFetch } from '$lib/api/request';
 export type ModelCostClass = 'priced' | 'local' | 'no_pricing';
 const COST_CLASSES: ReadonlySet<unknown> = new Set(['priced', 'local', 'no_pricing']);
 /** Why the rate cell has no figure; `none` means it has one. */
@@ -194,7 +194,7 @@ export async function loadMeasurementModels(grain = get(measurementGrain), scope
 		return { ...state, loading: true, error: null, ...EMPTY, scopeKey: null, grain: null };
 	});
 	try {
-		const response = await fetch(`/api/measurement/models?${grainScopeParams(grain, scope)}`, { signal: next.signal });
+		const response = await apiFetch(`/api/measurement/models?${grainScopeParams(grain, scope)}`, { signal: next.signal });
 		if (!response.ok) throw new Error(`models request failed: ${response.status}`);
 		const decoded = decodeModelsResponse(await response.json());
 		if (controller !== next || scopeKey !== modelsScopeKey(get(measurementScope))) return;

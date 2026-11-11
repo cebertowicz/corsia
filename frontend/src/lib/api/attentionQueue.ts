@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /**
  * The one user-global attention queue.
  *
@@ -164,7 +165,7 @@ export type AnswerOutcome =
 	| { status: 'error' };
 
 export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueue> {
-	const res = await fetch('/api/attention/queue', {
+	const res = await apiFetch('/api/attention/queue', {
 		headers: { Authorization: `Bearer ${bearer}` },
 	});
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -219,7 +220,7 @@ export async function answerDecision(
 ): Promise<AnswerOutcome> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/plans/decisions/${encodeURIComponent(decisionId)}/answer`, {
+		res = await apiFetch(`/api/plans/decisions/${encodeURIComponent(decisionId)}/answer`, {
 			method: 'POST',
 			headers: {
 				Authorization: `Bearer ${bearer}`,

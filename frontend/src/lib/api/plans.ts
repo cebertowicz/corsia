@@ -18,7 +18,7 @@ export type { OperatorFoldLevel } from './plansFolded';
 
 
 import { authHeaders, readPlan, safeErrorMessage } from './planRead';
-
+import { apiFetch } from './request';
 async function readOperator(
 	url: string,
 	bearerValue: string,
@@ -53,7 +53,7 @@ async function postPlanMutation(
 ): Promise<PlanLifecycleMutationOutcome> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/plans/${encodeURIComponent(planId)}/mutations`, {
+		res = await apiFetch(`/api/plans/${encodeURIComponent(planId)}/mutations`, {
 			method: 'POST',
 			headers: {
 				Authorization: `Bearer ${bearerValue}`,
@@ -166,7 +166,7 @@ export async function readOperatorThread(
  */
 export async function recordThreadPlanSeen(bearerValue: string, threadId: string, seenThrough: string): Promise<boolean> {
 	try {
-		const res = await fetch(`/api/plans/operator/threads/${encodeURIComponent(threadId)}/seen`, {
+		const res = await apiFetch(`/api/plans/operator/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({ seen_through: seenThrough }),
@@ -222,7 +222,7 @@ export interface ThreadPlanStateEntry {
 /** Mark a thread read (seen through now) or unread on every device. False when the server refused it. */
 export async function markThreadSeen(bearerValue: string, threadId: string, unread: boolean): Promise<boolean> {
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/seen`, {
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({ unread }),
@@ -240,7 +240,7 @@ export async function readThreadPlanStates(
 ): Promise<Record<string, ThreadPlanStateEntry> | null> {
 	const ids = threadIds.map(encodeURIComponent).join(',');
 	try {
-		const res = await fetch(`/api/plans/operator/thread-states?ids=${ids}`, authHeaders(bearerValue, null));
+		const res = await apiFetch(`/api/plans/operator/thread-states?ids=${ids}`, authHeaders(bearerValue, null));
 		if (!res.ok) return null;
 		const body = (await res.json()) as { states?: unknown } | null;
 		const states = body?.states;

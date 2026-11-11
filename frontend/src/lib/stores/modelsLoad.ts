@@ -3,7 +3,7 @@ import { token } from './auth';
 import { modelAvailability, type Model } from './models';
 import { activeModelId, getModelDispatchId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { activeThreadId, draftAccountId } from './threads';
-
+import { apiFetch } from '$lib/api/request';
 // The thread the catalog was last read for: its harness rows read that
 // thread's account, so another account's limit does not grey them out.
 let loadedScope: string | null | undefined;
@@ -22,7 +22,7 @@ async function readCatalog(scope: string | null, refreshUsage: boolean, accountI
 	const path = query ? `/api/models?${query}` : '/api/models';
 	// The network listener refuses any API read without the person's session, unscoped ones included.
 	const session = get(token);
-	const res = await (session ? fetch(path, { headers: { Authorization: `Bearer ${session}` } }) : fetch(path));
+	const res = await (session ? apiFetch(path, { headers: { Authorization: `Bearer ${session}` } }) : apiFetch(path));
 	if (res.ok === false) throw new Error(`catalog read returned ${res.status}`);
 	const rows = (await res.json()).models;
 	if (!Array.isArray(rows)) throw new Error('catalog read carried no rows');

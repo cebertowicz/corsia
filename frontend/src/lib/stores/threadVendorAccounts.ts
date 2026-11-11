@@ -3,7 +3,7 @@ import { token } from './auth';
 import { threads } from './threads';
 import type { VendorAccount } from './vendorAccounts';
 import { plainErrorText, SERVER_UNREACHABLE } from '$lib/plainError';
-
+import { apiFetch } from '$lib/api/request';
 export interface ThreadVendorAccount extends VendorAccount { hold_reason: string | null }
 interface SelectionRead {
 	key: string;
@@ -29,7 +29,7 @@ export function loadThreadVendorAccounts(threadId: string, key: string): Promise
 	const work = (async () => {
 		let accounts: ThreadVendorAccount[] = []; let error: string | undefined;
 		try {
-			const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account?token=${encodeURIComponent(auth)}`);
+			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account`);
 			const body = await response.json().catch(() => null);
 			if (!response.ok) error = plainErrorText(body?.detail, 'Couldn’t load this chat’s account. Try again.');
 			else if (!Array.isArray(body?.accounts) || body.accounts.some((row: ThreadVendorAccount) =>

@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /** Attention API client types and parent roll-up request. */
 
 export interface AttentionItem {
@@ -25,7 +26,7 @@ export interface RollupResponse {
 }
 
 async function req<T>(url: string, options?: RequestInit): Promise<T> {
-	const res = await fetch(url, options);
+	const res = await apiFetch(url, options);
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
 		const err: Error & { status?: number; body?: string } = new Error(

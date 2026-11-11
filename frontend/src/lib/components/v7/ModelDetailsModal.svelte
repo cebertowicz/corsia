@@ -8,7 +8,7 @@
 	import { canEditCheckpointWindow } from './modelWarning';
 	import ImageInputEditor from './ImageInputEditor.svelte';
 	import ModelLabelEditor from './ModelLabelEditor.svelte';
-
+import { apiFetch } from '$lib/api/request';
 	interface Props {
 		model: ProviderModel;
 		providerLabel: string;
@@ -49,7 +49,7 @@
 		cacheLoading = true;
 		const t = get(token) || '';
 		try {
-			const res = await fetch(`/api/settings/network-servers/${serverId}/cache/status?token=${t}`);
+			const res = await apiFetch(`/api/settings/network-servers/${serverId}/cache/status`);
 			if (res.ok) {
 				const data = await res.json();
 				cacheStats = (data.caches || []).filter((c: CacheEntry) =>

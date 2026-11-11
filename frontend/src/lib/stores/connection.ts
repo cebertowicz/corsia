@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-
+import { apiFetch } from '$lib/api/request';
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export const connectionState = writable<ConnectionState>('disconnected');
@@ -74,8 +74,8 @@ export async function refreshDrainStatus(
 	if (!isCurrent()) return;
 	const requestedGeneration = drainStatusGeneration;
 	const requestId = ++latestDrainRefreshRequest;
-	const response = await fetch(
-		`/api/system/drain?token=${encodeURIComponent(authToken)}`,
+	const response = await apiFetch(
+		`/api/system/drain`,
 		{ cache: 'no-store' },
 	);
 	if (!isCurrent()) return;
@@ -104,7 +104,7 @@ export async function checkSecurityAlert(authToken: string | null = null): Promi
 		return;
 	}
 	try {
-		const res = await fetch('/api/security/alert', {
+		const res = await apiFetch('/api/security/alert', {
 			headers: { Authorization: `Bearer ${authToken}` },
 		});
 		if (!res.ok) { securityAlert.set(null); return; }
@@ -115,7 +115,7 @@ export async function checkSecurityAlert(authToken: string | null = null): Promi
 
 export async function dismissSecurityAlert(token: string): Promise<void> {
 	try {
-		await fetch(`/api/security/alert?token=${token}`, { method: 'DELETE' });
+		await apiFetch(`/api/security/alert`, { method: 'DELETE' });
 		securityAlert.set(null);
 	} catch {}
 }

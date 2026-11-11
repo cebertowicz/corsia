@@ -1,6 +1,6 @@
 import { writable, derived, type Readable } from 'svelte/store';
 import bundleSelf from './build-info.json';
-
+import { apiFetch } from '$lib/api/request';
 export interface BuildInfo {
 	label: string;
 	short_hash: string;
@@ -59,7 +59,7 @@ export const isBackendBehindOnDisk: Readable<boolean> = derived(
 
 export async function loadServerVersion(): Promise<void> {
 	try {
-		const res = await fetch('/api/version', { cache: 'no-store' });
+		const res = await apiFetch('/api/version', { cache: 'no-store' });
 		if (res.ok) serverVersion.set(await res.json());
 	} catch (e) {
 		console.warn('loadServerVersion failed:', e);

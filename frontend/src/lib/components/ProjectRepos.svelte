@@ -9,7 +9,7 @@
 	import { token } from '$lib/stores/auth';
 	import { toasts } from '$lib/stores/toast';
 	import { plainResponseError } from '$lib/plainError';
-
+import { apiFetch } from '$lib/api/request';
 	let { projectId }: { projectId: string } = $props();
 
 
@@ -64,7 +64,7 @@
 		}
 		loading = true;
 		try {
-			const res = await fetch(`/api/projects/${project}/repos?token=${t}`);
+			const res = await apiFetch(`/api/projects/${project}/repos`);
 			if (!res.ok) throw new Error(`Couldn't load repos (${res.status})`);
 			const nextRepos = ((await res.json()).repos ?? []) as Repo[];
 			if (isCurrent(generation)) repos = nextRepos;
@@ -106,7 +106,7 @@
 				addMode === 'link'
 					? { mode: 'link', path: path.trim(), name: name.trim() || null, ...controls }
 					: { mode: 'create', name: name.trim(), ...controls };
-			const res = await fetch(`/api/projects/${project}/repos?token=${t}`, {
+			const res = await apiFetch(`/api/projects/${project}/repos`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
@@ -138,7 +138,7 @@
 		const project = projectId;
 		const generation = projectGeneration;
 		try {
-			const res = await fetch(`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}?token=${t}`, {
+			const res = await apiFetch(`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}`, {
 				method: 'DELETE',
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not detach that repository. Try again.'));
@@ -165,8 +165,8 @@
 		const generation = projectGeneration;
 		branchLoading[repo.name] = true;
 		try {
-			const res = await fetch(
-				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}/branches?token=${t}`,
+			const res = await apiFetch(
+				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}/branches`,
 			);
 			if (!res.ok) {
 				throw new Error(await plainResponseError(res, 'Could not load this repository’s branches. Try again.'));
@@ -195,8 +195,8 @@
 		const generation = projectGeneration;
 		mutationBusy[repo.name] = true;
 		try {
-			const res = await fetch(
-				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}?token=${t}`,
+			const res = await apiFetch(
+				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}`,
 				{
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },

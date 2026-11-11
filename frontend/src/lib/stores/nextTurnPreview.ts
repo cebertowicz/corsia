@@ -1,5 +1,5 @@
 import type { ContextUsage } from './contextUsageTypes';
-
+import { apiFetch } from '$lib/api/request';
 /**
  * Read the next-turn context preview for one thread.
  *
@@ -15,7 +15,7 @@ export async function fetchNextTurnPreview(
 	const params = new URLSearchParams();
 	params.set('token', authToken);
 	if (modelId) params.set('model', modelId);
-	const res = await fetch(
+	const res = await apiFetch(
 		`/api/threads/${threadId}/context-snapshot/next-turn?${params.toString()}`,
 	);
 	if (!res.ok) throw new Error(`Context preview failed (${res.status})`);

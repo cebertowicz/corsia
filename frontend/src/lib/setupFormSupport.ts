@@ -1,12 +1,12 @@
 import type { SetupStep } from '$lib/components/SetupShell.svelte';
 import { localHostRefusal } from './localHostRefusal';
-
+import { apiFetch } from '$lib/api/request';
 type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
 
 export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
 
 export async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
-	const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
+	const response = await apiFetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
 		body: JSON.stringify(session ? { onboarding: true } : {}),

@@ -2,7 +2,7 @@ import { fetchCorsiaAgent } from '$lib/utils/conductor';
 import { getModelDispatchId } from '$lib/stores/models';
 import { setupModelWorks, type SetupModel } from '$lib/setupModels';
 import { on } from '$lib/ws/events';
-
+import { apiFetch } from '$lib/api/request';
 type WarmProgressEvent = {
 	type: 'thread_warm_progress';
 	thread_id?: string;
@@ -86,7 +86,7 @@ export function createSetupWarm() {
 				});
 				const query = new URLSearchParams({ token: session, model, progress: 'true' });
 				const url = `/api/threads/${encodeURIComponent(lookup.target.thread_id)}/warm?${query}`;
-				const response = await fetch(`${url}&wait=true`, { method: 'POST', signal });
+				const response = await apiFetch(`${url}&wait=true`, { method: 'POST', signal });
 				const body: { ok?: boolean; message?: string } | null = await response.json().catch(() => null);
 				// A warm that didn't finish leaves the normal cold-turn path; record why for diagnosis.
 				if (!response.ok || body?.ok === false) {

@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { plainResponseError } from '$lib/plainError';
 import { signInStateLine } from '$lib/appSignIn';
-
+import { apiFetch } from './request';
 export type AppState = 'awaiting_approval' | 'connecting' | 'working' | 'needs_token' | 'token_rejected' | 'needs_sign_in' | 'disconnected' | 'failed' | 'expired';
 
 export interface AppKeyRef {
@@ -166,7 +166,7 @@ function url(path: string): string {
 const accountFailure = (account: Pick<ConnectedAccount, 'provider_display_name'>): string => `Couldn't change this ${account.provider_display_name} account. Try again.`;
 
 async function response<T>(path: string, init?: RequestInit, fallback = 'Could not update this app. Try again.'): Promise<T> {
-	const result = await fetch(url(path), init);
+	const result = await apiFetch(url(path), init);
 	if (!result.ok) throw new Error(await plainResponseError(result, fallback));
 	return result.json() as Promise<T>;
 }
@@ -225,7 +225,7 @@ export class SignInStartError extends Error {
 }
 
 export async function startAppSignIn(id: string): Promise<SignInStart> {
-	const result = await fetch(url(`/api/mcp/servers/${encodeURIComponent(id)}/sign-in`), { method: 'POST' });
+	const result = await apiFetch(url(`/api/mcp/servers/${encodeURIComponent(id)}/sign-in`), { method: 'POST' });
 	if (result.ok) return result.json() as Promise<SignInStart>;
 	const body = await result.clone().json().catch(() => null);
 	if (typeof body?.detail?.failure_class === 'string') throw new SignInStartError(body.detail.failure_class);
@@ -250,7 +250,7 @@ export class ConnectAppError extends Error {
 }
 
 export async function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> & { config: Record<string, unknown> }): Promise<ConnectedApp> {
-	const result = await fetch(url('/api/mcp/servers'), {
+	const result = await apiFetch(url('/api/mcp/servers'), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...input, key_refs: [] }),

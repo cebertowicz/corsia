@@ -1,6 +1,6 @@
 import { plainErrorText } from '$lib/plainError';
 import { resizeTextInputToContent } from '$lib/textInputResize';
-
+import { apiFetch } from '$lib/api/request';
 /** Which composer sheet is open above the input bar; null when none is. */
 export type SheetView = 'attachments' | 'model' | 'thinking' | 'context' | null;
 
@@ -29,7 +29,7 @@ let uploadLimits: UploadLimits | null = null;
 export async function loadUploadLimits(authToken: string): Promise<UploadLimits | null> {
 	if (uploadLimits) return uploadLimits;
 	try {
-		const res = await fetch('/api/upload/limits', { headers: { Authorization: `Bearer ${authToken}` } });
+		const res = await apiFetch('/api/upload/limits', { headers: { Authorization: `Bearer ${authToken}` } });
 		if (!res.ok) return null;
 		uploadLimits = (await res.json()) as UploadLimits;
 	} catch {
@@ -66,8 +66,8 @@ export async function uploadInputFile(
 	const form = new FormData();
 	form.append('file', file);
 	try {
-		const res = await fetch(
-			`/api/upload?token=${encodeURIComponent(authToken)}&thread_id=${encodeURIComponent(threadId)}`,
+		const res = await apiFetch(
+			`/api/upload?thread_id=${encodeURIComponent(threadId)}`,
 			{
 				method: 'POST',
 				body: form,

@@ -9,7 +9,7 @@
 	import MessageList from './MessageList.svelte';
 	import InputBar from './InputBar.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-
+import { apiFetch } from '$lib/api/request';
 	type TurnSummary = {
 		started_at: string | null;
 		ended_at: string | null;
@@ -57,7 +57,7 @@
 		}
 		try {
 			const query = new URLSearchParams({ token: authToken, limit: '50' });
-			const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${query}`);
+			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${query}`);
 			if (!response.ok) throw new Error(`Child transcript load failed (${response.status})`);
 			const body = await response.json();
 			if (requestGeneration !== generation) return;

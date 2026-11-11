@@ -11,7 +11,7 @@ import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
 import type { UpdateSchedule, UpdateStatus } from './types';
-
+import { apiFetch } from '$lib/api/request';
 const POLL_MS = 1_000;
 export type { UpdateSchedule, UpdateStatus } from './types';
 export const updateStatus = writable<UpdateStatus | null>(null);
@@ -176,7 +176,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	const authToken = get(token);
 	if (!authToken) return;
 	try {
-		const response = await fetch(`/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
+		const response = await apiFetch(`/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
 			headers: { Authorization: `Bearer ${authToken}` },
 			cache: 'no-store',
 		});
@@ -229,7 +229,7 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 		return false;
 	}
 	try {
-		const response = await fetch('/api/system/update-schedule', {
+		const response = await apiFetch('/api/system/update-schedule', {
 			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch), cache: 'no-store',
 		});

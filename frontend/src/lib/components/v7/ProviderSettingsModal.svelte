@@ -18,7 +18,7 @@
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
 	import AccountsBlock from './AccountsBlock.svelte';
 	import type { ProviderSettingsTab } from './providerSettingsTypes';
-
+import { apiFetch } from '$lib/api/request';
 	interface Props {
 		provider: HostProvider;
 		initialTab?: ProviderSettingsTab;
@@ -100,8 +100,8 @@
 		}
 		try {
 			const t = get(token) || '';
-			const res = await fetch(
-				`/api/settings/providers/${provider.name}/status?token=${t}`,
+			const res = await apiFetch(
+				`/api/settings/providers/${provider.name}/status`,
 			);
 			if (res.ok) {
 				const data = await res.json();
@@ -205,8 +205,8 @@
 			: `Model server ${action === 'start' ? 'started' : 'stopped'}.`;
 		try {
 			const t = get(token) || '';
-			const res = await fetch(
-				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}?token=${t}`,
+			const res = await apiFetch(
+				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}`,
 				{ method: 'POST' },
 			);
 			const data = await res.json().catch(() => ({}));

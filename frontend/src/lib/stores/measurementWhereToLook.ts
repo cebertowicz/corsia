@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { measurementScope, panelSeriesIds, type MeasurementScope } from './measurement';
 import { grainScopeParams, measurementGrain } from './measurementGrain';
 import { decodePeriod, type MeasurementPeriod } from './measurementPeriod';
-
+import { apiFetch } from '$lib/api/request';
 export type WhereToLookFormat = 'percent' | 'hours' | 'minutes' | 'ratio' | 'tokens' | 'dollars';
 const FORMATS: ReadonlySet<unknown> = new Set(['percent', 'hours', 'minutes', 'ratio', 'tokens', 'dollars']);
 
@@ -79,7 +79,7 @@ export async function loadMeasurementWhereToLook(scope = get(measurementScope), 
 		const params = grainScopeParams(grain, scope);
 		// The page's own series request, so the server answers both from one read.
 		params.set('ids', panelSeriesIds());
-		const response = await fetch(`/api/measurement/where-to-look?${params}`, { signal: next.signal });
+		const response = await apiFetch(`/api/measurement/where-to-look?${params}`, { signal: next.signal });
 		if (!response.ok) throw new Error(`where-to-look request failed: ${response.status}`);
 		const decoded = decodeWhereToLook(await response.json());
 		if (controller !== next || scopeKey !== key(get(measurementScope))) return;

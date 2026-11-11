@@ -1,4 +1,5 @@
 <script lang="ts">
+import { apiFetch } from '$lib/api/request';
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
@@ -247,7 +248,7 @@
 		const signal = firstPageRead.start();
 		const sequence = beginChatReplyAttentionRead();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
+			const res = await apiFetch(`/api/threads/${threadId}/messages?limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);

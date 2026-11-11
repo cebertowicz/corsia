@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { measurementScope, type MeasurementScope } from './measurement';
 import { grainScopeParams, measurementGrain, viewerTimeZone, type MeasurementGrain } from './measurementGrain';
 import { decodeSpan } from './measurementPeriod';
-
+import { apiFetch } from '$lib/api/request';
 /** A token figure: the sum of what was recorded and how many calls recorded none of it (a lower bound when above zero). */
 export type KpiTokenFigure = { value: number; unknown_records: number };
 export type KpiPeriod = {
@@ -29,7 +29,7 @@ export async function loadKeyFigures(scope = get(measurementScope), grain = get(
 	keyFigures.update((state) => ({ loading: true, kpi: state.selection === selection ? state.kpi : null, error: null, selection }));
 	try {
 		const params = grainScopeParams(grain, scope);
-		const response = await fetch(`/api/measurement/key-figures?${params}`, { signal: active.signal });
+		const response = await apiFetch(`/api/measurement/key-figures?${params}`, { signal: active.signal });
 		if (!response.ok) throw new Error('key figures');
 		const data = await response.json() as { kpi?: Kpi };
 		if (!data.kpi?.current || !data.kpi.previous) throw new Error('key figures shape');

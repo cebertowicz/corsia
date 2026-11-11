@@ -2,7 +2,7 @@ import { get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
 import { on } from '$lib/ws/events';
-
+import { apiFetch } from '$lib/api/request';
 const LEGACY_KEY = 'corsia.document-comments.deliver-immediately';
 const ROUTE = '/api/doc-feedback/delivery-preference';
 
@@ -21,7 +21,7 @@ function forgetLegacy(): void {
 
 async function call(method: 'GET' | 'PUT', immediate?: boolean): Promise<{ immediate: boolean; stored: boolean } | null> {
 	try {
-		const res = await fetch(ROUTE, {
+		const res = await apiFetch(ROUTE, {
 			method,
 			headers: { Authorization: `Bearer ${get(token) ?? ''}`, ...(method === 'PUT' ? { 'Content-Type': 'application/json' } : {}) },
 			...(method === 'PUT' ? { body: JSON.stringify({ immediate }) } : {}),

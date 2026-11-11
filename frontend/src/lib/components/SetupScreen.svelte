@@ -1,4 +1,5 @@
 <script lang="ts">
+import { apiFetch } from '$lib/api/request';
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button } from '$lib/components/ui';
@@ -183,7 +184,7 @@
 	async function readStatus() {
 		page = 'checking'; statusError = '';
 		try {
-			const response = await fetch('/api/setup/status');
+			const response = await apiFetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
 			status = await response.json(); setFolderState(status); sharing = status.usage_sharing_default === true; // the server owns the default (off only where the region needs opt-in); a missing one never reads as a yes
@@ -224,7 +225,7 @@
 	async function stopLocal() {
 		const current = get(token);
 		if (current) { await cancelLocalDownload(current); await refreshSources(); }
-		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+		else await apiFetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 	}
 	async function turnOffLocal() {
 		const current = get(token);
@@ -245,7 +246,7 @@
 				if (!folderApplyPath) throw new Error('work folder path is unavailable');
 				await applyWorkFolder(folderApplyPath); folderChanged = false;
 			}
-			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null, usage_sharing: sharing }) });
+			const response = await apiFetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null, usage_sharing: sharing }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
 			if (!response.ok) {

@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
-
+import { apiFetch } from './request';
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
 
 export interface FeedbackCounts { comments: number; suggestions: number; edits: number }
@@ -42,7 +42,7 @@ export class ReviewRefusal extends Error {
 const authorization = () => ({ Authorization: `Bearer ${get(token) ?? ''}` });
 
 export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead> {
-	const response = await fetch(`/api/attention/${encodeURIComponent(artifactId)}/review`, { headers: authorization() });
+	const response = await apiFetch(`/api/attention/${encodeURIComponent(artifactId)}/review`, { headers: authorization() });
 	if (!response.ok) throw new Error(`${response.status}`);
 	return response.json();
 }

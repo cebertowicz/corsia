@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
-
+import { apiFetch } from './request';
 export type SkillScope = 'workspace' | 'project' | 'thread';
 
 export interface SkillRow {
@@ -44,7 +44,7 @@ export async function fetchSkills(params: {
 	});
 	if (params.projectId) q.set('project_id', params.projectId);
 	if (params.threadId) q.set('thread_id', params.threadId);
-	return ok(await fetch(`/api/skills?${q.toString()}`));
+	return ok(await apiFetch(`/api/skills?${q.toString()}`));
 }
 
 export async function createSkill(params: {
@@ -54,7 +54,7 @@ export async function createSkill(params: {
 	projectId?: string | null;
 	threadId?: string | null;
 }): Promise<SkillRow> {
-	const data = await ok(await fetch(`/api/skills?token=${tok()}`, {
+	const data = await ok(await apiFetch(`/api/skills`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({

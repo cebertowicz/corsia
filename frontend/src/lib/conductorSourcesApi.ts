@@ -4,7 +4,7 @@ import { loadModels } from '$lib/stores/modelsLoad';
 import { loadThreadVendorAccounts } from '$lib/stores/threadVendorAccounts';
 import { PIN_FAILED } from '$lib/stores/threadAccountPin';
 import { SERVER_UNREACHABLE } from '$lib/plainError';
-
+import { apiFetch } from '$lib/api/request';
 /**
  * The calls the first-run sources panel makes beyond reading the sources: the CLI install and
  * link routes, the conductor's account bind step, and the added-account sign-in. Each takes
@@ -20,7 +20,7 @@ export type BindReason = 'not_ready' | 'limited' | 'no_usable_model' | 'unchecke
 export interface BindResult { bound: boolean; reason: BindReason | null }
 
 export async function bindConductorAccount(t: string, threadId: string, accountId: string): Promise<BindResult> {
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/corsia-agent-account`, {
+	const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/corsia-agent-account`, {
 		method: 'POST', headers: headers(t, true), body: JSON.stringify({ account_id: accountId }),
 	});
 	if (!response.ok) throw new Error(`bind ${response.status}`);
@@ -50,7 +50,7 @@ export type LinkOutcome = 'linked' | 'already_linked' | 'not_found' | 'timed_out
 
 /** Link an installed CLI where CORSIA's service can see it; `outcome` says why a failed link failed. */
 export async function linkCli(t: string, vendor: string): Promise<{ ok: boolean; outcome: LinkOutcome | null }> {
-	const response = await fetch(`/api/providers/cli/${vendor}/link`, { method: 'POST', headers: headers(t) });
+	const response = await apiFetch(`/api/providers/cli/${vendor}/link`, { method: 'POST', headers: headers(t) });
 	const body = await response.json().catch(() => null);
 	return { ok: response.ok && body?.ok === true, outcome: body?.outcome ?? null };
 }
@@ -75,7 +75,7 @@ export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_
  * already there is not a failure: the refusal says which, and the card's state is what's stale.
  */
 async function startCliJob(t: string, vendor: string, operation: 'install' | 'update'): Promise<CliInstallRefusal | null> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/${operation}`, {
+	const response = await apiFetch(`/api/providers/cli/${encodeURIComponent(vendor)}/${operation}`, {
 		method: 'POST', headers: headers(t),
 	});
 	if (response.status === 409) {
@@ -98,14 +98,14 @@ export function startCliUpdate(t: string, vendor: string): Promise<CliInstallRef
 
 /** Read a vendor CLI installation's current state without starting another installer. */
 export async function getCliInstall(t: string, vendor: string): Promise<CliInstall> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { headers: headers(t) });
+	const response = await apiFetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { headers: headers(t) });
 	if (!response.ok) throw new Error(`CLI install ${response.status}`);
 	return cliInstallOf(await response.json().catch(() => null));
 }
 
 /** Stop a running vendor CLI installation; the answer is the state it settled in ('done' when it had just finished). */
 export async function cancelCliInstall(t: string, vendor: string): Promise<CliInstall> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { method: 'DELETE', headers: headers(t) });
+	const response = await apiFetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { method: 'DELETE', headers: headers(t) });
 	if (!response.ok) throw new Error(`CLI install cancel ${response.status}`);
 	return cliInstallOf(await response.json().catch(() => null));
 }
@@ -138,14 +138,14 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
  * included), else a new one.
  */
 export async function accountToSignIn(t: string, provider: string, name: string): Promise<string> {
-	const listed = await fetch(`/api/vendor-accounts?provider=${encodeURIComponent(provider)}`, { headers: headers(t) });
+	const listed = await apiFetch(`/api/vendor-accounts?provider=${encodeURIComponent(provider)}`, { headers: headers(t) });
 	if (listed.ok) {
 		const body = await listed.json();
 		const reusable = (body?.accounts ?? []).find((account: { state: string }) =>
 			account.state === 'signed_out');
 		if (reusable) return reusable.id;
 	}
-	const added = await fetch('/api/vendor-accounts', {
+	const added = await apiFetch('/api/vendor-accounts', {
 		method: 'POST', headers: headers(t, true), body: JSON.stringify({ provider, name }),
 	});
 	if (!added.ok) throw new Error(`add account ${added.status}`);
@@ -154,7 +154,7 @@ export async function accountToSignIn(t: string, provider: string, name: string)
 
 /** Start the browser sign-in; the backend binds the conductor to the account if it comes back Ready. */
 export async function startSignin(t: string, accountId: string, bindThreadId: string): Promise<Signin> {
-	const response = await fetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, {
+	const response = await apiFetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, {
 		method: 'POST', headers: headers(t, true), body: JSON.stringify({ bind_thread_id: bindThreadId }),
 	});
 	if (!response.ok) throw new Error(`signin ${response.status}`);
@@ -162,7 +162,7 @@ export async function startSignin(t: string, accountId: string, bindThreadId: st
 }
 
 export async function checkSignin(t: string, accountId: string): Promise<Signin | null> {
-	const response = await fetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, {
+	const response = await apiFetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, {
 		method: 'POST', headers: headers(t),
 	});
 	const body = await response.json().catch(() => null);
@@ -172,7 +172,7 @@ export async function checkSignin(t: string, accountId: string): Promise<Signin 
 }
 
 export async function cancelSignin(t: string, accountId: string): Promise<Signin> {
-	const response = await fetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, {
+	const response = await apiFetch(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, {
 		method: 'DELETE', headers: headers(t),
 	});
 	if (!response.ok) throw new Error(`signin cancel ${response.status}`);
@@ -184,12 +184,12 @@ export type LifecycleResult = { ok: boolean; ref?: string };
 
 /** Start or stop the person's own local server through the existing lifecycle route. */
 async function localServerLifecycle(t: string, action: 'start' | 'stop'): Promise<LifecycleResult> {
-	const listed = await fetch('/api/settings/network-servers', { headers: headers(t) });
+	const listed = await apiFetch('/api/settings/network-servers', { headers: headers(t) });
 	if (!listed.ok) return { ok: false };
 	const servers: { id: string; provider: string; kind?: string | null; status: string }[] = (await listed.json())?.servers ?? [];
 	const server = servers.find((row) => row.provider === 'omlx' && row.kind !== 'external' && row.status !== 'disabled');
 	if (!server) return { ok: false };
-	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/${action}`, {
+	const response = await apiFetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/${action}`, {
 		method: 'POST', headers: headers(t),
 	});
 	if (!response.ok) return { ok: false };
@@ -211,7 +211,7 @@ export interface StarterResult { ok: boolean; in_progress?: boolean; reason?: 'n
 
 /** Ask the person's own oMLX to download the starter model; it writes no settings. */
 export async function addStarterModel(t: string): Promise<StarterResult> {
-	const response = await fetch('/api/providers/local/starter', { method: 'POST', headers: headers(t) });
+	const response = await apiFetch('/api/providers/local/starter', { method: 'POST', headers: headers(t) });
 	if (!response.ok) throw new Error(`starter ${response.status}`);
 	return response.json();
 }

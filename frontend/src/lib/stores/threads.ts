@@ -50,7 +50,7 @@ export function isNavAgent(s: Thread): boolean {
 
 export type { ChatComment } from '../chatCommentTypes';
 import type { ChatComment } from '../chatCommentTypes';
-
+import { apiFetch } from '$lib/api/request';
 export interface Message {
 	id: string;
 	thread_id: string;
@@ -258,7 +258,7 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		return { ...thread, title };
 	}));
 	try {
-		const response = await fetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
+		const response = await apiFetch(`/api/threads/${threadId}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
@@ -279,7 +279,7 @@ export async function saveThreadProject(threadId: string, projectId: string | nu
 		return s;
 	}));
 	try {
-		const res = await fetch(`/api/threads/${threadId}?token=${token}`, {
+		const res = await apiFetch(`/api/threads/${threadId}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ project_id: projectId }),

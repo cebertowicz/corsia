@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { token } from '$lib/stores/auth';
-
+import { apiFetch } from '$lib/api/request';
 	interface Props {
 		serverId: string;
 	}
@@ -53,8 +53,8 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await fetch(
-				`/api/settings/network-servers/${serverId}/settings?token=${$token}`,
+			const res = await apiFetch(
+				`/api/settings/network-servers/${serverId}/settings`,
 			);
 			if (res.status === 503) {
 				error = 'oMLX server is unreachable. Make sure it\'s running and reachable at the configured host:port.';
