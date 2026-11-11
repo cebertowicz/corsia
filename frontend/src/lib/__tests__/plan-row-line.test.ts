@@ -131,6 +131,44 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(subline('Pick a name')).toBe('Needs your decision');
 	});
 
+	it('keeps an open ask\'s own subtext and adds the needs-you dot and the accent count after it', () => {
+		render([node({
+			id: 'ask', title: 'Review launch plan', state: 'review_requested', requires_user_action: true,
+			review: { kind: 'human_decision', label: 'Needs your decision', actor: { kind: 'user', id: null, label: 'You' } },
+			comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 1, system_task: false },
+		})]);
+
+		const lines = row('Review launch plan').querySelectorAll('.row-subline');
+		expect(lines).toHaveLength(1);
+		expect(lines[0].textContent).toBe('Needs your decision · 2 comments, 1 suggestion');
+		expect(lines[0].querySelector('.comment-count .comment-dot')).not.toBeNull();
+	});
+
+	it('gives a file task the same dot and accent count as its only subtext', () => {
+		render([node({
+			id: 'file', title: 'Launch plan.md', requires_user_action: true, assignee: 'user',
+			comment_attention: { artifact_id: 'doc', comments: 1, suggestions: 1, system_task: true },
+		})]);
+
+		const lines = row('Launch plan.md').querySelectorAll('.row-subline');
+		expect(lines).toHaveLength(1);
+		expect(lines[0].textContent).toBe('1 comment, 1 suggestion');
+		expect(lines[0].querySelector('.comment-count .comment-dot')).not.toBeNull();
+		expect(rowFaceSource).toMatch(/\.comment-count\s*\{\s*color:\s*var\(--accent\)/);
+		expect(rowFaceSource).toMatch(/\.comment-dot\s*\{[^}]*background:\s*var\(--amber\)/);
+	});
+
+	it('shows an agent\'s feedback task its count without the needs-you dot', () => {
+		render([node({
+			id: 'feedback', title: 'Author left 1 comment', state: 'active',
+			comment_attention: { artifact_id: 'doc', comments: 1, suggestions: 0, system_task: false },
+		})]);
+
+		const count = row('Author left 1 comment').querySelector('.comment-count');
+		expect(count?.textContent).toBe('1 comment');
+		expect(count?.querySelector('.comment-dot')).toBeNull();
+	});
+
 	it('joins every specific fact on the one subline', () => {
 		const held = node({
 			id: 'held', title: 'Held step',
