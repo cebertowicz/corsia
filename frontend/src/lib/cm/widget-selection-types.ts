@@ -1,3 +1,4 @@
+import type { EditorView } from '@codemirror/view';
 import type { SelectionLabel } from '$lib/stores/commentDraft';
 
 const TOUCH_SLOP = 6;
@@ -21,4 +22,18 @@ export function caretAt(x: number, y: number): { node: Node; offset: number } | 
 	if (position) return { node: position.offsetNode, offset: position.offset };
 	const range = document.caretRangeFromPoint?.(x, y);
 	return range ? { node: range.startContainer, offset: range.startOffset } : null;
+}
+
+/**
+ * Puts the browser's selection inside a table or diagram widget, once the editor has let go of its focus. A selection
+ * inside a widget is not the editor's: CodeMirror passes it over when the browser reports it, but while the editor is
+ * focused, any change to the editor's DOM before that report (the widget redrawing its comment marks) has CodeMirror read
+ * it as a caret at the widget's edge. That moves the editor's caret off where the reader left it and lets go of the comment
+ * the click just opened. An editor without focus never takes the browser's selection for its own.
+ */
+export function selectInWidget(view: EditorView, write: (selection: Selection) => void): void {
+	const selection = document.getSelection();
+	if (!selection) return;
+	if (view.hasFocus) view.contentDOM.blur();
+	write(selection);
 }
