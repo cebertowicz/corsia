@@ -4,6 +4,8 @@
 # Add a scenario under frontend/e2e/contact-sheet: export seed(page, request)
 # to create the fixture, open it on page, and return an async open(page) function;
 # also export scrollAnchor (a selector inside the screen's scrollable content).
+# A scenario with several screen states may also export states (lowercase names);
+# open(page, state) then opens each one, captured into its own subfolder.
 # Writes index.html and screenshots to DIR (default: contact-sheet/<scenario>).
 # Captures light and dark, top and bottom, around CSS width thresholds.
 set -euo pipefail

@@ -46,4 +46,6 @@ class MailHostError(AccountError):
             raise ValueError("unknown mail-host cause")
         self.cause = cause
         self.host = host
-        super().__init__(_MESSAGES[cause].format(host=host or "the server", name=name or "The host"))
+        # A refused password or IMAP turned off is a setting only the person can change.
+        super().__init__(_MESSAGES[cause].format(host=host or "the server", name=name or "The host"),
+                         person_fixes=cause in (PASSWORD_REFUSED, IMAP_OFF))

@@ -1,4 +1,5 @@
 import type { FailureObservation } from './documentFailures';
+import type { EmailDraftInfo } from '$lib/emailDraft';
 
 export interface HeldDocument {
 	corsia_text: string;
@@ -43,6 +44,8 @@ export interface DocumentFrame extends FailureObservation {
 	reserved?: boolean;
 	ranges?: { id: string; from_off: number; to_off: number }[];
 	states?: { id: string; orphaned: boolean; text_changed: boolean }[];
+	/** On an email draft's open, receipt and update frames: the header as the server read it from the live text. */
+	email_draft?: EmailDraftInfo;
 }
 
 /** A comment's own id, minted at capture so the live range and the posted comment share it. */

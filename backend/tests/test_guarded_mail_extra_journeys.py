@@ -6,9 +6,9 @@ import httpx
 import pytest
 
 from tests.test_guarded_mail_journeys import provider_state
-from tests.test_google_email import GMAIL, THREADED, _draft as gmail_draft, approve, client_file, google, mail
+from tests.test_google_email import GMAIL, THREADED, _draft as gmail_draft, _row, approve, client_file, google, mail
 from mailhost_helpers import authority, env, servers  # noqa: F401
-from test_mailhost_send import _draft as host_draft, _send, make_host  # noqa: F401
+from test_mailhost_send import _draft as host_draft, _row as host_row, _send, make_host  # noqa: F401
 from test_mailhost_threads_folders_invites import ORIGINAL, _id
 from tools.google_email import EmailDraftTool, EmailSendTool
 from tools.reviewed_drafts import working_root
@@ -31,7 +31,9 @@ async def test_gmail_warning_is_in_saved_draft(mail):
     provider_state(mail, [THREADED])
     saved = await gmail_draft(mail, to=['alternate@example.com'], reply_to_message_id='m-100')
     document = (mail.workspace / saved['path']).read_text()
-    assert 'differs' in document and 'alternate@example.com' in document
+    assert 'alternate@example.com' in document
+    assert any('differs' in note for note in saved['guard_notes'])
+    assert not any('differs' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
     assert not mail.sends
 
 
@@ -56,7 +58,9 @@ async def test_host_warning_is_in_saved_draft(make_host):
     host.built.imap.messages[5] = ORIGINAL
     saved = await host_draft(host, to=['alternate@example.com'], cc=[], reply_to_message_id=_id(host))
     document = (host.workspace / saved['path']).read_text()
-    assert 'differs' in document and 'alternate@example.com' in document
+    assert 'alternate@example.com' in document
+    assert any('differs' in note for note in saved['guard_notes'])
+    assert not any('differs' in note for note in json.loads(host_row(saved['draft_id'])['target_json'])['notes'])
     assert not host.built.smtp.sent
 
 
@@ -102,7 +106,9 @@ async def test_host_detected_font_plain_alternative_and_attachment_send(make_hos
     (working_root(host.thread) / 'report.txt').write_text('attached report')
     saved = await host_draft(host, attachments=['report.txt'])
     document = (host.workspace / saved['path']).read_text()
-    assert 'Attachment: report.txt (1 KB)' in document
+    target = json.loads(host_row(saved['draft_id'])['target_json'])
+    assert [a['name'] for a in target['attachments']] == ['report.txt']
+    assert 'Attachment:' not in document
     result = await _send(host, saved)
     assert not result.startswith('Error'), result
     assert len(host.built.smtp.sent) == 1

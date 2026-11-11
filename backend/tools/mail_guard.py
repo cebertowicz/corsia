@@ -44,6 +44,10 @@ class Verdict:
     warnings: list[str] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     evidence_ids: list[dict[str, str]] = field(default_factory=list)
+    #: Context the person sees under the draft's header, worded for them. Added recipients and newer emails in its
+    #: thread are not here: the draft view works those out from the draft and the conversation it reads. A reply sent
+    #: away from the address the earlier email asked for is, since the view can't mark it.
+    quiet: list[str] = field(default_factory=list)
 
 
 def normalize_subject(subject: str) -> str:
@@ -97,6 +101,9 @@ def check_reply(
         result.recipients = recipients
         if requested_to and [x.casefold() for x in requested_to] != [x.casefold() for x in recipients]:
             result.warnings.append(f"The requested recipient differs from the original reply address {', '.join(recipients)}; the reply will go to {', '.join(requested_to)}.")
+            # The view marks only addresses the answered email never carried, so a reply sent to its sender instead of
+            # the address it asked for would go unmarked: the person reads this one here.
+            result.quiet.append(f"The earlier email asked for replies to {', '.join(recipients)}; this reply goes to {', '.join(requested_to)}.")
     for message in thread:
         if message.date <= target.date or message.message_id == target.message_id:
             continue
@@ -117,6 +124,8 @@ def check_reply(
             result.stale.append(detail)
         else:
             result.warnings.append(detail)
+        name, address = parseaddr(message.sender)
+        result.quiet.append(f"{name or address or message.sender} wrote about the same subject in another conversation.")
     if not target.own:
         result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
     return result

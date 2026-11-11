@@ -9,6 +9,8 @@
 	import { uiScope } from '$lib/stores/uiScope';
 	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 	import { submittedAnswers } from '$lib/stores/cardAnswers';
+	import { splitFileName } from '$lib/fileNameSplit';
+	import { fitMiddleEllipsis } from '$lib/actions/middleEllipsis';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
 	import NeedsYouTile from './NeedsYouTile.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
@@ -19,6 +21,8 @@
 		threadId,
 		variant = 'row',
 		chipWidth = 'default',
+		middleEllipsis = false,
+		chipAside,
 		newMarker = false,
 		onActivate,
 		task,
@@ -30,6 +34,10 @@
 		variant?: 'row' | 'chip';
 		/** Opt-in for a chip whose title is its only location cue; ordinary attachment chips retain 220px. */
 		chipWidth?: 'default' | 'content';
+		/** A chip whose name is cut in the middle when it does not fit, keeping its start and its extension. */
+		middleEllipsis?: boolean;
+		/** A chip's secondary text after the name (an attached file's size); it is part of the chip's press target and accessible name. */
+		chipAside?: string;
 		/** Show the shared unread marker on a chip. */
 		newMarker?: boolean;
 		/** An alternate destination for a reply chip. */
@@ -74,7 +82,7 @@
 			: null,
 	);
 	const typeWord = $derived((card.type ?? 'file').replace(/-/g, ' '));
-	const accessibleName = $derived([card.title, typeWord, stateLabel, counts].filter(Boolean).join(', '));
+	const accessibleName = $derived([card.title, typeWord, stateLabel, counts, chipAside].filter(Boolean).join(', '));
 	const interactive = $derived(Boolean(onActivate || (card.opens && card.available && threadId && card.path)));
 
 	function open(event: MouseEvent): void {
@@ -130,7 +138,8 @@
 {/snippet}
 {#snippet chipFace()}
 	{@render glyph()}
-	<span class="text"><span class="head"><span class="title">{card.title}</span>{#if newMarker}<NewMarker dot />{/if}</span></span>
+	<span class="text"><span class="head"><span class="title" class:split={middleEllipsis}>{#if middleEllipsis}{@const parts = splitFileName(card.title)}<span class="name-start" use:fitMiddleEllipsis={parts.head}>{parts.head}</span>{#if parts.tail}<span class="name-end">{parts.tail}</span>{/if}{:else}{card.title}{/if}</span>{#if newMarker}<NewMarker dot />{/if}</span></span>
+	{#if chipAside}<span class="chip-aside">{chipAside}</span>{/if}
 {/snippet}
 
 {#if variant === 'row'}
@@ -231,6 +240,7 @@
 	.tile.chip .thumb { border-radius: var(--radius-xs); }
 	.text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 	.tile.chip .text { flex: 0 1 auto; }
+	.chip-aside { flex: 0 0 auto; font-size: var(--text-caption); color: var(--text-tertiary); white-space: nowrap; }
 	.title {
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -240,6 +250,12 @@
 		line-height: var(--lh-tight);
 	}
 	.tile.chip .title { font-size: var(--text-footnote); font-weight: var(--fw-medium); }
+	/* A name cut in the middle: the start gives way first and carries the ellipsis, the end (the extension) stays. The action
+	   `fitMiddleEllipsis` then sets the start so the ellipsis meets the end with no gap; this rule lays the chip out and shows if it cannot measure. */
+	.title.split { display: flex; text-overflow: clip; }
+	.name-start { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; flex: 0 1 auto; }
+	/* The end never shrinks: even a sub-pixel share of the overflow would put an ellipsis inside the extension. */
+	.name-end { flex: 0 0 auto; white-space: pre; }
 	/* The title and the time share one line, the time on the title's baseline; only the title gives way. */
 	.head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
 	.head .title { flex: 1 1 auto; min-width: 0; }

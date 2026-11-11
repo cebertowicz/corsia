@@ -315,6 +315,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
+		artifactId={loadedArtifactId}
 		{docState}
 		documentName={target?.name ?? 'this document'}
 		onRetry={() => reloadNonce += 1}

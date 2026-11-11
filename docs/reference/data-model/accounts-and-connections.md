@@ -50,7 +50,7 @@ Source: `backend/infra/action_drafts_schema.py`.
 | `sent_at` | TEXT | No | No | — | — |
 | `external_id` | TEXT | No | No | — | — |
 
-Indexes: `sqlite_autoindex_action_drafts_1` (id, unique).
+Indexes: `idx_action_drafts_kind_path` (kind, path), `sqlite_autoindex_action_drafts_1` (id, unique).
 
 ### `auth_tokens`
 
