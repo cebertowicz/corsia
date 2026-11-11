@@ -53,6 +53,14 @@
 		e.preventDefault();
 		onSend();
 	}
+	// Send leaves with the text it sent, so focus goes back to the field, where Enter leaves it, rather than to the page;
+	// on a touch screen that would raise the keyboard, so there the field stays as the tap left it.
+	function sendClicked(e: MouseEvent) {
+		e.stopPropagation();
+		if (posting) return;
+		if (!window.matchMedia?.('(pointer: coarse)').matches) input?.focus({ preventScroll: true });
+		onSend();
+	}
 </script>
 
 <div class="ct-compose open" data-autosize-sticky>
@@ -60,7 +68,7 @@
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
 		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={keepVisible} bind:value use:autosize={{ value, fit: true }} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
-			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={(e) => { e.stopPropagation(); if (!posting) onSend(); }} aria-label="Send reply" title="Reply">
+			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
 			</button>
 		{/if}

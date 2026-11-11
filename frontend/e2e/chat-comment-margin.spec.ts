@@ -246,6 +246,8 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 	await page.screenshot({ path: info.outputPath('pasted-chat-popover.png'), animations: 'disabled' });
 
 	await send.click();
+	// Send goes once its text is posted; focus returns to the field, so the card holding it stays while the transcript moves.
+	await expect(input).toBeFocused();
 	await expect(thread).toContainText('pasted reply 0');
 	await input.fill(Array.from({ length: 40 }, (_, i) => `second chat reply ${i}`).join('\n'));
 	// At 420 tall the popover cannot hold the thread beside the field: field and Send stay pinned and clickable and
@@ -258,6 +260,7 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 		await expectDiscussionVisible(thread, 'typed reply 0');
 	}
 	await send.click();
+	await expect(input).toBeFocused();
 	await expect(thread).toContainText('second chat reply 0');
 
 });

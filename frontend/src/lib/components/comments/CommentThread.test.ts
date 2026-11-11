@@ -46,6 +46,16 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
+	it('keeps focus in the reply field when a clicked Send goes away after posting', async () => {
+		render(thread());
+		const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		type(input, 'looks right');
+		button('.ct-send').focus();
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(host.querySelector('.ct-send')).toBeNull());
+		expect(document.activeElement).toBe(input);
+	});
+
 	it('draws no Reply field while hideReply is set, unless a reply is half typed', () => {
 		render(thread({ replies: [reply] }), false, { hideReply: true });
 		expect(host.querySelector('.ct-input')).toBeNull();
