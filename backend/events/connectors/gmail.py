@@ -17,6 +17,7 @@ from typing import Any
 
 from events.connectors import ConnectorManifest, EventTypeDecl, register
 from events.identity_formula import RelationshipDecl
+from events.rule_match import CASELESS, DOMAIN
 
 GMAIL_INTEGRATION = "gmail"
 EMAIL_THREAD_TYPE = "email-thread"
@@ -91,5 +92,5 @@ MANIFEST = register(ConnectorManifest(
     build_artifact_ref=_artifact_ref,
     resolve_relationships=_relationships,
     unrouted_scope=_unrouted_scope,
-    fact_comparison={"from_address": "caseless", "from_domain": "domain"},
+    fact_comparison={"from_address": CASELESS, "from_domain": DOMAIN},
 ))

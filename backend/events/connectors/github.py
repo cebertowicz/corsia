@@ -250,7 +250,7 @@ def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
     """The projects whose registered source repositories track the event's repository."""
     from events.connectors.github_notifications_feed import FeedError, projects_tracking_github_repository
 
-    repository = facts.get("repo")
+    repository = facts.get(MANIFEST.repository_fact or "")
     if not repository:
         return frozenset()
     try:
