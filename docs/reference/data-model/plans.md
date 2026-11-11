@@ -236,7 +236,7 @@ Source: `backend/infra/plan_schema.py`.
 | `payload_json` | TEXT | No | No | — | — |
 | `created_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_measurement_rejections_time` (created_at, node_id), `idx_measurement_accepted_node` (node_id, created_at; accepted states only), `idx_measurement_accepted_time` (created_at; accepted states only), `idx_measurement_corrections_node` (node_id; `correction_created` only), `idx_measurement_rejected_node` (node_id; `review_rejected` only), `idx_plan_node_events_created` (created_at), `idx_plan_node_events_node` (node_id, created_at), `sqlite_autoindex_plan_node_events_1` (id, unique).
+Indexes: `idx_measurement_accepted_node` (node_id, created_at), `idx_measurement_accepted_time` (created_at), `idx_measurement_corrections_node` (node_id), `idx_measurement_rejected_node` (node_id), `idx_measurement_rejections_time` (created_at, node_id), `idx_plan_node_events_created` (created_at), `idx_plan_node_events_node` (node_id, created_at), `sqlite_autoindex_plan_node_events_1` (id, unique).
 
 ### `plan_node_holds`
 
