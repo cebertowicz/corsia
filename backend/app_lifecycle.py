@@ -64,13 +64,12 @@ async def _startup_network_discovery() -> None:
         logger.warning(f"network discovery startup failed: {exc}")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Start and stop backend runtime services for the FastAPI app."""
-    from loguru import logger
+async def _begin_startup(app: FastAPI, logger) -> None:
+    """Start log capture, run startup init off the loop, then bind loop services.
 
-    # Capture starts first, so startup's own phase timings and errors reach the
-    # conductor log store. It never raises: a failure leaves capture off.
+    Capture starts first, so startup's own phase timings and errors reach the
+    conductor log store. It never raises: a failure leaves capture off.
+    """
     await asyncio.to_thread(start_corsia_logs)
     configure_sqlite_fetch_switch_interval()
     with startup_progress.publishing():
@@ -80,6 +79,14 @@ async def lifespan(app: FastAPI):
 
     if not getattr(app.state, "litellm_cost_map_offline", False):
         start_refresh()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start and stop backend runtime services for the FastAPI app."""
+    from loguru import logger
+
+    await _begin_startup(app, logger)
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:
