@@ -22,8 +22,12 @@ def test_one_task_per_document_closes_and_can_reopen(isolated_db):
         with write_transaction(db, scope="test_reconcile") as connection:
             first = person_comment_task.reconcile(connection, artifact)
             assert person_comment_task.reconcile(connection, artifact) == first
-        row = db.execute("SELECT title,assignee FROM plan_nodes WHERE id=?", (first,)).fetchone()
-        assert tuple(row) == ("brief.md", "user")
+        row = db.execute(
+            "SELECT n.title,n.assignee,n.parent_id,p.owner_kind,p.owner_id FROM plan_nodes n"
+            " JOIN plans p ON p.id=n.plan_id WHERE n.id=?", (first,),
+        ).fetchone()
+        # Coverage joins the plan owner's thread, so the task must be a thread-owned root leaf.
+        assert tuple(row) == ("brief.md", "user", None, "thread", "owner")
         with write_transaction(db, scope="test_comment_read") as connection:
             mark_thread_viewed(connection, "owner-token", artifact, root["id"], reply["id"])
             person_comment_task.reconcile(connection, artifact)
@@ -96,6 +100,44 @@ def test_feedback_covers_person_task_until_settled(isolated_db, feedback_first, 
             shown = nodes()
             assert shown[person_task]['comment_attention']['comments'] == 1
             assert len(attention()) == 1
+    finally:
+        db.close()
+
+
+def test_covered_comment_task_leaves_every_plan_count_unchanged(isolated_db):
+    """Hiding happens in the plans projection, so the pane and chat list read the same counts."""
+    from doceditor.person_comment_projection import annotate
+    from plans import operator_chat_state
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
+        with write_transaction(db, scope='test_count_parity') as connection:
+            plan = service.ensure_plan('thread', 'owner', db=connection)
+            feedback = service.add_node(plan.id, kind='task', title='Agent feedback',
+                                        acceptance_criteria='Done', actor_id=None,
+                                        provenance='document.feedback_batch', db=connection)
+            artifact_links.link(feedback.id, artifact, 'input', actor_id=None,
+                                provenance='document.feedback_batch', db=connection)
+            service.transition_node(feedback.id, 'active', actor_id='owner', db=connection)
+
+            def counts():
+                envelope = public.read_operator_thread('owner', actor=actor, db=connection)
+                raw = dict(envelope['plans'][0]['progress'])
+                annotated = annotate(connection, envelope, 'owner-token')['plans'][0]['progress']
+                assert annotated == raw
+                state = operator_chat_state.read_thread_states(['owner'], actor=actor, db=connection)
+                return raw, state['states']['owner']['label_key']
+
+            before = counts()
+        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        with write_transaction(db, scope='test_count_parity_after') as connection:
+            person_task = person_comment_task.reconcile(connection, artifact)
+            assert operator_display_state.covered_nodes([person_task], db=connection) == {person_task}
+            assert counts() == before
     finally:
         db.close()
 

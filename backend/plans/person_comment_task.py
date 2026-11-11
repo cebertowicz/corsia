@@ -4,7 +4,8 @@ from pathlib import Path
 
 from doceditor import person_comment_attention
 from infra.config import WORKSPACE
-from plans import artifact_links, node_states, review_requests, service
+from infra.write_effects import after_commit
+from plans import artifact_links, node_states, notifications, review_requests, service
 from plans.feedback_items import artifact_name
 from registry import models as registry_models
 from registry.shared_principals import document_scope
@@ -55,7 +56,7 @@ def reconcile(db, artifact_id: str) -> str | None:
             assignee='user', actor_id=None, provenance=PROVENANCE, db=db,
         )
         artifact_links.link(node.id, artifact_id, 'input', actor_id=None, provenance=PROVENANCE, db=db)
-        review_requests._notify(db, plan.id)
+        after_commit(db, lambda: notifications.notify_after_commit((plan.id,), db=db))
         return node.id
     if not count and node_id:
         review_requests.settle_node(
