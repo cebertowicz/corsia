@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from plans import admission, operator_node_facts as facts, operator_stopped
 from plans.admission_projection import executor_of
-from plans.operator_display_state import covered_nodes
+from plans.operator_display_state import coverage_matches
 
 
 def read(projected, *, db, now, costs, memo, lean, detail_ids, attempt_limit):
@@ -21,5 +21,5 @@ def read(projected, *, db, now, costs, memo, lean, detail_ids, attempt_limit):
         node_plans, db=db, now=now or datetime.now(timezone.utc), wanted=costs,
         detail_ids=detail_ids,
     )
-    covered = covered_nodes((node['id'] for node, _ in node_plans), db=db)
-    return node_plans, executors, details, executions, stops, cost_facts, covered
+    coverage = coverage_matches((node['id'] for node, _ in node_plans), db=db)
+    return node_plans, executors, details, executions, stops, cost_facts, coverage

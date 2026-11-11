@@ -248,14 +248,15 @@ def project_node_event(
     if from_schema_step(provenance):
         return
 
-    append_node_transition(
-        connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
-        new_state=new_state, created_at=created_at,
-    )
-    update_cards.observe_node_event(
-        connection, node_id=node_id, event=event, event_id=event_id,
-        new_state=new_state, payload=payload, created_at=created_at,
-    )
+    if provenance != "document.person_comment_task":
+        append_node_transition(
+            connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
+            new_state=new_state, created_at=created_at,
+        )
+        update_cards.observe_node_event(
+            connection, node_id=node_id, event=event, event_id=event_id,
+            new_state=new_state, payload=payload, created_at=created_at,
+        )
     delegation_notice.observe_node_event(
         connection, node_id=node_id, event=event, event_id=event_id,
         actor_id=actor_id, new_state=new_state, payload=payload,

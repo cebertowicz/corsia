@@ -28,10 +28,135 @@ def test_one_task_per_document_closes_and_can_reopen(isolated_db):
             mark_thread_viewed(connection, "owner-token", artifact, root["id"], reply["id"])
             person_comment_task.reconcile(connection, artifact)
         assert db.execute("SELECT state FROM plan_nodes WHERE id=?", (first,)).fetchone()[0] == "accepted"
+        assert db.execute("SELECT COUNT(*) FROM thread_updates WHERE node_id=?", (first,)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM messages WHERE json_extract(metadata,'$.node_id')=?", (first,)).fetchone()[0] == 0
         add_comment(db, artifact, author_id="owner", parent_id=root["id"])
         with write_transaction(db, scope="test_reopen") as connection:
             second = person_comment_task.reconcile(connection, artifact)
         assert second and second != first
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('feedback_first', [True, False])
+@pytest.mark.parametrize('moving', [True, False])
+def test_feedback_covers_person_task_until_settled(isolated_db, feedback_first, moving):
+    from doceditor.person_comment_projection import annotate
+    from plans import operator_chat_state
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        with write_transaction(db, scope='test_feedback_plan') as connection:
+            plan = service.ensure_plan('thread', 'owner', db=connection)
+
+        def add_feedback(connection):
+            node = service.add_node(plan.id, kind='task', title='Agent feedback',
+                                    acceptance_criteria='Done', actor_id=None,
+                                    provenance='document.feedback_batch', db=connection)
+            artifact_links.link(node.id, artifact, 'input', actor_id=None,
+                                provenance='document.feedback_batch', db=connection)
+            if moving:
+                service.transition_node(node.id, 'active', actor_id='owner', db=connection)
+            return node
+
+        if feedback_first:
+            with write_transaction(db, scope='test_feedback_first') as connection:
+                feedback = add_feedback(connection)
+        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        with write_transaction(db, scope='test_comment_coverage') as connection:
+            person_task = person_comment_task.reconcile(connection, artifact)
+            if not feedback_first:
+                feedback = add_feedback(connection)
+            actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
+
+            def nodes():
+                envelope = public.read_operator_thread('owner', actor=actor, db=connection)
+                return {n['id']: n for n in annotate(connection, envelope, 'owner-token')['plans'][0]['nodes']}
+
+            def attention():
+                return operator_chat_state.read_thread_states(['owner'], actor=actor, db=connection)['states']['owner']['attention_items']
+
+            assert operator_display_state.covered_nodes([feedback.id, person_task], db=connection) == {person_task}
+            shown = nodes()
+            assert person_task not in shown
+            assert shown[feedback.id]['comment_attention']['comments'] == 1
+            assert len(attention()) == 1
+            ask = service.add_node(plan.id, kind='task', title='Review', acceptance_criteria='Done',
+                                   assignee='user', actor_id=None, provenance='test', db=connection)
+            artifact_links.link(ask.id, artifact, 'input', actor_id=None, provenance='test', db=connection)
+            shown = nodes()
+            assert shown[ask.id]['comment_attention']['comments'] == 1
+            assert 'comment_attention' not in shown[feedback.id]
+            assert len(attention()) == 1
+            service.transition_node(ask.id, 'closed', actor_id=None, provenance='test', db=connection)
+            service.transition_node(feedback.id, 'closed', actor_id=None, provenance='test', db=connection)
+            shown = nodes()
+            assert shown[person_task]['comment_attention']['comments'] == 1
+            assert len(attention()) == 1
+    finally:
+        db.close()
+
+
+def test_other_agents_feedback_does_not_cover_owner_comment_task(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        seed_thread(db, 'reviewer')
+        artifact = seed_document(db, 'owner')
+        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        with write_transaction(db, scope='test_other_feedback') as connection:
+            person_task = person_comment_task.reconcile(connection, artifact)
+            plan = service.ensure_plan('thread', 'reviewer', db=connection)
+            node = service.add_node(plan.id, kind='task', title='Other feedback',
+                                    acceptance_criteria='Done', actor_id=None,
+                                    provenance='document.feedback_batch', db=connection)
+            artifact_links.link(node.id, artifact, 'input', actor_id=None,
+                                provenance='document.feedback_batch', db=connection)
+            assert not operator_display_state.covered_nodes([person_task], db=connection)
+    finally:
+        db.close()
+
+
+def test_feedback_parent_with_unlisted_settled_child_keeps_projected_progress(isolated_db):
+    from doceditor.person_comment_projection import annotate
+    from datetime import UTC, datetime
+    from plans import mutations, pane_views
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        with write_transaction(db, scope='test_nested_coverage') as connection:
+            plan = service.ensure_plan('thread', 'owner', db=connection)
+            parent = service.add_node(plan.id, kind='phase', title='Feedback', acceptance_criteria='Done',
+                                      provenance='document.feedback_batch', db=connection)
+            artifact_links.link(parent.id, artifact, 'input', actor_id=None,
+                                provenance='document.feedback_batch', db=connection)
+            child = service.add_node(plan.id, kind='task', title='Completed child', acceptance_criteria='Done',
+                                     parent_id=parent.id, db=connection)
+            service.transition_node(child.id, 'active', db=connection)
+            mutations.request_review(child.id, evidence='Done', actor_id='owner', db=connection)
+            service.transition_node(child.id, 'accepted', verification_result='passed', verified_by='owner', db=connection)
+            service.transition_node(parent.id, 'active', db=connection)
+            ask = service.add_node(plan.id, kind='task', title='Review', acceptance_criteria='Done',
+                                   assignee='user', provenance='test', db=connection)
+            artifact_links.link(ask.id, artifact, 'input', actor_id=None, provenance='test', db=connection)
+            actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
+            pane_views.record(connection, user_id='owner-token', thread_id='owner',
+                              seen_through=datetime.now(UTC).isoformat())
+            envelope = public.read_operator_thread('owner', actor=actor, db=connection)
+            projected = envelope['plans'][0]
+            nodes = {node['id']: node for node in projected['nodes']}
+            assert parent.id in nodes and child.id not in nodes
+            assert nodes[parent.id]['branch_progress'] is not None
+            assert not nodes[parent.id]['comment_task_covered']
+            before = dict(projected['progress'])
+            annotated = annotate(connection, envelope, 'owner-token')['plans'][0]
+            assert annotated['progress'] == before
     finally:
         db.close()
 
@@ -61,12 +186,14 @@ def test_two_document_steps_cover_only_the_comment_task(isolated_db):
             actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
             envelope = public.read_operator_thread('owner', actor=actor, db=connection)
             nodes = {node['id']: node for plan in envelope['plans'] for node in plan['nodes']}
-            assert not nodes[comment_task]['requires_user_action']
+            assert comment_task not in nodes
             assert all(nodes[node_id]['requires_user_action'] for node_id in asks)
             assert connection.execute(
                 f"SELECT {operator_display_state.ask_deferred_sql('n.id', plan_state_sql='p.state')} "
                 'FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE n.id=?', (comment_task,),
             ).fetchone()[0] == 1
+            deferred = operator_display_state.ask_deferred_sql('?', plan_state_sql='?')
+            assert connection.execute(f'SELECT {deferred}', ('active', comment_task)).fetchone()[0] == 1
             for node_id in asks:
                 service.transition_node(node_id, 'closed', actor_id=None, provenance='test', db=connection)
             assert not operator_display_state.covered_nodes([comment_task], db=connection)

@@ -7,6 +7,13 @@ import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '..
 
 const repo = path.resolve(process.cwd(), '..');
 
+async function settled(page: import('@playwright/test').Page) {
+	await expect.poll(() => page.evaluate(() => document.getAnimations().filter((animation) =>
+		animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity,
+	).length)).toBe(0);
+	await expect(page.getByText('Loading plan…')).toHaveCount(0);
+}
+
 for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at ${width}px`, async ({ page, request }, testInfo) => {
 	test.setTimeout(180_000);
 	await page.setViewportSize({ width, height: 900 });
@@ -34,12 +41,18 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		'from infra.database import get_db',
 		'from doc_feedback_helpers import add_comment',
 		'db = get_db()',
-		'root, _ = add_comment(db, sys.argv[1], author_kind="user", author_id=None)',
+		'root, _ = add_comment(db, sys.argv[1], author_kind="user", author_id=None, delivery_policy="document-held")',
 		'add_comment(db, sys.argv[1], author_id=sys.argv[2], parent_id=root["id"])',
-		'second_root, _ = add_comment(db, sys.argv[3], author_kind="user", author_id=None)',
+		'second_root, _ = add_comment(db, sys.argv[3], author_kind="user", author_id=None, delivery_policy="document-held")',
 		'add_comment(db, sys.argv[3], author_id=sys.argv[2], parent_id=second_root["id"])',
 		'from doceditor import comments, feedback_batches',
 		'from infra.database import write_transaction',
+		'from plans import service, artifact_links',
+		'with write_transaction(db, scope="seed_agent_feedback") as connection:',
+		'    plan = service.ensure_plan("thread", sys.argv[2], db=connection)',
+		'    feedback = service.add_node(plan.id, kind="task", title="Author left 1 comment on Second plan", acceptance_criteria="Review feedback", actor_id=None, provenance="document.feedback_batch", db=connection)',
+		'    artifact_links.link(feedback.id, sys.argv[3], "input", actor_id=None, provenance="document.feedback_batch", db=connection)',
+		'    service.transition_node(feedback.id, "active", actor_id=sys.argv[2], db=connection)',
 		'user_id = db.execute("SELECT user_id FROM threads WHERE id=?", (sys.argv[2],)).fetchone()[0]',
 		'from infra.presence_records import enter',
 		'from infra.time import utc_now',
@@ -57,8 +70,9 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await openAppPastLanding(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	const sidebar = sidebarThread(page, title);
-	const sidebarRow = sidebar.locator('xpath=ancestor::li[1]');
+	const sidebarRow = page.locator('aside.sidebar').getByRole('listitem').filter({ hasText: title });
 	await expect(sidebarRow.getByRole('button', { name: /Needs you/ })).toBeVisible();
+	await settled(page);
 	console.log(`build stamp ${width} orange: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-orange.png`) });
 	const marked = await request.post(`/api/threads/${threadId}/seen?${query}`, { data: { unread: true }, headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
@@ -72,14 +86,21 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await page.screenshot({ path: testInfo.outputPath(`${width}-orange-over-unread.png`) });
 	await sidebar.click();
 	await expect(page.getByText(/\d+ new repl(?:y|ies).*\d+ documents/i)).toHaveCount(0);
-	await expect.poll(() => page.locator('main').evaluate((element) => element.getAnimations().length)).toBe(0);
+	if (width > 1024) await expect(page.getByRole('list', { name: 'Plan steps' })).toBeVisible();
+	await settled(page);
 	console.log(`build stamp ${width} chat: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-chat-no-chip.png`) });
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: /^Open plan —/ }).click();
 	else if (width <= 1024) await page.getByRole('button', { name: 'Toggle panel' }).click();
-	const row = page.getByRole('listitem').filter({ hasText: 'Launch plan.md' }).first();
+	const plan = page.getByRole('list', { name: 'Plan steps' });
+	const row = plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' }).first();
 	await expect(row).toContainText('1 comment, 1 suggestion');
-	await expect.poll(() => page.locator('main').evaluate((element) => element.getAnimations().length)).toBe(0);
+	await expect(plan.getByRole('listitem').filter({ hasText: 'Second plan.md' })).toHaveCount(0);
+	const agentFeedback = plan.getByRole('listitem').filter({ hasText: 'Author left 1 comment on Second plan' });
+	await expect(agentFeedback).toHaveCount(1);
+	await expect(agentFeedback).toContainText('1 comment');
+	await expect(agentFeedback).toContainText('Set aside');
+	await settled(page);
 	console.log(`build stamp ${width} task: ${await page.locator('.version-overlay').innerText()}`);
 	await page.screenshot({ path: testInfo.outputPath(`${width}-comment-task.png`) });
 	if (width === 393) {
@@ -122,7 +143,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		else if (width <= 1024) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	};
 	const capture = async (name: string) => {
-		await expect.poll(() => page.locator('main').evaluate((element) => element.getAnimations().length)).toBe(0);
+		await settled(page);
 		console.log(`build stamp ${width} ${name}: ${await page.locator('.version-overlay').innerText()}`);
 		await page.screenshot({ path: testInfo.outputPath(`${width}-${name}.png`) });
 	};
@@ -145,7 +166,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		probe.remove();
 		return color;
 	}));
-	await expect(page.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
+	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
 	await capture('ask-with-comments');
 	const viewed = await request.post(`/api/artifacts/${artifactId}/comments/${ids.replies[0][0]}/viewed`, {
 		headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: ids.replies[0][1] },

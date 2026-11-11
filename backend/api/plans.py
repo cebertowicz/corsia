@@ -50,19 +50,15 @@ def _operator_operation(kind: str, target_id: str | None, user_id: str):
     db = get_db()
     actor = _human_actor(user_id)
     try:
-        if kind == "workspace":
-            result = public.read_operator_workspace(actor=actor, db=db)
-        elif kind == "project" and target_id is not None:
-            result = public.read_operator_project(target_id, actor=actor, db=db)
-        elif kind == "thread" and target_id is not None:
-            result = public.read_operator_thread(target_id, actor=actor, db=db)
-        elif kind == "child" and target_id is not None:
-            result = public.read_operator_child(target_id, actor=actor, db=db)
-        else:
-            raise RuntimeError(f"unsupported operator projection kind: {kind}")
         from doceditor.person_comment_projection import annotate
 
-        return annotate(db, result, user_id)
+        if kind == "workspace":
+            return annotate(db, public.read_operator_workspace(actor=actor, db=db), user_id)
+        projections = {"project": public.read_operator_project, "thread": public.read_operator_thread,
+                       "child": public.read_operator_child}
+        if kind not in projections or target_id is None:
+            raise RuntimeError(f"unsupported operator projection kind: {kind}")
+        return annotate(db, projections[kind](target_id, actor=actor, db=db), user_id)
     except public.OperatorNotFound:
         return {"operator_error": "not_found"}
     finally:
