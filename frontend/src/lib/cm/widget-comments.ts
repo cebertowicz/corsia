@@ -7,6 +7,7 @@ import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey }
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
+import { caretToWidget } from './widget-caret';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -104,6 +105,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private recentTouch = () => Date.now() - this.lastTouchAt < 750;
 		private readonly down = (event: PointerEvent) => {
 			this.pointer = event.pointerType;
+			if (event.button === 0) caretToWidget(this.view, event.target);
 			if (event.pointerType === 'touch') { this.touchStart = { x: event.clientX, y: event.clientY }; this.touchMoved = false; this.lastTouchAt = Date.now(); }
 		};
 		private readonly move = (event: PointerEvent) => {

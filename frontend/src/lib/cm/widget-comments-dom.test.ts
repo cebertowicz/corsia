@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorState, type Extension } from '@codemirror/state';
+import { EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
@@ -151,6 +151,60 @@ describe('a selection raised inside a rendered table', () => {
 		expect(table.querySelector('.cm-comment-pending')?.textContent, 'the pending mark is drawn under the selection').toBe('lph');
 		expect(document.getSelection()!.toString()).toBe('lph');
 		expect(raised.at(-1)).toMatchObject({ text: 'lph', inWidget: true });
+	});
+});
+
+describe('a press inside a rendered table or diagram', () => {
+	/** The live preview's own widgets, and the user events of every selection the editor takes. */
+	function rendered() {
+		const events: Array<string | undefined> = [];
+		const view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [
+			markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() }),
+			EditorView.updateListener.of((u) => { if (u.selectionSet) events.push(...u.transactions.map((t) => t.annotation(Transaction.userEvent))); }),
+		] }), parent: document.body }));
+		expect(view.state.selection.main.head, 'setup: the caret starts at the top of the document').toBe(0);
+		return { view, events };
+	}
+	const press = (el: Element) => el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+
+	it('puts the editor caret on the pressed cell, as a pointer selection', () => {
+		const { view, events } = rendered();
+		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		press(table.querySelector('table')!.rows[2].cells[1]);
+		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Eli'));
+		expect(view.state.selection.main.empty).toBe(true);
+		expect(events).toEqual(['select.pointer']);
+	});
+
+	it('puts the editor caret on the diagram fence', () => {
+		const { view } = rendered();
+		const diagram = view.contentDOM.querySelector<HTMLElement>('.cm-md-mermaid')!;
+		expect(diagram, 'setup: the diagram rendered').toBeTruthy();
+		press(diagram);
+		expect(view.state.selection.main.head).toBe(FENCE_FROM);
+	});
+
+	it('leaves the caret alone for a press outside the widgets or with another button', () => {
+		const { view } = rendered();
+		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		table.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2 }));
+		view.contentDOM.querySelector('.cm-line')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+		expect(view.state.selection.main.head).toBe(0);
+	});
+
+	it('keeps the selection a drag draws in the cell after the press moved the caret, with the editor focused', () => {
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+		const onSelect = vi.fn();
+		const view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect, onFocus: vi.fn() })] }), parent: document.body }));
+		view.focus();
+		const cellEl = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!.querySelector('table')!.rows[1].cells[0];
+		press(cellEl);
+		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Alpha'));
+		document.getSelection()!.setBaseAndExtent(cellEl.firstChild!, 1, cellEl.firstChild!, 4);
+		document.dispatchEvent(new Event('selectionchange'));
+		vi.advanceTimersByTime(50);
+		expect(document.getSelection()!.toString()).toBe('lph');
+		expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'lph', inWidget: true }));
 	});
 });
 
