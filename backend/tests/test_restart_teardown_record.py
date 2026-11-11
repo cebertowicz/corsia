@@ -84,3 +84,28 @@ bootout_service_and_wait domain label
         await _monitor_restart_process(child, operation_id)
     assert (await run_in_db(self_restart.operation_by_id, operation_id))["status"] == "in_flight"
     assert self_restart.restart_holds_new_work()
+
+
+async def test_failed_final_write_after_confirmed_loaded_bootout_releases(isolated_db, tmp_path):
+    operation_id = await run_in_db(operation_in, "restarting")
+    service = Path(__file__).resolve().parents[2] / "scripts/corsia.d/service.sh"
+    script = tmp_path / "corsia"
+    script.write_text(f'''#!/bin/bash
+source "{service}"
+fail() {{ :; }}
+launchctl_bootout_wait() {{ touch "$TEARDOWN_STARTED"; return 1; }}
+service_is_loaded() {{ return 0; }}
+mv() {{ [ ! -e "$TEARDOWN_STARTED" ] || return 1; /bin/mv "$@"; }}
+bootout_service_and_wait domain label
+''')
+    script.chmod(0o755)
+    environment = {**os.environ, "CORSIA_RESTART_BACKEND_PORT": "4111",
+                   "TEARDOWN_STARTED": str(tmp_path / "started")}
+    with (tmp_path / "lifecycle.log").open("w") as log:
+        child = spawn_restart_lifecycle(script, ["restart-prepared"], environment,
+                                        operation_id, log, caller_credential="caller-credential")
+        assert await asyncio.to_thread(child.wait, 5) == 1
+        await _monitor_restart_process(child, operation_id)
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "failed" and row["failure_code"] == "launch_failed"
+    assert not self_restart.restart_holds_new_work()

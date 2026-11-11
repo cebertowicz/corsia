@@ -71,7 +71,11 @@ _corsia_lifecycle_cleanup() {
             printf 'refusal_reason=%s\n' "$refusal_line"
         } > "$_corsia_lifecycle_result_file.tmp" \
             && mv -f "$_corsia_lifecycle_result_file.tmp" "$_corsia_lifecycle_result_file" \
-            || printf 'Lifecycle result record not written\n'
+            || {
+                printf 'Lifecycle result record not written\n'
+                # A teardown record must not outlive a bootout this shell resolved.
+                [ "$_corsia_unconfirmed_bootout" = true ] || rm -f "$_corsia_lifecycle_result_file"
+            }
     fi
     if [ "$_corsia_lifecycle_done" = true ] && [ -n "$_corsia_lifecycle_result_file" ]; then
         rm -f "$_corsia_lifecycle_result_file"
