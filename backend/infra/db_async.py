@@ -102,19 +102,32 @@ async def use_db_context(context, /):
     A ``with`` body whose manager opens or closes a SQLite write transaction cannot
     stay on the loop, and lifting the whole body into a worker function is not
     always possible. ``with`` treats a failed ``__enter__`` as no exit to run, so a
-    failed enter calls no ``__exit__`` either. The caller's in-flight exception is
-    read here, on the loop, before the exit job is submitted, so a failure inside
-    the manager's own exit replaces the caller's error exactly as an inline exit did.
+    failed enter calls no ``__exit__`` either. A caller cancelled while the enter job
+    runs still waits for it (``_run_shielded``); if it entered, it is exited with that
+    cancellation before it propagates. The caller's in-flight exception is read here,
+    on the loop, before the exit job is submitted; a true exit result suppresses it
+    and a failure inside the manager's own exit replaces it, as an inline ``with`` does.
     """
-    outcome: tuple = (None, None, None)
-    value = await run_in_db(context.__enter__)
+    entered = []
+
+    def enter():
+        value = context.__enter__()
+        entered.append(True)
+        return value
+
+    try:
+        value = await run_in_db(enter)
+    except asyncio.CancelledError:
+        if entered:
+            await run_in_db(context.__exit__, *sys.exc_info())
+        raise
     try:
         yield value
     except BaseException:
-        outcome = sys.exc_info()
-        raise
-    finally:
-        await run_in_db(context.__exit__, *outcome)
+        if not await run_in_db(context.__exit__, *sys.exc_info()):
+            raise
+    else:
+        await run_in_db(context.__exit__, None, None, None)
 
 
 async def run_in_db_unless_owned(owned_db, fn, /, *args, **kwargs):

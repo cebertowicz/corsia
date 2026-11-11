@@ -56,6 +56,30 @@ async def test_turn_start_admission_writes_off_the_event_loop(vendors, tmp_path,
     assert len(writes) == 1
 
 
+@pytest.mark.asyncio
+async def test_session_closing_during_admission_writes_nothing(vendors, tmp_path, monkeypatch):
+    """Close does not take the write lock, so a close that begins during the admission hop still refuses the write."""
+    from subagents import codex_requests
+    from subagents.vendor_write_admission import prepare_session_launch
+
+    _db, _row, session = _launched_session(vendors, 'codex', tmp_path)
+    prepare_session_launch(session, 'codex')
+    writes: list[bytes] = []
+    session._proc = SimpleNamespace(
+        stdin=SimpleNamespace(write=writes.append, drain=AsyncMock()), returncode=None,
+    )
+
+    def admit_then_close(admitted, provider):
+        admitted._closing = True
+
+    monkeypatch.setattr(codex_requests, 'require_session_write', admit_then_close)
+
+    with pytest.raises(RuntimeError, match='terminated before provider write'):
+        await session._request('turn/start', {'input': 'input'})
+
+    assert writes == []
+
+
 @pytest.fixture
 def observed_codex_model(isolated_db):
     """One Codex model row whose reported identity a signed-in account lists now."""
@@ -82,8 +106,7 @@ def _stored_model(path) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_terminal_context_observation_writes_off_the_event_loop(    observed_codex_model, monkeypatch,
-):
+async def test_terminal_context_observation_writes_off_the_event_loop(observed_codex_model, monkeypatch):
     """A terminal Codex observation reaches the model row from the DB pool."""
     from core.turn_core import TurnIdentity
     from subagents import codex_runtime_terminal as terminal
@@ -174,3 +197,53 @@ async def test_use_db_context_exit_replaces_the_callers_error(monkeypatch):
             raise ValueError("caller failed")
 
     assert isinstance(raised.value.__context__, ValueError)
+
+
+@pytest.mark.asyncio
+async def test_use_db_context_exits_a_manager_entered_after_cancellation():
+    """A caller cancelled while the enter job runs still exits what that job entered."""
+    from infra.db_async import use_db_context
+
+    events: list[str] = []
+    entering, release = threading.Event(), threading.Event()
+
+    class _SlowEnter(_RecordingDirectory):
+        def __enter__(self) -> str:
+            entering.set()
+            release.wait(5)
+            return super().__enter__()
+
+    async def body():
+        async with use_db_context(_SlowEnter(events, threading.get_ident())):
+            events.append("unreachable")
+
+    task = asyncio.create_task(body())
+    await asyncio.to_thread(entering.wait, 5)
+    task.cancel()
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert events == ["enter:True", "exit:CancelledError"]
+
+
+@pytest.mark.asyncio
+async def test_use_db_context_keeps_an_exit_that_suppresses():
+    """A manager whose exit returns true suppresses the caller's error, as `with` does."""
+    from infra.db_async import use_db_context
+
+    events: list[str] = []
+
+    class _Suppressing:
+        def __enter__(self) -> None:
+            events.append("enter")
+
+        def __exit__(self, exc_type, exc, tb) -> Literal[True]:
+            events.append(f"exit:{exc_type.__name__}")
+            return True
+
+    async with use_db_context(_Suppressing()):
+        raise ValueError("suppressed")
+
+    assert events == ["enter", "exit:ValueError"]
