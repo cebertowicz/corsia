@@ -176,6 +176,40 @@ body. A server read is `fetch(`, or a call to an identifier matching
   its handler and on reconnect; for a time-driven change, arm one
   `setTimeout` at the deadline.
 
+### `raw-api-request`
+
+```toml
+[rules.raw-api-request]
+enabled  = true
+severity = "error"
+include_globs = ["frontend/src/**/*.ts", "frontend/src/**/*.svelte"]
+allow_files = [
+    "frontend/src/lib/api/request.ts",   # reason required
+]
+```
+
+Flags a `fetch(`, `new EventSource(`, or (in a file that uses
+`XMLHttpRequest`) `.open(method, url)` in frontend `.ts`/`.svelte` files whose
+address targets `/api`, outside the shared request function `apiFetch`.
+`*.test.ts`, `*.spec.ts`, and `__tests__/` are skipped. The devices listener
+(the remote-apps entrance) admits an `/api` request only with the signed-in
+session in the form it accepts, so a raw call works on the main computer and
+fails from a phone or another computer; `apiFetch` adds the session in one
+place.
+
+- **What counts as targeting `/api`:** an address containing `/api` (a literal
+  or template, `${BASE}/api/...` included), a bare name whose same-file
+  `const|let|var` initializer contains `/api`, or a call to a same-file
+  function whose body contains `/api`. An address that arrives as a parameter
+  (`imageFailure.ts`'s `fetch(src)`) or from another file is not visible and
+  is not flagged.
+- **`allow_files`** is the list of accepted exemptions, each with a stated
+  reason; the shared request function is the only entry.
+- **Fix:** call `apiFetch(url, init)` from `$lib/api/request` and leave the
+  session out of the URL. An `<img src>` or download link, which cannot set a
+  header, keeps its session in the URL query, built by a helper such as
+  `artifactImage.ts`.
+
 Each TOML string is passed unmodified to Python's `re.compile()` as a regex.
 TOML *literal* strings (single quotes) avoid backslash escape processing —
 `'\d'` in TOML is the two-character regex `\d`.
