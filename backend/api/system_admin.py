@@ -10,9 +10,8 @@ from pathlib import Path
 from threading import Thread
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from loguru import logger
 
-from api.drain import settle_restart_exit
+from api.drain import log_restart_exit_failure, settle_restart_exit
 from api.restart_shell import spawn_restart_lifecycle
 from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
 from api.self_restart_response import self_restart_response as _self_restart_response
@@ -162,16 +161,8 @@ async def _monitor_restart_process(process, operation_id: str) -> None:
         def schedule() -> None:
             task = loop.create_task(settle_restart_exit(process, operation_id, returncode))
             _RESTART_EXIT_TASKS.add(task)
-            def finished(done: asyncio.Task) -> None:
-                _RESTART_EXIT_TASKS.discard(done)
-                if done.cancelled():
-                    return
-                try:
-                    done.result()
-                except Exception:
-                    logger.exception("restart exit settlement failed for operation {}", operation_id)
-
-            task.add_done_callback(finished)
+            task.add_done_callback(_RESTART_EXIT_TASKS.discard)
+            task.add_done_callback(log_restart_exit_failure(operation_id))
 
         try:
             loop.call_soon_threadsafe(schedule)

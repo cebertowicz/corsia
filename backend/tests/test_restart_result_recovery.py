@@ -9,7 +9,7 @@ from test_packaged_update_lifecycle import operation_in
 
 
 async def test_detached_settlement_exception_is_logged(monkeypatch):
-    from api import system_admin
+    from api import drain, system_admin
 
     logged = asyncio.Event()
     entries = []
@@ -22,7 +22,7 @@ async def test_detached_settlement_exception_is_logged(monkeypatch):
         logged.set()
 
     monkeypatch.setattr(system_admin, "settle_restart_exit", broken_settlement)
-    monkeypatch.setattr(system_admin, "logger", SimpleNamespace(exception=log_exception))
+    monkeypatch.setattr(drain, "logger", SimpleNamespace(exception=log_exception))
     child = SimpleNamespace(poll=lambda: None, wait=lambda: 9)
     await system_admin._monitor_restart_process(child, "a" * 32)
     await asyncio.wait_for(logged.wait(), 10)

@@ -6,6 +6,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from loguru import logger
 
 from infra.auth import authenticate
 
@@ -122,6 +123,19 @@ async def settle_drain_exit(
             **guard,
         )
     return released
+
+
+def log_restart_exit_failure(operation_id: str):
+    """Retrieve and report a detached settlement failure for this operation."""
+    def finished(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("restart exit settlement failed for operation {}", operation_id)
+
+    return finished
 
 
 async def settle_restart_exit(process, operation_id: str, returncode: int) -> None:
