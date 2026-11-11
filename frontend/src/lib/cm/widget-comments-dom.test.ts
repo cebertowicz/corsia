@@ -237,6 +237,29 @@ describe('a press inside a rendered table or diagram', () => {
 		}
 	});
 
+	it('moves the caret for a touch only once it is a tap, so a swipe that starts on a table leaves the caret where it was', () => {
+		const touch = (type: string, el: Element, clientY: number) => {
+			const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY });
+			Object.defineProperty(event, 'pointerType', { value: 'touch' });
+			el.dispatchEvent(event);
+		};
+		const { view, events } = rendered();
+		view.focus();
+		const cellEl = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!.querySelector('table')!.rows[2].cells[1];
+		// A swipe: the finger comes down on a cell and moves; whether or not a click follows, the caret stays put.
+		touch('pointerdown', cellEl, 10);
+		expect(view.state.selection.main.head, 'nothing moves before the touch is known to be a tap').toBe(0);
+		touch('pointermove', cellEl, 60);
+		cellEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, clientX: 5, clientY: 60 }));
+		expect(view.state.selection.main.head).toBe(0);
+		expect(events).toEqual([]);
+		// A tap: down and up in place.
+		touch('pointerdown', cellEl, 10);
+		cellEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, clientX: 5, clientY: 10 }));
+		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Eli'));
+		expect(events).toEqual(['select.pointer']);
+	});
+
 	it('leaves the caret alone for a press outside the widgets or with another button', () => {
 		const { view } = rendered();
 		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
