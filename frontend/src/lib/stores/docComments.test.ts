@@ -320,6 +320,24 @@ describe('prepared comment arrivals', () => {
 		revealCommentArrival('shown-doc', arrival);
 		expect(get(docComments)['shown-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
 	});
+
+	it('reveals the newer copy when a load sent before its own fetch answers after it', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		holdCommentArrival('late-doc', 'note');
+		// A load goes out first and is slow; the arrival's own fetch goes out after it, once the comment was resolved.
+		let answerLoad!: (value: ReturnType<typeof note>) => void;
+		mocks.fetchComments.mockImplementationOnce(() => new Promise((resolve) => { answerLoad = resolve; }));
+		const load = loadComments('late-doc');
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		const arrival = await prepareCommentArrival('late-doc', 'note');
+		// The older request's answer lands last; its copy is kept aside but is not the newer one.
+		answerLoad(note(false));
+		await load;
+		revealCommentArrival('late-doc', arrival);
+		expect(get(docComments)['late-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
+	});
 });
 
 describe('resolving a comment', () => {

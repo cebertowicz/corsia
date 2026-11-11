@@ -6,7 +6,7 @@ import { copyStamp, endHold, heldIds, holdCall, startHold } from './docCommentHo
 export interface PreparedCommentArrival {
 	comment: DocComment | null;
 	feedback: CommentFeedback;
-	/** When this copy was fetched, against the copies a hold keeps aside (`copyStamp`). */
+	/** The stamp of the request this copy came from, against the copies a hold keeps aside (`copyStamp`). */
 	at: number;
 }
 
@@ -14,9 +14,10 @@ export async function prepareCommentArrival(
 	artifactId: string,
 	commentId: string | null,
 ): Promise<PreparedCommentArrival> {
+	const at = copyStamp();
 	const { comments, feedback } = await fetchComments(artifactId);
 	const row = commentId ? comments.find((comment) => comment.id === commentId) : null;
-	return { comment: row ? fromServer(row) : null, feedback, at: copyStamp() };
+	return { comment: row ? fromServer(row) : null, feedback, at };
 }
 
 /** The rows with this comment added at the top, or in place of its current copy when `replace`. */
@@ -29,8 +30,8 @@ const merged = (comment: DocComment, replace: boolean) => (rows: DocComment[]): 
 export function revealCommentArrival(artifactId: string, arrival: PreparedCommentArrival): void {
 	const comment = arrival.comment;
 	if (!comment) return;
-	// Whichever copy came last: one a load kept aside after this fetch (resolved or replied to since), else the prepared one,
-	// never the copy that was showing when the hold began.
+	// The newest data: a copy kept aside from a request sent after this one (resolved or replied to since), else the prepared
+	// one, never the copy that was showing when the hold began, whatever order the responses landed in.
 	const kept = endHold(artifactId, comment.id, arrival.at);
 	reshow(artifactId, merged(kept ?? comment, true));
 }
