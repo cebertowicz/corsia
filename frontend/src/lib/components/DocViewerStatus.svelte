@@ -345,7 +345,7 @@
 		.identity-details:has(.identity-age) { display: flex; }
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: 13px; container: identity-age / inline-size; }
 		.identity-age :global(button.identity) { flex-wrap: nowrap; }
-		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; container: identity-owner / inline-size; }
+		.identity-owner { flex: 1; min-width: 0; padding: 3px; margin: -3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; container: identity-owner / inline-size; }
 		.plain-owner-only { display: none; }
 		@container identity-owner (width < 13ch) {
 			.plain-owner-name { display: none; }

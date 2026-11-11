@@ -83,5 +83,5 @@ export async function showPicker(target: Page) {
 	const supervisor = target.getByRole('combobox', { name: 'Supervisor', exact: true });
 	if (!(await supervisor.isVisible())) await identity.click();
 	await supervisor.click();
-	await expect(target.getByRole('option', { name: /A very long agent name.*Paused/ })).toBeVisible();
+	await expect(target.locator('#supervisor-options').getByRole('option', { name: /A very long agent name.*Paused/ })).toBeVisible();
 }
