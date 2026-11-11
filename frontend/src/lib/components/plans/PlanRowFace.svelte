@@ -72,9 +72,10 @@
 	</span>
 	{#if node.comment_attention}
 		<span class="row-subline {state} {tone}" style:color={node.comment_attention.system_task ? undefined : 'var(--accent)'}>{feedbackLine(node.comment_attention)}</span>
-	{:else if liveStep}
+	{/if}
+	{#if (!node.comment_attention || (!node.comment_attention.system_task && !node.requires_user_action)) && liveStep}
 		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
-	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
+	{:else if (!node.comment_attention || (!node.comment_attention.system_task && !node.requires_user_action)) && (subline.lead || subline.moment)}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>
 
 <style>

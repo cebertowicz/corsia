@@ -345,13 +345,25 @@ def present_plan(
     """
     if owner is None or projected.plan["state"] == "archived":
         return None
+    # Covered person-comment tasks are root leaves; hide them before deriving
+    # every operator count and header, including the chat-list projection.
+    visible = [node for node in projected.nodes if not states[node['id']]['comment_task_covered']]
+    hidden = len(projected.nodes) - len(visible)
+    comment_carriers = []
+    for node in projected.nodes:
+        state = states[node['id']]
+        matches = state['comment_coverage']
+        if not matches or any(row['carrier_kind'] == 'ask' for row in matches):
+            continue
+        carrier = min(matches, key=lambda row: row['carrier_id'])
+        comment_carriers.append({**carrier, 'title': node['title'], 'owed': state['comment_attention_owed']})
     nodes = [
         _present_node(
             node, review_targets, states[node["id"]], projected.plan["state"],
         )
-        for node in projected.nodes
+        for node in visible
     ]
-    counts = _apply_branches(nodes, projected.nodes, tree)
+    counts = _apply_branches(nodes, visible, tree)
     leaf_ids = _leaf_ids(nodes, tree)
     # A delegated step whose child plan is moving reads Working without running
     # itself; it is current work all the same, so its path stays open.
@@ -367,6 +379,8 @@ def present_plan(
     below_cut = frozenset(str(node["id"]) for node in projected.nodes if node.get("later"))
     next_ids = node_state.next_node_ids([n for n in nodes if n["id"] not in users | below_cut])
     progress = {**projected.progress, "distribution": counts}
+    progress['open'] -= hidden
+    progress['total'] -= hidden
     display = plan_header.plan_display(projected.plan, counts, nodes, users, below_cut)
     # Each outside-wait row reads the same value as the sidebar and chip (EW11).
     for node in nodes:
@@ -384,5 +398,6 @@ def present_plan(
         "oversize": oversize(nodes),
         "current_node_ids": current,
         "next_node_ids": next_ids,
+        "_comment_carriers": comment_carriers,
         "nodes": nodes,
     }

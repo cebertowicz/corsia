@@ -227,10 +227,14 @@ def project(
     ``last_transition_at`` are None, a settled node's recorded reason is not in
     ``status_reason``, and ``execution`` has no attempts and zero counts.
     """
-    node_plans, executor_by_node, details, executions, stops, cost_facts, covered = operator_projection_facts.read(
+    node_plans, executor_by_node, details, executions, stops, cost_facts, coverage = operator_projection_facts.read(
         projected, db=db, now=now, costs=costs, memo=memo, lean=lean, detail_ids=detail_ids,
         attempt_limit=ATTEMPT_HISTORY_LIMIT,
     )
+    covered = {row['person_node_id'] for row in coverage}
+    coverage_by_person = {}
+    for row in coverage:
+        coverage_by_person.setdefault(row['person_node_id'], []).append(row)
     labels, history, attempt_counts, evidence, changed, settled_because = details
     commitment_costs, node_costs, initiatives = cost_facts
     if titles is None:
@@ -273,6 +277,10 @@ def project(
                 "last_transition_at": None if lean else changed[node["id"]],
                 "requires_user_action": asks_user and not deferred_ask,
                 "comment_task_covered": node['id'] in covered,
+                "comment_coverage": coverage_by_person.get(node['id'], []),
+                "comment_attention_owed": asks_user and not ask_deferred(
+                    plan_paused=plan_paused(execution), node_paused=node_paused(execution),
+                ),
             }
     return states
 

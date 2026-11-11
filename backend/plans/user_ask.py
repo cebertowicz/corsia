@@ -148,7 +148,7 @@ def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = N
             SELECT 1 FROM ({asks}) ask
             LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
             WHERE {where} AND deferred.hold_id IS NULL
-              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
+              AND NOT {operator_display_state.pause_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
         ) THEN 'raised'
         WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
         ELSE 'cleared'

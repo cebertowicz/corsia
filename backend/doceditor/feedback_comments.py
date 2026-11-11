@@ -110,9 +110,10 @@ def recipients(
     if comment.get("tagged_user_id"):
         resolved.add(USER_AUTHOR_ID)
     if comment["author_kind"] == "agent":
-        from plans.public import open_ask_artifacts
+        from plans.public import open_asks_for_artifact
 
-        if open_ask_artifacts(db, str(comment["artifact_id"])):
+        if any(ask['provenance'] != 'document.person_comment_task'
+               for ask in open_asks_for_artifact(str(comment['artifact_id']), db=db)):
             resolved.add(USER_AUTHOR_ID)
     if root is not None:
         resolved.add(_recipient_for_author(root))
