@@ -105,7 +105,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private recentTouch = () => Date.now() - this.lastTouchAt < 750;
 		private readonly down = (event: PointerEvent) => {
 			this.pointer = event.pointerType;
-			if (event.button === 0) caretToWidget(this.view, event.target);
+			if (event.button === 0) caretToWidget(this.view, event);
 			if (event.pointerType === 'touch') { this.touchStart = { x: event.clientX, y: event.clientY }; this.touchMoved = false; this.lastTouchAt = Date.now(); }
 		};
 		private readonly move = (event: PointerEvent) => {

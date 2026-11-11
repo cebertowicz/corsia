@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { forceParsing } from '@codemirror/language';
+import { forceParsing, syntaxTree } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
@@ -156,16 +156,34 @@ describe('a selection raised inside a rendered table', () => {
 
 describe('a press inside a rendered table or diagram', () => {
 	/** The live preview's own widgets, and the user events of every selection the editor takes. */
-	function rendered() {
+	function rendered(doc = DOC) {
 		const events: Array<string | undefined> = [];
-		const view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [
+		const view = parsed(new EditorView({ state: EditorState.create({ doc, extensions: [
 			markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() }),
 			EditorView.updateListener.of((u) => { if (u.selectionSet) events.push(...u.transactions.map((t) => t.annotation(Transaction.userEvent))); }),
 		] }), parent: document.body }));
 		expect(view.state.selection.main.head, 'setup: the caret starts at the top of the document').toBe(0);
 		return { view, events };
 	}
-	const press = (el: Element) => el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+	const press = (el: Element, at: { clientX?: number; clientY?: number } = {}) => el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, ...at }));
+	/** What the reader types next, through the editor as a keystroke does, then the blocks the parser sees in the result. */
+	function type(view: EditorView, text: string) {
+		view.dispatch(view.state.replaceSelection(text), { userEvent: 'input.type' });
+		parsed(view);
+		const blocks: string[] = [];
+		syntaxTree(view.state).iterate({ enter: (n) => {
+			if (['Table', 'TableRow', 'TableHeader', 'FencedCode', 'Paragraph', 'ATXHeading1'].includes(n.name)) blocks.push(`${n.name}:${view.state.sliceDoc(n.from, n.to)}`);
+			return n.name !== 'Paragraph';
+		} });
+		return blocks;
+	}
+	/** Lay a drawn table's cells out as a grid with a 10px gap between them, the box a border or padding press falls in. */
+	function layOut(table: HTMLElement) {
+		[...table.querySelector('table')!.rows].forEach((row, r) => [...row.cells].forEach((cellEl, c) => {
+			const [left, top] = [c * 110, r * 50];
+			cellEl.getBoundingClientRect = () => ({ left, top, right: left + 100, bottom: top + 40, width: 100, height: 40, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+		}));
+	}
 
 	it('puts the editor caret on the pressed cell, as a pointer selection', () => {
 		const { view, events } = rendered();
@@ -176,12 +194,47 @@ describe('a press inside a rendered table or diagram', () => {
 		expect(events).toEqual(['select.pointer']);
 	});
 
-	it('puts the editor caret on the diagram fence', () => {
+	it('puts a press on table padding or a border in the nearest cell, so typing stays in that cell and adds no row', () => {
 		const { view } = rendered();
-		const diagram = view.contentDOM.querySelector<HTMLElement>('.cm-md-mermaid')!;
-		expect(diagram, 'setup: the diagram rendered').toBeTruthy();
-		press(diagram);
-		expect(view.state.selection.main.head).toBe(FENCE_FROM);
+		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		layOut(table);
+		const rows = type(view, '').filter((b) => b.startsWith('TableRow')).length;
+		// The gap between Bravo (row 2, col 0) and Eli (row 2, col 1), nearer Eli.
+		press(table.querySelector('table')!, { clientX: 107, clientY: 120 });
+		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Eli'));
+		const blocks = type(view, 'XYZ');
+		expect(blocks).toContain('TableRow:| Bravo | XYZEli |');
+		expect(blocks.filter((b) => b.startsWith('TableRow'))).toHaveLength(rows);
+		expect(blocks[0]).toBe('Paragraph:intro');
+		expect(view.contentDOM.querySelector('.cm-md-table table')!.rows).toHaveLength(4);
+	});
+
+	it('puts a press on a diagram on the blank line after its fence, so typing leaves the diagram whole', () => {
+		// The blank line is the document's last: the typed text is its own paragraph. With a paragraph right under the
+		// blank line, the typed text becomes that paragraph's first line, as Markdown joins adjacent lines.
+		for (const [doc, typed] of [[DOC, 'Paragraph:XYZ'], [`${DOC}\nAfter the diagram.\n`, 'Paragraph:XYZ\nAfter the diagram.']]) {
+			const { view } = rendered(doc);
+			const diagram = view.contentDOM.querySelector<HTMLElement>('.cm-md-mermaid')!;
+			expect(diagram, 'setup: the diagram rendered').toBeTruthy();
+			press(diagram);
+			expect(view.state.selection.main.head).toBe(DOC.length);
+			const blocks = type(view, 'XYZ');
+			expect(blocks).toContain('FencedCode:```mermaid\ngraph TD; A-->B\n```');
+			expect(blocks).toContain(typed);
+			expect(view.contentDOM.querySelector('.cm-md-mermaid'), 'the diagram still renders').toBeTruthy();
+			view.destroy();
+		}
+	});
+
+	it('leaves the caret alone for a press on a diagram with no blank line after it', () => {
+		for (const doc of [`${DOC}# Next heading\n`, DOC.slice(0, -1)]) {
+			const { view, events } = rendered(doc);
+			press(view.contentDOM.querySelector('.cm-md-mermaid')!);
+			expect(view.state.selection.main.head, JSON.stringify(doc.slice(-20))).toBe(0);
+			expect(events).toEqual([]);
+			if (doc.endsWith('# Next heading\n')) expect(type(view, '')).toContain('ATXHeading1:# Next heading');
+			view.destroy();
+		}
 	});
 
 	it('leaves the caret alone for a press outside the widgets or with another button', () => {

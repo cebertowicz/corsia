@@ -22,6 +22,10 @@ const DOC = [
 	`| Trailhead signs | Replace the faded ${QUOTED} |`, '',
 	PARA, '',
 ].join('\n');
+const FENCE = ['```mermaid', 'flowchart TD', '  Draft --> Review', '```'].join('\n');
+const CLOSING = 'Closing line under the diagram.';
+/** The table, then a commented diagram with a blank line and a paragraph under it. */
+const WITH_DIAGRAM = DOC.replace(`${PARA}\n`, `${FENCE}\n\n${CLOSING}\n`);
 /** The same document with enough below it to scroll. */
 const LONG = DOC + Array.from({ length: 80 }, (_, i) => `Filler paragraph ${i + 1}.\n`).join('\n');
 
@@ -36,8 +40,8 @@ async function settled(page: Page) {
 	}), { message: 'setup: the editor is at rest before the keystroke' }).toBe(true);
 }
 
-/** Seed a document whose table cell holds one commented phrase, and open it in the artifact pane. */
-async function openDocument(page: Page, size: { width: number; height: number }, text = DOC) {
+/** Seed a document with one comment on `anchor` (by default a phrase in a table cell), and open it in the artifact pane. */
+async function openDocument(page: Page, size: { width: number; height: number }, text = DOC, anchor = QUOTED) {
 	await page.setViewportSize(size);
 	const request = page.request, params = { token: TEST_TOKEN };
 	const title = `reclick-typing-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -49,10 +53,10 @@ async function openDocument(page: Page, size: { width: number; height: number },
 	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId: string = (await seeded.json()).artifact.id;
-	const from = text.indexOf(QUOTED);
-	expect(from, 'setup: the commented phrase is in the document').toBeGreaterThanOrEqual(0);
+	const from = text.indexOf(anchor);
+	expect(from, 'setup: the commented text is in the document').toBeGreaterThanOrEqual(0);
 	const created = await request.post(`/api/artifacts/${artifactId}/comments`, {
-		params, data: { body: 'Which sign needs replacing?', anchor_text: QUOTED, from_off: from, to_off: from + QUOTED.length, delivery_policy: 'immediate' },
+		params, data: { body: 'Which sign needs replacing?', anchor_text: anchor, from_off: from, to_off: from + anchor.length, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const commentId: string = (await created.json()).comment.id;
@@ -66,7 +70,7 @@ async function openDocument(page: Page, size: { width: number; height: number },
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-md-table table')).toBeVisible({ timeout: 15_000 });
 	const highlight = page.locator('.cm-md-table td .cm-comment-anchor', { hasText: QUOTED }).first();
-	await expect(highlight).toBeVisible();
+	if (anchor === QUOTED) await expect(highlight).toBeVisible();
 	return { request, docPath, commentId, highlight };
 }
 
@@ -151,5 +155,44 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-after-typing');
 		assertTypingStayedPut(saved);
+	});
+	test('typing after a diagram comment closes or after a tap on table padding leaves both blocks whole', async ({ page, request }, testInfo) => {
+		test.setTimeout(120_000);
+		const { docPath } = await openDocument(page, { width: 393, height: 852 }, WITH_DIAGRAM, FENCE);
+		const diagram = page.locator('.cm-md-mermaid');
+		await expect(diagram.locator('svg'), 'setup: the diagram rendered').toBeVisible({ timeout: 20_000 });
+		await expect(diagram, 'setup: the diagram carries its comment').toHaveClass(/cm-comment-block/);
+
+		// Open the diagram's comment and retap to close it: closing hands the keyboard back to the editor's caret.
+		await diagram.tap();
+		await expect(page.locator('.drawer-panel')).toBeVisible();
+		await diagram.tap({ force: true });
+		await settled(page);
+		await page.keyboard.type('XYZ');
+
+		// A tap in the table's own padding, above the Notes header: off every cell, nearest that one.
+		const notes = (await page.locator('.cm-md-table th', { hasText: 'Notes' }).boundingBox())!;
+		const widget = (await page.locator('.cm-md-table').boundingBox())!;
+		expect(notes.y - widget.y, 'setup: the table has padding above its header').toBeGreaterThan(4);
+		await page.touchscreen.tap(notes.x + notes.width / 2, widget.y + 2);
+		await settled(page);
+		// The tap leaves the editor unfocused. The next focus() that is not a tap (a card closing hands the keyboard back
+		// this way) gives the keyboard the caret the tap placed. No card is open here, so call it as the card does.
+		expect(await page.locator('.cm-content').evaluate((el) => {
+			const view = (el as HTMLElement & { cmTile?: { root?: { view?: { focus(): void } } } }).cmTile?.root?.view;
+			view?.focus();
+			return Boolean(view);
+		}), 'setup: the editor view is reachable from its content element').toBe(true);
+		await settled(page);
+		await page.keyboard.type('QRS');
+
+		const saved = await savedAfterProseMarker(page, request, docPath);
+		await saveEvidenceScreenshot(page, testInfo, 'phone-diagram-and-padding-after-typing');
+		expect(saved.startsWith('# Editing table cells'), `typing landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
+		expect(saved, 'closing the diagram comment put the typing on the blank line under the fence').toContain(`${FENCE}\nXYZ\n${CLOSING}`);
+		expect(saved, 'the padding tap put the typing in the nearest header cell').toContain('| Item | QRSNotes |');
+		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
+		await expect(diagram.locator('svg'), 'the diagram still renders').toBeVisible();
+		await expect(page.locator('.cm-md-table table tr'), 'the table still renders its two rows').toHaveCount(2);
 	});
 });
