@@ -57,7 +57,7 @@ test('capture document ownership states', async ({ page }) => {
 	const docs = [] as { path: string; artifact: string; title: string }[];
 	for (const [folder, title] of [['shared/planning', 'Project planning.md'], ['', 'Meeting notes.md']]) {
 		const docPath = path.join(workspace, folder, title);
-		const created = await page.request.put('/api/files/content', { params, data: { path: docPath, text: `# ${title.replace('.md', '')}\n\nThis document records the decisions and next steps for the work.\n\n## Next steps\n\n- Review the plan together.\n- Capture the outcome.\n`, thread_id: owner, description: 'Planning document', create: true } });
+		const created = await page.request.put('/api/files/content', { params, data: { path: docPath, text: `# ${title.replace('.md', '')}\n\nThis document records the decisions and next steps for the work.\n\n## Next steps\n\n- Review the plan together.\n- Capture the outcome.\n\n## Timeline\n\nInvite neighbours to review the plan before the first planting day.\n\n## Open questions\n\nAgree on the layout and the next meeting.\n`, thread_id: owner, description: 'Planning document', create: true } });
 		expect(created.ok(), await created.text()).toBeTruthy();
 		docs.push({ path: docPath, artifact: (await created.json()).artifact.id, title });
 	}
