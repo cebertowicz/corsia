@@ -32,8 +32,16 @@ export async function widen(page: Page, doc: Doc) {
 	}
 	await waitForPanelsToSettle(page);
 	if (!(await page.locator('[data-margin-card]').count())) await pill(page).click();
-	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+	await expectMarginColumnUp(page);
 	return doc;
+}
+
+/**
+ * The margin column is up when a card in it is. The column has no height of its own (its cards sit at their lines, out of
+ * flow), so with no open suggestion to offer Accept all it is 0 px tall beside cards a reader sees.
+ */
+export async function expectMarginColumnUp(page: Page) {
+	await expect(page.locator('.canvas-comment-drawer.margin [data-margin-card]').first()).toBeVisible();
 }
 
 /** Seeds the document and, on a desktop, widens the canvas so it has room for the column. */

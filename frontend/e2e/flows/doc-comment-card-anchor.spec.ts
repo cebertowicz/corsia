@@ -3,6 +3,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { waitForPanelsToSettle } from '../support/sidebar';
+import { expectMarginColumnUp } from '../support/marginCards';
 
 const SECTIONS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
 const SECTION = 'Third';
@@ -151,7 +152,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
 	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first().click();
-	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+	await expectMarginColumnUp(page);
 }
 
 /** The canvas at its widest: both side panels tucked away. */
@@ -254,9 +255,14 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			if (expanded) await expandCanvas(page);
 			await placeTarget(page, 0.5);
 			const line = lineOf(page, `The ${SECTION} target is right here`);
+			const placed = await drawnBox(line);
 			// Double-click where the reader sees the line. A locator dblclick that finds the line a pixel off between two frames
-			// retries by scrolling it to the canvas's bottom edge, which would leave no room for the wheel below.
+			// retries by scrolling it to the canvas's bottom edge, which would leave no room for the wheel below; this check
+			// stands in for its stability check, so the app moving the line still fails here, with the move it made.
 			const target = await box(line);
+			const now = await drawnBox(line);
+			const move = { x: Math.round((now.x - placed.x) * 100) / 100, y: Math.round((now.y - placed.y) * 100) / 100 };
+			expect(Math.max(Math.abs(move.x), Math.abs(move.y)), `the line moved ${JSON.stringify(move)} px between placing it and the double-click`).toBeLessThanOrEqual(1);
 			await page.mouse.dblclick(target.x + 12, target.y + 8);
 			await page.locator('.sel-comment').click();
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();

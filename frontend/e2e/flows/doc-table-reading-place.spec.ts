@@ -3,7 +3,7 @@ import { expect, type Browser, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createComment, openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
-import { pill, widen, type Doc } from '../support/marginCards';
+import { expectMarginColumnUp, pill, widen, type Doc } from '../support/marginCards';
 
 /**
  * A table-heavy document stays still under the reader: a status page of wide tables whose rows wrap onto several lines.
@@ -186,17 +186,23 @@ for (const [width, height] of LAYOUTS) {
 
 interface Placement { scrollTop: number; rowTop: number; rowBottom: number; rowX: number; textTop: number; textX: number; bandTop: number; bandBottom: number }
 
-/** The scroller's offset, the commented row's box and the part of the scroller on screen (a phone sheet covers its bottom). */
+/**
+ * The scroller's offset, the commented row's box and the part of the scroller on screen (a phone sheet covers its bottom),
+ * as the next painted frame shows them. A read in a task can land between the text narrowing and the editor's next measure,
+ * which holds the row before that frame paints: a place no reader ever sees (needs `installPaintedFrames`).
+ */
 async function placement(page: Page, key: string): Promise<Placement> {
-	return page.evaluate((key) => {
-		const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-		const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`))!;
-		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = tr.querySelector('strong')!.getBoundingClientRect();
-		// At phone width the comments come up as a sheet over the text; beside a wide canvas they sit in the margin.
-		const sheet = window.innerWidth <= 768 ? document.querySelector<HTMLElement>('[data-doc-comments-drawer]') : null;
-		const bottom = sheet ? Math.min(box.bottom, sheet.getBoundingClientRect().top) : box.bottom;
-		return { scrollTop: scroller.scrollTop, rowTop: rect.top, rowBottom: rect.bottom, rowX: rect.left, textTop: text.top, textX: text.left, bandTop: box.top, bandBottom: bottom };
-	}, key);
+	return page.evaluate((key) => new Promise<Placement>((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`))!;
+			const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = tr.querySelector('strong')!.getBoundingClientRect();
+			// At phone width the comments come up as a sheet over the text; beside a wide canvas they sit in the margin.
+			const sheet = window.innerWidth <= 768 ? document.querySelector<HTMLElement>('[data-doc-comments-drawer]') : null;
+			const bottom = sheet ? Math.min(box.bottom, sheet.getBoundingClientRect().top) : box.bottom;
+			return { scrollTop: scroller.scrollTop, rowTop: rect.top, rowBottom: rect.bottom, rowX: rect.left, textTop: text.top, textX: text.left, bandTop: box.top, bandBottom: bottom };
+		}, (at) => { resolve(at); return false; });
+	}), key);
 }
 
 const CLICKED = 'steer2-r4';
@@ -217,11 +223,13 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 		try {
 			const page = await context.newPage();
 			await openLiveDocument(page, document, '# Briefing');
+			await installPaintedFrames(page);
 			// The margin column needs a canvas wide enough for it; at the default split a thread opens as a popover.
 			if (cards === 'margin' || cards === 'opens') {
 				await widen(page, document as unknown as Doc);
 				if (cards === 'opens') {
-					await page.getByRole('button', { name: 'Close comments' }).click();
+					// On the canvas the column has no heading or close button: the comments control closes it.
+					await pill(page).click();
 					await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 				}
 				// The column opening holds the top line until the reader takes over; a reader scrolls with the wheel, which ends it.
@@ -265,8 +273,9 @@ test('@surface:live-document the column opening with a row cut off at the top ke
 	try {
 		const page = await context.newPage();
 		await openLiveDocument(page, document, '# Briefing');
+		await installPaintedFrames(page);
 		await widen(page, document as unknown as Doc);
-		await page.getByRole('button', { name: 'Close comments' }).click();
+		await pill(page).click();
 		await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 		await page.locator('.cm-scroller').hover();
 		await page.mouse.wheel(0, 40);
@@ -274,7 +283,7 @@ test('@surface:live-document the column opening with a row cut off at the top ke
 		await readAtRow(page, 'steer2-r3', -30);
 		results.push({ step: 'before', ...await placement(page, 'steer2-r4') });
 		await pill(page).click();
-		await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+		await expectMarginColumnUp(page);
 		for (const ms of [100, 400, 1_500]) {
 			await page.waitForTimeout(ms);
 			results.push({ step: `after ${ms} ms`, ...await placement(page, 'steer2-r4') });
