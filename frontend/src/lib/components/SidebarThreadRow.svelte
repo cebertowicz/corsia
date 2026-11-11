@@ -7,7 +7,7 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
-	import { isYourMove, showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
+	import { showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
 	import ThreadWaitingMark from './ThreadWaitingMark.svelte';
 	import { minuteClock } from '$lib/time';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
@@ -75,8 +75,7 @@
 	);
 	const planState = $derived($threadPlanStates[thread.id]);
 	const updateSummary = $derived(planState?.latest_update?.summary);
-	// What the user owes takes the second line, in place of the update summary; the mark owns it either way.
-	const needsYou = $derived(isYourMove(planState));
+	// The mark sits beside the title; the update summary keeps the second line.
 
 	// The swipe transforms are composited layers (about three per row), so a row carries them only while it is
 	// being swiped, is open, or is still sliding shut. A row at rest has none, so the windowed list can mount
@@ -181,13 +180,9 @@
 							: 'Checkpointing context'}
 						>{checkpointLabel}</span>
 					{/if}
-					{#if !needsYou}
-						<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
-					{/if}
+					<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
 				</div>
-				{#if needsYou}
-					<ThreadPlanStateMark threadId={thread.id} line {onOpenAttention} onOpenThread={onSelect} />
-				{:else if updateSummary}
+				{#if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
 				{/if}
 			{/if}
