@@ -41,19 +41,26 @@ export interface CommentRange {
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
 
 /**
- * What the editor repaints on: the ranges are sent to it again only when this changes, so every field a highlight is drawn from
- * is in it. The unread flag is one: a thread read since the last paint must lose its new sign.
+ * What the editor repaints on: the ranges are sent to it again only when this changes. It is the ranges' own data, every field of
+ * each, so a field added to `CommentRange` is in it without being listed here. Only the callbacks are left out (JSON has no
+ * functions): they are new closures on every build and draw nothing.
  */
-export const paintSignature = (ranges: CommentRange[]): string =>
-	ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.point ? 1 : 0}:${r.unread ?? ''}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify(ranges);
 
 /**
- * The highlight under a press, read from where it landed. A phone puts the caret at the nearest end of the tapped word, which lies
- * outside a highlight that stops short of its word, so the caret alone cannot say which highlight was tapped.
+ * The highlight under a press, read only from where it landed, never from the caret: a phone puts the caret at the nearest end of
+ * the tapped word, which lies outside a highlight that stops short of its word, and beside a highlight when the tap was on the space
+ * or punctuation next to it. The position nearest a press is the highlight's end both when the press is on that end of its last
+ * character and when it is on the character after, so at an end the press must also be on the highlight's side of it.
  */
 export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange | undefined {
 	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
-	return ranges.find((r) => !r.point && at >= r.from && at <= r.to);
+	return ranges.find((r) => {
+		if (r.point || at < r.from || at > r.to) return false;
+		if (at === r.to && r.to > r.from) return press.clientX <= (view.coordsAtPos(r.to, -1)?.right ?? Infinity);
+		if (at === r.from) return press.clientX >= (view.coordsAtPos(r.from, 1)?.left ?? -Infinity);
+		return true;
+	});
 }
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });

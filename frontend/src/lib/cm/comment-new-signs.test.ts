@@ -61,3 +61,13 @@ it('repaints a thread that was read: the signature the editor repaints on change
 	// A new comment is not a new reply: the sign's name changes, so the signature does.
 	expect(paintSignature([{ ...unread[0], unread: 'comment' as const }, unread[1]])).not.toBe(paintSignature(unread));
 });
+
+it('repaints a pin whose number, colour or region changed with its place and id unchanged, and ignores a new callback', () => {
+	const region = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } as never;
+	const pin = (over: Record<string, unknown> = {}) => [{ from: 5, to: 9, id: 'pinned', region: true, pin: { region, number: 1, color: '#336699', ...over } }];
+	expect(paintSignature(pin({ number: 2 }))).not.toBe(paintSignature(pin()));
+	expect(paintSignature(pin({ color: '#993366' }))).not.toBe(paintSignature(pin()));
+	expect(paintSignature(pin({ region: { x: 0.5, y: 0.2, w: 0.3, h: 0.4 } }))).not.toBe(paintSignature(pin()));
+	expect(paintSignature([{ ...pin()[0], region: false }])).not.toBe(paintSignature(pin()));
+	expect(paintSignature([{ ...pin()[0], onMarkerFocus: () => {} }])).toBe(paintSignature(pin()));
+});

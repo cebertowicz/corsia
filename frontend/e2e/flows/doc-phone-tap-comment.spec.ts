@@ -194,6 +194,22 @@ test.describe(`${TAG} tap`, () => {
 			await expectOpenOn(page, 'conductor', 'a tap on the right half, with the caret already in the word');
 		});
 
+		test('a tap on the space or the punctuation next to a highlighted word opens nothing', async ({ page }) => {
+			test.setTimeout(60_000);
+			await openDocument(page);
+			// Just past each highlight's right edge, on the character that follows it: the caret snaps to the word's end, which is the highlight's end.
+			for (const word of ['reviewer', 'timing'] as const) {
+				const box = (await highlight(page, word).boundingBox())!;
+				await page.touchscreen.tap(box.x + box.width + 1, box.y + box.height / 2);
+				await page.waitForTimeout(700);
+				await expect(sheet(page), `a tap on the character after ${word}`).toHaveCount(0);
+			}
+			// The same tap, just inside the edge, is on the word.
+			const box = (await highlight(page, 'reviewer').boundingBox())!;
+			await page.touchscreen.tap(box.x + box.width - 2, box.y + box.height / 2);
+			await expectOpenOn(page, 'reviewer', 'a tap on the last letter');
+		});
+
 		test('a long press on a one-word highlight opens its comment', async ({ page, browserName }, testInfo) => {
 			test.skip(browserName !== 'chromium', 'The long press is sent through the Chrome DevTools protocol');
 			test.setTimeout(60_000);

@@ -111,7 +111,9 @@ describe('MarkdownEditor edits', () => {
 			rangeLayout.getClientRects = () => [new DOMRect(10, 20, 8, 16)] as unknown as DOMRectList;
 			rangeLayout.getBoundingClientRect = () => new DOMRect(10, 20, 8, 16);
 		});
-		afterEach(() => { delete rangeLayout.getClientRects; delete rangeLayout.getBoundingClientRect; });
+		afterEach(() => { delete rangeLayout.getClientRects; delete rangeLayout.getBoundingClientRect; vi.restoreAllMocks(); });
+		// And no pointer position to read: a press lands where the test put the caret, as the browser does under the pointer.
+		beforeEach(() => { vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: EditorView) { return this.state.selection.main.head; }); });
 		const open = (props: Record<string, unknown>) => {
 			host = document.createElement('div'); document.body.appendChild(host);
 			component = mount(MarkdownEditor, { target: host, props: Object.defineProperties({ value: 'quick brown fox' }, Object.getOwnPropertyDescriptors(props)) });

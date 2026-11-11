@@ -195,7 +195,7 @@
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
-			const hit = (click && highlightAtPress(v, click, curHighlights)) || curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
+			const hit = click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
 			const arrived = !!hit && hit.id !== caretIn;
 			caretIn = hit?.id ?? null;
 			// Where a card would cover the text (the phone sheet, the popover), only a tap or click opens it; typing and the arrow keys
