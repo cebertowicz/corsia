@@ -9,7 +9,7 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | Variable | Default | What it does | Named in |
 |---|---|---|---|
 | `BACKEND_LOG` | — | Sets the backend log path in the launcher. | `scripts/corsia`, `scripts/corsia.d/app_mode.sh`, `scripts/corsia.d/runtime.sh` |
-| `BACKEND_PORT` | — | Sets the backend port. | `backend/api/setup.py`, `backend/api/system_admin.py`, `backend/automation/update_schedule.py`, `backend/cli_sources.py`, `backend/connections/google/oauth.py`, `backend/subagents/harness_tool_bridge.py`, `scripts/corsia`, `scripts/corsia.d/app_mode.sh` |
+| `BACKEND_PORT` | — | Sets the backend port. | `backend/api/setup.py`, `backend/api/system_admin_helpers.py`, `backend/automation/update_schedule.py`, `backend/cli_sources.py`, `backend/connections/google/oauth.py`, `backend/subagents/harness_tool_bridge.py`, `scripts/corsia`, `scripts/corsia.d/app_mode.sh` |
 | `CORSIA_ANALYTICS_DISABLE` | `'0'` | Disables product analytics when set to 1. | `backend/infra/product_events.py` |
 | `CORSIA_ANALYTICS_PROJECT` | — | Sets the project identifier for product events. | `backend/infra/product_events.py` |
 | `CORSIA_API_BASE` | — | Sets the CORSIA API base URL for CLI clients. | `backend/cli_sources.py`, `backend/scripts/corsia_api.py` |
@@ -144,6 +144,7 @@ These variables are used internally or for tests.
 - `CORSIA_RESTART_CALLER_TOKEN`
 - `CORSIA_RESTART_CURL`
 - `CORSIA_RESTART_OPERATION_ID`
+- `CORSIA_RESTART_RESULT_FILE`
 - `CORSIA_SCRIPT_GITHUB_SOCKET`
 - `CORSIA_SCRIPT_TOOL_SOCKET`
 - `CORSIA_SERVICE_GENERATION`
