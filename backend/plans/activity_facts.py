@@ -27,6 +27,7 @@ def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:
     watches = node_waits.armed_watches(db, ids, compact=True)
     attempts = admission_attempts.open_attempts(ids, db=db, compact=True)
     attention = artifact_links.raised_attention_nodes(ids, db=db)
+    covered = operator_display_state.covered_nodes(ids, db=db)
     for row in nodes:
         node_id = str(row["id"])
         placed = [dict(hold) | {"placed": True} for hold in holds.get(node_id, [])]
@@ -42,6 +43,7 @@ def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:
             "has_user_block": not_moving.user_blocker(placed),
             "has_user_pause": pause is not None and user_steering.is_user_pause(pause),
             "has_attention": node_id in attention,
+            "covered": node_id in covered,
             "wait_deadline": deadlines[0] if deadlines else None,
             "wait_deadline_latest": deadlines[1] if deadlines else None,
             "attempt_id": attempt["id"] if attempt is not None else None,
