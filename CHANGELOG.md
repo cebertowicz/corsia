@@ -46,11 +46,12 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
 - On a narrow screen, opening another agent's chat from a chat now keeps it visible.
-- On macOS, an update that refuses before restarting now lets agents resume work without waiting for a manual restart.
+- On a paired computer, updates and restarts now reach the main CORSIA service instead of failing because they were started from the paired device.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
 - On a phone, typing while a comment you tapped in the text is open closes its sheet and puts what you type in the document.
 - On a touch screen with a wide window, such as a tablet, the message box no longer covers Won’t do on a task for you.
+- On macOS, an update that refuses before restarting now lets agents resume work without waiting for a manual restart.
 - Open comments and suggestions on a document now sit as cards in the margin beside their text, each level with the line it comments on, until they are resolved; suggestions have their own cards with Accept and Reject. Resolved comments are in a Resolved list, newest first. A comment whose text was deleted stays near where it was and says the text is gone. Where the window is too narrow for the margin, a comment opens beside where you clicked; on a phone, comments open in a sheet from the bottom of the screen. Picked cards return to their places when you click elsewhere in the text or press Escape, and a reply button near the bottom of the screen comes into view. If resolving a suggestion fails, its card stays open and says so.
 - Place again is available when deleted comment text returns to a document, so you can restore the comment's position.
 - A repository an agent attaches to a project is now refused if its Git settings go beyond a short safe list, since some settings can run a program; the refusal names each setting to remove, and adding that repository yourself in Project settings still works.
