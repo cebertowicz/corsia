@@ -14,6 +14,7 @@ from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
 )
+from plans.feedback_titles import comment_phrases, trim_title
 from plans.plan_write import transaction
 
 PROVENANCE = feedback_join.PROVENANCE
@@ -78,32 +79,6 @@ class FeedbackNodeResult:
     woke: bool = False
 
 
-def _comment_phrases(items: list[dict[str, Any]]) -> list[str]:
-    """Render distinct ordinary, suggested, and reopened comment categories."""
-    comments = [item for item in items if item["kind"] == "comment"]
-    reopened = sum(item.get("event") == "reopened" for item in comments)
-    ordinary = [item for item in comments if item.get("event") != "reopened"]
-    suggestions = sum(item.get("replacement") is not None for item in ordinary)
-    plain = len(ordinary) - suggestions
-    phrases = []
-    if plain:
-        phrases.append(f"{plain} comment{'s' if plain != 1 else ''}")
-    if suggestions:
-        phrases.append(f"{suggestions} suggestion{'s' if suggestions != 1 else ''}")
-    if reopened:
-        phrases.append(f"{reopened} re-opened comment{'s' if reopened != 1 else ''}")
-    return phrases
-
-
-def _trim_title(full: str, suffix: str) -> str:
-    if len(full) <= service.MAX_NODE_TITLE:
-        return full
-    if len(suffix) < service.MAX_NODE_TITLE:
-        room = service.MAX_NODE_TITLE - len(suffix)
-        return f"{full[:room - 1]}…{suffix}"
-    return f"{full[:service.MAX_NODE_TITLE - 1]}…"
-
-
 def _title(authors: list[str], document: str, items: list[dict[str, Any]]) -> str:
     """The task's title: who wrote what it holds, and what, without saying anyone did what they did not.
 
@@ -112,7 +87,7 @@ def _title(authors: list[str], document: str, items: list[dict[str, Any]]) -> st
     comment counts alone are true of the group.
     """
     edits, ordinary, reopened = feedback_item_counts(items)
-    phrases = _comment_phrases(items)
+    phrases = comment_phrases(items)
     if len(authors) == 1:
         author = authors[0]
     elif len(authors) == 2:
@@ -129,7 +104,7 @@ def _title(authors: list[str], document: str, items: list[dict[str, Any]]) -> st
         suffix = f" re-opened {reopened} comment{'s' if reopened != 1 else ''} on {document}"
     else:
         suffix = f" left {' and '.join(phrases)} on {document}"
-    return _trim_title(author + suffix, suffix)
+    return trim_title(author + suffix, suffix)
 
 
 # The line item_blocks writes for a person's edit; delivery deletes the edit itself, so this keeps its name.
@@ -394,7 +369,7 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
     full = f"Review {artifact_name(db, artifact_id)} for {request['requester_display']}"
     return _create_linked_node(
         db, reviewer_thread_id, artifact_id, request_id, REVIEW_PROVENANCE,
-        title=_trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
+        title=trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
         description=description(path, request), intent_node_id=_requesting_intent(db, request),
     )
 
