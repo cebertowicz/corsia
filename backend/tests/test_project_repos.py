@@ -458,7 +458,7 @@ async def test_add_repo_rejects_registration_while_owned_process_is_active(
     from api import project_repos
     from fastapi import HTTPException
     from infra import repo_policy_transition
-    from infra.repo_policy_transition import EVERYWHERE
+    from infra.repo_policy_transition import UNCONFINED
 
     workspace = tmp_path / "project"
     workspace.mkdir()
@@ -469,7 +469,7 @@ async def test_add_repo_rejects_registration_while_owned_process_is_active(
     monkeypatch.setattr(
         repo_policy_transition,
         "owned_process_reaches",
-        lambda: [EVERYWHERE],
+        lambda: [UNCONFINED],
     )
 
     with pytest.raises(HTTPException) as raised:
@@ -533,7 +533,7 @@ async def test_detach_repo_rejects_while_repo_access_is_active(
     from api import project_repos
     from fastapi import HTTPException
     from infra import repo_policy_transition
-    from infra.repo_policy_transition import EVERYWHERE, admit_repo_effect
+    from infra.repo_policy_transition import UNCONFINED, admit_repo_effect
 
     workspace = tmp_path / "project"
     source = workspace / "source"
@@ -554,7 +554,7 @@ async def test_detach_repo_rejects_while_repo_access_is_active(
         monkeypatch.setattr(
             repo_policy_transition,
             "owned_process_reaches",
-            lambda: [EVERYWHERE],
+            lambda: [UNCONFINED],
         )
     active_effect = admit_repo_effect() if blocker == "effect" else nullcontext()
 

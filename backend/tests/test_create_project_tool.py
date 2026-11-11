@@ -649,7 +649,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
     from api import project_scaffolding, projects
     from fastapi import HTTPException
     from infra import repo_policy_transition
-    from infra.repo_policy_transition import EVERYWHERE
+    from infra.repo_policy_transition import UNCONFINED
 
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
@@ -660,7 +660,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
     monkeypatch.setattr(
         repo_policy_transition,
         "owned_process_reaches",
-        lambda: [EVERYWHERE],
+        lambda: [UNCONFINED],
     )
 
     conn = sqlite3.connect(":memory:", check_same_thread=False)

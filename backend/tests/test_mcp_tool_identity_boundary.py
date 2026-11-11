@@ -181,3 +181,31 @@ async def test_mcp_wrapper_rewrites_private_path_denial(monkeypatch):
         "Nothing was returned. Use the app's own working directory or a supported "
         "non-private integration."
     )
+
+
+@pytest.mark.asyncio
+async def test_connected_app_call_counts_as_unconfined_repo_effect(monkeypatch):
+    """A local app's server is fenced only from Local only projects, so the caller's fence can't scope its effect."""
+    from infra import repo_policy_transition
+    from tools import host_access_gate, registry as registry_module
+    from tools.host_action_types import HostActionAuthorization
+    from tools.registry import ToolRegistry
+
+    seen: list[bool] = []
+
+    async def authorize(**_kwargs):
+        return HostActionAuthorization()
+
+    async def run(_tool, _name, _params, _context):
+        return "ran"
+
+    monkeypatch.setattr(host_access_gate, "authorize_host_action", authorize)
+    monkeypatch.setattr(registry_module, "execute_recorded_call", run)
+    monkeypatch.setattr(
+        repo_policy_transition, "caller_reach",
+        lambda _thread_id, *, unconfined: seen.append(unconfined) or repo_policy_transition.UNCONFINED,
+    )
+    plain = SimpleNamespace(name="plain")
+    for tool in (_wrapper_for_output("ok", is_error=False), plain):
+        assert await ToolRegistry()._authorized_execute(tool, "probe", {}, {}, {"id": "thread"}) == "ran"
+    assert seen == [True, False]

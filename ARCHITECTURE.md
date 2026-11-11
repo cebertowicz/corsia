@@ -531,16 +531,22 @@ mutual exclusion between repository *effects* (any tool call that may read or
 touch a working repository) and repository *policy transitions* (attaching,
 detaching, pinning or checkout-protecting a repository). It is scoped by the
 project fence (`infra.project_fence.fenced_project_ids`), not by repository:
-an effect's *reach* is the projects its caller is not fenced from, and a
+an effect's *reach* is every project except those its caller is fenced from
+(held as the fenced set, so a project created later counts as reachable), and a
 transition's *claim* is the project it names plus every project whose folder or
 registered repository overlaps the path. A transition refuses while an effect
 or owned process whose reach meets its claim is active, and such an effect
 refuses while that transition is active; one transition runs at a time. Both
-sides fail closed to everywhere: a reach for a call under a host-access permit,
-with no thread, or with an unreadable caller; a claim for a path inside the
-workspace that no project holds (every agent can write it), or an unreadable
-claim. A path outside the workspace that no project holds is writable only
-under a permit, so it claims only the named project.
+sides fail closed: a reach is *unconfined* (meets every claim) for a call under
+a host-access permit, a connected app's call (its server has no caller and is
+fenced only from Local only projects), a call with no thread, or an unreadable
+caller; a claim is everywhere for a path inside the workspace that no project
+folder or repository contains (every agent can write some of it), or an
+unreadable claim. A path outside the workspace that no project holds is
+writable only under a permit, so it claims only the projects holding part of it.
+Effects and the transition meet under one lock; owned processes are read after
+the transition is published and outside the lock, since a process starts only
+inside an admitted effect.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect(reach)`
 except the tools whose own execution enters the stronger transition:

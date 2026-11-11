@@ -101,6 +101,7 @@ class ToolRegistry(ToolStore):
         """
         from infra.repo_policy_transition import admit_repo_effect, caller_reach
         import tools.confined_reads as confined_reads
+        from tools.mcp import MCPToolWrapper
         from tools.host_access_gate import (
             authorize_host_action,
             host_action_permit_scope,
@@ -135,14 +136,14 @@ class ToolRegistry(ToolStore):
         # transition refuses while an effect that can meet it is active, so
         # admitting this call's own effect would make the tool collide with itself.
         # Every other tool is admitted as an effect with its caller's reach, and
-        # a transition excludes the effects and owned processes it can meet.
+        # a transition excludes the effects and owned processes it can meet. A
+        # permit or a connected app's server is not confined by the caller's fence.
         repo_effect = (
             nullcontext()
             if name in _REPO_TRANSITION_OWNERS
             else admit_repo_effect(await asyncio.to_thread(
-                caller_reach,
-                thread_context["id"],
-                leased=authorization.opens_host_paths,
+                caller_reach, thread_context["id"],
+                unconfined=authorization.opens_host_paths or isinstance(tool, MCPToolWrapper),
             ))
         )
         with repo_effect, confined_reads.scope(thread_context):

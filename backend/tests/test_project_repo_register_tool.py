@@ -371,12 +371,12 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
 ):
     """The exemption removes only self-collision, never real exclusion."""
     from infra import repo_policy_transition
-    from infra.repo_policy_transition import EVERYWHERE, admit_repo_effect
+    from infra.repo_policy_transition import UNCONFINED, admit_repo_effect
 
     repo = registry_env["tmp"] / "external" / "app"
     _git_repo(repo)
     if blocker == "owned process":
-        monkeypatch.setattr(repo_policy_transition, "owned_process_reaches", lambda: [EVERYWHERE])
+        monkeypatch.setattr(repo_policy_transition, "owned_process_reaches", lambda: [UNCONFINED])
 
     held = admit_repo_effect() if blocker == "effect" else None
     if held is not None:
@@ -430,7 +430,7 @@ async def test_register_waits_only_for_work_that_can_reach_the_project(
     process = SimpleNamespace(thread_id="busy-thread", lease_id=None, permit_id=None)
     monkeypatch.setattr(PROCESS_OWNER, "outstanding_records", lambda: (process,))
 
-    with admit_repo_effect(caller_reach("busy-thread", leased=False, db=db)):
+    with admit_repo_effect(caller_reach("busy-thread", unconfined=False, db=db)):
         result = await _registry_register(monkeypatch, db, registry_env["workspace"], str(repo))
 
     registered = db.execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0]

@@ -5,21 +5,29 @@ base-checkout protection) changes which paths agents may write. A tool effect or
 owned process admitted under the old policy must not keep writing across that
 change, so the two stay mutually exclusive — but only where they can meet.
 
-Every agent call is already walled by ``infra.project_fence.fenced_project_ids``,
-so an effect's **reach** is the set of projects its caller is not fenced from.
-A transition's **claim** is the projects whose paths it changes: the project it
-names, plus every project whose folder or registered repository overlaps the
-repository path (a linked directory may already belong to another project, or
-contain or sit inside one of its repositories). They conflict when the two share
-a project.
+An agent's own calls are walled by ``infra.project_fence.fenced_project_ids``, so
+an effect's **reach** is every project except those its caller is fenced from. It
+is held as that fenced set, so a project created after admission counts as
+reachable. A transition's **claim** is the projects whose paths it changes: the
+project it names, plus every project whose folder or registered repository
+overlaps the repository path (a linked directory may already belong to another
+project, or contain or sit inside one of its repositories). They conflict when
+the claim names a project the reach is not fenced from.
 
-Both sides fail closed to everywhere. A reach is everywhere for a call under a
-host-access permit (which opens any path), a call with no thread, a caller that
-cannot be read, or any error reading it. A claim is everywhere when the path sits
-inside the workspace but in no project folder or repository — every agent can
-write such a path before the change — or when the claim cannot be read. A path
-outside the workspace that no project holds is writable only under a permit, so
-it claims only the named project; permit holders reach everywhere anyway.
+Both sides fail closed. A reach is unconfined, meeting every claim, for a call
+the caller's fence does not confine (a host-access permit, which opens any path, or a
+connected app, whose server has no caller and is fenced only from Local only
+projects), a call with no thread, a caller that cannot be read, or any error
+reading it. A claim is everywhere when the path sits inside the workspace and no
+project folder or repository contains it — every agent can write some of it
+before the change — or when the claim cannot be read. A path outside the
+workspace that no project holds is writable only under a permit, so it claims
+only the projects holding part of it; permit holders reach everything anyway.
+
+Effects and transitions meet under one lock. Owned processes are read after the
+transition is published and outside the lock, so tool admission never waits on
+those reads: a process starts only inside an admitted effect, and once the
+transition is published an effect that meets it is refused.
 """
 
 from __future__ import annotations
@@ -41,45 +49,57 @@ class RepoPolicyTransitionBusy(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class Scope:
-    """Projects one effect can write, or one transition changes; or everywhere."""
+class Claim:
+    """The projects one policy change touches, or everywhere."""
 
     projects: frozenset[str] = frozenset()
     everywhere: bool = False
 
-    def meets(self, other: "Scope") -> bool:
-        """Whether an effect with one scope and a transition with the other can meet."""
-        return self.everywhere or other.everywhere or bool(self.projects & other.projects)
+
+#: The fail-closed claim: meets every reach.
+EVERYWHERE = Claim(everywhere=True)
 
 
-#: The fail-closed scope: meets every other scope.
-EVERYWHERE = Scope(everywhere=True)
+@dataclass(frozen=True, slots=True)
+class Reach:
+    """The projects one effect can write: every project but ``fenced``, or any path at all."""
+
+    fenced: frozenset[str] = frozenset()
+    unconfined: bool = False
+
+    def meets(self, claim: Claim) -> bool:
+        """Whether this effect can write a path the claimed change touches."""
+        return self.unconfined or claim.everywhere or bool(claim.projects - self.fenced)
 
 
-def caller_reach(thread_id: str | None, *, leased: bool, db=None) -> Scope:
-    """The projects one caller's effect can write; :data:`EVERYWHERE` when unsure."""
-    if leased or not thread_id:
-        return EVERYWHERE
+#: The fail-closed reach: it can write any path, so it meets every claim.
+UNCONFINED = Reach(unconfined=True)
+
+
+def caller_reach(thread_id: str | None, *, unconfined: bool, db=None) -> Reach:
+    """The projects one caller's effect can write; :data:`UNCONFINED` when unsure.
+
+    ``unconfined`` marks a call its caller's project fence does not confine.
+    """
+    if unconfined or not thread_id:
+        return UNCONFINED
     try:
         from infra.database import get_db
         from infra.project_fence import fenced_project_ids, read_caller
 
         connection = db or get_db()
         fenced = fenced_project_ids(read_caller(thread_id, db=connection), db=connection)
-        if not isinstance(fenced, frozenset):
-            return EVERYWHERE
-        every = frozenset(str(row["id"]) for row in connection.execute("SELECT id FROM projects"))
-        return Scope(every - fenced)
+        return Reach(fenced) if isinstance(fenced, frozenset) else UNCONFINED
     except Exception:
-        log.warning("repo effect reach unreadable for %s; treating as everywhere", thread_id, exc_info=True)
-        return EVERYWHERE
+        log.warning("repo effect reach unreadable for %s; treating as unconfined", thread_id, exc_info=True)
+        return UNCONFINED
 
 
 def _overlaps(a: Path, b: Path) -> bool:
     return a == b or a in b.parents or b in a.parents
 
 
-def repo_claim(project_id: str | None, repo_path: Path | None, *, db=None, workspace: Path | None = None) -> Scope:
+def repo_claim(project_id: str | None, repo_path: Path | None, *, db=None, workspace: Path | None = None) -> Claim:
     """The projects a policy change on ``repo_path`` touches; :data:`EVERYWHERE` when unsure or unknown."""
     if repo_path is None:
         return EVERYWHERE
@@ -92,22 +112,29 @@ def repo_claim(project_id: str | None, repo_path: Path | None, *, db=None, works
         root = Path(workspace or WORKSPACE).expanduser().resolve(strict=False)
         target = Path(os.path.normpath(repo_path.expanduser().resolve(strict=False)))
         holders: set[str] = set()
+        contained = False
+
+        def hold(holder: str, held: Path) -> None:
+            nonlocal contained
+            if _overlaps(target, held):
+                holders.add(holder)
+                contained = contained or held == target or held in target.parents
+
         for row in connection.execute("SELECT project_id, repo_path FROM project_repo_policies"):
             path = row["repo_path"]
             if not (isinstance(path, str) and Path(path).is_absolute()):
                 return EVERYWHERE
-            if _overlaps(target, Path(os.path.normpath(Path(path).resolve(strict=False)))):
-                holders.add(str(row["project_id"]))
+            hold(str(row["project_id"]), Path(os.path.normpath(Path(path).resolve(strict=False))))
         for row in connection.execute("SELECT id, name, path FROM projects"):
             # A folder that doesn't resolve is fenced, like the path fence does, only
             # as a folder under ``projects/`` claiming no row: inside the workspace
-            # and held by nobody below, which claims everywhere.
+            # and contained by nobody below, which claims everywhere.
             _name, folder = resolve_project_row_paths(root, project_name=row["name"], raw_path=row["path"])
-            if folder is not None and _overlaps(target, folder.resolve(strict=False)):
-                holders.add(str(row["id"]))
-        if not holders and (target == root or root in target.parents):
+            if folder is not None:
+                hold(str(row["id"]), folder.resolve(strict=False))
+        if not contained and (target == root or root in target.parents):
             return EVERYWHERE
-        return Scope(frozenset(holders | ({project_id} if project_id else set())))
+        return Claim(frozenset(holders | ({project_id} if project_id else set())))
     except Exception:
         log.warning("repo policy claim unreadable for %s; treating as everywhere", repo_path, exc_info=True)
         return EVERYWHERE
@@ -118,11 +145,11 @@ class _RepoPolicyTransitionCoordinator:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._active_effects: Counter[Scope] = Counter()
-        self._transition: Scope | None = None
+        self._active_effects: Counter[Reach] = Counter()
+        self._transition: Claim | None = None
 
     @contextmanager
-    def admit_effect(self, reach: Scope) -> Iterator[None]:
+    def admit_effect(self, reach: Reach) -> Iterator[None]:
         with self._lock:
             if self._transition is not None and reach.meets(self._transition):
                 raise RepoPolicyTransitionBusy(
@@ -142,8 +169,8 @@ class _RepoPolicyTransitionCoordinator:
     def transition(
         self,
         *,
-        claim: Scope,
-        active_process_reaches: Callable[[], Iterable[Scope]],
+        claim: Claim,
+        active_process_reaches: Callable[[], Iterable[Reach]],
     ) -> Iterator[None]:
         with self._lock:
             if self._transition is not None:
@@ -155,13 +182,15 @@ class _RepoPolicyTransitionCoordinator:
                     "Repository policy transition is blocked by an active "
                     "tool effect."
                 )
+            self._transition = claim
+        try:
             try:
                 reaches = list(active_process_reaches())
             except Exception as exc:
                 raise RepoPolicyTransitionBusy(
                     "Owned process activity could not be verified."
                 ) from exc
-            if not all(isinstance(reach, Scope) for reach in reaches):
+            if not all(isinstance(reach, Reach) for reach in reaches):
                 raise RepoPolicyTransitionBusy(
                     "Owned process activity could not be verified."
                 )
@@ -170,8 +199,6 @@ class _RepoPolicyTransitionCoordinator:
                     "Repository policy transition is blocked by an active "
                     "owned process."
                 )
-            self._transition = claim
-        try:
             yield
         finally:
             with self._lock:
@@ -182,27 +209,28 @@ _COORDINATOR = _RepoPolicyTransitionCoordinator()
 
 
 @contextmanager
-def admit_repo_effect(reach: Scope = EVERYWHERE) -> Iterator[None]:
+def admit_repo_effect(reach: Reach = UNCONFINED) -> Iterator[None]:
     """Admit one tool effect unless it can meet an active repo transition."""
     with _COORDINATOR.admit_effect(reach):
         yield
 
 
-def owned_process_reaches() -> list[Scope]:
-    """The reach of every owned process still outstanding, by its thread and permit."""
+def owned_process_reaches() -> list[Reach]:
+    """The reach of every owned process still outstanding, read once per thread and permit."""
     from host_access.processes import PROCESS_OWNER
 
-    return [
-        caller_reach(record.thread_id, leased=record.lease_id is not None or record.permit_id is not None)
+    callers = {
+        (record.thread_id, record.lease_id is not None or record.permit_id is not None)
         for record in PROCESS_OWNER.outstanding_records()
-    ]
+    }
+    return [caller_reach(thread_id, unconfined=unconfined) for thread_id, unconfined in callers]
 
 
 @contextmanager
 def repo_policy_transition(
     *,
-    claim: Scope = EVERYWHERE,
-    active_process_reaches: Callable[[], Iterable[Scope]] | None = None,
+    claim: Claim = EVERYWHERE,
+    active_process_reaches: Callable[[], Iterable[Reach]] | None = None,
 ) -> Iterator[None]:
     """Quarantine one durable repo policy change from the effects it can meet."""
     reaches = active_process_reaches or (lambda: owned_process_reaches())
