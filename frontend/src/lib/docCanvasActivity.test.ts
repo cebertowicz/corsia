@@ -90,4 +90,30 @@ describe('watchCanvasAndBand', () => {
 		await Promise.resolve();
 		expect(changed).toHaveBeenCalledTimes(2);
 	});
+
+	it('stops watching a band once it is removed, and watches the one that replaces it', async () => {
+		const observed = new Set<Element>();
+		vi.stubGlobal('ResizeObserver', class {
+			observe(node: Element) { observed.add(node); }
+			unobserve(node: Element) { observed.delete(node); }
+			disconnect() { observed.clear(); }
+		});
+		const root = document.createElement('div');
+		const addBand = () => {
+			const band = document.createElement('div');
+			band.setAttribute('data-doc-bottom-band', '');
+			return root.appendChild(band);
+		};
+		const stop = watchCanvasAndBand(root, vi.fn());
+		const first = addBand();
+		await Promise.resolve();
+		expect([...observed]).toEqual([root, first]);
+		root.removeChild(first);
+		await Promise.resolve();
+		expect([...observed]).toEqual([root]);
+		const second = addBand();
+		await Promise.resolve();
+		expect([...observed]).toEqual([root, second]);
+		stop();
+	});
 });

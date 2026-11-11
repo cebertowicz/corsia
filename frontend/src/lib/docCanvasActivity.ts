@@ -67,9 +67,14 @@ export function bottomNoticesHeight(clip: DOMRect, band: DOMRect | undefined, pi
 export function watchCanvasAndBand(root: HTMLElement, changed: () => void): () => void {
 	const resize = new ResizeObserver(changed);
 	resize.observe(root);
+	let band: Element | null = null;
 	const watchBand = () => {
-		const band = root.querySelector(':scope > [data-doc-bottom-band]');
-		if (band) resize.observe(band);
+		const now = root.querySelector(':scope > [data-doc-bottom-band]');
+		if (now !== band) {
+			if (band) resize.unobserve(band);
+			if (now) resize.observe(now);
+			band = now;
+		}
 		changed();
 	};
 	const children = new MutationObserver(watchBand);
