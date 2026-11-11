@@ -87,7 +87,7 @@ function t() { return get(token) || ''; }
 
 export async function loadNetworkServers(): Promise<void> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers`);
+		const res = await apiFetch(`${BASE}/api/settings/network-servers?token=${t()}`);
 		if (res.ok) {
 			const data = await res.json();
 			networkServers.set(data.servers || []);
@@ -107,7 +107,7 @@ export async function addNetworkServer(
 	extra?: { base_url?: string; dialect?: string; api_key?: string; model_ids?: string[] },
 ): Promise<{ ok: boolean; server_id?: string; status?: string; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers?token=${t()}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ name, hostname, port, ...(extra ?? {}) }),
@@ -133,7 +133,7 @@ export async function updateNetworkServer(
 	},
 ): Promise<{ ok: boolean; server_id?: string; status?: string; models?: number; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}?token=${t()}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(extra),
@@ -153,7 +153,7 @@ export async function setNetworkServerBilling(
 	input: { mode: ServerBilling['mode'] | null; monthly_price_cents: number | null; charge_day: number | null },
 ): Promise<{ ok: boolean; message?: string; status?: number; code?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/billing`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/billing?token=${t()}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ ...input, expected_billing_revision: server.billing_revision ?? 0 }),
@@ -174,7 +174,7 @@ export async function setNetworkServerEnabled(
 	enabled: boolean,
 ): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/enabled`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/enabled?token=${t()}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
@@ -196,7 +196,7 @@ export async function setNetworkServerPrivate(
 	isPrivate: boolean,
 ): Promise<{ ok: true } | { ok: false; detail?: unknown; reached: boolean }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ private: isPrivate }),
@@ -215,7 +215,7 @@ export async function setNetworkServerPrivate(
 /** Probe an External endpoint now and rediscover its models. */
 export async function testNetworkServer(serverId: string): Promise<{ ok: boolean; message: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/test`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}/test?token=${t()}`, {
 			method: 'POST',
 		});
 		const data = await res.json().catch(() => ({}));
@@ -235,7 +235,7 @@ export async function setModelImageInput(
 ): Promise<{ ok: boolean; message?: string }> {
 	try {
 		const path = `${serverId}/models/${encodeURIComponent(modelId)}/image-input`;
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${path}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${path}?token=${t()}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ mode }),
@@ -250,7 +250,7 @@ export async function setModelImageInput(
 
 export async function removeNetworkServer(serverId: string): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}`, {
+		const res = await apiFetch(`${BASE}/api/settings/network-servers/${serverId}?token=${t()}`, {
 			method: 'DELETE',
 		});
 		if (res.ok) {

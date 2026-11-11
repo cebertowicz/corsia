@@ -68,7 +68,7 @@ export async function uploadInputFile(
 	form.append('file', file);
 	try {
 		const res = await apiFetch(
-			`/api/upload?thread_id=${encodeURIComponent(threadId)}`,
+			`/api/upload?token=${encodeURIComponent(authToken)}&thread_id=${encodeURIComponent(threadId)}`,
 			{
 				method: 'POST',
 				body: form,

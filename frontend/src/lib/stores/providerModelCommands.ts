@@ -14,7 +14,7 @@ const t = () => get(token) || '';
 // one is the catalog's enabled flag, written by row id. Only managed servers load.
 async function _setCatalogModelEnabled(modelDbId: string, enable: boolean): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/models/${encodeURIComponent(modelDbId)}`, {
+		const res = await apiFetch(`${BASE}/api/settings/models/${encodeURIComponent(modelDbId)}?token=${t()}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled: enable }),
@@ -58,7 +58,7 @@ export async function loadModel(
 	if (toggled) return toggled;
 	if (server) {
 		try {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/load`, {
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/load?token=${t()}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ model: modelId }),
@@ -79,7 +79,7 @@ export async function cancelJob(
 	if (!server) return { ok: false, message: 'no server' };
 	try {
 		const res = await apiFetch(
-			`${BASE}/api/settings/network-servers/${server.id}/jobs/${jobId}`,
+			`${BASE}/api/settings/network-servers/${server.id}/jobs/${jobId}?token=${t()}`,
 			{ method: 'DELETE' },
 		);
 		const data = await res.json().catch(() => null);
@@ -108,7 +108,7 @@ export async function unloadModel(
 	if (toggled) return toggled;
 	if (server) {
 		try {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/unload`, {
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models/unload?token=${t()}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ model: modelId }),

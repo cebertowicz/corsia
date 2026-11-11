@@ -1,4 +1,3 @@
-
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { disconnect } from '$lib/ws/connection';

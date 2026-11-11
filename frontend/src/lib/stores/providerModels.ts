@@ -92,7 +92,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 	try {
 		if (p.type === 'harness') return _setState(k, { loading: false, models: await harnessModels(p.name) });
 		if (p.type === 'cloud') {
-			const res = await apiFetch(`${BASE}/api/settings/providers/${p.name}/models`);
+			const res = await apiFetch(`${BASE}/api/settings/providers/${p.name}/models?token=${t()}`);
 			if (!res.ok) {
 				const list = fallbackCloudModels(p.models);
 				_setState(k, { loading: false, models: list });
@@ -108,7 +108,7 @@ export async function loadProviderModelsFor(p: ProviderEntry, server?: NetworkSe
 		}
 
 		if (server) {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models`);
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/models?token=${t()}`);
 			if (!res.ok) { _setState(k, { loading: false, lastError: `HTTP ${res.status}` }); return; }
 			const data = await res.json();
 			const deduped = networkProviderModels(data);
@@ -128,7 +128,7 @@ export async function pollJobsFor(p: ProviderEntry, server?: NetworkServer): Pro
 	let jobs: any[] = [];
 	try {
 		if (server) {
-			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/jobs/active`);
+			const res = await apiFetch(`${BASE}/api/settings/network-servers/${server.id}/jobs/active?token=${t()}`);
 			if (res.ok) jobs = (await res.json()).jobs ?? [];
 		}
 	} catch { return; }

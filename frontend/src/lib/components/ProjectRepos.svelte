@@ -65,7 +65,7 @@
 		}
 		loading = true;
 		try {
-			const res = await apiFetch(`/api/projects/${project}/repos`);
+			const res = await apiFetch(`/api/projects/${project}/repos?token=${t}`);
 			if (!res.ok) throw new Error(`Couldn't load repos (${res.status})`);
 			const nextRepos = ((await res.json()).repos ?? []) as Repo[];
 			if (isCurrent(generation)) repos = nextRepos;
@@ -107,7 +107,7 @@
 				addMode === 'link'
 					? { mode: 'link', path: path.trim(), name: name.trim() || null, ...controls }
 					: { mode: 'create', name: name.trim(), ...controls };
-			const res = await apiFetch(`/api/projects/${project}/repos`, {
+			const res = await apiFetch(`/api/projects/${project}/repos?token=${t}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
@@ -139,7 +139,7 @@
 		const project = projectId;
 		const generation = projectGeneration;
 		try {
-			const res = await apiFetch(`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}`, {
+			const res = await apiFetch(`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}?token=${t}`, {
 				method: 'DELETE',
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not detach that repository. Try again.'));
@@ -167,7 +167,7 @@
 		branchLoading[repo.name] = true;
 		try {
 			const res = await apiFetch(
-				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}/branches`,
+				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}/branches?token=${t}`,
 			);
 			if (!res.ok) {
 				throw new Error(await plainResponseError(res, 'Could not load this repository’s branches. Try again.'));
@@ -197,7 +197,7 @@
 		mutationBusy[repo.name] = true;
 		try {
 			const res = await apiFetch(
-				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}`,
+				`/api/projects/${project}/repos/${encodeURIComponent(repo.name)}?token=${t}`,
 				{
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },

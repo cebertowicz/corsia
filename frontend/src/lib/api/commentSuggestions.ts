@@ -1,5 +1,8 @@
+import { get } from 'svelte/store';
+import { token } from '$lib/stores/auth';
 import type { ServerComment } from './docs';
 import { apiFetch } from './request';
+
 export interface SuggestionDecision {
 	comment?: ServerComment;
 	accepted?: string[];
@@ -21,7 +24,7 @@ export class SuggestionRefused extends Error {
 export async function decideSuggestion(
 	commentId: string, decision: 'accept' | 'reject', allFromAuthor = false
 ): Promise<SuggestionDecision> {
-	const response = await apiFetch(`/api/comments/${commentId}/decision`, {
+	const response = await apiFetch(`/api/comments/${commentId}/decision?token=${encodeURIComponent(get(token) ?? '')}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ decision, all_from_author: allFromAuthor }),
@@ -31,7 +34,7 @@ export async function decideSuggestion(
 
 /** Accept every open suggestion on a document, from every author, in one write; having none is not an error. */
 export async function acceptAllSuggestions(artifactId: string): Promise<SuggestionDecision> {
-	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all`, { method: 'POST' });
+	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all?token=${encodeURIComponent(get(token) ?? '')}`, { method: 'POST' });
 	return decided(response, "Couldn't accept the suggestions");
 }
 

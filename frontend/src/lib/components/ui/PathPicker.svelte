@@ -30,13 +30,13 @@
 		loading = true;
 		error = null;
 		try {
-			const qs = new URLSearchParams();
+			const qs = new URLSearchParams({ token: t });
 			if (path) qs.set('path', path);
 			if (mode === 'file') {
 				qs.set('files', '1');
 				if (ext) qs.set('ext', ext);
 			}
-			const res = await apiFetch(`/api/fs/browse${qs.size ? `?${qs}` : ''}`);
+			const res = await apiFetch(`/api/fs/browse?${qs}`);
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not browse that folder. Try again.'));
 			const d = await res.json();
 			cwd = d.path;

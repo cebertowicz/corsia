@@ -23,7 +23,7 @@ export async function togglePin(id: string): Promise<void> {
 	);
 
 	try {
-		const res = await apiFetch(`/api/threads/${id}`, {
+		const res = await apiFetch(`/api/threads/${id}?token=${t}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ pinned: !!next }),

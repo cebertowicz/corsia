@@ -30,7 +30,7 @@ function t() { return get(token) || ''; }
 
 export async function loadProviders(): Promise<void> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/providers`);
+		const res = await apiFetch(`${BASE}/api/settings/providers?token=${t()}`);
 		if (res.ok) {
 			const data = await res.json();
 			providers.set(data.providers || []);
@@ -51,7 +51,7 @@ export async function updateProvider(
 	},
 ): Promise<{ ok: boolean; error?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/providers/${name}`, {
+		const res = await apiFetch(`${BASE}/api/settings/providers/${name}?token=${t()}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch),
@@ -74,7 +74,7 @@ export async function updateProvider(
 
 export async function deleteProvider(name: string): Promise<{ ok: boolean }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/providers/${name}`, { method: 'DELETE' });
+		const res = await apiFetch(`${BASE}/api/settings/providers/${name}?token=${t()}`, { method: 'DELETE' });
 		if (res.ok) await loadProviders();
 		return { ok: res.ok };
 	} catch {
@@ -84,7 +84,7 @@ export async function deleteProvider(name: string): Promise<{ ok: boolean }> {
 
 export async function testProvider(name: string): Promise<{ ok: boolean; message?: string; error?: string }> {
 	try {
-		const res = await apiFetch(`${BASE}/api/settings/providers/${name}/test`, { method: 'POST' });
+		const res = await apiFetch(`${BASE}/api/settings/providers/${name}/test?token=${t()}`, { method: 'POST' });
 		const result = await res.json();
 		testedProviders.update((names) => result.ok ? [...new Set([...names, name])] : names.filter((candidate) => candidate !== name));
 		return result;

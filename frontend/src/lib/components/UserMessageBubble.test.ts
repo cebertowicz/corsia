@@ -290,7 +290,7 @@ describe('UserMessageBubble — delivery state', () => {
 
 		await vi.waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledWith(
-				'/api/threads/thread-queued/messages/m-human-1/cancel',
+				'/api/threads/thread-queued/messages/m-human-1/cancel?token=ui-token',
 				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});
@@ -354,7 +354,7 @@ describe('UserMessageBubble — delivery state', () => {
 			// The endpoint takes no body; the acknowledgement field it was sent
 			// was never read by anything.
 			expect(fetchMock).toHaveBeenCalledWith(
-				'/api/threads/thread-ambiguous/messages/m-human-1/retry',
+				'/api/threads/thread-ambiguous/messages/m-human-1/retry?token=ui-token',
 				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});
@@ -426,7 +426,7 @@ describe('UserMessageBubble — delivery state', () => {
 
 		await vi.waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledWith(
-				'/api/threads/thread-retry/messages/m-human-1/retry',
+				'/api/threads/thread-retry/messages/m-human-1/retry?token=ui-token',
 				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});

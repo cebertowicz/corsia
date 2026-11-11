@@ -1,4 +1,5 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
+import { token } from './auth';
 
 /** The page's one time grain: each bar, tile and comparison is a calendar day or a Monday to Sunday week. */
 export type MeasurementGrain = 'days' | 'weeks';
@@ -21,5 +22,7 @@ export function viewerTimeZone(): string {
 /** The query every grain-aware Measurement request carries: scope, grain and the viewer's zone. */
 export function grainScopeParams(grain: MeasurementGrain, scope: MeasurementScopeKey): URLSearchParams {
 	const params = new URLSearchParams({ project: scope.project, agent: scope.agent ?? 'none', grain, timezone: viewerTimeZone() });
+	const currentToken = get(token);
+	if (currentToken) params.set('token', currentToken);
 	return params;
 }

@@ -150,7 +150,7 @@ describe('StatusBanners', () => {
 		flushSync();
 
 		expect(fetch).toHaveBeenCalledWith(
-			'/api/system/drain',
+			'/api/system/drain?token=test-token',
 			{ cache: 'no-store', headers: { Authorization: 'Bearer test-token' } },
 		);
 		expect(host.textContent).toContain(

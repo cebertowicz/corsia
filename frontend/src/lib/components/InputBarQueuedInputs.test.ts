@@ -132,7 +132,7 @@ describe('the queue pinned to the top of the input box', () => {
 	});
 
 	it('removes a queued input through the one delivery-action endpoint', async () => {
-		const cancelUrl = '/api/threads/thread-1/messages/queued-1/cancel';
+		const cancelUrl = '/api/threads/thread-1/messages/queued-1/cancel?token=token';
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
 			ok: true,
 			json: async () => String(input) === cancelUrl

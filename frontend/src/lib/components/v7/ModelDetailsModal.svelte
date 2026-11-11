@@ -50,7 +50,7 @@
 		cacheLoading = true;
 		const t = get(token) || '';
 		try {
-			const res = await apiFetch(`/api/settings/network-servers/${serverId}/cache/status`);
+			const res = await apiFetch(`/api/settings/network-servers/${serverId}/cache/status?token=${t}`);
 			if (res.ok) {
 				const data = await res.json();
 				cacheStats = (data.caches || []).filter((c: CacheEntry) =>

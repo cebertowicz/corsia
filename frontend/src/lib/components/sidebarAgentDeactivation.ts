@@ -5,7 +5,8 @@ import { apiFetch } from '$lib/api/request';
 export async function deactivateSidebarAgent(id: string, authToken: string): Promise<string | null> {
 	let response: Response;
 	try {
-		response = await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+		const query = new URLSearchParams({ token: authToken });
+		response = await apiFetch(`/api/agents/${id}?${query}`, { method: 'DELETE' });
 	} catch (error) {
 		console.error('Could not deactivate agent', error);
 		return SERVER_UNREACHABLE;

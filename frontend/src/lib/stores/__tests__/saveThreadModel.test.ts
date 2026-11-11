@@ -81,7 +81,7 @@ describe('saveThreadModel', () => {
 			checkpointRequired: true,
 		});
 		expect(fetch).toHaveBeenCalledWith(
-			'/api/threads/thread-1',
+			'/api/threads/thread-1?token=tok',
 			expect.objectContaining({
 				// No checkpoint choice rides along: the server decides, and it
 				// decides the warm path.

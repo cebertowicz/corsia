@@ -227,7 +227,7 @@ describe('model picker account rows', () => {
 		await settle();
 		expect(puts()).toHaveLength(1);
 		const [url, init] = puts()[0];
-		expect(String(url)).toMatch(/^\/api\/threads\/thread-1\/vendor-account$/);
+		expect(String(url)).toMatch(/^\/api\/threads\/thread-1\/vendor-account\?token=/);
 		expect(JSON.parse(init.body)).toEqual({ account_id: 'personal' });
 	});
 

@@ -65,7 +65,7 @@ describe('OverageSwitch', () => {
 		render(row).querySelector('button')?.click();
 		await settle();
 
-		expect(String(fetchMock.mock.calls[0][0])).toBe('/api/vendor-accounts/acct-2/usage');
+		expect(String(fetchMock.mock.calls[0][0])).toMatch(/^\/api\/vendor-accounts\/acct-2\/usage\?/);
 		expect(fetchMock.mock.calls[0][1].method).toBe('PUT');
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ allow_overage: true });
 		let stored: VendorAccount[] = [];

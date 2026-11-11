@@ -30,7 +30,7 @@ export function loadThreadVendorAccounts(threadId: string, key: string): Promise
 	const work = (async () => {
 		let accounts: ThreadVendorAccount[] = []; let error: string | undefined;
 		try {
-			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account`);
+			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account?token=${encodeURIComponent(auth)}`);
 			const body = await response.json().catch(() => null);
 			if (!response.ok) error = plainErrorText(body?.detail, 'Couldn’t load this chat’s account. Try again.');
 			else if (!Array.isArray(body?.accounts) || body.accounts.some((row: ThreadVendorAccount) =>

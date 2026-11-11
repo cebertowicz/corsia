@@ -42,7 +42,7 @@ describe('threadLocalOnly', () => {
 describe('saveThreadLocalOnly', () => {
 	it('writes through the person route and reloads the authoritative thread list', async () => {
 		threads.set([makeThread()]);
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/threads'
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).startsWith('/api/threads?')
 			? ({ ok: true, json: async () => reloadBody({ local_only: true, local_only_effective: true, local_only_cause: 'own' }) })
 			: ({ ok: true }));
 		vi.stubGlobal('fetch', fetchMock);
@@ -50,7 +50,7 @@ describe('saveThreadLocalOnly', () => {
 		expect(fetchMock).toHaveBeenCalledWith('/api/threads/t1/local-only', expect.objectContaining({
 			method: 'PUT', body: JSON.stringify({ local_only: true }), headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
 		}));
-		expect(fetchMock).toHaveBeenCalledWith('/api/threads', { headers: { Authorization: 'Bearer tok' } });
+		expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/threads?'), { headers: { Authorization: 'Bearer tok' } });
 		expect(get(threads)[0]).toMatchObject({ local_only: true, local_only_effective: true, local_only_cause: 'own' });
 	});
 	it('leaves the store alone and returns the save-failure line when the server cannot be reached', async () => {
@@ -61,7 +61,7 @@ describe('saveThreadLocalOnly', () => {
 	});
 	it('reports a successful save whose required reload failed', async () => {
 		threads.set([makeThread()]);
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/threads'
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).startsWith('/api/threads?')
 			? ({ ok: true, json: async () => { throw new SyntaxError('bad JSON'); } })
 			: ({ ok: true })));
 		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: 'Saved. Reload the page to see it.' });

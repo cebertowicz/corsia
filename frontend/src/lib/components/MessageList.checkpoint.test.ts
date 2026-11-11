@@ -84,7 +84,7 @@ describe('checkpoint thread status', () => {
 			'[data-checkpoint-cancel="checkpoint-1"]',
 		)?.click();
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-			'/api/threads/thread-checkpoint/checkpoints/checkpoint-1/cancel',
+			'/api/threads/thread-checkpoint/checkpoints/checkpoint-1/cancel?token=ui-token',
 			expect.objectContaining({ method: 'POST' }),
 		));
 		expect(host.textContent).not.toContain('omlx@internal');

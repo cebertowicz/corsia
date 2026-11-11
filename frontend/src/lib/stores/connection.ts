@@ -76,7 +76,7 @@ export async function refreshDrainStatus(
 	const requestedGeneration = drainStatusGeneration;
 	const requestId = ++latestDrainRefreshRequest;
 	const response = await apiFetch(
-		`/api/system/drain`,
+		`/api/system/drain?token=${encodeURIComponent(authToken)}`,
 		{ cache: 'no-store' },
 	);
 	if (!isCurrent()) return;
@@ -114,7 +114,7 @@ export async function checkSecurityAlert(authToken: string | null = null): Promi
 
 export async function dismissSecurityAlert(token: string): Promise<void> {
 	try {
-		await apiFetch(`/api/security/alert`, { method: 'DELETE' });
+		await apiFetch(`/api/security/alert?token=${token}`, { method: 'DELETE' });
 		securityAlert.set(null);
 	} catch {}
 }

@@ -17,7 +17,7 @@ it('asks for one restore by version and the revision the person saw, and carries
 	expect(refused).toBeInstanceOf(RequestRefused);
 	expect((refused as RequestRefused).kind).toBe('stale');
 	const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-	expect(url).toBe('/api/files/history/restore');
+	expect(url.startsWith('/api/files/history/restore?')).toBe(true);
 	expect(init.method).toBe('POST');
 	expect(JSON.parse(String(init.body))).toEqual({ path: '/w/SKILL.md', version: 'v1', base_sha256: 'base', project_id: 'p', thread_id: 't' });
 });

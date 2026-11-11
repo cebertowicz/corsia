@@ -234,7 +234,7 @@ export async function saveThreadModel(
 	modelId: string,
 	token: string,
 ): Promise<ThreadModelSaveResult> {
-	const res = await apiFetch(`/api/threads/${threadId}`, {
+	const res = await apiFetch(`/api/threads/${threadId}?token=${token}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ model: modelId }),

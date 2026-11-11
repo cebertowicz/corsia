@@ -33,7 +33,7 @@ export async function pinThreadAccount(threadId: string, accountId: string): Pro
 	if (!auth) return { ok: false, message: PIN_FAILED };
 	let body: Record<string, unknown> | null;
 	try {
-		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account`, {
+		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account?token=${encodeURIComponent(auth)}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ account_id: accountId }),

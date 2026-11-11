@@ -115,7 +115,7 @@ export async function loadModelProfile(modelId: string): Promise<ModelProfile | 
 export async function updateModelProfile(modelId: string, patch: Partial<ModelProfile>): Promise<boolean> {
 	try {
 		const t = get(token);
-		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile`, {
+		const res = await apiFetch(`${BASE}/api/models/${modelId}/profile?token=${t}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch),

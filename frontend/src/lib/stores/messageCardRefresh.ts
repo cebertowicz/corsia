@@ -41,7 +41,7 @@ export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: bo
 
 async function read(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
 	const params = new URLSearchParams({
-		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to,
+		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to, token: bearer,
 	});
 	const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
 	if (!res.ok) return [];

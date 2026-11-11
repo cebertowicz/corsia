@@ -25,7 +25,7 @@ export function createTranscriptPagerPort(inputs: {
 			const token = inputs.token(), threadId = inputs.threadId();
 			if (!token || !threadId) return null;
 			try {
-				const res = await apiFetch(`/api/threads/${threadId}/messages?limit=${inputs.pageSize}&before=${cursor}${inputs.querySuffix()}`);
+				const res = await apiFetch(`/api/threads/${threadId}/messages?token=${token}&limit=${inputs.pageSize}&before=${cursor}${inputs.querySuffix()}`);
 				if (!res.ok) return null;
 				const data = await res.json() as MessagePage;
 				return { ...data, messages: hydrateFetchedMessages(data.messages ?? []) };

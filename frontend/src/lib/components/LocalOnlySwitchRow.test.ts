@@ -103,7 +103,7 @@ describe('Local only switch writes', () => {
 	it('turns off an own setting in a cloud-off project, then presents the reloaded project cause', async () => {
 		thread({ local_only: 1, local_only_effective: true, local_only_cause: 'own' });
 		models.set([local, marked('thread_local_only')]);
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/threads'
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).startsWith('/api/threads?')
 			? ({ ok: true, json: async () => ({ threads: [{ id: 't1', user_id: 'u', profile: 'personal', title: 'Chat', model: null, project_id: 'p1', created_at: 'now', updated_at: 'later', local_only: 0, local_only_effective: true, local_only_cause: 'project' }] }) })
 			: ({ ok: true }));
 		vi.stubGlobal('fetch', fetchMock);

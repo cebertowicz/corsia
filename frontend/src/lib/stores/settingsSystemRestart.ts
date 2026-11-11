@@ -11,7 +11,7 @@ export async function restartSystem(
 ): Promise<{ ok: true; operation_id: string; message?: string } | { ok: false; message?: string }> {
 	try {
 		const t = get(token);
-		const res = await apiFetch(`${BASE}/api/system/restart?mode=${mode}`, {
+		const res = await apiFetch(`${BASE}/api/system/restart?token=${t}&mode=${mode}`, {
 			method: 'POST',
 		});
 		const data = await res.json().catch(() => ({}));
@@ -62,7 +62,7 @@ export async function readSystemRestartStatus(operationId: string, signal?: Abor
 		const t = get(token);
 		if (!t) return null;
 		const res = await apiFetch(
-			`${BASE}/api/system/drain?operation_id=${encodeURIComponent(operationId)}`,
+			`${BASE}/api/system/drain?token=${encodeURIComponent(t)}&operation_id=${encodeURIComponent(operationId)}`,
 			{ cache: 'no-store', signal },
 		);
 		if (res.status === 404) return 'Restart operation not found.';

@@ -76,7 +76,7 @@ export async function requestDeliveryAction(
 		const response = await apiFetch(
 			`/api/threads/${encodeURIComponent(threadId)}`
 			+ `/messages/${encodeURIComponent(messageId)}`
-			+ `/${action}`,
+			+ `/${action}?token=${encodeURIComponent(authToken)}`,
 			{ method: 'POST' },
 		);
 		if (!response.ok) {

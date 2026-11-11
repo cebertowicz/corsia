@@ -14,9 +14,10 @@ export async function fetchNextTurnPreview(
 	modelId: string | null,
 ): Promise<ContextUsage | null> {
 	const params = new URLSearchParams();
+	params.set('token', authToken);
 	if (modelId) params.set('model', modelId);
 	const res = await apiFetch(
-		`/api/threads/${threadId}/context-snapshot/next-turn${params.size ? `?${params}` : ''}`,
+		`/api/threads/${threadId}/context-snapshot/next-turn?${params.toString()}`,
 	);
 	if (!res.ok) throw new Error(`Context preview failed (${res.status})`);
 	const body = await res.json();

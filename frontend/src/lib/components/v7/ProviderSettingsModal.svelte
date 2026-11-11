@@ -102,7 +102,7 @@
 		try {
 			const t = get(token) || '';
 			const res = await apiFetch(
-				`/api/settings/providers/${provider.name}/status`,
+				`/api/settings/providers/${provider.name}/status?token=${t}`,
 			);
 			if (res.ok) {
 				const data = await res.json();
@@ -207,7 +207,7 @@
 		try {
 			const t = get(token) || '';
 			const res = await apiFetch(
-				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}`,
+				`/api/settings/network-servers/${provider.server.id}/lifecycle/${action}?token=${t}`,
 				{ method: 'POST' },
 			);
 			const data = await res.json().catch(() => ({}));

@@ -115,7 +115,7 @@ describe('MessageList persisted tool activity', () => {
 		flushSync();
 
 		expect(fetchMock).toHaveBeenCalledWith(
-			`/api/threads/${THREAD_ID}/messages/tool-1/tool-results/call-1`,
+			`/api/threads/${THREAD_ID}/messages/tool-1/tool-results/call-1?token=test-token`,
 			{ headers: { Authorization: 'Bearer test-token' } },
 		);
 		await vi.waitFor(() => expect(host.textContent).toContain('lazy output'));

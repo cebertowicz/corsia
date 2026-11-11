@@ -55,7 +55,7 @@
 		error = null;
 		try {
 			const res = await apiFetch(
-				`/api/settings/network-servers/${serverId}/settings`,
+				`/api/settings/network-servers/${serverId}/settings?token=${$token}`,
 			);
 			if (res.status === 503) {
 				error = 'oMLX server is unreachable. Make sure it\'s running and reachable at the configured host:port.';

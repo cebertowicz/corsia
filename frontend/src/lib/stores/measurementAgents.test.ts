@@ -49,7 +49,7 @@ describe('Agents requests', () => {
 		await loadMeasurementAgents();
 		const url = new URL(String(fetchMock.mock.calls[0][0]), 'http://x');
 		expect(url.pathname).toBe('/api/measurement/agents');
-		expect([...url.searchParams.keys()].sort()).toEqual(['agent', 'grain', 'metric', 'project', 'sort', 'timezone']);
+		expect([...url.searchParams.keys()].sort()).toEqual(['agent', 'grain', 'metric', 'project', 'sort', 'timezone', 'token']);
 		expect(url.searchParams.get('project')).toBe('project-1');
 		expect(url.searchParams.get('agent')).toBe('agent-1');
 		expect(url.searchParams.get('grain')).toBe('days');

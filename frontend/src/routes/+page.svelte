@@ -86,7 +86,7 @@
 	async function pollSystem() {
 		if (!$token) return;
 		try {
-			const res = await apiFetch(`/api/system`);
+			const res = await apiFetch(`/api/system?token=${$token}`);
 			systemStatus = await res.json();
 		} catch { /* ignore */ }
 	}
@@ -310,7 +310,7 @@
 		const choice = get(draftAccountId);
 		const accountId = draftAccountForModel(choice, inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
-		const res = await apiFetch(`/api/threads`, {
+		const res = await apiFetch(`/api/threads?token=${t}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
@@ -374,7 +374,7 @@
 		await removeThreadFromView(id);
 		try {
 			const response = await apiFetch(
-				`/api/threads/${id}`,
+				`/api/threads/${id}?token=${$token}`,
 				{ method: 'DELETE' },
 			);
 			if (!response.ok) throw new Error(`DELETE thread ${id} -> ${response.status}`);
@@ -389,7 +389,7 @@
 	async function archiveThread(id: string) {
 		if (!$token) return;
 		await removeThreadFromView(id);
-		await apiFetch(`/api/threads/${id}`, {
+		await apiFetch(`/api/threads/${id}?token=${$token}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ archived: true }),

@@ -165,7 +165,7 @@ export async function hydrateSubagentThread(
 	try {
 		const res = await apiFetch(
 			`/api/delegation/threads/${encodeURIComponent(threadId)}/status`
-			+ `?messages=0`,
+			+ `?token=${encodeURIComponent(token)}&messages=0`,
 		);
 		if (!res.ok) throw new Error(`subagent status refresh failed (${res.status})`);
 		const truth = await res.json();

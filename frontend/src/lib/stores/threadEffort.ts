@@ -32,7 +32,7 @@ export async function saveReasoningEffort(threadId: string, effort: string | nul
 	writeThreadEffort(threadId, effort);
 	let failure: string | null = null;
 	try {
-		const res = await apiFetch(`/api/threads/${threadId}`, {
+		const res = await apiFetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ reasoning_effort: effort }),

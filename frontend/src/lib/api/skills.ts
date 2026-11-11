@@ -54,7 +54,7 @@ export async function createSkill(params: {
 	projectId?: string | null;
 	threadId?: string | null;
 }): Promise<SkillRow> {
-	const data = await ok(await apiFetch(`/api/skills`, {
+	const data = await ok(await apiFetch(`/api/skills?token=${tok()}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({

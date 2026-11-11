@@ -228,7 +228,7 @@ describe('EventChip', () => {
 
 		await vi.waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledWith(
-				'/api/threads/thread-restart-wake/messages/restart-wake-1/cancel',
+				'/api/threads/thread-restart-wake/messages/restart-wake-1/cancel?token=ui-token',
 				{ method: 'POST', headers: { Authorization: 'Bearer ui-token' } },
 			);
 		});

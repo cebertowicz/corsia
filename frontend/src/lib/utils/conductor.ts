@@ -118,13 +118,13 @@ export function fetchConductor(token: string | null, scope: UiScope | null): Pro
 	if (!scope) return Promise.resolve({ kind: 'unknown' });
 	return fetchTarget(
 		token,
-		`/api/conductor?scope=${encodeURIComponent(scope.id)}`,
+		`/api/conductor?token=${encodeURIComponent(token ?? '')}&scope=${encodeURIComponent(scope.id)}`,
 	);
 }
 
 /** Read the workspace CORSIA agent and accept its model as that thread's truth. */
 export async function fetchCorsiaAgent(token: string | null): Promise<CoordinationLookup> {
-	const lookup = await fetchTarget(token, `/api/corsia-agent`);
+	const lookup = await fetchTarget(token, `/api/corsia-agent?token=${encodeURIComponent(token ?? '')}`);
 	if (lookup.kind === 'target') corsiaAgentId.set(lookup.target.thread_id);
 	else if (lookup.kind === 'absent') corsiaAgentId.set(null);
 	return lookup;

@@ -10,7 +10,7 @@ import { apiFetch } from '$lib/api/request';
 export async function loadThreads(auth: string | null = get(token)): Promise<void> {
 	if (!auth) return;
 	const tokenAtStart = get(token);
-	const response = await apiFetch(`/api/threads`);
+	const response = await apiFetch(`/api/threads?token=${encodeURIComponent(auth)}`);
 	const data = await response.json();
 	if (get(token) !== tokenAtStart) return;
 	const refreshed = reconcileThreadModelSnapshots(data.threads as Thread[]);

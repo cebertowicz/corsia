@@ -34,6 +34,7 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 		limit: String(deps.pageSize), from_id: stub.firstId, to_id: stub.lastId,
 	});
 	if (base.oldestId) params.set('before', base.oldestId);
+	params.set('token', bearer);
 	try {
 		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
 		if (get(activeThreadId) !== threadId) return;

@@ -63,7 +63,7 @@ describe('fetchConductor', () => {
 
 		await fetchConductor('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
 
-		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/conductor?scope=proj-123');
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/conductor?token=tok&scope=proj-123');
 	});
 
 	it('preserves the backend target model for hidden conductor hydration', async () => {
@@ -114,7 +114,7 @@ describe('fetchConductor', () => {
 		const lookup = await fetchCorsiaAgent('tok');
 
 		expect(lookup).toMatchObject({ kind: 'target', firstRunPending: true });
-		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toMatch(/^\/api\/corsia-agent$/);
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toMatch(/^\/api\/corsia-agent\?token=tok$/);
 		expect(get(corsiaAgentId)).toBe('cond-w');
 	});
 
@@ -299,8 +299,8 @@ describe('fetchScopeTarget', () => {
 		await fetchScopeTarget('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
 
 		const urls = vi.mocked(globalThis.fetch).mock.calls.map((call) => String(call[0]));
-		expect(urls[0]).toBe('/api/corsia-agent');
-		expect(urls[1]).toBe('/api/conductor?scope=proj-123');
+		expect(urls[0]).toMatch(/^\/api\/corsia-agent\?/);
+		expect(urls[1]).toMatch(/^\/api\/conductor\?.*&scope=proj-123$/);
 	});
 });
 

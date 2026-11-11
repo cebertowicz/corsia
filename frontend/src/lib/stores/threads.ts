@@ -259,7 +259,7 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		return { ...thread, title };
 	}));
 	try {
-		const response = await apiFetch(`/api/threads/${threadId}`, {
+		const response = await apiFetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
@@ -280,7 +280,7 @@ export async function saveThreadProject(threadId: string, projectId: string | nu
 		return s;
 	}));
 	try {
-		const res = await apiFetch(`/api/threads/${threadId}`, {
+		const res = await apiFetch(`/api/threads/${threadId}?token=${token}`, {
 			method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ project_id: projectId }),
