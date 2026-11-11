@@ -11,10 +11,13 @@ import { isolatedDb } from '../support/heldComments';
  */
 
 const TAG = '@flow:doc-phone-tap-comment @surface:documents';
+/** A paragraph long enough to wrap onto several rows at 393; where each row starts is read from the real layout. */
+const WRAPPED = 'Rows wrap here: alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu.';
 const DOC = [
 	'# Handover notes', '',
 	'The conductors review every release before it ships, and the reviewer signs off on timing.', '',
 	'Escalate blockers to the owner the same day. Nothing waits for a meeting.', '',
+	WRAPPED, '',
 	'The last paragraph holds no comment at all and only gives the page some length to scroll.', '',
 ].join('\n');
 /** Each comment's one-word quote, and what the reader asked on it. */
@@ -36,7 +39,7 @@ test.beforeEach(({}, testInfo) => {
 interface Opened { request: Page['request']; artifactId: string; threadId: string; ids: Record<Word, string> }
 
 /** Seed the document with one one-word comment per word, then open it in the artifact pane on a phone. */
-async function openDocument(page: Page, { unreadReply = [], unreadRoot = [] }: { unreadReply?: Word[]; unreadRoot?: Word[] } = {}): Promise<Opened> {
+async function openDocument(page: Page, { unreadReply = [], unreadRoot = [], extra = [] }: { unreadReply?: Word[]; unreadRoot?: Word[]; extra?: Array<{ body: string; from: number; to: number }> } = {}): Promise<Opened> {
 	const request = page.request, params = { token: TEST_TOKEN };
 	const title = `phone-tap-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 	const threadId = await createSession(request, title);
@@ -54,6 +57,10 @@ async function openDocument(page: Page, { unreadReply = [], unreadRoot = [] }: {
 		});
 		expect(created.ok(), await created.text()).toBeTruthy();
 		ids[word] = (await created.json()).comment.id;
+	}
+	for (const { body, from, to } of extra) {
+		const created = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body, anchor_text: DOC.slice(from, to), from_off: from, to_off: to, delivery_policy: 'immediate' } });
+		expect(created.ok(), await created.text()).toBeTruthy();
 	}
 	// An agent's reply to the reader's comment is an unread reply; an agent's own comment, made after the reader's, is an unread comment.
 	for (const word of unreadReply) isolatedDb([
@@ -147,6 +154,24 @@ async function longPress(page: Page, target: Locator, ms = 800) {
 	await session.detach();
 }
 
+/** The box of every character of the paragraph that starts with `lead`, in the real layout (a space at a row's end takes its row's box). */
+async function charRects(page: Page, lead: string): Promise<Array<{ left: number; right: number; top: number; bottom: number }>> {
+	return page.evaluate((lead) => {
+		const line = [...document.querySelectorAll('.cm-line')].find((l) => l.textContent?.startsWith(lead))!;
+		const out: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+		const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+			for (let i = 0; i < node.textContent!.length; i += 1) {
+				const range = document.createRange();
+				range.setStart(node, i); range.setEnd(node, i + 1);
+				const box = range.getClientRects()[0];
+				out.push(box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom } : out[out.length - 1]);
+			}
+		}
+		return out;
+	}, lead);
+}
+
 /** The right half of a highlight, where a word-end caret lands past a highlight that stops short of its word. */
 const rightHalf = async (target: Locator) => ({ x: (await target.boundingBox())!.width * 0.75, y: 6 });
 
@@ -208,6 +233,55 @@ test.describe(`${TAG} tap`, () => {
 			const box = (await highlight(page, 'reviewer').boundingBox())!;
 			await page.touchscreen.tap(box.x + box.width - 2, box.y + box.height / 2);
 			await expectOpenOn(page, 'reviewer', 'a tap on the last letter');
+		});
+
+		test('a tap in the blank beside a wrapped row\'s end, or at the start of the row, opens nothing; a tap on the highlight does', async ({ page, browserName }) => {
+			test.skip(browserName !== 'chromium', 'Reads the layout through Chromium range rects');
+			test.setTimeout(90_000);
+			// The wrapped rows are read from the real layout on a probe page, then the comments are seeded before the document is opened for real:
+			// a document that is already open takes comments only from the editor's own capture.
+			const probe = await page.context().newPage();
+			await probe.setViewportSize({ width: 393, height: 852 });
+			await openDocument(probe);
+			const rects = await charRects(probe, WRAPPED.slice(0, 12));
+			await probe.close();
+			const starts = rects.flatMap((rect, i) => (i > 0 && rect.top > rects[i - 1].top + 4 ? [i] : []));
+			expect(starts.length, 'the paragraph wraps onto at least three rows at 393').toBeGreaterThanOrEqual(2);
+			const base = DOC.indexOf(WRAPPED);
+			// A highlight that starts a wrapped row (its position is also the end of the row above), and one that ends where a row ends
+			// (its last word and the space that wraps, so its end is also the start of the row below).
+			const fromStart = starts[0], fromWord = WRAPPED.slice(fromStart, WRAPPED.indexOf(' ', fromStart));
+			const toEnd = starts[1], toStart = WRAPPED.lastIndexOf(' ', toEnd - 2) + 1, toText = WRAPPED.slice(toStart, toEnd);
+			expect(toText.endsWith(' '), 'the second row break follows a space').toBe(true);
+			const marks = [{ body: 'Starts a row?', from: base + fromStart, to: base + fromStart + fromWord.length, text: fromWord }, { body: 'Ends a row?', from: base + toStart, to: base + toEnd, text: toText.trim() }];
+			await openDocument(page, { extra: marks });
+			const anchor = (text: string) => page.locator('.cm-comment-anchor', { hasText: new RegExp(`^${text}\\s*$`) }).first();
+			for (const mark of marks) await expect(anchor(mark.text)).toBeVisible({ timeout: 15_000 });
+			await anchor(fromWord).scrollIntoViewIfNeeded();
+			const now = await charRects(page, WRAPPED.slice(0, 12));
+			expect(now.flatMap((rect, i) => (i > 0 && rect.top > now[i - 1].top + 4 ? [i] : [])), 'the rows break where the probe read them').toEqual(starts);
+			const middle = (rect: { top: number; bottom: number }) => (rect.top + rect.bottom) / 2;
+
+			// Right of the row above's last letter, in the blank where its space hangs: the highlight starts the next row, not here.
+			let last = fromStart - 1;
+			while (WRAPPED[last] === ' ') last -= 1;
+			await page.touchscreen.tap(now[last].right + 3, middle(now[last]));
+			await page.waitForTimeout(700);
+			await expect.soft(sheet(page), 'a tap past the end of the row above a highlight that starts the next row').toHaveCount(0);
+			if (await sheet(page).count()) await putSheetAway(page);
+
+			// The row's own start, left of its first letter: the highlight above ends there, but this is not its row.
+			await page.touchscreen.tap(now[toEnd].left + 1, middle(now[toEnd]));
+			await page.waitForTimeout(700);
+			await expect.soft(sheet(page), 'a tap at the start of the row below a highlight that ends the row above').toHaveCount(0);
+			if (await sheet(page).count()) await putSheetAway(page);
+
+			// And a tap on either highlight opens its own comment.
+			await anchor(fromWord).tap();
+			await expect(sheet(page).getByText('Starts a row?')).toBeVisible();
+			await putSheetAway(page);
+			await anchor(toText.trim()).tap({ position: { x: 3, y: 6 } });
+			await expect(sheet(page).getByText('Ends a row?')).toBeVisible();
 		});
 
 		test('a long press on a one-word highlight opens its comment', async ({ page, browserName }, testInfo) => {

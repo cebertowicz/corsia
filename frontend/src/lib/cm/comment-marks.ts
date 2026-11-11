@@ -50,15 +50,23 @@ export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify
 /**
  * The highlight under a press, read only from where it landed, never from the caret: a phone puts the caret at the nearest end of
  * the tapped word, which lies outside a highlight that stops short of its word, and beside a highlight when the tap was on the space
- * or punctuation next to it. The position nearest a press is the highlight's end both when the press is on that end of its last
- * character and when it is on the character after, so at an end the press must also be on the highlight's side of it.
+ * or punctuation next to it. The position nearest a press is a highlight's end both when the press is on that end of its last
+ * character and when it is on the character after, and a soft wrap makes one position the end of a row and the start of the next,
+ * so at an end the press must also be on the highlight's side of it and on that end's own row.
  */
 export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange | undefined {
 	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
+	const onRow = (edge: { top: number; bottom: number } | null) => !edge || (press.clientY >= edge.top && press.clientY <= edge.bottom);
 	return ranges.find((r) => {
 		if (r.point || at < r.from || at > r.to) return false;
-		if (at === r.to && r.to > r.from) return press.clientX <= (view.coordsAtPos(r.to, -1)?.right ?? Infinity);
-		if (at === r.from) return press.clientX >= (view.coordsAtPos(r.from, 1)?.left ?? -Infinity);
+		if (at === r.to && r.to > r.from) {
+			const edge = view.coordsAtPos(r.to, -1);
+			return onRow(edge) && press.clientX <= (edge?.right ?? Infinity);
+		}
+		if (at === r.from) {
+			const edge = view.coordsAtPos(r.from, 1);
+			return onRow(edge) && press.clientX >= (edge?.left ?? -Infinity);
+		}
 		return true;
 	});
 }
