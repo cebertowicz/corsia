@@ -42,7 +42,8 @@ async def test_chrome_restricted_ports_refuse_all_page_routes(tmp_path, monkeypa
     with monkeypatch.context() as setup:
         setup.setattr(browser_ports, 'reserve_pair', _reserve_test_controls)
         chrome = await ChromeProcess.launch(str(executable), profile=str(tmp_path / 'chrome-profile'),
-                                            headless=True, ua=None)
+                                            headless=True, ua=None,
+                                            record=(tmp_path, 'session123456'))
     tested = []
     try:
         for port in browser_ports.RESERVED_PORTS:
