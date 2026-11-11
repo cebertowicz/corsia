@@ -25,6 +25,18 @@ const button = (selector: string) => host.querySelector<HTMLButtonElement>(selec
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); });
 
 describe('CommentThread', () => {
+	it.each([
+		['expanded resolved comment', { resolved: true }],
+		['open suggestion', { replacement: 'new text' }],
+		['decided suggestion with an open conversation', { replacement: 'new text', decision: 'accepted' as const }],
+	])('exposes the discussion for sizing on an %s', (_label, state) => {
+		render(thread({ ...state, replies: [reply] }));
+		if ('resolved' in state && state.resolved) { button('.ct-res-head').click(); flushSync(); }
+		expect(host.querySelector('[data-discussion-original]')?.textContent).toContain('note');
+		expect(host.querySelector('[data-discussion-replies]')?.textContent).toContain(reply.text);
+		expect(host.querySelector('.ct-input')).not.toBeNull();
+	});
+
 	it('posts a reply and clears the input', async () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;

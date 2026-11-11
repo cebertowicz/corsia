@@ -4,7 +4,8 @@ import { raiseAsk } from '../support/reviewAsk';
 import { seed, open } from '../support/reviewFixtures';
 import { setDebugVersionOverlay } from '../support/heldComments';
 
-for (const [width, height, mode, project] of [[1440, 900, 'default', 'chromium-desktop'], [900, 900, 'default', 'chromium-desktop'], [393, 852, 'phone', 'chromium-mobile'], [393, 420, 'phone', 'chromium-mobile'], [393, 350, 'phone', 'chromium-mobile']] as const) for (const theme of ['light', 'dark'] as const) {
+
+for (const [width, height, mode, project] of [[1440, 900, 'default', 'chromium-desktop'], [900, 900, 'default', 'chromium-desktop'], [900, 420, 'default', 'chromium-desktop'], [393, 852, 'phone', 'chromium-mobile'], [393, 420, 'phone', 'chromium-mobile'], [393, 350, 'phone', 'chromium-mobile']] as const) for (const theme of ['light', 'dark'] as const) {
  test(`long review note keeps Reject reachable at ${width}x${height} ${theme}`, async ({ page, request }, info) => {
   test.skip(info.project.name !== project);
   test.setTimeout(90_000);
@@ -21,15 +22,21 @@ for (const [width, height, mode, project] of [[1440, 900, 'default', 'chromium-d
    if (i < 7) await note.press('Shift+Enter');
   }
   await page.screenshot({ path: info.outputPath('typed-review-note.png'), animations: 'disabled' });
-  await note.fill(Array.from({ length: 40 }, (_, i) => `review note line ${i}`).join('\n'));
+
+  await note.fill('');
+  await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `review note line ${i}`).join('\n'));
   await expect.poll(() => note.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
+  await expect.poll(() => note.evaluate((field: HTMLTextAreaElement) => field.clientHeight)).toBeGreaterThan(45);
+  await expect.poll(() => note.evaluate((field: HTMLTextAreaElement) => field.scrollHeight - field.clientHeight - field.scrollTop)).toBeLessThanOrEqual(1);
   const send = bar.getByRole('button', { name: 'Reject', exact: true });
   await expect.poll(async () => {
    const box = (await send.boundingBox())!;
    return box.y >= 0 && box.y + box.height <= height && box.x >= 0 && box.x + box.width <= width;
   }).toBe(true);
   await page.screenshot({ path: info.outputPath('long-review-note.png'), animations: 'disabled' });
+
   await send.click();
   await expect(bar.locator('.rb-receipt')).toContainText('Rejected');
+
  });
 }

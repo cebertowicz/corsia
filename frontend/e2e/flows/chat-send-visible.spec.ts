@@ -1,9 +1,10 @@
 import { expect, test } from '../support/test';
-import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
-import { injectMessage } from '../support/mock';
+import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { injectMessage, seedMockResponses } from '../support/mock';
 import { setDebugVersionOverlay } from '../support/heldComments';
 
-for (const [width, height, project] of [[1440, 900, 'chromium-desktop'], [900, 900, 'chromium-desktop'], [393, 852, 'chromium-mobile'], [393, 350, 'chromium-mobile'], [393, 420, 'chromium-mobile']] as const) for (const theme of ['light', 'dark'] as const) {
+
+for (const [width, height, project] of [[1440, 900, 'chromium-desktop'], [900, 900, 'chromium-desktop'], [900, 420, 'chromium-desktop'], [393, 852, 'chromium-mobile'], [393, 350, 'chromium-mobile'], [393, 420, 'chromium-mobile']] as const) for (const theme of ['light', 'dark'] as const) {
  test(`chat comment remains usable at ${width}x${height} ${theme}`, async ({ page, request }, info) => {
   test.skip(info.project.name !== project);
   test.setTimeout(90_000);
@@ -39,7 +40,9 @@ for (const [width, height, project] of [[1440, 900, 'chromium-desktop'], [900, 9
   }
   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
   await page.screenshot({ path: info.outputPath('typed-chat-comment.png'), animations: 'disabled' });
-  await input.fill(Array.from({ length: 40 }, (_, i) => `long chat line ${i}`).join('\n'));
+
+  await input.fill('');
+  await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `long chat line ${i}`).join('\n'));
   await input.pressSequentially('!');
   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
   const button = page.getByRole('button', { name: 'Comment', exact: true });
@@ -51,7 +54,13 @@ for (const [width, height, project] of [[1440, 900, 'chromium-desktop'], [900, 9
    return quote.y >= 0 && quote.y >= quoteWrap.y && quote.y + quote.height <= quoteWrap.y + quoteWrap.height && quote.y + quote.height <= field.y && field.y + field.height <= action.y && action.y + action.height <= height;
   }).toBe(true);
   await page.screenshot({ path: info.outputPath('long-chat-comment.png'), animations: 'disabled' });
+
   await button.click();
   await expect(page.locator('.comment-chip')).toBeVisible();
+  await seedMockResponses(request, [{ content: 'Received comment' }]);
+  await chatComposer(page).fill('Please address this');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(row.locator('.cm-comment-anchor').filter({ hasText: 'selected phrase' })).toBeVisible();
+
  });
 }

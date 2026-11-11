@@ -206,8 +206,8 @@
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
 	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
-	/* The note is one line on a wide canvas; the script sizes it to its text and the CSS caps it (four lines in the phone capsule). */
-	.rb-capsule :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: var(--space-6); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
+	/* The note grows at every width, with the same bounded scrolling used by the narrow canvas. */
+	.rb-capsule :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
 	.rb-capsule :global(.rb-note::placeholder) { color: var(--text-tertiary); }
 	.rb-capsule :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
 	.rb-icon { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }

@@ -11,7 +11,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -24,10 +24,12 @@
 		width?: string;
 		/** Called with the card each time it has been placed, so an owner can measure where it landed. */
 		onPlace?: (card: HTMLElement) => void;
-		/** Keep the surface inside this element (the canvas it belongs to) instead of anywhere in the window. */
-		bounds?: HTMLElement | null;
+		/** Keep the surface inside this element or live rectangle instead of anywhere in the window. */
+		bounds?: Anchor;
 		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
 		avoidRect?: () => DOMRect | null;
+		/** Keep a thread's anchor visible while its contents grow. */
+		clearAnchor?: boolean;
 		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
 		initialFocus?: string;
 		/** False leaves the focus where it is on open, for a card that opens beside text the person is editing. */
@@ -53,7 +55,7 @@
 	let lastScrollInput = 0;
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
-		const edge = bounds?.getBoundingClientRect();
+		const edge = anchorRect(bounds);
 		const viewport = window.visualViewport;
 		const top = viewport?.offsetTop ?? 0;
 		const bottom = top + (viewport?.height ?? window.innerHeight);
@@ -108,6 +110,35 @@
 		// The side holds until the person moves the anchor: growing while they type clamps the surface rather than flipping it away from where they are looking.
 		const key = sideKey ?? anchor;
 		if (key !== rememberedKey || moved) { rememberedKey = key; rememberedSide = null; rememberedPointer = null; }
+		// Clamping an editor whose anchor has scrolled out would cap it at zero height, taking Send with it: leave that surface to the placement below.
+		if (clearAnchor && !(engaged && (rect.bottom < area.top || rect.top > area.bottom)) && (placement === 'pointer' || placement === 'bottom' || placement === 'bottom-end' || (rect.right + gap + width > area.right - gap && rect.left - gap - width < area.left + gap))) {
+			const above = Math.max(0, rect.top - area.top - 2 * gap);
+			const below = Math.max(0, area.bottom - rect.bottom - 2 * gap);
+			rememberedSide ??= below >= above ? 'below' : 'above';
+			const room = rememberedSide === 'above' ? above : below;
+			// A composer being typed in keeps its own height: the anchor can move while the person types, and a band
+			// below the card's own minimum clips the field and Send out of the card. The discussion regions are
+			// already at their minimums, so what the composer sits on plus the composer is that floor; take the
+			// tallest band the canvas has, bottom-pinned, and the discussion scrolls inside it.
+			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]') : null;
+			const need = pinned ? pinned.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + gap : 0;
+			const band = area.bottom - area.top - 2 * gap;
+			if (pinned && need > room && band > need) {
+				const cap = Math.max(need, height);
+				const fittedHeight = Math.min(naturalHeight, cap);
+				const top = Math.max(area.top + gap, area.bottom - gap - fittedHeight);
+				const left = Math.max(area.left + gap, Math.min(under, area.right - width - gap));
+				style = `left: ${left}px; top: ${top}px; max-width: ${width}px; max-height: ${cap}px;`;
+				if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
+				return;
+			}
+			const fittedHeight = Math.min(height, room);
+			const top = rememberedSide === 'above' ? rect.top - gap - fittedHeight : rect.bottom + gap;
+			const left = Math.max(area.left + gap, Math.min(under, area.right - width - gap));
+			style = `left: ${left}px; top: ${top}px; max-width: ${width}px; max-height: min(70vh, 620px, ${room}px);`;
+			if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
+			return;
+		}
 		if (placement === 'pointer') {
 			// Opened by a click: `rect` is the clicked line's box at the pointer's x. The card's top sits `--space-1` under that box (the line's own half-leading, so no glyph of the next line peeks out) and to the pointer's right; near the right edge it flips left, near the bottom it flips above the line.
 			const reach = 12, drop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1')) || 4;
@@ -155,12 +186,6 @@
 		viewport?.addEventListener('resize', position);
 		viewport?.addEventListener('scroll', position);
 		return () => { window.removeEventListener(ANCHOR_MOVED, position); viewport?.removeEventListener('resize', position); viewport?.removeEventListener('scroll', position); };
-	});
-	$effect(() => {
-		if (!open || !surface) return;
-		const observer = new ResizeObserver(() => position());
-		observer.observe(surface);
-		return () => observer.disconnect();
 	});
 	$effect(() => {
 		if (!open) return;

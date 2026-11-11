@@ -271,6 +271,44 @@ describe('Popover', () => {
 			expect(surface.style.clipPath).toBe('');
 			expect(document.activeElement).toBe(box);
 		});
+		it('keeps an anchor-clearing editor in its canvas when the anchor moves out during typing', async () => {
+			let reading = new DOMRect(520, 100, 20, 20);
+			measure(new DOMRect(500, 0, 520, 700));
+			host = document.createElement('div'); document.body.appendChild(host);
+			const bounds = document.createElement('div'); bounds.setAttribute('data-canvas', ''); host.appendChild(bounds);
+			component = mount(Popover, { target: host, props: { anchor: () => reading, bounds, open: true, onClose: vi.fn(), placement: 'bottom', clearAnchor: true, children: (() => {}) as any } });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			await vi.waitFor(() => expect(surface.style.top).toBe('128px'));
+			const box = surface.appendChild(document.createElement('textarea')); box.focus();
+			reading = new DOMRect(520, 2000, 20, 20);
+			window.dispatchEvent(new Event('scroll'));
+			await vi.waitFor(() => {
+				expect(parseFloat(surface.style.top)).toBeLessThan(700);
+				expect(surface.style.maxHeight).not.toMatch(/, 0px\)$/);
+			});
+		});
+		it('keeps a typing composer its own height when the anchor leaves it less room than it needs', async () => {
+			let reading = new DOMRect(520, 150, 20, 20);
+			measure(new DOMRect(500, 0, 520, 300));
+			host = document.createElement('div'); document.body.appendChild(host);
+			const bounds = document.createElement('div'); bounds.setAttribute('data-canvas', ''); host.appendChild(bounds);
+			component = mount(Popover, { target: host, props: { anchor: () => reading, bounds, open: true, onClose: vi.fn(), placement: 'bottom', clearAnchor: true, children: (() => {}) as any } });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			// The card is 170 tall and its composer ends 150 into it; the anchor bands are 134 and 114, so clamping to
+			// the anchor would cut the card below the composer and push Send out of it.
+			const pinned = surface.appendChild(document.createElement('div'));
+			pinned.setAttribute('data-autosize-sticky', '');
+			pinned.getBoundingClientRect = () => new DOMRect(0, 0, 300, 150);
+			const box = surface.appendChild(document.createElement('textarea')); box.focus();
+			window.dispatchEvent(new Event('resize'));
+			await vi.waitFor(() => {
+				expect(parseFloat(surface.style.maxHeight)).toBeGreaterThanOrEqual(150 + 16);
+				expect(parseFloat(surface.style.top) + 170).toBeLessThanOrEqual(300);
+			});
+			expect(document.activeElement).toBe(box);
+		});
 		it('still follows a scroll the document caused when focus is on a button in the card, as a jump or step does', async () => {
 			let reading: DOMRect | null = new DOMRect(520, 100, 20, 20);
 			const surface = mountIn(new DOMRect(500, 0, 900, 700), () => reading);

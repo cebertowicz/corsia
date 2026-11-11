@@ -317,7 +317,7 @@
 		</div>{/key}</div>
 	</div>
 {/snippet}
-{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/snippet}
+{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/snippet}
 
 {#if surfaceState || sheet.closing}
 	{#if margin && surfaceState}

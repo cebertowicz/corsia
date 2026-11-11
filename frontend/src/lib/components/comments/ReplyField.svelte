@@ -7,10 +7,9 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, fit = true, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
+		/** Replies grow until their available scroller is full, then scroll inside. */
 		value?: string;
-		/** In a popover or sheet the field grows until that scroller is full, then scrolls; in a margin card it grows with its text. */
-		fit?: boolean;
 		selection?: [number, number] | null;
 		keepVisible?: boolean;
 		posting?: boolean;
@@ -56,10 +55,10 @@
 	}
 </script>
 
-<div class="ct-compose open">
+<div class="ct-compose open" data-autosize-sticky>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={keepVisible} bind:value use:autosize={{ value, fit }} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={keepVisible} bind:value use:autosize={{ value, fit: true }} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={(e) => { e.stopPropagation(); if (!posting) onSend(); }} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
@@ -70,7 +69,9 @@
 
 <style>
 	.ct-compose { margin-top: var(--space-1); }
-	/* A reply has no six-line cap: a margin card grows with it, and a popover or sheet until it is full (autosize `fit`). */
+	/* A thread popover or drawer scrolls its discussion behind the reply instead of hiding its field below the fold. */
+	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { position: sticky; bottom: 0; z-index: 1; background: var(--bg-elevated); box-shadow: 0 12px var(--bg-elevated); }
+	/* Replies grow until their available scroller is full, then scroll inside. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }
