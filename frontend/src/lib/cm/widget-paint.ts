@@ -123,10 +123,18 @@ function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLElement {
 	return insert;
 }
 
+/** Whether text sits in a diagram or a non-editable part drawn inside the cell. The whole table widget is non-editable, so the check stops at the cell. */
+function inDrawnPart(node: Node, cell: HTMLElement): boolean {
+	for (let el = node.parentElement; el && el !== cell; el = el.parentElement) {
+		if (el instanceof SVGElement || el.getAttribute('contenteditable') === 'false') return true;
+	}
+	return false;
+}
+
 /** A cell's visible text nodes, leaving out a diagram's or image's own text and the blank nodes between elements. */
 function cellTextNodes(cell: HTMLElement): Text[] {
 	const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, {
-		acceptNode: (node) => node.parentElement?.closest('svg, [contenteditable="false"]') || !(node as Text).data.trim() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+		acceptNode: (node) => inDrawnPart(node, cell) || !(node as Text).data.trim() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
 	});
 	const nodes: Text[] = [];
 	for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);

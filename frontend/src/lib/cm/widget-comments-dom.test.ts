@@ -152,6 +152,29 @@ describe('a selection raised inside a rendered table', () => {
 		expect(document.getSelection()!.toString()).toBe('lph');
 		expect(raised.at(-1)).toMatchObject({ text: 'lph', inWidget: true });
 	});
+
+	it('marks a comment on a whole cell on the cell text, inside the editor’s non-editable table widget', () => {
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+		// jsdom does not reflect `contentEditable` to the attribute as browsers do, and CodeMirror marks its widgets through that property.
+		const native = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'contentEditable');
+		Object.defineProperty(HTMLElement.prototype, 'contentEditable', { configurable: true, get() { return this.getAttribute('contenteditable') ?? 'inherit'; }, set(value: string) { this.setAttribute('contenteditable', value); } });
+		let table: HTMLElement;
+		try {
+			const view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() })] }), parent: document.body }));
+			const eli = TABLE_FROM + TABLE.indexOf('Eli');
+			view.dispatch({ effects: setCommentRanges.of([{ id: 'a', from: eli, to: eli + 3 }]) });
+			vi.advanceTimersByTime(100);
+			table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		} finally {
+			if (native) Object.defineProperty(HTMLElement.prototype, 'contentEditable', native);
+			else delete (HTMLElement.prototype as Partial<HTMLElement>).contentEditable;
+		}
+		expect(table.closest('[contenteditable="false"]'), 'setup: the editor draws the table as a non-editable widget').toBeTruthy();
+		const td = table.querySelector('table')!.rows[2].cells[1];
+		expect(td.textContent, 'setup: the cell holds Eli').toBe('Eli');
+		expect(td.classList.contains('cm-comment-anchor')).toBe(false);
+		expect([...td.querySelectorAll<HTMLElement>('.cm-comment-wrap.cm-comment-anchor')].map((wrap) => [wrap.textContent, wrap.dataset.commentIds])).toEqual([['Eli', 'a']]);
+	});
 });
 
 describe('comments drawn on a diagram', () => {

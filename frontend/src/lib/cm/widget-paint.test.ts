@@ -53,6 +53,16 @@ describe('paintTable and unpaint', () => {
 		expect(cell(el, 2, 1).dataset.commentIds).toBe('b');
 	});
 
+	it('marks a whole cell on its text inside a non-editable widget, leaving a diagram or non-editable part in the cell out', () => {
+		const el = widget();
+		el.setAttribute('contenteditable', 'false');
+		const eli = cell(el, 2, 1);
+		eli.insertAdjacentHTML('beforeend', '<span contenteditable="false">caption</span><svg><text>label</text></svg>');
+		paintTable(el, BASE, SRC, [mark('a', 'Eli')]);
+		expect(eli.classList.contains('cm-comment-anchor')).toBe(false);
+		expect([...eli.querySelectorAll('.cm-comment-wrap')].map((wrap) => wrap.textContent)).toEqual(['Eli']);
+	});
+
 	it('keeps every comment on one cell and on a whole table, in paint order, and never a pending mark', () => {
 		const el = widget();
 		paintTable(el, BASE, SRC, [mark('a', 'Eli'), mark('b', 'Eli'), { id: 'draft', kind: 'pending', from: BASE + SRC.indexOf('Eli'), to: BASE + SRC.indexOf('Eli') + 3 }]);
