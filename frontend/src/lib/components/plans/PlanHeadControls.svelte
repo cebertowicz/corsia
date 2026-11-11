@@ -30,7 +30,7 @@
 		const revision = current.plan.revision;
 		busy = true;
 		error = null;
-		const result = await mutatePlanLifecycle(bearer, current.plan.id, op, revision, `${op}:${current.plan.id}:${revision}`);
+		const result = await mutatePlanLifecycle(current.plan.id, op, revision, `${op}:${current.plan.id}:${revision}`);
 		busy = false;
 		if (result.status === 'success') {
 			query.retry();

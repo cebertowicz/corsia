@@ -9,6 +9,7 @@ import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from './messageHistory';
 import { parseRunStubs, type RunLoad, type RunStub } from './focusRuns';
+import { apiFetch } from '$lib/api/request';
 
 export interface RunLoaderDeps {
 	pageSize: number;
@@ -35,7 +36,7 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 	if (base.oldestId) params.set('before', base.oldestId);
 	params.set('token', bearer);
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
 		if (get(activeThreadId) !== threadId) return;
 		if (!res.ok) return fail();
 		const page = await res.json();
@@ -66,15 +67,13 @@ export async function refreshCommentRuns(
 	runs: () => readonly RunStub[],
 	setRuns: (next: RunStub[]) => void,
 ): Promise<void> {
-	const bearer = get(token);
-	if (!bearer || get(activeThreadId) !== threadId) return;
+	if (!get(token) || get(activeThreadId) !== threadId) return;
 	for (const stub of runs().filter((run) => run.turnIds.includes(turnId))) {
 		const params = new URLSearchParams({
 			view: 'focus-run', limit: '1', from_id: stub.firstId, to_id: stub.lastId,
 		});
-		params.set('token', bearer);
 		try {
-			const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
+			const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const page = await res.json();
 			if (get(activeThreadId) !== threadId || !runs().includes(stub)) continue;

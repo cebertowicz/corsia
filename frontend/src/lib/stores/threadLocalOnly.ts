@@ -1,6 +1,7 @@
 import { saveFailureText } from '../saveFailure';
 import type { Thread } from './threads';
 import { loadThreads } from './threadsLoad';
+import { apiFetch } from '$lib/api/request';
 
 export interface ThreadLocalOnly {
 	effective: boolean;
@@ -23,13 +24,12 @@ export function threadLocalOnly(thread: Partial<Thread> | null | undefined): Thr
 export async function saveThreadLocalOnly(
 	threadId: string,
 	localOnly: boolean,
-	auth: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	let response: Response;
 	try {
-		response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/local-only`, {
+		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/local-only`, {
 			method: 'PUT',
-			headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ local_only: localOnly }),
 		});
 	} catch {
@@ -40,7 +40,7 @@ export async function saveThreadLocalOnly(
 		return { ok: false, error: saveFailureText(body?.message ?? body?.detail, true) };
 	}
 	try {
-		await loadThreads(auth);
+		await loadThreads();
 		return { ok: true };
 	} catch {
 		return { ok: false, error: 'Saved. Reload the page to see it.' };

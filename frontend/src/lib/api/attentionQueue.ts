@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /**
  * The one user-global attention queue.
  *
@@ -163,10 +164,8 @@ export type AnswerOutcome =
 	| { status: 'unauthorized' }
 	| { status: 'error' };
 
-export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueue> {
-	const res = await fetch('/api/attention/queue', {
-		headers: { Authorization: `Bearer ${bearer}` },
-	});
+export async function fetchAttentionQueue(): Promise<AttentionQueue> {
+	const res = await apiFetch('/api/attention/queue');
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	const data = (await res.json()) as AttentionQueueResponse;
 	const current = data.current ?? null;
@@ -207,7 +206,6 @@ function closedMessage(res: Response): Promise<string> {
  * and its note whenever it is non-blank: there the note is additive.
  */
 export async function answerDecision(
-	bearer: string,
 	decisionId: string,
 	answer: {
 		optionId?: string;
@@ -219,10 +217,9 @@ export async function answerDecision(
 ): Promise<AnswerOutcome> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/plans/decisions/${encodeURIComponent(decisionId)}/answer`, {
+		res = await apiFetch(`/api/plans/decisions/${encodeURIComponent(decisionId)}/answer`, {
 			method: 'POST',
 			headers: {
-				Authorization: `Bearer ${bearer}`,
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(

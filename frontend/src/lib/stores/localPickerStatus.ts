@@ -24,7 +24,7 @@ async function read(): Promise<void> {
 	const t = get(token);
 	if (!t) return;
 	try {
-		localSource.set((await fetchSources(t)).find((source) => source.source === 'omlx'));
+		localSource.set((await fetchSources()).find((source) => source.source === 'omlx'));
 	} catch { /* the line stays as it was */ }
 }
 
@@ -38,16 +38,16 @@ export async function retryLocalSetup(kind: LocalPickerRetry): Promise<LocalSetu
 	let result: LocalSetupRetry = { ok: true };
 	try {
 		if (kind === 'starter') {
-			result = { ok: (await addStarterModel(t)).ok };
+			result = { ok: (await addStarterModel()).ok };
 		} else if (kind === 'settings') {
 			const repository = get(localSource)?.settings_download?.repository;
 			if (!repository) result = { ok: false };
 			else {
-				await startLocalModelDownload(t, repository);
+				await startLocalModelDownload(repository);
 				result = { ok: true };
 			}
 		} else {
-			result = { ok: (await setupLocalSource(t)).ok };
+			result = { ok: (await setupLocalSource()).ok };
 		}
 	} catch (caught) {
 		result = { ok: false, message: caught instanceof Error ? caught.message : undefined };

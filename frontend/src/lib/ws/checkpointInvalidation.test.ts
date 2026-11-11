@@ -50,7 +50,7 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 	it('shows the preview the sheet reads without writing it into the measured slot', async () => {
 		const fetchMock = mockPreview();
 		const installed = checkpoint('c1', 'installed');
-		await refreshUsageAfterInstall('viewed', 'tok', [installed]);
+		await refreshUsageAfterInstall('viewed', [installed]);
 		expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('/api/threads/viewed/context-snapshot/next-turn');
 		expect(getContextUsage('viewed')).toBe(measured);
 		expect(get(contextPreviewByThread).get('viewed')?.usage).toEqual({ ...preview, thread_id: 'viewed' });
@@ -74,11 +74,11 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 		const fetchMock = vi.fn(() => new Promise<Response>(resolve => pending.push(resolve)));
 		vi.stubGlobal('fetch', fetchMock);
 		const beforeInstall = previewIdentity('viewed', null, measured, null);
-		const initialRead = ensureContextPreview({ threadId: 'viewed', authToken: 'tok', modelId: null, ...beforeInstall });
+		const initialRead = ensureContextPreview({ threadId: 'viewed', modelId: null, ...beforeInstall });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		const installed = checkpoint('c1', 'installed');
-		const refreshed = refreshUsageAfterInstall('viewed', 'tok', [installed]);
+		const refreshed = refreshUsageAfterInstall('viewed', [installed]);
 		pending[0](new Response(JSON.stringify({ preview: { ...preview, total_used: 30_000 } })));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 		pending[1](new Response(JSON.stringify({ preview })));
@@ -94,10 +94,10 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 		vi.stubGlobal('fetch', fetchMock);
 		const installed = checkpoint('c1', 'installed');
 		const identity = previewIdentity('viewed', null, measured, installed);
-		const initialRead = ensureContextPreview({ threadId: 'viewed', authToken: 'tok', modelId: null, ...identity });
+		const initialRead = ensureContextPreview({ threadId: 'viewed', modelId: null, ...identity });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
-		const refreshed = refreshUsageAfterInstall('viewed', 'tok', [installed]);
+		const refreshed = refreshUsageAfterInstall('viewed', [installed]);
 		pending[0](new Response(JSON.stringify({ preview: { ...preview, total_used: 30_000 } })));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 		pending[1](new Response(JSON.stringify({ preview })));
@@ -109,7 +109,7 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 
 	it('marks the pre-install count unavailable when the install read defers', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview: null }))));
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 
 		expect(getContextUsage('viewed')).toEqual({
 			...measured, token_usage_available: false, token_source: undefined,
@@ -118,17 +118,17 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 
 	it('ignores checkpoints that have not installed', async () => {
 		const fetchMock = mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'running')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'running')]);
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(getContextUsage('viewed')).toBe(measured);
 	});
 
 	it('applies one install once, so a later measured turn is not overwritten', async () => {
 		mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		const nextTurn = { ...measured, total_used: 60_000 };
 		setContextUsage('viewed', nextTurn);
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(getContextUsage('viewed')).toBe(nextTurn);
 	});
 
@@ -140,14 +140,14 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 			usage: { ...preview, total_used: 90_000 } as never, loading: false, error: '',
 		}]]));
 		mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [installed]);
+		await refreshUsageAfterInstall('viewed', [installed]);
 		expect(shownReading('viewed', installed)?.total_used).toBe(40_000);
 	});
 
 	it('shows the measured reading again once a turn measures after the install', async () => {
 		const installed = checkpoint('c1', 'installed');
 		mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [installed]);
+		await refreshUsageAfterInstall('viewed', [installed]);
 		const nextTurn = { ...measured, total_used: 60_000, snapshot_id: 'after' };
 		setContextUsage('viewed', nextTurn);
 		expect(shownReading('viewed', installed)).toBe(nextTurn);
@@ -155,12 +155,12 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 
 	it('remembers an applied install across a reload', async () => {
 		const fetchMock = mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		dropInMemoryInstalls();
 		const laterTurn = { ...measured, total_used: 60_000 };
 		setContextUsage('viewed', laterTurn);
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(getContextUsage('viewed')).toBe(laterTurn);
 	});
@@ -171,7 +171,7 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 			const threadId = `viewed-${index}`;
 			activeThreadId.set(threadId);
 			setContextUsage(threadId, measured);
-			await refreshUsageAfterInstall(threadId, 'tok', [checkpoint(`c${index}`, 'installed')]);
+			await refreshUsageAfterInstall(threadId, [checkpoint(`c${index}`, 'installed')]);
 		}
 		expect(fetchMock).toHaveBeenCalledTimes(129);
 		const stored = JSON.parse(sessionStorage.getItem('corsia.appliedCheckpointInstalls') ?? '{}');
@@ -186,39 +186,39 @@ describe('chip usage after a checkpoint install (#1562)', () => {
 			setContextUsage('viewed', nextTurn);
 			return new Response(JSON.stringify({ preview }));
 		}));
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(getContextUsage('viewed')).toBe(nextTurn);
 	});
 
 	it('does nothing when the durable checkpoint read failed', async () => {
 		const fetchMock = mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', null);
+		await refreshUsageAfterInstall('viewed', null);
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(getContextUsage('viewed')).toBe(measured);
 	});
 
 	it('leaves other threads alone', async () => {
 		const fetchMock = mockPreview();
-		await refreshUsageAfterInstall('elsewhere', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('elsewhere', [checkpoint('c1', 'installed')]);
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(getContextUsage('viewed')).toBe(measured);
 	});
 
 	it('marks the stale count unavailable when the preview read fails', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(getContextUsage('viewed')).toEqual({ ...measured, token_usage_available: false, token_source: undefined });
 	});
 
 	it('marks the stale count unavailable when the preview request throws', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c1', 'installed')]);
 		expect(getContextUsage('viewed')?.token_usage_available).toBe(false);
 	});
 
 	it('reads the newest checkpoint as the install to apply', async () => {
 		const fetchMock = mockPreview();
-		await refreshUsageAfterInstall('viewed', 'tok', [checkpoint('c2', 'running'), checkpoint('c1', 'installed')]);
+		await refreshUsageAfterInstall('viewed', [checkpoint('c2', 'running'), checkpoint('c1', 'installed')]);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

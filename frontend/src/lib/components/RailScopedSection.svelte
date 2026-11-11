@@ -154,7 +154,7 @@
 		renamingThreadId = null;
 		if (!id || !title || !$token) return;
 		try {
-			await saveThreadTitle(id, title, $token);
+			await saveThreadTitle(id, title);
 		} catch {
 			toasts.show("Couldn't rename Agent", 'error');
 		}

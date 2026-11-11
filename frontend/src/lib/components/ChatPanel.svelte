@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiFetch } from '$lib/api/request';
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
@@ -10,8 +11,7 @@
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
-	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
-	import { quoteLabel } from './chatUnreadTargets';
+	import { createReplyAnnouncements } from './chatReplyAnnouncements.svelte';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
@@ -145,7 +145,7 @@
 		// stdin channel and keeps Send live. A WS frame carries it on subscribe,
 		// but a socket that has not opened yet carries nothing — so read it.
 		const subagentRefresh = authToken
-			? hydrateSubagentThread(id, authToken).catch(() => null)
+			? hydrateSubagentThread(id).catch(() => null)
 			: Promise.resolve(null);
 		try {
 			await Promise.all([
@@ -224,13 +224,7 @@
 	// A newer first-page read makes the older one stale: abort it, never download both.
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
-	let replyAnnouncements = $state<{ id: number; text: string }[]>([]);
-	// The live region announces what is added to it: keep the three newest, keyed so each reply adds a node, and clear them when the chat changes.
-	$effect(() => {
-		void $activeThreadId;
-		replyAnnouncements = [];
-		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), { id: (replyAnnouncements.at(-1)?.id ?? 0) + 1, text: `New reply on ${quoteLabel(quote)}` }]; });
-	});
+	const replyAnnouncements = createReplyAnnouncements(MSG_PAGE_SIZE, () => $activeThreadId);
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -247,7 +241,7 @@
 		const signal = firstPageRead.start();
 		const sequence = beginChatReplyAttentionRead();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
+			const res = await apiFetch(`/api/threads/${threadId}/messages?limit=${MSG_PAGE_SIZE}${focusParam()}`, { sessionInAddress: true, signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
@@ -299,7 +293,7 @@
 			pagerGeneration++;
 			pager = createPager();
 			const myGen = pagerGeneration;
-			await refreshVisibleThread(sid, get(token), loadFirstPage(sid, myGen));
+			await refreshVisibleThread(sid, loadFirstPage(sid, myGen));
 		};
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
@@ -309,7 +303,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
+	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements.items as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
 	<ChatThreadBindings />
 	<div class="chat-content" bind:this={chatCanvas} use:toastAnchorSurface>
 		<div class="transcript-area">

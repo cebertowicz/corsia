@@ -92,7 +92,6 @@
 			await requestDeliveryAction(action, {
 				threadId,
 				messageId: msg.id,
-				authToken,
 				failureText: action === 'retry'
 					? 'Could not send this again. Try once more.'
 					: 'Could not cancel this message. Try again.',

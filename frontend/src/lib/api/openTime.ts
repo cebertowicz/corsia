@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /** One batched read of open time, the server's number for how long running work has had something happening in it. */
 
 export interface OpenTimeQuery {
@@ -19,13 +20,12 @@ export interface OpenTimeAnswer {
 
 /** The answers by query key; a thread the user cannot read has none. Null when the read failed. */
 export async function readOpenTime(
-	bearerValue: string,
 	queries: OpenTimeQuery[],
 ): Promise<Record<string, OpenTimeAnswer> | null> {
 	try {
-		const res = await fetch('/api/open-time', {
+		const res = await apiFetch('/api/open-time', {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				items: queries.map((query) => ({
 					id: query.key,

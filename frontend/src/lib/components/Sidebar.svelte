@@ -117,7 +117,7 @@
 		const unread = id ? Boolean($threadPlanStates[id]?.has_update) : false;
 		closeContextMenu();
 		if (!id || !$token) return;
-		if (await markThreadSeen($token, id, !unread)) reloadThreadPlanStates([id]);
+		if (await markThreadSeen(id, !unread)) reloadThreadPlanStates([id]);
 		else toasts.show(unread ? "Couldn't mark read" : "Couldn't mark unread", 'error');
 	}
 
@@ -134,7 +134,7 @@
 		const authToken = $token;
 		closeContextMenu();
 		if (!id || !authToken) return;
-		const failure = await deactivateSidebarAgent(id, authToken);
+		const failure = await deactivateSidebarAgent(id);
 		if (failure) {
 			toasts.show(failure, 'error');
 			return;

@@ -42,7 +42,7 @@ afterEach(() => {
 describe('fetchRollup', () => {
 	it('hits /api/attention/rollup with parent_thread_id', async () => {
 		mockFetch(200, { parent_thread_id: 'p1', items: [ITEM], pull_only: true });
-		const result = await fetchRollup(TOKEN, 'p1');
+		const result = await fetchRollup('p1');
 		expect(result.pull_only).toBe(true);
 		expect(result.items[0].external_id).toBe('art-1');
 		const url = vi.mocked(fetch).mock.calls[0][0] as string;
@@ -53,7 +53,7 @@ describe('fetchRollup', () => {
 describe('rollup pull-only contract', () => {
 	it('returns pull_only: true and never wakes', async () => {
 		mockFetch(200, { parent_thread_id: 'p1', items: [], pull_only: true });
-		const result = await fetchRollup(TOKEN, 'p1');
+		const result = await fetchRollup('p1');
 		expect(result.pull_only).toBe(true);
 	});
 });

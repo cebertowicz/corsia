@@ -45,6 +45,7 @@
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
+	import { apiFetch } from '$lib/api/request';
 
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
 	let sidebarOpen = $state(false);
@@ -85,7 +86,7 @@
 	async function pollSystem() {
 		if (!$token) return;
 		try {
-			const res = await fetch(`/api/system?token=${$token}`);
+			const res = await apiFetch(`/api/system`, { sessionInAddress: true });
 			systemStatus = await res.json();
 		} catch { /* ignore */ }
 	}
@@ -125,7 +126,7 @@
 	async function goConductor(isActive: () => boolean = () => true, scope: UiScope | null = $uiScope): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await fetchScopeTarget($token, scope);
+		conductorLookup = await fetchScopeTarget(scope);
 		if (!isActive()) return false;
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
@@ -139,7 +140,6 @@
 		toasts.show(`Couldn't load ${scope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
-
 
 	function goDocuments(lens: 'all' | 'skills' = 'all', documentId?: string) {
 		const attachTarget = get(contextAttachTarget);
@@ -179,7 +179,7 @@
 
 	async function attachThreadToProject(id: string, projectId: string | null, projectName?: string | null) {
 		try {
-			await saveThreadProject(id, projectId, $token);
+			await saveThreadProject(id, projectId);
 			toasts.show(projectId ? `Moved to ${projectName ?? 'project'}` : 'Removed from project', 'success');
 			// The active conversation's scope follows its project assignment.
 			if (id === $activeThreadId) {
@@ -309,8 +309,8 @@
 		const choice = get(draftAccountId);
 		const accountId = draftAccountForModel(choice, inheritModel, get(models));
 		const body = buildNewThreadBody({ projectId, reasoningEffort: pendingEffort, modelId: inheritModel, accountId });
-		const res = await fetch(`/api/threads?token=${t}`, {
-			method: 'POST',
+		const res = await apiFetch(`/api/threads`, {
+			sessionInAddress: true, method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
 		});
@@ -372,9 +372,9 @@
 		cancelThreadTypewriters(id);
 		await removeThreadFromView(id);
 		try {
-			const response = await fetch(
-				`/api/threads/${id}?token=${$token}`,
-				{ method: 'DELETE' },
+			const response = await apiFetch(
+				`/api/threads/${id}`,
+				{ sessionInAddress: true, method: 'DELETE' },
 			);
 			if (!response.ok) throw new Error(`DELETE thread ${id} -> ${response.status}`);
 		} catch (error) {
@@ -388,8 +388,8 @@
 	async function archiveThread(id: string) {
 		if (!$token) return;
 		await removeThreadFromView(id);
-		await fetch(`/api/threads/${id}?token=${$token}`, {
-			method: 'PATCH',
+		await apiFetch(`/api/threads/${id}`, {
+			sessionInAddress: true, method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ archived: true }),
 		}).catch(() => {});
@@ -431,7 +431,7 @@
 			loadSettings,
 			loadUpdateStatus,
 			pollSystem,
-			checkSecurityAlert: () => checkSecurityAlert($token),
+			checkSecurityAlert: () => checkSecurityAlert(),
 			selectThread,
 			setActiveView: (view) => { activeView = view; },
 			chatPanel: () => chatPanelRef,

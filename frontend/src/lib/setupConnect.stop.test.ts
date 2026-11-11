@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 
 import { createSetupConnect } from './setupConnect.svelte';
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+beforeEach(() => { sessionStore.set('session'); });
+afterEach(() => { sessionStore.set(null); });
 
 afterEach(() => { vi.unstubAllGlobals(); });
 

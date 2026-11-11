@@ -49,9 +49,10 @@ export function isNavAgent(s: Thread): boolean {
 }
 
 export type { ChatComment } from '../chatCommentTypes';
-import type { ChatComment } from '../chatCommentTypes';
+import type { ChatCommentRowFields } from '../chatCommentTypes';
+import { apiFetch } from '$lib/api/request';
 
-export interface Message {
+export interface Message extends ChatCommentRowFields {
 	id: string;
 	thread_id: string;
 	role: 'user' | 'assistant' | 'system';
@@ -65,7 +66,6 @@ export interface Message {
 	firstRunOpeningReveal?: boolean;
 	reasoning?: string;
 	_optimistic?: boolean;
-	commentOnlyReceipt?: boolean;
 	delivery_state?: import('../messageDelivery').MessageDeliveryState;
 	delivery_error?: string | null;
 	delivery_revision?: number;
@@ -76,10 +76,6 @@ export interface Message {
 	next_attempt_at?: string | null;
 	/** Artifact cards the server computed for this message when it was read (display rows only). */
 	cards?: import('../api/messageCards').MessageCard[];
-	/** Server-computed transcript content after placed chat answers are removed. */
-	chat_visible_content?: string;
-	chat_comments?: ChatComment[];
-	chat_answer_cids?: string[];
 }
 
 function validDeliveryRevision(value: unknown): number | null {
@@ -250,7 +246,7 @@ export function clearThreadBuffers(threadId: string) {
 export const reasoningEffort = writable<string | null>(null);
 
 /** Optimistically rename a thread and restore its prior title if persistence fails. */
-export async function saveThreadTitle(threadId: string, title: string, token: string): Promise<void> {
+export async function saveThreadTitle(threadId: string, title: string): Promise<void> {
 	const target = get(coordinationThreads).some((thread) => thread.id === threadId) ? coordinationThreads : threads;
 	let previousTitle = '';
 	target.update((rows) => rows.map((thread) => {
@@ -259,8 +255,8 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 		return { ...thread, title };
 	}));
 	try {
-		const response = await fetch(`/api/threads/${threadId}?token=${encodeURIComponent(token)}`, {
-			method: 'PATCH',
+		const response = await apiFetch(`/api/threads/${threadId}`, {
+			sessionInAddress: true, method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ title }),
 		});
@@ -273,15 +269,15 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 	}
 }
 
-export async function saveThreadProject(threadId: string, projectId: string | null, token: string) {
+export async function saveThreadProject(threadId: string, projectId: string | null) {
 	let prev: string | null = null;
 	threads.update(ss => ss.map(s => {
 		if (s.id === threadId) { prev = s.project_id ?? null; return { ...s, project_id: projectId }; }
 		return s;
 	}));
 	try {
-		const res = await fetch(`/api/threads/${threadId}?token=${token}`, {
-			method: 'PATCH',
+		const res = await apiFetch(`/api/threads/${threadId}`, {
+			sessionInAddress: true, method: 'PATCH',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ project_id: projectId }),
 		});

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionToken } from '$lib/stores/sessionToken';
 
 import { uploadInputFile, loadUploadLimits, resetUploadLimits, updateInputBarHeight } from './inputBarHelpers';
 
@@ -25,9 +26,11 @@ beforeEach(() => {
 	});
 });
 
+beforeEach(() => sessionToken.set('test-token'));
 afterEach(() => {
 	vi.unstubAllGlobals();
 	resetUploadLimits();
+	sessionToken.set(null);
 });
 
 describe('upload limits are server-owned', () => {
@@ -46,13 +49,12 @@ describe('upload limits are server-owned', () => {
 			return new Response(JSON.stringify(okUpload), { status: 200 });
 		});
 		vi.stubGlobal('fetch', fetchMock);
-		await loadUploadLimits('test-token');
+		await loadUploadLimits();
 		// The Devices listener admits an /api read only by its session header, so the preflight must be signed.
 		expect(fetchMock).toHaveBeenCalledWith('/api/upload/limits', { headers: { Authorization: 'Bearer test-token' } });
 
 		const { attachment, error } = await uploadInputFile(
 			fileOfSize(40 * 1024 * 1024),
-			'test-token',
 			'thread-1',
 		);
 
@@ -75,11 +77,10 @@ describe('upload limits are server-owned', () => {
 			return new Response(JSON.stringify(okUpload), { status: 200 });
 		});
 		vi.stubGlobal('fetch', fetchMock);
-		await loadUploadLimits('test-token');
+		await loadUploadLimits();
 
 		const { attachment, error } = await uploadInputFile(
 			fileOfSize(51 * 1024 * 1024),
-			'test-token',
 			'thread-1',
 		);
 

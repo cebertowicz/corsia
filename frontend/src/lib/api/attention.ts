@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /** Attention API client types and parent roll-up request. */
 
 export interface AttentionItem {
@@ -25,7 +26,7 @@ export interface RollupResponse {
 }
 
 async function req<T>(url: string, options?: RequestInit): Promise<T> {
-	const res = await fetch(url, options);
+	const res = await apiFetch(url, options);
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
 		const err: Error & { status?: number; body?: string } = new Error(
@@ -47,14 +48,8 @@ function qs(params: Record<string, string | undefined | null>): string {
 	return s ? `?${s}` : '';
 }
 
-/** GETs carry the token as a Bearer header (not in the URL) — backend accepts it
- * via the shared require_user seam. */
-function bearer(token: string): RequestInit {
-	return { headers: { Authorization: `Bearer ${token}` } };
-}
-
-export async function fetchRollup(token: string, parentThreadId: string): Promise<RollupResponse> {
+export async function fetchRollup(parentThreadId: string): Promise<RollupResponse> {
 	return req<RollupResponse>(
-		`/api/attention/rollup${qs({ parent_thread_id: parentThreadId })}`, bearer(token)
+		`/api/attention/rollup${qs({ parent_thread_id: parentThreadId })}`
 	);
 }

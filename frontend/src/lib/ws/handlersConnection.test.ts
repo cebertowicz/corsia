@@ -107,7 +107,7 @@ describe('drain status', () => {
 		});
 		expect(fetch).toHaveBeenCalledWith(
 			'/api/system/drain?token=test-token',
-			{ cache: 'no-store' },
+			{ cache: 'no-store', headers: { Authorization: 'Bearer test-token' } },
 		);
 		vi.unstubAllGlobals();
 	});
@@ -157,8 +157,8 @@ describe('drain status', () => {
 			new Promise((resolve) => responses.push(resolve))
 		)));
 
-		const older = refreshDrainStatus('test-token');
-		const newer = refreshDrainStatus('test-token');
+		const older = refreshDrainStatus();
+		const newer = refreshDrainStatus();
 		responses[0]({
 			ok: true,
 			json: async () => ({

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { token } from '$lib/stores/auth';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
@@ -11,6 +10,7 @@
 	import CommentReplyList from './comments/CommentReplyList.svelte';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './comments/comment-link.css';
+	import { apiFetch } from '$lib/api/request';
 
 	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false, picked = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => string | void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean } = $props();
 	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
@@ -42,8 +42,8 @@
 	async function viewed(comment: ChatComment, replyId: string): Promise<void> {
 		const answer = comment.answers.find(item => answerId(item) === replyId);
 		if (!answer || answer.author_kind !== 'agent') return;
-		const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(answer.user_message_id)}/comments/${encodeURIComponent(answer.cid)}/viewed`, {
-			method: 'POST', headers: { Authorization: `Bearer ${$token}`, 'Content-Type': 'application/json' },
+		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(answer.user_message_id)}/comments/${encodeURIComponent(answer.cid)}/viewed`, {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ assistant_message_id: answer.assistant_message_id }),
 		});
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -76,7 +76,7 @@
 							<CommentReplyList replies={[{ id: failed.id, author: 'user', authorKind: 'user', text: reply.note, at: formatTime(failed.created_at) }]} />
 						{/each}
 						<span>Not delivered</span>
-						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, authToken: $token ?? '', failureText: 'Couldn’t retry this reply. Try again.' })}>Retry</button>
+						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, failureText: 'Couldn’t retry this reply. Try again.' })}>Retry</button>
 					</div>
 				{/each}
 				{/snippet}

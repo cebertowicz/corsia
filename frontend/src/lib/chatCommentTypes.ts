@@ -22,3 +22,13 @@ export interface ChatComment {
 	created_at: string;
 	answers: ChatCommentAnswer[];
 }
+
+/** What a transcript row carries about chat comments. */
+export interface ChatCommentRowFields {
+	/** Server-computed transcript content after placed chat answers are removed. */
+	chat_visible_content?: string;
+	chat_comments?: ChatComment[];
+	chat_answer_cids?: string[];
+	/** The server settled this row's Turn as comment-only: it leaves no Worked receipt. */
+	commentOnlyReceipt?: boolean;
+}
