@@ -41,6 +41,18 @@ async def test_regular_delete_still_cancels(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cancel_changed_operation_returns_conflict(monkeypatch):
+    from api import drain
+    from automation import restart
+
+    monkeypatch.setattr(drain, "_require_user", lambda _token: {"id": "owner"})
+    monkeypatch.setattr(restart, "abort_restart_control", AsyncMock(return_value=False))
+    with pytest.raises(HTTPException) as exc:
+        await drain.cancel_drain("token", "a" * 32)
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_unknown_refusal_code_rejected(monkeypatch):
     from api import drain
 

@@ -88,15 +88,18 @@ async def cancel_drain(
 ):
     """Release only the exact active operation, recording a pre-stop refusal."""
     _require_user(token)
-    return await settle_drain_exit(operation_id, failure_code, reason, backend_healthy)
+    released = await settle_drain_exit(operation_id, failure_code, reason, backend_healthy)
+    if not released:
+        raise HTTPException(409, "restart operation changed before cancellation")
+    return {"ok": True, "active": False, "operation_id": operation_id}
 
 
 async def settle_drain_exit(
     operation_id: str, failure_code: str | None = None,
     reason: str | None = None, backend_healthy: bool | None = None,
     *, pre_stop_only: bool = False,
-):
-    """Settle the lifecycle exit with the drain cancellation semantics."""
+) -> bool:
+    """Release the operation using the drain cancellation semantics."""
     from automation.restart import abort_restart_control
 
     guard = {"pre_stop_only": True} if pre_stop_only else {}
@@ -112,15 +115,13 @@ async def settle_drain_exit(
         reason = terminal_update_summary(reason, None)
         operation = await run_in_db(self_restart.operation_by_id, operation_id)
         if not operation or operation.get("kind") != "update":
-            raise HTTPException(409, "update operation changed before refusal")
+            return False
         released = await abort_restart_control(
             operation_id, error=reason, failure_code=failure_code,
             failure_detail=json.dumps({"reason": reason, "backend_healthy": backend_healthy}),
             **guard,
         )
-    if not released:
-        raise HTTPException(409, "restart operation changed before cancellation")
-    return {"ok": True, "active": False, "operation_id": operation_id}
+    return released
 
 
 async def settle_restart_exit(process, operation_id: str, returncode: int) -> None:
@@ -133,7 +134,8 @@ async def settle_restart_exit(process, operation_id: str, returncode: int) -> No
     path = None
     try:
         path = Path(process.lifecycle_result_path)
-        fields = dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
+        lines = path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
+        fields = dict(line.split("=", 1) for line in lines)
         if (int(fields["status"]) != returncode or
             any(fields[key] not in {"true", "false"} for key in
                 ("is_update", "stopping", "unconfirmed_bootout", "backend_healthy")) or

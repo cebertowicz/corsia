@@ -33,7 +33,6 @@ def _authenticated_user(request: Request) -> dict | None:
     return authenticate(request.query_params.get(_AUTH_QUERY_KEY))
 
 
-
 async def launch_update(
     user: dict, caller_token: str | None, trigger: str,
     target_version: str | None, *, port: int,

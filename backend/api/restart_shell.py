@@ -45,6 +45,7 @@ _corsia_lifecycle_cleanup() {
         fi
         refusal_line="${refusal_reason:0:500}"
         refusal_line="${refusal_line//$'\n'/ }"
+        refusal_line="${refusal_line//$'\r'/ }"
     fi
     # The backend that spawned this lifecycle owns its exit: it reads this
     # record when the child exits and settles the operation once.

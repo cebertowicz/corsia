@@ -282,10 +282,9 @@ async def test_child_refusal_preserves_already_recorded_reason(isolated_db):
     assert await restart.abort_restart_control(
         operation_id, error="specific refusal", failure_code="update_refused"
     )
-    try:
-        await settle_drain_exit(operation_id, "update_refused", "specific refusal", False, pre_stop_only=True)
-    except Exception as exc:
-        assert getattr(exc, "status_code", None) == 409
+    assert await settle_drain_exit(
+        operation_id, "update_refused", "specific refusal", False, pre_stop_only=True
+    ) is False
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "failed"
     assert row["error"] == "specific refusal" and row["failure_code"] == "update_refused"
@@ -297,13 +296,49 @@ async def test_child_refusal_does_not_release_advanced_update(isolated_db, phase
 
     operation_id = await run_in_db(operation_in, phase)
     held_before = self_restart.restart_holds_new_work()
-    try:
-        await settle_drain_exit(operation_id, "update_refused", "specific refusal", False, pre_stop_only=True)
-    except Exception as exc:
-        assert getattr(exc, "status_code", None) == 409
+    assert await settle_drain_exit(
+        operation_id, "update_refused", "specific refusal", False, pre_stop_only=True
+    ) is False
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "in_flight" and row["phase"] == phase
     assert self_restart.restart_holds_new_work() == held_before
+
+
+async def test_child_exit_after_advance_is_a_noop(isolated_db, tmp_path, caplog):
+    import logging
+    from types import SimpleNamespace
+    from api.drain import settle_restart_exit
+
+    operation_id = await run_in_db(operation_in, "restarting")
+    before = await run_in_db(self_restart.operation_by_id, operation_id)
+    result = tmp_path / "result"
+    result.write_text("status=1\nis_update=true\nstopping=false\nunconfirmed_bootout=false\nbackend_healthy=false\nrefusal_reason=refused\n")
+    with caplog.at_level(logging.ERROR):
+        await settle_restart_exit(SimpleNamespace(lifecycle_result_path=result), operation_id, 1)
+    assert await run_in_db(self_restart.operation_by_id, operation_id) == before
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_child_refusal_with_carriage_return_keeps_reason(isolated_db, tmp_path):
+    import os
+    from api.restart_shell import spawn_restart_lifecycle
+    from api.system_admin import _monitor_restart_process
+
+    operation_id = await run_in_db(operation_in, "ready")
+    script = tmp_path / "corsia"
+    script.write_text("#!/bin/bash\n_corsia_lifecycle_refusal_reason=$'first\\rsecond'\nexit 1\n")
+    script.chmod(0o755)
+    with (tmp_path / "lifecycle.log").open("w") as log:
+        child = spawn_restart_lifecycle(
+            script, ["restart-prepared"],
+            {**os.environ, "CORSIA_RESTART_BACKEND_PORT": "12345"}, operation_id, log,
+            caller_credential=OWNER_TOKEN,
+        )
+        await asyncio.to_thread(child.wait, 5)
+        await _monitor_restart_process(child, operation_id)
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["failure_code"] == "update_refused"
+    assert row["error"] == "first second"
 
 
 @pytest.mark.parametrize("body", ["exit 9", "kill -TERM $$"])
