@@ -37,6 +37,36 @@ async def test_two_insertions_are_independently_accepted(integration_client, doc
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_two_accepts_at_once_land_in_order(integration_client, doc, _registrable_roots, monkeypatch):
+    import asyncio
+
+    from doceditor import live_suggestions
+
+    owner = _mk_thread(integration_client, _OWNER, title="Owner")
+    moved = doc.parent / ".threads" / owner / doc.name
+    moved.parent.mkdir(parents=True)
+    doc.rename(moved)
+    moved.write_text("Heading\n", encoding="utf-8")
+    await ArtifactRegisterTool().execute(path=str(moved), _thread_id=owner)
+    created = []
+    for replacement in (" one", " two"):
+        result = await DocCommentCreateTool().execute(doc_path=str(moved), quote="Heading", replacement=replacement,
+                                                       insert_after=True, _thread_id=owner)
+        created.append(json.loads(result)["comment"])
+
+    async def slow_legacy(*args, **kwargs):
+        await asyncio.sleep(0.05)  # the other Accept gets to load its siblings meanwhile, unless it waits its turn
+        return None
+
+    monkeypatch.setattr(live_suggestions, "accept_live", slow_legacy)
+    results = await asyncio.gather(*(
+        DocCommentUpdateTool().execute(comment_id=item["id"], decision="accept", _thread_id=owner) for item in created))
+    assert not any(result.startswith("Error") for result in results), results
+    assert moved.read_text(encoding="utf-8") == "Heading one two\n"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_reject_does_not_read_accepted_siblings(integration_client, doc, _registrable_roots, monkeypatch):
     from doceditor import comments
 
@@ -51,7 +81,7 @@ async def test_reject_does_not_read_accepted_siblings(integration_client, doc, _
     comment = json.loads(result)["comment"]
     def unexpected_read(*args, **kwargs):
         raise AssertionError("reject read accepted siblings")
-    monkeypatch.setattr(comments, "insertion_siblings", unexpected_read)
+    monkeypatch.setattr(comments, "accepted_insertions", unexpected_read)
     result = await DocCommentUpdateTool().execute(comment_id=comment["id"], decision="reject", _thread_id=owner)
     assert not result.startswith("Error"), result
     assert moved.read_text(encoding="utf-8") == "Heading\n"

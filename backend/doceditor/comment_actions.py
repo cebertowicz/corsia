@@ -9,12 +9,15 @@ document save lives in the API layer, which this module does not import.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import sqlite3
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
+from weakref import WeakValueDictionary
 
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
@@ -45,6 +48,21 @@ DocumentWriter = Callable[
     [str, str, str | None, str, str | None, str | None], Awaitable[dict[str, Any] | None]
 ]
 
+_accept_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def accept_lock(artifact_id: str) -> asyncio.Lock:
+    """One document's Accepts, one at a time from loading siblings through recording the decision.
+
+    An insertion's place depends on its accepted siblings, so the next Accept must read every earlier
+    one's recorded decision. Callers hold a strong reference while waiting or working, so an idle
+    document leaves no lock behind. The lock lives in this server process.
+    """
+    lock = _accept_locks.get(artifact_id)
+    if lock is None:
+        lock = _accept_locks[artifact_id] = asyncio.Lock()
+    return lock
+
 
 
 
@@ -74,10 +92,10 @@ def suggestion_edit_span(comment: dict[str, Any], span: tuple[int, int]) -> tupl
 
 
 def insertion_position(comment: dict[str, Any], document_text: str, point: int) -> int:
-    """Skip older sibling insertions whose text already follows the same quote, contiguous; one not in the text is passed over."""
+    """Skip accepted older insertions still contiguous after the same quote."""
     key = (comment.get("created_at", ""), comment["id"])
     anchor_end = point
-    for sibling in sorted(comment["_insertion_siblings"], key=lambda row: (row.get("created_at", ""), row["id"])):
+    for sibling in sorted(comment["_accepted_insertions"], key=lambda row: (row.get("created_at", ""), row["id"])):
         if (sibling.get("created_at", ""), sibling["id"]) >= key:
             break
         if sibling.get("anchor_text") != comment.get("anchor_text"):
@@ -89,8 +107,9 @@ def insertion_position(comment: dict[str, Any], document_text: str, point: int) 
         if sibling_span[1] != anchor_end:
             continue
         replacement = sibling["replacement"]
-        if document_text.startswith(replacement, point):
-            point += len(replacement)
+        if not document_text.startswith(replacement, point):
+            break
+        point += len(replacement)
     return point
 
 
@@ -224,6 +243,32 @@ async def decide_suggestion(
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
+    if decision != "accept":
+        lock: contextlib.AbstractAsyncContextManager = contextlib.nullcontext()
+    else:
+        lock = accept_lock(await run_in_db(_artifact_id_of, comment_id))
+    async with lock:
+        return await _decide_suggestion(
+            comment_id, decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id,
+            write=write, include_document=include_document, reason=reason)
+
+
+def _artifact_id_of(comment_id: str) -> str:
+    db = get_db()
+    try:
+        comment = store.get_comment(comment_id, db=db)
+    finally:
+        db.close()
+    if comment is None:
+        raise CommentActionError("not_found", "Comment not found")
+    return str(comment["artifact_id"])
+
+
+async def _decide_suggestion(
+    comment_id: str, decision: str, *, user_id: str, decided_by: str,
+    actor_thread_id: str | None, write: DocumentWriter, include_document: bool, reason: str | None,
+) -> dict[str, Any]:
+    """An Accept runs this whole body under its document's ``accept_lock``."""
 
     def _load():
         db = get_db()
@@ -235,7 +280,7 @@ async def decide_suggestion(
             owner = owner_row(db, artifact["parent_thread_id"])
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
             if decision == "accept" and comment.get("insert_after"):
-                comment["_insertion_siblings"] = store.insertion_siblings(
+                comment["_accepted_insertions"] = store.accepted_insertions(
                     comment["artifact_id"], comment["anchor_text"], db=db)
             return comment, artifact, owner[1] if owner else None
         finally:

@@ -119,20 +119,22 @@ def _check_existing_identity(row: dict, artifact_id: str, author: str, cid: str)
         )
 
 
-def is_insertion_sibling(row: dict) -> bool:
-    """One predicate for insertion siblings in single and batch decisions: any not rejected. An open one counts too,
-    since its Accept may already be in the text while its decision is still being recorded."""
-    return bool(row.get("insert_after")) and row.get("decision") != "rejected"
+_ACCEPTED_INSERTION = {"insert_after": 1, "decision": "accepted"}
 
 
-def insertion_siblings(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
-    """Insertion siblings (`is_insertion_sibling`) for the same artifact and quoted text; the query only narrows to the
-    artifact and quote, so the predicate is written once."""
-    rows = db.execute(
-        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? ORDER BY created_at, id",
-        (artifact_id, anchor_text),
-    ).fetchall()
-    return [sibling for sibling in map(dict, rows) if is_insertion_sibling(sibling)]
+def is_accepted_insertion(row: dict) -> bool:
+    """One predicate for accepted insertion siblings in single and batch decisions."""
+    return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
+
+
+def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
+    """Accepted insertion siblings for the same artifact and quoted text."""
+    predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
+    return [dict(row) for row in db.execute(
+        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+        + predicate + " ORDER BY created_at, id",
+        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
+    ).fetchall()]
 
 
 def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:
