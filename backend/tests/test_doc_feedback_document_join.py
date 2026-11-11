@@ -6,6 +6,7 @@ from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_
 from doceditor import comment_actions, comments, feedback_batches
 from infra.database import get_db, write_transaction
 from plans import holds, service
+from plans.feedback_nodes import AGENT_FRAMING, USER_FRAMING
 from test_doc_feedback_reply_join import _feedback_nodes
 
 _HANDED = "SELECT 1 FROM plan_node_attempts WHERE node_id=?"
@@ -163,14 +164,46 @@ def test_a_suggestion_still_gets_its_own_task(isolated_db):
         db.close()
 
 
-def test_a_persons_comment_does_not_join_an_agents_task(isolated_db):
+def test_a_persons_comment_joins_an_agents_task_and_states_the_intent(isolated_db):
     db = get_db()
     try:
         artifact_id, _, queued = _queued_document(db)
+        assert queued["intent"] is None
 
+        person, _ = add_person_comment(db, artifact_id)
+
+        assert len(_feedback_nodes(db, "owner")) == 2
+        joined = service.get_node(queued["id"], db=db)
+        assert joined.title.startswith("Reviewer and Steve left 2 comments on")
+        assert joined.intent.startswith("Answer the person's 1 comment on ")
+        assert f"Comment {person['id']}" in joined.description
+        assert joined.description.startswith(queued["description"])
+        assert USER_FRAMING in joined.description
+        assert joined.description.count(AGENT_FRAMING) == 1
+    finally:
+        db.close()
+
+
+def test_an_agents_comment_joins_a_persons_task_without_dropping_its_intent(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner")
         add_person_comment(db, artifact_id)
+        add_person_comment(db, artifact_id)
+        _, queued = _feedback_nodes(db, "owner")
+        assert queued["intent"].startswith("Answer the person's 1 comment on ")
 
-        assert len(_feedback_nodes(db, "owner")) == 3
-        assert service.get_node(queued["id"], db=db).description == queued["description"]
+        agent = _agent_comment(db, artifact_id)
+
+        assert len(_feedback_nodes(db, "owner")) == 2
+        joined = service.get_node(queued["id"], db=db)
+        assert joined.title.startswith("Steve and Reviewer left 2 comments on")
+        assert joined.intent == queued["intent"]
+        assert f"Comment {agent['id']}" in joined.description
+        assert joined.description.startswith(queued["description"])
+        assert AGENT_FRAMING in joined.description
+        assert joined.description.count(USER_FRAMING) == 1
     finally:
         db.close()

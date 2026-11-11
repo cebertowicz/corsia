@@ -3,10 +3,9 @@
 A new top-level comment joins the first open task the recipient has for the same
 document that its owner has not been handed yet (no attempt), whoever wrote the
 earlier comments there, so comments left before the owner starts are read as one
-task. Only a task made from the same kind of author (a person, or agents) is
-joined, because the task's framing differs between them. Once the owner has been
-handed the task, a new top-level comment gets its own task. A top-level comment
-never joins by waking a task its owner is working.
+task and a document never has two open tasks for the same owner. Once the owner
+has been handed the task, a new top-level comment gets its own task. A top-level
+comment never joins by waking a task its owner is working.
 
 A comment thread is one conversation, so a batch of replies whose thread already
 has an open task for the same recipient, from the same author, goes into that
@@ -37,6 +36,9 @@ from plans import mutations, node_waits, notifications, service
 from plans.feedback_items import batch_value, load_feedback_items
 from plans.plan_write import transaction
 
+# The provenance a feedback task and its document link carry.
+PROVENANCE = "document.feedback_batch"
+
 # A feedback task is made active at once; until its owner selects it, it is still queued.
 _WORKABLE = ("pending", "active")
 
@@ -52,13 +54,15 @@ _THREAD_TASKS = """
      ORDER BY b.created_at,b.id
 """
 
-# Open tasks delivered to this recipient from this kind of author for one document, oldest first.
+# The recipient's open feedback tasks for one document, whoever wrote their comments, oldest first.
+# Each feedback task is linked to its document once, when its first batch creates it.
 _DOCUMENT_TASKS = """
-    SELECT b.delivered_node_id FROM doc_feedback_batches b
-      JOIN plan_nodes n ON n.id=b.delivered_node_id
-     WHERE b.recipient_id=? AND b.author_kind=? AND b.artifact_id=? AND b.id<>?
-       AND n.state IN (?,?)
-     ORDER BY b.created_at,b.id
+    SELECT l.node_id FROM plan_node_artifact_links l
+      JOIN plan_nodes n ON n.id=l.node_id
+      JOIN plans p ON p.id=n.plan_id
+     WHERE l.artifact_id=? AND l.role='input' AND l.provenance=?
+       AND p.owner_kind='thread' AND p.owner_id=? AND n.state IN (?,?)
+     ORDER BY l.created_at,l.node_id
 """
 
 
@@ -110,10 +114,9 @@ def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join
 def _document_task(db, recipient_thread_id: str, batch: Any) -> Join | None:
     """The document's first open task for the recipient whose owner has not been handed it and that waits on nothing."""
     rows = db.execute(_DOCUMENT_TASKS, (
-        recipient_thread_id, batch_value(batch, "author_kind"), batch_value(batch, "artifact_id"),
-        batch_value(batch, "id"), *_WORKABLE,
+        batch_value(batch, "artifact_id"), PROVENANCE, recipient_thread_id, *_WORKABLE,
     )).fetchall()
-    for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
+    for node_id in (str(row["node_id"]) for row in rows):
         node = service._node_row(db, node_id)
         if not _waits(db, node) and not _handed(db, node_id):
             return Join(node_id, False)

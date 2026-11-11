@@ -15,7 +15,7 @@ from plans.feedback_items import (
 )
 from plans.plan_write import transaction
 
-PROVENANCE = "document.feedback_batch"
+PROVENANCE = feedback_join.PROVENANCE
 COMMENT_ACCEPTANCE = (
     "Every item is considered and acted on where needed, and every change made for one is also made "
     "wherever this document says the same thing in other words. Do not reply if no reply is needed."
@@ -120,7 +120,7 @@ def _title(author: str, document: str, items: list[dict[str, Any]]) -> str:
 def _authors(db, node_id: str, batch: Any, author: str) -> str:
     """The label for everyone who wrote what the task holds: one name, two names, or a count."""
     names = [
-        feedback_display(db, earlier, [])[0]
+        feedback_display(db, earlier)[0]
         for earlier in feedback_join.earlier_batches(db, node_id, batch)
         if batch_value(earlier, "author_id") != batch_value(batch, "author_id")
     ]
@@ -128,6 +128,17 @@ def _authors(db, node_id: str, batch: Any, author: str) -> str:
     if len(names) > 2:
         return f"{len(names)} authors"
     return " and ".join(names)
+
+
+def _joined_blocks(db, node_id: str, batch: Any, items: list[dict[str, Any]]) -> str:
+    """The batch's items for the task it joins, with its own framing when no earlier batch there came from its kind of author."""
+    blocks = item_blocks(batch, items)
+    kind = batch_value(batch, "author_kind")
+    if not any(item["kind"] == "comment" for item in items) or any(
+        batch_value(earlier, "author_kind") == kind for earlier in feedback_join.earlier_batches(db, node_id, batch)
+    ):
+        return blocks
+    return f"{USER_FRAMING if kind == 'user' else AGENT_FRAMING}\n\n{blocks}"
 
 
 def _acceptance(items: list[dict[str, Any]]) -> str:
@@ -245,11 +256,13 @@ def create_feedback_node(
     """Create one queued recipient-plan task, idempotently keyed by batch id.
 
     A batch of new top-level comments joins the document's open task its owner has
-    not started; a batch of replies whose comment thread already has an open task
+    not started, whoever wrote the comments there; a batch of replies whose comment thread already has an open task
     joins that task instead (``plans.feedback_join``). When its owner is working on
     a thread's task, the owner keeps its selection and receives a wake with the
-    reply; otherwise the person's new comments restate the task's intent. The
-    title names everyone who wrote what the task holds.
+    reply; otherwise the person's new comments restate the task's intent from the
+    person's comments the task holds, and agents' comments stay listed items. A
+    batch from a kind of author the task has not held before brings its own framing.
+    The title names everyone who wrote what the task holds.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -263,7 +276,7 @@ def create_feedback_node(
     joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
         held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
-        blocks = item_blocks(batch, loaded)
+        blocks = _joined_blocks(db, joined.node_id, batch, loaded)
         restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
             db, joined.node_id, title=_title(_authors(db, joined.node_id, batch, author), document, held),
