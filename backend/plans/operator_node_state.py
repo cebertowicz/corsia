@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime
 
-from plans import admission, node_states, operator_stopped, service, user_steering, wait_causes
-from plans.admission_projection import executor_of
-from plans import operator_node_facts as facts
+from plans import node_states, operator_projection_facts, operator_stopped, service, user_steering, wait_causes
 from plans.operator_display_state import (
     NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
-    ask_deferred, covered_nodes, display_from_facts, node_paused, plan_paused, retired_display,
+    ask_deferred, display_from_facts, node_paused, plan_paused, retired_display,
     review_deferred, row_asks_user,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
@@ -229,24 +227,15 @@ def project(
     ``last_transition_at`` are None, a settled node's recorded reason is not in
     ``status_reason``, and ``execution`` has no attempts and zero counts.
     """
-    node_plans = [(node, item.plan) for item in projected for node in item.nodes]
-    executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
-    labels, history, attempt_counts, evidence, changed, settled_because = (
-        facts.NO_DETAIL if lean else facts.detail(
-            projected, node_plans, executor_by_node, limit=ATTEMPT_HISTORY_LIMIT, db=db,
-            scoped=detail_ids is not None,
-        )
+    node_plans, executor_by_node, details, executions, stops, cost_facts, covered = operator_projection_facts.read(
+        projected, db=db, now=now, costs=costs, memo=memo, lean=lean, detail_ids=detail_ids,
+        attempt_limit=ATTEMPT_HISTORY_LIMIT,
     )
+    labels, history, attempt_counts, evidence, changed, settled_because = details
+    commitment_costs, node_costs, initiatives = cost_facts
     if titles is None:
         titles = {node["id"]: node["title"] for node, _plan in node_plans}
-    executions = admission.project_many(node_plans, db=db, memo=memo)
-    stops = operator_stopped.nodes(node_plans, executor_by_node, executions, db=db)
-    commitment_costs, node_costs, initiatives = facts.project_costs(
-        node_plans, db=db, now=now or datetime.now(timezone.utc), wanted=costs,
-        detail_ids=detail_ids,
-    )
     states: dict[str, dict] = {}
-    covered = covered_nodes((node['id'] for item in projected for node in item.nodes), db=db)
 
     for item in projected:
         for node in item.nodes:
