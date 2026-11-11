@@ -8,6 +8,9 @@ from infra.database import get_db
 # Callers strip the tags of sections that were not placed.
 LAST_MESSAGE_PREVIEW = f"""(SELECT substr({VISIBLE_CONTENT}, 1, 100) FROM messages m {VISIBLE_CONTENT_JOIN}
     WHERE m.thread_id=s.id AND m.role IN ('user','assistant') AND (cv.content IS NULL OR cv.content != '')
+    AND NOT (m.role='user' AND trim(m.content)='' AND CASE WHEN json_valid(m.metadata) THEN
+        COALESCE(json_array_length(m.metadata, '$.reply_context.comments'), 0) > 0
+        AND COALESCE(json_array_length(m.metadata, '$.attachments'), 0) = 0 ELSE 0 END)
     ORDER BY m.created_at DESC LIMIT 1)"""
 
 

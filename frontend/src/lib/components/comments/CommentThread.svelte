@@ -30,7 +30,7 @@
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -87,6 +87,8 @@
 		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		replyText?: string;
+		replyPending?: boolean;
+		replyError?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
 		onReplySelection?: (selection: [number, number] | null) => void;
@@ -208,12 +210,12 @@
 	async function postReply() {
 		const submittedText = replyText;
 		const t = submittedText.trim();
-		if (readOnly || !t || replyPosting) return;
+		if (readOnly || !t || replyPosting || replyPending) return;
 		replyPosting = true;
 		try {
 			const mentions = replyField?.mentions() ?? [];
 			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
-			if (!chatSurface || replyText === submittedText) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
+			if (!chatSurface) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
 		} finally {
@@ -324,7 +326,8 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} fit={!inMargin} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && replyPosting} onSend={postReply} />
+			<ReplyField {selectedTags} fit={!inMargin} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
+			{#if chatSurface && replyError}<p role="alert">{replyError} Retry by sending again.</p>{/if}
 		{/if}
 	</div>
 {/if}

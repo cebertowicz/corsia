@@ -17,7 +17,6 @@
 	import { holdsNewWork } from '$lib/update/model';
 	import AgentMessageAttribution from './AgentMessageAttribution.svelte';
 	import UserBubbleAttachments from './UserBubbleAttachments.svelte';
-	import SentChatComments from './SentChatComments.svelte';
 
 	let {
 		msg,
@@ -116,9 +115,6 @@
 					attachments={msg.metadata.attachments}
 					{onOpenLightbox}
 				/>
-			{/if}
-			{#if msg.metadata?.reply_context?.comments?.length}
-				<SentChatComments comments={msg.metadata.reply_context.comments} threadId={messageThreadId} />
 			{/if}
 			{#if msg.content}
 				<div class="bubble-content long-message-body" class:collapsed={contentCollapsed} class:md-content={isAgentSent}>

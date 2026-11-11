@@ -8,6 +8,7 @@ import type { Message } from '../stores/threads';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { addedMessage, deliveryRevision } from './messageProjection';
 import { emit } from './events';
+import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
@@ -167,7 +168,14 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			if (inputId && typeof data.thread_id === 'string') {
 				recoverInput(data.thread_id, inputId);
 			}
-			if (data.queue_kind === 'messages') reconcileQueuedInputReceipt(data);
+			if (data.queue_kind === 'messages' && inputId && typeof data.thread_id === 'string' && typeof data.message_id === 'string') {
+				const failure = data.delivery_state && !['queued', 'delivered'].includes(data.delivery_state)
+					? (data.delivery_error || 'Couldn’t post this comment. Try again.') : undefined;
+				const draft = chatReplyDrafts.settle(data.thread_id, inputId, failure);
+				if (draft && failure) emit('chat_comment_draft_error', draft);
+				else if (draft) data.chat_comment_target_id = draft.targetMessageId;
+				reconcileQueuedInputReceipt(data);
+			}
 			emit('input_queued', data);
 			break;
 		}

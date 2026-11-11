@@ -31,16 +31,16 @@ describe('Focus comment sends', () => {
     expect([...placed]).toEqual(['send-1', 'send-2', 'send-3']);
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
-  it('keeps a fallback send between two work blocks', () => {
+  it('hides a send whose target is unavailable', () => {
     const fallback = send(2, { metadata: { reply_context: { comments: [{ id: 'unplaced', cid: 'unplaced' }] } } });
     const { entries } = presentation([send(1), fallback, send(3)]);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
-    expect(entries[2]).toMatchObject({ message: { id: 'send-2' } });
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
+    expect(entries.some(e => e.kind === 'message' && e.message.id === 'send-2')).toBe(false);
   });
-  it('keeps an optimistic send visible between work blocks', () => {
+  it('hides an optimistic send between work blocks', () => {
     const { entries, placed } = presentation([send(1, { _optimistic: true })]);
-    expect(placed.has('send-1')).toBe(false);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
+    expect(placed.has('send-1')).toBe(true);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
   it('keeps a previously expanded inner stub open after merging', () => {
     const stub = (firstId: string, lastId: string, firstSeq: number, lastSeq: number) => ({
@@ -56,10 +56,10 @@ describe('Focus comment sends', () => {
     expect(isRunExpanded(tokens, expanded)).toBe(true);
     expect(isRunExpanded(tokens, toggleRun(tokens, expanded))).toBe(false);
   });
-  it('keeps a failed send with an unseen target in place', () => {
+  it('hides a failed send with an unseen target', () => {
     const failed = send(2, { delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'unplaced', root_cid: 'missing', root_user_message_id: 'missing' }] } } });
     const { entries, placed } = presentation([send(1), failed, send(3)]);
-    expect(placed.has('send-2')).toBe(false);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
+    expect(placed.has('send-2')).toBe(true);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
 });

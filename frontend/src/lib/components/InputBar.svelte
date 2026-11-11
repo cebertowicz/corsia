@@ -26,7 +26,7 @@
 	import { watchComposer } from './inputBarLifecycle';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
-	import { REPLY_SEND_FAILURE, emitComposerSend, replySendBlock, type ComposerDeliveryIntent } from './composerSend';
+	import { emitComposerSend, postChatComment, type ComposerDeliveryIntent } from './composerSend';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import { updateRestarting } from '$lib/update/store';
 
@@ -209,19 +209,8 @@
 		return 'sent';
 	}
 
-	export function sendReply(reply: ChatComment): void {
-		// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
-		if (!boundThreadId) throw new Error('Cannot send reply: no chat');
-		const blocked = replySendBlock($updateRestarting, canSendToModel);
-		if (blocked) { toasts.show(REPLY_SEND_FAILURE[blocked], 'error'); throw new Error(`Cannot send reply: ${blocked}`); }
-		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
-		const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
-		emitComposerSend(boundThreadId, '', 0, payload);
-		const inputId = sendMessage(boundThreadId, '', selection.modelId ?? undefined, [], undefined, 'apply_now', payload);
-		if (!inputId) {
-			toasts.show(REPLY_SEND_FAILURE.notAccepted, 'error');
-			throw new Error('Cannot send reply: not accepted');
-		}
+	export function sendReply(reply: ChatComment): string {
+		return postChatComment(reply, boundThreadId, selection.modelId ?? undefined, $updateRestarting, canSendToModel);
 	}
 	const activeThread = $derived(selection.thread);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));

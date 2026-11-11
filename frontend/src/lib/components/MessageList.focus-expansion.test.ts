@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe('comment-only sends across server stubs', () => {
-	it.each(['optimistic', 'queued', 'failed'] as const)('keeps a %s reply accessible when its target is in collapsed work', (state) => {
+	it.each(['optimistic', 'queued', 'failed'] as const)('hides a %s reply when its target is in collapsed work', (state) => {
 		const target = { ...work('target', 1, '10:00:00'), thread_id: A, chat_comments: [{
 			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'Target', note: 'note', from_off: 0, to_off: 6,
 			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z', answers: [],
@@ -88,10 +88,7 @@ describe('comment-only sends across server stubs', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ cards: [], has_more: false, divider: null }))));
 		messages.set([target, send] as Message[]);
 		renderList({ historyComplete: true });
-		expect(host.querySelector('[data-message-id="send"]')).not.toBeNull();
-		if (state !== 'optimistic') {
-			expect(host.querySelector(`[data-message-id="send"] [data-delivery-action="${state === 'failed' ? 'retry' : 'cancel'}"]`)).not.toBeNull();
-		}
+		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
 	});
 	it('places a reply whose loaded target is inside collapsed work', () => {
 		const target = { ...work('target', 1, '10:00:00'), thread_id: A, content: 'Target', chat_comments: [{

@@ -1,4 +1,7 @@
 import { emitProductEvent } from '$lib/product_events';
+import type { ChatComment } from '$lib/chatCommentAnchors';
+import { sendMessage } from '$lib/ws';
+import { toasts } from '$lib/stores/toast';
 
 /** What a send asks the runtime to do with the turn in flight. */
 export type ComposerDeliveryIntent = 'apply_now' | 'queue_after_turn';
@@ -28,6 +31,22 @@ export const REPLY_SEND_FAILURE = {
 	noModel: 'This chat’s model can’t answer this reply. Your reply stays here; choose a model, then send it again.',
 	notAccepted: 'CORSIA couldn’t send this reply because the connection is unavailable. Your reply stays here; send it again.',
 } as const;
+
+export function postChatComment(reply: ChatComment, threadId: string | null | undefined, modelId: string | undefined, restarting: boolean, modelReady: boolean): string {
+	// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
+	if (!threadId) throw new Error('Cannot send reply: no chat');
+	const blocked = replySendBlock(restarting, modelReady);
+	if (blocked) { toasts.show(REPLY_SEND_FAILURE[blocked], 'error'); throw new Error(`Cannot send reply: ${blocked}`); }
+	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
+	const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
+	emitComposerSend(threadId, '', 0, payload);
+	const inputId = sendMessage(threadId, '', modelId, [], undefined, 'apply_now', payload);
+	if (!inputId) {
+		toasts.show(REPLY_SEND_FAILURE.notAccepted, 'error');
+		throw new Error(REPLY_SEND_FAILURE.notAccepted);
+	}
+	return inputId;
+}
 
 export type ReplySendBlock = keyof typeof REPLY_SEND_FAILURE;
 

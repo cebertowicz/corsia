@@ -92,6 +92,9 @@
 			if (data?.thread_id !== subscribed || data?.error_type === 'stop_failed') return;
 			void load();
 		};
+		const refreshComment = (data: any) => { if (data?.chat_comment_target_id) refreshLifecycle(data); };
+		const offCommentQueued = on('input_queued', refreshComment);
+		const offCommentAccepted = on('input_accepted', refreshComment);
 		const offActivity = on('turn_activity', refreshLifecycle);
 		const offComplete = on('turn_complete', refreshLifecycle);
 		const offCancelled = on('turn_cancelled', refreshLifecycle);
@@ -105,6 +108,8 @@
 			generation += 1;
 			unsubscribeThread(subscribed);
 			offConnected?.();
+			offCommentQueued?.();
+			offCommentAccepted?.();
 			offActivity?.();
 			offComplete?.();
 			offCancelled?.();

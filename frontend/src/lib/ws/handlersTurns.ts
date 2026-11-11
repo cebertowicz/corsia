@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
 import {
 	messages,
 	streamContentByThread,
@@ -85,26 +86,7 @@ function admitTerminalFrame(data: any): TurnIdentity | null {
 	return identity;
 }
 
-function reconcileOptimisticRow(
-	threadId: string,
-	inputId: string,
-	messageId: string,
-	createdAt: string,
-	delivery: Pick<Message, 'delivery_state' | 'delivery_error' | 'delivery_revision' | 'seq'> = {},
-): void {
-	if (!isDisplayedThread(threadId)) return;
-	messages.update(current => current.map(message =>
-		(message.metadata?.input_id === inputId || message.id === inputId)
-			? mergeMessageDelivery(message, {
-				...message,
-				id: messageId,
-				created_at: createdAt,
-				_optimistic: false,
-				...delivery,
-			})
-			: message
-	).sort(compareMessageOrder));
-}
+import { reconcileOptimisticRow } from './reconcileOptimisticRow';
 
 export function handleInputAccepted(data: any): void {
 	const threadId = data?.thread_id;
@@ -116,6 +98,8 @@ export function handleInputAccepted(data: any): void {
 		!threadId || typeof inputId !== 'string' || typeof messageId !== 'string'
 		|| typeof createdAt !== 'string' || !identity
 	) return;
+	const draft = chatReplyDrafts.settle(threadId, inputId);
+	if (draft) data.chat_comment_target_id = draft.targetMessageId;
 	const transition = acceptInput(threadId, inputId, identity);
 	reconcileOptimisticRow(threadId, inputId, messageId, createdAt, {
 		delivery_state: 'delivered',

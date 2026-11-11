@@ -205,7 +205,7 @@
 			scrollControl.beginProgrammaticScroll.bind(scrollControl), () => landOnFirstRunOpening(messagesEl),
 		);
 	});
-	const pendingDeliveryMessages = $derived(presentation.visibleMessages.filter((msg) => isImminentDelivery(msg, renderedStreaming)));
+	const pendingDeliveryMessages = $derived(presentation.visibleMessages.filter((msg) => !placedEnvelopes.has(msg.id) && isImminentDelivery(msg, renderedStreaming)));
 	// G2: Focus shows your own waiting messages only; a context update that is just waiting is not shown.
 	const pendingEntries = $derived([
 		...(presentation.pendingContextDigest && !focusMode

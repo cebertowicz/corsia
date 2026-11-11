@@ -23,12 +23,12 @@ export interface ChatCommentAnchor {
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
  * reject instead, so every thread the reply was typed in keeps it.
  */
-export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => void): void {
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => string | void): string | void {
 	if (!message || !comment || typeof message.seq !== 'number') {
 		toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
 		throw new Error('Comment is unavailable');
 	}
-	send({
+	return send({
 		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,
 		from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote,
 		anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note,

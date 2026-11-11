@@ -46,14 +46,14 @@ describe('reply context send payload', () => {
 		expect(sent.at(-1)?.reply_context).toEqual({ comments: [comment], in_view: [[3, 4, 2]], first_unread: { seq: 4, truncated: false } });
 	});
 
-	it('shows the sent comments on the sender\'s own echo, with or without text', () => {
-		// The sending socket gets no message_added for its own input, so the echo is what it renders.
+	it('keeps a comment-only send out of the sender\'s transcript', () => {
+		// A comment-only send has no optimistic transcript row.
 		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
 		activeThreadId.set('main');
 		messages.set([]);
 		try {
 			sendMessage('main', '', undefined, undefined, undefined, 'apply_now', [comment]);
-			expect(get(messages).at(-1)).toMatchObject({ content: '', metadata: { reply_context: { comments: [comment] } } });
+			expect(get(messages)).toEqual([]);
 			sendMessage('main', 'plain');
 			expect(get(messages).at(-1)?.metadata).not.toHaveProperty('reply_context');
 		} finally {

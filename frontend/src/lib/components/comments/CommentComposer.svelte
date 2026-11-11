@@ -8,7 +8,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection() }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection() }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -18,6 +18,9 @@
 		disabledReason?: string;
 		submitLabel?: string;
 		submittingLabel?: string;
+		pending?: boolean;
+		error?: string;
+		retainText?: boolean;
 		mentions?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
@@ -29,15 +32,15 @@
 	let posting = $state(false);
 	$effect(() => {
 		text;
-		onBody?.(text);
+		untrack(() => onBody?.(text));
 	});
 	async function submit() {
 		const value = text.trim();
-		if (!value || posting || disabledReason) return;
+		if (!value || posting || pending || disabledReason) return;
 		posting = true;
 		const offset = text.length - text.trimStart().length;
 		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
-		try { await onSubmit(value, [...new Set(mentions.map(item => item.agent_id))], mentions); selectedTags.clear(); text = ''; }
+		try { await onSubmit(value, [...new Set(mentions.map(item => item.agent_id))], mentions); if (!retainText) { selectedTags.clear(); text = ''; } }
 		catch { /* onSubmit reports its own failure; keep the draft for a retry. */ }
 		finally { posting = false; }
 	}
@@ -52,14 +55,15 @@
 	<div>
 		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
-			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 		</Field>
 	</div>
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
-		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? submittingLabel : submitLabel}</button>
+		<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
+	{#if error}<p class="selection-reason" role="alert">{error}</p>{/if}
 </div>
 
 <style>

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 
 import { subagentMeta } from '../stores/subagents';
+import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
 import { activeThreadId, messages } from '../stores/threads';
 import { handleMessage } from './handlers';
 import { _unconfirmedFrameIdsForTests, resendUnconfirmedFrames, sendMessage } from './send';
@@ -37,6 +38,19 @@ beforeEach(() => {
 });
 
 describe('resending what a dropped socket never confirmed', () => {
+	it('resends a comment without a transcript row and clears its draft on a queued receipt', () => {
+		const anchor = { from_off: 0, to_off: 1, quote: 'q', anchor_prefix: '', anchor_suffix: '' };
+		const inputId = sendMessage(THREAD, '', undefined, undefined, undefined, 'apply_now', [{ id: 'c', seq: 1, ...anchor, note: 'keep' }])!;
+		chatReplyDrafts.postRoot(THREAD, 'target', 'keep', inputId, anchor, 1);
+		expect(get(messages)).toEqual([]);
+		const { socket, sent } = newSocket();
+		resendUnconfirmedFrames(socket);
+		expect(sent).toEqual([JSON.parse(frames[0])]);
+		handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: THREAD, input_id: inputId, message_id: inputId, delivery_state: 'queued' }, () => {});
+		expect(chatReplyDrafts.root(THREAD, 'target')).toBeUndefined();
+		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
+	});
+
 	it('puts every waiting frame on the new socket in send order, unchanged', () => {
 		const first = sendMessage(THREAD, 'first')!;
 		const other = sendMessage('main-2', 'another thread')!;

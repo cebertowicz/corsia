@@ -31,11 +31,11 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		// The server identifies placed answers; do not parse tags in the client.
 		const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
 		const lastAssistant = [...rows].reverse().find(row => row.role === 'assistant');
-		const answerIds = comments.length ? [] : [...new Set<string>(stepIds.length ? stepIds : lastAssistant ? [lastAssistant.id] : [])];
+		const answerIds = comments.length || frame.chat_comment_target_id ? [] : [...new Set<string>(stepIds.length ? stepIds : lastAssistant ? [lastAssistant.id] : [])];
 		// The loaded page cannot answer this. This socket never receives the added-message
 		// frame for its own send, and the commented row may not be loaded on this page at all,
 		// so only the server's own answer about the turn's rows proves a comment was answered.
-		if (!answerIds.length && !comments.length) return;
+		if (!answerIds.length && !comments.length && !frame.chat_comment_target_id) return;
 		const current = ++generation;
 		const sequence = beginChatReplyAttentionRead();
 		try {
@@ -46,12 +46,13 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 			// The server names the message a landed reply sits on. A comment this page never carried is
 			// still a target: its row is what draws the notice and carries the quote to announce.
 			const namedTargets = (answers.replies ?? []).map(item => item.detail.destination.id);
-			const targetIds = [...new Set([...knownTargets.map(row => row.id), ...namedTargets])];
+			const targetIds = [...new Set([...knownTargets.map(row => row.id), ...namedTargets,
+				...(typeof frame.chat_comment_target_id === 'string' ? [frame.chat_comment_target_id] : [])])];
 			const targetRows = await read(threadId, bearer, targetIds);
 			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;
 			const byId = new Map(refreshed.map(row => [row.id, row]));
-			if (!comments.length) {
+			if (!comments.length && !frame.chat_comment_target_id) {
 				const existing = new Set(rows.flatMap(row =>
 					(row.chat_comments ?? []).flatMap(comment => comment.answers.filter(answer => answer.author_kind === 'agent').map(answer => `${comment.id}:${answer.assistant_message_id}:${answer.cid}`))));
 				for (const row of targetRows.rows) for (const comment of row.chat_comments ?? []) for (const answer of comment.answers) {
@@ -68,7 +69,15 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 			if (replies !== null) setChatReplyAttention(threadId, replies, sequence);
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
-	const stops = [on('turn_complete', frame => refresh(frame)), on('message_added', frame => {
+	function refreshOwnInput(frame: any) {
+		if (frame?.chat_comment_target_id) { void refresh(frame); return; }
+		const row = get(messages).find(item => item.thread_id === frame?.thread_id
+			&& (item.id === frame?.message_id || item.metadata?.input_id === frame?.input_id));
+		const comments = row?.metadata?.reply_context?.comments;
+		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
+	}
+	const stops = [on('turn_complete', frame => refresh(frame)), on('input_queued', refreshOwnInput),
+		on('input_accepted', refreshOwnInput), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;
 		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
 		// An update can answer comments while its turn keeps running; show them in their threads now.

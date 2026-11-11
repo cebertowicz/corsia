@@ -3,49 +3,11 @@ import type { ChatComment, Message } from '$lib/stores/threads';
 /** The comment a reply send answers, as one key: its root message and comment id. */
 const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
 
-/**
- * Empty comment envelopes whose comments are attached to a loaded target. Placement alone does not
- * decide visibility: suppressibleCommentEnvelopes also preserves delivery and recovery controls.
- * One pass builds the keys; each envelope then
- * checks its comments against them, so the transcript asks once per change instead of rescanning per row.
- */
-export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const byId = new Map<string, Message>();
-	const retries = new Map<string, string[]>();
-	// A send still on its way is placed once its comment's thread is loaded; a delivered one once its own copy is.
-	const roots = new Set<string>();
-	const shown = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId) continue;
-		byId.set(row.id, row);
-		const from = row.metadata?.retried_from_message_id;
-		if (from) retries.set(from, [...(retries.get(from) ?? []), row.id]);
-		for (const root of row.chat_comments ?? []) {
-			const key = replyKey(root.user_message_id, root.cid);
-			if (key) { roots.add(key); shown.add(key); }
-			for (const answer of root.answers ?? []) {
-				const answerKey = answer.author_kind === 'user' ? replyKey(answer.user_message_id, answer.cid) : '';
-				if (answerKey) shown.add(answerKey);
-			}
-		}
-	}
-	const placed = new Set<string>();
-	for (const row of byId.values()) {
-		const comments = row.metadata?.reply_context?.comments;
-		if (row.role !== 'user' || row.content.trim() || !comments?.length || row.metadata?.attachments?.length) continue;
-		if (row._optimistic || row.delivery_state === 'queued' || row.delivery_state === 'failed') {
-			if (comments.every((reply: { root_user_message_id?: string; root_cid?: string }) => roots.has(replyKey(reply.root_user_message_id, reply.root_cid)))) placed.add(row.id);
-			continue;
-		}
-		// A delivered envelope counts as placed through any retry that replaced it.
-		const successors = [row.id];
-		for (let index = 0; index < successors.length; index++) {
-			for (const next of retries.get(successors[index]) ?? []) if (!successors.includes(next)) successors.push(next);
-		}
-		if (comments.every((comment: { id?: string }) => !!comment.id && successors.some(id => byId.get(id)?.metadata?.reply_context?.comments
-			?.some((copy: { id?: string; cid?: string }) => copy.id === comment.id && shown.has(replyKey(id, copy.cid)))))) placed.add(row.id);
-	}
-	return placed;
+/** Comment-only inputs live in their comment threads, regardless of target loading or delivery state. */
+export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
+	return new Set(rows.filter(row => row.thread_id === threadId && row.role === 'user'
+		&& !row.content.trim() && !row.metadata?.attachments?.length
+		&& row.metadata?.reply_context?.comments?.length).map(row => row.id));
 }
 
 function supersededReplies(rows: Message[], threadId: string | null | undefined): Set<string> {
@@ -55,17 +17,6 @@ function supersededReplies(rows: Message[], threadId: string | null | undefined)
 		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
 	}
 	return superseded;
-}
-
-/** Placed replies still needing delivery or recovery retain their transcript controls. */
-export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const placed = placedCommentEnvelopes(rows, threadId);
-	const superseded = supersededReplies(rows, threadId);
-	for (const row of rows) {
-		if (row.thread_id === threadId && (row._optimistic || row.delivery_state === 'queued'
-			|| (row.delivery_state && row.delivery_state !== 'delivered' && !superseded.has(row.id)))) placed.delete(row.id);
-	}
-	return placed;
 }
 
 const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {

@@ -153,8 +153,8 @@ export function sendMessage(
 		created_at: new Date().toISOString(),
 		_optimistic: true,
 	};
-	if (isDisplayedThread(threadId)) {
-		messages.update(m => [...m, msg]);
+	if (isDisplayedThread(threadId) && (content.trim() || !comments.length || attachments?.length)) {
+		messages.update(rows => [...rows, msg]);
 	}
 	// One queue. A message sent while a checkpoint holds the thread is an
 	// ordinary queued row that the transcript renders like any other; the frame
@@ -178,7 +178,7 @@ export function sendMessage(
 	threads.update(ss => {
 		const updated = ss.map(s =>
 			s.id === threadId
-				? { ...s, updated_at: now, last_message: content.slice(0, 100) }
+				? { ...s, updated_at: now, last_message: content || !comments.length ? content.slice(0, 100) : s.last_message }
 				: s
 		);
 		updated.sort((a, b) => {
@@ -191,7 +191,7 @@ export function sendMessage(
 
 	const effort = get(reasoningEffort);
 	// The captured context belongs to this send.
-	const replyContext = takeReplyContext(threadId) ?? {};
+	const replyContext = !content && comments.length ? {} : takeReplyContext(threadId) ?? {};
 	if (comments.length) replyContext.comments = comments;
 	const hasReplyContext = Object.keys(replyContext).length > 0;
 	const frame = JSON.stringify({
