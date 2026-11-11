@@ -705,7 +705,7 @@ def test_update_swaps_the_staged_app_and_hands_off_to_its_own_script(app):
         env=app.env(
             CORSIA_RESTART_BACKEND_PORT=str(PORT),
             CORSIA_RESTART_OPERATION_ID=OPERATION_ID,
-            CORSIA_RESTART_CURL=str(app.fakebin / "curl"),
+            CORSIA_RESTART_RESULT_FILE=str(app.root / "lifecycle.result"),
         ),
         capture_output=True,
         text=True,

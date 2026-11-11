@@ -68,7 +68,7 @@ def test_explicit_refusal_records_result_without_cleanup_request(tmp_path, monke
     curl = tmp_path / "curl"
     curl.write_text('#!/bin/bash\nprintf "call\\n" >> "$CALLS"\nexit ' + ('0' if reachable else '7') + '\n')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     script = tmp_path / "corsia"
     from pathlib import Path
     corsia_text = (Path(__file__).resolve().parents[2] / "scripts/corsia").read_text()

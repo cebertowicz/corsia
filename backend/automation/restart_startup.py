@@ -78,6 +78,24 @@ async def run_startup_reconcile(logger) -> tuple[object, tuple[str, ...], str | 
     return reconciled
 
 
+def _remove_terminal_lifecycle_results(logger) -> None:
+    """Remove prior lifecycle results only after their operations are terminal."""
+    import re
+    from automation.self_restart import TERMINAL_STATUSES, operation_by_id
+    from infra.config import LOGS_DIR
+
+    for path in LOGS_DIR.glob("lifecycle-*.result"):
+        match = re.fullmatch(r"lifecycle-([0-9a-f]{32})\.result", path.name)
+        if not match:
+            continue
+        operation = operation_by_id(match.group(1))
+        if operation and operation["status"] in TERMINAL_STATUSES:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("could not remove terminal lifecycle result {}", path.name)
+
+
 async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operation, logger) -> None:
     """Time and report the lifecycle-owned post-bind drive phase.
 
@@ -99,6 +117,7 @@ async def run_startup_drive(harness_task, recovered, wakes, rolled_back_operatio
     logger.info("startup phase: restart continuity drive started")
     try:
         outcomes = await asyncio.gather(drive(), settle_unconfirmed_update(logger), return_exceptions=True)
+        await run_in_db(_remove_terminal_lifecycle_results, logger)
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
                 raise outcome

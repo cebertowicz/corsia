@@ -136,10 +136,13 @@ async def settle_restart_exit(process, operation_id: str, returncode: int) -> No
         path = Path(process.lifecycle_result_path)
         lines = path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
         fields = dict(line.split("=", 1) for line in lines)
-        if (int(fields["status"]) != returncode or
-            any(fields[key] not in {"true", "false"} for key in
+        if (any(fields[key] not in {"true", "false"} for key in
                 ("is_update", "unconfirmed_bootout", "backend_healthy")) or
             len(fields["refusal_reason"]) > 500):
+            raise ValueError("invalid lifecycle result")
+        if fields["status"] == "pending" and fields["unconfirmed_bootout"] == "true":
+            return
+        if int(fields["status"]) != returncode:
             raise ValueError("invalid lifecycle result")
     except (AttributeError, OSError, UnicodeError, ValueError, KeyError):
         await abort_restart_control(
