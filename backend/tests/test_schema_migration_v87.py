@@ -15,12 +15,18 @@ _V86 = """
         created_at TEXT NOT NULL, replacement TEXT, review INTEGER NOT NULL DEFAULT 0,
         -- Not v86-era: the one unread definition reads the person-tag mark, so this fixture needs
         -- that column to read unread here. The proof below is the v87 stamp carry, untouched.
-        tagged_user_id TEXT
+        tagged_user_id TEXT,
+        -- Not v86-era either: thread attention also reads the comments delivered to the person,
+        -- so the fixture carries the columns and tables that read joins. They stay empty here.
+        author_thread_id TEXT, decision TEXT
     );
     CREATE TABLE doc_comment_views (
         user_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
         viewed_at TEXT NOT NULL, PRIMARY KEY (user_id, artifact_id)
     );
+    CREATE TABLE threads (id TEXT PRIMARY KEY, user_id TEXT);
+    CREATE TABLE doc_feedback_batches (id TEXT PRIMARY KEY, artifact_id TEXT, recipient_id TEXT);
+    CREATE TABLE doc_feedback_batch_items (batch_id TEXT, comment_id TEXT);
 """
 SEEN = '2026-10-02T00:00:00+00:00'
 
