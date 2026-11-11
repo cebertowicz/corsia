@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import authenticate
 from infra.chat_comment_index import attach_comments
-from infra.chat_comment_receipts import comment_only_receipt_turns
+from infra.chat_comment_receipts import annotate_comment_only_receipts
 from infra.database import get_db
 from infra.db_async import run_in_db, run_read
 from infra.queries import get_thread_for_user
@@ -18,13 +18,11 @@ from api.thread_inbox_actions import (
 )
 from api.thread_focus_page import (
     InvertedRange,
-    RangeTooLarge,
     read_authorized_focus_page,
-    read_authorized_run_projection,
     read_authorized_run_range,
 )
+from api.thread_focus_projection import RangeTooLarge, read_authorized_run_projection
 from api.thread_cards import attach_result_cards
-from api.thread_message_rows import metadata_dict
 from api.thread_paging import (
     CursorNotFound,
     load_tool_result,
@@ -34,18 +32,13 @@ from api.thread_paging import (
 router = APIRouter(prefix="/api", tags=["threads"])
 
 
-def _annotate_comment_only_receipts(db, thread_id, page):
-    turn_ids = [metadata_dict(row).get("turn_id") for row in page]
-    hidden = comment_only_receipt_turns(db, thread_id, list({turn for turn in turn_ids if isinstance(turn, str)}))
-    for row, turn in zip(page, turn_ids):
-        if isinstance(turn, str) and turn in hidden:
-            row["commentOnlyReceipt"] = True
-
-
 def _attach_page_extras(db, thread_id, user_id, result):
     attach_result_cards(db, thread_id, user_id, result)
     if result is not None:
         page = result['messages'] if isinstance(result, dict) else result[0]
+        if not isinstance(result, dict):
+            # Focus reads drop that work in SQL; the plain page marks it for the client.
+            annotate_comment_only_receipts(db, thread_id, page)
         attach_comments(db, thread_id, user_id, page)
 
 @router.post("/threads/{thread_id}/messages/{message_id}/cancel")
@@ -146,8 +139,6 @@ async def get_messages(
                 result = read_authorized_page_with_summaries(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
-                if result is not None:
-                    _annotate_comment_only_receipts(db, thread_id, result[0])
             _attach_page_extras(db, thread_id, user["id"], result)
             return (result, chat_reply_items(db, user["id"], thread_id)) if result is not None else None
         finally:

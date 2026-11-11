@@ -48,6 +48,12 @@ def _metadata(raw: object) -> dict:
     return {}
 
 
+def row_turn_id(row: dict) -> str | None:
+    """The Turn a message row belongs to, if its metadata names one."""
+    turn = _metadata(row.get("metadata")).get("turn_id")
+    return turn if isinstance(turn, str) else None
+
+
 def _system_type(meta: dict) -> str:
     kind = meta.get("type")
     return str("" if kind is None else kind)
@@ -76,6 +82,18 @@ def is_focus_visible(row: dict) -> bool:
             return is_result_notice(meta, row.get("content"))
         return kind not in ACTIVITY_SYSTEM_TYPES and kind not in NEVER_DRAWN_SYSTEM_TYPES
     return False
+
+
+def is_comment_only_work(row: dict, turns: set[str]) -> bool:
+    """Whether `row` is work of one of `turns`, completed Turns that only answered chat comments.
+
+    Their assistant rows and the system rows Focus would not show leave no Worked
+    receipt; a notice Focus shows stays. `COMMENT_ONLY_WORK_SQL` is the SQL twin.
+    """
+    role = row.get("role")
+    return row_turn_id(row) in turns and (
+        role == "assistant" or (role == "system" and not is_focus_visible(row))
+    )
 
 
 def row_kind(row: dict) -> str:
@@ -160,6 +178,12 @@ NEVER_DRAWN_FILTER = (
     f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
     f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
 )
+
+# `is_comment_only_work` in SQL; `:suppressed` is the JSON array of those Turn ids.
+COMMENT_ONLY_WORK_SQL = f"""CASE WHEN role != 'user' AND json_valid(metadata) THEN
+    COALESCE(json_extract(metadata, '$.turn_id') IN (SELECT value FROM json_each(:suppressed))
+    AND (role = 'assistant' OR (role = 'system' AND ({FOCUS_VISIBLE_SQL}) = 0)), 0)
+    ELSE 0 END"""
 
 
 def focus_kind_sql(weight_sql: str) -> str:

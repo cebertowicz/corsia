@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from infra.focus_rows import is_comment_only_work, row_turn_id
+
 # ECMAScript String.trim whitespace, matching suppressibleCommentEnvelopes.
 _TRIM = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
@@ -56,6 +58,25 @@ def comment_only_receipt_turns(db: sqlite3.Connection, thread_id: str, turn_ids:
         )""",
         (json.dumps(candidate_ids), thread_id, thread_id, _TRIM),
     ).fetchall()}
+
+
+def _page_turns(db: sqlite3.Connection, thread_id: str, rows: list[dict]) -> set[str]:
+    turns = {turn for turn in map(row_turn_id, rows) if turn is not None}
+    return comment_only_receipt_turns(db, thread_id, sorted(turns))
+
+
+def annotate_comment_only_receipts(db: sqlite3.Connection, thread_id: str, rows: list[dict]) -> None:
+    """Mark a plain page's rows of qualifying Turns so the client draws no receipt for them."""
+    hidden = _page_turns(db, thread_id, rows)
+    for row in rows:
+        if row_turn_id(row) in hidden:
+            row["commentOnlyReceipt"] = True
+
+
+def drop_comment_only_work(db: sqlite3.Connection, thread_id: str, rows: list[dict]) -> list[dict]:
+    """Remove qualifying Turns' work rows from an expanded Focus run."""
+    hidden = _page_turns(db, thread_id, rows)
+    return [row for row in rows if not is_comment_only_work(row, hidden)]
 
 
 def _terminal_comment_only_receipt(thread_id: str, turn_id: str, db=None) -> bool:

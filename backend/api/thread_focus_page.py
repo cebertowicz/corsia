@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql, is_focus_visible
+from infra.focus_rows import (
+    COMMENT_ONLY_WORK_SQL, FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql,
+)
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -23,10 +25,9 @@ from api.thread_paging import (
     project_anchors,
 )
 from api.thread_turn_summaries import page_turn_summaries
-from api.thread_message_rows import metadata_dict
 from history.projection import in_read_snapshot
 from infra.message_activity import ACTIVITY_WEIGHT_SQL, DISPLAY_ROW_SELECT
-from infra.chat_comment_receipts import comment_only_receipt_turns
+from infra.chat_comment_receipts import comment_only_receipt_turns, drop_comment_only_work
 from infra.queries import get_thread_for_user
 
 # Rows one Focus page may inspect. A page of a 0.7%-visible thread needs about 7100.
@@ -42,13 +43,9 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 # statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
 # `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
-_SUPPRESSED_WORK = f"""CASE WHEN role != 'user' AND json_valid(metadata) THEN
-    COALESCE(json_extract(metadata, '$.turn_id') IN (SELECT value FROM json_each(:suppressed))
-    AND (role = 'assistant' OR (role = 'system' AND ({FOCUS_VISIBLE_SQL}) = 0)), 0)
-    ELSE 0 END"""
-_VISIBLE_COLUMN = f"CASE WHEN {_SUPPRESSED_WORK} THEN 0 ELSE ({FOCUS_VISIBLE_SQL}) END AS vis"
+_VISIBLE_COLUMN = f"CASE WHEN {COMMENT_ONLY_WORK_SQL} THEN 0 ELSE ({FOCUS_VISIBLE_SQL}) END AS vis"
 _RUN_COLUMNS = (
-    f"{_VISIBLE_COLUMN}, {_SUPPRESSED_WORK} AS suppressed, {ACTIVITY_WEIGHT_SQL} AS weight, "
+    f"{_VISIBLE_COLUMN}, {COMMENT_ONLY_WORK_SQL} AS suppressed, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
     "CASE WHEN role = 'assistant' AND instr(metadata, '\"browser_chip\"') > 0 AND json_valid(metadata) "
     "THEN json_extract(metadata, '$.browser_chip') END AS chip, "
@@ -166,10 +163,6 @@ _OLDER_EXISTS_SQL = (
 
 class InvertedRange(ValueError):
     """`from_id` is newer than `to_id`; the route maps it to 400."""
-
-
-class RangeTooLarge(ValueError):
-    """The requested projection exceeds the existing Focus scan cap."""
 
 
 @dataclass
@@ -328,18 +321,6 @@ def _display_anchor_seq(db, thread_id: str, message_id: str) -> int:
     return int(row["seq"])
 
 
-def page_run_projection(db, thread_id: str, from_id: str, to_id: str) -> list[dict]:
-    """Recompute an existing stub's bounded range after a Turn settles."""
-    low = _display_anchor_seq(db, thread_id, from_id)
-    high = _display_anchor_seq(db, thread_id, to_id)
-    if low > high:
-        raise InvertedRange(f"from_id {from_id} is newer than to_id {to_id}")
-    walk = _walk(db, thread_id, high + 1, FOCUS_SCAN_CAP + 1, FOCUS_SCAN_CAP, range_floor=low)
-    if walk.has_more:
-        raise RangeTooLarge("Focus run range exceeds the scan cap")
-    return walk.runs
-
-
 def page_run_range(
     db, thread_id: str, limit: int, from_id: str, to_id: str, before: str | None,
 ) -> dict:
@@ -367,13 +348,7 @@ def page_run_range(
     newest_first = [dict(row) for row in rows]
     has_more = len(newest_first) > limit
     selected = list(reversed(newest_first[:limit]))
-    turn_ids = [metadata_dict(row).get("turn_id") for row in selected]
-    hidden = comment_only_receipt_turns(db, thread_id, [turn for turn in turn_ids if isinstance(turn, str)])
-    visible = [row for row in selected if not (
-        metadata_dict(row).get("turn_id") in hidden
-        and (row["role"] == "assistant" or (row["role"] == "system" and not is_focus_visible(row)))
-    )]
-    display = project_anchors(db, thread_id, visible)
+    display = project_anchors(db, thread_id, drop_comment_only_work(db, thread_id, selected))
     finish_display(db, thread_id, display, include_tool_results=False)
     return {
         "messages": display,
@@ -407,17 +382,6 @@ def read_authorized_focus_page(
     return in_read_snapshot(
         db, _focus_read, thread_id, limit, before, user_id=user_id, scan_cap=scan_cap,
     )
-
-
-def _projection_read(thread_id, from_id, to_id, *, db, user_id=None):
-    if not _authorized(db, thread_id, user_id):
-        return None
-    return {"messages": [], "runs": page_run_projection(db, thread_id, from_id, to_id)}
-
-
-def read_authorized_run_projection(db, thread_id: str, from_id: str, to_id: str, *, user_id=None):
-    """Authorization and stub reprojection share one snapshot."""
-    return in_read_snapshot(db, _projection_read, thread_id, from_id, to_id, user_id=user_id)
 
 
 def read_authorized_run_range(
