@@ -62,6 +62,14 @@ export function retainDisplayedRows(threadId: string): void {
 		row.thread_id === threadId || isDisplayedThread(row.thread_id)));
 }
 
+/** Mark a displayed thread's rows of a Turn the server found comment-only (see `isCommentOnlyWork`). */
+export function markCommentOnlyTurn(threadId: string, turnId: string): void {
+	if (!isDisplayedThread(threadId)) return;
+	messages.update((current) => current.map((message) =>
+		message.thread_id === threadId && message.metadata?.turn_id === turnId
+			? { ...message, commentOnlyReceipt: true } : message));
+}
+
 export function _resetDisplayedThreadsForTests(): void {
 	claims.set(new Map());
 }

@@ -11,7 +11,6 @@
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
-	import { refreshCommentRuns } from '$lib/refreshCommentRuns';
 	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
@@ -24,7 +23,7 @@
 	import { createChatCommentMargin } from './chatCommentMargin.svelte';
 	import { coreSettings } from '$lib/stores/settings';
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
-	import { loadRunRange } from '$lib/focusRunLoader';
+	import { loadRunRange, refreshCommentRuns } from '$lib/focusRunLoader';
 	import InputBar from './InputBar.svelte';
 	import type { SendOutcome } from './composerSendReadiness';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
@@ -290,15 +289,8 @@
 			followBottom: () => messageListRef?.followBottom(),
 			fetchThreadMessages,
 			clearWarmKeys: clearWarmKeysForThread,
-			refreshCommentRuns: (threadId, turnId) => {
-				const bearer = get(token);
-				if (!bearer) return;
-				void refreshCommentRuns(threadId, turnId, {
-					token: bearer, runs: () => get(activeThreadId) === threadId ? focusRuns : [],
-					replace: (old, next) => { focusRuns = focusRuns.flatMap(run => run === old ? next : [run]); },
-					request: url => fetch(url),
-				});
-			},
+			refreshCommentRuns: (threadId, turnId) =>
+				void refreshCommentRuns(threadId, turnId, () => focusRuns, (next) => { focusRuns = next; }),
 		});
 		const handleVisibilityChange = async () => {
 			if (document.visibilityState !== 'visible') return;

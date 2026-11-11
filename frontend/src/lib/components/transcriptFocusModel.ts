@@ -4,7 +4,7 @@ import type { TranscriptMessage } from './messageListModel';
 import { SOURCE_MEMBERS, sourceMembers, sourceRange } from './contextEventModel';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
 import { combineStubs, stubTokens, type RunStub } from '$lib/focusRuns';
-import { hasAssistantActivity, isHumanMessage, isSystemNotice } from './transcriptRowKinds';
+import { hasAssistantActivity, isCommentOnlyWork, isHumanMessage, isSystemNotice } from './transcriptRowKinds';
 
 export { isFocusVisible, isRecoveredError, rowKind, runKinds, type RowKind } from './transcriptRowKinds';
 
@@ -263,8 +263,7 @@ export function buildTranscriptPresentation(
 	};
 
 	for (const message of visibleMessages) {
-		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id)
-			|| (message.commentOnlyReceipt === true && !isHumanMessage(message) && !isSystemNotice(message))) continue;
+		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id) || isCommentOnlyWork(message)) continue;
 		const at = sourceRange(message)?.min ?? message.seq;
 		if (typeof at === 'number' && at > 0) holdThrough(at);
 		if (isHumanMessage(message) || isSystemNotice(message)) {
