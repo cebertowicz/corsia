@@ -136,7 +136,7 @@ app_mode_swap_staged_update /disposable/staged
     curl = tmp_path / "curl"
     curl.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$TRACE"\n')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     log = tmp_path / "update.log"
     with log.open("w") as out:
         child = spawn_restart_lifecycle(script, ["restart-prepared"], {

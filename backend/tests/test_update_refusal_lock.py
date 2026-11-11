@@ -22,7 +22,7 @@ def test_refusal_releases_update_lock_before_failed_cleanup(tmp_path, monkeypatc
 exit 7
 ''')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
 source "{root / 'scripts/corsia.d/app_mode.sh'}"

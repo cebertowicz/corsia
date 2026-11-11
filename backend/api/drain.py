@@ -6,6 +6,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from loguru import logger
 
 from infra.auth import authenticate
 
@@ -124,6 +125,19 @@ async def settle_drain_exit(
     return released
 
 
+def log_restart_exit_failure(operation_id: str):
+    """Retrieve and report a detached settlement failure for this operation."""
+    def finished(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("restart exit settlement failed for operation {}", operation_id)
+
+    return finished
+
+
 async def settle_restart_exit(process, operation_id: str, returncode: int) -> None:
     """Settle a child exit from its atomically published lifecycle result."""
     from pathlib import Path
@@ -136,10 +150,13 @@ async def settle_restart_exit(process, operation_id: str, returncode: int) -> No
         path = Path(process.lifecycle_result_path)
         lines = path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
         fields = dict(line.split("=", 1) for line in lines)
-        if (int(fields["status"]) != returncode or
-            any(fields[key] not in {"true", "false"} for key in
+        if (any(fields[key] not in {"true", "false"} for key in
                 ("is_update", "unconfirmed_bootout", "backend_healthy")) or
             len(fields["refusal_reason"]) > 500):
+            raise ValueError("invalid lifecycle result")
+        if fields["status"] == "pending" and fields["unconfirmed_bootout"] == "true":
+            return
+        if int(fields["status"]) != returncode:
             raise ValueError("invalid lifecycle result")
     except (AttributeError, OSError, UnicodeError, ValueError, KeyError):
         await abort_restart_control(

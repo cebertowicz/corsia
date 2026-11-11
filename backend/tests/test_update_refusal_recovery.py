@@ -163,7 +163,7 @@ def test_lifecycle_refusal_records_reason_without_loopback(tmp_path, monkeypatch
     trace = tmp_path / "calls"
     curl.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$TRACE"\nexit ' + ('0' if reachable else '7') + '\n')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     script = tmp_path / "corsia"
     corsia_text = (Path(__file__).resolve().parents[2] / "scripts/corsia").read_text()
     fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"

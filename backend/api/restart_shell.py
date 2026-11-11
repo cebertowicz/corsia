@@ -6,7 +6,6 @@ import json
 import os
 import re
 import select
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +30,18 @@ readonly _corsia_lifecycle_is_update
 _corsia_lifecycle_done=false
 _corsia_update_stopping=
 _corsia_unconfirmed_bootout=false
+_corsia_lifecycle_record_teardown() {
+    [ -n "$_corsia_lifecycle_result_file" ] || return 1
+    # Publish uncertainty before launchd can start tearing the service down.
+    {
+        printf 'status=pending\n'
+        printf 'is_update=%s\n' "$_corsia_lifecycle_is_update"
+        printf 'unconfirmed_bootout=true\n'
+        printf 'backend_healthy=false\n'
+        printf 'refusal_reason=\n'
+    } > "$_corsia_lifecycle_result_file.tmp" \
+        && mv -f "$_corsia_lifecycle_result_file.tmp" "$_corsia_lifecycle_result_file"
+}
 _corsia_lifecycle_cleanup() {
     _corsia_lifecycle_status=$?
     local refusal_reason="${_corsia_lifecycle_refusal_reason:-}"
@@ -62,6 +73,9 @@ _corsia_lifecycle_cleanup() {
             && mv -f "$_corsia_lifecycle_result_file.tmp" "$_corsia_lifecycle_result_file" \
             || printf 'Lifecycle result record not written\n'
     fi
+    if [ "$_corsia_lifecycle_done" = true ] && [ -n "$_corsia_lifecycle_result_file" ]; then
+        rm -f "$_corsia_lifecycle_result_file"
+    fi
     exit "$_corsia_lifecycle_status"
 }
 trap _corsia_lifecycle_cleanup EXIT
@@ -71,13 +85,12 @@ trap 'exit 143' TERM
 _corsia_lifecycle_token="${CORSIA_RESTART_CALLER_TOKEN:-}"
 _corsia_lifecycle_port="${CORSIA_RESTART_BACKEND_PORT:-}"
 _corsia_lifecycle_operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
-_corsia_lifecycle_curl="${CORSIA_RESTART_CURL:-}"
 _corsia_lifecycle_result_file="${CORSIA_RESTART_RESULT_FILE:-}"
 export -n _corsia_lifecycle_token _corsia_lifecycle_port \
-    _corsia_lifecycle_operation_id _corsia_lifecycle_curl _corsia_lifecycle_result_file
+    _corsia_lifecycle_operation_id _corsia_lifecycle_result_file
 readonly _corsia_lifecycle_token _corsia_lifecycle_port \
-    _corsia_lifecycle_operation_id _corsia_lifecycle_curl _corsia_lifecycle_result_file
-unset CORSIA_RESTART_CALLER_TOKEN CORSIA_RESTART_CURL
+    _corsia_lifecycle_operation_id _corsia_lifecycle_result_file
+unset CORSIA_RESTART_CALLER_TOKEN
 if ! declare -p _CORSIA_REQUEST_BACKEND_PORT > /dev/null 2>&1; then
     readonly _CORSIA_REQUEST_BACKEND_PORT="$_corsia_lifecycle_port"
 fi
@@ -108,20 +121,12 @@ def _lifecycle_launch_env(
         caller_credential
         or restart_env.get("CORSIA_RESTART_CALLER_TOKEN", "")
     )
-    curl_path = shutil.which("curl", path=restart_env.get("PATH"))
     if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("restart operation id must be 32 lowercase hex characters")
     if not port.isdigit() or not 1 <= int(port) <= 65535:
         raise ValueError("restart backend port must be between 1 and 65535")
     if not credential or "\x00" in credential:
         raise ValueError("restart caller credential is missing or invalid")
-    if (
-        curl_path is None
-        or not Path(curl_path).is_absolute()
-        or not Path(curl_path).is_file()
-        or not os.access(curl_path, os.X_OK)
-    ):
-        raise ValueError("restart cleanup requires an absolute curl executable")
 
     launch_env = {
         name: value
@@ -133,14 +138,12 @@ def _lifecycle_launch_env(
             and not name.startswith("_CORSIA_LIFECYCLE_")
             and not name.startswith("_CORSIA_REQUEST_")
             and not name.startswith("_corsia_lifecycle_")
-            and not name.startswith("_corsia_cleanup_")
         )
     }
     launch_env.update({
         "CORSIA_RESTART_BACKEND_PORT": port,
         "CORSIA_RESTART_OPERATION_ID": operation_id,
         "CORSIA_RESTART_CALLER_TOKEN": credential,
-        "CORSIA_RESTART_CURL": curl_path,
     })
     return launch_env
 
