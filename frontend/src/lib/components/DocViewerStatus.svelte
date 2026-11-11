@@ -133,7 +133,8 @@
 					const verifiedWidth = verified ? probe.getBoundingClientRect().width + 6 : 0;
 					probe.remove();
 					const others = [...identity.children].filter(child => child !== tools && !child.classList.contains('identity-details')).reduce((width, child) => width + child.getBoundingClientRect().width + 6, 0);
-					useMetadataRow = identity.clientWidth < tools.getBoundingClientRect().width + others + ownerWidth + verifiedWidth + 6;
+					// The compact row has no Mark verified action; retain the complete metadata row when it is offered.
+					useMetadataRow = !!header.querySelector('.verification-action') || identity.clientWidth < tools.getBoundingClientRect().width + others + ownerWidth + verifiedWidth + 6;
 				}
 			});
 		};
@@ -301,7 +302,7 @@
 	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
 	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.metadata-owner { flex: 1 1 100%; min-width: 0; }
+	.metadata-owner { flex: 1 1 100%; min-width: 0; font-size: 13px; }
 	.verification-action { margin-left: -10px; }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
 	.metadata-error { color: var(--red); }
@@ -336,7 +337,8 @@
 	@container doc-canvas (max-width: 37.5rem) {
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
-		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
+		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: 13px; container: identity-age / inline-size; }
+		.identity-age :global(button.identity) { flex-wrap: nowrap; }
 		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; container: identity-owner / inline-size; }
 		.plain-owner-only { display: none; }
 		@container identity-owner (width < 13ch) {
