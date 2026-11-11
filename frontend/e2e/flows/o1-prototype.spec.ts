@@ -95,6 +95,15 @@ test('capture document ownership states', async ({ page }) => {
 			await page.getByText('Garden planning', { exact: true }).first().click();
 			await expect(page.locator('.cm-content')).toBeVisible();
 			await expect(page.locator('.doc')).toHaveCSS('opacity', '1');
+			await expect(page.locator('.cm-content .cm-md-h1')).toBeVisible();
+			await page.waitForFunction(() => {
+				const editor = document.querySelector('.cm-content');
+				if (!editor || editor.contains(document.activeElement)) return false;
+				return [...editor.querySelectorAll('.cm-line')].every(line => {
+					const box = line.getBoundingClientRect();
+					return box.bottom <= 0 || box.top >= innerHeight || !/^\s*#{1,6}\s/.test(line.textContent ?? '');
+				});
+			});
 			const details = page.getByRole('button', { name: 'Document details' });
 			const control = page.getByRole('button', { name: /^Owner/ });
 			if (!(await control.isVisible()) && await details.isVisible()) await details.click();
