@@ -71,14 +71,24 @@ export const settled = (page: Page) => page.evaluate(() => Promise.all(document.
 	.filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
 	.map((a) => a.finished.catch(() => null))).then(() => undefined));
 
-/** Seed the document (and, when writable, a comment on one table cell), then open it in the canvas at `layout`. */
-export async function openTableDocument(page: Page, layout: { width: number; height: number }, { readOnly = false, text = DOC } = {}): Promise<Seeded> {
+/**
+ * Resolves once the phone sheet around `target`, if it is in one, has finished sliding in. `settled` cannot tell: the sheet's
+ * real slide is started a frame after the sheet is in the document, and a snapshot taken before that holds only finished
+ * zero-length placeholders, so it returns while the sheet is still moving. A sheet at rest has no transform on its wrapper.
+ */
+export const sheetAtRest = (target: Locator) => target.evaluate((el) => new Promise<void>((resolve) => {
+	const motion = el.closest('.drawer-motion');
+	const check = () => (!motion || getComputedStyle(motion).transform === 'none' ? resolve() : requestAnimationFrame(check));
+	check();
+}));
+
+/** Seed the document (and, when writable, a comment on `quoted`, words in one table cell by default), then open it in the canvas at `layout`. */
+export async function openTableDocument(page: Page, layout: { width: number; height: number }, { readOnly = false, text = DOC, quoted = 'trailhead sign points the wrong way' } = {}): Promise<Seeded> {
 	await page.setViewportSize({ width: layout.width, height: layout.height });
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 	const doc = await seed(page, text, readOnly);
 	let commentId: string | null = null;
 	if (!readOnly) {
-		const quoted = 'trailhead sign points the wrong way';
 		const from = text.indexOf(quoted);
 		const created = await page.request.post(`/api/artifacts/${doc.artifactId}/comments`, {
 			params: doc.params,

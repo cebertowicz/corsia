@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import {
-	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, settled
+	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, settled, sheetAtRest
 } from '../support/tableCells';
 
 /**
@@ -15,6 +15,7 @@ type Box = { x: number; y: number; right: number; bottom: number };
 /** Where `target` rests: read once the offer's pop and the sheet's slide have finished, since both move what they draw. */
 const boxOf = async (target: Locator): Promise<Box> => {
 	await settled(target.page());
+	await sheetAtRest(target);
 	return target.evaluate((el) => {
 		const r = el.getBoundingClientRect();
 		return { x: r.left, y: r.top, right: r.right, bottom: r.bottom };
@@ -140,6 +141,21 @@ for (const layout of LAYOUTS) {
 			expect(near(opened.x, proseComposer.x) && Math.abs(opened.y - proseComposer.y) <= 4,
 				`the composer opens against the selected words' line as in prose (${JSON.stringify({ opened, proseComposer })})`).toBe(true);
 			await frame(page, `05-selection-composer-${at}`);
+		});
+
+		test('a click on a comment covering a whole cell opens the comment and the cell, and the comment stays open', async ({ page }) => {
+			test.setTimeout(120_000);
+			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });
+			const whole = page.locator(`td[data-comment-ids*="${seeded.commentId}"]`);
+			await expect(whole, 'the comment is drawn on the whole cell').toBeVisible();
+			await whole.click({ delay: 80 });
+			await expect(page.getByText('Which way does it point now?').first()).toBeVisible();
+			await expect(editorIn(page), 'the cell opened with the comment').toBeVisible();
+			// Whatever would close the comment (the cell editor taking focus, the document reading the press) has run by the next two frames.
+			await settled(page);
+			await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+			await expect(page.getByText('Which way does it point now?').first(), 'the comment is still open').toBeVisible();
+			await expect(editorIn(page), 'the cell is still open').toBeVisible();
 		});
 
 		test('a read-only document never opens a cell editor', async ({ page }) => {

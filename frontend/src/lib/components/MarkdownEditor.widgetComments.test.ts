@@ -12,7 +12,7 @@ const DANA = DOC.indexOf('Dana');
 let component: ReturnType<typeof mount> | undefined;
 let host: HTMLElement;
 
-function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn(), props: { onCaretAway?: () => void } = {}) {
+function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn(), props: { onCaretAway?: () => void; cardMode?: 'popover' | 'sheet' } = {}) {
 	host = document.body.appendChild(document.createElement('div'));
 	component = mount(MarkdownEditor, { target: host, props: { value: DOC, highlights, onAnchorFocus, ...props } });
 	flushSync();
@@ -103,6 +103,59 @@ describe('a click on comments drawn inside a table', () => {
 			await Promise.resolve();
 			flushSync();
 			expect(view.state.selection.main.head, 'the editor caret did not jump to the table').toBe(2);
+			expect(onCaretAway, 'the comment the click opened was not let go').not.toHaveBeenCalled();
+		} finally {
+			delete (document as Partial<Document>).caretPositionFromPoint;
+		}
+	});
+});
+
+/** The cards cover the text here, so the card is opened by the click alone, never by the cell editor's caret arriving. */
+describe('a click on a comment that covers a whole table cell', () => {
+	const cellEditor = () => host.querySelector<HTMLElement>('.cm-md-cell-editor .cm-editor');
+	const markedCell = async () => {
+		const mark = await painted();
+		expect(mark.tagName, 'setup: the mark is drawn on the cell itself').toBe('TD');
+		return mark;
+	};
+
+	it('opens the comment and the cell together, as a click in Docs does', async () => {
+		const onAnchorFocus = mountEditor([comment('a')]);
+		(await markedCell()).click();
+		expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function), undefined, expect.any(MouseEvent));
+		expect(cellEditor(), 'the cell is open for editing').not.toBeNull();
+	});
+
+	it('hands several comments on the cell to their marker, and still opens the cell', async () => {
+		const onMarkerFocus = vi.fn();
+		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus), comment('b', onMarkerFocus)], vi.fn(), { cardMode: 'popover' });
+		(await markedCell()).click();
+		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		expect(onAnchorFocus, 'the cell editor taking focus does not also open a card of its own').not.toHaveBeenCalled();
+		expect(cellEditor(), 'the cell is open for editing').not.toBeNull();
+	});
+
+	it('keeps the comment open when the cell editor takes the focus, and when the table redraws before the browser reports the press', async () => {
+		const onCaretAway = vi.fn();
+		const onAnchorFocus = mountEditor([comment('a')], vi.fn(), { onCaretAway, cardMode: 'popover' });
+		const cell = await markedCell();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		view.focus();
+		view.dispatch({ selection: { anchor: 2 } });
+		flushSync();
+		onCaretAway.mockClear();
+		const caretPosition = vi.fn(() => ({ offsetNode: cell.firstChild!, offset: 1 }) as unknown as CaretPosition);
+		Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: caretPosition });
+		try {
+			cell.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			cell.click();
+			expect(cellEditor(), 'the cell is open for editing').not.toBeNull();
+			cell.classList.add('cm-comment-focused');
+			await Promise.resolve();
+			flushSync();
+			expect(onAnchorFocus, 'the comment opened once, by the click').toHaveBeenCalledOnce();
+			expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function), undefined, expect.any(MouseEvent));
 			expect(onCaretAway, 'the comment the click opened was not let go').not.toHaveBeenCalled();
 		} finally {
 			delete (document as Partial<Document>).caretPositionFromPoint;
