@@ -71,6 +71,43 @@ def test_a_clone_under_the_write_lock_is_a_self_contained_snapshot(tmp_path):
         backup.close()
 
 
+def test_a_passive_checkpoint_between_the_two_clones_does_not_change_the_snapshot(tmp_path, monkeypatch):
+    """Another connection may checkpoint while the lock is held; the cloned WAL still replays those pages."""
+    if not _supports_clone(tmp_path):
+        pytest.skip("this file system cannot clone")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 7)
+    writer.execute("UPDATE t SET label = 'final ' || id")
+    checkpointer = sqlite3.connect(source, isolation_level=None)
+    real_clone = sqlite_clone._clone_file
+    moved: list[int] = []
+
+    def clone_then_checkpoint(src, dst):
+        real_clone(src, dst)
+        if not moved:
+            _busy, _frames, backfilled = checkpointer.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            moved.append(backfilled)
+
+    monkeypatch.setattr(sqlite_clone, "_clone_file", clone_then_checkpoint)
+    holder = sqlite3.connect(source, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    target = tmp_path / "live.db.bak"
+    try:
+        clone_database(source, target, expected_user_version=7)
+    finally:
+        holder.execute("ROLLBACK")
+        for conn in (holder, checkpointer, writer):
+            conn.close()
+
+    assert moved and moved[0] > 0, "the checkpoint must have written WAL pages into the live file"
+    backup = sqlite3.connect(target)
+    try:
+        assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert backup.execute("SELECT count(*) FROM t WHERE label LIKE 'final %'").fetchone()[0] == 500
+    finally:
+        backup.close()
+
+
 def test_a_clone_reading_the_wrong_version_leaves_nothing_behind(tmp_path):
     if not _supports_clone(tmp_path):
         pytest.skip("this file system cannot clone")
