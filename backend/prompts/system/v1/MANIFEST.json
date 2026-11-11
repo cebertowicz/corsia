@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3543,
+      "bytes": 3614,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "7d624bc345602aa0ec6909dc6988026b492ea3206861366a7c28304f01eac43d"
+      "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
     },
     {
       "bytes": 389,
@@ -340,16 +340,16 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 6196,
+      "bytes": 6296,
       "kind": "skill",
       "path": "skills/instruction-review/SKILL.md",
-      "sha256": "5c498c2da4b377a4796489c86d38ab5ea188666623df2ade79b9f6dd71f3a79e"
+      "sha256": "7a6a9a345627f580ab63f7643edcfc3a6939decce6ce69a3e038c04fdb664e92"
     },
     {
-      "bytes": 4630,
+      "bytes": 4792,
       "kind": "skill",
       "path": "skills/instruction-review/corsia.yaml",
-      "sha256": "273db9ab3baf6fcde27c56e4b602e70b253a1472907767367b1a80db7f0043c9"
+      "sha256": "2898a94c8e2b8e5f0b5e760183a7024aa04a201ac4037e1514bbffbacc975afe"
     },
     {
       "bytes": 3634,

@@ -25,7 +25,7 @@ Improve agent behavior, not prose volume, and diagnose before you cut, per skill
 - **reread** — Read the file as its first reader, on a fresh look, not as its editor. Knowing what you changed makes a dangling reference invisible; reading from the first line makes it visible.
 - **whole-result** — Reconcile against your inventory, not your memory. Then ask what a careful auditor would notice that these checks miss, and answer that before you call the run done. A cut that shrinks the set but worsens behavior is reverted, as `context-stewardship` requires; the lagging checks on this step are how you find out, so record the review date where you will meet them again.
 - **cadence** — Arm the wake yourself; a horizon written only in a message wakes nothing. If nothing here can arm one, record that gap so the report can say it, instead of naming a date no one will meet.
-- **report** — Say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
+- **report** — Only when the set changed, something needs the person, or one of their choices is still unanswered: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
 
 ## Choices the owner sets
 

@@ -61,6 +61,6 @@ workflow:
     - id: report
       title: Person told what changed
       required: true
-      check: one message sent in this run giving the set count before and after with headroom, what moved and where, what waits on another owner, what wakes the next review or that nothing here can, any choice still unanswered, and at most one ask
+      check: when the set changed, something needs the person, or one of their choices is still unanswered, one message sent in this run giving the set count before and after with headroom, what moved and where, what waits on another owner, what wakes the next review or that nothing here can, any choice still unanswered, and at most one ask; otherwise no message, and the result recorded on this run's phase
       after: [cadence]
       difficulty: {default: routine}
