@@ -55,6 +55,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     expect(rects.dialog!.right).toBeLessThanOrEqual(width);
     await page.screenshot({ animations: 'disabled', path: `${out}/picker-${width}.png` });
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeHidden();
     if (await details.isVisible() && await details.getAttribute('aria-expanded') === 'true') await details.click();
   }
   // The base owner slot can be hidden by the shell at narrow pane widths.
