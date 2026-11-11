@@ -38,7 +38,7 @@ _RESERVED_EXECUTION_PREFIXES = (
 # ``infra.repo_policy_transition.repo_policy_transition``. They are excused
 # from the registry's ``admit_repo_effect()`` wrapper because that effect would
 # be the active effect their own transition refuses. Nothing else is exempt:
-# effects, transitions and owned processes stay mutually exclusive.
+# effects, transitions and owned processes that can meet stay mutually exclusive.
 _REPO_TRANSITION_OWNERS = frozenset({"project_create", "project_repo_register"})
 
 log = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ class ToolRegistry(ToolStore):
                 context, which only this registry may supply, or the call's
                 plan dispatch could not be settled.
         """
-        from infra.repo_policy_transition import admit_repo_effect
+        from infra.repo_policy_transition import admit_repo_effect, caller_reach
         import tools.confined_reads as confined_reads
         from tools.host_access_gate import (
             authorize_host_action,
@@ -132,14 +132,18 @@ class ToolRegistry(ToolStore):
         execution_params.update(parameter_overrides)
         # These two tools own the stronger repository-policy transition for
         # the repository work they start, and they enter it themselves. The
-        # transition already refuses while any effect is active, so admitting
-        # this call's own effect would only make the tool collide with itself.
-        # Every other tool is still admitted as an effect, and the transition
-        # still excludes effects, other transitions and owned processes.
+        # transition refuses while an effect that can meet it is active, so
+        # admitting this call's own effect would make the tool collide with itself.
+        # Every other tool is admitted as an effect with its caller's reach, and
+        # a transition excludes the effects and owned processes it can meet.
         repo_effect = (
             nullcontext()
             if name in _REPO_TRANSITION_OWNERS
-            else admit_repo_effect()
+            else admit_repo_effect(await asyncio.to_thread(
+                caller_reach,
+                thread_context["id"],
+                leased=authorization.opens_host_paths,
+            ))
         )
         with repo_effect, confined_reads.scope(thread_context):
             with host_action_permit_scope(authorization):

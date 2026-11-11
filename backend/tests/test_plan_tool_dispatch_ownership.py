@@ -137,7 +137,7 @@ async def test_repository_policy_refusal_records_nothing(isolated_db):
     thread_id, identity, attempt_id = _selected_executor(get_db(), "own-repo-policy")
     tool = ProbeTool()
 
-    with repo_policy_transition(active_process_count=lambda: 0):
+    with repo_policy_transition(active_process_reaches=lambda: ()):
         result = await execute_as(registry_of(tool), identity, thread_id, tool.name)
 
     assert result == (

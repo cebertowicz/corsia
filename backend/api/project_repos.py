@@ -29,7 +29,10 @@ from infra.project_repo_policy import (
     switch_repo_branch,
 )
 from infra.repo_policy_transition import (
+    EVERYWHERE,
     RepoPolicyTransitionBusy,
+    Scope,
+    repo_claim,
     repo_policy_transition,
 )
 
@@ -304,10 +307,9 @@ def _update_controls(
     )
 
 
-def _active_owned_process_count() -> int:
-    from host_access.processes import PROCESS_OWNER
-
-    return PROCESS_OWNER.active_process_count()
+def _source_claim(project_id: str, path: Path | None) -> Scope:
+    """The projects a policy change on one source path touches (``EVERYWHERE`` if unknown)."""
+    return EVERYWHERE if path is None else repo_claim(project_id, path)
 
 
 def _commit_repo_policy_update(
@@ -543,8 +545,14 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
                 connection.close()
 
     def _transitioned_add():
+        ws_dir = _workspace_dir_for(project_id)
+        target = (
+            Path(body.path) if body.mode == "link" and body.path
+            else ws_dir / "source" / body.name if body.mode != "link" and body.name
+            else None
+        )
         try:
-            with repo_policy_transition(active_process_count=_active_owned_process_count):
+            with repo_policy_transition(claim=_source_claim(project_id, target)):
                 return _add()
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -603,7 +611,7 @@ async def update_repo(token: str, project_id: str, name: str, body: RepoUpdate):
             verify_checkout = changes_policy or selects_pin
             transition = (
                 repo_policy_transition(
-                    active_process_count=_active_owned_process_count,
+                    claim=_source_claim(project_id, repo_path),
                 )
                 if verify_checkout
                 else nullcontext()
@@ -770,10 +778,9 @@ async def detach_repo(token: str, project_id: str, name: str):
             connection.close()
 
     def _transitioned_detach():
+        entry = _workspace_dir_for(project_id) / "source" / name
         try:
-            with repo_policy_transition(
-                active_process_count=_active_owned_process_count,
-            ):
+            with repo_policy_transition(claim=_source_claim(project_id, entry)):
                 return _detach()
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc

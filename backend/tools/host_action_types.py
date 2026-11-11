@@ -68,3 +68,8 @@ class HostActionAuthorization:
     @property
     def parameter_overrides(self) -> dict[str, Any]:
         return dict(self._parameter_overrides)
+
+    @property
+    def opens_host_paths(self) -> bool:
+        """Whether this call runs under a reviewed host-access permit."""
+        return self._permit is not None

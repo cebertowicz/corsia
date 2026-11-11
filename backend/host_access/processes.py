@@ -461,6 +461,17 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
             for runtime in self._runtimes.values()
         )
 
+    def outstanding_process_owners(self) -> tuple[tuple[str, bool], ...]:
+        """Each outstanding process group's thread and whether host access started it."""
+        return tuple(
+            (
+                runtime.record.thread_id,
+                runtime.record.lease_id is not None or runtime.record.permit_id is not None,
+            )
+            for runtime in self._runtimes.values()
+            if runtime.record.terminal_state in _OUTSTANDING_STATES
+        )
+
     @staticmethod
     def _lifecycle_cleanup_pending(runtime: _RuntimeProcess) -> bool:
         transition_pending = (

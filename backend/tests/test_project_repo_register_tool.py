@@ -370,13 +370,13 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
     registry_env, monkeypatch, blocker,
 ):
     """The exemption removes only self-collision, never real exclusion."""
-    from infra.repo_policy_transition import admit_repo_effect
-    from api import project_repos
+    from infra import repo_policy_transition
+    from infra.repo_policy_transition import EVERYWHERE, admit_repo_effect
 
     repo = registry_env["tmp"] / "external" / "app"
     _git_repo(repo)
     if blocker == "owned process":
-        monkeypatch.setattr(project_repos, "_active_owned_process_count", lambda: 1)
+        monkeypatch.setattr(repo_policy_transition, "owned_process_reaches", lambda: [EVERYWHERE])
 
     held = admit_repo_effect() if blocker == "effect" else None
     if held is not None:
@@ -399,6 +399,44 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
         "SELECT COUNT(*) FROM project_repo_policies"
     ).fetchone()[0] == 0
     assert not (registry_env["workspace"] / "source" / "app").exists()
+
+
+@pytest.mark.parametrize("busy_project", ["p2", "p1"])
+@pytest.mark.asyncio
+async def test_register_waits_only_for_work_that_can_reach_the_project(
+    registry_env, monkeypatch, busy_project,
+):
+    """Another project's tool call and process don't block; the same project's do."""
+    from host_access.processes import PROCESS_OWNER
+    from infra.repo_policy_transition import admit_repo_effect, caller_reach
+
+    db = registry_env["db"]
+    other = registry_env["tmp"] / "projects" / "other"
+    other.mkdir(parents=True)
+    db.execute(
+        "INSERT INTO projects (id,name,path,created_at,updated_at) VALUES ('p2','Other',?,'t','t')",
+        (str(other),),
+    )
+    db.execute(
+        "INSERT INTO threads (id,user_id,model,project_id,created_at,updated_at) "
+        "VALUES ('busy-thread','u-test','test/model',?,'t','t')",
+        (busy_project,),
+    )
+    db.commit()
+    repo = registry_env["tmp"] / "external" / "app"
+    _git_repo(repo)
+    monkeypatch.setattr(PROCESS_OWNER, "outstanding_process_owners", lambda: (("busy-thread", False),))
+
+    with admit_repo_effect(caller_reach("busy-thread", leased=False, db=db)):
+        result = await _registry_register(monkeypatch, db, registry_env["workspace"], str(repo))
+
+    registered = db.execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0]
+    if busy_project == "p2":
+        assert "Registered repository 'app'" in result, result
+        assert registered == 1
+    else:
+        assert "blocked by an active tool effect" in result, result
+        assert registered == 0
 
 
 @pytest.mark.asyncio

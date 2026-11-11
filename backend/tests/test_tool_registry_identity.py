@@ -83,7 +83,7 @@ class _TransitionOwningProjectCreateTool(_ResultTool):
     async def execute(self, **_kwargs: Any) -> str:
         from infra.repo_policy_transition import repo_policy_transition
 
-        with repo_policy_transition(active_process_count=lambda: 0):
+        with repo_policy_transition(active_process_reaches=lambda: ()):
             return "ok"
 
 
@@ -456,7 +456,7 @@ async def test_registry_enters_host_gate_with_exact_identity_and_scopes_result(
             events.append(("permit-exit", value))
 
     @contextmanager
-    def repo_scope():
+    def repo_scope(_reach):
         events.append(("repo-enter", None))
         try:
             yield
@@ -748,7 +748,7 @@ async def test_registry_skips_the_repo_effect_only_for_transition_owners(
             super().__init__(tool_name)
 
         async def execute(self, **_kwargs: Any) -> str:
-            with repo_policy_transition(active_process_count=lambda: 0):
+            with repo_policy_transition(active_process_reaches=lambda: ()):
                 return "ok"
 
     _seed_session(
@@ -788,7 +788,7 @@ async def test_registry_keeps_repo_effect_exclusion_for_every_other_tool(
     registry = ToolRegistry()
     registry.register(_ResultTool("capture"))
 
-    with repo_policy_transition(active_process_count=lambda: 0):
+    with repo_policy_transition(active_process_reaches=lambda: ()):
         token = state._current_thread_id.set("effect-thread")
         try:
             result = await registry.execute("capture", {})

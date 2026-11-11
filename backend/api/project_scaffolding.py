@@ -36,7 +36,7 @@ from infra.project_repo_policy import (
     prepare_repo_policy,
     register_prepared_repo_policy,
 )
-from infra.repo_policy_transition import repo_policy_transition
+from infra.repo_policy_transition import repo_claim, repo_policy_transition
 from infra.workspace_paths import WorkspaceReference
 from registry.bootload import report_sync_failure, sync_bootload_documents
 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -300,12 +300,6 @@ def _write_doc_roots(db, project_id: str, roots: list[dict]) -> None:
     )
 
 
-def _active_owned_process_count() -> int:
-    from host_access.processes import PROCESS_OWNER
-
-    return PROCESS_OWNER.active_process_count()
-
-
 def initialize_project(
     db,
     *,
@@ -325,7 +319,9 @@ def initialize_project(
     (``infra.conductor.ensure_project_conductor``).
     """
     transition = (
-        repo_policy_transition(active_process_count=_active_owned_process_count)
+        # The project does not exist yet, so only the projects already holding
+        # the linked path, if any, can meet this transition.
+        repo_policy_transition(claim=repo_claim(None, Path(repo_path_str)))
         if repo_path_str else nullcontext()
     )
     with transition:
