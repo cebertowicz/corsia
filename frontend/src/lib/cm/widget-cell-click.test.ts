@@ -62,6 +62,43 @@ describe('cellClicked', () => {
 		expect(cellClicked(r.view, widget), 'with no point to go by, the padding is no cell\'s').toBeNull();
 	});
 
+	describe('a press beside the table', () => {
+		// The text column spans x 40-240; the table's widget is 120 wide, level with y 100-180, its cells in a 2x2 grid.
+		const laid = () => {
+			const r = track(open());
+			const widget = cellEl(r).closest<HTMLElement>('.cm-md-table')!;
+			vi.spyOn(r.view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 0, 200, 400));
+			vi.spyOn(widget, 'getBoundingClientRect').mockReturnValue(new DOMRect(64, 100, 120, 80));
+			for (const [row, col] of [[0, 0], [1, 0], [0, 1], [1, 1]]) vi.spyOn(cellEl(r, row, col), 'getBoundingClientRect').mockReturnValue(new DOMRect(64 + col * 60, 100 + row * 40, 60, 40));
+			return r;
+		};
+
+		it('goes to the nearest cell when it lands on the editor\'s own area, left or right of the table', () => {
+			const r = laid();
+			expect(cellClicked(r.view, r.view.contentDOM, { x: 61, y: 110 })?.cell, 'left, level with the header row').toBe(cellEl(r, 0, 0));
+			expect(cellClicked(r.view, r.view.scrollDOM, { x: 187, y: 170 })?.cell, 'right, level with the body row').toBe(cellEl(r, 1, 1));
+			expect(cellClicked(r.view, document.body, { x: 243, y: 170 })?.cell, 'on what holds the editor, past the column').toBe(cellEl(r, 1, 1));
+		});
+
+		it('is prose\'s, not the table\'s, when it is above, below or well away from the table', () => {
+			const r = laid();
+			expect(cellClicked(r.view, r.view.contentDOM, { x: 61, y: 95 }), 'above the table').toBeNull();
+			expect(cellClicked(r.view, r.view.contentDOM, { x: 61, y: 185 }), 'below the table').toBeNull();
+			expect(cellClicked(r.view, document.body, { x: 300, y: 110 }), 'beyond the padding').toBeNull();
+		});
+
+		it('is left alone when it lands on a thing of its own, or ends a drag that selected prose', () => {
+			const r = laid();
+			const card = document.createElement('div');
+			document.body.append(card);
+			expect(cellClicked(r.view, card, { x: 61, y: 110 }), 'a card beside the table').toBeNull();
+			const range = document.createRange();
+			range.selectNodeContents(r.view.contentDOM);
+			document.getSelection()!.addRange(range);
+			expect(cellClicked(r.view, r.view.contentDOM, { x: 61, y: 110 }), 'a drag that selected text').toBeNull();
+		});
+	});
+
 	it('leaves a selection already dragged inside the table to the comment flows', () => {
 		const r = track(open());
 		const range = document.createRange();
