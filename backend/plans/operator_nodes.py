@@ -13,6 +13,7 @@ import plans.operator_artifact_fields as artifact_fields
 import plans.operator_display_state as display_state
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
+import plans.operator_projection_facts as projection_facts
 import plans.operator_scheduled as scheduled_work
 import plans.rollup as rollup
 import plans.service as service
@@ -345,18 +346,10 @@ def present_plan(
     """
     if owner is None or projected.plan["state"] == "archived":
         return None
-    # Covered person-comment tasks are root leaves; hide them before deriving
-    # every operator count and header, including the chat-list projection.
-    visible = [node for node in projected.nodes if not states[node['id']]['comment_task_covered']]
+    # Hide covered person-comment tasks before deriving every count and header,
+    # so the pane and the chat list read the same totals.
+    visible, comment_carriers = projection_facts.split_covered(projected.nodes, states)
     hidden = len(projected.nodes) - len(visible)
-    comment_carriers = []
-    for node in projected.nodes:
-        state = states[node['id']]
-        matches = state['comment_coverage']
-        if not matches or any(row['carrier_kind'] == 'ask' for row in matches):
-            continue
-        carrier = min(matches, key=lambda row: row['carrier_id'])
-        comment_carriers.append({**carrier, 'title': node['title'], 'owed': state['comment_attention_owed']})
     nodes = [
         _present_node(
             node, review_targets, states[node["id"]], projected.plan["state"],
