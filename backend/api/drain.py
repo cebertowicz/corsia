@@ -88,10 +88,20 @@ async def cancel_drain(
 ):
     """Release only the exact active operation, recording a pre-stop refusal."""
     _require_user(token)
+    return await settle_drain_exit(operation_id, failure_code, reason, backend_healthy)
+
+
+async def settle_drain_exit(
+    operation_id: str, failure_code: str | None = None,
+    reason: str | None = None, backend_healthy: bool | None = None,
+    *, pre_stop_only: bool = False,
+):
+    """Settle the lifecycle exit with the drain cancellation semantics."""
     from automation.restart import abort_restart_control
 
+    guard = {"pre_stop_only": True} if pre_stop_only else {}
     if failure_code is None:
-        released = await abort_restart_control(operation_id, cancelled=True)
+        released = await abort_restart_control(operation_id, cancelled=True, **guard)
     else:
         if failure_code != "update_refused" or not reason or len(reason) > 500:
             raise HTTPException(400, "invalid update refusal")
@@ -106,10 +116,49 @@ async def cancel_drain(
         released = await abort_restart_control(
             operation_id, error=reason, failure_code=failure_code,
             failure_detail=json.dumps({"reason": reason, "backend_healthy": backend_healthy}),
+            **guard,
         )
     if not released:
         raise HTTPException(409, "restart operation changed before cancellation")
     return {"ok": True, "active": False, "operation_id": operation_id}
+
+
+async def settle_restart_exit(process, operation_id: str, returncode: int) -> None:
+    """Settle a child exit from its atomically published lifecycle result."""
+    from pathlib import Path
+    from automation.restart import abort_restart_control
+
+    if returncode == 0:
+        return
+    path = None
+    try:
+        path = Path(process.lifecycle_result_path)
+        fields = dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
+        if (int(fields["status"]) != returncode or
+            any(fields[key] not in {"true", "false"} for key in
+                ("is_update", "stopping", "unconfirmed_bootout", "backend_healthy")) or
+            len(fields["refusal_reason"]) > 500):
+            raise ValueError("invalid lifecycle result")
+    except (AttributeError, OSError, UnicodeError, ValueError, KeyError):
+        await abort_restart_control(
+            operation_id, error=f"restart script exited before restart: {returncode}",
+            failure_code="launch_failed", failure_detail=f'{{"exit_code": {returncode}}}',
+            pre_stop_only=True,
+        )
+        return
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if fields["stopping"] == "true" or fields["unconfirmed_bootout"] == "true":
+        return
+    reason = fields["refusal_reason"] or None
+    await settle_drain_exit(
+        operation_id, "update_refused" if reason else None, reason,
+        fields["backend_healthy"] == "true", pre_stop_only=True,
+    )
 
 
 @router.post("/drain/update")

@@ -19,6 +19,7 @@ HOLD_PHASES = frozenset({
     "restarting",
     "resuming",
 })
+PRE_STOP_PHASES = HOLD_PHASES - {"restarting", "resuming"}
 ACTIVE_PHASES = HOLD_PHASES | {"verifying"}
 
 

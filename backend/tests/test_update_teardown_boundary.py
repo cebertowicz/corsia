@@ -1,19 +1,18 @@
-"""The lifecycle shell owns release except when launchd teardown is unconfirmed."""
+"""Lifecycle result records preserve the launchd teardown boundary."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-from api.restart_shell import PRE_STOP_UPDATE_REFUSED, spawn_restart_lifecycle
+from api.restart_shell import spawn_restart_lifecycle
 
 
 @pytest.mark.parametrize(
-    ("scenario", "delete_expected"),
-    [("refusal", True), ("stop_failure", True), ("bootout_timeout", False),
-     ("bootout_unloaded", False), ("killed", False), ("success", False)],
+    "scenario",
+    ["refusal", "stop_failure", "bootout_timeout", "bootout_unloaded", "killed", "success"],
 )
-def test_update_cleanup_boundary(tmp_path, scenario, delete_expected):
+def test_update_cleanup_boundary(tmp_path, scenario):
     service = Path(__file__).resolve().parents[2] / "scripts/corsia.d/service.sh"
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
@@ -39,12 +38,14 @@ return 0
     with (tmp_path / "lifecycle.log").open("w") as log:
         child = spawn_restart_lifecycle(script, ["restart-prepared"], environment,
                                         "a" * 32, log, caller_credential="test-credential")
-        expected = 0 if scenario == "success" else (-9 if scenario == "killed" else (2 if scenario.startswith("bootout_") else PRE_STOP_UPDATE_REFUSED))
+        expected = 0 if scenario == "success" else (-9 if scenario == "killed" else (2 if scenario.startswith("bootout_") else 1))
         assert child.wait(timeout=5) == expected
     observed = calls.read_text() if calls.exists() else ""
-    assert ("DELETE" in observed) is delete_expected
-    log = (tmp_path / "lifecycle.log").read_text()
-    assert ("cleanup held: launchd teardown unconfirmed" in log) is scenario.startswith("bootout_")
+    assert "DELETE" not in observed
+    record = child.lifecycle_result_path
+    assert record.exists() is (scenario not in {"success", "killed"})
+    if record.exists():
+        assert ("unconfirmed_bootout=true" in record.read_text()) is scenario.startswith("bootout_")
 
 
 @pytest.mark.parametrize("body", [
@@ -59,10 +60,15 @@ def test_no_pre_stop_signal_after_stop_or_unknown_exit(tmp_path, body):
     curl = tmp_path / "curl"
     curl.write_text("#!/bin/bash\nexit 52\n")
     curl.chmod(0o755)
-    environment = {**os.environ, "PATH": str(tmp_path), "CORSIA_RESTART_BACKEND_PORT": "4111"}
+    environment = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "CORSIA_RESTART_BACKEND_PORT": "4111"}
     with (tmp_path / "lifecycle.log").open("w") as log:
         child = spawn_restart_lifecycle(
             script, ["restart-prepared"], environment, "a" * 32, log,
             caller_credential="test-credential",
         )
-        assert child.wait(timeout=5) != PRE_STOP_UPDATE_REFUSED
+        assert child.wait(timeout=5) != 0
+    if body == "kill -KILL $$":
+        assert not child.lifecycle_result_path.exists()
+    else:
+        record = child.lifecycle_result_path.read_text()
+        assert "stopping=true" in record or "unconfirmed_bootout=true" in record

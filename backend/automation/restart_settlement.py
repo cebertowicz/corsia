@@ -83,13 +83,14 @@ def release_restart_control(
 ) -> tuple[str, ...] | None:
     """Atomically move the exact operation and gather all work its cutoff held."""
     from automation import self_restart
+    from automation.restart_rule import PRE_STOP_PHASES
     from automation.restart_wakes import cancel_operation_registrations
     from infra.restart_authorization import serving_head_sha
 
     with write_transaction(None, scope="settle_restart_control") as connection:
         if pre_stop_only:
             operation = self_restart.operation_by_id(operation_id, db=connection)
-            if not operation or operation.get("kind") != "update" or operation.get("phase") not in {"holding", "steering", "draining", "ready"}:
+            if not operation or operation.get("phase") not in PRE_STOP_PHASES:
                 return None
         if target == "verifying":
             released = self_restart.transition_operation(

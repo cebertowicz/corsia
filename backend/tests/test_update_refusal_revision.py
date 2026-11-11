@@ -60,7 +60,7 @@ async def test_lifecycle_open_records_log_after_preparation_write_fails(isolated
 
 
 @pytest.mark.parametrize("reachable", [True, False])
-def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, reachable):
+def test_explicit_refusal_records_result_without_cleanup_request(tmp_path, monkeypatch, reachable):
     import os
     from api.restart_shell import spawn_restart_lifecycle
 
@@ -81,6 +81,6 @@ def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, re
             **os.environ, "CORSIA_RESTART_BACKEND_PORT": "4111", "CALLS": str(calls),
         }, "a" * 32, out, caller_credential="test-credential")
         assert child.wait(timeout=5) != 0
-    assert calls.read_text().splitlines() == ["call"]
+    assert not calls.exists()
     assert "The staged update is missing" in log.read_text()
-    assert ("cleanup curl exit 7" in log.read_text()) is (not reachable)
+    assert "refusal_reason=The staged update is missing" in child.lifecycle_result_path.read_text()
