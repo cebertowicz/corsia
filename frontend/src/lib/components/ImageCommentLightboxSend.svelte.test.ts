@@ -451,6 +451,6 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(footerIn(shown.target)).toBeNull();
 		expect(bar.querySelector('[data-image-comment]')).not.toBeNull();
 		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
-		expect([...bar.querySelectorAll('button')].map((button) => button.textContent!.trim())).toEqual(expect.arrayContaining(['Back', 'Fit']));
+		expect([...bar.querySelectorAll('button')].map((button) => button.getAttribute('aria-label') ?? button.textContent!.trim())).toEqual(expect.arrayContaining(['Back to notes.md', 'Fit']));
 	});
 });

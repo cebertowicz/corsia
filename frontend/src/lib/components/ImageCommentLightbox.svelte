@@ -339,7 +339,7 @@
 	.viewer-cell { grid-area: viewer; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 	/* The viewer bar keeps the document header's rule (DocViewerStatus): while Send shows in a narrow bar, Send takes the room the
 	   count's noun had, so the icon and count carry the count; an unread count keeps its noun. With a two-digit count, the noun and
-	   Send, the bar's controls need about 550px. */
+	   Send, the bar's controls need about 550px. Back's short label and Send's short form share this threshold (ImageLightboxResponsive.css). */
 	@container image-bar (width < 600px) {
 		:global(.bar:has(.sending-now) [data-image-comments-pill] .count-unit:not(.keep)) { display: none; }
 	}

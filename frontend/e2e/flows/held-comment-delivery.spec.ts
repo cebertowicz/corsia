@@ -401,6 +401,54 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await captureFrame(page, 'post-image-close', '393');
 	});
 
+	test('a narrow image bar beside chat keeps Back, the count and Send 99 whole on one row (1440, 520 split)', async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedImageDocument(page, request, 'held-split-image-many', 520);
+		await openDocument(page, seeded, 1440);
+		await openImage(page);
+		holdPersonBatches(true);
+		try {
+			await page.evaluate(async (artifactId) => {
+				const { liveDocumentBindings } = await import('/src/lib/stores/liveDocuments.ts');
+				const { addDocImageComment } = await import('/src/lib/stores/imageRegionComments.ts');
+				let bindings: Record<string, import('../../src/lib/stores/liveDocumentSession').LiveDocumentSession> = {};
+				const stop = liveDocumentBindings.subscribe((value) => { bindings = value; });
+				stop();
+				const session = Object.values(bindings).find((bound) => bound.artifactId === artifactId);
+				if (!session) throw new Error('The open image must have its containing live document');
+				const text = session.text.toString(), quote = '![Mock screen](shots/screen.png)', from = text.indexOf(quote);
+				if (from < 0) throw new Error('The live document must contain the seeded image');
+				for (let index = 1; index <= 98; index++) {
+					await addDocImageComment({ artifactId, from, to: from + quote.length, text, session }, { x: 0.2, y: 0.25, w: 0.1, h: 0.1 }, `Split pin ${index}`);
+				}
+			}, seeded.artifactId);
+			await commentOnRegion(page, 'Split pin 99', { x: 0.6, y: 0.1 });
+			await putSheetAway(page);
+		} finally { holdPersonBatches(false); }
+		await expect(imageBarSend(page)).toHaveText('Send 99 comments');
+		await expectBarFits(page);
+		// The bar's own width (under 600px here, at a desktop window) picks the short forms; the names stay whole.
+		const back = bar(page).getByRole('button', { name: 'Back to walkthrough.md', exact: true });
+		await expect(back).toHaveAccessibleName('Back to walkthrough.md');
+		await expect(back).toHaveText('Back', { useInnerText: true });
+		await expect(imageBarSend(page)).toHaveAccessibleName(/Send 99/);
+		const row = await bar(page).evaluate((element) => {
+			const visible = [...element.querySelectorAll<HTMLElement>('button')].filter((control) => control.getClientRects().length > 0);
+			return {
+				width: element.clientWidth,
+				rows: new Set(visible.map((control) => { const box = control.getBoundingClientRect(); return Math.round(box.top + box.height / 2); })).size,
+				clipped: visible.filter((control) => control.scrollWidth > control.clientWidth + 0.5 || [...control.querySelectorAll<HTMLElement>(':scope > span')]
+					.some((part) => part.getClientRects().length > 0 && part.scrollWidth > part.clientWidth + 0.5)).map((control) => control.getAttribute('aria-label') ?? control.innerText),
+			};
+		});
+		expect(row.width, 'the split leaves the bar narrow').toBeLessThan(600);
+		expect(row.rows, 'every control shares one row').toBe(1);
+		expect(row.clipped, 'no control label is cut').toEqual([]);
+		await captureFrame(page, 'image-bar-send-99-split', '1440');
+	});
+
 	test('image-bar Send 101 fits at 393 and sends only its image lane', async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);

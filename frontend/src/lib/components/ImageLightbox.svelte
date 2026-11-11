@@ -284,7 +284,8 @@
 		{#if onBack}
 			<button type="button" class="control back" onclick={onBack} aria-label={docName ? `Back to ${docName}` : 'Back'}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
-				<span class="back-text">{$isMobile || !docName ? 'Back' : `Back to ${docName}`}</span>
+				{#if docName}<span class="back-text">Back to {docName}</span>{/if}
+				<span class="back-word" class:only={!docName}>Back</span>
 			</button>
 		{/if}
 		<span class="spacer"></span>
@@ -367,6 +368,8 @@
 	/* The document's name is the one label that yields: it truncates before any bar control is pushed past the edge. */
 	.back { padding-left: 4px; max-width: 60%; min-width: 0; }
 	.back-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	/* A narrow bar shows the short label whole instead (ImageLightboxResponsive.css). */
+	.back-word:not(.only) { display: none; }
 
 	/* A neutral backdrop, so a screenshot of a UI never reads as the app around it. */
 	.viewport {
