@@ -44,6 +44,7 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 # `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
 _VISIBLE_COLUMN = f"CASE WHEN {COMMENT_ONLY_WORK_SQL} THEN 0 ELSE ({FOCUS_VISIBLE_SQL}) END AS vis"
+_CANDIDATE_COLUMN = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.turn_id') END AS turn_id"
 _RUN_COLUMNS = (
     f"{_VISIBLE_COLUMN}, {COMMENT_ONLY_WORK_SQL} AS suppressed, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
@@ -71,16 +72,12 @@ def _anchors_cte(columns: str) -> str:
     )
 
 
-# The newest `:budget` visible anchors among the first `:newest_n` anchors; only they
-# cross into Python. When the budget fills, the last one's seq is where the walk stops.
-_CANDIDATE_COLUMN = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.turn_id') END AS turn_id"
-_CANDIDATES_SQL = (
-    f"WITH {_anchors_cte(_CANDIDATE_COLUMN)} "
-    "SELECT DISTINCT turn_id FROM anchors WHERE turn_id IS NOT NULL"
-)
-_VISIBLE_SQL = (
-    f"WITH {_anchors_cte(_VISIBLE_COLUMN)} "
-    "SELECT id, seq FROM anchors WHERE vis = 1 ORDER BY seq DESC LIMIT :budget"
+# The first `:newest_n` anchors newest-first, each with whether Focus shows it and its
+# Turn. `_visible_anchors` stops reading at the page's last visible anchor, so SQLite
+# reads no further than the page; that anchor's seq is where the walk stops.
+_STREAM_SQL = (
+    f"WITH {_anchors_cte(f'{FOCUS_VISIBLE_SQL} AS vis, role, ' + _CANDIDATE_COLUMN)} "
+    "SELECT id, seq, vis, role, turn_id FROM anchors ORDER BY seq DESC"
 )
 
 # Every hidden run among the first `:cap` anchors, aggregated in SQLite. A run closes
@@ -174,22 +171,60 @@ class _Walk:
     scanned: int = 0
 
 
+def _visible_anchors(db, thread_id: str, args: dict, budget: int) -> tuple[list, set[str]]:
+    """The newest `budget` anchors Focus shows, and the comment-only Turns among the rows read.
+
+    A comment-only Turn's work is not drawn, so hiding one of its visible rows reads
+    further back, where another such Turn may sit: which Turns qualify is asked for
+    each batch of newly read Turns until the page holds `budget` shown anchors or the
+    rows run out. A page with none asks once.
+    """
+    cursor = db.execute(_STREAM_SQL, args)
+    try:
+        return _read_shown(db, thread_id, iter(cursor), budget)
+    finally:
+        cursor.close()
+
+
+def _read_shown(db, thread_id: str, stream, budget: int) -> tuple[list, set[str]]:
+    read: list = []
+    checked: set[str] = set()
+    suppressed: set[str] = set()
+
+    def shown(row) -> bool:
+        return bool(row["vis"]) and not (row["role"] == "assistant" and row["turn_id"] in suppressed)
+
+    count = 0
+    while True:
+        for row in stream if count < budget else ():
+            read.append(row)
+            count += shown(row)
+            if count >= budget:
+                break
+        new = {row["turn_id"] for row in read if row["turn_id"]} - checked
+        checked |= new
+        found = comment_only_receipt_turns(db, thread_id, sorted(new))
+        if not found:
+            return [row for row in read if shown(row)], suppressed
+        suppressed |= found
+        count = sum(map(shown, read))
+
+
 def _walk(
     db, thread_id: str, cursor_seq: int | None,
     budget: int, cap: int, *, range_floor: int | None = None,
 ) -> _Walk:
     """Walk newest-first until `budget` visible anchors or `cap` rows are read.
 
-    Two statements, both aggregating in SQLite: the first finds the visible anchors
-    (and so where the walk stops), the second reduces the hidden rows in that range
-    to run stubs. Only visible anchors and stubs cross into Python.
+    Two statements, both in SQLite: the first finds the visible anchors (and so
+    where the walk stops), the second reduces the hidden rows in that range to run
+    stubs. The page's anchors and the stubs cross into Python.
     """
-    args = {"thread": thread_id, "after": cursor_seq, "floor": range_floor, "cap": cap, "suppressed": "[]"}
-    candidates = [row[0] for row in db.execute(_CANDIDATES_SQL, {**args, "newest_n": cap}).fetchall()]
-    args["suppressed"] = json.dumps(sorted(comment_only_receipt_turns(db, thread_id, candidates)))
-    visible = db.execute(_VISIBLE_SQL, {**args, "newest_n": cap, "budget": budget}).fetchall()
-    walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)])
+    args = {"thread": thread_id, "after": cursor_seq, "floor": range_floor, "cap": cap}
+    visible, suppressed = _visible_anchors(db, thread_id, {**args, "newest_n": cap}, budget)
+    args["suppressed"] = json.dumps(sorted(suppressed))
     floor = visible[-1]["seq"] if len(visible) >= budget else range_floor
+    walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)])
     rows = db.execute(_RUNS_SQL, {**args, "floor": floor, "newest_n": cap + 1}).fetchall()
     meta = next(row for row in rows if row["kind"] == "meta")
     walk.oldest_id = meta["first_id"]

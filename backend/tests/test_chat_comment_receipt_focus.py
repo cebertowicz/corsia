@@ -155,6 +155,20 @@ def test_focus_keeps_comment_turn_with_visible_chat_and_live_turn():
         assert any("comment" in run["turn_ids"] for run in _walk(db, _SID, None, 20, 100).runs)
 
 
+def test_hidden_answer_reads_further_back_and_hides_the_next_comment_turn_too():
+    db = _db()
+    db.executescript(CHAT_COMMENT_SCHEMA_SQL)
+    thread = _Thread(db)
+    thread.add("s", "ordinary")
+    _comment_turn(db, thread, "older-comment")
+    _comment_turn(db, thread, "newer-comment")
+    walk = _walk(db, _SID, None, 2, 100)
+    inputs = [row[0] for row in db.execute("SELECT id FROM messages WHERE role='user' ORDER BY seq")]
+    # Each answer is shown under the plain rule; hiding the newer one brings the older one onto the page.
+    assert walk.visible_ids == inputs
+    assert walk.runs == []
+
+
 def test_comment_only_work_rule_matches_its_sql_twin():
     from infra.focus_rows import COMMENT_ONLY_WORK_SQL, is_comment_only_work
 
