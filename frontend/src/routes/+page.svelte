@@ -141,7 +141,6 @@
 		return false;
 	}
 
-
 	function goDocuments(lens: 'all' | 'skills' = 'all', documentId?: string) {
 		const attachTarget = get(contextAttachTarget);
 		const picker = get(docPickerTarget);
