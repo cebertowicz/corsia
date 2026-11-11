@@ -19,13 +19,17 @@ async function capture(page: Page, target: Locator, name: string) {
   })).toBe(1);
   const geometry = await target.evaluate(element => {
     const rect = element.getBoundingClientRect();
-    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.scrollWidth };
+    const center = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.scrollWidth, centerUncovered: !!center && (element === center || element.contains(center)) };
   });
   expect(geometry.width).toBeGreaterThan(0);
   expect(geometry.height).toBeGreaterThan(0);
   expect(geometry.x).toBeGreaterThanOrEqual(0);
   expect(geometry.x + geometry.width).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.y).toBeGreaterThanOrEqual(0);
+  expect(geometry.y + geometry.height).toBeLessThanOrEqual(geometry.viewportHeight + 1);
   expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.centerUncovered).toBe(true);
   const stamp = await page.locator('.version-overlay').innerText();
   console.log(`FRAME ${name} ${JSON.stringify({ stamp, geometry })}`);
   await page.screenshot({ path: path.join(directory!, `${name}.png`), animations: 'disabled' });
