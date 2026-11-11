@@ -6,7 +6,7 @@
 
 	let { artifactId, ownership, onChange, compact = false, saving = $bindable(false), error = $bindable(''), errorFor = $bindable(null), pending = $bindable(null), open = $bindable(false), externalAnchor = null }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void; compact?: boolean; saving?: boolean; error?: string; errorFor?: 'owner' | 'supervisor' | null; pending?: { kind: 'owner' | 'supervisor'; id: string; name: string } | null; open?: boolean; externalAnchor?: HTMLButtonElement | null } = $props();
 	let ownAnchor = $state<HTMLButtonElement>();
-	const anchor = $derived(externalAnchor ?? ownAnchor);
+	const anchor = $derived(externalAnchor ?? ownAnchor ?? null);
 	let paneWidth = $state(360);
 	function measurePane() {
 		const header = anchor?.closest<HTMLElement>('.document-header');
@@ -93,7 +93,7 @@
 	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.compact-owner { display: none; overflow: hidden; text-overflow: ellipsis; }
 	.owner-only { display: none; }
-	@container identity-age (width < 13ch) {
+	@container identity-owner (width < 13ch) {
 		.owner-name { display: none; }
 		.owner-only { display: inline; }
 	}

@@ -93,6 +93,7 @@
 	let detailsOpen = $state(false);
 	let ownershipInDetails = $state(true);
 	let compactOwnerOnly = $state(true);
+	let useMetadataRow = $state(false);
 	let compactOwnerOpen = $state(false);
 	let ownerAnchor = $state<HTMLButtonElement | null>(null);
 	$effect(() => { if (!compactOwnerOpen) ownerAnchor = null; });
@@ -117,6 +118,22 @@
 		const measure = () => {
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
+				const identity = header.querySelector<HTMLElement>('.document-identity');
+				const tools = header.querySelector<HTMLElement>('.document-tools');
+				const age = header.querySelector<HTMLElement>('.identity-age');
+				const verified = header.querySelector<HTMLElement>('.identity-verified');
+				if (identity && tools && age) {
+					const probe = document.createElement('span');
+					Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', whiteSpace: 'nowrap', font: getComputedStyle(age).font });
+					probe.textContent = 'Owner';
+					document.body.appendChild(probe);
+					const ownerWidth = probe.getBoundingClientRect().width;
+					if (verified) { probe.style.font = getComputedStyle(verified).font; probe.textContent = verified.textContent; }
+					const verifiedWidth = verified ? probe.getBoundingClientRect().width + 6 : 0;
+					probe.remove();
+					const others = [...identity.children].filter(child => child !== tools && !child.classList.contains('identity-details')).reduce((width, child) => width + child.getBoundingClientRect().width + 6, 0);
+					useMetadataRow = identity.clientWidth < tools.getBoundingClientRect().width + others + ownerWidth + verifiedWidth + 6;
+				}
 				const metadata = header.querySelector<HTMLElement>('.document-metadata.has-ownership');
 				if (!metadata) return;
 				const probe = metadata.cloneNode(true) as HTMLElement;
@@ -237,12 +254,12 @@
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
-<header class="document-header" use:detailsKeys use:ownershipFit>
+<header class="document-header" class:use-metadata-row={useMetadataRow} use:detailsKeys use:ownershipFit>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
 		<div class="identity-details">
 			<span class="document-title" title={title}>{title}</span>
-			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails || compactOwnerOnly} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}Owner: {freshness.owner_name}{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
+			{#if (ownership && artifactId) || (freshness && freshnessPresentation)}<span class="identity-age"><span class="identity-owner" class:has-freshness={!!freshnessPresentation}>{#if ownership && artifactId}<DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails || compactOwnerOnly} bind:open={compactOwnerOpen} externalAnchor={ownerAnchor} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} />{:else if freshness}<span class="plain-owner-name">Owner: {freshness.owner_name}</span><span class="plain-owner-only">Owner</span>{/if}</span>{#if freshnessPresentation}<button type="button" class="identity-verified details-toggle" aria-label="Document details" aria-expanded={detailsOpen || compactOwnerOpen} onclick={(event) => openDetails(event.currentTarget)}>{freshnessPresentation.phrase}</button>{/if}</span>{/if}
 		</div>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -271,7 +288,7 @@
 	</div>
 	{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
 		<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
-			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+			{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} compact={useMetadataRow || ownershipInDetails} bind:saving={ownershipSaving} bind:error={ownershipError} bind:errorFor={ownershipErrorFor} bind:pending={ownershipPending} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 			{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 			{#if freshness && freshnessPresentation}
 				{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>
@@ -341,34 +358,22 @@
 		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
 		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
-	@media (max-width: 768px) {
-		@container doc-header (width < 408px) {
-			/* A phone's 99 and 100+ counts, and a reviewer group that overflows into "+N", need the shorter visible preference label so Send stays whole in one row; the accessible name and 44px target stay unchanged. */
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle { gap: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span { font-size: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
-		}
-	}
+	/* Delivery keeps its full label at every width. */
 	@container doc-canvas (max-width: 37.5rem) {
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 13ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.identity-owner:not(.has-freshness) { min-width: 0; }
-		.document-identity:has(.identity-owner:not(.has-freshness)) { flex-wrap: nowrap; }
-		.identity-details:has(.identity-owner:not(.has-freshness)) { flex: 1 1 0; min-width: 6ch; }
-		.document-identity:has(.identity-owner:not(.has-freshness)) .document-tools { flex: 0 1 auto; min-width: 0; }
-		.document-identity:has(.identity-owner:not(.has-freshness)) .delivery-toggle { min-width: 0; flex: 0 1 auto; }
-		.document-identity:has(.identity-owner:not(.has-freshness)) .delivery-toggle > span { min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		/* The verified phrase carries the picker when the owner cannot fit. */
-		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }
+		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; container: identity-owner / inline-size; }
+		.plain-owner-only { display: none; }
+		@container identity-owner (width < 13ch) {
+			.plain-owner-name { display: none; }
+			.plain-owner-only { display: inline; }
+		}
+		.document-identity { flex-wrap: nowrap; }
+		.identity-details:has(.identity-age) { flex: 1 1 0; min-width: 0; }
+		.identity-verified { flex: none; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+		.document-header.use-metadata-row .identity-details { display: none; }
+		.document-header.use-metadata-row .document-metadata { display: flex; }
 		.document-title { display: none; }
 		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
