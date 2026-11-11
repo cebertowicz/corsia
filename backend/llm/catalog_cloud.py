@@ -261,12 +261,16 @@ async def discover_cloud_models(provider: str, api_key: str) -> dict:
         result["error"] = f"Cloud discovery not implemented for {provider}"
         return result
 
-    before = _provider_rows(provider)
-    result["models"] = _persist_cloud_models(provider, discovered, now)
+    from infra.db_async import run_in_db
+
+    # On the DB lane, not the event loop: the write waits for the lock, which a boot recovery or
+    # migration can hold for many seconds, and every request would wait with it.
+    before = await run_in_db(_provider_rows, provider)
+    result["models"] = await run_in_db(_persist_cloud_models, provider, discovered, now)
     result["ok"] = True
     from infra.state.ws import notify_models_changed
 
-    if _provider_rows(provider) != before:
+    if await run_in_db(_provider_rows, provider) != before:
         notify_models_changed()
     result["models"].sort(key=lambda model: (-model.get("enabled", 0), model["display_name"]))
     return result
