@@ -407,6 +407,8 @@ async def test_register_waits_only_for_work_that_can_reach_the_project(
     registry_env, monkeypatch, busy_project,
 ):
     """Another project's tool call and process don't block; the same project's do."""
+    from types import SimpleNamespace
+
     from host_access.processes import PROCESS_OWNER
     from infra.repo_policy_transition import admit_repo_effect, caller_reach
 
@@ -425,7 +427,8 @@ async def test_register_waits_only_for_work_that_can_reach_the_project(
     db.commit()
     repo = registry_env["tmp"] / "external" / "app"
     _git_repo(repo)
-    monkeypatch.setattr(PROCESS_OWNER, "outstanding_process_owners", lambda: (("busy-thread", False),))
+    process = SimpleNamespace(thread_id="busy-thread", lease_id=None, permit_id=None)
+    monkeypatch.setattr(PROCESS_OWNER, "outstanding_records", lambda: (process,))
 
     with admit_repo_effect(caller_reach("busy-thread", leased=False, db=db)):
         result = await _registry_register(monkeypatch, db, registry_env["workspace"], str(repo))

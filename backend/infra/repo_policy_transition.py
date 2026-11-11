@@ -79,8 +79,10 @@ def _overlaps(a: Path, b: Path) -> bool:
     return a == b or a in b.parents or b in a.parents
 
 
-def repo_claim(project_id: str | None, repo_path: Path, *, db=None, workspace: Path | None = None) -> Scope:
-    """The projects a policy change on ``repo_path`` touches; :data:`EVERYWHERE` when unsure."""
+def repo_claim(project_id: str | None, repo_path: Path | None, *, db=None, workspace: Path | None = None) -> Scope:
+    """The projects a policy change on ``repo_path`` touches; :data:`EVERYWHERE` when unsure or unknown."""
+    if repo_path is None:
+        return EVERYWHERE
     try:
         from core.project_context import resolve_project_row_paths
         from infra.config import WORKSPACE
@@ -191,8 +193,8 @@ def owned_process_reaches() -> list[Scope]:
     from host_access.processes import PROCESS_OWNER
 
     return [
-        caller_reach(thread_id, leased=leased)
-        for thread_id, leased in PROCESS_OWNER.outstanding_process_owners()
+        caller_reach(record.thread_id, leased=record.lease_id is not None or record.permit_id is not None)
+        for record in PROCESS_OWNER.outstanding_records()
     ]
 
 
