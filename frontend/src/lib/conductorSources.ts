@@ -123,9 +123,7 @@ async function readSources(res: Response): Promise<ModelSource[]> {
 }
 
 export async function fetchSources(t: string): Promise<ModelSource[]> {
-	return readSources(await apiFetch('/api/providers/sources', {
-		headers: { Authorization: `Bearer ${t}` },
-	}));
+	return readSources(await apiFetch('/api/providers/sources'));
 }
 
 export type LocalSetupResult = {
@@ -183,14 +181,14 @@ async function localRouteError(response: Response, fallback: string): Promise<Er
 
 /** Settings' local-model recommendations, checked by oMLX for this computer. */
 export async function fetchLocalModelRecommendations(t: string): Promise<LocalModelRecommendations> {
-	const response = await apiFetch('/api/providers/local/recommendations', { headers: { Authorization: `Bearer ${t}` } });
+	const response = await apiFetch('/api/providers/local/recommendations');
 	if (!response.ok) throw await localRouteError(response, "Couldn’t check which models fit this computer.");
 	return response.json();
 }
 
 /** Settings' cheap durable local-download projection. */
 export async function fetchLocalModelDownloads(t: string): Promise<LocalModelDownload[]> {
-	const response = await apiFetch('/api/providers/local/downloads', { headers: { Authorization: `Bearer ${t}` } });
+	const response = await apiFetch('/api/providers/local/downloads');
 	if (!response.ok) throw await localRouteError(response, "Couldn't read local model downloads. Try again.");
 	return response.json();
 }
@@ -199,7 +197,7 @@ export async function fetchLocalModelDownloads(t: string): Promise<LocalModelDow
 export async function startLocalModelDownload(t: string, repository: string): Promise<void> {
 	const response = await apiFetch('/api/providers/local/downloads', {
 		method: 'POST',
-		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ repository }),
 	});
 	if (!response.ok) throw await localRouteError(response, 'Couldn’t start the download. Try again.');
@@ -209,14 +207,13 @@ export async function startLocalModelDownload(t: string, repository: string): Pr
 export async function deleteLocalModelDownload(t: string, repository: string): Promise<void> {
 	const response = await apiFetch(`/api/providers/local/downloads/${encodeURIComponent(repository)}`, {
 		method: 'DELETE',
-		headers: { Authorization: `Bearer ${t}` },
 	});
 	if (!response.ok) throw await localRouteError(response, "Couldn't delete the download. Try again.");
 }
 
 export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; cancelled: boolean }> {
 	const response = await apiFetch('/api/providers/local/cancel', {
-		method: 'POST', headers: { Authorization: `Bearer ${t}` },
+		method: 'POST',
 	});
 	if (!response.ok) throw new Error(`local cancel ${response.status}`);
 	return response.json();
@@ -224,7 +221,7 @@ export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; can
 
 export async function setupLocalSource(t: string): Promise<LocalSetupResult> {
 	const response = await apiFetch('/api/providers/local/setup', {
-		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({}),
 	});
 	const body = await response.json().catch(() => null);
@@ -239,6 +236,5 @@ export async function setupLocalSource(t: string): Promise<LocalSetupResult> {
 export async function recheckSources(t: string): Promise<ModelSource[]> {
 	return readSources(await apiFetch('/api/providers/sources/recheck', {
 		method: 'POST',
-		headers: { Authorization: `Bearer ${t}` },
 	}));
 }

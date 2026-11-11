@@ -104,7 +104,7 @@ export function createDevices(options: Options = {}) {
 
 	const headers = (json = false): Record<string, string> => {
 		const current = get(token);
-		return { ...(current ? { Authorization: `Bearer ${current}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) };
+		return json ? { 'Content-Type': 'application/json' } : {};
 	};
 
 	function accept(api: DevicesApi) {

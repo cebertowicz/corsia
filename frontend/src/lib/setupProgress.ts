@@ -23,7 +23,7 @@ const PROGRESS = '/api/setup/progress';
 export async function fetchSetupProgress(sessionToken: string | null): Promise<SetupProgress | null> {
 	if (!sessionToken) return null;
 	try {
-		const response = await apiFetch(PROGRESS, { headers: { Authorization: `Bearer ${sessionToken}` } });
+		const response = await apiFetch(PROGRESS);
 		if (!response.ok) return null;
 		const progress = await response.json();
 		return typeof progress?.setup_completed === 'boolean' ? progress as SetupProgress : null;
@@ -41,7 +41,7 @@ export async function recordSetupProgress(change: SetupProgressChange, sessionTo
 	try {
 		const response = await apiFetch(PROGRESS, {
 			method: 'PUT',
-			headers: { 'Content-Type': 'application/json', ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(change),
 		});
 		return response.ok;

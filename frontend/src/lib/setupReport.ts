@@ -22,7 +22,7 @@ export async function setupReportDetails(rows: SetupReportRow[]): Promise<string
 	try {
 		const response = await apiFetch('/api/setup/report', {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ rows: rows.map(({ key, name, cause, reference }) => ({ key, name, cause: cause || null, reference: reference || null })) }),
 		});
 		if (!response.ok) return `${DETAILS_UNREAD} (HTTP ${response.status}).\n`;

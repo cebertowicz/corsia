@@ -46,9 +46,7 @@ export async function readUpdateCards(
 	const params = new URLSearchParams({ from_seq: String(options.fromSeq) });
 	if (options.divider) params.set('divider', 'true');
 	try {
-		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`, {
-			headers: { Authorization: `Bearer ${bearerValue}` },
-		});
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/updates?${params}`);
 		if (!res.ok) {
 			console.error('[thread updates] read rejected', threadId, res.status);
 			return null;

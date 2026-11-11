@@ -29,7 +29,7 @@ let uploadLimits: UploadLimits | null = null;
 export async function loadUploadLimits(authToken: string): Promise<UploadLimits | null> {
 	if (uploadLimits) return uploadLimits;
 	try {
-		const res = await apiFetch('/api/upload/limits', { headers: { Authorization: `Bearer ${authToken}` } });
+		const res = await apiFetch('/api/upload/limits');
 		if (!res.ok) return null;
 		uploadLimits = (await res.json()) as UploadLimits;
 	} catch {

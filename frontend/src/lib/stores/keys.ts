@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
@@ -66,7 +65,6 @@ export class KeyWriteError extends Error {
 /** Writes read the session from the header only; the server never reads it from the URL. */
 function headers(json = false): HeadersInit {
 	return {
-		Authorization: `Bearer ${get(token)}`,
 		...(json ? { 'Content-Type': 'application/json' } : {}),
 	};
 }

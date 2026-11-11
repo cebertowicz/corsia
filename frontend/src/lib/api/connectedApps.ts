@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { plainResponseError } from '$lib/plainError';
 import { signInStateLine } from '$lib/appSignIn';
@@ -158,15 +157,11 @@ export interface SignInStart { authorization_url: string; expires_at: string; re
 export interface SignInStatus extends Partial<Pick<SignInView, 'status' | 'failure_class' | 'expires_at'>> { authorization_url?: string; words?: string }
 export interface SignOutResult { id: string; had_sign_in: boolean; provider_told: boolean; provider_url: string | null; state: string }
 
-function url(path: string): string {
-	const auth = get(token);
-	return `${path}?token=${encodeURIComponent(auth ?? '')}`;
-}
 
 const accountFailure = (account: Pick<ConnectedAccount, 'provider_display_name'>): string => `Couldn't change this ${account.provider_display_name} account. Try again.`;
 
 async function response<T>(path: string, init?: RequestInit, fallback = 'Could not update this app. Try again.'): Promise<T> {
-	const result = await apiFetch(url(path), init);
+	const result = await apiFetch(path, init);
 	if (!result.ok) throw new Error(await plainResponseError(result, fallback));
 	return result.json() as Promise<T>;
 }
@@ -225,7 +220,7 @@ export class SignInStartError extends Error {
 }
 
 export async function startAppSignIn(id: string): Promise<SignInStart> {
-	const result = await apiFetch(url(`/api/mcp/servers/${encodeURIComponent(id)}/sign-in`), { method: 'POST' });
+	const result = await apiFetch(`/api/mcp/servers/${encodeURIComponent(id)}/sign-in`, { method: 'POST' });
 	if (result.ok) return result.json() as Promise<SignInStart>;
 	const body = await result.clone().json().catch(() => null);
 	if (typeof body?.detail?.failure_class === 'string') throw new SignInStartError(body.detail.failure_class);
@@ -250,7 +245,7 @@ export class ConnectAppError extends Error {
 }
 
 export async function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> & { config: Record<string, unknown> }): Promise<ConnectedApp> {
-	const result = await apiFetch(url('/api/mcp/servers'), {
+	const result = await apiFetch('/api/mcp/servers', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...input, key_refs: [] }),

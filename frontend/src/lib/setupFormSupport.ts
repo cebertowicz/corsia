@@ -8,7 +8,7 @@ export const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.
 export async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
 	const response = await apiFetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(session ? { onboarding: true } : {}),
 	});
 	const body = await response.json().catch(() => null);

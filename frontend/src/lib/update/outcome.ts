@@ -8,7 +8,6 @@ export async function markOutcomeSeen(operationId: string): Promise<void> {
 	try {
 		await apiFetch(`/api/system/update-operations/${encodeURIComponent(operationId)}/outcome-seen`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${authToken}` },
 		});
 	} catch { /* an unmarked outcome shows once more on the next load, never less than once */ }
 }

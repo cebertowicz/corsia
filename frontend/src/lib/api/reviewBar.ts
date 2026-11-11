@@ -39,10 +39,8 @@ export class ReviewRefusal extends Error {
 	constructor(readonly code: string, message: string) { super(message); }
 }
 
-const authorization = () => ({ Authorization: `Bearer ${get(token) ?? ''}` });
-
 export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead> {
-	const response = await apiFetch(`/api/attention/${encodeURIComponent(artifactId)}/review`, { headers: authorization() });
+	const response = await apiFetch(`/api/attention/${encodeURIComponent(artifactId)}/review`);
 	if (!response.ok) throw new Error(`${response.status}`);
 	return response.json();
 }
@@ -56,7 +54,7 @@ export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead>
 export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[]): Promise<ReviewAnswer> {
 	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json', ...authorization() },
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds }),
 	}, COMMENT_POST_TIMEOUT_MS);
 	if (response.ok) {

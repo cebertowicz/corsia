@@ -1,7 +1,5 @@
-import { get } from 'svelte/store';
 import { documentCommentDeliveryPolicy } from '$lib/commentDeliveryPreference';
 import { docOpenFailure } from '$lib/docOpenRefusal';
-import { token } from '$lib/stores/auth';
 import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
@@ -9,10 +7,6 @@ import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes'
 import { apiFetch } from './request';
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
-
-function tok(): string {
-	return encodeURIComponent(get(token) ?? '');
-}
 
 /** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
 export class RequestRefused extends Error {
@@ -185,7 +179,7 @@ export async function postComment(
 	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
-		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
+		`/api/artifacts/${artifactId}/comments`,
 		{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...c, delivery_policy: c.delivery_policy ?? documentCommentDeliveryPolicy() }) },
 		COMMENT_POST_TIMEOUT_MS
 	));
@@ -204,7 +198,7 @@ export async function patchComment(commentId: string, fields: Partial<{ resolved
 
 export async function markCommentThreadViewed(artifactId: string, rootId: string, seenReplyId: string): Promise<{ root_id: string; new_reply_ids: string[] }> {
 	return ok(await apiFetch(`/api/artifacts/${artifactId}/comments/${rootId}/viewed`, {
-		method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token) ?? ''}` },
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ seen_reply_id: seenReplyId })
 	}));
 }

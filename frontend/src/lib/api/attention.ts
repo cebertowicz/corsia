@@ -51,7 +51,7 @@ function qs(params: Record<string, string | undefined | null>): string {
 /** GETs carry the token as a Bearer header (not in the URL) — backend accepts it
  * via the shared require_user seam. */
 function bearer(token: string): RequestInit {
-	return { headers: { Authorization: `Bearer ${token}` } };
+	return {};
 }
 
 export async function fetchRollup(token: string, parentThreadId: string): Promise<RollupResponse> {

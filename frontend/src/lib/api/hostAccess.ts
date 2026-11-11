@@ -125,7 +125,6 @@ export class HostAccessApiError extends Error {
 
 function headers(token: string, json = false): Record<string, string> {
 	return {
-		Authorization: `Bearer ${token}`,
 		...(json ? { 'Content-Type': 'application/json' } : {}),
 	};
 }

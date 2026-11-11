@@ -165,9 +165,7 @@ export type AnswerOutcome =
 	| { status: 'error' };
 
 export async function fetchAttentionQueue(bearer: string): Promise<AttentionQueue> {
-	const res = await apiFetch('/api/attention/queue', {
-		headers: { Authorization: `Bearer ${bearer}` },
-	});
+	const res = await apiFetch('/api/attention/queue');
 	if (!res.ok) throw new Error(`HTTP ${res.status}`);
 	const data = (await res.json()) as AttentionQueueResponse;
 	const current = data.current ?? null;
@@ -223,7 +221,6 @@ export async function answerDecision(
 		res = await apiFetch(`/api/plans/decisions/${encodeURIComponent(decisionId)}/answer`, {
 			method: 'POST',
 			headers: {
-				Authorization: `Bearer ${bearer}`,
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(

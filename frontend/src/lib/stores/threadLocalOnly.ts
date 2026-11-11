@@ -29,7 +29,7 @@ export async function saveThreadLocalOnly(
 	try {
 		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/local-only`, {
 			method: 'PUT',
-			headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ local_only: localOnly }),
 		});
 	} catch {

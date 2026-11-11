@@ -44,7 +44,7 @@ import { apiFetch } from '$lib/api/request';
 		try {
 			const res = await apiFetch('/api/context/bootloader/file', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ scope: 'project', project_id: projectId, path, content: `# ${path}\n` }),
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not create that. Try again.'));

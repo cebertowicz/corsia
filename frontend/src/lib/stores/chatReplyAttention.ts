@@ -38,7 +38,7 @@ export async function refreshChatReplyAttention(threadId: string): Promise<void>
 	if (!bearer || get(activeThreadId) !== threadId) return;
 	const sequence = beginChatReplyAttentionRead();
 	const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
-		method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ message_ids: [] }),
 	});
 	if (!response.ok) throw new Error(`HTTP ${response.status}`);

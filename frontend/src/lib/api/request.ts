@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
+import { token } from '$lib/stores/sessionToken';
 
 /**
  * The one way the app asks its own server for anything.

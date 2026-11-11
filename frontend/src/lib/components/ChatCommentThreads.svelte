@@ -36,7 +36,7 @@ import { apiFetch } from '$lib/api/request';
 		const answer = comment.answers.find(item => answerId(item) === replyId);
 		if (!answer || answer.author_kind !== 'agent') return;
 		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(answer.user_message_id)}/comments/${encodeURIComponent(answer.cid)}/viewed`, {
-			method: 'POST', headers: { Authorization: `Bearer ${$token}`, 'Content-Type': 'application/json' },
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ assistant_message_id: answer.assistant_message_id }),
 		});
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);

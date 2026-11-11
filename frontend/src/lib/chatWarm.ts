@@ -9,7 +9,6 @@
 
 import { get } from 'svelte/store';
 
-import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, findModelById, getModelDispatchId, modelAvailability } from '$lib/stores/models';
 import { apiFetch } from '$lib/api/request';

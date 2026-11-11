@@ -69,7 +69,6 @@ import { apiFetch } from '$lib/api/request';
 		const res = await apiFetch(path, {
 			...init,
 			headers: {
-				Authorization: `Bearer ${t}`,
 				'Content-Type': 'application/json',
 				...(init.headers ?? {}),
 			},

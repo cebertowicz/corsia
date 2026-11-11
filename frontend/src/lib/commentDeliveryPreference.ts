@@ -23,7 +23,7 @@ async function call(method: 'GET' | 'PUT', immediate?: boolean): Promise<{ immed
 	try {
 		const res = await apiFetch(ROUTE, {
 			method,
-			headers: { Authorization: `Bearer ${get(token) ?? ''}`, ...(method === 'PUT' ? { 'Content-Type': 'application/json' } : {}) },
+			...(method === 'PUT' ? { headers: { 'Content-Type': 'application/json' } } : {}),
 			...(method === 'PUT' ? { body: JSON.stringify({ immediate }) } : {}),
 		});
 		return res.ok ? await res.json() : null;

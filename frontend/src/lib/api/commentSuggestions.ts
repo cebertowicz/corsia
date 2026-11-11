@@ -1,5 +1,3 @@
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import type { ServerComment } from './docs';
 import { apiFetch } from './request';
 export interface SuggestionDecision {

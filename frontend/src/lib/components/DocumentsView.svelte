@@ -181,7 +181,6 @@ import { apiFetch } from '$lib/api/request';
 			const res = await apiFetch('/api/context/bootloader/attach', {
 				method: 'POST',
 				headers: {
-					Authorization: `Bearer ${t}`,
 					'Content-Type': 'application/json',
 				},
 				body: JSON.stringify(body),

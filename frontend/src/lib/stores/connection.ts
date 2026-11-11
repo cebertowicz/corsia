@@ -104,9 +104,7 @@ export async function checkSecurityAlert(authToken: string | null = null): Promi
 		return;
 	}
 	try {
-		const res = await apiFetch('/api/security/alert', {
-			headers: { Authorization: `Bearer ${authToken}` },
-		});
+		const res = await apiFetch('/api/security/alert');
 		if (!res.ok) { securityAlert.set(null); return; }
 		const data = await res.json();
 		securityAlert.set(data?.vulns != null ? data : null);

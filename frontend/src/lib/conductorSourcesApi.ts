@@ -12,7 +12,7 @@ import { apiFetch } from '$lib/api/request';
  */
 
 const headers = (t: string, json = false): Record<string, string> => ({
-	Authorization: `Bearer ${t}`, ...(json ? { 'Content-Type': 'application/json' } : {}),
+	...(json ? { 'Content-Type': 'application/json' } : {}),
 });
 
 export type BindReason = 'not_ready' | 'limited' | 'no_usable_model' | 'unchecked' | 'stale'

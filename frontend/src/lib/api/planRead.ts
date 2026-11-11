@@ -12,7 +12,7 @@ export function safeErrorMessage(status: number): string {
 
 /** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
 export function authHeaders(bearerValue: string, etag: string | null): RequestInit {
-	const headers: Record<string, string> = { Authorization: `Bearer ${bearerValue}` };
+	const headers: Record<string, string> = {};
 	if (etag) headers['If-None-Match'] = etag;
 	return { headers };
 }

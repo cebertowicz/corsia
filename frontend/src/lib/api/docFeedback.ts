@@ -1,5 +1,3 @@
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import { apiFetch } from './request';
 export type DeliveryPolicy = 'immediate' | 'document-held' | 'image-held';
 
@@ -50,7 +48,6 @@ async function postFeedback(
 	const res = await apiFetch(`/api/doc-feedback/${action}`, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${get(token) ?? ''}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({ artifact_id: artifactId, ...(deliveryPolicy ? { delivery_policy: deliveryPolicy } : {}) }),
@@ -72,7 +69,7 @@ export function retryDocFeedback(artifactId: string, deliveryPolicy: DeliveryPol
 export async function touchDocFeedback(artifactId: string, deliveryPolicy: 'document-held' | 'image-held') {
 	const res = await apiFetch('/api/doc-feedback/touch', {
 		method: 'POST',
-		headers: { Authorization: `Bearer ${get(token) ?? ''}`, 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ artifact_id: artifactId, delivery_policy: deliveryPolicy }),
 	});
 	if (!res.ok) throw new DocFeedbackError(res.status);
@@ -80,7 +77,7 @@ export async function touchDocFeedback(artifactId: string, deliveryPolicy: 'docu
 }
 
 export async function heldDocFeedbackForThread(threadId: string): Promise<HeldThreadFeedback> {
-	const res = await apiFetch(`/api/doc-feedback/thread/${threadId}`, { headers: { Authorization: `Bearer ${get(token) ?? ''}` } });
+	const res = await apiFetch(`/api/doc-feedback/thread/${threadId}`);
 	if (!res.ok) throw new DocFeedbackError(res.status);
 	return res.json();
 }
@@ -88,7 +85,7 @@ export async function heldDocFeedbackForThread(threadId: string): Promise<HeldTh
 export async function sendHeldDocFeedbackForThread(threadId: string): Promise<HeldThreadFeedback> {
 	const res = await apiFetch('/api/doc-feedback/thread/send', {
 		method: 'POST',
-		headers: { Authorization: `Bearer ${get(token) ?? ''}`, 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ thread_id: threadId }),
 	});
 	if (!res.ok) throw new DocFeedbackError(res.status);

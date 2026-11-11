@@ -56,7 +56,6 @@ async function postPlanMutation(
 		res = await apiFetch(`/api/plans/${encodeURIComponent(planId)}/mutations`, {
 			method: 'POST',
 			headers: {
-				Authorization: `Bearer ${bearerValue}`,
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(body),
@@ -168,7 +167,7 @@ export async function recordThreadPlanSeen(bearerValue: string, threadId: string
 	try {
 		const res = await apiFetch(`/api/plans/operator/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ seen_through: seenThrough }),
 		});
 		return res.ok;
@@ -224,7 +223,7 @@ export async function markThreadSeen(bearerValue: string, threadId: string, unre
 	try {
 		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ unread }),
 		});
 		return res.ok;

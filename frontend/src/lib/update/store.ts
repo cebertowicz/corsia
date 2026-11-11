@@ -177,7 +177,6 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	if (!authToken) return;
 	try {
 		const response = await apiFetch(`/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`, {
-			headers: { Authorization: `Bearer ${authToken}` },
 			cache: 'no-store',
 		});
 		if (!response.ok) throw new Error(`Update check returned ${response.status}`);
@@ -230,7 +229,7 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 	}
 	try {
 		const response = await apiFetch('/api/system/update-schedule', {
-			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+			method: 'PUT', headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(patch), cache: 'no-store',
 		});
 		if (!response.ok) throw new Error(`Schedule save returned ${response.status}`);

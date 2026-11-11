@@ -13,7 +13,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		let replies: CommentReplyItem[] | null = null;
 		for (let offset = 0; offset < ids.length; offset += pageSize) {
 			const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
-				method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ message_ids: ids.slice(offset, offset + pageSize) }),
 			});
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);

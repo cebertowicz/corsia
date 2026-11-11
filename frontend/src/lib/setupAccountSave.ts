@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { apiFetch } from '$lib/api/request';
 export type AccountChanges = { name?: string; email?: string; password?: string; usage_sharing?: boolean };
@@ -10,7 +9,7 @@ export function withReference(line: string, result: { ref?: unknown } | null): s
 
 /** Saves what changed on the account setup made. An email has nowhere to go until the profile exists, and the name on screen is what builds it. */
 export async function putSetupAccount(changes: AccountChanges, name: string): Promise<{ response: Response; result: { code?: string; detail?: unknown; ref?: string; token?: string; user?: { id: string; name: string } } | null }> {
-	const send = () => apiFetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
+	const send = () => apiFetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
 	let response = await send();
 	let result = await response.json().catch(() => null);
 	if (response.status === 422 && result?.code === 'profile_missing' && changes.name === undefined) {

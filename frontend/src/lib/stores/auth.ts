@@ -3,14 +3,13 @@ import { writable, derived, get } from 'svelte/store';
 import { toasts } from '$lib/stores/toast';
 import { coordinationThreads } from '$lib/stores/threads';
 import { apiFetch } from '$lib/api/request';
+import { token } from '$lib/stores/sessionToken';
 interface User {
 	id: string;
 	name: string;
 }
 
-export const token = writable<string | null>(
-	typeof localStorage !== 'undefined' ? localStorage.getItem('corsia_token') : null
-);
+export { token };
 export const user = writable<User | null>(null);
 export const isAuthenticated = derived(user, $u => $u !== null);
 
@@ -43,7 +42,6 @@ export async function logout() {
 		try {
 			const response = await apiFetch('/api/auth/logout', {
 				method: 'POST',
-				headers: { Authorization: `Bearer ${currentToken}` },
 			});
 			// 401 means the session was already invalid, so nothing survives it.
 			if (!response.ok && response.status !== 401) {

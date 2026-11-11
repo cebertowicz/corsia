@@ -47,7 +47,7 @@ import { apiFetch } from '$lib/api/request';
 		try {
 			const res = await apiFetch(url, {
 				method,
-				headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, fallback));

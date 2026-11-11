@@ -18,7 +18,6 @@ export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb
 	try {
 		res = await apiFetch(`/api/held-replies/${encodeURIComponent(id)}/${verb}`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearer}` },
 		});
 	} catch {
 		return { status: 'error', line: null };
