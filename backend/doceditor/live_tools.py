@@ -117,7 +117,7 @@ async def _submit(entry, path: Path, kwargs: dict, thread_id: str, producer: str
                        origin=asdict(origin) if origin else None, call_id=call_id)
     operation = Operation("write" if content is not None else "edit", content=content, edits=edits,
                           base_hash=entry.live.read_bases.get(thread_id), actor=actor,
-                          multi_edit=producer == "multi_edit", edit_path=edit_path)
+                          multi_edit=producer == "multi_edit", edit_path=edit_path, reason=kwargs.get("reason"))
     cancel_event = _cancel_event(kwargs)
     outcome = "failed"
     try:

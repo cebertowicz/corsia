@@ -28,7 +28,10 @@ def resolve(
     usable_for: Callable[[dict, sqlite3.Connection], dict], refusals: Refusals,
     error_type: type[AccountError] = AccountError, db: sqlite3.Connection | None = None,
 ) -> dict:
-    """The one reachable account of ``providers`` named by ``selector``, else a fixed refusal."""
+    """The one reachable account of ``providers`` named by ``selector``, else a fixed refusal.
+
+    Every refusal here is the person's to fix: connect, share or name an account; trying again can't help.
+    """
     if db is None:
         from infra.database import get_db
 
@@ -41,23 +44,23 @@ def resolve(
         finally:
             connection.close()
     if not any(list_accounts(provider, db=db) for provider in providers):
-        raise error_type(refusals.none_connected)
+        raise error_type(refusals.none_connected, person_fixes=True)
     caller = thread_id if isinstance(thread_id, str) and thread_id else None
     reachable = [
         account for provider in providers if caller is not None
         for account in visible_accounts(caller, db=db, provider=provider)
     ]
     if not reachable:
-        raise error_type(refusals.none_available)
+        raise error_type(refusals.none_available, person_fixes=True)
     listed = _choices(reachable)
     if selector is None or (isinstance(selector, str) and not selector.strip()):
         if len(reachable) == 1:
             return usable_for(reachable[0], db)
-        raise error_type(refusals.choose.format(choices=listed))
+        raise error_type(refusals.choose.format(choices=listed), person_fixes=True)
     wanted = selector.strip() if isinstance(selector, str) else ""
     named = [account for account in reachable if account["id"] == wanted] or [
         account for account in reachable if str(account["address"]).strip().lower() == wanted.lower()
     ]
     if len(named) != 1:
-        raise error_type((refusals.choose if named else refusals.unknown).format(choices=listed))
+        raise error_type((refusals.choose if named else refusals.unknown).format(choices=listed), person_fixes=True)
     return usable_for(named[0], db)

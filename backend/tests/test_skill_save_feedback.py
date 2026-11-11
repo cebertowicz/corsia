@@ -149,7 +149,7 @@ def test_placement_refusal_records_validation_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(guidance_git, "find_commit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         guidance_git,
-        "save_guidance",
+        "save_with_history",
         lambda *_args, **_kwargs: SaveResult(REFUSED, INVALID_SKILL_REASON, errors=("description is required",)),
     )
     monkeypatch.setattr(

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { mount, unmount, untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import type { ChangeDesc } from '@codemirror/state';
 	import type { CommentRange, ScrollOrigin } from '$lib/cm/comment-marks';
@@ -12,6 +13,14 @@
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
+	import EmailConversation from './EmailConversation.svelte';
+	import EmailNotes from './EmailNotes.svelte';
+	import EmailAttachments from './EmailAttachments.svelte';
+	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
+	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
+	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
+	import { activeThreadId } from '$lib/stores/activeThreadId';
 
 	type DocState = 'loading' | 'ready' | 'error';
 	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
@@ -46,6 +55,7 @@
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
+		artifactId = null,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -78,9 +88,52 @@
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
+		/** The loaded document's artifact id. When its draft record makes it an email draft, it opens as an email with its context read from the draft's account. */
+		artifactId?: string | null;
 	} = $props();
 
 	let editor = $state<MarkdownEditor>();
+	// An email draft keeps its text in the editor, with the warnings above it and the read-only conversation below. The
+	// editor sits in the same wrapper either way, so editing the header never remounts it. `readAttempt` counts the
+	// person's retries of a failed read; each one reads the draft's context again.
+	let readAttempt = $state(0);
+	let context = $state<{ artifactId: string; read: EmailDraftContext } | null>(null);
+	const LOADING: EmailDraftContext = { status: 'loading', conversation: [], notes: [], attachments: [] };
+	const draft = $derived(artifactId ? $emailDraftHeaders[artifactId] ?? null : null);
+	const emailDraftId = $derived(draft ? artifactId : null);
+	$effect(() => {
+		const id = docState === 'ready' ? emailDraftId : null;
+		readAttempt;
+		if (!id) { context = null; return; }
+		let current = true;
+		context = { artifactId: id, read: untrack(() => context)?.artifactId === id ? { ...untrack(() => context)!.read, status: 'loading' } : LOADING };
+		void fetchEmailDraftContext(id).then((read) => { if (current) context = { artifactId: id, read }; });
+		return () => { current = false; };
+	});
+	const email = $derived<EmailDraftContext | null>(context?.read ?? null);
+	const attachments = $derived(email?.attachments ?? []);
+	// Which entries the send would refuse is the server's reading of the header (refusedEntries says how an edit it
+	// hasn't read is shown).
+	const rereads = $derived(!!liveText);
+	let refused = $state<string[]>([]);
+	$effect(() => {
+		const recipients = currentRecipients(draft?.header, headerLayout(value.split('\n')).text);
+		refused = draft ? refusedEntries(untrack(() => refused), recipients, rereads) : [];
+	});
+	const loudLines = $derived(email ? [newerEmailsLine(newerEmails(email)), notFullAddressLine(refused)].filter((line): line is string => !!line) : []);
+	const emailHeader = $derived<EmailHeaderOptions | null>(email ? {
+		quiet: email.notes,
+		answered: email.answered ?? null,
+		header: draft?.header ?? null,
+		rereads,
+		attachmentsKey: JSON.stringify([attachments, email.threadId ?? $activeThreadId]),
+		mountAttachments: attachments.length ? (host) => {
+			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: email.threadId ?? $activeThreadId } });
+			return () => void unmount(chips);
+		} : null,
+	} : null);
+	// The header lines are drawn as a compact block over the editable text (cm/email-header.ts).
+	useEmailHeader(() => editor?.editorView(), () => emailHeader);
 	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
@@ -99,7 +152,16 @@
 	});
 </script>
 
-<div class="doc-main" bind:this={column}>
+{#snippet editorBlock()}
+	<div class="ed-wrap">
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		{#if saveError}
+			<div class="save-error" role="alert">{saveError}</div>
+		{/if}
+	</div>
+{/snippet}
+
+<div class="doc-main" class:email-mode={email} bind:this={column}>
 	{#if docState === 'loading'}
 		<div class="loadbar"><span></span></div>
 		<div class="md-skel">{#each Array(6) as _, i (i)}<span class="ms-line" style="width:{[90, 70, 80, 55, 75, 45][i]}%"></span>{/each}</div>
@@ -109,10 +171,11 @@
 			<Button size="sm" variant="ghost" onclick={onRetry}>Retry</Button>
 		</div>
 	{:else}
-		<div class="ed-wrap">
-			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
-			{#if saveError}
-				<div class="save-error" role="alert">{saveError}</div>
+		<div class="doc-body" class:email-scroll={email}>
+			{#if email}<EmailNotes lines={loudLines} />{/if}
+			{@render editorBlock()}
+			{#if email && (email.conversation.length || email.status !== 'ready')}
+				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} reference={email.reference} detail={email.detail} onretry={() => readAttempt += 1} />
 			{/if}
 		</div>
 	{/if}

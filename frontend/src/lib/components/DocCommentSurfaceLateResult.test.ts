@@ -31,12 +31,13 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const onSuggestionAccepted = vi.fn(), onSuggestionBusy = vi.fn();
 
-function render() {
+/** `narrow`: the sheet, where the list keeps Accept all; beside the margin column it is the review bar's. */
+function render(narrow = false) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(DocCommentSurface, {
 		target: host,
 		props: Object.defineProperties({
-			state: { kind: 'list' }, anchor: document.createElement('button'), narrow: false,
+			state: { kind: 'list' }, anchor: document.createElement('button'), narrow,
 			comments: [suggestion, secondSuggestion], focusedId: null, draft: null, onClose: vi.fn(), restoreFocus: vi.fn(),
 			onFocus: vi.fn(), onSubmit: vi.fn(), onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(),
 			target: first, artifactId: first.artifactId, onSuggestionAccepted, onSuggestionBusy,
@@ -91,13 +92,13 @@ afterEach(() => {
 describe('a decision that settles after the surface moved on', () => {
 	it.each(meanwhile)('accept-all fails after $what: shown only on the opening that started it', async ({ act, sameOpening }) => {
 		const decision = pendingDecision();
-		render();
-		host.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
+		render(true);
+		document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		await act();
 		decision.fail(new Error('The document could not be saved'));
 		await settled();
-		expect(host.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'The document could not be saved' : null);
+		expect(document.body.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'The document could not be saved' : null);
 	});
 
 	it.each(meanwhile)('a reject fails after $what: shown only on the opening that started it', async ({ act, sameOpening }) => {
@@ -124,8 +125,8 @@ describe('a decision that settles after the surface moved on', () => {
 
 	it.each(meanwhile)('accept-all succeeds after $what: its text goes to its own document', async ({ act, sameOpening, sameDocument }) => {
 		const decision = pendingDecision();
-		render();
-		host.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
+		render(true);
+		document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		await act();
 		decision.succeed({ accepted: ['comment-1'], skipped: [{ id: 'comment-2', reason: 'overlaps an earlier suggestion' }], text: 'accepted document', revision: 'r3' });
@@ -136,26 +137,26 @@ describe('a decision that settles after the surface moved on', () => {
 		expect(mocks.loadComments).toHaveBeenCalledExactlyOnceWith('artifact-1');
 		// Closing the surface does not change which document is on screen; switching tabs does.
 		expect(onSuggestionAccepted.mock.calls).toEqual(sameDocument ? [['accepted document']] : []);
-		expect(host.textContent?.includes('1 skipped')).toBe(sameOpening);
+		expect(document.body.textContent?.includes('1 skipped')).toBe(sameOpening);
 	});
 
 	it.each(meanwhile.slice(1))('a skipped list from a finished accept-all is gone after $what', async ({ act }) => {
 		const decision = pendingDecision();
-		render();
-		host.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
+		render(true);
+		document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		decision.succeed({ accepted: ['comment-1'], skipped: [{ id: 'comment-2', reason: 'overlaps an earlier suggestion' }], text: 'accepted document', revision: 'r3' });
 		await settled();
-		expect(host.textContent?.includes('1 skipped')).toBe(true);
+		expect(document.body.textContent?.includes('1 skipped')).toBe(true);
 		// Its reasons are about the first document's suggestions, so they do not stay on what replaced it.
 		await act();
-		expect(host.textContent?.includes('1 skipped')).toBe(false);
+		expect(document.body.textContent?.includes('1 skipped')).toBe(false);
 	});
 
 	it.each(meanwhile.slice(1))('an accept-all still running after $what is not shown as running, but still blocks another', async ({ act }) => {
 		const decision = pendingDecision();
-		render();
-		const acceptAll = () => host.querySelector<HTMLButtonElement>('.suggestion-status button')!;
+		render(true);
+		const acceptAll = () => document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!;
 		acceptAll().click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		flushSync();

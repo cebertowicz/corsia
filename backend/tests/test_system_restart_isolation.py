@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 import threading
-from unittest.mock import AsyncMock, mock_open, patch
+from unittest.mock import AsyncMock, Mock, mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,36 +39,44 @@ def _rows(sql: str, params: tuple = ()) -> list[dict]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["restart", "update"])
+@pytest.mark.parametrize("configured_port", ["43217", None])
+async def test_device_restart_targets_main_http_listener(monkeypatch, mode, configured_port):
+    from starlette.requests import Request
+
+    import api.system_admin as system_admin
+
+    if configured_port is None:
+        monkeypatch.delenv("BACKEND_PORT", raising=False)
+    else:
+        monkeypatch.setenv("BACKEND_PORT", configured_port)
+    request = Request({"type": "http", "server": ("127.0.0.1", 47901), "corsia_listener": "devices"})
+    prelaunch = AsyncMock(return_value=("operation", Mock(wait=Mock(return_value=0))))
+    with (
+        patch.object(system_admin, "authenticate", return_value={"id": "person"}),
+        patch.object(system_admin, "require_human_user"),
+        patch.object(system_admin, "prelaunch_settings_restart", prelaunch),
+        patch.object(system_admin, "_monitor_restart_process", new_callable=AsyncMock),
+    ):
+        await system_admin.system_restart(request, "session", mode=mode)
+
+    env = prelaunch.await_args.args[3]
+    expected = configured_port or str(DEFAULT_BACKEND_PORT)
+    assert env["BACKEND_PORT"] == expected
+    assert env["CORSIA_RESTART_BACKEND_PORT"] == expected
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
     tmp_path: Path,
     monkeypatch,
 ):
-    """A real shell failure before CLI dispatch releases only its exact operation."""
+    """A real shell failure records its exit without exposing its credential."""
     from api.settings_restart import _launch_settings_restart
 
     operation_id = "d" * 32
     secret = "caller credential with spaces & symbols"
     child_env = tmp_path / "child.env"
-    curl_result = tmp_path / "curl-result"
-    expected_secret = tmp_path / "expected-secret"
-    expected_secret.write_text(secret)
-
-    fake_curl = tmp_path / "curl"
-    fake_curl.write_text(
-        "#!/bin/bash\n"
-        "expected=$(cat \"$EXPECTED_SECRET_FILE\")\n"
-        "args=$(printf '%s\\n' \"$@\")\n"
-        "case \"$args\" in *\"operation_id=$EXPECTED_OPERATION\"*) op=ok ;; *) op=bad ;; esac\n"
-        "case \"$args\" in *\"token=$expected\"*) auth=ok ;; *) auth=bad ;; esac\n"
-        "printf '%s:%s:%s:%s:%s:%s\\n' \"$op\" \"$auth\" "
-        "\"${CORSIA_RESTART_CALLER_TOKEN-unset}\" "
-        "\"${CORSIA_TOKEN-unset}\" "
-        "\"${_corsia_lifecycle_token-unset}\" "
-        "\"${_corsia_cleanup_token-unset}\" > \"$CURL_RESULT\"\n"
-    )
-    fake_curl.chmod(0o755)
-    monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: str(fake_curl))
-
     failing_script = tmp_path / "corsia"
     failing_script.write_text(
         "#!/bin/bash\n"
@@ -84,14 +91,9 @@ async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
         "CORSIA_RESTART_BACKEND_PORT": "4111",
         "CORSIA_RESTART_OPERATION_ID": operation_id,
         "CORSIA_RESTART_CALLER_TOKEN": secret,
-        "CORSIA_RESTART_CURL": str(fake_curl),
         "CORSIA_TOKEN": secret,
-        "EXPECTED_OPERATION": operation_id,
-        "EXPECTED_SECRET_FILE": str(expected_secret),
-        "CURL_RESULT": str(curl_result),
         "CHILD_ENV": str(child_env),
         "_corsia_lifecycle_token": secret,
-        "_corsia_cleanup_token": secret,
     }
 
     process = await _launch_settings_restart(
@@ -105,7 +107,7 @@ async def test_lifecycle_shell_owns_pre_wrapper_failure_and_scrubs_credential(
     returncode = await asyncio.to_thread(process.wait, 5)
 
     assert returncode == 17
-    assert curl_result.read_text().strip() == "ok:ok:unset:unset:unset:unset"
+    assert "status=17" in process.lifecycle_result_path.read_text()
     assert "CORSIA_RESTART_CALLER_TOKEN=" not in child_env.read_text()
     assert secret not in child_env.read_text()
     assert secret not in (tmp_path / "restart.log").read_text()
@@ -125,10 +127,6 @@ async def test_lifecycle_shell_ignores_hostile_inherited_bash_startup(
     script = tmp_path / "corsia"
     script.write_text("#!/bin/bash\nexit 0\n")
     script.chmod(0o755)
-    fake_curl = tmp_path / "curl"
-    fake_curl.write_text("#!/bin/bash\nexit 0\n")
-    fake_curl.chmod(0o755)
-    monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: str(fake_curl))
     operation_id = "e" * 32
     restart_env = {
         **os.environ,
@@ -136,7 +134,6 @@ async def test_lifecycle_shell_ignores_hostile_inherited_bash_startup(
         "CORSIA_RESTART_BACKEND_PORT": "4112",
         "CORSIA_RESTART_OPERATION_ID": operation_id,
         "CORSIA_RESTART_CALLER_TOKEN": "credential",
-        "CORSIA_RESTART_CURL": str(fake_curl),
         "BASH_ENV": str(bash_env),
         "ENV": str(bash_env),
         "CDPATH": str(tmp_path),
@@ -347,7 +344,7 @@ class TestRestartInstanceIsolation:
     ):
         client = _client(3001)
         with (
-            patch("api.restart_shell.shutil.which", return_value=None),
+            patch("api.system_admin._own_backend_port", return_value=0),
             patch("subprocess.Popen") as popen,
         ):
             response = client.post(
@@ -556,7 +553,7 @@ async def test_update_owns_restart_slot_through_preparation(isolated_db):
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),
@@ -603,7 +600,7 @@ async def test_cancelled_update_retains_ownership_until_preparation_settles(
 
     request = Request({"type": "http", "server": ("testserver", 3001)})
     begin_drain = AsyncMock()
-    launch = AsyncMock(return_value=object())
+    launch = AsyncMock(return_value=Mock(wait=Mock(return_value=0)))
     with (
         patch("api.settings_restart._prepare_current_release", side_effect=prepare),
         patch("api.settings_restart._begin_settings_drain", begin_drain),

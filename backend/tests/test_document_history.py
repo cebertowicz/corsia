@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from infra import document_history
 from infra.document_history import list_versions, version_text
 from infra.guidance_git import GitFault
-from infra.guidance_targets import GuidanceTarget
+from infra.guidance_targets import HistoryTarget
 
 
 def git(repo: Path, *args: str) -> str:
@@ -88,7 +88,7 @@ def test_a_workspace_with_no_repository_of_its_own_reads_history_off(workspace_w
 
 def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no_repository_of_its_own, monkeypatch):
     from api import files_history
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     class DB:
         def close(self):
@@ -99,20 +99,25 @@ def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no
     monkeypatch.setattr(files_history, "get_db", DB)
     monkeypatch.setattr(files_history.config, "WORKSPACE", workspace)
     monkeypatch.setattr(files_history, "checked_read_path", lambda *_: (path, []))
-    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: GuidanceTarget("context, workspace scope"))
+    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: HistoryTarget("context, workspace scope"))
     assert files_history.history(str(path), "person", None, None) == {"versions": [], "truncated": False}
     with pytest.raises(HTTPException) as missing:
         files_history.history(str(path), "person", None, None, "a" * 40)
     assert missing.value.status_code == 404
 
 
+def reasoned(reason: str) -> str:
+    """A message whose stated reason keeps its save a version of its own in the grouped list."""
+    return f"{reason}\n\nReason: {reason}\nScope: workspace"
+
+
 def test_list_reports_truncation_past_the_cap(repo, monkeypatch):
     monkeypatch.setattr(document_history, "HISTORY_CAP", 2)
     path = repo / "sample.md"
-    first = commit(repo, path, "one", "first")
-    commit(repo, path, "two", "second")
+    first = commit(repo, path, "one", reasoned("first"))
+    commit(repo, path, "two", reasoned("second"))
     assert list_versions(repo, "sample.md")[1] is False
-    commit(repo, path, "three", "third")
+    commit(repo, path, "three", reasoned("third"))
     rows, truncated = list_versions(repo, "sample.md")
     assert len(rows) == 2 and truncated is True
     assert first not in [row["id"] for row in rows]
@@ -123,11 +128,11 @@ def test_list_reports_truncation_past_the_cap(repo, monkeypatch):
 
 def test_deleted_then_recreated_file_lists_only_versions_with_text(repo):
     path = repo / "sample.md"
-    first = commit(repo, path, "before delete", "first")
+    first = commit(repo, path, "before delete", reasoned("first"))
     git(repo, "rm", "-q", "--", "sample.md")
     git(repo, "commit", "-qm", "delete")
     deleted = git(repo, "rev-parse", "HEAD").strip()
-    recreated = commit(repo, path, "after delete", "recreate")
+    recreated = commit(repo, path, "after delete", reasoned("recreate"))
     rows, _ = list_versions(repo, "sample.md")
     assert [row["id"] for row in rows] == [recreated, first]
     assert version_text(repo, "sample.md", first) == "before delete"
@@ -179,7 +184,7 @@ def test_git_fault_is_unavailable_not_unknown(repo, monkeypatch):
     monkeypatch.setattr(files_history, "get_db", DB)
     monkeypatch.setattr(files_history.config, "WORKSPACE", repo)
     monkeypatch.setattr(files_history, "checked_read_path", lambda *_: (path, []))
-    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: GuidanceTarget("skill"))
+    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: HistoryTarget("skill"))
 
     def fault(*_args, **_kwargs):
         raise GitFault("fatal: unable to read tree")

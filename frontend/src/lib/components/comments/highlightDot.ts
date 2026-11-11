@@ -1,14 +1,17 @@
 import { mount, unmount } from 'svelte';
 import NewMarker from './NewMarker.svelte';
 
-/** Place the shared marker out of text flow, keeping it visible within the scroller. */
-export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void): () => void {
+/** What the pinned sign says is new, as its accessible name. */
+export type NewSignName = 'New comment' | 'New reply';
+
+/** Pin the new sign over the end of a highlight, out of text flow so no line moves for it, kept visible within the scroller. */
+export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void, name: NewSignName = 'New reply'): () => void {
 	const host = document.createElement('span');
 	const layer = body.parentElement?.classList.contains('comment-mark-layer') ? body.parentElement : null;
 	host.dataset.highlightDot = '';
 	host.style.cssText = `position:${layer ? 'absolute' : 'fixed'};z-index:5;pointer-events:none;display:none;line-height:0`;
 	(layer ?? document.body).append(host);
-	const marker = mount(NewMarker, { target: host, props: { dotOnly: true, failedQuote } });
+	const marker = mount(NewMarker, { target: host, props: { pinned: true, failedQuote, name } });
 	let frame = 0;
 	function update() {
 		frame = 0;
@@ -17,15 +20,17 @@ export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failed
 		textRange.selectNodeContents(anchor);
 		const rects = anchor.matches('td, th') ? [...textRange.getClientRects()] : [...anchor.getClientRects()];
 		const last = rects.at(-1);
-		const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1'));
-		if (!last || !Number.isFinite(size) || size <= 0) { setVisible(false); return; }
+		// Its own size: the word, or a failed reply's dot.
+		host.style.display = 'inline-flex';
+		const width = host.offsetWidth, height = host.offsetHeight;
+		if (!last || width <= 0 || height <= 0) { setVisible(false); return; }
 		const scroller = body.closest<HTMLElement>('.messages, .cm-scroller');
 		const clip = scroller?.getBoundingClientRect();
 		const headerBottom = document.querySelector('.shell-header')?.getBoundingClientRect().bottom ?? 0;
 		const top = Math.max(0, headerBottom, clip?.top ?? 0), bottom = Math.min(innerHeight, clip?.bottom ?? innerHeight);
-		if (last.right < 0 || last.left > innerWidth || last.bottom < top || last.top > bottom || bottom - top < size) { setVisible(false); return; }
-		const x = Math.max(0, Math.min(innerWidth - size, last.right - size));
-		const y = Math.max(top, Math.min(bottom - size, last.top - size - 1));
+		if (last.right < 0 || last.left > innerWidth || last.bottom < top || last.top > bottom || bottom - top < height) { setVisible(false); return; }
+		const x = Math.max(0, Math.min(innerWidth - width, last.right - width));
+		const y = Math.max(top, Math.min(bottom - height, last.top - height - 1));
 		const layerRect = layer?.getBoundingClientRect();
 		host.style.left = `${x - (layerRect?.left ?? 0)}px`; host.style.top = `${y - (layerRect?.top ?? 0)}px`; setVisible(true);
 	}

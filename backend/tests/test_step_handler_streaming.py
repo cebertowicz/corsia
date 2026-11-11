@@ -138,7 +138,6 @@ def test_persistence_failure_always_closes_pooled_connection(
             raise
 
     monkeypatch.setattr("core.step_handler.run_in_db", _run_in_db)
-    monkeypatch.setattr("core.step_handler.get_db", lambda: db)
     monkeypatch.setattr("core.step_handler.write_transaction", _write_transaction)
     monkeypatch.setattr("core.step_handler.insert_message", _fail_insert)
     # A tool result is written by the canonical tool-result writer instead.

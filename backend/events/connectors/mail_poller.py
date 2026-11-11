@@ -27,7 +27,9 @@ from connections.mail import email_screen
 from connections.microsoft import client as microsoft_client
 from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID
 from events.connectors.mail_poll_read import ADAPTERS, event_payload
-from events.connectors import gmail_feed as feed
+from events import rule_reads
+from events.connectors import get_manifest, gmail_feed as feed
+from events.connectors.gmail import EMAIL_RECEIVED
 from events.platform import DIGESTED, FILTERED, WOKE, PlatformDelivery, deliver_platform_event_sync
 from events.resolve import Target
 from infra.database import get_db, write_transaction
@@ -162,19 +164,25 @@ def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
 
 def _deliver(account_id: str, payload: dict[str, Any], db: sqlite3.Connection | None = None) -> bool:
     """Deliver one event only to resolved owners inside its account reach."""
-    from connections.connected_accounts import account_reaches_thread, get_account, is_connected
+    from connections.connected_accounts import ConnectedAccountError, account_reaches_thread, is_connected
 
     def inside_account_reach(target: Target, connection: sqlite3.Connection) -> str | None:
         if target.thread is None or account_reaches_thread(account_id, target.thread, db=connection):
             return None
         return "account_out_of_reach"
 
+    try:
+        connector = ADAPTERS[_provider(account_id)].connector
+    except ConnectedAccountError:
+        return False  # removed since it was polled
+    # Read before the write transaction: where agents' own rules may fire if no one owns the conversation.
+    scope = rule_reads.unrouted_projects(
+        connector, EMAIL_RECEIVED, get_manifest(connector).extract_facts(payload, None))
     with write_transaction(db, scope="mail_poll_deliver") as conn:
         if not is_connected(account_id, db=conn):
             return False
-        provider = get_account(account_id, db=conn)["provider"]
         deliveries = deliver_platform_event_sync(
-            ADAPTERS[str(provider)].connector, payload, target_filter=inside_account_reach, db=conn,
+            connector, payload, target_filter=inside_account_reach, unrouted_projects=scope, db=conn,
         )
         _record_delivery(account_id, deliveries)
         return True

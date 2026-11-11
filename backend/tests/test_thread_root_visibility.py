@@ -262,8 +262,6 @@ async def test_cc_turn_activity_frame_names_the_visible_root(isolated_db, monkey
 @pytest.mark.asyncio
 async def test_codex_turn_activity_frame_names_the_visible_root(isolated_db):
     """The Codex live-turn start broadcast carries the same root contract."""
-    from types import SimpleNamespace
-
     from core.turn_core import TurnIdentity
     from subagents import codex_runtime
 
@@ -273,7 +271,7 @@ async def test_codex_turn_activity_frame_names_the_visible_root(isolated_db):
     )
     identity = TurnIdentity("turn-cx", 6)
     frames: list[dict] = []
-    live = SimpleNamespace(session=None, corsia_turn=None)
+    live = codex_runtime._LiveCodex(session=None, parent_thread_id=None, name="cx-child")
 
     accepted = await codex_runtime._start_live_turn(
         "cx-child",

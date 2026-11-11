@@ -14,7 +14,7 @@ from core.skill_scanning import skill_files
 from core.system_tier import system_tier_manifest
 from core.workspace_layout import ThreadRootResolver, resolve_workspace_root
 from infra.corsia_agent import corsia_agent_thread_id
-from infra.guidance_git import MAX_GUIDANCE_BYTES
+from core.document_history_paths import MAX_HISTORY_BYTES
 
 SOURCE_DISCOVERY_ISSUE = "Read-only guidance source discovery (legacy issue #3364)"
 
@@ -183,7 +183,7 @@ def current_sources(workspace: Path, inputs: tuple[dict, list, list]) -> tuple[l
         try:
             if not path.resolve().is_relative_to(root):
                 raise ValueError("source is outside the workspace")
-            if path.stat().st_size > MAX_GUIDANCE_BYTES:
+            if path.stat().st_size > MAX_HISTORY_BYTES:
                 raise ValueError("source exceeds guidance limit")
             record = source_record(path.read_text(encoding="utf-8"), str(path.resolve()), with_statement=True)
         except (OSError, UnicodeError, ValueError) as exc:

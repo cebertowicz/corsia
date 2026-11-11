@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
+	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
 		tabs: ArtifactTab[];
@@ -107,6 +108,8 @@
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21M12 3C9.6 5.5 8.4 8.5 8.4 12S9.6 18.5 12 21" /></svg>
 					{:else if t.kind !== 'document'}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /></svg>
+						{:else if t.artifactId && $emailDraftHeaders[t.artifactId]}
+							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
 						{:else if imageTabIds.has(key)}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
 						{:else}

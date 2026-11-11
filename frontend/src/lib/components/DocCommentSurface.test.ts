@@ -58,6 +58,15 @@ function noRoomCanvas(): HTMLElement {
 	canvases.push(app);
 	return box(doc, 'bounds', new DOMRect(0, 0, 600, 800));
 }
+/** The resolved drawer's two bound props, as the viewer holds them for its header control. */
+function resolvedDrawerProps() {
+	const open = writable(false), liveOpen = fromStore(open);
+	let count = 0;
+	return {
+		props: Object.getOwnPropertyDescriptors({ get resolvedOpen() { return liveOpen.current; }, set resolvedOpen(value: boolean) { open.set(value); }, get resolvedCount() { return count; }, set resolvedCount(value: number) { count = value; } }),
+		set: (value: boolean) => open.set(value), isOpen: () => get(open), count: () => count,
+	};
+}
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
@@ -77,9 +86,10 @@ describe('DocCommentSurface suggestions', () => {
 		},
 	);
 
-	it('shows open threads as cards in the margin, with text navigation, and lists only resolved ones behind its own entry', () => {
+	it('shows open threads as cards in the margin, with text navigation, and lists only resolved ones in their own drawer', () => {
 		const onFocus = vi.fn();
-		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }], onFocus });
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }], onFocus }, open.props));
 		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]');
 		expect(drawer).not.toBeNull();
 		expect(document.body.querySelector('[data-popover]')).toBeNull();
@@ -87,9 +97,11 @@ describe('DocCommentSurface suggestions', () => {
 		drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]')!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
 		expect(drawer!.querySelector('[data-drawer-filter]')).toBeNull();
-		expect(drawer!.querySelector('.margin-aside')).toBeNull();
-		drawer!.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!.click(); flushSync();
-		const list = drawer!.querySelector('.margin-aside')!;
+		// No heading or close in the column: the header's control opens the resolved drawer.
+		expect(drawer!.querySelector('.drawer-heading')).toBeNull();
+		expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+		open.set(true); flushSync();
+		const list = document.body.querySelector('.resolved-drawer')!;
 		expect([...list.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});
 
@@ -108,24 +120,37 @@ describe('DocCommentSurface suggestions', () => {
 		expect(card(rest.id).textContent).toContain('1 reply');
 	});
 
-	it('counts open threads in the header, and the resolved entry is the only way to the resolved list', () => {
-		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
-		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
-		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
-		const entry = drawer.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!;
-		expect(entry.textContent?.trim()).toBe('Resolved · 1');
-		expect(entry.getAttribute('aria-expanded')).toBe('false');
-		entry.click(); flushSync();
-		expect(entry.getAttribute('aria-expanded')).toBe('true');
-		expect(drawer.querySelector('.margin-aside')?.getAttribute('aria-label')).toBe('Resolved comments');
+	it('counts resolved threads for the header control, and opens their drawer only from it', () => {
+		const open = resolvedDrawerProps();
+		const focused = writable<string | null>(null), liveFocused = fromStore(focused);
+		const comments = writable([suggestion, { ...secondSuggestion, resolved: true }]), liveComments = fromStore(comments);
+		render(Object.defineProperties({ state: { kind: 'list' }, get focusedId() { return liveFocused.current; }, get comments() { return liveComments.current; } }, open.props));
+		expect(open.count()).toBe(1);
+		// A resolved thread picked, the comments changing under an edit, or the picked thread being resolved: none opens it over the cards.
+		focused.set('comment-2'); flushSync();
+		comments.set([{ ...suggestion }, { ...secondSuggestion, resolved: true }]); flushSync();
+		focused.set('comment-1'); flushSync();
+		comments.set([{ ...suggestion, resolved: true }, { ...secondSuggestion, resolved: true }]); flushSync();
+		expect(open.isOpen()).toBe(false);
+		expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+		open.set(true); flushSync();
+		expect(document.body.querySelector('[role="dialog"][aria-label="Resolved comments"], [aria-label="Resolved comments"]')).not.toBeNull();
 	});
 
 	it('lists resolved threads newest first', () => {
 		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
-		render({ state: { kind: 'list' }, comments: [resolved('old', '2026-11-01T10:00:00Z'), resolved('newest', '2026-11-05T10:00:00Z'), resolved('middle', '2026-11-03T10:00:00Z')] });
-		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
-		drawer.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!.click(); flushSync();
-		expect([...drawer.querySelectorAll('.margin-aside [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ state: { kind: 'list' }, comments: [resolved('old', '2026-11-01T10:00:00Z'), resolved('newest', '2026-11-05T10:00:00Z'), resolved('middle', '2026-11-03T10:00:00Z')] }, open.props));
+		open.set(true); flushSync();
+		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
+	});
+
+	it.each([true, false])('keeps the margin cards up while a new comment is written, the composer a card among them when the column is up (%s)', (overColumn) => {
+		render({ state: { kind: 'draft' }, draftOverColumn: overColumn, draft: { text: 'old text' }, comments: [suggestion] });
+		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]') !== null).toBe(overColumn);
+		// With the column up the composer is in it, level with the selection, and nothing covers the text; without it, a popover.
+		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-margin-card="draft"] textarea, .canvas-comment-drawer.margin [data-margin-card="draft"] .ct-input') !== null).toBe(overColumn);
+		expect(document.body.querySelector('[data-popover] .ct-input, [data-popover] textarea') !== null).toBe(!overColumn);
 	});
 
 	it('opens the column without hiding the sidebar or the Workspace panel', () => {
@@ -144,35 +169,50 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [deleted, secondSuggestion] });
 		const card = document.body.querySelector<HTMLElement>('[data-margin-card="comment-1"]');
 		expect(card).not.toBeNull();
-		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text isn’t in the document');
 		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
-		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
 		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();
 	});
 
-	it('has no resolved entry while nothing is resolved', () => {
-		render({ state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-aside-kind]')).toBeNull();
+	it('shows a review conversation as a card in the column', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, id: 'review-1', replacement: null, review: true }] });
+		expect(document.body.querySelector('[data-margin-card="review-1"]')).not.toBeNull();
+	});
+
+	it('counts no resolved threads for the header control once nothing is resolved', () => {
+		const open = resolvedDrawerProps();
+		const comments = writable([suggestion, { ...secondSuggestion, resolved: true }]), liveComments = fromStore(comments);
+		render(Object.defineProperties({ state: { kind: 'list' }, get comments() { return liveComments.current; } }, open.props));
+		expect(open.count()).toBe(1);
+		comments.set([suggestion]); flushSync();
+		expect(open.count()).toBe(0);
 		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
 	});
 
-	it('lists the open threads in the sheet that has no margin, with the resolved ones behind an entry, newest first', async () => {
+	it('lists only the open threads in the sheet that has no margin; the resolved ones, newest first, open in their own drawer from the header control', async () => {
 		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
-		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] });
-		const ids = () => [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
-		expect(ids()).toEqual(['comment-1']);
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] }, open.props));
+		const ids = (selector: string) => [...document.body.querySelectorAll(`${selector} [data-comment-id]`)].map((card) => card.getAttribute('data-comment-id'));
+		expect(ids('[data-doc-comments-drawer]')).toEqual(['comment-1']);
 		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('1 open');
-		const entry = document.body.querySelector<HTMLButtonElement>('[data-doc-comments-drawer] [data-aside-kind="resolved"]')!;
-		expect(entry.textContent).toContain('Resolved · 2');
-		entry.click();
-		await tick();
-		expect(ids()).toEqual(['comment-1', 'new', 'old']);
-		expect(document.body.querySelector('[data-drawer-filter]')).toBeNull();
+		expect(open.count()).toBe(2);
+		open.set(true); flushSync(); await tick();
+		expect(ids('.resolved-drawer')).toEqual(['new', 'old']);
+		expect(document.body.querySelector('[data-doc-comments-drawer] .resolved-drawer')).toBeNull();
 	});
 
-	it('has no resolved entry and no empty-resolved text in the sheet while nothing is resolved', () => {
+	it('opens the resolved drawer with no comment surface up, so a narrow canvas reaches it from the header control alone', async () => {
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ narrow: true, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		expect(document.body.querySelector('[data-doc-comments-drawer]')).toBeNull();
+		expect(open.count()).toBe(1);
+		open.set(true); flushSync(); await tick();
+		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
+	});
+
+	it('has no empty-resolved text in the sheet while nothing is resolved', () => {
 		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-doc-comments-drawer] [data-aside-kind]')).toBeNull();
 		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('No resolved comments');
 	});
 
@@ -182,147 +222,10 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('Send now');
 	});
 
-	it('shows no Place again footer when every unplaced comment is detached, though its card stays in the drawer', () => {
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true, detached: true }], placementRecovery: { onReload: vi.fn(() => true), unplacedCount: 1, replaceableCount: 0 } });
-		expect(document.body.querySelector('[data-doc-comments-drawer] [data-drawer-placement]')).toBeNull();
-		expect(document.body.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
-		expect(document.body.querySelector('[data-doc-comments-drawer]')?.textContent).not.toContain("couldn't be placed");
-	});
-
-	it('counts every unplaced comment like the header, and after Place again never claims a detached one was placed', async () => {
-		// Two unplaced, one detached: the footer agrees with the header pill (2), and placing the other leaves 1, not "Comments placed".
-		const reloading = writable(false), counts = writable({ unplaced: 2, replaceable: 1 });
-		const liveReloading = fromStore(reloading), liveCounts = fromStore(counts);
-		render({
-			state: { kind: 'list' },
-			comments: [{ ...suggestion, orphaned: true }, { ...suggestion, id: 'detached', orphaned: true, detached: true }],
-			get placementRecovery() { return { onReload: () => true, unplacedCount: liveCounts.current.unplaced, replaceableCount: liveCounts.current.replaceable, reloading: liveReloading.current }; },
-		});
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
-		expect(document.body.querySelector('[data-drawer-focus-home]')?.textContent).toBe('Comments 2 open');
-		document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
-		reloading.set(true); flushSync();
-		counts.set({ unplaced: 1, replaceable: 0 }); flushSync();
-		reloading.set(false); flushSync();
-		await tick();
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("1 comment still couldn't be placed");
-		expect(document.body.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
-		expect(document.activeElement).toBe(document.body.querySelector('[data-drawer-focus-home]'));
-	});
-
-	it('moves orphan placement recovery into the comments drawer with its existing live-state wiring', () => {
-		const reload = vi.fn(() => true);
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload, unplacedCount: 1, replaceableCount: 1 } });
-		const footer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-placement]')!;
-		expect(footer.querySelector('[role="status"]')?.textContent).toBe("1 comment couldn't be placed");
-		const button = footer.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-		button.click();
-		expect(reload).toHaveBeenCalledOnce();
-		expect(document.body.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer.parentElement);
-	});
-
-	it('restores focus to the orphan recovery action after a reload leaves the comment unplaced', async () => {
-		const reloading = writable(false);
-		const live = fromStore(reloading);
-		render({
-			state: { kind: 'list' },
-			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => true, unplacedCount: 1, replaceableCount: 1, reloading: live.current }; },
-		});
-		const button = document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-		button.focus();
-		button.click();
-		reloading.set(true); flushSync();
-		reloading.set(false); flushSync();
-		await tick();
-		expect(document.activeElement).toBe(document.body.querySelector('[aria-label="Reload comment placements"]'));
-	});
-
-	it('announces every failed placement retry even when the unplaced count does not change', async () => {
-		const reloading = writable(false);
-		const live = fromStore(reloading);
-		render({
-			state: { kind: 'list' },
-			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => true, unplacedCount: 1, replaceableCount: 1, reloading: live.current }; },
-		});
-		const retry = async () => {
-			document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
-			reloading.set(true); flushSync();
-			reloading.set(false); flushSync();
-			await tick();
-		};
-		await retry();
-		const first = document.body.querySelector('[data-drawer-placement] [role="status"]')!;
-		expect(first.textContent).toBe("1 comment still couldn't be placed");
-		await retry();
-		const second = document.body.querySelector('[data-drawer-placement] [role="status"]')!;
-		expect(second.textContent).toBe("1 comment still couldn't be placed");
-		expect(second).not.toBe(first);
-	});
-
-	it('shows a refused placement retry after the drawer closes and reopens', async () => {
-		const state = writable<{ kind: 'list' } | null>({ kind: 'list' });
-		const reloading = writable(false), reloadError = writable(false);
-		const liveState = fromStore(state), liveReloading = fromStore(reloading), liveReloadError = fromStore(reloadError);
-		render({
-			get state() { return liveState.current; },
-			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => { reloading.set(true); return true; }, unplacedCount: 1, replaceableCount: 1, reloading: liveReloading.current, reloadError: liveReloadError.current }; },
-		});
-		document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
-		state.set(null); flushSync();
-		await vi.waitFor(() => expect(document.body.querySelector('[data-doc-comments-drawer]')).toBeNull());
-		reloadError.set(true); reloading.set(false); state.set({ kind: 'list' }); flushSync();
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("Couldn't reload comment placements");
-	});
-
-	it('keeps a successful placement announcement in the drawer after the recovery action is gone', async () => {
-		const reloading = writable(false);
-		const comments = writable([{ ...suggestion, orphaned: true }]);
-		const liveReloading = fromStore(reloading);
-		const liveComments = fromStore(comments);
-		render({
-			state: { kind: 'list' },
-			get comments() { return liveComments.current; },
-			get placementRecovery() { const count = liveComments.current.filter(comment => comment.orphaned && !comment.resolved).length; return { onReload: () => true, unplacedCount: count, replaceableCount: count, reloading: liveReloading.current }; },
-		});
-		document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
-		reloading.set(true); flushSync();
-		comments.set([]); flushSync();
-		reloading.set(false); flushSync();
-		await tick();
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
-		expect(document.body.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
-		expect(document.activeElement).toBe(document.body.querySelector('[data-drawer-focus-home]'));
-	});
-
-	it('clears a successful placement announcement when a later refresh reports unplaced comments', async () => {
-		const reloading = writable(false);
-		const orphanedCount = writable(1);
-		const liveReloading = fromStore(reloading);
-		const liveOrphanedCount = fromStore(orphanedCount);
-		render({
-			state: { kind: 'list' },
-			get placementRecovery() { return { onReload: () => true, unplacedCount: liveOrphanedCount.current, replaceableCount: liveOrphanedCount.current, reloading: liveReloading.current }; },
-		});
-		document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
-		reloading.set(true); flushSync();
-		orphanedCount.set(0); flushSync();
-		reloading.set(false); flushSync();
-		await tick();
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
-		orphanedCount.set(2); flushSync();
-		await tick();
-		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
-	});
-
-	it('keeps a disconnected placement retry focusable and names its live status', () => {
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), unplacedCount: 1, replaceableCount: 1, unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
-		const button = document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-		expect(button.disabled).toBe(false);
-		expect(button.getAttribute('aria-disabled')).toBe('true');
-		expect(button.getAttribute('aria-describedby')).toBe('live-connection-artifact');
+	it.each([false, true])('keeps a comment whose text moved or went as a marked card (sheet: %s)', (narrow) => {
+		render({ narrow, state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }, { ...secondSuggestion, orphaned: true, detached: true }] });
+		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		expect(drawer.querySelectorAll('[data-comment-id] .ct.orphaned')).toHaveLength(2);
 	});
 
 	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
@@ -369,6 +272,12 @@ describe('DocCommentSurface suggestions', () => {
 			expect(onClose).not.toHaveBeenCalled();
 			unmount(component!); host.remove(); component = null;
 		}
+	});
+
+	it.each([false, true])('draws one thread flat in the popover and the sheet: the container is its card (narrow %s)', (narrow) => {
+		render({ narrow, state: { kind: 'thread', id: suggestion.id }, ...(narrow ? {} : { bounds: noRoomCanvas() }) });
+		const card = document.body.querySelector<HTMLElement>(`${narrow ? '[data-adaptive-drawer]' : '[data-popover]'} .ct`)!;
+		expect(card.classList.contains('flat')).toBe(true);
 	});
 
 	it('leaves the focus in the text a card was picked from, and moves it into a card opened any other way', async () => {
@@ -432,7 +341,7 @@ describe('DocCommentSurface suggestions', () => {
 			const accept = document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
 			drawn = null;
 			accept.click();
-			await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.'));
+			await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document."));
 			expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
 			await vi.waitFor(() => expect(placed()).toEqual(before));
 			expect(onClose).not.toHaveBeenCalled();
@@ -513,7 +422,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, onClose, restoreFocus });
 		window.addEventListener('keydown', documentEscape);
 		try {
-			document.body.querySelector('[data-drawer-focus-home]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			document.body.querySelector('[data-doc-comments-drawer]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 			expect(onClose).toHaveBeenCalledOnce();
 			expect(restoreFocus).toHaveBeenCalledOnce();
 			expect(documentEscape).not.toHaveBeenCalled();
@@ -595,7 +504,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		expect(accept().textContent).toBe('Accept');
 		expect(accept().disabled).toBe(true);
-		expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+		expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document.");
 		expect(onSuggestionAccepted).not.toHaveBeenCalled();
 	});
 
@@ -700,7 +609,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.textContent).not.toContain('Accept all from agent-1');
 	});
 
-	it('accepts all, re-seeds without a stale banner, and shows skipped reasons', async () => {
+	it.each([true, false])('accepts all, re-seeds without a stale banner, and shows skipped reasons (sheet: %s)', async (narrow) => {
 		mocks.flushDraft.mockResolvedValue(true);
 		mocks.decideSuggestion.mockResolvedValue({
 			accepted: ['comment-1'],
@@ -709,11 +618,13 @@ describe('DocCommentSurface suggestions', () => {
 			revision: 'r3',
 		});
 		mocks.loadComments.mockResolvedValue(undefined);
+		// Accept all is the sheet list's first item, and the margin column's.
 		const { onSuggestionAccepted } = render({
+			narrow,
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 		});
-		const button = Array.from(document.body.querySelectorAll('button')).find(
+		const button = Array.from(document.body.querySelectorAll(narrow ? 'button' : '.margin-accept-all button')).find(
 			(candidate) => candidate.textContent === 'Accept all from agent-1',
 		) as HTMLButtonElement;
 		button.click();
@@ -726,13 +637,13 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.textContent).not.toContain('Updated elsewhere');
 	});
 
-	it('runs accept-all once, shows it busy, and reports a failure inline', async () => {
+	it.each([true, false])('runs accept-all once, shows it busy, and reports a failure inline (sheet: %s)', async (narrow) => {
 		mocks.flushDraft.mockResolvedValue(true);
 		let fail!: (error: Error) => void;
 		mocks.decideSuggestion.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
 		mocks.loadComments.mockResolvedValue(undefined);
-		render({ state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
-		const acceptAll = () => document.body.querySelector<HTMLButtonElement>('.suggestion-status button')!;
+		render({ narrow, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
+		const acceptAll = () => document.body.querySelector<HTMLButtonElement>(`${narrow ? '' : '.margin-accept-all '}.suggestion-status button`)!;
 		expect(acceptAll().textContent).toBe('Accept all from agent-1');
 		acceptAll().click(); acceptAll().click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
@@ -748,8 +659,9 @@ describe('DocCommentSurface suggestions', () => {
 		expect(acceptAll().disabled).toBe(false);
 	});
 
-	it('hides accept-all from read-only viewers', () => {
+	it.each([true, false])('hides accept-all from read-only viewers (sheet: %s)', (narrow) => {
 		render({
+			narrow,
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 			readOnly: true,
@@ -771,13 +683,14 @@ describe('DocCommentSurface comments on images inside a document', () => {
 	const images = () => ({ srcOf: vi.fn((comment: { id: string }) => `/img/${comment.id}`), colorOf: vi.fn(() => '#e5484d'), onOpen: vi.fn() });
 
 	// The margin column keeps the thumbnail: one heads each image card, in document order. Grouping every comment of an image together under one thumbnail, in number order, and the orphaned card, are the sheet's list (the next two tests).
-	it('in the margin column, a thumbnail heads each image card, in document order', () => {
+	it('in the margin column, a thumbnail and caption sit inside the top of each image card, in document order', () => {
 		render({ state: { kind: 'list' }, comments, images: images() });
 		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
 		const ids = [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids).toEqual(['before', 'b', 'between', 'a', 'c', 'gone']);
 		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
-		expect(thumbs.map((thumb) => thumb.nextElementSibling?.getAttribute('data-comment-id'))).toEqual(['b', 'a', 'c', 'gone']);
+		expect(thumbs.map((thumb) => thumb.closest('[data-comment-id]')?.getAttribute('data-comment-id'))).toEqual(['b', 'a', 'c', 'gone']);
+		for (const thumb of thumbs) expect(thumb.closest('.ct')?.firstElementChild).toBe(thumb);
 		expect(thumbs.map((thumb) => thumb.getAttribute('aria-label'))).toEqual(['Mock: image with comment 2', 'Mock: image with comment 1', 'Mock: image with comment 1', 'Mock: image with comment 3']);
 	});
 
@@ -839,10 +752,11 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
-		render({ state: { kind: 'list' }, focusedId: 'comment-1', get comments() { return state.current; } });
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ state: { kind: 'list' }, focusedId: 'comment-1', get comments() { return state.current; } }, open.props));
 		const field = document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-		expect(document.body.querySelector('.drawer-heading')?.textContent).toContain('2 open');
+		expect(open.count()).toBe(0);
 		// A resolved thread also reads as agreed; the kept card must still show the reply being typed, not "Agreed".
 		const eased: Array<[Element, number]> = [];
 		const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes | null) {
@@ -853,8 +767,8 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const card = document.body.querySelector<HTMLElement>('[data-comment-id="comment-1"]')!;
 		expect(card).not.toBeNull();
 		expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('half a reply');
-		// The header counts threads that are open, as the document's chip does: the kept card says it is resolved and is not counted.
-		expect(document.body.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		// The kept card says it is resolved, and the header's Resolved control does not count it yet.
+		expect(open.count()).toBe(0);
 		// It no longer offers what a resolved thread cannot do, says what Send does, and offers Re-open.
 		// The note enters, and Agree and Resolve leave, by easing (clip and fade) rather than in one frame.
 		const easedNodes = eased.map(([node]) => node);
@@ -873,7 +787,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		// The picked card is the one the person typed in, so it goes on to the Resolved list the column keeps for the selected thread; what leaves is its place among the open cards.
 		await vi.waitFor(() => expect(document.body.querySelector('.margin-stack [data-comment-id="comment-1"]')).toBeNull());
 		expect(document.body.querySelector('.margin-stack [data-comment-id="comment-2"]')).not.toBeNull();
-		expect(document.body.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		expect(open.count()).toBe(1);
 	});
 
 	it('Re-open on the kept card reopens the thread and keeps the reply', async () => {
@@ -962,7 +876,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		canvases.push(bounds);
 		render({ bounds, state: { kind: 'list' } });
 		const surface = component as unknown as { cardMode(): string };
-		const column = () => document.body.querySelector('.drawer-comments.margin-clip') !== null;
+		const column = () => document.body.querySelector('.drawer-comments.in-margin') !== null;
 		const resize = (to: number) => { width = to; resized.forEach((callback) => callback()); flushSync(); };
 		expect([surface.cardMode(), column()]).toEqual(['margin', true]);
 		resize(600); // under MARGIN_MIN: the column leaves (after its exit motion) as the mode stops being 'margin'

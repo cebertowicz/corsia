@@ -45,7 +45,8 @@ export async function openCommentThread(row: Locator, page: Page, quote: string)
 		return drawer;
 	}
 	if (await page.locator('.chat-margin').count()) {
-		const card = page.locator('.chat-margin .chat-margin-card');
+		// The clicked highlight picks its own card, so a message with several comments returns the right one.
+		const card = page.locator('.chat-margin .chat-margin-card.selected');
 		await expect(card).toBeVisible();
 		return card;
 	}

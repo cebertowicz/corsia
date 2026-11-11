@@ -85,7 +85,7 @@ const expectAttached = () => {
 const expectOrphaned = () => {
 	expect(group()).toBe('Text changed');
 	expect(accept().disabled).toBe(true);
-	expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+	expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document.");
 };
 async function refuseAccept() {
 	mocks.flushDraft.mockResolvedValue(true);
@@ -118,7 +118,7 @@ describe('a suggestion card and the text it replaces', () => {
 		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')).toBeNull();
 		edit(6, 7, 'a');
 		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
-		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document.");
 		expect(document.body.querySelector('.aside-button, .margin-aside, .orphans-button')).toBeNull();
 		edit(6, 7, 'i');
 		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')).toBeNull();

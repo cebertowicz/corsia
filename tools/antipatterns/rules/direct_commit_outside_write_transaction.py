@@ -19,6 +19,7 @@ _EXCLUDED = {
     "backend/infra/otel_logs/store.py",
     "backend/eval/fixtures/blank_session.py",  # Fixture setup/teardown only.
     "backend/e2e_mock.py",
+    "backend/e2e_mock_catalog.py",
     "backend/e2e_app.py",
     "backend/e2e_pressure_fixture.py",
 }

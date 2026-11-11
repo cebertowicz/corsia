@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import IO
 
 from core.guidance_manifest import git_blob_oid
-from infra.guidance_git import GitFault, MAX_GUIDANCE_BYTES
+from core.document_history_paths import MAX_HISTORY_BYTES
+from infra.guidance_git import GitFault
 
 _UNAVAILABLE = "exact recorded file object unavailable"
 _UNAVAILABLE_OR_LIMIT = "exact recorded file object unavailable or exceeds guidance limit"
@@ -106,7 +107,7 @@ class BatchBlobReader:
             if len(header) != 3 or header[0].decode() != oid:
                 raise GitFault("git cat-file: unexpected batch response")
             kind, size = header[1].decode(), int(header[2])
-            if kind != "blob" or not 0 <= size <= MAX_GUIDANCE_BYTES:
+            if kind != "blob" or not 0 <= size <= MAX_HISTORY_BYTES:
                 return kind, None
             content_header = self._batch_command(stdin, stdout, "contents", oid)
             if content_header != header:

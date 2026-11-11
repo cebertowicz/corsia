@@ -54,7 +54,7 @@ class _Queued:
 class DocumentLane:
     def __init__(
         self, live: LiveDocument, *, validate_actor: Callable[[str, WriteActor | None], Awaitable],
-        write: Callable[[str, str], Awaitable],
+        write: Callable[..., Awaitable],
         policy: Callable[[Operation, str], Awaitable[Publication | None]] | None = None,
         published: Callable[[], None] | None = None, artifact_id: str = "",
         admission: PublicationGate | None = None,
@@ -233,7 +233,7 @@ class DocumentLane:
 
     # Candidate construction stays in live_candidate; durable recording in live_lane_record.
 
-    async def _execute(self, operation: Operation) -> WriteResult:
+    async def _execute(self, operation: Operation, expected_sha256: str | None = None) -> WriteResult:
         """Run one write; an outside write caught at the rename re-runs it on top.
 
         The rejected attempt replaced nothing and its pending row is discarded,
@@ -242,16 +242,19 @@ class DocumentLane:
         from doceditor.document_save import FileChangedOutside
         for _ in range(OUTSIDE_WRITE_ATTEMPTS - 1):
             try:
-                return await self._attempt(operation)
+                return await self._attempt(operation, expected_sha256)
             except FileChangedOutside:
                 log.info("Live write met an outside write before its rename; re-running on top of it")
-        return await self._attempt(operation)
+        return await self._attempt(operation, expected_sha256)
 
-    async def _attempt(self, operation: Operation) -> WriteResult:
+    async def _attempt(self, operation: Operation, expected_sha256: str | None = None) -> WriteResult:
         # A landed write disproves only store failures recorded before it started.
         generation = await asyncio.to_thread(self.live.store.failure_generation)
         await self._barrier()
         prior_hash = await self._import()
+        if expected_sha256 is not None and file_hash(self.live.text.encode("utf-8")) != expected_sha256:
+            from doceditor.document_save import DocumentSaveError, STALE_MESSAGE
+            raise DocumentSaveError("stale", STALE_MESSAGE)
         fork, accepted, skipped, receipt, author = await build_candidate(self.live, operation)
         text = str(fork["text"])
         ranges = candidate_ranges(self.live, fork)
@@ -269,7 +272,7 @@ class DocumentLane:
         record = await record_candidate(self.live, fork, prior_hash, publication, operation)
         await _checkpoint("record")
         try:
-            await self.write(text, prior_hash)
+            await self.write(text, prior_hash, operation)
         except Exception:
             await asyncio.to_thread(self.live.store.discard, record.op_id)
             self.live.pending_changed()
@@ -331,6 +334,14 @@ class DocumentLane:
     async def recover(self) -> None:
         from doceditor.live_recovery import recover
         await self._submit(lambda: recover(self))
+
+    async def restore(self, operation: Operation, expected_sha256: str) -> WriteResult:
+        """Run a whole-text replace only while the live text still hashes to ``expected_sha256``, the
+        text the person restored from; checked in this lane's turn, so no write lands in between. An
+        edit made outside CORSIA is taken in first, so it counts as a change and is never replaced,
+        including one caught at the rename, whose re-run checks again. Stale, it writes nothing; the
+        next save of the document records that edit."""
+        return await self._submit(lambda: self._execute(operation, expected_sha256))
 
     async def choose(self, kind: Literal["corsia", "file"], *, actor: WriteActor | None = None,
                      cancel_event=None) -> WriteResult:

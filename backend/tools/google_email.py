@@ -23,6 +23,7 @@ from connections.mailhost.errors import MailHostError, PASSWORD_REFUSED
 from connections.mail_accounts import MAIL_ACCOUNT_PARAM, resolve_for_thread
 from connections.mail import attachments, mail_compose
 from connections.mail.email_document import (
+    EMAIL_DRAFT_FOLDER,
     NEEDS_BODY,
     NEEDS_RECIPIENT,
     NEEDS_SUBJECT,
@@ -40,7 +41,6 @@ from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft,
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.mail_backends import Gate, MailBackend, backend_for
-from tools.mail_guard import evidence
 from tools.mail_guard_runtime import guarded_reply, new_arrival
 
 log = logging.getLogger(__name__)
@@ -104,11 +104,20 @@ GUARD_GUIDANCE = (
 )
 
 
-def _size(count: int) -> str:
-    kb = round(count / 1024)
-    if kb < 1024:
-        return f"{max(1, kb) if count else 0} KB"
-    return f"{count / (1024 * 1024):.1f} MB"
+async def _check_message_size(
+    backend: MailBackend, thread_id: str, account_id: str, text: str, target: dict, attached: list,
+    limit: int, original: Any, font: tuple[str | None, str | None],
+) -> None:
+    """Builds the message as it would be sent and refuses a draft whose attachments push it past the account's size limit."""
+    parsed = parse_document(text)
+    if parsed is None:
+        raise DraftRefused("Couldn't prepare the draft. Check its contents and save it again.")
+    sample = build_message(parsed, target)
+    quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
+    mail_compose.add_html(sample, parsed["body"], font[0], font[1], quote_body)
+    await asyncio.to_thread(attachments.add, thread_id, sample, attached)
+    if len(sample.as_bytes()) > limit:
+        raise DraftRefused(f"Draft not saved: {attachments.OVERSIZE}")
 
 
 # Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
@@ -183,8 +192,9 @@ class EmailDraftTool(Tool):
         existing = await run_in_db(open_draft, thread_id, str(draft_id), "email") if draft_id is not None else None
         if existing is not None and existing["state"] != "open":
             raise DraftRefused(NO_OPEN_DRAFT)
-        target, reply_label, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
+        target, signature = await backend.draft_metadata(account, existing, kwargs.get("reply_to_message_id"))
         notes: list[str] = []
+        quiet: list[str] = []  # Context under the header; facts without a complete view elsewhere stay as notes.
         original = None
         if target.get("reply_to"):
             if not target.get("in_reply_to"):
@@ -197,16 +207,18 @@ class EmailDraftTool(Tool):
             if verdict.stops:
                 raise DraftRefused(_stop("Draft not saved", verdict.stops))
             to = to or verdict.recipients
-            notes.extend(verdict.warnings + verdict.info + verdict.stale)
+            # The view shows added recipients and newer emails in the conversation itself (E5), so the guard's
+            # evidence goes to the agent and the person's notes hold only what has no other home.
+            notes.extend(verdict.info)
+            quiet.extend(verdict.quiet)
             if not original.own:
-                notes.append("The message being replied to:\n" + evidence(original))
                 notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
         if not to:
             raise DraftRefused(NEEDS_RECIPIENT)
         if target.get("prefix_reply_subject"):
             subject = reply_subject(subject)
         face, size, font_note = await _font(backend, account_id)
-        notes.extend([font_note] if font_note else [])
+        quiet.extend([font_note] if font_note else [])
         paths = kwargs.get("attachments") or []
         limit, applies_to_message = await backend.attachment_limit(account_id) if paths else (None, False)
         try:
@@ -215,22 +227,15 @@ class EmailDraftTool(Tool):
             if str(exc).startswith("Not sent: "):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
-        target = {**target, "account_id": account_id, "account": address, "attachments": attached}
-        notes.extend(f"Attachment: {item['name']} ({_size(item['size'])})" for item in attached)
-        text = compose_document(address, to, cc, subject, body, signature, reply_label, notes)
+        # Chips show attachment names and sizes, so the notes carry no attachment lines.
+        target = {**target, "account_id": account_id, "account": address, "attachments": attached,
+                  "notes": list(dict.fromkeys([*quiet, *notes]))}
+        text = compose_document(address, to, cc, subject, body, signature)
         if applies_to_message and limit is not None:
-            parsed = parse_document(text)
-            if parsed is None:
-                raise DraftRefused("Couldn't prepare the draft. Check its contents and save it again.")
-            sample = build_message(parsed, target)
-            quote_body = await backend.fetch_body(account_id, original.message_id) if original else None
-            mail_compose.add_html(sample, parsed["body"], face, size, quote_body)
-            await asyncio.to_thread(attachments.add, thread_id, sample, attached)
-            if len(sample.as_bytes()) > limit:
-                raise DraftRefused(f"Draft not saved: {attachments.OVERSIZE}")
+            await _check_message_size(backend, thread_id, account_id, text, target, attached, limit, original, (face, size))
         try:
             saved = await save_draft(
-                thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
+                thread_id=thread_id, kind="email", extension=".md", prefix=EMAIL_DRAFT_FOLDER,
                 account_id=account_id, target=target, text=text, draft_id=draft_id,
                 context=kwargs, description="Email draft; the person reviews it before anything is sent.",
             )
@@ -245,6 +250,7 @@ class EmailDraftTool(Tool):
         }
         if original:
             result["guard_evidence"] = verdict.evidence_ids
+            result.update({"guard_notes": evidence_notes} if (evidence_notes := verdict.warnings + verdict.stale) else {})
             result["guard_guidance"] = GUARD_GUIDANCE + f"Reply target: {original.message_id}; thread: {original.thread_id}."
         result.update({"font_note": font_note} if font_note else {})
         if copy_note is not None:

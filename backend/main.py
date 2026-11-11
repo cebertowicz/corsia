@@ -91,6 +91,7 @@ from api import (
 )
 from api.attention import router as attention_router
 from api.held_replies import router as held_replies_router
+from api.email_drafts import router as email_drafts_router
 from api.system_perf import router as system_perf_router
 from api.registry import router as registry_router
 from api.registry_pane import router as registry_pane_router
@@ -239,6 +240,7 @@ app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
 app.include_router(attention_router)
 app.include_router(held_replies_router)
+app.include_router(email_drafts_router)
 app.include_router(cc_attach_router)
 app.include_router(conductor_router)
 app.include_router(corsia_agent_router)

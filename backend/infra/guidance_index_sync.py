@@ -23,7 +23,7 @@ Git = Callable[..., str]
 CORSIA_COMMITTER = "corsia@localhost"
 
 
-def index_lock_fault(git: Git, repo: Path) -> str:
+def index_lock_fault(git: Git, repo: Path, git_dir: Path | None = None) -> str:
     """Clear a stale ``index.lock`` through the shared fail-closed rule before the real-index sync.
 
     Returns "" when there was nothing to clear or the lock is gone, and the rule's own fault text when
@@ -31,7 +31,7 @@ def index_lock_fault(git: Git, repo: Path) -> str:
     the commit has landed and a preserved lock must stay a fault in the result, never a failed save.
     """
     try:
-        git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+        git_dir = git_dir or Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
         if not (git_dir / "index.lock").exists():
             return ""
         recover_stale_git_index_lock(git_dir)
@@ -203,10 +203,10 @@ def _consume_one(git: Git, repo: Path, git_dir: Path, record):
             lock.unlink(missing_ok=True)
 
 
-def consume_records(git: Git, repo: Path, shown: set[str] | None = None):
+def consume_records(git: Git, repo: Path, shown: set[str] | None = None, *, git_dir: Path | None = None):
     """Consume recorded failures, keeping any record a fault or held lock left unrepaired for a later attempt.
     Every outcome is logged; only those for ``shown`` paths (all when None) are returned to the caller."""
-    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    git_dir = git_dir or Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
     path = _records_path(git_dir)
     records = _read_records(path)
     kept, repaired, notes = [], [], []

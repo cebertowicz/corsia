@@ -60,16 +60,17 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
 /**
  * The highlight ranges for the editor. An open suggestion rides on its range (`suggestion`), drawn in place of
  * the anchor highlight. Of suggestions that overlap, the earliest in document order is inline and the rest are
- * card-only. `accepting` is the id whose Accept is in flight.
+ * card-only. `accepting` is the id whose Accept is in flight. A comment on part of an image carries its pin, in `colorOf`'s colour.
  */
-export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
+export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null, colorOf?: (comment: DocComment) => string): CommentRange[] {
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
+		const unread = comment.newReplyIds?.length ? 'reply' : comment.newComment ? 'comment' : undefined;
 		// A comment whose original text is gone keeps a point at the line its text last was, where its margin card sits.
 		if (!anchorRange && (comment.detached || decidedOpen(comment)) && !comment.resolved && comment.regionNumber == null && comment.from != null) {
 			const at = Math.min(Math.max(comment.from, 0), text.length);
-			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true }];
+			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true, ...(unread ? { unread } : {}) }];
 		}
 		if (!anchorRange) return [];
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
@@ -79,28 +80,14 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
+		const pin = comment.region && comment.regionNumber != null && colorOf ? { region: comment.region, number: comment.regionNumber, color: colorOf(comment) } : undefined;
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(pin ? { pin } : {}), ...(range.from === range.to && !suggestion ? { point: true } : {}), ...(unread ? { unread } : {}) }];
 	});
 }
 
-/**
- * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
- * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
- * resolved thread is never in it. The recovery's count is the part of that group Place again can attempt: an orphaned
- * unresolved comment whose quote remains in the text.
- */
-export function commentSurfaceStatus(comments: DocComment[], text: string) {
-	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
-	return {
-		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
-		orphanedCount: comments.filter(lost).length,
-		replaceableCount: comments.filter((comment) => {
-			const quote = anchoredQuote(comment);
-			return lost(comment) && !!quote && text.includes(quote);
-		}).length,
-		placementReloading: comments.some((comment) => comment.placementReloading),
-		placementReloadError: comments.some((comment) => comment.placementReloadError),
-	};
+/** The document header's comment count: open threads, and resolved ones with unread replies. */
+export function commentSurfaceStatus(comments: DocComment[]) {
+	return { commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length };
 }
 
 /**

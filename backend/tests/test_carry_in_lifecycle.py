@@ -102,13 +102,13 @@ def _write_lessons(c1, count: int) -> None:
 
 
 def _save(c1, text: str):
-    from infra.guidance_git import save_guidance
+    from infra.guidance_git import save_with_history
     from infra.guidance_targets import guidance_target
 
     path = c1.workspace / TARGET
     target = guidance_target(path, c1.workspace)
     assert target is not None
-    return save_guidance({path: text.encode()}, workspace=c1.workspace, target=target,
+    return save_with_history({path: text.encode()}, workspace=c1.workspace, target=target,
                          author="Tester <t@agents.corsia.local>")
 
 

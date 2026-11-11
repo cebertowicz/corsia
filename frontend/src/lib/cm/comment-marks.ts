@@ -3,6 +3,7 @@ import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
+import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
@@ -29,6 +30,10 @@ export interface CommentRange {
 	point?: boolean;
 	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
 	region?: boolean;
+	/** What that pin draws (`image-pins.ts`): its box or point on the image, its number and its author's colour. */
+	pin?: { region: ImageRegion; number: number; color: string };
+	/** The thread has something the reader has not opened, the comment itself or a reply: its highlight carries the new sign, named for it (`comment-new-signs.ts`). */
+	unread?: 'comment' | 'reply';
 	/** Its text was just typed over: the rest of the word typed at its end joins it (`mapCommentRange`). */
 	open?: boolean;
 }
@@ -37,6 +42,9 @@ export const setCommentRanges = StateEffect.define<CommentRange[]>();
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
+/** An unread thread's highlight names its thread, so its sign can find where the highlight ends. */
+const markOf = (range: CommentRange) => !range.unread ? (range.focused ? anchorFocused : anchor)
+	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id } });
 
 // A suggestion with an empty quote is a pure insertion: its range is a point.
 const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to) || (!!range.point && range.from === range.to);
@@ -75,7 +83,7 @@ export const commentMarks = [
 	commentRanges,
 	EditorView.decorations.compute([commentRanges], (state): DecorationSet =>
 		Decoration.set(state.field(commentRanges).filter((range) => !range.suggestion && !range.point)
-			.map((range) => (range.focused ? anchorFocused : anchor).range(range.from, range.to)), true)),
+			.map((range) => markOf(range).range(range.from, range.to)), true)),
 ];
 
 // A far jump lands on estimated line heights. The lines it reveals are measured

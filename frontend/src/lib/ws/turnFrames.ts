@@ -46,6 +46,8 @@ export function stepTextMessage(data: any, threadId: string, reasoningBuffer: st
 		metadata: data.metadata,
 		created_at: data.created_at,
 		seq: typeof data.seq === 'number' ? data.seq : undefined,
+		...(Array.isArray(data.chat_answer_cids) && typeof data.chat_visible_content === 'string'
+			? { chat_answer_cids: data.chat_answer_cids, chat_visible_content: data.chat_visible_content } : {}),
 		typewriterPos: undefined,
 		reasoning,
 	};

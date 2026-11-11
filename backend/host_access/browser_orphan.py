@@ -8,6 +8,7 @@ import stat
 import time
 from functools import partial
 from pathlib import Path
+from typing import Callable
 
 import psutil
 
@@ -36,14 +37,25 @@ def startup_message(exc: BaseException) -> str:
     return message if isinstance(exc, BrowserProfileInUse) or message in _SAFE_STARTUP_MESSAGES else "details withheld"
 
 
-def _still_ours(process: psutil.Process, birth: float, argument: str) -> bool | None:
+def _chrome_is_ours(pid: int, birth: float, profile: str) -> bool | None:
+    """The one answer to whether an orphaned Chrome group, found or recorded, is ours to stop.
+
+    True: our orphaned headless Chrome on this profile. False: a visible window, left for the
+    person. None: anything not proven, a group leader that is gone included.
+    """
     try:
-        current = identity.process_for_identity(process.pid)
-        argv = current.cmdline()
-        return True if (current.is_running() and identity.process_create_time(current) == birth
-                        and current.ppid() == 1 and current.uids().real == os.getuid()
-                        and argument in argv and "--headless=new" in argv
-                        and os.getpgid(current.pid) == current.pid) else None
+        process = identity.process_for_identity(pid)
+        argv = process.cmdline()
+        if not (process.is_running() and identity.process_create_time(process) == birth
+                and process.ppid() == 1 and process.uids().real == os.getuid() and os.getpgid(pid) == pid
+                and argv and "chrome" in os.path.basename(argv[0]).lower()
+                and f"--user-data-dir={profile}" in argv
+                and not any(arg.startswith("--type=") for arg in argv)):
+            return None
+        if "--headless=new" not in argv:
+            logger.info("left orphaned browser window pid=%s for the person", pid)
+            return False
+        return True
     except (psutil.Error, OSError, identity.BrowserIdentityError, identity.BrowserPidAbsent):
         return None
 
@@ -78,7 +90,7 @@ def close_orphans(profile: str, owned_pids: frozenset[int]) -> None:
     for process, birth in candidates:
         pid = process.pid
         result = stop_orphan_group(
-            pid, lambda: _still_ours(process, birth, argument),
+            pid, partial(_chrome_is_ours, pid, birth, profile),
             on_signal=lambda: logger.info("signalled orphaned Chrome pid=%s profile=%s", pid, Path(profile).name),
             ignore_zombie_leader=True,
         )
@@ -86,24 +98,12 @@ def close_orphans(profile: str, owned_pids: frozenset[int]) -> None:
             raise BrowserProfileInUse(pid)
 
 
-def _record_process_matches(pid: int, birth: float, directory: Path, session: str,
-                            profile: str | None) -> bool | None:
+def _daemon_is_ours(pid: int, birth: float, directory: Path, session: str) -> bool | None:
     try:
         process = identity.process_for_identity(pid)
         if (not process.is_running() or identity.process_create_time(process) != birth
                 or process.uids().real != os.getuid() or os.getpgid(pid) != pid):
             return None
-        if profile is not None:
-            argv = process.cmdline()
-            if not (argv and "chrome" in os.path.basename(argv[0]).lower()
-                    and f"--user-data-dir={profile}" in argv
-                    and not any(arg.startswith("--type=") for arg in argv)):
-                return None
-            if "--headless=new" not in argv:
-                # A visible window stays for the person to close, as in close_orphans.
-                logger.info("left orphaned browser window pid=%s for the person", pid)
-                return False
-            return True
         executable = process.exe()
         if not executable or "agent-browser" not in os.path.basename(executable):
             return None
@@ -112,10 +112,9 @@ def _record_process_matches(pid: int, birth: float, directory: Path, session: st
         return None
 
 
-def _stop_record(pid: int, birth: float, directory: Path, session: str, profile: str | None) -> None:
+def _stop_record(pid: int, check: Callable[[], bool | None]) -> None:
     from host_access.processes import stop_orphan_group
 
-    check = partial(_record_process_matches, pid, birth, directory, session, profile)
     result = stop_orphan_group(pid, check, ignore_zombie_leader=True)
     if result == "unverified":
         logger.warning("browser orphan could not be verified pid=%s", pid)
@@ -131,7 +130,7 @@ def _stop_daemon(path: Path, directory: Path) -> None:
         pid = identity.parse_pid_sidecar(raw)
         process = identity.process_for_identity(pid)
         birth = identity.process_create_time(process)
-        _stop_record(pid, birth, directory, session, None)
+        _stop_record(pid, partial(_daemon_is_ours, pid, birth, directory, session))
     except identity.BrowserPidAbsent:
         return
     except (psutil.Error, OSError, identity.BrowserIdentityError):
@@ -151,7 +150,7 @@ def _stop_chrome(path: Path, directory: Path) -> None:
         if (not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1
                 or not isinstance(birth, (int, float)) or not isinstance(profile, str) or not profile):
             return
-        _stop_record(pid, birth, directory, session, profile)
+        _stop_record(pid, partial(_chrome_is_ours, pid, birth, profile))
     except (ValueError, KeyError, TypeError, psutil.Error, OSError, identity.BrowserIdentityError):
         if isinstance(pid, int):
             logger.warning("browser orphan could not be verified pid=%s", pid)

@@ -10,6 +10,7 @@ import { readDeviceRecovery, type DeviceRecovery } from './deviceRecovery';
 import { decodeUpdate, type DocumentFrame } from './documentWire';
 import { LiveDocumentSession } from './liveDocumentSession';
 import { LiveOperationError } from './documentFailures';
+import { noteLiveHeader } from './emailDraftHeaders';
 
 interface Binding { target: DocViewerTarget; session: LiveDocumentSession | null }
 interface Opening {
@@ -191,6 +192,7 @@ async function opened(frame: DocumentFrame): Promise<void> {
 }
 
 async function handle(frame: DocumentFrame): Promise<void> {
+	noteLiveHeader(frame.artifact_id, frame.email_draft);
 	if (frame.type === 'doc_opened') { await opened(frame); return; }
 	const opening = openings.get(frame.request_id ?? '');
 	if (frame.type === 'doc_error' && opening) {

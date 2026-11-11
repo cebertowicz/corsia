@@ -85,11 +85,13 @@ async def content(token: str, path: str, project_id: str | None = None, thread_i
     from api.files_load import read_document
 
     result = await run_in_db(read_document, path, user["id"], project_id, thread_id)
+    document = result.pop("_document")
     if result.pop("_recorded"):
-        from infra.document_history import history_off
+        from infra.document_history import history_offered
 
-        # One `git rev-parse` per guidance-file open, about 9 ms measured; any other document asks none.
-        result["history"] = not await run_off_db(history_off, Path(config.WORKSPACE))
+        # The repository is read from Git once per workspace; a document's open asks whether HEAD holds
+        # it (one lookup, whatever the history's length), any other file asks Git nothing.
+        result["history"] = await run_off_db(history_offered, Path(config.WORKSPACE), document)
     else:
         result["history"] = False
     notification = result.pop("_notification")

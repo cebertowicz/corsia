@@ -11,7 +11,7 @@ import json
 import logging
 from pathlib import Path
 
-from infra.guidance_git import digest, save_guidance
+from infra.guidance_git import digest, save_with_history
 from infra.guidance_targets import guidance_target
 from infra.guidance_messages import saver_author
 
@@ -187,7 +187,7 @@ def save_guided_write(
     from infra.config import WORKSPACE
 
     results: list[str] = []
-    saved = save_guidance(
+    saved = save_with_history(
         {path: text.encode()}, workspace=WORKSPACE, target=target,
         author=saver_author(thread_id=kwargs.get("_thread_id")), reason=kwargs.get("reason"),
         evidence=kwargs.get("evidence"), expected=None if expected is None else {path: digest(expected)},
@@ -197,7 +197,7 @@ def save_guided_write(
     )
     receipt = results[0] if results else None
     result = (
-        _with_line(receipt, "guidance_history", saved.line)
+        _with_line(receipt, f"{target.kind}_history", saved.line)
         if receipt is not None and saved.line
         else receipt or saved.line or ""
     )

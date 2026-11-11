@@ -89,16 +89,14 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
 	await expect(card(page, doc, FIRST)).toBeVisible();
-	// The lowest card reaches past the bottom of the column; moving focus into it must not scroll the column's clip, which would carry every card away from its text.
-	const clipScroll = await page.evaluate(() => {
-		const clip = document.querySelector<HTMLElement>('.drawer-comments.margin-clip')!;
+	// The lowest card sits below the visible document; the cards scroll with it, so moving focus into one may scroll the document but never moves a card off its text.
+	const columnScroll = await page.evaluate(() => {
+		const column = document.querySelector<HTMLElement>('.drawer-comments.in-margin')!;
 		const lowest = [...document.querySelectorAll<HTMLElement>('[data-margin-card]')].sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
-		const overshoot = lowest.getBoundingClientRect().bottom - clip.getBoundingClientRect().bottom;
 		lowest.querySelector<HTMLElement>('button, textarea, [contenteditable]')?.focus();
-		return { overshoot, top: clip.scrollTop };
+		return column.scrollTop;
 	});
-	expect(clipScroll.overshoot, 'a card reaches below the column').toBeGreaterThan(0);
-	expect(clipScroll.top, 'the clip did not scroll').toBe(0);
+	expect(columnScroll, 'the column itself did not scroll').toBe(0);
 	const [first] = await geometry(page, doc.ids);
 	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
 });
@@ -135,7 +133,7 @@ test('@flow:doc-margin-cards a thread whose text was deleted keeps its card at t
 	await page.keyboard.press('Backspace');
 	await expect(card(page, doc, FIRST)).toHaveCount(1);
 	await expect(card(page, doc, FIRST).locator('.ct.orphaned')).toHaveCount(1);
-	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('This text is no longer in the document');
+	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('This text isn’t in the document');
 	expect(await page.locator('.margin-aside-orphans, .orphans-button').count()).toBe(0);
 });
 
@@ -156,8 +154,8 @@ test('@flow:doc-margin-cards the drawer lists only resolved threads, newest reso
 	// Resolved threads have left the column; the rest stay.
 	await expect(card(page, doc, ALPHA)).toHaveCount(0);
 	await expect(card(page, doc, BRAVO)).toHaveCount(1);
-	await page.locator('.aside-button[data-aside-kind="resolved"]').click();
-	const order = await page.locator('.margin-aside [data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
+	await page.locator('[data-resolved-entry]').click();
+	const order = await page.locator('.resolved-drawer [data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
 	expect(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
 });
 

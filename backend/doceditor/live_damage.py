@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from doceditor import live_events
 from doceditor.document_save import FileChangedOutside
 from doceditor.live_admission import falls_back_to_plain, store_refusal
-from doceditor.live_lane import LaneRefused
+from doceditor.live_lane import LaneRefused, Operation
 from doceditor.live_publication_record import Publication, WriteActor
 from doceditor.live_publisher import register_publication
 from doceditor.live_store import Mirror, StoreRefused
@@ -79,7 +79,7 @@ class DamageSave:
         try:
             await self.entry.lane.validate_actor(text, actor)
             publication = await asyncio.to_thread(self._publication, actor, text, prior_text, prior_hash)
-            await self.entry.lane.write(text, prior_hash)
+            await self.entry.lane.write(text, prior_hash, Operation("replace", content=text, actor=actor))
         except FileChangedOutside:
             self._refused("file_changed_outside")
             return

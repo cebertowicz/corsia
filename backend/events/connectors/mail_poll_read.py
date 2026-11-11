@@ -129,6 +129,9 @@ def event_payload(
         "injection": bool(screen.injection), "injection_rule": screen.rule,
         "kind": screen.kind, "screen_model": screen.model_id,
     }
+    if address := email_screen.sender_address(headers.get("from", "")):
+        payload["from_address"] = address
+        payload["from_domain"] = address.rpartition("@")[2]
     if date := email_screen.date_for_screen(adapter.date(headers) or "", screen):
         payload["date"] = date
     if screen.clean and (subject := headers.get("subject")):

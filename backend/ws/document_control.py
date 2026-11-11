@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 
-from fastapi import HTTPException, WebSocketDisconnect
+from fastapi import HTTPException
 
 from api.files_load import read_document
 from doceditor.document_scope import MAX_TEXT_BYTES, UI_THREAD
@@ -18,8 +18,9 @@ from doceditor.live_runtime import LiveEntry, get_documents
 from doceditor.live_store import BrowserMessage, StoreRefused
 from infra.db_async import run_in_db
 from infra.state import send_to_client
-from ws import section_turn
+from ws import document_email, section_turn
 from ws.document_failures import failure_state
+from ws.document_send import closed_socket_error, observe_send
 
 FRAME_TYPES = {"doc_open", "doc_update", "doc_sync", "doc_flush", "doc_replace", "doc_choice", "doc_close", "doc_positions",
                "doc_release"}
@@ -44,40 +45,18 @@ def _encoded(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-_CLOSED_SOCKET_SEND_ERRORS = {
-    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close'",
-    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed.",
-    'Cannot call "send" once a close message has been sent.',
-}
-
-
-def _closed_socket_error(error: BaseException) -> bool:
-    """Whether document delivery lost a socket after its work already completed."""
-    return isinstance(error, (WebSocketDisconnect, ConnectionError)) or (
-        isinstance(error, RuntimeError) and str(error) in _CLOSED_SOCKET_SEND_ERRORS)
-
-
-def _observe_send(task: asyncio.Task) -> None:
-    """Retrieve a broadcast write's outcome; a socket that closed first is expected."""
-    if task.cancelled() or (error := task.exception()) is None:
-        return
-    if _closed_socket_error(error):
-        log.debug("Live-document frame not delivered to a closed socket: %s", error)
-    else:
-        log.warning("Live-document frame not delivered", exc_info=error)
-
-
 def _broadcast(artifact_id: str, frame: dict, *, exclude=None) -> None:
     for socket, subscriptions in tuple(_subscriptions.items()):
         if socket is not exclude and artifact_id in subscriptions:
-            send_to_client(socket, {"artifact_id": artifact_id, **frame}).add_done_callback(_observe_send)
+            send_to_client(socket, {"artifact_id": artifact_id, **frame}).add_done_callback(observe_send)
 
 
 def _changed(artifact_id: str, entry: LiveEntry, update: bytes, sender, author: dict | None = None) -> None:
     frame = {"type": "doc_update", "store_id": entry.live.store.store_id,
              "update": _encoded(update), "digest": entry.live.digest,
              "ranges": [{"id": identifier, "from_off": start, "to_off": end}
-                        for identifier, (start, end) in entry.live.ranges.items()]}
+                        for identifier, (start, end) in entry.live.ranges.items()],
+             **document_email.header(entry)}
     if author is not None:
         frame["author"] = author
     _broadcast(artifact_id, frame, exclude=sender)
@@ -127,6 +106,7 @@ async def _open(socket, user: dict, data: dict) -> None:
         await send_to_client(socket, {"type": "doc_opened", "live": False, "request_id": data.get("request_id")})
         return
     artifact_id = artifact["id"]
+    entry.email_draft_id = (loaded.get("email_draft") or {}).get("id")
     _subscriptions.setdefault(socket, {})[artifact_id] = Subscription(entry, actor, loaded["writable"], user["id"])
     entry.live.acknowledge = lambda ids: _broadcast(artifact_id, {
         "type": "doc_ack", "store_id": entry.live.store.store_id, "message_ids": list(ids)})
@@ -153,7 +133,8 @@ async def _open(socket, user: dict, data: dict) -> None:
                                 "vector": _encoded(entry.live.doc.get_state()), "digest": entry.live.digest,
                                 "writable": loaded["writable"], "request_id": data.get("request_id"),
                                 "ranges": anchors["ranges"], "states": anchors["states"], **state,
-                                "setup_incarnation": manager.setup_incarnation, **failures})
+                                "setup_incarnation": manager.setup_incarnation, **failures,
+                                **document_email.header(entry)})
     for failure in failures["blocking"]:
         provenance = {key: value for key, value in failure.items() if key not in {"kind", "message"}}
         failure_changed(failure["kind"], failure["message"], provenance)
@@ -289,7 +270,8 @@ async def _operate(socket, user: dict, data: dict) -> None:
             raise StoreRefused("The server backlog is full; keep this update on the device and retry")
         section_turn.note_edit(socket, user, artifact_id, live, before)
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
-                                    "store_id": live.store.store_id, "message_ids": [identifier]})
+                                    "store_id": live.store.store_id, "message_ids": [identifier],
+                                    **document_email.header(entry)})
         _schedule_commit(artifact_id, entry)
         return
     if kind == "doc_flush" and data.get("retry") is True:
@@ -326,7 +308,7 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
                                     **({"title": title} if title else {}),
                                     "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
     except Exception as error:
-        if _closed_socket_error(error):
+        if closed_socket_error(error):
             log.debug("Live-document frame not delivered to a closed socket: %s", error)
             return
         log.exception("Live document frame failed")

@@ -33,15 +33,15 @@ function mark(canvasEl: HTMLElement, id: string, top: number, bottom: number): H
 	return el;
 }
 
-function marginColumn(canvasEl: HTMLElement, cards: Record<string, { top: number; bottom: number; behind?: boolean; under?: boolean }>): void {
+function marginColumn(canvasEl: HTMLElement, cards: Record<string, { top: number; bottom: number; placed?: boolean }>): void {
 	const column = document.createElement('section');
 	column.className = 'drawer-comments';
 	paint(column, VIEW.top, VIEW.bottom);
 	const stack = document.createElement('div');
-	stack.className = `margin-stack${Object.values(cards).some((card) => card.behind) ? ' behind' : ''}`;
+	stack.className = 'margin-stack';
 	for (const [id, card] of Object.entries(cards)) {
 		const el = document.createElement('div');
-		el.className = `margin-card placed${card.under ? ' under' : ''}`;
+		el.className = `margin-card${card.placed === false ? '' : ' placed'}`;
 		el.dataset.marginCard = id;
 		paint(el, card.top, card.bottom);
 		stack.appendChild(el);
@@ -104,9 +104,9 @@ describe('docJumpTargets', () => {
 		expect(result).toMatchObject({ direction: 'below', target: { id: 'gone', distance: 120 } });
 	});
 
-	it('ignores a card that is not placed or is hidden behind the open list, and counts its thread as undrawn', () => {
+	it('ignores a card that is not placed yet, and counts its thread as undrawn', () => {
 		const canvasEl = canvas();
-		marginColumn(canvasEl, { hidden: { top: 620, bottom: 700, behind: true } });
+		marginColumn(canvasEl, { hidden: { top: 620, bottom: 700, placed: false } });
 		expect(docJumpTargets(canvasEl, [thread('hidden')])).toMatchObject({ direction: 'below', target: { id: 'hidden', distance: 0 } });
 	});
 

@@ -1,6 +1,6 @@
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
-import { ITEMS, BRAVO, SUGGESTION2, card, geometry, open, type Doc } from '../support/marginCards';
+import { ITEMS, BRAVO, FIRST, SUGGESTION2, card, geometry, open, pill, type Doc } from '../support/marginCards';
 
 /**
  * Margin comments, the defects found in the built column: a picked card lets go on a click into plain text and on Escape; the
@@ -63,9 +63,9 @@ test('@flow:doc-margin-defects Send reply of a card near the bottom of the windo
 	await wrap.locator('textarea').fill('Is the intro the right place?');
 	const send = wrap.getByRole('button', { name: 'Send reply' });
 	await expect.poll(async () => {
-		const [box, clip, clipScroll] = [await send.boundingBox(), await page.locator('.drawer-comments.margin-clip').boundingBox(), await page.locator('.drawer-comments.margin-clip').evaluate((el) => el.scrollTop)];
-		return !!box && !!clip && box.y + box.height <= clip.y + clip.height + 0.5 && clipScroll === 0;
-	}, { message: 'Send reply inside the column, and the column itself not scrolled' }).toBe(true);
+		const [box, canvas, columnScroll] = [await send.boundingBox(), await page.locator('.cm-scroller').boundingBox(), await page.locator('.drawer-comments.in-margin').evaluate((el) => el.scrollTop)];
+		return !!box && !!canvas && box.y + box.height <= canvas.y + canvas.height + 0.5 && columnScroll === 0;
+	}, { message: 'Send reply inside the visible document, and the column itself not scrolled' }).toBe(true);
 	await send.click();
 	await expect(wrap).toContainText('Is the intro the right place?');
 	// A suggestion with a reply stays an open conversation once decided: accept it, then Resolve it with the server refusing.
@@ -82,6 +82,38 @@ test('@flow:doc-margin-defects Send reply of a card near the bottom of the windo
 	await expect(wrap.locator('.ct-decision-error')).toBeVisible();
 	await expect(wrap.locator('.ct-act.resolve'), 'the card stays, Resolve can be tried again').toBeVisible();
 	expect(held).toBe(1);
+});
+
+test('@flow:doc-margin-defects the column closed and reopened at once keeps its room beside the text', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	await page.waitForTimeout(600);
+	const room = () => page.locator('.cm-scroller').evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingRight));
+	const shown = await room();
+	expect(shown, 'the editor keeps room for the column').toBeGreaterThan(200);
+	// Reopened while the column is still fading out: the same section comes back.
+	await pill(page).click();
+	await pill(page).click();
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	await page.waitForTimeout(600);
+	expect(await room(), 'the room is back, so no card sits over the text').toBe(shown);
+	const [text, first] = [await page.locator('.cm-line', { hasText: 'Paragraph 1 of the plan' }).first().boundingBox(), await card(page, doc, FIRST).boundingBox()];
+	expect(first!.x, 'the card starts right of the text').toBeGreaterThanOrEqual(text!.x + text!.width);
+	// Closed again after the cancelled fade: the room starts closing while the column is still fading, not when it unmounts.
+	const closing = await page.evaluate(async (button) => {
+		(button as HTMLElement).click();
+		for (let frame = 0; frame < 2; frame += 1) await new Promise(requestAnimationFrame);
+		const scroller = document.querySelector('.cm-scroller')!;
+		return {
+			fading: !!document.querySelector('.canvas-comment-drawer.margin'),
+			roomClosing: scroller.getAnimations().some((a) => (a as CSSTransition).transitionProperty === 'padding-right'),
+		};
+	}, await pill(page).elementHandle());
+	expect(closing, 'the room closes with the fade').toEqual({ fading: true, roomClosing: true });
+	await page.waitForTimeout(600);
+	await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
+	expect(await room(), 'the text widens back once the column is gone').toBeLessThan(50);
 });
 
 test('@flow:doc-margin-defects a narrow desktop width opens the popover at the click, and a phone the sheet', async ({ page, request }, info) => {

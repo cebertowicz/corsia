@@ -247,6 +247,28 @@ def test_boot_recovery_releases_a_live_writer_hold_and_delivers_the_input(isolat
     assert [i.message_id for c in claims for i in c.items if i.message_id == "head"] == ["head"]
 
 
+@pytest.mark.parametrize("thread_id", [None, THREAD])
+def test_releasing_holds_reads_the_queued_inputs_index_not_every_message(isolated_db, thread_id) -> None:
+    """Boot recovery releases holds under the write lock; a scan of every message held it ~28 s."""
+    from infra.database import get_db
+    from infra.live_writer_hold import clear_live_writer_holds
+
+    db = get_db()
+    statements: list[str] = []
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.set_trace_callback(statements.append)
+        clear_live_writer_holds(db, thread_id)
+        db.set_trace_callback(None)
+        db.execute("ROLLBACK")
+        [update] = [s for s in statements if s.lstrip().upper().startswith("UPDATE MESSAGES")]
+        plan = " | ".join(str(row[-1]) for row in db.execute(f"EXPLAIN QUERY PLAN {update}"))
+    finally:
+        db.close()
+
+    assert "idx_messages_queued_inputs" in plan, plan
+
+
 def _refuse_successor_while_registered() -> None:
     """A successor claims the idle thread and is refused while the old handle is still registered."""
     from infra.input_writes import begin_batch_write, settle_batch_write

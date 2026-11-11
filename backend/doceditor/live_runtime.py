@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from doceditor.live_failure_record import SetupFailure
 
-from doceditor.document_save import validate_live_write, write_atomic_plain
+from doceditor.document_save import validate_live_write
+from doceditor.live_text_write import write_live_text
 from doceditor import live_events
 from doceditor.live_damage import DamageSave
 from doceditor.live_document import LiveDocument, file_hash
@@ -51,6 +52,7 @@ class LiveEntry:
     artifact_id: str = ""
     policy: SharedLivePolicy | None = None
     lifetime: DocumentLifetime | None = None
+    email_draft_id: str | None = None
 
 
 class LiveDocuments:
@@ -230,11 +232,11 @@ class LiveDocuments:
                 self._release_opening(state_path)
                 raise
             policy = SharedLivePolicy(live, owner=self)
-            def replace_file(text, prior_hash):
-                write_atomic_plain(path, text, prior_hash)
+            def replace_file(text, prior_hash, operation):
+                write_live_text(path, text, prior_hash, operation)
                 return file_hash(text.encode("utf-8"))
-            async def writer(text, prior_hash):
-                live.on_disk = (await asyncio.to_thread(replace_file, text, prior_hash), text)
+            async def writer(text, prior_hash, operation=None):
+                live.on_disk = (await asyncio.to_thread(replace_file, text, prior_hash, operation), text)
             async def validate_actor(text, caller):
                 await asyncio.to_thread(validate_live_write, path, text, caller)
             lane = DocumentLane(live, validate_actor=validate_actor, write=writer,

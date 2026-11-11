@@ -208,7 +208,7 @@ async def test_an_agent_whose_turn_ends_without_answering_drops_out_is_told_and_
 async def test_a_three_message_burst_from_the_person_reaches_the_agent_as_one_wake(
     integration_client, doc, _registrable_roots, driven, monkeypatch,
 ):
-    """One wake, and one change frame sent after delivery: never while the burst's batch is open."""
+    """Each comment is announced at commit; the burst reaches the agent in one wake."""
     from doceditor import comment_notifications, feedback_batches
 
     a, root = _comment_by_thread_a(integration_client, doc)
@@ -227,7 +227,7 @@ async def test_a_three_message_burst_from_the_person_reaches_the_agent_as_one_wa
 
     [batch] = _rows("SELECT * FROM doc_feedback_batches WHERE recipient_id=? AND author_kind='user'", a)
     assert (batch["state"], batch["item_count"]) == ("open", 3)
-    assert driven == [] and open_at_frame == []
+    assert driven == [] and open_at_frame == [1, 1, 1]
 
     woken = feedback_batches.close_due(batch["closes_at"])
 
@@ -236,7 +236,7 @@ async def test_a_three_message_burst_from_the_person_reaches_the_agent_as_one_wa
     assert woken.count(a) == 1
     [batch] = _rows("SELECT * FROM doc_feedback_batches WHERE recipient_id=? AND author_kind='user'", a)
     assert (batch["state"], batch["item_count"]) == ("delivered", 3)
-    assert open_at_frame == [0]
+    assert open_at_frame == [1, 1, 1, 0]
 
 
 @pytest.mark.asyncio

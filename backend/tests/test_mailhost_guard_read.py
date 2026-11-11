@@ -152,3 +152,10 @@ async def test_provider_failures_never_silently_pass(provider, failure):
     with pytest.raises(Exception):
         await guard_read.guard_data('account', read.mint_message_id('account', 42, 1))
     assert not any(c[0] == 'SEARCH' and c[2] == 'ALL' for c in provider.commands)
+
+
+def test_a_malformed_arrival_date_falls_back_to_the_written_date_and_never_reads_as_unreachable():
+    written = guard_read._arrival_date(b'not a date', 'Mon, 26 Oct 2026 10:00:00 +0000')
+    assert written == datetime(2026, 10, 26, 10, tzinfo=timezone.utc)
+    with pytest.raises(guard_read.DraftRefused):
+        guard_read._arrival_date(b'not a date', 'also not a date')
