@@ -3,7 +3,7 @@ import { test, expect } from '../support/test';
 import { seed } from '../contact-sheet/document-owner-supervisor';
 
 test('seed and hold reviewer surface', async ({ page, request, browser }) => {
-  test.setTimeout(45 * 60 * 1000);
+  test.setTimeout(0);
   const stopFile = process.env.O1_STOP_FILE;
   if (!stopFile || existsSync(stopFile)) throw new Error('Set a fresh stop-file path');
   await page.setViewportSize({ width: 1440, height: 1000 });
