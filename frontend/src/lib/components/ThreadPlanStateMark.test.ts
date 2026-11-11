@@ -236,7 +236,7 @@ describe('ThreadPlanStateMark', () => {
 			state: 'needs_input', label_key: 'waiting', paused: false, attention_items: [decision],
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state')!;
-		expect(mark.title).toBe('Needs you');
+		expect(mark.title).toBe('Needs input · Plan: Waiting');
 		mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		expect(onOpenAttention).toHaveBeenCalledWith('thread-1', 'Decide');
 		expect(host.querySelector('.attention-item, .bg')).toBeNull();
@@ -250,7 +250,7 @@ describe('ThreadPlanStateMark', () => {
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state');
 		expect(mark?.textContent).toBe('');
-		expect(mark?.title).toBe('Needs you');
+		expect(mark?.title).toBe('Blocked on you · Plan: Waiting · Paused');
 		expect(host.querySelector('.paused-glyph')).toBeNull();
 	});
 
@@ -261,13 +261,13 @@ describe('ThreadPlanStateMark', () => {
 		[[decision, review, hold], '3 for you'],
 		[[access], 'Allow access'],
 		[[hold], 'Needs you'],
-	] as const)('shows a needs-you dot for %o (previously %s)', (items: readonly ThreadAttentionItem[], _word: string) => {
+	] as const)('shows a needs-you dot for %o (previously %s)', (items: readonly ThreadAttentionItem[], word: string) => {
 		render({ state: 'needs_input', label_key: null, paused: false, attention_items: [...items], has_update: true });
 		const dots = host.querySelectorAll<HTMLElement>('.update-dot');
 		expect(dots).toHaveLength(1);
 		expect(dots[0].classList.contains('needs-you-dot')).toBe(true);
 		expect(dots[0].textContent).toBe('');
-		expect(dots[0].getAttribute('aria-label')).toBe('Needs you');
+		expect(dots[0].getAttribute('aria-label')).toBe(`${word}: ${items.length} item${items.length === 1 ? '' : 's'}`);
 	});
 
 	it('names several Failed items with a count', () => {
@@ -295,7 +295,7 @@ describe('ThreadPlanStateMark', () => {
 		const mark = host.querySelector<HTMLElement>('.plan-state');
 		expect(mark?.textContent).toBe('');
 		expect(mark?.getAttribute('role')).toBe('img');
-		expect(mark?.getAttribute('aria-label')).toBe('Needs you');
+		expect(mark?.getAttribute('aria-label')).toBe('Needs input');
 		expect(mark?.classList.contains('needs-you-dot')).toBe(true);
 	});
 

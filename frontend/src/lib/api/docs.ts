@@ -201,6 +201,12 @@ export async function patchComment(commentId: string, fields: Partial<{ resolved
 	return data.comment;
 }
 
+export async function dismissCommentAttention(artifactId: string): Promise<void> {
+	await ok(await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}/comments/dismiss-all`, {
+		method: 'POST', headers: { Authorization: `Bearer ${get(token) ?? ''}` },
+	}));
+}
+
 export async function markCommentThreadViewed(artifactId: string, rootId: string, seenReplyId: string): Promise<{ root_id: string; new_reply_ids: string[] }> {
 	return ok(await apiFetch(`/api/artifacts/${artifactId}/comments/${rootId}/viewed`, {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },

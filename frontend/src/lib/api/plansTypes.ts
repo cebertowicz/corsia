@@ -165,6 +165,7 @@ export interface OperatorNode {
 	kind: string;
 	title: string;
 	description: string | null;
+	comment_attention?: { artifact_id: string; comments: number; suggestions: number; system_task: boolean };
 	/** Open steps in this plan that this user-assigned step releases. */
 	waiting_on: string[];
 	acceptance_criteria: string;

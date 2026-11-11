@@ -7,7 +7,7 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
-	import { showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
+	import { isYourMove, showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
 	import ThreadWaitingMark from './ThreadWaitingMark.svelte';
 	import { minuteClock } from '$lib/time';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
@@ -75,6 +75,7 @@
 	);
 	const planState = $derived($threadPlanStates[thread.id]);
 	const updateSummary = $derived(planState?.latest_update?.summary);
+	const needsYou = $derived(isYourMove(planState));
 	// The mark sits beside the title; the update summary keeps the second line.
 
 	// The swipe transforms are composited layers (about three per row), so a row carries them only while it is
@@ -180,7 +181,7 @@
 							: 'Checkpointing context'}
 						>{checkpointLabel}</span>
 					{/if}
-					<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
+					<ThreadPlanStateMark threadId={thread.id} line={needsYou} {onOpenAttention} onOpenThread={onSelect} />
 				</div>
 				{#if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
