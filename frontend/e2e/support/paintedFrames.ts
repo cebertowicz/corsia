@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Samples every painted frame until `keep` returns false; installed on the page by `installPaintedFrames`. `measure`
@@ -69,4 +69,19 @@ export async function installPaintedFrames(page: Page): Promise<void> {
 		};
 		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame = eachPaintedFrame;
 	}, { depth: SENTINEL_DEPTH, passes: PASSES });
+}
+
+/**
+ * What the page's next painted frame shows: runs `measure(node, arg)` on `target`'s element inside that frame's rendering,
+ * after the page's last resize observation in it. A read in a task can land between a layout change and the editor's
+ * measure that corrects it before paint: a place no reader ever sees. `measure` is sent to the page as source, so it may
+ * use only its arguments and the page's globals; `arg` and the result must be serializable.
+ */
+export async function readPainted<A, R>(target: Locator, measure: (node: Element, arg: A) => R, arg: A): Promise<R> {
+	const page = target.page();
+	if (!(await page.evaluate(() => Boolean((window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame)))) await installPaintedFrames(page);
+	return target.evaluate((node, { source, arg }) => new Promise<unknown>((resolve) => {
+		const read = (0, eval)(`(${source})`) as (node: Element, arg: unknown) => unknown;
+		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(() => read(node, arg), (sample) => { resolve(sample); return false; });
+	}), { source: measure.toString(), arg: arg as unknown }) as Promise<R>;
 }
