@@ -478,6 +478,16 @@ describe('checkpoint websocket invalidation', () => {
 			expect(row?.metadata?.repair_owner).toBe('provider-engine');
 		});
 
+		it('marks only the exact comment-only turn on a terminal fact', () => {
+			applyLifecycle('viewed', VIEWED);
+			messages.set([
+				{ id: 'comment', thread_id: 'viewed', role: 'assistant', content: '', created_at: '2026-01-01', metadata: { turn_id: VIEWED.turnId } },
+				{ id: 'ordinary', thread_id: 'viewed', role: 'assistant', content: '', created_at: '2026-01-01', metadata: { turn_id: 'ordinary' } },
+			]);
+			handleTurnComplete(frame({ thread_id: 'viewed', comment_only_receipt: true }, VIEWED));
+			expect(get(messages).map(row => row.commentOnlyReceipt)).toEqual([true, undefined]);
+		});
+
 		it('turn_complete installs the compact receipt on its exact message', () => {
 			applyLifecycle('viewed', VIEWED);
 			messages.set([{

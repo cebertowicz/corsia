@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import authenticate
 from infra.chat_comment_index import attach_comments
+from infra.chat_comment_receipts import comment_only_receipt_turns
 from infra.database import get_db
 from infra.db_async import run_in_db, run_read
 from infra.queries import get_thread_for_user
@@ -17,10 +18,13 @@ from api.thread_inbox_actions import (
 )
 from api.thread_focus_page import (
     InvertedRange,
+    RangeTooLarge,
     read_authorized_focus_page,
+    read_authorized_run_projection,
     read_authorized_run_range,
 )
 from api.thread_cards import attach_result_cards
+from api.thread_message_rows import metadata_dict
 from api.thread_paging import (
     CursorNotFound,
     load_tool_result,
@@ -28,6 +32,14 @@ from api.thread_paging import (
 )
 
 router = APIRouter(prefix="/api", tags=["threads"])
+
+
+def _annotate_comment_only_receipts(db, thread_id, page):
+    turn_ids = [metadata_dict(row).get("turn_id") for row in page]
+    hidden = comment_only_receipt_turns(db, thread_id, list({turn for turn in turn_ids if isinstance(turn, str)}))
+    for row, turn in zip(page, turn_ids):
+        if isinstance(turn, str) and turn in hidden:
+            row["commentOnlyReceipt"] = True
 
 
 def _attach_page_extras(db, thread_id, user_id, result):
@@ -71,14 +83,16 @@ async def retry_inbox_message(
 def _validate_page_request(limit, before, view, from_id, to_id):
     if before is not None and (limit is None or limit < 1):
         raise HTTPException(400, detail="`before` cursor requires `limit` ≥ 1 (spec §1.8)")
-    if view not in (None, "focus"):
-        raise HTTPException(400, detail="`view` must be `focus` when given")
+    if view not in (None, "focus", "focus-run"):
+        raise HTTPException(400, detail="`view` must be `focus` or `focus-run` when given")
     if (from_id is None) != (to_id is None):
         raise HTTPException(400, detail="`from_id` and `to_id` are given together")
     if (view or from_id) and (limit is None or limit < 1):
         raise HTTPException(400, detail="`view` and `from_id` require `limit` ≥ 1")
-    if view and from_id:
+    if view == "focus" and from_id:
         raise HTTPException(400, detail="`view` and `from_id` are separate reads")
+    if view == "focus-run" and (not from_id or before):
+        raise HTTPException(400, detail="`focus-run` requires a range and no cursor")
 
 
 @router.get("/threads/{thread_id}/messages")
@@ -116,7 +130,9 @@ async def get_messages(
             restriction = transcript_restriction(Reader.from_user(user), thread) if thread is not None else None
             if restriction is not None:
                 return (restriction, [])
-            if from_id is not None and to_id is not None:
+            if view == "focus-run":
+                result = read_authorized_run_projection(db, thread_id, from_id, to_id, user_id=user["id"])
+            elif from_id is not None and to_id is not None:
                 result = read_authorized_run_range(
                     db, thread_id, limit, from_id, to_id, before, user_id=user["id"],
                 )
@@ -130,6 +146,8 @@ async def get_messages(
                 result = read_authorized_page_with_summaries(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
+                if result is not None:
+                    _annotate_comment_only_receipts(db, thread_id, result[0])
             _attach_page_extras(db, thread_id, user["id"], result)
             return (result, chat_reply_items(db, user["id"], thread_id)) if result is not None else None
         finally:
@@ -137,7 +155,7 @@ async def get_messages(
 
     try:
         result = await run_read(_query)
-    except InvertedRange as exc:
+    except (InvertedRange, RangeTooLarge) as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     except CursorNotFound:
         # Unknown `before` cursor → empty page (frontend reads this as

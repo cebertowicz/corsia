@@ -387,6 +387,12 @@ export function handleTurnComplete(data: any) {
 	const identity = admitTerminalFrame(data);
 	if (!threadId || !identity) return;
 	clearTerminalTransients(threadId, identity);
+	if (data.comment_only_receipt === true && isDisplayedThread(threadId)) {
+		messages.update(current => current.map(message =>
+			message.thread_id === threadId && message.metadata?.turn_id === identity.turnId
+				? { ...message, commentOnlyReceipt: true } : message
+		));
+	}
 	emit('turn_complete', data);
 	if (!isDisplayedThread(threadId)) return;
 	recordMeasuredUsage(threadId, data.context_usage ?? null);

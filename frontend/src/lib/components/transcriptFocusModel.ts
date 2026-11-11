@@ -263,7 +263,8 @@ export function buildTranscriptPresentation(
 	};
 
 	for (const message of visibleMessages) {
-		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id)) continue;
+		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id)
+			|| (message.commentOnlyReceipt === true && !isHumanMessage(message) && !isSystemNotice(message))) continue;
 		const at = sourceRange(message)?.min ?? message.seq;
 		if (typeof at === 'number' && at > 0) holdThrough(at);
 		if (isHumanMessage(message) || isSystemNotice(message)) {

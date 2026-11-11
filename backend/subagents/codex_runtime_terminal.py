@@ -14,6 +14,7 @@ from core.turn_core import (
     settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
+from infra.chat_comment_receipts import terminal_comment_only_receipt
 from infra.context_receipts import (
     attach_context_receipt,
     live_context_usage_payload,
@@ -377,6 +378,8 @@ async def publish_claimed_terminal(
         context_usage=context_usage,
         db=db,
     )
+    if terminal_type == "turn_complete" and await terminal_comment_only_receipt(thread_id, identity.turn_id, db=db):
+        payload["comment_only_receipt"] = True
     live.thinking_buf = ""
     live.thinking_provenance = None
     bcast(thread_id, payload)

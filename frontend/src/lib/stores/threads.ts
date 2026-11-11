@@ -65,6 +65,8 @@ export interface Message {
 	firstRunOpeningReveal?: boolean;
 	reasoning?: string;
 	_optimistic?: boolean;
+	/** Server-derived: this row's Turn was comment-only, so Focus leaves its work out of the receipt. */
+	commentOnlyReceipt?: boolean;
 	delivery_state?: import('../messageDelivery').MessageDeliveryState;
 	delivery_error?: string | null;
 	delivery_revision?: number;

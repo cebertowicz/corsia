@@ -11,6 +11,7 @@
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
 	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
+	import { refreshCommentRuns } from '$lib/refreshCommentRuns';
 	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
@@ -289,6 +290,15 @@
 			followBottom: () => messageListRef?.followBottom(),
 			fetchThreadMessages,
 			clearWarmKeys: clearWarmKeysForThread,
+			refreshCommentRuns: (threadId, turnId) => {
+				const bearer = get(token);
+				if (!bearer) return;
+				void refreshCommentRuns(threadId, turnId, {
+					token: bearer, runs: () => get(activeThreadId) === threadId ? focusRuns : [],
+					replace: (old, next) => { focusRuns = focusRuns.flatMap(run => run === old ? next : [run]); },
+					request: url => fetch(url),
+				});
+			},
 		});
 		const handleVisibilityChange = async () => {
 			if (document.visibilityState !== 'visible') return;

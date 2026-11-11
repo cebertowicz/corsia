@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql
+from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql, is_focus_visible
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -23,8 +23,10 @@ from api.thread_paging import (
     project_anchors,
 )
 from api.thread_turn_summaries import page_turn_summaries
+from api.thread_message_rows import metadata_dict
 from history.projection import in_read_snapshot
 from infra.message_activity import ACTIVITY_WEIGHT_SQL, DISPLAY_ROW_SELECT
+from infra.chat_comment_receipts import comment_only_receipt_turns
 from infra.queries import get_thread_for_user
 
 # Rows one Focus page may inspect. A page of a 0.7%-visible thread needs about 7100.
@@ -40,9 +42,13 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 # statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
 # `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
-_VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
+_SUPPRESSED_WORK = f"""CASE WHEN role != 'user' AND json_valid(metadata) THEN
+    COALESCE(json_extract(metadata, '$.turn_id') IN (SELECT value FROM json_each(:suppressed))
+    AND (role = 'assistant' OR (role = 'system' AND ({FOCUS_VISIBLE_SQL}) = 0)), 0)
+    ELSE 0 END"""
+_VISIBLE_COLUMN = f"CASE WHEN {_SUPPRESSED_WORK} THEN 0 ELSE ({FOCUS_VISIBLE_SQL}) END AS vis"
 _RUN_COLUMNS = (
-    f"{_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
+    f"{_VISIBLE_COLUMN}, {_SUPPRESSED_WORK} AS suppressed, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
     "CASE WHEN role = 'assistant' AND instr(metadata, '\"browser_chip\"') > 0 AND json_valid(metadata) "
     "THEN json_extract(metadata, '$.browser_chip') END AS chip, "
@@ -70,6 +76,11 @@ def _anchors_cte(columns: str) -> str:
 
 # The newest `:budget` visible anchors among the first `:newest_n` anchors; only they
 # cross into Python. When the budget fills, the last one's seq is where the walk stops.
+_CANDIDATE_COLUMN = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.turn_id') END AS turn_id"
+_CANDIDATES_SQL = (
+    f"WITH {_anchors_cte(_CANDIDATE_COLUMN)} "
+    "SELECT DISTINCT turn_id FROM anchors WHERE turn_id IS NOT NULL"
+)
 _VISIBLE_SQL = (
     f"WITH {_anchors_cte(_VISIBLE_COLUMN)} "
     "SELECT id, seq FROM anchors WHERE vis = 1 ORDER BY seq DESC LIMIT :budget"
@@ -90,7 +101,7 @@ scanned AS (
     SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
 ),
 bounded AS (
-    SELECT id, seq, vis, weight, row_kind, turn_id, chip, rn, retry_for, error_turn,
+    SELECT id, seq, vis, suppressed, weight, row_kind, turn_id, chip, rn, retry_for, error_turn,
         COALESCE(SUM(vis) OVER (ORDER BY seq DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
         CASE WHEN turn_id IS NOT NULL
@@ -102,7 +113,7 @@ hidden AS (
     SELECT *, MAX(CASE WHEN live IS NOT NULL THEN rn * 2 + live END) OVER (
         PARTITION BY seg ORDER BY seq DESC
         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_known
-    FROM bounded WHERE vis = 0
+    FROM bounded WHERE vis = 0 AND NOT suppressed
 ),
 split AS (
     SELECT *, SUM(CASE WHEN live IS NOT NULL AND prev_known IS NOT NULL
@@ -135,13 +146,15 @@ SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
     json_group_array(DISTINCT ends.row_kind) AS kinds,
-    substr(MAX(printf('%020d', ends.seq) || ends.chip), 21) AS browser_chip
+    substr(MAX(printf('%020d', ends.seq) || ends.chip), 21) AS browser_chip,
+    NULL AS oldest_kept_id
 FROM ends LEFT JOIN run_turns USING (seg, run_no)
 GROUP BY ends.seg, ends.run_no
 UNION ALL
 SELECT 'meta', NULL, NULL, (SELECT COUNT(*) FROM anchors), 0,
     (SELECT id FROM scanned WHERE rn = MIN((SELECT COUNT(*) FROM anchors), :cap)),
-    NULL, NULL, '[]', NULL
+    NULL, NULL, '[]', NULL,
+    (SELECT id FROM scanned WHERE rn <= :cap AND NOT suppressed ORDER BY rn DESC LIMIT 1)
 ORDER BY first_seq
 """
 
@@ -155,6 +168,10 @@ class InvertedRange(ValueError):
     """`from_id` is newer than `to_id`; the route maps it to 400."""
 
 
+class RangeTooLarge(ValueError):
+    """The requested projection exceeds the existing Focus scan cap."""
+
+
 @dataclass
 class _Walk:
     visible_ids: list[str] = field(default_factory=list)
@@ -166,7 +183,7 @@ class _Walk:
 
 def _walk(
     db, thread_id: str, cursor_seq: int | None,
-    budget: int, cap: int,
+    budget: int, cap: int, *, range_floor: int | None = None,
 ) -> _Walk:
     """Walk newest-first until `budget` visible anchors or `cap` rows are read.
 
@@ -174,15 +191,17 @@ def _walk(
     (and so where the walk stops), the second reduces the hidden rows in that range
     to run stubs. Only visible anchors and stubs cross into Python.
     """
-    args = {"thread": thread_id, "after": cursor_seq, "floor": None, "cap": cap}
+    args = {"thread": thread_id, "after": cursor_seq, "floor": range_floor, "cap": cap, "suppressed": "[]"}
+    candidates = [row[0] for row in db.execute(_CANDIDATES_SQL, {**args, "newest_n": cap}).fetchall()]
+    args["suppressed"] = json.dumps(sorted(comment_only_receipt_turns(db, thread_id, candidates)))
     visible = db.execute(_VISIBLE_SQL, {**args, "newest_n": cap, "budget": budget}).fetchall()
     walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)])
-    floor = visible[-1]["seq"] if len(visible) >= budget else None
+    floor = visible[-1]["seq"] if len(visible) >= budget else range_floor
     rows = db.execute(_RUNS_SQL, {**args, "floor": floor, "newest_n": cap + 1}).fetchall()
     meta = next(row for row in rows if row["kind"] == "meta")
     walk.oldest_id = meta["first_id"]
     walk.scanned = min(meta["count"], cap)
-    if floor is None:
+    if floor is None or range_floor is not None:
         walk.has_more = meta["count"] > cap
     else:
         walk.has_more = db.execute(_OLDER_EXISTS_SQL, (thread_id, floor)).fetchone() is not None
@@ -201,8 +220,8 @@ def _walk(
             "continues_older": False,
             **({"browser_chip": json.loads(row["browser_chip"])} if row["browser_chip"] else {}),
         })
-    # The oldest run is cut off by the cap or budget only if it holds the last row read.
-    if walk.runs and walk.runs[0]["first_id"] == walk.oldest_id:
+    # Suppressed work consumes scan budget but cannot close an ordinary run.
+    if walk.runs and walk.runs[0]["first_id"] == meta["oldest_kept_id"]:
         walk.runs[0]["continues_older"] = walk.has_more
     return walk
 
@@ -309,6 +328,18 @@ def _display_anchor_seq(db, thread_id: str, message_id: str) -> int:
     return int(row["seq"])
 
 
+def page_run_projection(db, thread_id: str, from_id: str, to_id: str) -> list[dict]:
+    """Recompute an existing stub's bounded range after a Turn settles."""
+    low = _display_anchor_seq(db, thread_id, from_id)
+    high = _display_anchor_seq(db, thread_id, to_id)
+    if low > high:
+        raise InvertedRange(f"from_id {from_id} is newer than to_id {to_id}")
+    walk = _walk(db, thread_id, high + 1, FOCUS_SCAN_CAP + 1, FOCUS_SCAN_CAP, range_floor=low)
+    if walk.has_more:
+        raise RangeTooLarge("Focus run range exceeds the scan cap")
+    return walk.runs
+
+
 def page_run_range(
     db, thread_id: str, limit: int, from_id: str, to_id: str, before: str | None,
 ) -> dict:
@@ -336,7 +367,13 @@ def page_run_range(
     newest_first = [dict(row) for row in rows]
     has_more = len(newest_first) > limit
     selected = list(reversed(newest_first[:limit]))
-    display = project_anchors(db, thread_id, selected)
+    turn_ids = [metadata_dict(row).get("turn_id") for row in selected]
+    hidden = comment_only_receipt_turns(db, thread_id, [turn for turn in turn_ids if isinstance(turn, str)])
+    visible = [row for row in selected if not (
+        metadata_dict(row).get("turn_id") in hidden
+        and (row["role"] == "assistant" or (row["role"] == "system" and not is_focus_visible(row)))
+    )]
+    display = project_anchors(db, thread_id, visible)
     finish_display(db, thread_id, display, include_tool_results=False)
     return {
         "messages": display,
@@ -370,6 +407,17 @@ def read_authorized_focus_page(
     return in_read_snapshot(
         db, _focus_read, thread_id, limit, before, user_id=user_id, scan_cap=scan_cap,
     )
+
+
+def _projection_read(thread_id, from_id, to_id, *, db, user_id=None):
+    if not _authorized(db, thread_id, user_id):
+        return None
+    return {"messages": [], "runs": page_run_projection(db, thread_id, from_id, to_id)}
+
+
+def read_authorized_run_projection(db, thread_id: str, from_id: str, to_id: str, *, user_id=None):
+    """Authorization and stub reprojection share one snapshot."""
+    return in_read_snapshot(db, _projection_read, thread_id, from_id, to_id, user_id=user_id)
 
 
 def read_authorized_run_range(

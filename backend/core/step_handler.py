@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from infra.chat_comment_answers import VisibleAnswerStream, message_answer_fields
+from infra.chat_comment_receipts import terminal_comment_only_receipt
 from infra.database import write_transaction
 from infra.sidebar_preview import sidebar_update
 from infra.time import utc_now_iso
@@ -356,6 +357,8 @@ class StepHandler:
             "step_ids": self.step_ids,
             **terminal_context,
         }
+        if await terminal_comment_only_receipt(self.thread_id, self.turn_id):
+            ws_payload["comment_only_receipt"] = True
         await self._emit(ws_payload)
 
         try:
