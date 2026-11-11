@@ -52,12 +52,9 @@ _corsia_lifecycle_cleanup() {
     if [ "$_corsia_lifecycle_done" != true ] \
         && [ "$_corsia_lifecycle_status" -ne 0 ] \
         && [ -n "$_corsia_lifecycle_result_file" ]; then
-        local stopping=false
-        [ -z "${_corsia_update_stopping:-}" ] || stopping=true
         {
             printf 'status=%s\n' "$_corsia_lifecycle_status"
             printf 'is_update=%s\n' "$_corsia_lifecycle_is_update"
-            printf 'stopping=%s\n' "$stopping"
             printf 'unconfirmed_bootout=%s\n' "$_corsia_unconfirmed_bootout"
             printf 'backend_healthy=%s\n' "$backend_healthy"
             printf 'refusal_reason=%s\n' "$refusal_line"

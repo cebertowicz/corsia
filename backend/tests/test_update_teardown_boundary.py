@@ -71,4 +71,5 @@ def test_no_pre_stop_signal_after_stop_or_unknown_exit(tmp_path, body):
         assert not child.lifecycle_result_path.exists()
     else:
         record = child.lifecycle_result_path.read_text()
-        assert "stopping=true" in record or "unconfirmed_bootout=true" in record
+        assert "status=79\n" in record and "stopping=" not in record
+        assert ("unconfirmed_bootout=true" in record) is body.startswith("_corsia_unconfirmed")

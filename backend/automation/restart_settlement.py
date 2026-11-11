@@ -16,12 +16,12 @@ async def abort_restart_control(
     cancelled: bool = False,
     failure_code: str | None = None,
     failure_detail: str | None = None,
-    pre_stop_only: bool = False,
+    before_resume: bool = False,
 ) -> bool:
     """Release one failed or cancelled restart without stranding retained work."""
     return await settle_restart_control(
         operation_id, target="cancelled" if cancelled else "failed", error=error,
-        failure_code=failure_code, failure_detail=failure_detail, pre_stop_only=pre_stop_only,
+        failure_code=failure_code, failure_detail=failure_detail, before_resume=before_resume,
     )
 
 
@@ -32,13 +32,13 @@ async def settle_restart_control(
     error: str = "",
     failure_code: str | None = None,
     failure_detail: str | None = None,
-    pre_stop_only: bool = False,
+    before_resume: bool = False,
 ) -> bool:
     """Finish release and resumption before propagating caller cancellation."""
     from subagents.runtime_guard import join_task_through_cancellation
 
     release = asyncio.create_task(
-        _release_and_resume(operation_id, error, target, failure_code, failure_detail, pre_stop_only)
+        _release_and_resume(operation_id, error, target, failure_code, failure_detail, before_resume)
     )
     cancellation = await join_task_through_cancellation(release)
     released = release.result()
@@ -47,7 +47,7 @@ async def settle_restart_control(
     return released
 
 
-async def _release_and_resume(operation_id, error, target, failure_code, failure_detail, pre_stop_only) -> bool:
+async def _release_and_resume(operation_id, error, target, failure_code, failure_detail, before_resume) -> bool:
     from automation import restart
     from automation.update_failure_notice import tell_conductor_detached
     from infra import drain
@@ -57,8 +57,8 @@ async def _release_and_resume(operation_id, error, target, failure_code, failure
     # Resolve through the public owner so existing cancellation/integration probes
     # observe the same release boundary as startup and Update confirmation.
     kwargs: dict[str, Any] = {} if target in {"failed", "cancelled"} else {"target": target}
-    if pre_stop_only:
-        kwargs["pre_stop_only"] = True
+    if before_resume:
+        kwargs["before_resume"] = True
     threads = await run_in_db(
         restart._release_restart_control, operation_id, error, target == "cancelled",
         failure_code, failure_detail, **kwargs,
@@ -79,18 +79,18 @@ def release_restart_control(
     failure_detail: str | None,
     *,
     target: str | None = None,
-    pre_stop_only: bool = False,
+    before_resume: bool = False,
 ) -> tuple[str, ...] | None:
     """Atomically move the exact operation and gather all work its cutoff held."""
     from automation import self_restart
-    from automation.restart_rule import PRE_STOP_PHASES
+    from automation.restart_rule import BEFORE_RESUME_PHASES
     from automation.restart_wakes import cancel_operation_registrations
     from infra.restart_authorization import serving_head_sha
 
     with write_transaction(None, scope="settle_restart_control") as connection:
-        if pre_stop_only:
+        if before_resume:
             operation = self_restart.operation_by_id(operation_id, db=connection)
-            if not operation or operation.get("phase") not in PRE_STOP_PHASES:
+            if not operation or operation.get("phase") not in BEFORE_RESUME_PHASES:
                 return None
         if target == "verifying":
             released = self_restart.transition_operation(

@@ -19,7 +19,8 @@ HOLD_PHASES = frozenset({
     "restarting",
     "resuming",
 })
-PRE_STOP_PHASES = HOLD_PHASES - {"restarting", "resuming"}
+# Phases the spawning backend still owns; "resuming" belongs to its replacement.
+BEFORE_RESUME_PHASES = HOLD_PHASES - {"resuming"}
 ACTIVE_PHASES = HOLD_PHASES | {"verifying"}
 
 

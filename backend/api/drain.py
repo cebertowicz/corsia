@@ -97,12 +97,12 @@ async def cancel_drain(
 async def settle_drain_exit(
     operation_id: str, failure_code: str | None = None,
     reason: str | None = None, backend_healthy: bool | None = None,
-    *, pre_stop_only: bool = False,
+    *, before_resume: bool = False,
 ) -> bool:
     """Release the operation using the drain cancellation semantics."""
     from automation.restart import abort_restart_control
 
-    guard = {"pre_stop_only": True} if pre_stop_only else {}
+    guard = {"before_resume": True} if before_resume else {}
     if failure_code is None:
         released = await abort_restart_control(operation_id, cancelled=True, **guard)
     else:
@@ -138,14 +138,14 @@ async def settle_restart_exit(process, operation_id: str, returncode: int) -> No
         fields = dict(line.split("=", 1) for line in lines)
         if (int(fields["status"]) != returncode or
             any(fields[key] not in {"true", "false"} for key in
-                ("is_update", "stopping", "unconfirmed_bootout", "backend_healthy")) or
+                ("is_update", "unconfirmed_bootout", "backend_healthy")) or
             len(fields["refusal_reason"]) > 500):
             raise ValueError("invalid lifecycle result")
     except (AttributeError, OSError, UnicodeError, ValueError, KeyError):
         await abort_restart_control(
             operation_id, error=f"restart script exited before restart: {returncode}",
             failure_code="launch_failed", failure_detail=f'{{"exit_code": {returncode}}}',
-            pre_stop_only=True,
+            before_resume=True,
         )
         return
     finally:
@@ -154,12 +154,14 @@ async def settle_restart_exit(process, operation_id: str, returncode: int) -> No
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
-    if fields["stopping"] == "true" or fields["unconfirmed_bootout"] == "true":
+    # This backend is reading its child's exit, so teardown did not take it
+    # down: releasing is safe unless launchd may still be tearing it down.
+    if fields["unconfirmed_bootout"] == "true":
         return
     reason = fields["refusal_reason"] or None
     await settle_drain_exit(
         operation_id, "update_refused" if reason else None, reason,
-        fields["backend_healthy"] == "true", pre_stop_only=True,
+        fields["backend_healthy"] == "true", before_resume=True,
     )
 
 

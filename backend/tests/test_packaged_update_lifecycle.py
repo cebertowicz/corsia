@@ -283,21 +283,21 @@ async def test_child_refusal_preserves_already_recorded_reason(isolated_db):
         operation_id, error="specific refusal", failure_code="update_refused"
     )
     assert await settle_drain_exit(
-        operation_id, "update_refused", "specific refusal", False, pre_stop_only=True
+        operation_id, "update_refused", "specific refusal", False, before_resume=True
     ) is False
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "failed"
     assert row["error"] == "specific refusal" and row["failure_code"] == "update_refused"
 
 
-@pytest.mark.parametrize("phase", ["restarting", "resuming", "verifying"])
+@pytest.mark.parametrize("phase", ["resuming", "verifying"])
 async def test_child_refusal_does_not_release_advanced_update(isolated_db, phase):
     from api.drain import settle_drain_exit
 
     operation_id = await run_in_db(operation_in, phase)
     held_before = self_restart.restart_holds_new_work()
     assert await settle_drain_exit(
-        operation_id, "update_refused", "specific refusal", False, pre_stop_only=True
+        operation_id, "update_refused", "specific refusal", False, before_resume=True
     ) is False
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "in_flight" and row["phase"] == phase
@@ -309,10 +309,10 @@ async def test_child_exit_after_advance_is_a_noop(isolated_db, tmp_path, caplog)
     from types import SimpleNamespace
     from api.drain import settle_restart_exit
 
-    operation_id = await run_in_db(operation_in, "restarting")
+    operation_id = await run_in_db(operation_in, "resuming")
     before = await run_in_db(self_restart.operation_by_id, operation_id)
     result = tmp_path / "result"
-    result.write_text("status=1\nis_update=true\nstopping=false\nunconfirmed_bootout=false\nbackend_healthy=false\nrefusal_reason=refused\n")
+    result.write_text("status=1\nis_update=true\nunconfirmed_bootout=false\nbackend_healthy=false\nrefusal_reason=refused\n")
     with caplog.at_level(logging.ERROR):
         await settle_restart_exit(SimpleNamespace(lifecycle_result_path=result), operation_id, 1)
     assert await run_in_db(self_restart.operation_by_id, operation_id) == before
@@ -372,17 +372,45 @@ async def test_child_exit_without_reason_matches_drain_cancel(isolated_db, tmp_p
     assert not self_restart.restart_holds_new_work()
 
 
-@pytest.mark.parametrize("flag", ["stopping", "unconfirmed_bootout"])
-async def test_child_exit_retains_hold_for_stopping_or_unconfirmed(isolated_db, tmp_path, flag):
+async def _exit_lifecycle(tmp_path, operation_id, body):
     import os
 
     from api.restart_shell import spawn_restart_lifecycle
     from api.system_admin import _monitor_restart_process
 
-    operation_id = await run_in_db(operation_in, "ready")
     script = tmp_path / "corsia"
-    value = "1" if flag == "stopping" else "true"
-    script.write_text(f"#!/bin/bash\n_corsia_{'update_' if flag == 'stopping' else ''}{flag}={value}\nexit 9\n")
+    script.write_text(f"#!/bin/bash\n{body}\n")
+    script.chmod(0o755)
+    with (tmp_path / "lifecycle.log").open("w") as log:
+        child = spawn_restart_lifecycle(
+            script, ["restart-prepared"],
+            {**os.environ, "CORSIA_RESTART_BACKEND_PORT": "12345"},
+            operation_id, log, caller_credential="x" * 8,
+        )
+        await asyncio.to_thread(child.wait, 5)
+        await _monitor_restart_process(child, operation_id)
+
+
+@pytest.mark.parametrize("phase", ["ready", "restarting"])
+async def test_failed_stop_with_backend_alive_releases_hold(isolated_db, tmp_path, phase):
+    # The drain finished (restarting) and bootout then failed with the service
+    # still loaded: this backend survived, so it must release its own hold.
+    operation_id = await run_in_db(operation_in, phase)
+    await _exit_lifecycle(tmp_path, operation_id, "_corsia_update_stopping=1\nexit 1")
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "cancelled"
+    assert not self_restart.restart_holds_new_work()
+
+
+async def test_child_exit_retains_hold_for_unconfirmed_bootout(isolated_db, tmp_path):
+    import os
+
+    from api.restart_shell import spawn_restart_lifecycle
+    from api.system_admin import _monitor_restart_process
+
+    operation_id = await run_in_db(operation_in, "restarting")
+    script = tmp_path / "corsia"
+    script.write_text("#!/bin/bash\n_corsia_unconfirmed_bootout=true\nexit 9\n")
     script.chmod(0o755)
     with (tmp_path / "lifecycle.log").open("w") as log:
         child = spawn_restart_lifecycle(
