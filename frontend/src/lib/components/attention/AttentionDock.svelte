@@ -240,7 +240,6 @@
 		class="attention-dock"
 		class:expanded={showChip}
 	>
-		{#if current}
 		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
@@ -289,7 +288,6 @@
 			<p class="dock-stale" role="status">Showing last known items.</p>
 		{/if}
 		</section>
-		{/if}
 	</div>
 {/if}
 

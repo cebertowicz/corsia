@@ -21,5 +21,25 @@ def read(projected, *, db, now, costs, memo, lean, detail_ids, attempt_limit):
         node_plans, db=db, now=now or datetime.now(timezone.utc), wanted=costs,
         detail_ids=detail_ids,
     )
-    coverage = coverage_matches((node['id'] for node, _ in node_plans), db=db)
+    coverage: dict[str, list[dict]] = {}
+    for row in coverage_matches((node['id'] for node, _ in node_plans), db=db):
+        coverage.setdefault(row['person_node_id'], []).append(row)
     return node_plans, executors, details, executions, stops, cost_facts, coverage
+
+
+def split_covered(nodes, states) -> tuple[list[dict], list[dict]]:
+    """Drop covered person-comment tasks and name the feedback row carrying each one's counts.
+
+    A covered task is always a root leaf, so removing it changes no branch count.
+    An open ask carries the counts on its own; only feedback-only coverage needs a carrier.
+    """
+    visible, carriers = [], []
+    for node in nodes:
+        state = states[node['id']]
+        if not state['comment_task_covered']:
+            visible.append(node)
+        matches = state['comment_coverage']
+        if matches and not any(row['carrier_kind'] == 'ask' for row in matches):
+            carrier = min(matches, key=lambda row: row['carrier_id'])
+            carriers.append({**carrier, 'title': node['title'], 'owed': state['comment_attention_owed']})
+    return visible, carriers

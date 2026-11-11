@@ -231,10 +231,6 @@ def project(
         projected, db=db, now=now, costs=costs, memo=memo, lean=lean, detail_ids=detail_ids,
         attempt_limit=ATTEMPT_HISTORY_LIMIT,
     )
-    covered = {row['person_node_id'] for row in coverage}
-    coverage_by_person = {}
-    for row in coverage:
-        coverage_by_person.setdefault(row['person_node_id'], []).append(row)
     labels, history, attempt_counts, evidence, changed, settled_because = details
     commitment_costs, node_costs, initiatives = cost_facts
     if titles is None:
@@ -255,17 +251,15 @@ def project(
                 stops.get(executor_id), node, item.plan, execution,
             )
             asks_user = row_asks_user(node, review, execution)
-            deferred_ask = asks_user and ask_deferred(
-                plan_paused=plan_paused(execution), node_paused=node_paused(execution),
-                covered=node['id'] in covered,
-            )
+            paused = ask_deferred(plan_paused=plan_paused(execution), node_paused=node_paused(execution))
+            deferred_ask = asks_user and ask_deferred(plan_paused=paused, covered=node['id'] in coverage)
             states[node["id"]] = {
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, asks_user=asks_user, stopped=stopped),
                 "status_reason": settled_because.get(node["id"]) or _status_reason(
                     execution, sequenced_after, stopped,
-                    deferred_ask=deferred_ask and (plan_paused(execution) or node_paused(execution)),
+                    deferred_ask=deferred_ask and paused,
                 ) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every
@@ -276,11 +270,9 @@ def project(
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],
                 "requires_user_action": asks_user and not deferred_ask,
-                "comment_task_covered": node['id'] in covered,
-                "comment_coverage": coverage_by_person.get(node['id'], []),
-                "comment_attention_owed": asks_user and not ask_deferred(
-                    plan_paused=plan_paused(execution), node_paused=node_paused(execution),
-                ),
+                "comment_task_covered": node['id'] in coverage,
+                "comment_coverage": coverage.get(node['id'], []),
+                "comment_attention_owed": asks_user and not paused,
             }
     return states
 
