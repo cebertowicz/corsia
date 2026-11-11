@@ -52,7 +52,7 @@ async def test_device_restart_targets_main_http_listener(monkeypatch, mode, conf
     else:
         monkeypatch.setenv("BACKEND_PORT", configured_port)
     request = Request({"type": "http", "server": ("127.0.0.1", 47901), "corsia_listener": "devices"})
-    prelaunch = AsyncMock(return_value=("operation", object()))
+    prelaunch = AsyncMock(return_value=("operation", Mock(wait=Mock(return_value=0))))
     with (
         patch.object(system_admin, "authenticate", return_value={"id": "person"}),
         patch.object(system_admin, "require_human_user"),
