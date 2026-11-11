@@ -17,7 +17,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
 1. **Read the project.** Read only the README, AGENTS.md/CLAUDE.md, the docs index, recent history and remotes, and change nothing in the folder (git history: `git log --since=90.days`, areas and authors, counts only). For a described project with no folder, skip to step 2. Other repositories or systems you see mentioned are listed as candidate sources, unread.
 
-2. **Learn how they work.** Post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
+2. **Learn how they work.** First check for a published coordination model that fits (SKILL step 3). Then post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
    1. What is this project for, and what would make the next few months a success?
    2. How does the work get done today: the steps from an idea or request to something finished, and who's involved?
    3. Where does the work live: repositories, documents, trackers, chat, email, other tools?
@@ -27,7 +27,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
    Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the CORSIA agent the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
 
-3. **Research how this work is done well.** First check for a published coordination model that fits (SKILL step 3) and build on it; then, for this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
+3. **Research how this work is done well.** Build on the published model step 2 found, if any; then, for this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
 
 4. **Break the work down.** From steps 1–3, write three short tables. Mark a row that doesn't apply to this project as not applicable; never fill it in to complete the table.
    - **Roles and recurring tasks:** each kind of work and who does it today. Each recurring task gets its steps, who does each, and where the person is asked (skill `workflow-design`).
