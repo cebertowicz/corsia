@@ -40,6 +40,22 @@ export interface CommentRange {
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
 
+/**
+ * What the editor repaints on: the ranges are sent to it again only when this changes, so every field a highlight is drawn from
+ * is in it. The unread flag is one: a thread read since the last paint must lose its new sign.
+ */
+export const paintSignature = (ranges: CommentRange[]): string =>
+	ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.point ? 1 : 0}:${r.unread ?? ''}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+
+/**
+ * The highlight under a press, read from where it landed. A phone puts the caret at the nearest end of the tapped word, which lies
+ * outside a highlight that stops short of its word, so the caret alone cannot say which highlight was tapped.
+ */
+export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange | undefined {
+	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
+	return ranges.find((r) => !r.point && at >= r.from && at <= r.to);
+}
+
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
 /** An unread thread's highlight names its thread, so its sign can find where the highlight ends. */

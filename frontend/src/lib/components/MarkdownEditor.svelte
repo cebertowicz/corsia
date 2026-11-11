@@ -15,7 +15,7 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, coveredByMove, openCommentIds, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, highlightAtPress, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -195,7 +195,7 @@
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
-			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
+			const hit = (click && highlightAtPress(v, click, curHighlights)) || curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
 			const arrived = !!hit && hit.id !== caretIn;
 			caretIn = hit?.id ?? null;
 			// Where a card would cover the text (the phone sheet, the popover), only a tap or click opens it; typing and the arrow keys
@@ -355,7 +355,7 @@
 				return id ? liveAnchor(id)() : null;
 			}, click)),
 		}));
-		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.point ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+		const sig = paintSignature(ranges);
 		if (sig === lastPainted) return;
 		lastPainted = sig;
 		curHighlights = ranges;

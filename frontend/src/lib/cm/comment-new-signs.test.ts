@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { commentMarks, setCommentRanges } from './comment-marks';
+import { commentMarks, paintSignature, setCommentRanges } from './comment-marks';
 import { commentNewSigns } from './comment-new-signs';
 
 vi.mock('$lib/documentReadingPlace', () => ({ releasePlace: vi.fn() }));
@@ -51,4 +51,13 @@ it('names the sign for what is new: a new comment with no new reply is a New com
 	view.dispatch({ effects: setCommentRanges.of([{ from: 11, to: 23, id: 'fresh', unread: 'reply' }]) });
 	flush(view);
 	expect(named()).toEqual(['New reply']);
+});
+
+it('repaints a thread that was read: the signature the editor repaints on changes with the unread flag', () => {
+	const unread = [{ from: 11, to: 23, id: 'asked', unread: 'reply' as const }, { from: 0, to: 3, id: 'quiet' }];
+	const read = [{ from: 11, to: 23, id: 'asked' }, { from: 0, to: 3, id: 'quiet' }];
+	expect(paintSignature(read)).not.toBe(paintSignature(unread));
+	expect(paintSignature(unread.map((r) => ({ ...r })))).toBe(paintSignature(unread));
+	// A new comment is not a new reply: the sign's name changes, so the signature does.
+	expect(paintSignature([{ ...unread[0], unread: 'comment' as const }, unread[1]])).not.toBe(paintSignature(unread));
 });
