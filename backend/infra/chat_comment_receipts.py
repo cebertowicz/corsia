@@ -60,6 +60,39 @@ def comment_only_receipt_turns(db: sqlite3.Connection, thread_id: str, turn_ids:
     ).fetchall()}
 
 
+def shown_anchors(db: sqlite3.Connection, thread_id: str, stream, budget: int) -> tuple[list, set[str]]:
+    """The first `budget` rows of `stream` Focus shows, and the comment-only Turns among the rows read.
+
+    A comment-only Turn's work is not drawn, so hiding one of its visible rows reads
+    further back, where another such Turn may sit: which Turns qualify is asked for
+    each batch of newly read Turns until the page holds `budget` shown anchors or the
+    rows run out. A page with none asks once. `stream` yields anchors newest-first
+    with `vis`, `role` and `turn_id`; it is read no further than needed.
+    """
+    read: list = []
+    checked: set[str] = set()
+    suppressed: set[str] = set()
+
+    def shown(row) -> bool:
+        # Only an assistant row: a system row Focus shows is never comment-only work.
+        return bool(row["vis"]) and not (row["role"] == "assistant" and row["turn_id"] in suppressed)
+
+    count = 0
+    while True:
+        for row in stream if count < budget else ():
+            read.append(row)
+            count += shown(row)
+            if count >= budget:
+                break
+        new = {row["turn_id"] for row in read if row["turn_id"]} - checked
+        checked |= new
+        found = comment_only_receipt_turns(db, thread_id, sorted(new))
+        if not found:
+            return [row for row in read if shown(row)], suppressed
+        suppressed |= found
+        count = sum(map(shown, read))
+
+
 def _page_turns(db: sqlite3.Connection, thread_id: str, rows: list[dict]) -> set[str]:
     turns = {turn for turn in map(row_turn_id, rows) if turn is not None}
     return comment_only_receipt_turns(db, thread_id, sorted(turns))

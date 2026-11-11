@@ -27,7 +27,7 @@ from api.thread_paging import (
 from api.thread_turn_summaries import page_turn_summaries
 from history.projection import in_read_snapshot
 from infra.message_activity import ACTIVITY_WEIGHT_SQL, DISPLAY_ROW_SELECT
-from infra.chat_comment_receipts import comment_only_receipt_turns, drop_comment_only_work
+from infra.chat_comment_receipts import drop_comment_only_work, shown_anchors
 from infra.queries import get_thread_for_user
 
 # Rows one Focus page may inspect. A page of a 0.7%-visible thread needs about 7100.
@@ -172,42 +172,12 @@ class _Walk:
 
 
 def _visible_anchors(db, thread_id: str, args: dict, budget: int) -> tuple[list, set[str]]:
-    """The newest `budget` anchors Focus shows, and the comment-only Turns among the rows read.
-
-    A comment-only Turn's work is not drawn, so hiding one of its visible rows reads
-    further back, where another such Turn may sit: which Turns qualify is asked for
-    each batch of newly read Turns until the page holds `budget` shown anchors or the
-    rows run out. A page with none asks once.
-    """
+    """The newest `budget` anchors Focus shows, and the comment-only Turns among the rows read."""
     cursor = db.execute(_STREAM_SQL, args)
     try:
-        return _read_shown(db, thread_id, iter(cursor), budget)
+        return shown_anchors(db, thread_id, iter(cursor), budget)
     finally:
         cursor.close()
-
-
-def _read_shown(db, thread_id: str, stream, budget: int) -> tuple[list, set[str]]:
-    read: list = []
-    checked: set[str] = set()
-    suppressed: set[str] = set()
-
-    def shown(row) -> bool:
-        return bool(row["vis"]) and not (row["role"] == "assistant" and row["turn_id"] in suppressed)
-
-    count = 0
-    while True:
-        for row in stream if count < budget else ():
-            read.append(row)
-            count += shown(row)
-            if count >= budget:
-                break
-        new = {row["turn_id"] for row in read if row["turn_id"]} - checked
-        checked |= new
-        found = comment_only_receipt_turns(db, thread_id, sorted(new))
-        if not found:
-            return [row for row in read if shown(row)], suppressed
-        suppressed |= found
-        count = sum(map(shown, read))
 
 
 def _walk(
