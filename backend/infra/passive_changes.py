@@ -9,10 +9,7 @@ from loguru import logger
 
 from infra.input_admission import AcceptedInput, accept_thread_input
 from infra.passive_digest import build_digest, clock_event, digest_summary
-from infra.passive_relevant import (  # noqa: F401
-    COMMENT_CHANGE_KINDS, REVIEWER_CHANGE_KINDS, _relevant_changes, agent_roster_scope_id,
-    corsia_agent_contact_scope_id,
-)
+from infra.passive_relevant import agent_roster_scope_id, corsia_agent_contact_scope_id, relevant_changes
 from infra.queries import thread_is_available
 from infra.time import utc_now_iso
 
@@ -247,7 +244,7 @@ def materialize_pending_digest(
     clock = clock_event(db, thread_id, observed_at)
     from infra.reviewer_watch import watched_reviews
 
-    rows, overflow = _relevant_changes(
+    rows, overflow = relevant_changes(
         db,
         thread_id=thread_id,
         user_id=str(session["user_id"]),

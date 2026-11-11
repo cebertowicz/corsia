@@ -29,7 +29,7 @@ REVIEWER_CHANGE_KINDS = ("comment.created", "content_edited")
 COMMENT_CHANGE_KINDS = ("comment.created",)
 
 
-def _relevant_changes(
+def relevant_changes(
     db: sqlite3.Connection,
     *,
     thread_id: str,
