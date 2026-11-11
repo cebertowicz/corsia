@@ -226,6 +226,25 @@ describe('PlanTree task context menu', () => {
 		expect(toggled).not.toHaveBeenCalled();
 	});
 
+	it('swallows the long-press tap that lands on the item opened under the finger, then takes the next tap', async () => {
+		vi.useFakeTimers();
+		const onAction = vi.fn().mockResolvedValue(null);
+		const row = mountTree({ user_actions: ['pause_node', 'close_node'] }, onAction);
+
+		row.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, clientX: 10, clientY: 10 }));
+		vi.advanceTimersByTime(501);
+		flushSync();
+		const first = () => menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement;
+		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
+		first().click();
+		expect(onAction).not.toHaveBeenCalled();
+		expect(menu()).not.toBeNull();
+
+		first().dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true }));
+		first().click();
+		expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: expect.any(String) }), 'pause_node');
+	});
+
 	it('cancels the long-press when the finger lifts early or moves', async () => {
 		vi.useFakeTimers();
 		const row = mountTree({ user_actions: ['pause_node', 'close_node'] }, vi.fn());
