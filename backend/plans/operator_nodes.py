@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 
+import plans.operator_artifact_fields as artifact_fields
 import plans.operator_display_state as display_state
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
@@ -19,20 +20,6 @@ import plans.user_steering as user_steering
 import plans.wait_summary as wait_summary
 from plans import open_tree
 from plans.node_states import folded_ids, is_container, parent_ids, work_ids
-
-
-def _artifact_fields(link: dict) -> dict:
-    return {
-        "id": link["artifact_id"],
-        "role": link["role"],
-        "integration": link["integration"],
-        "type": link["type"],
-        "external_id": link["external_id"],
-        "title": link.get("title"),
-        "path": link.get("path"),
-        "state": link["state"],
-        "attention_state": link.get("attention_state"),
-    }
 
 
 def _child_summary(
@@ -119,7 +106,7 @@ def _present_node(
         ),
         "discussion_artifact_id": discussion,
         "artifacts": [
-            _artifact_fields(link) for link in links if link["role"] != "discussion"
+            artifact_fields.present(link) for link in links if link["role"] != "discussion"
         ],
     }
 
