@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UnseenDocActivity, watchCanvasAndBand, type ActivityPosition } from './docCanvasActivity';
+import { UnseenDocActivity, bottomNoticesHeight, watchCanvasAndBand, type ActivityPosition } from './docCanvasActivity';
 import type { DocActivityFrame } from './docPresence';
 
 const frame = (id: string, from = 100): DocActivityFrame => ({
@@ -48,6 +48,25 @@ describe('unseen document arrivals', () => {
 		expect(unseen.pill(position)?.span.from).toBe(120);
 		unseen.clear();
 		expect(unseen.pill(position)).toBeNull();
+	});
+});
+
+describe('bottomNoticesHeight', () => {
+	const clip = new DOMRect(0, 0, 393, 700);
+	const band = (height: number) => new DOMRect(0, 700 - height, 393, height);
+
+	it('is nothing with no notice showing', () => {
+		expect(bottomNoticesHeight(clip, undefined, null)).toBe(0);
+	});
+
+	it('follows the band as it grows from one notice to a stack, so a stacked band is covered as fully as a single one', () => {
+		expect(bottomNoticesHeight(clip, band(70), null)).toBe(70);
+		expect(bottomNoticesHeight(clip, band(122), null)).toBe(122);
+	});
+
+	it('reaches the top of a below pill standing over the band, or alone at the foot', () => {
+		expect(bottomNoticesHeight(clip, band(70), 700 - 70 - 48)).toBe(118);
+		expect(bottomNoticesHeight(clip, undefined, 700 - 48)).toBe(48);
 	});
 });
 

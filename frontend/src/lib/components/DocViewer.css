@@ -22,9 +22,10 @@
 /* The bottom notices (the jump control, a delivery note, the below activity pill) float over the text, so the text runs to the pane's foot and
    never moves or shrinks as one comes or goes. The editor's own bottom padding lets the last line scroll clear of them, and while one shows a
    line brought into view (`--doc-bottom-float`, which the editor's scroll margin reads too) stops above where it sits. With none showing the
-   foot is plain text: a click there places the caret without the browser scrolling it up out of a padded strip. The float is sized to the
-   tallest single notice, a phone delivery note (a touch target with its own padding, 62px) on the band's foot padding, plus air. */
-.doc { --doc-bottom-float: calc(var(--touch-target) + var(--space-2) * 3 + var(--space-3)); }
+   foot is plain text: a click there places the caret without the browser scrolling it up out of a padded strip. The float is how far
+   the notices showing reach up from the foot, as DocCanvasActivity measures where it places them (`--doc-bottom-notices`: one notice or
+   a stack, with a below pill over them), plus air. */
+.doc { --doc-bottom-notices: 0px; --doc-bottom-float: calc(var(--doc-bottom-notices) + var(--space-3)); }
 .doc:has(> [data-doc-bottom-band], [data-doc-activity-pill][data-direction='below']) .cm-scroller { scroll-padding-bottom: var(--doc-bottom-float); }
 .doc > .doc-bottom-band[data-doc-bottom-band] { grid-area: editor; align-self: end; position: relative; z-index: 2; padding-bottom: var(--space-2); pointer-events: none; }
 @media (max-width: 600px) {

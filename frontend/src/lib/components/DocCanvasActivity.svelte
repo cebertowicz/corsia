@@ -4,7 +4,7 @@
 	import { Button } from './ui';
 	import { displayedDocument } from '$lib/ws/presence';
 	import { isViewing, onRecordedDocActivity, type DocActivityFrame, type DocSpan } from '$lib/docPresence';
-	import { UnseenDocActivity, locateDocumentActivity, watchCanvasAndBand, type ActivityPill } from '$lib/docCanvasActivity';
+	import { UnseenDocActivity, bottomNoticesHeight, locateDocumentActivity, watchCanvasAndBand, type ActivityPill } from '$lib/docCanvasActivity';
 
 	let { root, artifactId, threadId, onJump }: {
 		root?: HTMLElement; artifactId: string | null; threadId: string | null;
@@ -29,17 +29,22 @@
 	}
 	function measure() {
 		pendingMeasure = null;
-		if (!viewing) { unseen.clear(); eligible.clear(); pill = null; return; }
-		unseen.seen(locate);
-		pill = unseen.pill(locate);
+		if (viewing) {
+			unseen.seen(locate);
+			pill = unseen.pill(locate);
+		} else { unseen.clear(); eligible.clear(); pill = null; }
 		const clip = root?.querySelector('.doc-main')?.getBoundingClientRect();
-		if (clip && root && pill) {
+		if (!clip || !root) return;
+		// Both float over the text's foot: a below pill sits above the bottom band's notices rather than on them.
+		const band = root.querySelector(':scope > [data-doc-bottom-band]')?.getBoundingClientRect();
+		const below = Math.min(clip.bottom, band?.top ?? clip.bottom) - 48;
+		if (pill) {
 			const box = root.getBoundingClientRect();
-			// Both float over the text's foot: a below pill sits above the bottom band's notices rather than on them.
-			const band = root.querySelector(':scope > [data-doc-bottom-band]')?.getBoundingClientRect();
-			top = (pill.direction === 'above' ? clip.top + 4 : Math.min(clip.bottom, band?.top ?? clip.bottom) - 48) - box.top;
+			top = (pill.direction === 'above' ? clip.top + 4 : below) - box.top;
 			right = box.right - clip.right + 8;
 		}
+		// What this places is what a line brought into view must clear (DocViewer.css `--doc-bottom-float`).
+		root.style.setProperty('--doc-bottom-notices', `${bottomNoticesHeight(clip, band, pill?.direction === 'below' ? below : null)}px`);
 	}
 	function schedule() {
 		if (pendingMeasure !== null) return;
