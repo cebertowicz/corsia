@@ -343,7 +343,7 @@
 
 <style>
 	.lightbox { position: relative; flex: 1; min-height: 0; min-width: 0; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-	.bar { display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 36px; padding: 0 0 6px; }
+	.bar { container: image-bar / inline-size; display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 36px; padding: 0 0 6px; }
 	.spacer { flex: 1; }
 	.zoom { display: flex; align-items: center; gap: 2px; }
 	.level { min-width: 4ch; text-align: center; font-size: var(--text-footnote); font-variant-numeric: tabular-nums; color: var(--text-tertiary); }

@@ -114,7 +114,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 
 			// The viewer's list opens on All, so its pill counts the resolved thread too.
 			// The viewer sits directly above this drawer, so its thumbnail would repeat the image and hide the first card.
-			await expect(pill(page)).toHaveAttribute('aria-label', /^3 threads(, |$)/);
+			await expect(pill(page)).toHaveAttribute('aria-label', /^3 comments(, |$)/);
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
 			await expect(drawer).toBeVisible();

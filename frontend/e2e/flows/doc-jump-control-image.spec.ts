@@ -140,7 +140,9 @@ for (const width of [393, 1440]) {
 			expect(quiet?.n, `the control arrived from the pan alone, unrelated overlay mutations: ${JSON.stringify(quiet?.kinds)}`).toBe(0);
 			await expect(control).toHaveAccessibleName(/1 new, next (above|below): /);
 
-			// Its face is the touch target and it stays clear of the viewer's own controls.
+			// Its face is the touch target and it stays clear of the viewer's own controls. It is measured once its arrival has
+			// finished: mid-arrival its fractional rise rounds the measured height just under its size.
+			await control.evaluate((el) => Promise.all((el.closest('[data-doc-jump]') ?? el).getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))));
 			const face = (await control.boundingBox())!;
 			expect(face.height, 'the jump control meets its touch target height').toBeGreaterThanOrEqual(width === 393 ? 44 : 32);
 			for (const other of await overlay(page).locator('.bar button').all()) {
