@@ -146,6 +146,45 @@ def test_without_a_clone_the_migration_still_backs_up_by_copying_pages(tmp_path,
         backup.close()
 
 
+def test_a_clone_backup_skips_the_copy_room_check_and_its_pruning(tmp_path, ladder, monkeypatch):
+    """The copy's room check credits each backup's full size, which a clone does not hold."""
+    if not _supports_clone(tmp_path):
+        pytest.skip("this file system cannot clone")
+    import infra.database_migrations as migrations
+
+    def copy_room_check(*_args):
+        raise AssertionError("a clone must not prune backups to make room for a full copy")
+
+    monkeypatch.setattr(migrations, "_ensure_backup_room", copy_room_check)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    _wal_database(source, 3).close()
+
+    conn = sqlite3.connect(source)
+    try:
+        assert migrate_to_current(conn, 4).backup_path is not None
+    finally:
+        conn.close()
+
+
+def test_without_room_for_the_reserve_the_copy_room_check_decides(tmp_path, ladder, monkeypatch):
+    import infra.database_migrations as migrations
+
+    monkeypatch.setattr(migrations, "_BACKUP_FREE_FLOOR_BYTES", 10**18)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    _wal_database(source, 3).close()
+
+    conn = sqlite3.connect(source)
+    try:
+        with pytest.raises(migrations.MigrationError, match="not enough free space"):
+            migrate_to_current(conn, 4)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    finally:
+        conn.close()
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".bak")]
+
+
 def test_a_wal_database_migrates_with_its_unfolded_commits_in_the_backup(tmp_path, ladder):
     """The end-to-end path a live host takes: last commits only in the WAL, then a migration."""
     ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")

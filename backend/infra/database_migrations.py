@@ -1086,20 +1086,25 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     source = _connection_database_path(conn)
     if source is None:
         return None
-    _ensure_backup_room(source, from_version)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = source.with_name(f"{source.name}.pre-migration-v{from_version}-{stamp}.bak")
     if target.exists():
         raise MigrationError(f"backup path already exists, refusing to overwrite: {target}")
     # A copy-on-write clone takes milliseconds where the page copy below takes about a minute on a
-    # 25 GB database, all of it inside this write hold before the app can start.
-    try:
-        clone_database(source, target, expected_user_version=from_version)
-    except CloneUnsupported as unsupported:
-        log.info("Pre-migration backup copies pages: %s", unsupported)
-    else:
-        startup_progress.backup_step(0, 0, 1)
-        return target
+    # 25 GB database, all of it inside this write hold before the app can start. It writes at most
+    # the WAL's pages, so it needs that plus the reserve, not room for a full copy; and it runs
+    # before the copy's room check, which credits a backup's whole size as space its deletion
+    # frees and would prune clones that free almost nothing.
+    wal_bytes = _database_bytes(source) - source.stat().st_size
+    if shutil.disk_usage(source.parent).free >= wal_bytes + _BACKUP_FREE_FLOOR_BYTES:
+        try:
+            clone_database(source, target, expected_user_version=from_version)
+        except CloneUnsupported as unsupported:
+            log.info("Pre-migration backup copies pages: %s", unsupported)
+        else:
+            startup_progress.backup_step(0, 0, 1)
+            return target
+    _ensure_backup_room(source, from_version)
     # The copy holds whatever the database holds, credentials included before
     # the key-store migrations move them, so only the owner may read it.
     os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))

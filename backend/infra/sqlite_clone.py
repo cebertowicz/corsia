@@ -52,7 +52,13 @@ def _clone_file(source: Path, target: Path) -> None:
             if code in _UNSUPPORTED:
                 raise CloneUnsupported(os.strerror(code))
             raise OSError(code, os.strerror(code), str(target))
-        os.chmod(target, 0o600)
+        # clonefile copies the live file's mode, so until this narrows it the clone is readable by
+        # exactly whoever can already read the live database beside it, and no one else.
+        try:
+            os.chmod(target, 0o600)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
         return
     if not sys.platform.startswith("linux"):
         raise CloneUnsupported(f"no clone on {sys.platform}")
