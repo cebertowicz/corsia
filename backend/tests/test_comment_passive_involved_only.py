@@ -16,7 +16,7 @@ from registry import models
 def env(isolated_db, monkeypatch):
     monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
     db = get_db()
-    for tid in ("owner", "writer", "tagged", "pane"):
+    for tid in ("owner", "writer", "replier", "pane"):
         seed_thread(db, tid)
     aid = seed_document(db, "owner", name="PRD.md")
     # Thread "pane" merely had the document open: a follower registration.
@@ -50,10 +50,10 @@ def test_pane_registration_alone_gets_no_comment_line(env):
     assert lines(db, "owner") == []
 
 
-def test_replying_and_tagged_agents_still_get_their_wake(env):
+def test_agents_on_the_thread_still_get_their_wake(env):
     db, aid = env
     root, _ = add_comment(db, aid, author_id="writer")
-    add_comment(db, aid, author_id="tagged", parent_id=root["id"])
+    add_comment(db, aid, author_id="replier", parent_id=root["id"])
     recipients = {b["recipient_id"] for b in batches(db)}
     assert {"owner", "writer"} <= recipients
     assert "pane" not in recipients
