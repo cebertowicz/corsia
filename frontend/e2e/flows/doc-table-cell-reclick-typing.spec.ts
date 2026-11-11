@@ -93,19 +93,24 @@ async function savedAfterProseMarker(page: Page, request: Page['request'], docPa
 	return (await (await request.get('/api/files/content', { params: { token: TEST_TOKEN, path: docPath } })).json()).text as string;
 }
 
-/** Nothing may appear before the heading, and anything typed in the cell stays inside that row. */
-function assertTypingStayedPut(saved: string) {
+/** The source of the table and the line under it, as seeded. */
+const TABLE_AND_AFTER = ['| Item | Notes |', '| --- | --- |', `${CELL_ROW} Replace the faded ${QUOTED} |`, '', PARA].join('\n');
+
+/** The typing lands where the press put the caret: the start of the clicked cell's source, and nowhere else. */
+function assertTypedInClickedCell(saved: string) {
 	expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
-	if (!saved.includes('XYZ')) return;
-	const row = saved.split('\n').find((line) => line.startsWith(CELL_ROW));
-	expect(row, `XYZ is in the document but not in the commented row: ${JSON.stringify(saved)}`).toBeDefined();
-	expect(row!, `XYZ left the commented cell: ${row}`).toContain('XYZ');
+	expect(saved, 'the text typed after the reclick reached the document').toContain('XYZ');
+	expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
+	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toContain(`${CELL_ROW} XYZReplace the faded ${QUOTED} |`);
 }
 
 test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', () => {
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name.includes('mobile'), 'a mouse click'); });
 
-	test('reclicking the highlight and typing writes nothing at position 0', async ({ page, request }, testInfo) => {
+	// Typing in a cell at desktop widths needs the table cell editor (#2462): the browser cannot place its caret inside the
+	// rendered table, and that is where desktop typing goes. Until then this asserts only that the keystrokes cannot damage
+	// the document: nothing before the heading, no new table row, the cell's text as it was, nothing under the table.
+	test('reclicking the highlight and typing leaves the table and the top of the document intact', async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
 		const { docPath, commentId, highlight } = await openDocument(page, { width: 1440, height: 900 });
 
@@ -120,7 +125,9 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-typing');
-		assertTypingStayedPut(saved);
+		expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
+		expect(saved, `the table and the line under it are unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
+		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
 	});
 
 	test('a press on a cell leaves the document scrolled where it was', async ({ page }) => {
@@ -141,7 +148,7 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'chromium-mobile', 'a touch tap'); });
 	test.use({ hasTouch: true, isMobile: true });
 
-	test('retapping the highlight and typing writes nothing at position 0', async ({ page, request }, testInfo) => {
+	test('retapping the highlight and typing puts the text in the tapped cell', async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
 		const { docPath, commentId, highlight } = await openDocument(page, { width: 393, height: 852 });
 
@@ -157,7 +164,7 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-after-typing');
-		assertTypingStayedPut(saved);
+		assertTypedInClickedCell(saved);
 	});
 	test('typing after a diagram comment closes or after a tap on table padding leaves both blocks whole', async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
