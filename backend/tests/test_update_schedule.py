@@ -252,6 +252,9 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
         def poll(self):
             return None
 
+        def wait(self):
+            return 0
+
     def fake_popen(_command, *, stdout, **kwargs):
         launch_environment.update(kwargs["env"])
         stdout.write("detached lifecycle started\n")

@@ -361,12 +361,9 @@ async def publish_claimed_terminal(
         payload["context_message_id"] = context_message_id
     if context_usage is not None:
         payload["context_usage"] = live_context_usage_payload(context_usage_with_snapshot(context_usage, live))
-    _observe_terminal_context(
-        thread_id,
-        live,
-        context_usage,
-        source=source,
-    )
+    # The observation writes the model row: a SQLite write transaction, which
+    # the loop thread may not open.
+    await run_in_db(_observe_terminal_context, thread_id, live, context_usage, source=source)
     attachment_id = live.last_assistant_message_id
     if attachment_id is None and marker_is_context_owner:
         attachment_id = marker_id

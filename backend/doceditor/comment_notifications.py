@@ -5,9 +5,8 @@ The comment store announces every row it creates or updates
 write path cannot leave a second open canvas stale. Two writes are outside it.
 Anchor position saves (``comments.update_positions``) follow a text change on
 every autosave and are not announced; a canvas picks up moved anchors when it
-loads the document. Feedback batch state (send, retry) is announced when a due
-batch closes. A person's comment is announced once, after it is delivered, so
-a canvas that reloads on the frame never shows it as unsent.
+loads the document. A person's comment is announced when it commits. Feedback
+batch state is announced separately when a due batch closes.
 """
 
 from __future__ import annotations

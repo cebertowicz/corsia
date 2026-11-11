@@ -379,10 +379,10 @@ async def invoke_fork(
     else:
         source_home = Path(source.sessions_root).parent
         cwd = source.working_dir
-    from connections.account_operation import operation_directory, require_same_operation_home
+    from connections.account_operation import operation_home, require_same_operation_home
 
     require_same_operation_home(request, source_home if source else None)
-    with operation_directory(
+    async with operation_home(
         request, prefix='corsia-codex-fork-', kind=kind.name,
     ) as (request, isolated_home):
         if source is not None:

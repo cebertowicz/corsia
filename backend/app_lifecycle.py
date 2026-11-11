@@ -22,6 +22,7 @@ import infra.startup_progress as startup_progress
 from infra import state
 from infra.db_async import run_in_db
 from infra.database import shutdown_pool
+from infra.otel_logs.lifecycle import start_corsia_logs
 from llm.providers.omlx_startup import adopt_and_upgrade
 from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
 
@@ -63,21 +64,38 @@ async def _startup_network_discovery() -> None:
         logger.warning(f"network discovery startup failed: {exc}")
 
 
+async def _begin_startup(app: FastAPI, logger) -> None:
+    """Start log capture, run startup init off the loop, then bind loop services.
+
+    Capture starts first, so startup's own phase timings and errors reach the
+    conductor log store. It never raises: a failure leaves capture off. This
+    runs before ``lifespan``'s ``try``, so a failure here stops capture itself,
+    draining the writer so the failure's own records reach the store.
+    """
+    await asyncio.to_thread(start_corsia_logs)
+    try:
+        configure_sqlite_fetch_switch_interval()
+        with startup_progress.publishing():
+            await app_startup_init.initialize_startup_off_loop(logger)
+        app_loop.capture(asyncio.get_running_loop())
+        from connections.mail.draft_format_conversion import convert_open_drafts
+
+        await convert_open_drafts()
+        from llm.live_cost_map import start_refresh
+
+        if not getattr(app.state, "litellm_cost_map_offline", False):
+            start_refresh()
+    except BaseException:
+        stop_runtime_logs(logger)
+        raise
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start and stop backend runtime services for the FastAPI app."""
     from loguru import logger
 
-    configure_sqlite_fetch_switch_interval()
-    with startup_progress.publishing():
-        app_startup_init.initialize_startup(logger)
-    app_loop.capture(asyncio.get_running_loop())
-    from connections.mail.draft_format_conversion import convert_open_drafts
-    await convert_open_drafts()
-    from llm.live_cost_map import start_refresh
-
-    if not getattr(app.state, "litellm_cost_map_offline", False):
-        start_refresh()
+    await _begin_startup(app, logger)
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:

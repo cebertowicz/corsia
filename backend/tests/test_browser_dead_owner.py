@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import signal
+import socket
 import subprocess
 import sys
 import threading
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
+import psutil
 import pytest
 
 from host_access import browser_identity, browser_orphan, browser_owner_lock, browser_ports, browser_session_launch, processes
@@ -27,6 +33,9 @@ class FakeProcess:
 
     def is_running(self):
         return True
+
+    def ppid(self):
+        return 1  # its owning backend is dead, so launchd adopted it
 
     def create_time(self):
         return self.birth
@@ -233,3 +242,140 @@ def test_sweep_logs_what_it_left_unchecked(recovery, monkeypatch, caplog):
     browser_orphan.close_dead_sessions(root / "own", root=root)
     assert "time limit; 1 directories not checked" in caplog.text
     assert not signalled
+
+
+REAL_STOP = processes.stop_orphan_group
+
+
+@pytest.mark.parametrize("path", ["record", "launch"])
+def test_a_helper_outliving_its_leader_is_unverified_on_both_paths(recovery, monkeypatch, caplog, path):
+    """One answer for a group whose leader exits on SIGTERM while a helper lives on.
+
+    Nothing proves a leaderless group ours, so the record-driven stop and the launch-time
+    close_orphans both stop after SIGTERM and report it unverified; neither sends SIGKILL.
+    """
+    root, fake, _ = recovery
+    directory = make_dir(root, "helper")
+    browser_owner_lock.record_chrome(directory, SESSION, 102, 123.0, "/tmp/profile")
+    fake[102] = FakeProcess(102, directory, chrome=True)
+    leader = fake[102]
+    sent = []
+
+    def lookup(pid):
+        if pid not in fake:
+            raise browser_identity.BrowserPidAbsent
+        return fake[pid]
+
+    def send(pgid, selected):
+        sent.append(selected)
+        if selected == signal.SIGTERM:
+            del fake[pgid]  # the leader exits; a helper that ignored SIGTERM keeps the group alive
+
+    clock = iter(range(1000))
+    monkeypatch.setattr(browser_identity, "process_for_identity", lookup)
+    monkeypatch.setattr(processes, "stop_orphan_group", REAL_STOP)
+    monkeypatch.setattr(processes, "_group_pids", lambda pgid, **_: (pgid,))
+    monkeypatch.setattr(processes, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda _: None))
+    monkeypatch.setattr(os, "killpg", send)
+    if path == "record":
+        browser_orphan.close_dead_sessions(root / "own", root=root)
+        assert "browser orphan could not be verified pid=102" in caplog.text
+    else:
+        monkeypatch.setattr(browser_orphan.psutil, "process_iter", lambda *_: [leader])
+        with pytest.raises(browser_orphan.BrowserProfileInUse, match="102"):
+            browser_orphan.close_orphans("/tmp/profile", frozenset())
+    assert sent == [signal.SIGTERM]
+
+
+def test_a_stale_record_never_signals_the_process_now_holding_its_pid(tmp_path, monkeypatch, caplog):
+    """A record outlives its Chrome. Its birth time keeps the sweep off whatever holds the pid now."""
+    root = tmp_path / "sockets"
+    root.mkdir(mode=0o700)
+    directory = make_dir(root, "dead")
+    monkeypatch.setattr(browser_ports, "SOCKET_ROOT", root)
+    unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    try:
+        birth = psutil.Process(unrelated.pid).create_time()
+        browser_owner_lock.record_chrome(directory, SESSION, unrelated.pid, birth - 1.0, str(tmp_path))
+        browser_orphan.close_dead_sessions(root / "own", root=root)
+        assert unrelated.poll() is None
+        assert f"browser orphan could not be verified pid={unrelated.pid}" in caplog.text
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=10)
+
+
+DYING_BACKEND = """
+import asyncio, sys
+from pathlib import Path
+from host_access import browser_chrome, browser_owner_lock, browser_ports
+directory, profile, chrome, ports = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+browser_ports.RESERVED_PORTS = tuple(int(port) for port in ports.split(","))
+browser_chrome.chrome_argv = lambda *_, **__: [chrome, "-c", "import time; time.sleep(120)",
+                                               f"--user-data-dir={profile}", "--headless=new"]
+def no_listener(*_):
+    raise OSError("fixture: Chrome never listens, so the launch keeps waiting")
+browser_chrome.require_listener = no_listener
+browser_owner_lock.acquire(directory, create=True)
+asyncio.run(browser_chrome.ChromeProcess.launch(chrome, profile=profile, headless=True, ua=None,
+                                                record=(directory, "session123456")))
+"""
+
+
+def _wait_for(condition, what, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() >= deadline:
+            pytest.fail(f"fixture: {what}")
+        time.sleep(0.05)
+
+
+def _free_ports():
+    ports = []
+    for _ in range(2):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        ports.append(str(probe.getsockname()[1]))
+        probe.close()
+    return ",".join(ports)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="only the macOS launch records Chrome; Linux keeps native-owned launch")
+def test_a_dead_backends_starting_chrome_is_stopped_by_the_next_sweep(tmp_path, monkeypatch):
+    """The CPU leak: a backend dies while its headless Chrome starts, and no session file names it.
+
+    A real backend process launches a stand-in Chrome through ChromeProcess.launch and is killed
+    while the launch waits for the listener. The kernel frees its owner.lock and launchd adopts
+    the Chrome. The next backend's sweep finds that Chrome only through the record the launch
+    wrote at the spawn, and stops it.
+    """
+    root = tmp_path / "sockets"
+    root.mkdir(mode=0o700)
+    directory = root / "dead"
+    directory.mkdir(mode=0o700)
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    chrome = tmp_path / "chrome"
+    chrome.symlink_to(sys.executable)
+    record = directory / f"{SESSION}.chrome"
+    backend = subprocess.Popen(
+        [sys.executable, "-c", DYING_BACKEND, str(directory), str(profile), str(chrome), _free_ports()],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])})
+    leaked = None
+    try:
+        _wait_for(lambda: record.exists() or backend.poll() is not None, "the launch wrote no record")
+        assert backend.poll() is None
+        leaked = json.loads(record.read_text())["pid"]
+        backend.kill()
+        backend.wait(timeout=10)
+        _wait_for(lambda: psutil.Process(leaked).ppid() == 1, "launchd did not adopt the Chrome")
+        assert not list(directory.glob("*.pid"))  # no session file: only the record names this Chrome
+        monkeypatch.setattr(browser_ports, "SOCKET_ROOT", root)
+        browser_orphan.close_dead_sessions(root / "own", root=root)
+        _wait_for(lambda: not psutil.pid_exists(leaked), "the sweep left the Chrome running", timeout=5)
+    finally:
+        if backend.poll() is None:
+            backend.kill()
+            backend.wait(timeout=10)
+        if leaked is not None and psutil.pid_exists(leaked):
+            os.killpg(leaked, signal.SIGKILL)

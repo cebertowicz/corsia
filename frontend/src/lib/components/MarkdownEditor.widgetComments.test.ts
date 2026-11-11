@@ -4,6 +4,7 @@ import type { CommentRange } from '$lib/cm/comment-marks';
 import MarkdownEditor from './MarkdownEditor.svelte';
 import * as geometry from '$lib/cm/comment-anchor-geometry';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { EditorView } from '@codemirror/view';
 
 const DOC = 'intro\n\n| Item | Owner |\n|---|---|\n| Alpha | Dana |\n| Bravo | Eli |\n\nafter\n';
 const DANA = DOC.indexOf('Dana');
@@ -11,9 +12,9 @@ const DANA = DOC.indexOf('Dana');
 let component: ReturnType<typeof mount> | undefined;
 let host: HTMLElement;
 
-function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn()) {
+function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn(), props: { onCaretAway?: () => void } = {}) {
 	host = document.body.appendChild(document.createElement('div'));
-	component = mount(MarkdownEditor, { target: host, props: { value: DOC, highlights, onAnchorFocus } });
+	component = mount(MarkdownEditor, { target: host, props: { value: DOC, highlights, onAnchorFocus, ...props } });
 	flushSync();
 	return onAnchorFocus;
 }
@@ -71,6 +72,37 @@ describe('a click on comments drawn inside a table', () => {
 		focusedDocComment.set('gone');
 		anchor();
 		expect(rows).toHaveBeenLastCalledWith(expect.anything(), DANA, DANA + 3, null);
+	});
+
+	it('keeps the comment open and the caret in place when the table redraws before the browser reports where the press landed', async () => {
+		const onCaretAway = vi.fn();
+		const onAnchorFocus = mountEditor([comment('a')], vi.fn(), { onCaretAway });
+		const mark = await painted();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		// The reader's caret rests in the text above the table.
+		view.focus();
+		view.dispatch({ selection: { anchor: 2 } });
+		flushSync();
+		onCaretAway.mockClear();
+		const landed = mark.firstChild!;
+		const caretPosition = vi.fn(() => ({ offsetNode: landed, offset: 1 }) as unknown as CaretPosition);
+		Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: caretPosition });
+		try {
+			// A click on the comment: the table draws the press's caret in the cell, and the click opens the comment.
+			mark.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			mark.click();
+			expect(caretPosition).toHaveBeenCalled();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			// The table redraws its marks for the opened comment before the browser's selectionchange arrives.
+			mark.classList.add('cm-comment-focused');
+			await Promise.resolve();
+			flushSync();
+			expect(view.state.selection.main.head, 'the editor caret did not jump to the table').toBe(2);
+			expect(onCaretAway, 'the comment the click opened was not let go').not.toHaveBeenCalled();
+		} finally {
+			delete (document as Partial<Document>).caretPositionFromPoint;
+		}
 	});
 });
 

@@ -2710,7 +2710,6 @@ def test_rendered_launchd_service_has_explicit_shutdown_budget(
     user_local_bin = home_dir / ".local" / "bin"
     env_file.write_text(
         "CORSIA_RESTART_CALLER_TOKEN=must-not-render\n"
-        "CORSIA_RESTART_CURL=/tmp/must-not-render\n"
         "CORSIA_DEVICES_DISABLE=1\n"
         "VISIBLE_SETTING=preserved\n"
     )
@@ -2744,7 +2743,6 @@ render_service_plist generation-test
     assert "~" not in environment["PATH"]
     assert environment["VISIBLE_SETTING"] == "preserved"
     assert "CORSIA_RESTART_CALLER_TOKEN" not in environment
-    assert "CORSIA_RESTART_CURL" not in environment
     assert "CORSIA_DEVICES_DISABLE" not in environment
 
 
