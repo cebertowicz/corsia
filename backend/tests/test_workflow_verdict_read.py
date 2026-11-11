@@ -77,7 +77,7 @@ def node(db, node_id: str, *, workflow: str | None = "sdlc-process", version: st
                 outcome = "completed" if state in {"accepted", "accepted_with_followup"} else "failed"
                 db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
                            "VALUES (?,?,'test','workflow_run_ended',?,?)",
-                           (f"run-end-{node_id}", node_id, json.dumps({"outcome": outcome}), ended))
+                           (f"run-end-{node_id}", node_id, json.dumps({"outcome": outcome, "steps": []}), ended))
 
 
 def usage(db, usage_id: str, node_id: str, model: str = "claude-code/opus", *, prompt: int = 1_000_000,
@@ -149,7 +149,7 @@ def test_phase_run_uses_recorded_end_even_when_phase_is_pending(db) -> None:
         with raw_plan_seed(db):
             db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
                        "VALUES (?,?,'test',?,?,?)", (f"record-{name}", name, run_end.EVENT,
-                       json.dumps({"outcome": outcome}), "2026-10-07T00:00:00Z"))
+                       json.dumps({"outcome": outcome, "steps": []}), "2026-10-07T00:00:00Z"))
     node(db, "open-phase", kind="phase", state="pending")
     runs, _ = runs_of(read_snapshot(db, now=NOW))
     assert runs["done-phase"].terminal_at == "2026-10-07T00:00:00Z"
