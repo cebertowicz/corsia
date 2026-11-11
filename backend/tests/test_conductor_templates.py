@@ -19,7 +19,7 @@ _TEMPLATE_TEXT = {
         "When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`; for a learning report (`measurement.learning_report`), `context-stewardship`.\n\n"
         "- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery.\n"
         "- When goals or constraints change, identify affected owners and explicitly refresh their context through supported routes. Do not assume subscriptions, invalidation or receipts exist.\n"
-        "- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history.\n"
+        "- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history. Keep always-loaded instructions within a size budget you record: measure before every edit, make room for any addition that would exceed it by removing or moving at least as much, and set any budget at least a quarter above the size you measure, never at it. Run skill `instruction-review` at least weekly.\n"
         "- Measure context cost by role and trigger. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.\n"
     ),
     "corsia_agent": (
@@ -53,7 +53,7 @@ _TEMPLATE_TEXT = {
 }
 
 _TEMPLATE_SHA256 = {
-    "core": "d3809c49751e99aabbc6419d7554499c111b407180b7c7d400f9f77adeb60c57",
+    "core": "fa607bea58bfc65376abd508d2b369e2e7c5afed03dfa58a08032ec7a6558879",
     "corsia_agent": "14d249fc24c1828b6d0dac0e95d985a25c086e297262ba9e707ea78c0f7809fc",
     "project": "afa187445f8828be31482c434f76716ab56c3b3c58de1b0190c06d2924842887",
 }

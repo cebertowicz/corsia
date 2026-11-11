@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3204,
+      "bytes": 3543,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
+      "sha256": "7d624bc345602aa0ec6909dc6988026b492ea3206861366a7c28304f01eac43d"
     },
     {
       "bytes": 389,
@@ -338,6 +338,18 @@
       "kind": "skill",
       "path": "skills/google-setup/steps/console-project.json",
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
+    },
+    {
+      "bytes": 6196,
+      "kind": "skill",
+      "path": "skills/instruction-review/SKILL.md",
+      "sha256": "5c498c2da4b377a4796489c86d38ab5ea188666623df2ade79b9f6dd71f3a79e"
+    },
+    {
+      "bytes": 4630,
+      "kind": "skill",
+      "path": "skills/instruction-review/corsia.yaml",
+      "sha256": "273db9ab3baf6fcde27c56e4b602e70b253a1472907767367b1a80db7f0043c9"
     },
     {
       "bytes": 3634,

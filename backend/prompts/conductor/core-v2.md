@@ -12,5 +12,5 @@ When a movement digest (`measurement.movement_digest`) arrives, use skill `movem
 
 - Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery.
 - When goals or constraints change, identify affected owners and explicitly refresh their context through supported routes. Do not assume subscriptions, invalidation or receipts exist.
-- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history.
+- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history. Keep always-loaded instructions within a size budget you record: measure before every edit, make room for any addition that would exceed it by removing or moving at least as much, and set any budget at least a quarter above the size you measure, never at it. Run skill `instruction-review` at least weekly.
 - Measure context cost by role and trigger. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.
