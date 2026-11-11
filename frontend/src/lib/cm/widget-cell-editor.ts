@@ -3,15 +3,14 @@ import { EditorState, Facet, Transaction, type Extension } from '@codemirror/sta
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { emitProductEvent } from '$lib/product_events';
-import { blockRange, cellElement, drawnTableAt, TABLE } from './widget-blocks';
-import { cellClicked } from './widget-cell-click';
+import { cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import {
-	CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellInSource, openCellState, type OpenCell
+	CELL_SYNC, cellSource, closeCell, openCellAt, openCellInSource, openCellState, type OpenCell
 } from './widget-cell-state';
 import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly, inTableCell } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
-import { CellSwipe } from './widget-cell-swipe';
+import { CellPresses } from './widget-cell-presses';
 import { CELL_THEME } from './widget-cell-theme';
 import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
@@ -52,41 +51,16 @@ class CellEditors {
 	private readonly layer = new CellLayer();
 	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
 	private clickedAt: { x: number; y: number } | null = null;
-	private readonly swipe: CellSwipe;
+	private readonly presses: CellPresses;
 
 	constructor(private readonly host: EditorView) {
-		this.swipe = new CellSwipe();
-		host.dom.addEventListener('click', this.openPressed);
-		document.addEventListener('click', this.openPressedOutside);
-		document.addEventListener('pointerdown', this.pressedElsewhere, true);
+		this.presses = new CellPresses(host, {
+			isOpen: () => !!this.cell,
+			inEditor: (node) => this.layer.contains(node),
+			opened: (at) => { this.clickedAt = at; },
+			close: () => this.close()
+		});
 	}
-
-	/** A click on a drawn cell edits it: a caret in that cell, the way a click in prose places one. */
-	private readonly openPressed = (event: MouseEvent) => {
-		const host = this.host;
-		if (this.swipe.swiped()) return;
-		const clicked = cellClicked(host, event.target instanceof Element ? event.target : null, { x: event.clientX, y: event.clientY });
-		if (!clicked) return;
-		const { widget, cell, row } = clicked;
-		const block = blockRange(host, widget);
-		if (!block) return;
-		const open = cellToOpen(host.state, block.from, row.rowIndex, cell.cellIndex);
-		if (open) {
-			this.clickedAt = { x: event.clientX, y: event.clientY };
-			host.dispatch({ effects: openCellAt.of(open) });
-		}
-	};
-
-	/** A press outside the open cell closes it. A touch closes it only if it ends as a tap, the rule that opens a cell: a swipe is a scroll. */
-	/** A click on the canvas around the editor, level with a table: beside it, which is the nearest cell's as it is inside the editor. */
-	private readonly openPressedOutside = (event: MouseEvent) => {
-		if (!(event.target instanceof Node && this.host.dom.contains(event.target))) this.openPressed(event);
-	};
-
-	private readonly pressedElsewhere = (press: PointerEvent) => {
-		if (!this.cell || this.layer.contains(press.target as Node)) return;
-		if (!this.swipe.whenTapped(press, () => { if (this.cell) this.close(); })) this.close();
-	};
 
 	/**
 	 * Called after the host view has finished applying a change, which is the first moment a nested editor may be created or
@@ -286,10 +260,7 @@ class CellEditors {
 	destroy() {
 		this.detach();
 		this.host.dom.classList.remove('cm-md-cell-open');
-		this.host.dom.removeEventListener('click', this.openPressed);
-		document.removeEventListener('click', this.openPressedOutside);
-		document.removeEventListener('pointerdown', this.pressedElsewhere, true);
-		this.swipe.destroy();
+		this.presses.destroy();
 	}
 }
 
