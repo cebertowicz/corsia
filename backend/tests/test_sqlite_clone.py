@@ -1,0 +1,131 @@
+"""The pre-migration backup's clone path: a consistent, self-contained snapshot, or a clean fallback."""
+
+from __future__ import annotations
+
+import sqlite3
+import stat
+from pathlib import Path
+
+import pytest
+
+import infra.sqlite_clone as sqlite_clone
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.sqlite_clone import CloneUnsupported, clone_database
+
+
+@pytest.fixture
+def ladder():
+    """Register migration steps for one test and restore the real ladder."""
+    original = dict(MIGRATIONS)
+    MIGRATIONS.clear()
+    yield MIGRATIONS
+    MIGRATIONS.clear()
+    MIGRATIONS.update(original)
+
+
+def _wal_database(path: Path, version: int) -> sqlite3.Connection:
+    """A WAL database whose last commits are still only in its WAL, as on a live host."""
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, label TEXT)")
+    conn.execute(f"PRAGMA user_version={version}")
+    conn.executemany("INSERT INTO t (label) VALUES (?)", [(f"row {i}",) for i in range(500)])
+    assert Path(f"{path}-wal").stat().st_size > 0
+    return conn
+
+
+def _supports_clone(tmp_path: Path) -> bool:
+    probe = tmp_path / "probe"
+    probe.write_bytes(b"x")
+    try:
+        sqlite_clone._clone_file(probe, tmp_path / "probe-clone")
+    except CloneUnsupported:
+        return False
+    return True
+
+
+def test_a_clone_under_the_write_lock_is_a_self_contained_snapshot(tmp_path):
+    if not _supports_clone(tmp_path):
+        pytest.skip("this file system cannot clone; the fallback test covers it")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 7)
+    holder = sqlite3.connect(source, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    target = tmp_path / "live.db.bak"
+    try:
+        clone_database(source, target, expected_user_version=7)
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+        writer.close()
+
+    assert not Path(f"{target}-wal").exists()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    backup = sqlite3.connect(target)
+    try:
+        assert backup.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert backup.execute("SELECT count(*) FROM t").fetchone()[0] == 500
+        assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        backup.close()
+
+
+def test_a_clone_reading_the_wrong_version_leaves_nothing_behind(tmp_path):
+    if not _supports_clone(tmp_path):
+        pytest.skip("this file system cannot clone")
+    source = tmp_path / "live.db"
+    _wal_database(source, 7).close()
+    target = tmp_path / "live.db.bak"
+
+    with pytest.raises(RuntimeError, match="user_version 7"):
+        clone_database(source, target, expected_user_version=8)
+
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("live.db.bak")) == []
+
+
+def test_without_a_clone_the_migration_still_backs_up_by_copying_pages(tmp_path, ladder, monkeypatch):
+    def refuse(_source, _target):
+        raise CloneUnsupported("test file system")
+
+    monkeypatch.setattr(sqlite_clone, "_clone_file", refuse)
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 3)
+    writer.close()
+
+    conn = sqlite3.connect(source)
+    try:
+        result = migrate_to_current(conn, 4)
+    finally:
+        conn.close()
+
+    backup = sqlite3.connect(result.backup_path)
+    try:
+        assert backup.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert backup.execute("SELECT count(*) FROM t").fetchone()[0] == 500
+        assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name='migrated'").fetchone()[0] == 0
+    finally:
+        backup.close()
+
+
+def test_a_wal_database_migrates_with_its_unfolded_commits_in_the_backup(tmp_path, ladder):
+    """The end-to-end path a live host takes: last commits only in the WAL, then a migration."""
+    ladder[3] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    source = tmp_path / "live.db"
+    writer = _wal_database(source, 3)
+
+    conn = sqlite3.connect(source)
+    try:
+        result = migrate_to_current(conn, 4)
+    finally:
+        conn.close()
+        writer.close()
+
+    backup = sqlite3.connect(result.backup_path)
+    try:
+        assert backup.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert backup.execute("SELECT count(*) FROM t").fetchone()[0] == 500
+        assert backup.execute("SELECT count(*) FROM sqlite_master WHERE name='migrated'").fetchone()[0] == 0
+    finally:
+        backup.close()
