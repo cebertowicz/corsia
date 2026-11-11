@@ -74,7 +74,9 @@ class ChromeProcess:
     closed: bool = False
 
     @classmethod
-    async def launch(cls, executable: str, *, profile: str | None, headless: bool, ua: str | None) -> ChromeProcess:
+    async def launch(cls, executable: str, *, profile: str | None, headless: bool, ua: str | None,
+                     record: tuple[Path, str]) -> ChromeProcess:
+        """Start Chrome and write its record to ``record`` (socket directory, session) before any wait."""
         cdp, stream = browser_ports.reserve_pair()
         temporary = None
         child = None
@@ -98,6 +100,14 @@ class ChromeProcess:
                 child = await spawning
                 raise
             owned = cls(child, cdp_port, stream_port, stream, temporary)
+            # Record the child before the first wait: a backend that dies from here on leaves a Chrome
+            # the dead-owner sweep can find. Only the milliseconds since the spawn are unrecorded.
+            from host_access.browser_identity import BrowserPidAbsent
+            from host_access.browser_owner_lock import record_launched_chrome
+            try:
+                await asyncio.to_thread(record_launched_chrome, record[0], record[1], owned, profile)
+            except BrowserPidAbsent as exc:
+                raise RuntimeError(CHROME_EXITED) from exc  # it exited before it could be recorded
             for _ in range(100):
                 if child.returncode is not None:
                     raise RuntimeError(CHROME_EXITED)

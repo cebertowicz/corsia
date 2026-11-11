@@ -174,7 +174,7 @@ def synthetic_browser(monkeypatch):
     from host_access import browser_owner_lock
     monkeypatch.setattr(browser_owner_lock, 'record_launched_chrome', lambda *_: None)
 
-    async def chrome_launch(executable, *, profile, headless, ua):
+    async def chrome_launch(executable, *, profile, headless, ua, record):
         target = Path(profile) if profile else root / f'ephemeral-{len(fake.chrome_calls)}'
         argv = browser_chrome.chrome_argv(executable, 39400, target, headless=headless, ua=ua)
         fake.chrome_calls.append(argv)
