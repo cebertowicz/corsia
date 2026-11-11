@@ -111,6 +111,16 @@ def controlled_deadlines(monkeypatch):
     return deadlines
 
 
+async def _until_deadlines(deadlines, count):
+    """Wait for a writer to open its drain scope: turn/start and turn/steer
+    admission runs on the DB pool first, so the drain is past a thread hop."""
+    for _ in range(400):
+        if len(deadlines) >= count:
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError(f"{len(deadlines)} deadline scopes opened, expected {count}")
+
+
 @asynccontextmanager
 async def _late_lock_writer(session, method, deadlines):
     """Hand off the lock just before its real timeout callback can fire."""
@@ -214,7 +224,7 @@ async def test_steer_waiter_preserves_stalled_start_own_budget(controlled_deadli
         start = asyncio.create_task(session._request("turn/start", {"input": "x" * (2 * 1024 * 1024)}))
         steer = None
         try:
-            await asyncio.sleep(0)
+            await _until_deadlines(controlled_deadlines, 2)
             assert session._write_lock.locked()
             steer = asyncio.create_task(session._request("turn/steer", {}))
             await asyncio.sleep(0)
@@ -278,7 +288,7 @@ async def test_cancelled_writer_drain_does_not_kill(controlled_deadlines, writer
         }
         task = asyncio.create_task(operations[writer]())
         try:
-            await asyncio.sleep(0)
+            await _until_deadlines(controlled_deadlines, 2 if writer == "request" else 1)
             assert session._write_lock.locked() and not task.done()
             assert [budget for budget, _ in controlled_deadlines] == ([120, 120] if writer == "request" else [120])
             task.cancel()

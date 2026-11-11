@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from connections.account_policy import require_claim, require_launch
 from connections.account_receipts import capture_receipt
 from connections.account_runtime import OPERATION_KINDS, launch_homes
 from infra.database import get_db
+from infra.db_async import use_db_context
 
 
 def admit_operation(provider, model, request, *, actor_thread_id=None):
@@ -98,6 +99,22 @@ def _refuse_warm_source(reason):
     from core.fork_types import WarmForkUnusable
 
     raise WarmForkUnusable(reason, reason=reason)
+
+
+@asynccontextmanager
+async def operation_home(request, *, prefix, kind, home_subdir=None, model=None):
+    """`operation_directory` with its durable writes off the event loop.
+
+    Entering establishes the account's operation projection and retiring it records
+    the outcome on either result; both are SQLite write transactions, so the thread
+    running the event loop may not open either. The caller's body stays where it
+    was, on the loop.
+    """
+    directory = operation_directory(
+        request, prefix=prefix, kind=kind, home_subdir=home_subdir, model=model,
+    )
+    async with use_db_context(directory) as entered:
+        yield entered
 
 
 @contextmanager
