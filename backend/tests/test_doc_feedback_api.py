@@ -16,9 +16,12 @@ from infra.database import get_db, write_transaction
 
 
 @pytest.fixture
-def client(isolated_db):
+def client(isolated_db, monkeypatch):
+    from doceditor import live_runtime
     from main import app
 
+    # This client runs no lifespan, so a manager left by an integration test's app has no loop here.
+    monkeypatch.setattr(live_runtime, "_manager", None)
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -32,11 +35,8 @@ def artifact_id(isolated_db):
 
 
 def test_user_immediate_comment_waits_for_the_settle_then_is_delivered_once(client, isolated_db, monkeypatch):
-    from doceditor import live_runtime
     from plans import public
 
-    # This client runs no lifespan, so a manager left by an integration test's app has no loop here.
-    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -99,10 +99,9 @@ async def test_comment_handler_returns_before_agent_delivery(isolated_db, monkey
 
 
 def test_held_user_comment_returns_before_delivery_and_keeps_its_policy_batch_open(client, isolated_db, monkeypatch):
-    from doceditor import comment_notifications, live_runtime
+    from doceditor import comment_notifications
     from plans import public
 
-    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -151,9 +150,8 @@ def test_held_comment_is_visible_to_another_reader_of_shared_document(client, ar
 
 def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, monkeypatch):
     """A user comment on their own document is announced once at commit."""
-    from doceditor import comment_notifications, live_runtime
+    from doceditor import comment_notifications
 
-    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         seed_thread(db, "ui")
@@ -179,9 +177,8 @@ def test_no_recipient_person_comment_still_sends_one_frame(client, isolated_db, 
 
 
 def test_person_comment_is_live_before_edit_idle_delivery(client, isolated_db, monkeypatch):
-    from doceditor import comment_notifications, comments, live_runtime
+    from doceditor import comment_notifications, comments
 
-    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         seed_thread(db, "owner")

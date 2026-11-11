@@ -124,8 +124,9 @@ def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[s
     """Deliver a person's just-saved comment now, each batch in its own write.
 
     The comment is already committed. A batch that fails here stays open with its
-    deadline a few seconds out, so the continuation loop retries it. The comment's
-    one change frame goes out here, after delivery, whatever its outcome.
+    deadline a few seconds out, so the continuation loop retries it. The comment
+    itself was announced at commit; the frame sent here, whatever the outcome,
+    carries its delivery state.
     """
     woken: list[str] = []
     for batch_id in batch_ids:
