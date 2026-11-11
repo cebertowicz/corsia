@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,10 +104,24 @@ def _trim_title(full: str, suffix: str) -> str:
     return f"{full[:service.MAX_NODE_TITLE - 1]}…"
 
 
-def _title(author: str, document: str, items: list[dict[str, Any]]) -> str:
+def _title(authors: list[str], document: str, items: list[dict[str, Any]]) -> str:
+    """The task's title: who wrote what it holds, and what, without saying anyone did what they did not.
+
+    One author is named with what they did. Several authors (a count past two) are named
+    together, and once the task holds an edit they only "left feedback", which is true of each;
+    comment counts alone are true of the group.
+    """
     edits, ordinary, reopened = feedback_item_counts(items)
     phrases = _comment_phrases(items)
-    if edits:
+    if len(authors) == 1:
+        author = authors[0]
+    elif len(authors) == 2:
+        author = " and ".join(authors)
+    else:
+        author = f"{len(authors)} authors"
+    if edits and len(authors) > 1:
+        suffix = f" left feedback on {document}"
+    elif edits:
         suffix = f" edited {document}"
         if phrases:
             suffix += f" and left {' and '.join(phrases)}"
@@ -117,19 +132,30 @@ def _title(author: str, document: str, items: list[dict[str, Any]]) -> str:
     return _trim_title(author + suffix, suffix)
 
 
-def _authors(db, delivered: list[tuple[Any, list[dict[str, Any]]]], batch: Any, author: str) -> str:
-    """The label for everyone who wrote what the task holds, in the order they first wrote: one name, two names, or a count."""
+# The line item_blocks writes for a person's edit; delivery deletes the edit itself, so this keeps its name.
+_PERSON_EDIT_LINE = re.compile(
+    r"^Edit by (.+?) \(\d+ saves?, [^\n]*\), already applied:\n" + re.escape(USER_EDIT_FRAMING), re.MULTILINE,
+)
+
+
+def _authors(
+    db, delivered: list[tuple[Any, list[dict[str, Any]]]], batch: Any, author: str, description: str,
+) -> list[str]:
+    """Everyone who wrote what the task holds, in the order they first wrote.
+
+    A person's edit-only batch has no items left once delivered, so it is named from the edit line
+    the task's description kept, not from the generic fallback.
+    """
     current = str(batch_value(batch, "author_id"))
     names: dict[str, str] = {}
     for row, items in delivered:
         author_id = str(batch_value(row, "author_id"))
-        if author_id not in names:
-            names[author_id] = author if author_id == current else feedback_display(db, row, items)[0]
+        if author_id in names:
+            continue
+        kept = _PERSON_EDIT_LINE.search(description) if not items and batch_value(row, "author_kind") == "user" else None
+        names[author_id] = author if author_id == current else kept.group(1) if kept else feedback_display(db, row, items)[0]
     names[current] = author
-    labels = list(dict.fromkeys(names.values()))
-    if len(labels) > 2:
-        return f"{len(labels)} authors"
-    return " and ".join(labels)
+    return list(dict.fromkeys(names.values()))
 
 
 def _joined_blocks(batch: Any, items: list[dict[str, Any]], delivered: list[tuple[Any, list[dict[str, Any]]]]) -> str:
@@ -264,8 +290,8 @@ def create_feedback_node(
     a thread's task, the owner keeps its selection and receives a wake with the
     reply; otherwise the person's new comments restate the task's intent from the
     person's comments the task holds, and agents' comments stay listed items. A
-    batch from a kind of author the task has not held before brings its own framing.
-    The title names everyone who wrote what the task holds.
+    joining batch of comments brings its author kind's framing unless an earlier batch there from the same
+    kind of author held comments. The title names everyone who wrote what the task holds.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -278,12 +304,13 @@ def create_feedback_node(
     author, document = feedback_display(db, batch, loaded)
     joined = feedback_join.joining_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
+        description = str(service._node_row(db, joined.node_id)["description"] or "")
         delivered = feedback_join.earlier(db, joined.node_id, batch)
         held = feedback_join.held_items(delivered) + loaded
         blocks = _joined_blocks(batch, loaded, delivered)
         restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(_authors(db, delivered, batch, author), document, held),
+            db, joined.node_id, title=_title(_authors(db, delivered, batch, author, description), document, held),
             acceptance=_acceptance(held), blocks=blocks,
             intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
             provenance=PROVENANCE,
@@ -311,7 +338,7 @@ def create_feedback_node(
     count = _person_comments(batch, loaded)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
-        title=_title(author, document, loaded), acceptance=_acceptance(loaded),
+        title=_title([author], document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
         intent=_document_comment_intent(count, document) if count else None,
     )

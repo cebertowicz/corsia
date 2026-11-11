@@ -379,3 +379,58 @@ def test_a_task_holding_only_persons_comments_is_not_settled_by_resolving_them(i
         assert service.get_node(queued["id"], db=db).state != "accepted"
     finally:
         db.close()
+
+
+def _person_edit(db, artifact_id: str) -> None:
+    with write_transaction(db, scope="test_document_join_edit") as connection:
+        batch_id = feedback_batch_edits.record_edit(
+            connection, artifact_id=artifact_id, recipient_id="owner", author_kind="user",
+            author_id=feedback_batches.USER_AUTHOR_ID, actor_display="Steve",
+            path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
+        )
+    feedback_batches.deliver_person_comment(db, [batch_id], artifact_id)
+
+
+def _queued_edit_task(db, edit) -> tuple[str, dict]:
+    """A document whose owner is busy with a first comment's task while an edit-only task waits."""
+    seed_thread(db, "owner")
+    seed_thread(db, "author", title="Reviewer")
+    seed_thread(db, "second", title="Editor")
+    artifact_id = seed_document(db, "owner")
+    _agent_comment(db, artifact_id)
+    edit(db, artifact_id)
+    _, queued = feedback_nodes(db, "owner")
+    assert db.execute(_HANDED, (queued["id"],)).fetchone() is None
+    return artifact_id, queued
+
+
+def test_an_agents_comment_joining_a_persons_edit_only_task_keeps_the_persons_name(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, queued = _queued_edit_task(db, _person_edit)
+        assert queued["title"].startswith("Steve edited ")
+
+        _agent_comment(db, artifact_id)
+
+        assert len(feedback_nodes(db, "owner")) == 2
+        title = service.get_node(queued["id"], db=db).title
+        assert title.startswith("Steve and Reviewer left feedback on ") and "The user" not in title
+    finally:
+        db.close()
+
+
+def test_a_title_never_says_the_one_who_only_commented_edited(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, queued = _queued_edit_task(db, _agent_edit)
+        assert queued["title"].startswith("Reviewer edited ")
+
+        add_person_comment(db, artifact_id)
+        assert service.get_node(queued["id"], db=db).title.startswith("Reviewer and Steve left feedback on ")
+
+        _agent_comment(db, artifact_id, author_id="second", author="Editor")
+        title = service.get_node(queued["id"], db=db).title
+        assert title.startswith("3 authors left feedback on ")
+        assert " edited " not in title
+    finally:
+        db.close()
