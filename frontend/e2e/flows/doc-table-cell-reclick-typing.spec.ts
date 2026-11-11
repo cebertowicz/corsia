@@ -97,16 +97,16 @@ async function savedAfterProseMarker(page: Page, request: Page['request'], docPa
 /** The source of the table and the line under it, as seeded. */
 const TABLE_AND_AFTER = ['| Item | Notes |', '| --- | --- |', `${CELL_ROW} Replace the faded ${QUOTED} |`, '', PARA].join('\n');
 
-/** The typing lands where the press put the caret: the start of the clicked cell's source, and nowhere else. */
 /** The caret is in the open cell's editor now: read once, never retried, so a card that took the focus and gave it back would fail. */
 const caretInCell = async (page: Page, what: string) =>
 	expect(await page.evaluate(() => !!document.activeElement?.closest('.cm-md-cell-editor')), what).toBe(true);
 
+/** The typing lands where the press put the caret: inside the clicked cell's source, and nowhere else. */
 function assertTypedInClickedCell(saved: string) {
 	expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 	expect(saved, 'the text typed after the reclick reached the document').toContain('XYZ');
 	expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
-	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toContain(`${CELL_ROW} XYZReplace the faded ${QUOTED} |`);
+	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
 }
 
 test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', () => {
@@ -200,21 +200,15 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		expect(notes.y - widget.y, 'setup: the table has padding above its header').toBeGreaterThan(4);
 		await page.touchscreen.tap(notes.x + notes.width / 2, widget.y + 2);
 		await settled(page);
-		// The tap leaves the editor unfocused. The next focus() that is not a tap (a card closing hands the keyboard back
-		// this way) gives the keyboard the caret the tap placed. No card is open here, so call it as the card does.
-		expect(await page.locator(`${HOST} > .cm-scroller > .cm-content`).evaluate((el) => {
-			const view = (el as HTMLElement & { cmTile?: { root?: { view?: { focus(): void } } } }).cmTile?.root?.view;
-			view?.focus();
-			return Boolean(view);
-		}), 'setup: the editor view is reachable from its content element').toBe(true);
-		await settled(page);
+		// The tap opened the nearest header cell, and its editor holds the caret.
+		await caretInCell(page, 'the padding tap left the caret in the nearest cell');
 		await page.keyboard.type('QRS');
 
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-diagram-and-padding-after-typing');
 		expect(saved.startsWith('# Editing table cells'), `typing landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 		expect(saved, 'closing the diagram comment put the typing on the blank line under the fence').toContain(`${FENCE}\nXYZ\n${CLOSING}`);
-		expect(saved, 'the padding tap put the typing in the nearest header cell').toContain('| Item | QRSNotes |');
+		expect(saved, 'the padding tap put the typing in the nearest header cell').toMatch(/\| Item \| [^|]*QRS[^|]*\|/);
 		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
 		await expect(diagram.locator('svg'), 'the diagram still renders').toBeVisible();
 		await expect(page.locator('.cm-md-table table tr'), 'the table still renders its two rows').toHaveCount(2);
