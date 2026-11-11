@@ -17,10 +17,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from api.doc_comment_delivery import announce_person_comment_after_response
 from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
@@ -92,7 +91,7 @@ async def list_comments(artifact_id: str, token: str):
 
 @router.post("/artifacts/{artifact_id}/comments")
 async def create_comment(
-    artifact_id: str, token: str, body: CommentCreate, background: BackgroundTasks,
+    artifact_id: str, token: str, body: CommentCreate,
 ):
     """Create a comment. Idempotent on ``client_id``."""
     user = authenticate(token)
@@ -144,7 +143,7 @@ async def create_comment(
         tagged_agent_mentions=mentions,
     )
     try:
-        row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
+        row, _registered, feedback, _created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except TagValidationError as exc:
@@ -161,13 +160,6 @@ async def create_comment(
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
-    if created:
-        background.add_task(
-            announce_person_comment_after_response,
-            feedback["batch_ids"],
-            artifact_id,
-            feedback["delivery_policy"],
-        )
     return {"comment": row, **feedback}
 
 

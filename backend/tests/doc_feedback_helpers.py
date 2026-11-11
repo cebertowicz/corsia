@@ -72,7 +72,6 @@ def add_comment(
             to_off=None if parent_id else 13,
             replacement=replacement,
             client_id=client_id or str(uuid.uuid4())[:12],
-            announce=author_kind != "user",
             db=connection,
         )
         feedback = feedback_batches.record_comment(
@@ -104,7 +103,7 @@ def linked_comment_ids(db, batch_id: str) -> list[str]:
 
 
 def add_person_comment(db, artifact_id: str, *, client_id: str | None = None) -> tuple[dict, dict]:
-    """Create and immediately deliver a person's comment as the post-response task does."""
+    """Create a person's comment and deliver its batches now, as the due sweep does at their deadline."""
     row, feedback = add_comment(
         db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id=client_id,
     )
