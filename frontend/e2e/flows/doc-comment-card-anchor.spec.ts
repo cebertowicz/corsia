@@ -256,7 +256,10 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			if (expanded) await expandCanvas(page);
 			await placeTarget(page, 0.5);
 			const line = lineOf(page, `The ${SECTION} target is right here`);
-			await line.dblclick({ position: { x: 12, y: 8 } });
+			// Double-click where the reader sees the line. A locator dblclick that finds the line a pixel off between two frames
+			// retries by scrolling it to the canvas's bottom edge, which would leave no room for the wheel below.
+			const target = await box(line);
+			await page.mouse.dblclick(target.x + 12, target.y + 8);
 			await page.locator('.sel-comment').click();
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
