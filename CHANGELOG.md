@@ -52,7 +52,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On a paired computer, updates and restarts now reach the main CORSIA service instead of failing because they were started from the paired device.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
-- On a phone, tapping a comment's Reply field in the comments sheet keeps the whole card on screen, its author and quoted text included; before, the sheet scrolled far enough to show the field that the card no longer fit.
+- On a phone, tapping a comment's Reply field in the comments sheet keeps the whole card on screen, its author and quoted text included.
 - On a phone, typing while a comment you tapped in the text is open closes its sheet and puts what you type in the document.
 - On a touch screen with a wide window, such as a tablet, the message box no longer covers Won’t do on a task for you.
 - On macOS, when an update stops before CORSIA restarts (for example, a safety check fails or CORSIA does not shut down), agents now resume work without waiting for a manual restart.

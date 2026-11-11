@@ -31,7 +31,7 @@ test('@flow:doc-comment-sheet keeps the whole card visible when its reply field 
 	test.setTimeout(120_000);
 	await setMockCorsiaAgentModel(request);
 	await setDebugVersionOverlay(request, false);
-	const title = `comment-sheet-card-top-${Date.now()}`;
+	const title = `comment-sheet-card-whole-${Date.now()}`;
 	const owner = await createSession(request, title);
 	const doc = await seedTextDocument(request, owner, title, 'plan', TEXT);
 	const ids: Record<string, string> = {};
