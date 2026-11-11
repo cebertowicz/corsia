@@ -392,8 +392,8 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', orphaned: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe('The text this suggestion replaces has changed.');
-		expect(host.textContent).toContain('The text this suggestion replaces has changed.');
+		expect(accept.title).toBe("Can't accept: the text this suggestion replaces isn't in the document.");
+		expect(host.textContent).toContain("The text this suggestion replaces isn't in the document.");
 	});
 
 	it('disables accepting a suggestion edited inside, with the reason, while Reject and Reply stay', () => {
