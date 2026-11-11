@@ -44,6 +44,26 @@ export function clipTo(box: DOMRect, height: number, clippers: Element[]): strin
 }
 
 /**
+ * How far in from the cell's box its text starts on `side`: its padding, and in a table whose borders are collapsed, the
+ * share of the border that lies inside the cell. The editor draws no border, so without that share its text sits that far out.
+ * On the left the share is read off where the cell lays its own content (a border is snapped to the screen's pixels, so half
+ * its computed width is not what is drawn); a share that reads as more than a pixel is something other than a border.
+ */
+function inset(cell: HTMLTableCellElement, style: CSSStyleDeclaration, side: 'Top' | 'Right' | 'Bottom' | 'Left', box: DOMRect): string {
+	const padding = style[`padding${side}`];
+	const table = cell.closest('table');
+	if (!table || getComputedStyle(table).borderCollapse !== 'collapse') return padding;
+	if (side === 'Left') {
+		const range = document.createRange();
+		range.selectNodeContents(cell);
+		const lefts = [...range.getClientRects()].filter((r) => r.width > 0).map((r) => r.left);
+		const share = lefts.length ? Math.min(...lefts) - box.left - parseFloat(padding) : NaN;
+		if (share >= 0 && share <= 1) return `calc(${padding} + ${share}px)`;
+	}
+	return `calc(${padding} + ${parseFloat(style[`border${side}Width`]) / 2}px)`;
+}
+
+/**
  * Where a cell's editor is allowed to live.
  *
  * A rendered cell is inside CodeMirror's own editing host, and Chromium will not put a caret in a contenteditable element
@@ -100,7 +120,7 @@ export class CellLayer {
 		const type = face === cell ? style : getComputedStyle(face);
 		const next: Partial<Record<keyof CSSStyleDeclaration & string, string>> = {
 			left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, minHeight: `${box.height}px`,
-			padding: `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`,
+			padding: `${inset(cell, style, 'Top', box)} ${inset(cell, style, 'Right', box)} ${inset(cell, style, 'Bottom', box)} ${inset(cell, style, 'Left', box)}`,
 			// A row is as tall as its tallest cell, and a shorter cell's text sits where its vertical alignment puts it; the
 			// editor's text sits there too, so opening a cell in a tall row does not move its text to the top.
 			justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',

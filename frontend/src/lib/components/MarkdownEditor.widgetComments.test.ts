@@ -78,16 +78,14 @@ describe('a click on comments drawn inside a table', () => {
 		expect(rows).toHaveBeenLastCalledWith(expect.anything(), DANA, DANA + 3, null);
 	});
 
-	it('keeps the comment open and the caret in place when the table redraws before the browser reports where the press landed', async () => {
-		const onCaretAway = vi.fn();
-		const onAnchorFocus = mountEditor([onWords('a')], vi.fn(), { onCaretAway });
+	it('opens the cell and the comment once, and keeps the caret in that cell, when the table redraws before the browser reports where the press landed', async () => {
+		const onAnchorFocus = mountEditor([onWords('a')]);
 		const mark = await painted();
 		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
 		// The reader's caret rests in the text above the table.
 		view.focus();
 		view.dispatch({ selection: { anchor: 2 } });
 		flushSync();
-		onCaretAway.mockClear();
 		const landed = mark.firstChild!;
 		const caretPosition = vi.fn(() => ({ offsetNode: landed, offset: 1 }) as unknown as CaretPosition);
 		Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: caretPosition });
@@ -102,8 +100,9 @@ describe('a click on comments drawn inside a table', () => {
 			mark.classList.add('cm-comment-focused');
 			await Promise.resolve();
 			flushSync();
-			expect(view.state.selection.main.head, 'the editor caret did not jump to the table').toBe(2);
-			expect(onCaretAway, 'the comment the click opened was not let go').not.toHaveBeenCalled();
+			expect(host.querySelector('.cm-md-cell-editor .cm-editor'), 'the click on the commented words opened their cell').not.toBeNull();
+			const head = view.state.selection.main.head;
+			expect(head >= DANA && head <= DANA + 4, 'the document caret is in that cell, not above the table').toBe(true);
 		} finally {
 			delete (document as Partial<Document>).caretPositionFromPoint;
 		}

@@ -44,9 +44,34 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	if (!range.collapsed) range.collapse(true);
 	const raised = selectionIn(view, widget, range);
 	if (!raised) return null;
-	// That caret's own box has no size, so the offer is placed on the cell's box, the one its open editor is laid over.
+	// That caret's own box has no size, so the offer is placed on the cell's box, the one its open editor is laid over. An empty
+	// cell holds no text for it to cover: it sits inside the cell, at its far end, away from the caret at the start.
+	// A cell too narrow to hold it (a phone's last column) puts it beside or below the table, as the offer for selected text goes.
 	const box = td.getBoundingClientRect();
-	return { ...raised, top: box.top, left: box.left };
+	if (box.width < OFFER_ROOM) {
+		const beside = offerBesideTable(view, cell.tableFrom, { top: box.top, bottom: box.bottom });
+		if (beside) return { ...raised, above: false, ...beside };
+	}
+	return { ...raised, above: false, exact: true, end: true, top: (box.top + box.bottom) / 2, left: box.right - OFFER_GAP };
+}
+
+/** The widest the Comment offer is (on a phone), and the gap kept around it. */
+const OFFER_GAP = 6;
+// Under the table the offer has the table's own bottom margin to fit in, about the offer's height and a few pixels more.
+const BELOW_GAP = 3;
+const OFFER_ROOM = 120 + 2 * OFFER_GAP;
+
+/**
+ * Where the Comment offer for text selected in a table cell goes so that it covers no text: in the margin beside the table,
+ * level with the selected line, and where the table leaves no margin directly below it.
+ */
+export function offerBesideTable(view: EditorView, from: number, line: Extent) {
+	const widget = drawnTableAt(view, from);
+	if (!widget) return null;
+	// The table's own box: the widget around it carries padding the offer must not sit in, with the text below.
+	const table = (widget.querySelector('table') ?? widget).getBoundingClientRect(), column = view.scrollDOM.getBoundingClientRect();
+	if (column.right - table.right >= OFFER_ROOM) return { exact: true, top: (line.top + line.bottom) / 2, left: table.right + OFFER_GAP };
+	return { exact: true, below: true, top: table.bottom + BELOW_GAP, left: table.left };
 }
 
 /**

@@ -6,7 +6,7 @@ import type { Rig } from './typed-reveal-rig';
 import { emptyCellSelection } from './widget-cell-comment';
 import { openCellState } from './widget-cell-state';
 import { intersectsCell, tableCells, tableGrid, widgetCommentLabel } from './widget-cells';
-import { build, cellText, cleanup, clicked, table, typed } from './widget-cell-rig';
+import { build, cellCaret, cellText, cleanup, clicked, table, typed } from './widget-cell-rig';
 
 /**
  * A row shorter than its header is drawn with empty cells padded in at its end, none of which has source of its own. Each
@@ -65,6 +65,39 @@ describe('the padded cells of a short row', () => {
 			expect(emptyCellSelection(r.view)).toBeNull();
 		});
 	}
+
+	it('takes the text typed in column N of a row with whitespace after its last pipe, which is closed already', () => {
+		for (const [row, real] of [['| Login |  ', 1], ['| Login | Done | ', 2]] as const) {
+			for (let col = real; col < 4; col++) {
+				const r = track(build(short(row)));
+				clicked(r, table(r)!.rows[1].cells[col]);
+				expect(opened(r)?.col, `setup: the cell opened is column ${col}`).toBe(col);
+				typed(r, 0, 'Z');
+				expect(bodyRow(r), `row ${JSON.stringify(row)}: no pipe is written twice`).toBe(`${row}${' |'.repeat(col - real)} Z |`);
+				expect([...table(r)!.rows[1].cells].map((cell) => cell.textContent), 'the text is drawn in the column typed in')
+					.toEqual(Array.from({ length: 4 }, (_, at) => at === col ? 'Z' : at < real ? row.split('|')[at + 1].trim() : ''));
+			}
+		}
+	});
+
+	it('still closes a row that ends without a closing pipe, or on an escaped one', () => {
+		for (const row of ['| Login | a', '| Login | a\\|']) {
+			const r = track(build(short(row)));
+			clicked(r, table(r)!.rows[1].cells[2]);
+			expect(opened(r), 'setup: a cell opened').not.toBeNull();
+			typed(r, 0, 'Z');
+			expect(bodyRow(r), row).toBe(`${row} | Z |`);
+		}
+	});
+
+	it('types words into a padded cell with no space after the first letter', () => {
+		const r = track(build(short('| Login |')));
+		clicked(r, table(r)!.rows[1].cells[1]);
+		for (const char of 'world') typed(r, cellCaret(r), char);
+		expect(bodyRow(r)).toBe('| Login | world |');
+		expect(cellText(r)).toBe(' world ');
+		expect(cellCaret(r), 'the caret is after the last letter, before the trailing pad').toBe(6);
+	});
 
 	it('leaves a real empty cell its whole-cell Comment offer', () => {
 		const r = track(build(short('| Login |  | first | me |')));

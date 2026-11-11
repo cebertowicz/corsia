@@ -1,4 +1,4 @@
-import { ChangeSet, EditorSelection, Transaction, type Text } from '@codemirror/state';
+import { ChangeSet, EditorSelection, Facet, Transaction, type Text } from '@codemirror/state';
 import { ViewPlugin, type EditorView, type ViewUpdate } from '@codemirror/view';
 
 /**
@@ -6,14 +6,39 @@ import { ViewPlugin, type EditorView, type ViewUpdate } from '@codemirror/view';
  * escaped, a line break has nowhere to go, and half an escape pair would leave a bare pipe behind.
  */
 
-/** The smallest change from one cell text to the next, so the caret the reader placed maps through it instead of jumping to an end. */
-export function cellDifference(oldText: string, newText: string) {
+/** The smallest change from one run of text to the next: what a prefix and a suffix both texts share leaves alone. */
+function runDifference(oldText: string, newText: string, at = 0) {
 	let keep = 0;
 	while (keep < oldText.length && keep < newText.length && oldText[keep] === newText[keep]) keep++;
 	let tail = 0;
 	while (tail < oldText.length - keep && tail < newText.length - keep && oldText[oldText.length - 1 - tail] === newText[newText.length - 1 - tail]) tail++;
-	return { from: keep, to: oldText.length - tail, insert: newText.slice(keep, newText.length - tail) };
+	return { from: at + keep, to: at + oldText.length - tail, insert: newText.slice(keep, newText.length - tail) };
 }
+
+/**
+ * The smallest changes from one cell text to the next, so the caret the reader placed maps through them instead of jumping
+ * to an end. When only the padding around the same text differs (the cell's pipes were written around what was typed into
+ * a padded cell), the pads change and the text between them is left alone, so a caret in it stays after the character it
+ * was after and the next key lands there, not past the trailing pad.
+ */
+export function cellDifference(oldText: string, newText: string) {
+	const oldCore = oldText.trim();
+	if (oldCore && oldCore === newText.trim()) {
+		const oldLead = oldText.length - oldText.trimStart().length, newLead = newText.length - newText.trimStart().length;
+		return [
+			runDifference(oldText.slice(0, oldLead), newText.slice(0, newLead)),
+			runDifference(oldText.slice(oldLead + oldCore.length), newText.slice(newLead + oldCore.length), oldLead + oldCore.length)
+		].filter((change) => change.from !== change.to || change.insert);
+	}
+	return [runDifference(oldText, newText)];
+}
+
+/**
+ * On for the editor that holds one table cell's source. A cell stores a pipe as `\|` even inside a code span, where the
+ * markdown parse makes no escape of it, and the closed cell draws just the pipe; so the cell's own editor hides that
+ * backslash as it does an escape's, which the document's pass, never run inside a table, has no reason to.
+ */
+export const inTableCell = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
 
 const ONLY_BREAKS = /^\n+$/;
 

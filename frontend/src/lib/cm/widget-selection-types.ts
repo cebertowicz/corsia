@@ -15,6 +15,12 @@ export interface WidgetSelection {
 	inWidget: true;
 	/** The Comment button sits on the selection's top edge instead of beside its end, so it never covers text in the selected row. */
 	above?: boolean;
+	/** `left` and `top` are where the button is drawn, not the selection's end: it sits at that point as given. */
+	exact?: boolean;
+	/** The button hangs from `top` rather than being centred on it. */
+	below?: boolean;
+	/** The button ends at `left` rather than starting there. */
+	end?: boolean;
 }
 
 export function caretAt(x: number, y: number): { node: Node; offset: number } | null {

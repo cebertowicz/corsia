@@ -4,8 +4,8 @@ import { cell, cellContent, DOC, editorIn, frame, LAYOUTS, onlyIn, openTableDocu
 
 /**
  * An empty cell has no text to select for a comment, so while its editor is open and still empty the Comment offer is the
- * whole cell's, placed on that cell. The first character typed takes the offer away; deleting it brings the offer back. At
- * 393 the offer sits clear of the cell editor's line and inside the visible page.
+ * whole cell's, placed on that cell. The first character typed takes the offer away; deleting it brings the offer back. The
+ * offer sits inside the empty cell or, where the cell is too narrow, covers no cell, and is inside the visible page.
  */
 
 const FILLED = '| Signs | Plain words in a cell. | open |';
@@ -25,11 +25,11 @@ async function offerClear(page: Page) {
 	expect(offer, 'the offer is drawn').not.toBeNull();
 	expect(line, 'the cell editor\'s line is drawn').not.toBeNull();
 	expect(open, 'the open cell is drawn').not.toBeNull();
-	const gap = Math.max(open!.x - (offer!.x + offer!.width), offer!.x - (open!.x + open!.width));
-	expect(gap, `the offer ${JSON.stringify(offer)} overlaps the open cell ${JSON.stringify(open)} across, or sits within 8px of it`).toBeLessThanOrEqual(8);
-	const apart = offer!.y + offer!.height <= line!.y + 0.5 || offer!.y >= line!.y + line!.height - 0.5;
-	const across = offer!.x + offer!.width <= line!.x + 0.5 || offer!.x >= line!.x + line!.width - 0.5;
-	expect(apart || across, `the offer ${JSON.stringify(offer)} covers nothing of the editor's line ${JSON.stringify(line)}`).toBe(true);
+	// Inside the empty cell, which holds no text, or, when the cell is too narrow, clear of every cell of the table.
+	const inside = offer!.x >= open!.x - 1 && offer!.y >= open!.y - 1 && offer!.x + offer!.width <= open!.x + open!.width + 1 && offer!.y + offer!.height <= open!.y + open!.height + 1;
+	const cells = await page.locator('.cm-md-table td, .cm-md-table th').evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
+	const covered = cells.filter((c) => offer!.x < c.x + c.width && offer!.x + offer!.width > c.x && offer!.y < c.y + c.height && offer!.y + offer!.height > c.y);
+	expect(inside || covered.length === 0, `the offer ${JSON.stringify(offer)} sits inside the empty cell ${JSON.stringify(open)} or covers no cell (it covers ${JSON.stringify(covered)})`).toBe(true);
 	expect(offer!.y, 'the offer starts inside the visible page').toBeGreaterThanOrEqual(viewport.top);
 	expect(offer!.y + offer!.height, 'and ends inside it').toBeLessThanOrEqual(viewport.top + viewport.height);
 	expect(offer!.x + offer!.width, 'and is not cut off at the side').toBeLessThanOrEqual(viewport.width);

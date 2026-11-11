@@ -37,7 +37,6 @@ const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((e
 }, words);
 const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
 /** Where the offer sits against the selected words: across from where they end, and its middle from their top. */
-const besideEnd = (box: Box, words: Box) => ({ x: box.x - words.right, y: (box.y + box.bottom) / 2 - words.y });
 /** Where the composer opened: its left, and its top below the selected words; on the screen when it opened in the phone's sheet. */
 const composerUnder = async (composer: Locator, words: Box) => {
 	const inSheet = await composer.evaluate((el) => !!el.closest('[data-adaptive-drawer]'));
@@ -116,7 +115,7 @@ for (const layout of LAYOUTS) {
 			await page.keyboard.press('Home');
 			for (let char = 0; char < 'Paragraph'.length; char++) await page.keyboard.press('Shift+ArrowRight');
 			await expect(offer, 'setup: the prose selection is offered Comment').toBeVisible();
-			const proseWords = await wordsIn(line, 'Paragraph'), proseOffer = besideEnd(await boxOf(offer), proseWords);
+			const proseWords = await wordsIn(line, 'Paragraph');
 			await offer.click();
 			await expect(composer, 'setup: its composer opens').toBeVisible();
 			const proseComposer = await composerUnder(composer, proseWords);
@@ -130,9 +129,10 @@ for (const layout of LAYOUTS) {
 			for (let char = 0; char < 'A long'.length; char++) await page.keyboard.press('Shift+ArrowRight');
 			await expect(offer).toBeVisible();
 			const words = await wordsIn(page.locator('.cm-md-cell-editor'), 'A long'), shown = await boxOf(offer);
-			const rowAbove = await wordsIn(cell(page, 2, 1), 'Plain words in a cell.'), placed = besideEnd(shown, words);
-			expect(near(placed.x, proseOffer.x) && near(placed.y, proseOffer.y) && shown.y >= rowAbove.bottom,
-				`the offer sits beside the end of the selected words as in prose, clear of the words in the row above (${JSON.stringify({ shown, words, rowAbove, placed, proseOffer })})`).toBe(true);
+			// Unlike prose, where it sits beside the words, a table's offer sits beside or below the table: it covers no cell's text.
+			const cells = await page.locator('.cm-md-table td, .cm-md-table th').evaluateAll((all) => all.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
+			const covered = cells.filter((c) => shown.x < c.x + c.width && shown.x + shown.width > c.x && shown.y < c.y + c.height && shown.y + shown.height > c.y);
+			expect(covered.length, `the offer covers no cell of the table (${JSON.stringify({ shown, words, covered })})`).toBe(0);
 			await frame(page, `05-selection-offer-${at}`);
 			await offer.click();
 			await expect(composer).toBeVisible();

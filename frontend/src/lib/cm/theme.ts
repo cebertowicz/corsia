@@ -67,7 +67,8 @@ export const docTheme = EditorView.theme({
 	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--accent-line)' },
 	'.cm-md-link-open': { transition: 'text-decoration-color 150ms' },
 	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' }, '.cm-md-link-open:hover': { textDecorationColor: 'var(--accent)' } },
-	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' } },
+	// A table cell is a tap target now that it edits: a finger's height.
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' }, '.cm-md-table td, .cm-md-table th': { height: '44px' } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },
@@ -91,10 +92,7 @@ export const docTheme = EditorView.theme({
 		position: 'fixed',
 		zIndex: 40,
 		boxSizing: 'border-box',
-		background: 'color-mix(in srgb, var(--accent) 5%, transparent)',
-		outline: '2px solid var(--accent)',
-		outlineOffset: '-2px',
-		borderRadius: 'var(--radius-sm)',
+		// Nothing is drawn but the text and its caret: an open cell reads as the cell does at rest, as prose does under the caret.
 		cursor: 'text',
 		overflow: 'hidden',
 		// A column, so the editor's text can sit as high in the layer as the cell's sits in the row (`widget-cell-layer.ts`).
@@ -115,7 +113,16 @@ export const docTheme = EditorView.theme({
 	},
 	'.cm-md-cell-layer .cm-line': { padding: '0' },
 	// The edited cell's own box stays drawn; only its ink and any image step aside under the editor.
+	// The marks the rendered cell draws (a link's colour, a code chip) beat the cell's own colour, so each is put away too.
 	'.cm-md-cell-editing': { color: 'transparent', textDecorationColor: 'transparent' },
+	'.cm-md-cell-editing :is(a, code, strong, em, del, s, b, i, u)': { color: 'transparent', background: 'transparent', textDecorationColor: 'transparent' },
+	// The editor draws a cell's marks as the rendered cell draws them (`app.css`, `.md-content`), so opening a cell changes nothing
+	// the reader sees: a link is coloured and not underlined, and a code span has the cell's own chip.
+	'.cm-md-cell-layer .cm-md-link': { color: 'var(--accent-text)', textDecoration: 'none' },
+	'.cm-md-cell-layer .cm-md-inline-code': {
+		fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: 'var(--text-subhead)', padding: '2px 6px', border: 'none',
+		borderRadius: 'var(--radius-2xs)', background: 'var(--bg-tertiary)'
+	},
 	'.cm-md-cell-editing img, .cm-md-cell-editing .cm-md-image, .cm-md-cell-editing .cm-md-image-note': { visibility: 'hidden' },
 	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
 	// for the comment flows, would otherwise be a second caret on the same text.
@@ -168,6 +175,16 @@ export const docTheme = EditorView.theme({
 	'@media (prefers-reduced-motion: reduce)': { '.cm-scroller, .cm-scroller *': { transitionProperty: 'none !important' } },
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
+
+/** The marks a rendered table cell draws, for the cell's own editor: bold, italic, struck-through and linked text look as they do at rest. */
+export const cellHighlight = syntaxHighlighting(
+	HighlightStyle.define([
+		{ tag: t.strong, fontWeight: '600' },
+		{ tag: t.emphasis, fontStyle: 'italic' },
+		{ tag: t.strikethrough, textDecoration: 'line-through' },
+		{ tag: t.link, color: 'var(--accent-text)' }
+	])
+);
 
 export const docHighlight = syntaxHighlighting(
 	HighlightStyle.define([

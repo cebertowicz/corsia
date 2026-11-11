@@ -72,7 +72,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const target = event.target instanceof Element ? event.target : null;
 			const widget = target && widgetOf(this.view, target);
 			// A tap that edits a cell is the cell editor's: selecting the cell's text here would take the caret off its editor.
-			if (!widget || target.closest('a') || target.closest(CELL_EDITOR) || cellClicked(this.view, target)) return;
+			if (!widget || target.closest('a') || target.closest(CELL_EDITOR) || cellClicked(this.view, target, { x: event.clientX, y: event.clientY })) return;
 			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
 			const range = document.createRange();

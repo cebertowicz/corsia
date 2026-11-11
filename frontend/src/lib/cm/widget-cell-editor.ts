@@ -8,11 +8,14 @@ import { cellClicked } from './widget-cell-click';
 import {
 	CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellInSource, openCellState, type OpenCell
 } from './widget-cell-state';
-import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly } from './widget-cell-text';
+import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly, inTableCell } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
+import { CellFocusKeeper } from './widget-cell-focus';
+import { CELL_THEME } from './widget-cell-theme';
 import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
+import { cellHighlight } from './theme';
 
 /**
  * Editing the text of a rendered table cell where it is read.
@@ -33,15 +36,6 @@ import { repaintTableCell } from './widget-table';
 /** The extensions a cell's own editor runs over its source. `markdown-live.ts` supplies the document's hide-syntax pass. */
 export const cellEditorExtensions = Facet.define<Extension, readonly Extension[]>({ combine: (values) => values });
 
-/** The theme a cell editor needs to read as the cell it sits in; its type and colour come from the cell around it. */
-const CELL_THEME = EditorView.theme({
-	'&': { backgroundColor: 'transparent' },
-	'.cm-scroller': { overflow: 'hidden', fontFamily: 'inherit', lineHeight: 'inherit' },
-	'.cm-content': { padding: '0', caretColor: 'var(--accent)' },
-	'.cm-line': { padding: '0' },
-	'&.cm-focused': { outline: 'none' }
-});
-
 type Change = { from: number; to: number; insert: string };
 
 /** The cell's editor, and the cell it is held over, for as long as one cell is open. */
@@ -58,8 +52,10 @@ class CellEditors {
 	private readonly layer = new CellLayer();
 	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
 	private clickedAt: { x: number; y: number } | null = null;
+	private readonly focus: CellFocusKeeper;
 
 	constructor(private readonly host: EditorView) {
+		this.focus = new CellFocusKeeper(host, () => this.editor);
 		host.dom.addEventListener('click', this.openPressed);
 		document.addEventListener('pointerdown', this.pressedElsewhere, true);
 	}
@@ -67,7 +63,8 @@ class CellEditors {
 	/** A click on a drawn cell edits it: a caret in that cell, the way a click in prose places one. */
 	private readonly openPressed = (event: MouseEvent) => {
 		const host = this.host;
-		const clicked = cellClicked(host, event.target instanceof Element ? event.target : null);
+		if (this.focus.swiped()) return;
+		const clicked = cellClicked(host, event.target instanceof Element ? event.target : null, { x: event.clientX, y: event.clientY });
 		if (!clicked) return;
 		const { widget, cell, row } = clicked;
 		const block = blockRange(host, widget);
@@ -75,6 +72,7 @@ class CellEditors {
 		const open = cellToOpen(host.state, block.from, row.rowIndex, cell.cellIndex);
 		if (open) {
 			this.clickedAt = { x: event.clientX, y: event.clientY };
+			this.focus.opened();
 			host.dispatch({ effects: openCellAt.of(open) });
 		}
 	};
@@ -113,7 +111,7 @@ class CellEditors {
 		this.mount(cell);
 		if (moved || update.docChanged) {
 			const text = cellSource(update.state, cell), current = editor.state.doc.toString();
-			if (current !== text) editor.dispatch({ changes: [cellDifference(current, text)], userEvent: CELL_SYNC });
+			if (current !== text) editor.dispatch({ changes: cellDifference(current, text), userEvent: CELL_SYNC });
 		}
 		if (another) this.opened = editor.state.doc.toString().trim();
 		if (moved) this.mirrorToDocument(cell, editor);
@@ -150,8 +148,8 @@ class CellEditors {
 		const clicked = this.clickedAt, editor = this.editor;
 		this.clickedAt = null;
 		if (!clicked || !editor) return;
-		const at = editor.posAtCoords(clicked);
-		if (at === null) return;
+		// The nearest place in the cell's text, so a press on padding or a border still leaves the caret where typing lands.
+		const at = editor.posAtCoords(clicked, false);
 		editor.dispatch({ selection: { anchor: at, head: at } });
 	}
 
@@ -218,6 +216,8 @@ class CellEditors {
 				extensions: [
 					markdown({ extensions: GFM }),
 					...host.state.facet(cellEditorExtensions),
+					inTableCell.of(true),
+					cellHighlight,
 					EditorView.lineWrapping,
 					cellPaddingFlush,
 					EditorState.transactionFilter.of((tr) => (tr.isUserEvent(CELL_SYNC) ? tr : tr.docChanged ? cellShapeOnly(tr) : caretOnCellText(tr))),
@@ -286,6 +286,7 @@ class CellEditors {
 		this.host.dom.classList.remove('cm-md-cell-open');
 		this.host.dom.removeEventListener('click', this.openPressed);
 		document.removeEventListener('pointerdown', this.pressedElsewhere, true);
+		this.focus.destroy();
 	}
 }
 

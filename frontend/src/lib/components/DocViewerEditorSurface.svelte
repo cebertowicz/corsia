@@ -23,7 +23,7 @@
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
+	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; exact?: boolean; below?: boolean; end?: boolean; label?: SelectionLabel; inWidget?: boolean };
 
 	let {
 		docState,
@@ -145,7 +145,7 @@
 	let buttonWidth = $state(0);
 	const buttonLeft = $derived.by(() => {
 		if (!pendingSel) return 0;
-		const wanted = pendingSel.left + 8;
+		const wanted = (pendingSel.exact ? pendingSel.left : pendingSel.left + 8) - (pendingSel.end ? buttonWidth : 0);
 		const bounds = column?.getBoundingClientRect();
 		if (!bounds) return wanted;
 		return Math.max(bounds.left + EDGE, Math.min(wanted, bounds.right - EDGE - buttonWidth));
@@ -182,7 +182,7 @@
 </div>
 
 {#if pendingSel && !commentSheetOpen}
-	<button class="sel-comment" class:above={pendingSel.above} out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" class:above={pendingSel.above} class:below={pendingSel.below} out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment

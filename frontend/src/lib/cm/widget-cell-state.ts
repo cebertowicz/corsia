@@ -86,6 +86,15 @@ export const openCellState = StateField.define<OpenCell | null>({
 		}
 		if (!value || !transaction.docChanged) return value;
 		const { changes } = transaction;
+		// A change that replaces text across the cell's edge (a rewrite of the region around it, or of the whole document)
+		// leaves nothing to say which cell is the open one: mapped outward the range would cover its neighbours, and the
+		// widest of them would be taken for it. The editor closes instead of moving to another cell; what was typed is
+		// already in the document.
+		let replaced = false;
+		changes.iterChangedRanges((fromA, toA) => {
+			if (fromA < toA && fromA < value.to && toA > value.from && (fromA < value.from || toA > value.to)) replaced = true;
+		});
+		if (replaced) return null;
 		// Outward at both ends: text inserted at a cell's own edge — typed at its start, or the delimiters materialised
 		// around a cell the source did not have yet — belongs to that cell, so the range grows instead of stepping past it.
 		return resolveCell(transaction.state, {
@@ -107,7 +116,10 @@ export function openCellInSource(state: EditorState, changes: { from: number; in
 	const block = tableAt(state, cell.from, cell.from);
 	if (!first || !block) return;
 	const real = tableCells(state.sliceDoc(block.from, block.to)).filter((span) => span.row === cell.row).length;
-	const closed = state.sliceDoc(cell.from - 1, cell.from) === '|' ? '' : ' |';
+	// Whether the row's last pipe closes it is read past any whitespace after it (the padded cells sit at the line's end, not
+	// at its last pipe), and a pipe an odd run of backslashes escapes closes nothing.
+	const line = state.doc.lineAt(cell.from), before = line.text.slice(0, cell.from - line.from).trimEnd();
+	const closed = before.endsWith('|') && /(?:^|[^\\])(?:\\\\)*\|$/.test(before) ? '' : ' |';
 	first.insert = `${closed}${' |'.repeat(Math.max(0, cell.col - real))} ${first.insert} |`;
 }
 

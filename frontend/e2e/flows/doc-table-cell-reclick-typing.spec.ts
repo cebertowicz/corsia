@@ -107,10 +107,9 @@ function assertTypedInClickedCell(saved: string) {
 test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', () => {
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name.includes('mobile'), 'a mouse click'); });
 
-	// Typing in a cell at desktop widths needs the table cell editor (#2462): the browser cannot place its caret inside the
-	// rendered table, and that is where desktop typing goes. Until then this asserts only that the keystrokes cannot damage
-	// the document: nothing before the heading, no new table row, the cell's text as it was, nothing under the table.
-	test('reclicking the highlight and typing leaves the table and the top of the document intact', async ({ page, request }, testInfo) => {
+	// The first click opens the cell's editor (#2462) over the highlight, so the reclick lands on that editor, as a reader's does,
+	// and what is typed goes into the clicked cell at the click: nothing before the heading, no new row, nothing under the table.
+	test('reclicking the highlight and typing puts the text in the clicked cell and leaves the rest of the document intact', async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
 		const { docPath, commentId, highlight } = await openDocument(page, { width: 1440, height: 900 });
 
@@ -118,7 +117,7 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.cm-md-table .cm-comment-anchor.cm-comment-focused')).toBeVisible();
 
-		await highlight.click();
+		await highlight.click({ force: true });
 		await settled(page);
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-reclick');
 
@@ -126,7 +125,9 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-typing');
 		expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
-		expect(saved, `the table and the line under it are unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
+		expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
+		expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
+		expect(saved.replace('XYZ', ''), `the table and the line under it are otherwise unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
 		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
 	});
 

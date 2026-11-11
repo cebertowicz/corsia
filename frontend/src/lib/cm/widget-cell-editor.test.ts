@@ -3,9 +3,10 @@ import { Compartment, EditorState } from '@codemirror/state';
 import * as productEvents from '$lib/product_events';
 import { A as AUTHOR, type Rig } from './typed-reveal-rig';
 import {
-	cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
+	build, cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
 	layer, mountedEditor, open, press, table, typed
 } from './widget-cell-rig';
+import { openCellState } from './widget-cell-state';
 
 /**
  * Editing a rendered table cell: the click opens an editor over the cell's own `<td>` whose document is that cell's
@@ -45,6 +46,21 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(mountedEditor(r), 'the editor is gone').toBeNull();
 		expect(layer(r), 'and so is the layer that held it').toBeNull();
 		expect(cellEl(r)!.textContent, 'the cell is rendered text again, with what was typed').toBe('LoginXY');
+	});
+
+	it('takes focus back from a panel the same click opened, but not from a field the reader chose', () => {
+		const r = track(open());
+		const sheet = document.createElement('div'), field = document.createElement('textarea');
+		sheet.tabIndex = -1;
+		document.body.append(sheet, field);
+		clicked(r);
+		r.view.contentDOM.focus();
+		expect(cellEditor(r)!.dom.contains(document.activeElement), 'the document\'s own text, focused by the same tap, gives it back').toBe(true);
+		clicked(r);
+		sheet.focus();
+		expect(cellEditor(r)!.dom.contains(document.activeElement), 'a sheet that took focus right after the click gives it back').toBe(true);
+		field.focus();
+		expect(document.activeElement, 'a field the reader then chose keeps it').toBe(field);
 	});
 
 	it('closes when the reader presses outside the cell', () => {
@@ -296,5 +312,49 @@ describe('a selection in the cell is a selection in the document', () => {
 		expect(r.view.state.doc.toString(), 'the whole insertion is in the cell, and the row keeps its columns')
 			.toContain(`| LoginXY${long} | Done |`);
 		expect(r.view.state.selection.main.head, 'and the document mirrors the caret after it').toBe(at(8 + long.length));
+	});
+});
+
+describe('a rewrite of the region around the open cell', () => {
+	it('closes the cell editor, and takes no cell\'s focus', () => {
+		const r = track(build(DOC.replace('| Login | Done |', '| Login | Done |\n| Sync | Open |')));
+		clicked(r);
+		typed(r, 0, 'Q');
+		expect(mountedEditor(r), 'setup: the cell is open').not.toBeNull();
+		// Another client rewrites the rows the cell is in, as a delete and an insert in one update.
+		const rows = '| Login | Done |\n| Sync | Open |';
+		r.edit(AUTHOR, (text) => {
+			const row = text.toString().indexOf(rows);
+			text.delete(row, rows.length);
+			text.insert(row, '| Mail | Sent |\n| Chat | Held |');
+		});
+		const text = r.view.state.doc.toString();
+		expect(text, 'the rewrite is in the document').toContain('| Mail | Sent |\n| Chat | Held |');
+		expect(r.view.state.field(openCellState), 'no cell is open').toBeNull();
+		expect(mountedEditor(r), 'no editor is left over a cell').toBeNull();
+		expect(editingCell(r), 'no cell is marked as being edited').toBeNull();
+		expect(document.activeElement?.closest('.cm-md-cell-editor') ?? null, 'no cell editor holds the focus').toBeNull();
+		expect(r.text.toString()).toBe(text);
+	});
+
+	it('closes it for a whole-document replace, as a reload of the live text is', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, 'XY');
+		r.view.dispatch({ changes: { from: 0, to: r.view.state.doc.length, insert: r.view.state.doc.toString().replace('LoginXY', 'Other') } });
+		expect(r.view.state.field(openCellState)).toBeNull();
+		expect(mountedEditor(r)).toBeNull();
+	});
+
+	it('keeps the cell open for an edit that replaces only its own text', () => {
+		const r = track(open());
+		clicked(r);
+		r.edit(AUTHOR, (text) => {
+			const login = text.toString().indexOf('Login');
+			text.delete(login, 'Login'.length);
+			text.insert(login, 'Mail');
+		});
+		expect(r.view.state.field(openCellState)?.col).toBe(0);
+		expect(cellText(r)).toBe(' Mail ');
 	});
 });

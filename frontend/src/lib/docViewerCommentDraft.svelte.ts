@@ -9,7 +9,7 @@ import { plainErrorText } from '$lib/plainError';
 import { submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
-export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null;
+export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; exact?: boolean; below?: boolean; end?: boolean; inWidget?: boolean } | null;
 type Context = {
 	scope: () => string;
 	draft: () => CommentDraft | null;

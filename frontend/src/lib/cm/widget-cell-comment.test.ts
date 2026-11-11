@@ -49,10 +49,19 @@ describe('the Comment offer on an empty cell being edited', () => {
 		expect(raised, 'the editor\'s own selection flow is the one writer').toEqual([]);
 	});
 
-	it('is placed on the open cell\'s own box, not on its empty caret', () => {
+	it("is placed inside the open cell's own box, at its far end, so it covers no text", () => {
 		const r = openCell(1);
-		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 120, 36));
-		expect(emptyCellSelection(r.view), 'above the cell\'s top edge, from its left').toMatchObject({ top: 140, left: 312, above: true });
+		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 200, 36));
+		const offer = emptyCellSelection(r.view);
+		expect(offer, "level with the cell's middle, ending just inside its right edge").toMatchObject({ top: 158, left: 506, exact: true, end: true, above: false });
+	});
+
+	it('leaves a cell too narrow to hold it for beside or below the table', () => {
+		const r = openCell(1);
+		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 100, 36));
+		const offer = emptyCellSelection(r.view);
+		expect(offer, 'not placed at the narrow cell\'s own far end').not.toMatchObject({ end: true });
+		expect(offer).toMatchObject({ exact: true, above: false });
 	});
 
 	it('is none once the cell has text, and none for a cell opened with text', () => {
@@ -84,14 +93,26 @@ describe('text selected in an open cell', () => {
 		expect(openCellText(closed.view, logFrom, logTo)).toBeNull();
 	});
 
-	it("places the Comment offer by the prose rule: beside where the selected words end, on that line, measured in the cell's editor", () => {
+	it("places the Comment offer in the margin beside the table, level with the selected line, measured in the cell's editor", () => {
 		const r = openCell(0);
 		r.view.dispatch({ selection: { anchor: logFrom, head: logTo } });
 		const { inner, base } = openCellText(r.view, logFrom, logTo)!;
 		vi.spyOn(inner, 'coordsAtPos').mockImplementation((pos) => pos === logTo - base ? { left: 302, right: 302, top: 138, bottom: 154 } : null);
+		vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 120, 320, 90));
+		vi.spyOn(r.view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 700, 900));
 		const offer = selectionOffer(r.view, () => () => null);
-		expect(offer, 'at the end of the words, on their line').toMatchObject({ from: logFrom, to: logTo, text: 'Log', top: 138, left: 302 });
-		expect(offer?.above, 'not raised above the row').toBeUndefined();
+		expect(offer, 'right of the table, on the selected line').toMatchObject({ from: logFrom, to: logTo, text: 'Log', top: 146, left: 362, exact: true });
+		expect(offer?.below, 'not under the table').toBeUndefined();
+	});
+
+	it('places it directly below the table where the table leaves no margin', () => {
+		const r = openCell(0);
+		r.view.dispatch({ selection: { anchor: logFrom, head: logTo } });
+		const { inner, base } = openCellText(r.view, logFrom, logTo)!;
+		vi.spyOn(inner, 'coordsAtPos').mockImplementation((pos) => pos === logTo - base ? { left: 302, right: 302, top: 138, bottom: 154 } : null);
+		vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(16, 120, 340, 90));
+		vi.spyOn(r.view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 372, 900));
+		expect(selectionOffer(r.view, () => () => null), 'under the table, from its left').toMatchObject({ top: 213, left: 16, exact: true, below: true });
 	});
 
 	/** The document's text column and the table, as laid out: the composer's box runs from the column's left to the table's right. */

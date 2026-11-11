@@ -4,7 +4,7 @@ import type { Rig } from './typed-reveal-rig';
 import { tableCells } from './widget-cells';
 import { cellShapeOnly } from './widget-cell-text';
 import {
-	build, caretAt, cellCaret, cellText, cleanup, clicked, deleted, DOC, open, pasted, press, table, typed
+	build, caretAt, cellCaret, cellEditor, cellText, cleanup, clicked, deleted, DOC, open, pasted, press, table, typed
 } from './widget-cell-rig';
 
 /**
@@ -203,5 +203,50 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 				expect(allPipesEscaped(text) && text !== start, `${userEvent} of ${at} gives ${JSON.stringify(text)}`).toBe(true);
 			}
 		}
+	});
+});
+
+describe('a pipe inside inline code in a cell', () => {
+	const CODE = PIPED.replace('a\\|b', '`a\\|b`');
+	/** What the cell editor draws: a hidden range is not in its DOM. */
+	const drawn = (r: Rig) => cellEditor(r)!.contentDOM.textContent;
+
+	it('never shows its backslash, as the closed cell never does', () => {
+		const r = track(build(CODE));
+		expect(table(r)!.rows[1].cells[0].textContent, 'setup: the closed cell draws the pipe alone').toBe('a|b');
+		clicked(r);
+		expect(cellText(r), 'setup: the cell holds the escaped pipe in a code span').toBe(' `a\\|b` ');
+		expect(drawn(r)).toBe(' a|b ');
+	});
+
+	it('shows no backslash for a pipe typed there either', () => {
+		const r = track(build(PIPED.replace('a\\|b', '`ab`')));
+		clicked(r);
+		typed(r, 3, '|');
+		expect(cellText(r)).toBe(' `a\\|b` ');
+		expect(drawn(r)).toBe(' a|b ');
+	});
+
+	it('keeps the backslash visible in body text, where a code span has no escapes', () => {
+		const r = track(build('`a\\|b`\n\n' + DOC));
+		expect(r.view.contentDOM.textContent).toContain('a\\|b');
+	});
+
+	it('treats the caret by the hidden backslash as one before the pipe: Backspace deletes the character drawn before it', () => {
+		const r = track(build(CODE));
+		clicked(r);
+		caretAt(r, 4);
+		press(r, 'Backspace');
+		expect(cellText(r), 'the "a" went, the pair stayed whole').toBe(' `\\|b` ');
+		expect(savedRow(r)).toEqual(['`\\|b`', 'Done']);
+	});
+
+	it('deletes the pipe, with its backslash, on Backspace after it', () => {
+		const r = track(build(CODE));
+		clicked(r);
+		caretAt(r, 5);
+		press(r, 'Backspace');
+		expect(cellText(r)).toBe(' `ab` ');
+		expect(savedRow(r)).toEqual(['`ab`', 'Done']);
 	});
 });
