@@ -144,7 +144,7 @@ def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
             continue
         record = json.loads(row["payload_json"])
         record["steps"] = [{"gate_mode": None, "gate_answer": None, "node_ids": [], **step}
-                           for step in record.get("steps", [])]
+                           for step in record["steps"]]
         found[str(row["node_id"])] = {**record, "_recorded_at": row["created_at"]}
     return found
 
