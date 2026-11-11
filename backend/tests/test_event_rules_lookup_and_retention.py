@@ -1,4 +1,4 @@
-"""Event rules: a failed repository lookup, decision rows outliving their rule or
+"""Event rules: a failed unrouted-scope (repository) lookup, decision rows outliving their rule or
 thread, how long a disabled rule is listed, repository case, malformed facts, the
 preparation gate, and reads per recipient thread."""
 
@@ -53,10 +53,10 @@ async def test_a_failed_repository_lookup_fires_no_self_rule_and_records_why(
     assert _wakes("a") == [] and sent == []
     [decision] = _decisions(rule_id=rule["id"])
     assert (decision["thread_id"], decision["outcome"], decision["reason"]) == (
-        "a", "dead_lettered", "repository lookup failed")
-    assert any("repository lookup failed for github pr.merged on o/r" in line for line in warnings)
+        "a", "dead_lettered", "lookup of the projects it reaches failed")
+    assert any("unrouted scope lookup failed for github pr.merged" in line for line in warnings)
     [why] = (await _tool("a", operation="explain", event_id=decision["event_id"]))["decisions"]
-    assert why["explanation"] == f"rule {rule['id']} could not deliver it: repository lookup failed"
+    assert why["explanation"] == f"rule {rule['id']} could not deliver it: lookup of the projects it reaches failed"
 
 
 # -- 2. No decision row outlives its rule or thread --------------------------------------------

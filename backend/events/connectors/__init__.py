@@ -95,17 +95,24 @@ class ConnectorManifest:
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
-    # The fact naming the repository an event comes from, the repositories a
-    # project tracks, and its inverse, the projects tracking one repository
-    # (``None`` when they can't be read). Declared together: a rule's test on
-    # that fact must name one the writer's project tracks, and an event routing
-    # gave no thread reaches the self-rules of the projects tracking its repository.
+    # The fact naming the repository an event comes from and the repositories a
+    # project tracks (``None`` when they can't be read). Declared together: a rule's
+    # test on that fact must name one the writer's project tracks, and a self-rule
+    # on an event routing gave no thread must name it (``rules.reaches_unrouted``).
     repository_fact: str | None = None
     project_repositories: Callable[[str], frozenset[str] | None] | None = None
-    repository_projects: Callable[[str], frozenset[str] | None] | None = None
+    # The projects whose writers' rules to themselves may fire on an event routing gave
+    # no thread, read from its facts (``None`` when they can't be read): for GitHub the
+    # projects tracking its repository, for mail the projects its account reaches.
+    # ``None`` here: such an event reaches no rule.
+    unrouted_scope: Callable[[Mapping[str, Any]], frozenset[str] | None] | None = None
     # A CORSIA-produced (platform) event's fact naming the agent that asked for it: with no
     # artifact owner, the event still reaches that agent's own rules (``events.rules``).
     requester_fact: str | None = None
+    # How a rule's eq, not_eq and in tests compare a fact, when not exactly: ``"caseless"``
+    # ignores case; ``"domain"`` ignores case and also matches subdomains on a dot boundary
+    # (``acme.com`` matches ``em.acme.com``, never ``notacme.com``). Read by ``events.rule_match``.
+    fact_comparison: Mapping[str, str] = field(default_factory=dict)
     # How the connector receives webhooks under ``/webhooks/<connector>/``; ``None`` mounts none.
     receiver: ReceiverDecl | None = None
 

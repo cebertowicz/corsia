@@ -79,22 +79,21 @@ def type_rules(connector: str, event_type: str, read_facts: Iterable[str] = ()) 
 def unrouted_projects(
     connector: str, event_type: str, facts: Mapping[str, Any], self_rule: bool | None = None,
 ) -> frozenset[str] | None:
-    """The projects tracking the event's repository, should routing give it no thread.
+    """The connector's unrouted scope for the event, should routing give it no thread.
 
     Only a writer's deliver rule to itself can fire there, so :func:`type_rules`
     first asks whether any exists for the type, unless the caller's ``self_rule``
-    already says. With none, the connector's repository lookup (a policy query
-    and git config per registered repository) never runs. ``None``: the lookup
-    failed, which is not the same as an untracked repository. Runs git, so call
-    it outside any write transaction and the preparation gate.
+    already says. With none, the connector's scope lookup (for GitHub a policy
+    query and git config per registered repository) never runs. ``None``: the
+    lookup failed, which is not the same as an empty scope. GitHub's runs git, so
+    call it outside any write transaction and the preparation gate.
     """
     manifest = _manifest(connector)
-    repository = facts.get(manifest.repository_fact or "") if manifest is not None else None
-    if not repository or manifest.repository_projects is None:
+    if manifest is None or manifest.unrouted_scope is None:
         return frozenset()
     if not (type_rules(connector, event_type)[1] if self_rule is None else self_rule):
         return frozenset()
-    return manifest.repository_projects(str(repository))
+    return manifest.unrouted_scope(facts)
 
 
 def threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapping[str, Any]]:

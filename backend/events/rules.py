@@ -58,7 +58,7 @@ PAUSED = "paused"
 NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
 OUT_OF_PROJECT = "recipient outside the rule's project"
-LOOKUP_FAILED = "repository lookup failed"
+LOOKUP_FAILED = "lookup of the projects it reaches failed"
 UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's project; rule turned off"
 CREATOR_GONE = "creator gone"
@@ -102,35 +102,36 @@ def lookup(
 def reaches_unowned(rule: Rule, event: RuleEvent) -> bool:
     """Whether ``rule`` fires on an event routing gave no thread: one CORSIA produced for a
     requester (a worker's result) reaches only that requester's rules to itself; any other
-    reaches only :func:`self_on_repository`'s."""
+    reaches only :func:`reaches_unrouted`'s."""
     if event.requester is None:
-        return self_on_repository(rule)
+        return reaches_unrouted(rule)
     return (rule.created_by == event.requester and rule.action != DROP
             and thread_target(rule.to) == rule.created_by)
 
 
-def self_on_repository(rule: Rule) -> bool:
-    """An event with no owner and nothing routed reaches only a writer's rule to
-    itself (a delivery or its own script) that names the event's repository: create
-    checked that the writer's project tracks that repository, and no one else is reached."""
+def reaches_unrouted(rule: Rule) -> bool:
+    """An event with no owner and nothing routed, looked up in its connector's unrouted
+    scope, reaches only a writer's rule to itself (a delivery or its own script). Where
+    the connector declares a repository fact the rule must name it: create checked that
+    the writer's project tracks that repository. No one else is reached, and the
+    caller's target filter still applies (mail: the account's reach)."""
     if rule.action == DROP or thread_target(rule.to) != rule.created_by:
         return False
     fact = repository_fact(rule.connector)
-    return fact is not None and any(
+    return fact is None or any(
         test["field"] == fact and test["op"] in NAMING for test in rule.match)
 
 
 def lookup_failed(db: sqlite3.Connection, event: RuleEvent) -> list[Outcome]:
     """Fail closed, as ``create`` does: no self-rule fires on an event routing gave no
-    thread when the projects tracking its repository can't be read; each that matched
-    is dead-lettered with the reason."""
-    repository = event.facts.get(repository_fact(event.connector) or "")
-    logger.warning("event rules: repository lookup failed for {} {} on {}; no self-rule fired",
-                   event.connector, event.event_type, repository)
+    thread when its connector's unrouted scope can't be read; each that matched is
+    dead-lettered with the reason."""
+    logger.warning("event rules: unrouted scope lookup failed for {} {}; no self-rule fired",
+                   event.connector, event.event_type)
     return [
         Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=LOOKUP_FAILED)
         for rule in map(from_row, rule_reads.self_rules(db, event.connector, event.event_type))
-        if matches(rule, event.facts) and self_on_repository(rule)
+        if matches(rule, event.facts) and reaches_unrouted(rule)
     ]
 
 
@@ -271,7 +272,7 @@ def evaluate(
     by_thread, state, anchor = routed(targets, skipped)
     scope = anchor or event.requester
     rules = [rule for rule in lookup(db, event.connector, event.event_type, scope,
-                                     () if scope else event.repository_projects)
+                                     () if scope else event.unrouted_projects)
              if matches(rule, event.facts) and (anchor or reaches_unowned(rule, event))]
     if not rules:
         return None

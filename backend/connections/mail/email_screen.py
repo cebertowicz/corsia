@@ -116,6 +116,14 @@ def sender_for_screen(sender: str, screen: Screen | None) -> str:
     return address if is_plain_address(address) else ""
 
 
+def sender_address(sender: str) -> str | None:
+    """The sender's bare address in lowercase, whatever the screen, or ``None`` when not plain."""
+    from connections.mail.email_document import is_plain_address
+
+    address = parseaddr(sender)[1]
+    return address.casefold() if is_plain_address(address) else None
+
+
 def addresses_for_screen(value: str, screen: Screen | None) -> str:
     """An address-list header, with display names only after a clean screen."""
     if screen is not None and screen.clean:
