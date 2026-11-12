@@ -9,7 +9,8 @@ import { contrastBothThemes, countFit, settled, shoot } from '../support/comment
 const repo = path.resolve(process.cwd(), '..');
 
 for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at ${width}px`, async ({ page, request }, testInfo) => {
-	test.setTimeout(180_000);
+	// Thirteen frames, each shot in both themes and, on desktop, with the panel open and closed: about fifty screenshots.
+	test.setTimeout(360_000);
 	await page.setViewportSize({ width, height: 900 });
 	const workspace = process.env.CORSIA_E2E_WORKSPACE;
 	const state = process.env.CORSIA_E2E_STATE_DIR;
@@ -102,15 +103,16 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const row = plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' }).first();
 	await expect(row).toContainText('1 comment, 1 suggestion');
 	// The agent's own feedback task never stands in for the person's: each file keeps its task.
-	await expect(plan.getByRole('listitem').filter({ hasText: 'Second plan.md' }).first()).toContainText('1 comment');
+	const secondTask = plan.getByRole('listitem').filter({ hasText: 'Second plan.md' }).first();
+	await expect(secondTask.locator('.count-text')).toHaveText('1 comment');
 	const agentFeedback = plan.getByRole('listitem').filter({ hasText: /left 1 comment on Second plan/ });
 	await expect(agentFeedback).toHaveCount(1);
-	await expect(agentFeedback).toContainText('1 comment');
+	await expect(agentFeedback.locator('.comment-count')).toHaveCount(0);
 	console.log(`agent feedback row ${width}: ${await agentFeedback.innerText()}`);
 	await shoot(page, testInfo, `${width}-comment-task`, true);
 	console.log(`file task ${width}: ${JSON.stringify(await countFit(row))}`);
 	await contrastBothThemes(page, row, `file task ${width}`);
-	console.log(`agent feedback row ${width}: ${JSON.stringify(await countFit(agentFeedback))}`);
+	console.log(`second file task ${width}: ${JSON.stringify(await countFit(secondTask))}`);
 	if (width === 393) {
 		const box = await row.boundingBox();
 		if (!box) throw new Error('Task row has no bounds');
@@ -161,13 +163,26 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await reopenPlan();
 	await expect(row).toContainText('1 comment');
 	await capture('task-before-ask');
+	const auth = { Authorization: `Bearer ${TEST_TOKEN}` };
+	const envelope = await (await request.get(`/api/plans/operator/threads/${threadId}`, { headers: auth })).json();
+	const planId = envelope.plans[0].plan.id as string;
+	const fileTask = envelope.plans[0].nodes.find((node: { title: string; comment_attention?: unknown }) =>
+		node.title === 'Launch plan.md' && node.comment_attention) as { id: string } | undefined;
+	if (!fileTask) throw new Error('No file task before the ask');
 	seed('ask');
 	await reopenPlan();
 	const ask = plan.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
 	await expect(ask).toBeVisible();
 	// The review carries the file's comments now, and the file's own task is closed, not done: nothing was read.
 	await expect(ask.locator('.count-text')).toHaveText('1 comment');
-	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
+	// The file's task is closed with its reason, and no row of it carries a count.
+	const fileRows = plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' });
+	const fileTaskClosed = async () => {
+		await expect(fileRows.locator('.count-text')).toHaveCount(0);
+		const node = await (await request.get(`/api/plans/${planId}/nodes/${fileTask.id}`, { headers: auth })).json();
+		expect([node.state, node.status_reason]).toEqual(['closed', 'An open review of this document now carries these comments.']);
+	};
+	await fileTaskClosed();
 	console.log(`ask over task ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-raised-over-task');
 	const read = await request.post(`/api/artifacts/${artifactId}/comments/${back.root}/viewed`, {
@@ -196,7 +211,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		return color;
 	}));
 	await contrastBothThemes(page, ask, `ask row ${width}`);
-	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
+	await fileTaskClosed();
 	console.log(`ask row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-with-comments');
 	const viewed = await request.post(`/api/artifacts/${artifactId}/comments/${ids.replies[0][0]}/viewed`, {

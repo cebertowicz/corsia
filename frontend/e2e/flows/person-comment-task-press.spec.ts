@@ -129,23 +129,24 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await expect(row).toHaveCount(0);
 	if (narrow) await expect(fileRows.first()).toContainText('Done');
 	// The person's Accept and Reject reach the owning agent as its own task about their edits. Wait for it, so every run
-	// meets the same plan below: while that task is open it carries the file's count and the file task stays hidden.
+	// meets the same plan below. That task never carries the file's count: the file keeps its own task beside it.
 	await expect(plan.getByRole('listitem').filter({ hasText: 'The user edited Launch plan' })).toBeVisible({ timeout: 30_000 });
 	await frame('7-plan-after-all-read');
 	const comments = await (await request.get(`/api/artifacts/${artifactId}/comments?${query}`)).json();
 	console.log(`PRESS ${width} decisions: ${JSON.stringify(comments.comments.filter((item: { replacement: string | null }) => item.replacement).map((item: { decision: string | null }) => item.decision))}`);
 
-	// A new reply brings the count back on the agent's edit task; Dismiss all clears it; a later reply brings it back again.
+	// A new reply brings the file's task back beside the agent's edit task; Dismiss all clears it; a later reply brings it back again.
 	const counted = plan.getByRole('listitem').filter({ has: page.locator('.count-text') });
 	const carrier = async (label: string) => console.log(`PRESS ${width} ${label}: counted rows=${JSON.stringify(await counted.evaluateAll((all) => all.map((item) => (item as HTMLElement).innerText.replace(/\s+/g, ' ').trim())))}`);
 	seed('reply');
 	await openPlan();
 	await expect(counted.locator('.count-text')).toHaveText('1 comment');
-	await expect(counted).toContainText('The user edited Launch plan');
+	await expect(counted).toContainText('Launch plan.md');
+	await expect(counted).not.toContainText('The user edited Launch plan');
 	await carrier('resurfaced after read');
 	await frame('8-resurfaced-after-read');
 	if (!narrow) {
-		// The edit task opens its details, so the document comes from its tab; Dismiss all is in its bar.
+		// The document comes from its tab; Dismiss all is in its bar.
 		await press(page.getByRole('tab', { name: 'Launch plan.md' }));
 		await expect(bar).toContainText('1 comment to review');
 		await press(bar.getByRole('button', { name: 'Dismiss all' }));
