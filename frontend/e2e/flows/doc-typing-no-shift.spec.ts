@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from '../support/test';
 import { openLiveDocument, seedLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 import { layouts } from '../support/liveConcurrency';
 
