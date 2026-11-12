@@ -11,7 +11,8 @@ const repo = path.resolve(process.cwd(), '..');
 // The person's own presses lower the count, as they clear "New": opening a thread (a card press) and deciding a
 // suggestion (Accept, Reject). Reading everything settles the task; a new reply brings it back, after Dismiss all too.
 for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, async ({ page, request }, testInfo) => {
-	test.setTimeout(240_000);
+	// Ten frames, each shot in both themes and, on desktop, with the panel open and closed: about forty screenshots.
+	test.setTimeout(360_000);
 	// Each read stamp the person's presses send, so the frames' log says which gesture lowered the count.
 	page.on('request', (r) => { if (r.url().includes('/viewed') || r.url().includes('/dismiss')) console.log(`PRESS ${width} request ${r.method()} ${new URL(r.url()).pathname}`); });
 	await page.setViewportSize({ width, height: 900 });
