@@ -7,7 +7,8 @@
    scroller: the editor keeps that room right of its text (and the grid gap the column used to leave), so the cards scroll with the page. The
    room opens over the spring duration and closes the same way as the column leaves, so the text narrows and widens in one smooth step.
    A Workspace panel shown over the canvas covers its inline end (`--pane-overlay-inset`), so the room starts left of it. */
-.doc .cm-scroller { transition: padding-right var(--dur-spring) var(--ease-material); }
+/* With no column, the text still keeps clear of a Workspace panel shown over the canvas: a highlight under the panel can be neither read nor pressed. */
+.doc .cm-scroller { padding-right: var(--pane-overlay-inset, 0px); transition: padding-right var(--dur-spring) var(--ease-material); }
 .doc.margin-room .cm-scroller { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }

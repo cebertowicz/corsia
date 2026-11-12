@@ -57,7 +57,7 @@ export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify
 export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange | undefined {
 	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
 	const onRow = (edge: { top: number; bottom: number } | null) => !edge || (press.clientY >= edge.top && press.clientY <= edge.bottom);
-	return ranges.find((r) => {
+	return innermost(ranges.filter((r) => {
 		if (r.point || at < r.from || at > r.to) return false;
 		if (at === r.to && r.to > r.from) {
 			const edge = view.coordsAtPos(r.to, -1);
@@ -68,7 +68,15 @@ export function highlightAtPress(view: EditorView, press: { clientX: number; cli
 			return onRow(edge) && press.clientX >= (edge?.left ?? -Infinity);
 		}
 		return true;
-	});
+	}));
+}
+
+/**
+ * Of the highlights a press is in, the one covering the least text, the earliest on a tie: a one-word comment inside a longer
+ * suggestion's quote is what the reader pressed, and the suggestion's card (which a phone's tap does not open) is not.
+ */
+export function innermost(held: CommentRange[]): CommentRange | undefined {
+	return held.reduce<CommentRange | undefined>((best, r) => (!best || r.to - r.from < best.to - best.from ? r : best), undefined);
 }
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
