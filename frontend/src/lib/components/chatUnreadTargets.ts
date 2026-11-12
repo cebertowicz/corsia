@@ -1,7 +1,6 @@
 import type { ChatComment, Message } from '$lib/stores/threads';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
-import { chatReplyIndex } from '$lib/chatCommentDelivery';
-import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
+import { replySending } from '$lib/chatCommentDelivery';
 // The same composition the comment cards use for a quote label: markdown marks out, whitespace flattened, then the shared snippet cut.
 import { clean, snippet } from '$lib/cm/widget-cells';
 import { plainQuote } from '$lib/plainQuote';
@@ -40,13 +39,11 @@ export function unreadTargets(root: HTMLElement, messages: Message[], threadId: 
 	let below: UnreadTarget | null = null;
 	let count = 0;
 	let hidden: { quote: string; seq: number; destination: AttentionDestination } | null = null;
-	// One pass over the chat's comment inputs for every comment, instead of a scan per comment.
-	const replies = threadId ? chatReplyIndex(chatCommentInputs.rows(threadId), threadId) : null;
 	for (const message of messages) {
-		if (message.thread_id !== threadId || !message.chat_comments?.length || !replies) continue;
+		if (message.thread_id !== threadId || !message.chat_comments?.length) continue;
 		for (const comment of message.chat_comments) {
 			const unreadCount = comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).length;
-			if (!threadId || !unreadCount || replies.pending(comment).length) continue;
+			if (!threadId || !unreadCount || replySending(comment)) continue;
 			count += unreadCount;
 			// A jump needs the message's place in history, so a comment that cannot carry one is counted but not selected.
 			if (!comment.cid || typeof message.seq !== 'number') continue;

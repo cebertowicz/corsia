@@ -208,8 +208,8 @@
 		return 'sent';
 	}
 
-	export function sendReply(reply: ChatComment): string {
-		return postChatComment(reply, boundThreadId, selection.modelId ?? undefined, $updateRestarting, canSendToModel);
+	export function sendReply(reply: ChatComment): Promise<void> {
+		return postChatComment(reply, boundThreadId, $updateRestarting, canSendToModel);
 	}
 	const activeThread = $derived(selection.thread);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));

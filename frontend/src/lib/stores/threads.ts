@@ -126,7 +126,7 @@ export function demoteAgentLocally(threadId: string): void {
 }
 
 export { activeThreadId, draftAccountId } from './activeThreadId';
-export { messages } from './transcriptMessages';
+export const messages = writable<Message[]>([]);
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
 	states: ReadonlyMap<string, ThreadTurnState>,

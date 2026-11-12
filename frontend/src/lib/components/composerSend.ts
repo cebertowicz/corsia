@@ -1,7 +1,11 @@
+import { get } from 'svelte/store';
 import { emitProductEvent } from '$lib/product_events';
-import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
-import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
-import { sendCommentInput } from '$lib/ws';
+import { CommentSendRefused, unknownSendFailure, type ChatComment } from '$lib/chatCommentAnchors';
+import { adoptCommentThreads } from '$lib/chatCommentRefresh';
+import { apiFetch } from '$lib/api/request';
+import { plainErrorText } from '$lib/plainError';
+import { reasoningEffort } from '$lib/stores/threads';
+import { viewingDocumentForThread } from '$lib/stores/documentViewport';
 
 /** What a send asks the runtime to do with the turn in flight. */
 export type ComposerDeliveryIntent = 'apply_now' | 'queue_after_turn';
@@ -36,19 +40,33 @@ function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
 	throw new CommentSendRefused(blockedSendText(cause, noun));
 }
 
-export function postChatComment(reply: ChatComment, threadId: string | null | undefined, modelId: string | undefined, restarting: boolean, modelReady: boolean): string {
+/**
+ * Post a comment, or a reply in a comment thread, from its own box. It is the chat's next input for the
+ * agent but no chat message: the server keeps it on the comment it belongs to. Resolves once the server
+ * has stored it, with the commented rows' threads as they now stand on screen; rejects with the sentence
+ * the box shows when it was not stored.
+ */
+export async function postChatComment(reply: ChatComment, threadId: string | null | undefined, restarting: boolean, modelReady: boolean): Promise<void> {
 	// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
 	if (!threadId) throw new Error('Cannot send reply: no chat');
 	const noun = reply.root_cid ? 'reply' : 'comment';
 	const blocked = replySendBlock(restarting, modelReady);
 	if (blocked) refuse(blocked, noun);
 	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
-	const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
-	emitComposerSend(threadId, '', 0, payload);
-	const inputId = sendCommentInput(threadId, payload[0], modelId);
-	if (!inputId) refuse('notAccepted', noun);
-	chatCommentInputs.sending(inputId, threadId, payload[0]);
-	return inputId;
+	const comment = { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid };
+	emitComposerSend(threadId, '', 0, [comment]);
+	const viewingDocument = viewingDocumentForThread(threadId);
+	const effort = get(reasoningEffort);
+	let response: Response;
+	try {
+		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ input_id: crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) }),
+		});
+	} catch { refuse('notAccepted', noun); }
+	const result = await response.json().catch(() => null);
+	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
+	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
 
 export type ReplySendBlock = 'restarting' | 'noModel' | 'notAccepted';

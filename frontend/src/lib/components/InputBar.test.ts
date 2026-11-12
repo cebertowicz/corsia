@@ -6,7 +6,6 @@ const wsMocks = vi.hoisted(() => {
 	const listeners = new Map<string, Set<(data: any) => void>>();
 	return {
 		sendMessage: vi.fn(),
-		sendCommentInput: vi.fn(),
 		stopTurn: vi.fn(),
 		on: vi.fn((event: string, handler: (data: any) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());
@@ -1389,13 +1388,14 @@ describe('InputBar model readiness at the action seam', () => {
 
 describe('a comment reply the composer cannot send', () => {
 	const reply = { id: 'reply', messageId: 'message-1', seq: 3, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'draft reply', root_user_message_id: 'user-1', root_cid: 'c1' };
+	const chatCommentPosts = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/chat-comments'));
 	// One sentence per known cause (COPY-STANDARD C11), each saying the typed reply is kept and what to do (C9).
 	const noModel = 'Couldn’t send this reply because this chat’s model can’t answer it. Your reply stays here; choose a model, then try again.';
 	const restarting = 'Couldn’t send this reply because CORSIA is restarting after an update. Your reply stays here; try again once CORSIA is back.';
 	const notAccepted = 'Couldn’t send this reply because the connection is unavailable. Your reply stays here; try again.';
 
 	// The thread keeps the draft when the send is refused, so the person needs the cause on screen and not only in the console.
-	it('says so while the chosen model cannot answer', () => {
+	it('says so while the chosen model cannot answer', async () => {
 		models.set([{ id: 'model-down', name: 'Down model', size: '', backend: 'local', speed: '', status: 'unavailable' }]);
 		activeModelId.set('model-down');
 		threads.set([{
@@ -1407,13 +1407,13 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(noModel));
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(noModel));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(noModel);
-		expect(wsMocks.sendCommentInput).not.toHaveBeenCalled();
+		expect(chatCommentPosts()).toEqual([]);
 	});
 
-	it('says CORSIA is restarting while an update restart is in flight', () => {
+	it('says CORSIA is restarting while an update restart is in flight', async () => {
 		updateStatus.set({
 			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
 			available: true, checked_at: 1, error: null,
@@ -1428,24 +1428,24 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(restarting));
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(restarting));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(restarting);
-		expect(wsMocks.sendCommentInput).not.toHaveBeenCalled();
+		expect(chatCommentPosts()).toEqual([]);
 	});
 
-	it('says the reply was not accepted when the send returns nothing', () => {
+	it('says the connection is unavailable when the post cannot reach CORSIA', async () => {
 		threads.set([{
 			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
 			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
 			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
 		}]);
 		activeThreadId.set('thread-1');
-		wsMocks.sendCommentInput.mockReturnValue(null);
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(notAccepted));
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(notAccepted));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(notAccepted);
 		// A reply sent from a thread is recorded like one sent from the composer, so reply_count still counts it.

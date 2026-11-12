@@ -33,7 +33,7 @@ export interface ChatCommentAnchor {
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
  * reject instead, so every thread the reply was typed in keeps it.
  */
-export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => string | void): string | void {
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => Promise<void>): Promise<void> {
 	if (!message || !comment || typeof message.seq !== 'number') {
 		throw new CommentSendRefused('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	}

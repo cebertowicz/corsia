@@ -1,63 +1,24 @@
-import type { ChatComment, Message } from '$lib/stores/threads';
+import type { ChatComment } from '$lib/stores/threads';
+import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 
-/** The comment a reply send answers, as one key: its root message and comment id. */
-const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
-
-function supersededReplies(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const superseded = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
-		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
-	}
-	return superseded;
-}
-
-const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {
-	if (seen.has(`${key}|${row.id}`)) return;
-	seen.add(`${key}|${row.id}`);
-	const list = index.get(key);
-	if (list) list.push(row); else index.set(key, [row]);
-};
-
-export type ChatReplyIndex = {
-	/** Sends still awaiting delivery to this thread of this comment. */
-	pending(comment: ChatComment): Message[];
-	/** Failed sends of this comment or addressed to its thread, with no later send already replacing them. */
-	failed(comment: ChatComment): Message[];
-};
+/** A comment, or a reply in its thread, that the server stored but could not deliver to the agent. */
+export type FailedSend = { messageId: string; note: string; createdAt: string; root: boolean };
 
 /**
- * Every stored comment-only input of one chat, keyed by the comment it answers, from one pass over
- * `chatCommentInputs.rows`, so one pass per change answers every comment's pending and failed lists.
+ * What of this comment's thread was not delivered, read from the server's delivery state on the comment and
+ * on each reply the person wrote in it. Each keeps its text and Retry in the thread. A retry replaces the
+ * failed comment on the server, so a failure it superseded is no longer on the comment.
  */
-export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
-	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.
-	const superseded = supersededReplies(rows, threadId);
-	const pendingByKey = new Map<string, Message[]>();
-	const failedByKey = new Map<string, Message[]>();
-	const pendingSeen = new Set<string>();
-	const failedSeen = new Set<string>();
-	// A root comment's own failed send, keyed by the comment's id: the sender learns of the failure before the server's cid reaches it.
-	const failedRoots = new Map<string, Message[]>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || row.role !== 'user') continue;
-		const targets = row.metadata?.reply_context?.comments;
-		if (!Array.isArray(targets)) continue;
-		const sending = row.delivery_state === 'queued';
-		const broken = row.delivery_state === 'failed' && !superseded.has(row.id);
-		if (!sending && !broken) continue;
-		for (const reply of targets) {
-			const key = replyKey(reply.root_user_message_id, reply.root_cid);
-			// A root comment that failed after it was stored has its failure and Retry in its own thread.
-			if (!key) { if (broken) addTo(failedRoots, replyKey(row.id, reply.id), failedSeen, row); continue; }
-			if (sending) addTo(pendingByKey, key, pendingSeen, row);
-			if (broken) addTo(failedByKey, key, failedSeen, row);
-		}
+export function failedSends(comment: ChatComment): FailedSend[] {
+	const failed: FailedSend[] = comment.delivery_state === 'failed'
+		? [{ messageId: comment.user_message_id, note: comment.note, createdAt: comment.created_at, root: true }] : [];
+	for (const answer of comment.answers) {
+		if (answer.author_kind === 'user' && answer.delivery_state === 'failed') failed.push({ messageId: answer.user_message_id, note: answer.text, createdAt: answer.created_at, root: false });
 	}
-	const of = (index: Map<string, Message[]>) => (comment: ChatComment) => index.get(replyKey(comment.user_message_id, comment.cid)) ?? [];
-	// A comment's own send drops out once its text is recorded on that comment as a user answer; that check reads the comment's answers, not the transcript.
-	return {
-		pending: comment => of(pendingByKey)(comment).filter(row => !comment.answers?.some(answer => answer.author_kind === 'user' && answer.user_message_id === row.id)),
-		failed: comment => [...of(failedByKey)(comment), ...(failedRoots.get(replyKey(comment.user_message_id, comment.id)) ?? [])],
-	};
+	return failed;
+}
+
+/** A reply typed in this comment's thread is on its way to the server. */
+export function replySending(comment: ChatComment): boolean {
+	return !!chatCommentDrafts.reply(comment.id)?.posting;
 }

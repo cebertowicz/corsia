@@ -4,7 +4,6 @@
 	import { on, subscribeThread, unsubscribeThread } from '$lib/ws';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { messages } from '$lib/stores/threads';
-	import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { adoptThreadSnapshot, claimDisplayedThread } from '$lib/stores/displayedThreads';
 	import MessageList from './MessageList.svelte';
@@ -93,12 +92,8 @@
 			if (data?.thread_id !== subscribed || data?.error_type === 'stop_failed') return;
 			void load();
 		};
-		// A comment posted here reloads the page so its thread shows the server's copy.
-		const refreshComment = (data: any) => {
-			if (typeof data?.thread_id === 'string' && chatCommentInputs.comments(data.thread_id, data.input_id, data.message_id).length) refreshLifecycle(data);
-		};
-		const offCommentQueued = on('input_queued', refreshComment);
-		const offCommentAccepted = on('input_accepted', refreshComment);
+		// A comment posted here, or its delivery changing, reloads the page so its thread shows the server's copy.
+		const offComments = on('chat_comments_changed', refreshLifecycle);
 		const offActivity = on('turn_activity', refreshLifecycle);
 		const offComplete = on('turn_complete', refreshLifecycle);
 		const offCancelled = on('turn_cancelled', refreshLifecycle);
@@ -112,8 +107,7 @@
 			generation += 1;
 			unsubscribeThread(subscribed);
 			offConnected?.();
-			offCommentQueued?.();
-			offCommentAccepted?.();
+			offComments?.();
 			offActivity?.();
 			offComplete?.();
 			offCancelled?.();

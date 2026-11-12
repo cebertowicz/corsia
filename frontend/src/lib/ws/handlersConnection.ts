@@ -18,7 +18,7 @@ import { clearAllContextUsage } from '../stores/contextUsageByThread';
 import { loadUpdateStatus } from '../update/store';
 import { emit } from './events';
 import { subscribedThreads } from './state';
-import { resubscribeWatchedThreads, sentWithoutRow, stopRequestedTurns, subscribeThread } from './send';
+import { resubscribeWatchedThreads, stopRequestedTurns, subscribeThread } from './send';
 import { cancelThreadTypewriters } from './typewriter';
 import { frameIdentity, frameStartedAt } from './turnFrames';
 import {
@@ -150,10 +150,8 @@ export function handleWsError(data: any) {
 	}
 	const identity = frameIdentity(data);
 	if (typeof data?.input_id === 'string' && identity === null) {
-		// An input sent with no transcript row has its error shown by the box that sent it.
-		const rowless = sentWithoutRow(data.input_id);
 		handleInputRejected(data);
-		if (!rowless) appendVisibleError(data);
+		appendVisibleError(data);
 		emit('error', data);
 		return;
 	}
