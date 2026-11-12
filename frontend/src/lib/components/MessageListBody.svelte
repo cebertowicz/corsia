@@ -8,7 +8,7 @@
 
 	let {
 		transcriptEntries,
-		placedEnvelopes,
+		commentEnvelopes,
 		pendingEntries,
 		retryRows = [],
 		expandedTools,
@@ -28,7 +28,7 @@
 		onLoadRun,
 	}: {
 		transcriptEntries: any[];
-		placedEnvelopes: ReadonlySet<string>;
+		commentEnvelopes: ReadonlySet<string>;
 		pendingEntries: any[];
 		/** Focus: context updates that could not be delivered, each with its Retry. */
 		retryRows?: any[];
@@ -52,7 +52,7 @@
 
 <TranscriptContent
 	entries={transcriptEntries}
-	{placedEnvelopes}
+	{commentEnvelopes}
 	{expandedTools}
 	{expandedReasoning}
 	{onToggleToolBlock}

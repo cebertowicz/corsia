@@ -5,14 +5,17 @@ import { activeThreadId, messages } from '$lib/stores/threads';
 import { handleWsError } from '$lib/ws/handlersConnection';
 import { handleMessage } from '$lib/ws/handlers';
 import { chatReplyDrafts } from './chatReplyDrafts.svelte';
-import { CommentSendRefused } from '$lib/chatCommentAnchors';
+import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
+import { sendMessage } from '$lib/ws/send';
+import { setWs } from '$lib/ws/state';
+import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const anchor = { from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: ' more' };
 const second = { from_off: 5, to_off: 9, quote: 'more', anchor_prefix: 'text ', anchor_suffix: '' };
-function setup(send: () => string | void = () => 'input-1') {
+function setup(send: (reply: ChatComment) => string | void = () => 'input-1') {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
@@ -52,7 +55,8 @@ function reject(inputId = 'input-1') {
 afterEach(() => {
 	if (component) unmount(component as never);
 	component = null; messages.set([]); activeThreadId.set(null); host?.remove();
-	for (const id of ['input-1', 'input-2', 'other-input']) chatReplyDrafts.settle('thread', id, 'accepted');
+	for (const id of ['input-1', 'input-2', 'other-input']) chatReplyDrafts.release('thread', id);
+	setWs(null as unknown as WebSocket); for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	for (const on of [anchor, second]) chatReplyDrafts.dropRoot('thread', 'm1', { ...on, quote: '', anchor_prefix: '', anchor_suffix: '' });
 	Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.unstubAllGlobals();
 });
@@ -66,22 +70,24 @@ it('keeps text pending, then shows rejection and retries until admission clears 
 	expect(host.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('Keep my comment');
 	host.querySelector<HTMLButtonElement>('button.submit')!.click(); await tick(); flushSync();
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)?.inputId).toBe('input-2');
-	chatReplyDrafts.settle('thread', 'input-2', 'accepted'); await tick(); flushSync();
+	chatReplyDrafts.release('thread', 'input-2'); await tick(); flushSync();
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)).toBeUndefined();
 });
 
-it('reopens a closed box on the rendered target when rejection arrives', async () => {
+it('tells a closed box\'s rejection in a toast and keeps its text for the passage', async () => {
 	setup(); await openBox(); await post();
 	host.querySelector<HTMLButtonElement>('button.cancel')!.click(); await tick(); flushSync();
 	expect(host.querySelector('[role="dialog"] textarea')).toBeNull();
 	reject(); await tick(); flushSync();
+	expect(get(toasts).map(toast => toast.message)).toContain('The selected text changed.');
+	await openBox();
 	expect(host.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('Keep my comment');
 	expect(host.querySelector('[role="alert"]')?.textContent).toContain('selected text changed');
 });
 
 it('keeps a rejected draft when the target is not rendered and the user returns', () => {
 	setup();
-	chatReplyDrafts.postRoot('thread', 'm1', 'keep this', 'other-input', anchor, 1, 'posted');
+	void chatReplyDrafts.postRoot('thread', 'm1', anchor, 'keep this', 'other-input');
 	activeThreadId.set('other'); host.querySelector('.message')!.remove();
 	reject('other-input');
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)).toMatchObject({ text: 'keep this', error: 'The selected text changed.' });
@@ -131,22 +137,22 @@ it('closes only its own box when an earlier post is stored', async () => {
 	expect(host.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('Second passage');
 });
 
-it('keeps a stored post\'s draft until it is accepted', async () => {
+it('closes the box once the post is stored', async () => {
 	setup(); await openBox(); await post();
 	handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: 'thread', input_id: 'input-1', message_id: 'input-1', delivery_state: 'queued' }, () => {});
-	await tick(); flushSync();
-	expect(host.querySelector('[role="dialog"] textarea')).toBeNull();
-	expect(chatReplyDrafts.settle('thread', 'input-1', 'accepted')?.text).toBe('Keep my comment');
-});
-
-it('opens a stored comment\'s thread on its failure instead of dropping it', async () => {
-	vi.stubGlobal('crypto', { randomUUID: () => 'posted-comment' });
-	setup(); await openBox(); await post();
-	handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: 'thread', input_id: 'input-1', message_id: 'input-1', delivery_state: 'failed' }, () => {});
 	await tick(); flushSync(); await tick(); flushSync();
 	expect(host.querySelector('[role="dialog"] textarea')).toBeNull();
-	expect(host.querySelector('[data-picked]')?.getAttribute('data-picked')).toBe('posted-comment');
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)).toBeUndefined();
-	// The sending socket never gets the stored row, so the failure its thread shows is written from the draft.
-	expect(get(messages).find(row => row.id === 'input-1')).toMatchObject({ delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'posted-comment', note: 'Keep my comment' }] } } });
+});
+
+it('keeps a comment stored and then failed on its own row, with its text, for its thread', async () => {
+	setWs({ readyState: WebSocket.OPEN, send: () => {} } as unknown as WebSocket);
+	setup(reply => sendMessage('thread', '', undefined, [], undefined, 'apply_now', [reply as never]) ?? undefined);
+	await openBox(); await post();
+	const inputId = get(messages).find(row => row.role === 'user')!.id;
+	handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: 'thread', input_id: inputId, message_id: 'stored-1', delivery_state: 'failed' }, () => {});
+	await tick(); flushSync(); await tick(); flushSync();
+	expect(host.querySelector('[role="dialog"] textarea')).toBeNull();
+	// The server's row is what the comment's thread reads its failure and Retry from.
+	expect(get(messages).find(row => row.id === 'stored-1')).toMatchObject({ delivery_state: 'failed', metadata: { reply_context: { comments: [{ note: 'Keep my comment' }] } } });
 });

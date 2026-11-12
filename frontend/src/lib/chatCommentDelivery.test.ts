@@ -40,11 +40,12 @@ describe('failed comment replies', () => {
 });
 
 describe('pending comment replies', () => {
-	it('shows optimistic and queued replies for the matching comment until they are delivered or fail', () => {
+	it('shows stored, queued replies for the matching comment until they are delivered or fail', () => {
+		// A send the server has not stored yet stays in the box it was typed in.
 		const optimistic = { ...row('optimistic', 'queued'), delivery_state: undefined, _optimistic: true } as Message;
 		const queued = row('queued', 'queued');
 		const rows = [optimistic, queued, row('delivered', 'delivered'), row('failed', 'failed'), row('other', 'queued', 'other')];
-		expect(chatReplyIndex(rows, 'thread').pending(root).map(message => message.id)).toEqual(['optimistic', 'queued']);
+		expect(chatReplyIndex(rows, 'thread').pending(root).map(message => message.id)).toEqual(['queued']);
 		expect(chatReplyIndex(rows, 'elsewhere').pending(root)).toEqual([]);
 	});
 

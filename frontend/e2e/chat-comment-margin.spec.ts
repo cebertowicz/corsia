@@ -2,7 +2,7 @@ import { expect, test } from './support/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses, waitForThreadReply } from './support/mock';
-import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread, settleHighlight } from './support/chatComments';
 import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
 
 
@@ -63,20 +63,7 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
  */
 async function centerAndSettle(page: Page, row: Locator) {
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-	const read = () => row.evaluate((el) => {
-		const anchor = el.querySelector<HTMLElement>('.cm-comment-anchor') ?? el;
-		const box = anchor.getBoundingClientRect();
-		const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
-		const hits = [...anchor.getClientRects()].length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
-		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
-		return clear ? `settled:${Math.round(box.x)},${Math.round(box.y)}` : 'covered';
-	});
-	await expect.poll(async () => {
-		const before = await read();
-		await page.waitForTimeout(80);
-		const after = await read();
-		return before === after ? before : `moved:${before}>${after}`;
-	}, { message: 'the highlighted line stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+,-?\d+$/);
+	await settleHighlight(page, row.locator('.cm-comment-anchor').first());
 }
 
 /**

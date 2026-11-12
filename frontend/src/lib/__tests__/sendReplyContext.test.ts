@@ -6,6 +6,7 @@ import { activeThreadId, messages } from '../stores/threads';
 import { visitDividers } from '../stores/threadUpdateCards';
 import { setWs } from '../ws/state';
 import { sendMessage } from '../ws/send';
+import { suppressibleCommentEnvelopes } from '../chatCommentDelivery';
 
 function rows(threadId: string, ...seqs: number[]) {
 	return seqs.map((seq) => ({ threadId, seq }));
@@ -46,14 +47,15 @@ describe('reply context send payload', () => {
 		expect(sent.at(-1)?.reply_context).toEqual({ comments: [comment], in_view: [[3, 4, 2]], first_unread: { seq: 4, truncated: false } });
 	});
 
-	it('keeps a comment-only send out of the sender\'s transcript', () => {
-		// A comment-only send has no optimistic transcript row.
+	it('keeps a comment-only send\'s row for its delivery, out of the sender\'s transcript', () => {
+		// The row carries the comment and the server's delivery state; the transcript leaves it to the comment's thread.
 		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
 		activeThreadId.set('main');
 		messages.set([]);
 		try {
-			sendMessage('main', '', undefined, undefined, undefined, 'apply_now', [comment]);
-			expect(get(messages)).toEqual([]);
+			const inputId = sendMessage('main', '', undefined, undefined, undefined, 'apply_now', [comment])!;
+			expect(get(messages)).toMatchObject([{ id: inputId, _optimistic: true, metadata: { reply_context: { comments: [comment] } } }]);
+			expect(suppressibleCommentEnvelopes(get(messages), 'main')).toEqual(new Set([inputId]));
 			sendMessage('main', 'plain');
 			expect(get(messages).at(-1)?.metadata).not.toHaveProperty('reply_context');
 		} finally {

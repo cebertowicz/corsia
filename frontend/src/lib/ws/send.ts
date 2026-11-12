@@ -153,8 +153,10 @@ export function sendMessage(
 		created_at: new Date().toISOString(),
 		_optimistic: true,
 	};
-	if (isDisplayedThread(threadId) && (content.trim() || !comments.length || attachments?.length)) {
-		messages.update(rows => [...rows, msg]);
+	// A comment-only send keeps its row too: the server's frames settle its delivery on it, and the
+	// transcript leaves it to the comment's thread.
+	if (isDisplayedThread(threadId)) {
+		messages.update(m => [...m, msg]);
 	}
 	// One queue. A message sent while a checkpoint holds the thread is an
 	// ordinary queued row that the transcript renders like any other; the frame

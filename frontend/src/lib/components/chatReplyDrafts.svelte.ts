@@ -1,40 +1,55 @@
-// Drafts belong to the comment, not the surface showing it: a margin card,
-// popover and drawer can replace one another without losing the typed text.
+// Drafts hold only text the server has not stored. Once it stores a comment or reply, that input's row
+// in the messages store carries its text and delivery state, and the comment's thread shows them.
+// Drafts belong to the comment, not the surface showing it: a margin card, popover and drawer can
+// replace one another without losing the typed text.
 import type { ChatCommentAnchor } from '$lib/chatCommentAnchors';
-type ReplyDraft = { text: string; inputId?: string; error?: string; threadId?: string; targetMessageId?: string; commentId?: string; anchor?: ChatCommentAnchor; seq?: number };
-const replies = $state<Record<string, ReplyDraft>>({});
-/** A root comment's draft. `postedId` is the id the posted comment carries; `queued` means the server stored it and it waits to be accepted. */
-type RootDraft = ReplyDraft & { threadId: string; targetMessageId: string; postedId?: string; queued?: boolean };
-const roots = $state<Record<string, RootDraft>>({});
+type Draft = { text: string; threadId?: string; inputId?: string; error?: string };
+const replies = $state<Record<string, Draft>>({});
+const roots = $state<Record<string, Draft>>({});
 // A root draft belongs to the passage it comments on, so two passages of one message never share text, an error or a pending post.
 const rootKey = (threadId: string, messageId: string, anchor: Pick<ChatCommentAnchor, 'from_off' | 'to_off'>) => JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off]);
 const sendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;
+// The box that posted an input learns here whether the server stored it (true) or refused it (false).
+const waiting = new Map<string, (stored: boolean) => void>();
 
-/** What became of a posted draft's input. A stored input that failed shows its failure and Retry in its thread, so its draft is released. */
-export type DraftOutcome = 'queued' | 'accepted' | 'stored_failed' | { error: string };
+function post(store: Record<string, Draft>, key: string, threadId: string, text: string, inputId: string | null, error: string | undefined, noun: 'comment' | 'reply'): Promise<boolean> {
+	store[key] = { text, threadId, ...(inputId ? { inputId } : { error: error || sendFailure(noun) }) };
+	if (!inputId) return Promise.resolve(false);
+	return new Promise(resolve => waiting.set(inputId, resolve));
+}
+
+function find(threadId: string, inputId: string): { store: Record<string, Draft>; key: string; noun: 'comment' | 'reply' } | null {
+	for (const [store, noun] of [[roots, 'comment'], [replies, 'reply']] as const) {
+		const key = Object.keys(store).find(item => store[item].threadId === threadId && store[item].inputId === inputId);
+		if (key) return { store, key, noun };
+	}
+	return null;
+}
+
+function answer(inputId: string, stored: boolean): void {
+	waiting.get(inputId)?.(stored);
+	waiting.delete(inputId);
+}
 
 export const chatReplyDrafts = {
 	get(commentId: string): string { return replies[commentId]?.text ?? ''; },
-	reply(commentId: string): ReplyDraft | undefined { return replies[commentId]; },
+	reply(commentId: string): Draft | undefined { return replies[commentId]; },
 	set(commentId: string, text: string): void {
 		const prior = replies[commentId];
 		if (text || prior?.inputId) replies[commentId] = { ...prior, text };
 		else delete replies[commentId];
 	},
-	postReply(threadId: string, messageId: string, commentId: string, text: string, inputId: string | null, error?: string): void {
-		replies[commentId] = { text, threadId, targetMessageId: messageId, commentId,
-			...(inputId ? { inputId } : { error: error || sendFailure('reply') }) };
+	postReply(threadId: string, commentId: string, text: string, inputId: string | null, error?: string): void {
+		void post(replies, commentId, threadId, text, inputId, error, 'reply');
 	},
-	/** The draft the composer on this passage shows; a stored comment waiting to be accepted is no longer the composer's. */
-	root(threadId: string, messageId: string, anchor: ChatCommentAnchor): RootDraft | undefined {
-		const draft = roots[rootKey(threadId, messageId, anchor)];
-		return draft?.queued ? undefined : draft;
+	/** The draft the composer on this passage shows. */
+	root(threadId: string, messageId: string, anchor: ChatCommentAnchor): Draft | undefined {
+		return roots[rootKey(threadId, messageId, anchor)];
 	},
 	setRoot(threadId: string, messageId: string, anchor: ChatCommentAnchor, text: string): void {
 		const key = rootKey(threadId, messageId, anchor);
 		const prior = roots[key];
-		if (prior?.queued) return;
-		if (text || prior?.inputId) roots[key] = { ...prior, text, threadId, targetMessageId: messageId, anchor };
+		if (text || prior?.inputId) roots[key] = { ...prior, text, threadId };
 		else delete roots[key];
 	},
 	/** Cancel drops the passage's text and failure; a post on its way keeps its draft until the server answers. */
@@ -42,26 +57,25 @@ export const chatReplyDrafts = {
 		const key = rootKey(threadId, messageId, anchor);
 		if (!roots[key]?.inputId) delete roots[key];
 	},
-	postRoot(threadId: string, messageId: string, text: string, inputId: string | null, anchor: ChatCommentAnchor, seq: number, postedId: string, error?: string): void {
-		roots[rootKey(threadId, messageId, anchor)] = {
-			text, threadId, targetMessageId: messageId, anchor, seq, postedId,
-			...(inputId ? { inputId } : { error: error || sendFailure('comment') }),
-		};
+	/** Resolves true once the server stores the comment, false when the post is refused. */
+	postRoot(threadId: string, messageId: string, anchor: ChatCommentAnchor, text: string, inputId: string | null, error?: string): Promise<boolean> {
+		return post(roots, rootKey(threadId, messageId, anchor), threadId, text, inputId, error, 'comment');
 	},
-	settle(threadId: string, inputId: string, outcome: DraftOutcome): RootDraft | undefined {
-		const entry = Object.entries(roots).find(([, draft]) => draft.threadId === threadId && draft.inputId === inputId);
-		if (entry) {
-			const [key, draft] = entry;
-			if (outcome === 'queued') roots[key] = { ...draft, queued: true };
-			else if (typeof outcome === 'object') roots[key] = { ...draft, inputId: undefined, queued: undefined, error: outcome.error || sendFailure('comment') };
-			else delete roots[key];
-			return draft;
-		}
-		const reply = Object.entries(replies).find(([, draft]) => draft.threadId === threadId && draft.inputId === inputId);
-		if (!reply) return undefined;
-		const [key, draft] = reply;
-		if (typeof outcome === 'object') replies[key] = { ...draft, inputId: undefined, error: outcome.error || sendFailure('reply') };
-		else delete replies[key];
-		return draft as RootDraft;
+	/** The server stored this input, so its row owns the text from here. True when it was a draft's. */
+	release(threadId: string, inputId: string): boolean {
+		const hit = find(threadId, inputId);
+		if (!hit) return false;
+		delete hit.store[hit.key];
+		answer(inputId, true);
+		return true;
+	},
+	/** The server refused this input before storing it: the draft keeps the text and shows the cause, which is returned; null when it was no draft's. */
+	refuse(threadId: string, inputId: string, error: string): string | null {
+		const hit = find(threadId, inputId);
+		if (!hit) return null;
+		const cause = error || sendFailure(hit.noun);
+		hit.store[hit.key] = { ...hit.store[hit.key], inputId: undefined, error: cause };
+		answer(inputId, false);
+		return cause;
 	},
 };

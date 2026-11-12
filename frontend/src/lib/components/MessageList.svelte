@@ -143,10 +143,10 @@
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
-	const placedEnvelopes = $derived(suppressibleCommentEnvelopes($messages, renderedThreadId));
+	const commentEnvelopes = $derived(suppressibleCommentEnvelopes($messages, renderedThreadId));
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
 			buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
-				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placedEnvelopes),
+				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], commentEnvelopes),
 			(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 			{
 				focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
@@ -205,7 +205,7 @@
 			scrollControl.beginProgrammaticScroll.bind(scrollControl), () => landOnFirstRunOpening(messagesEl),
 		);
 	});
-	const pendingDeliveryMessages = $derived(presentation.visibleMessages.filter((msg) => !placedEnvelopes.has(msg.id) && isImminentDelivery(msg, renderedStreaming)));
+	const pendingDeliveryMessages = $derived(presentation.visibleMessages.filter((msg) => !commentEnvelopes.has(msg.id) && isImminentDelivery(msg, renderedStreaming)));
 	// G2: Focus shows your own waiting messages only; a context update that is just waiting is not shown.
 	const pendingEntries = $derived([
 		...(presentation.pendingContextDigest && !focusMode
@@ -310,7 +310,7 @@
 	<!-- Every transcript row, live work included, renders through the body's Focus classification. -->
 		<MessageListBody
 			{transcriptEntries}
-			{placedEnvelopes}
+			{commentEnvelopes}
 			{pendingEntries}
 			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
 			{expandedTools}

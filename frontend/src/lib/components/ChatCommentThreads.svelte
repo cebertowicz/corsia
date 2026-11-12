@@ -26,7 +26,7 @@
 		let error = '';
 		try { inputId = onReply?.(text) ?? null; }
 		catch (failure) { error = refusalText(failure, 'reply'); /* Keep the reply and show the failure in its field. */ }
-		chatReplyDrafts.postReply(threadId, messageId, comment.id, text, inputId, error);
+		chatReplyDrafts.postReply(threadId, comment.id, text, inputId, error);
 	}
 
 	function answerId(answer: ChatComment['answers'][number]): string {

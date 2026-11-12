@@ -230,7 +230,7 @@ export function buildTranscriptPresentation(
 	live: { turnId: string | null } | null = null,
 	openKey = OPEN_RUN_KEY,
 	stubs: readonly RunStub[] = [],
-	placedEnvelopes: ReadonlySet<string> = new Set(),
+	commentEnvelopes: ReadonlySet<string> = new Set(),
 ): TranscriptEntry[] {
 	if (!focusMode) {
 		return visibleMessages.map((message) => messageEntry(
@@ -263,7 +263,7 @@ export function buildTranscriptPresentation(
 	};
 
 	for (const message of visibleMessages) {
-		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id)) continue;
+		if (isAgentOnlyReceipt(message) || commentEnvelopes.has(message.id)) continue;
 		const at = sourceRange(message)?.min ?? message.seq;
 		if (typeof at === 'number' && at > 0) holdThrough(at);
 		if (isHumanMessage(message) || isSystemNotice(message)) {

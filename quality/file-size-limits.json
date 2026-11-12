@@ -46,7 +46,7 @@
     "backend/tools/shell_guard.py": 1174,
     "frontend/src/lib/components/DocumentsView.svelte": 522,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 509,
-    "frontend/src/lib/ws/handlersTurns.ts": 436,
+    "frontend/src/lib/ws/handlersTurns.ts": 434,
     "frontend/src/routes/+page.svelte": 475,
     "frontend/src/routes/_design/+page.svelte": 608
   },

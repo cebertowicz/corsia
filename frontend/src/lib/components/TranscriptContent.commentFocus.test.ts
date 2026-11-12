@@ -22,7 +22,7 @@ it('keeps a placed reply hidden alongside its target', () => {
   const baseline = buildTranscriptPresentation(rows, true);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: baseline, placedEnvelopes: suppressibleCommentEnvelopes(rows, 'thread'), threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: baseline, commentEnvelopes: suppressibleCommentEnvelopes(rows, 'thread'), threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();
@@ -48,7 +48,7 @@ it('shows a comment target when the combined run is expanded', () => {
   const present = buildTranscriptPresentation(rows, true, null, undefined, [], placed);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: present, placedEnvelopes: placed, threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: present, commentEnvelopes: placed, threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();

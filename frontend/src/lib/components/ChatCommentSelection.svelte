@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
-	import { on } from '$lib/ws';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { clipChatSelection, refusalText, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
@@ -36,14 +35,7 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
-	// The passage whose post this box waits on; the box closes only when that passage's post is stored.
-	let awaitingRoot = $state.raw<Pick | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatReplyDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
-	$effect(() => {
-		if (rootDraft?.inputId) awaitingRoot = draft;
-		else if (rootDraft?.error || awaitingRoot !== draft) awaitingRoot = null;
-		else if (awaitingRoot && !rootDraft) { awaitingRoot = null; requestClose(); }
-	});
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -87,7 +79,7 @@
 		return new DOMRect(left, top, right - left, bottom - top);
 	}
 	function close() {
-		pick = null; draft = null; editingId = null; viewing = null; typed = null; awaitingRoot = null;
+		pick = null; draft = null; editingId = null; viewing = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
@@ -248,23 +240,6 @@
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
 		document.addEventListener('selectionchange', readSelection);
-		const stopDraftError = on('chat_comment_draft_error', item => {
-			if (item.threadId !== threadId || !item.targetMessageId) return;
-			const row = messageRoot()?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(item.targetMessageId)}"]`);
-			if (!row) return;
-			const show = () => {
-				if (item.commentId) {
-					if (marginComments && !narrow) selectedCommentId = item.commentId;
-					else viewing = { messageId: item.targetMessageId, commentId: item.commentId };
-				} else if (item.anchor && typeof item.seq === 'number') {
-					draft = { messageId: item.targetMessageId, seq: item.seq, anchor: item.anchor, rect: row.getBoundingClientRect() };
-				}
-			};
-			// This box's own post was stored and failed: the box closes and the comment's thread opens on its failure.
-			if (open && awaitingRoot && item.commentId) requestClose();
-			if (closing) { const finish = afterClose; afterClose = () => { finish?.(); show(); }; }
-			else if (!open && !viewing) show();
-		});
 		const replyClick = (event: Event) => {
 			const { threadId: sourceThread, messageId, commentId, target } = (event as CustomEvent<{ threadId: string; messageId: string; commentId: string; target: HTMLElement }>).detail;
 			const message = $messages.find(item => item.id === messageId && item.thread_id === threadId);
@@ -313,7 +288,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { stopDraftError(); for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);
@@ -335,7 +310,9 @@
 			const id = crypto.randomUUID();
 			try { inputId = onSendReply({ id, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }) ?? null; }
 			catch (failure) { error = refusalText(failure, 'comment'); /* Keep the draft and show the failure in its box. */ }
-			chatReplyDrafts.postRoot(threadId, currentDraft.messageId, note, inputId, currentDraft.anchor, currentDraft.seq, id, error);
+			// The box stays, read-only, until the server stores the comment; then it closes, unless it has moved to another passage.
+			void chatReplyDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, inputId, error)
+				.then(stored => { if (stored && draft === currentDraft) requestClose(); });
 			return;
 		}
 		if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));

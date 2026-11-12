@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import { expect, test, type APIRequestContext, type Page } from './support/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
-import { commentEditor, commentOnMessage } from './support/chatComments';
+import { commentEditor, commentOnMessage, openCommentThread } from './support/chatComments';
 import { capture, framesDirectory, selectPhrase } from './support/chatCommentFrames';
 
 /**
  * A comment's post failing, seen where the person wrote it: refused before it is stored, the box keeps the text and
- * says why, and its one Retry posts it; stored and then failed, the box closes and the comment's own thread shows
- * the failure with its Retry. The socket is routed so each failure lands on the exact post under test.
+ * says why, and its one Retry posts it; stored and then failed, the box closes and the comment's own thread, opened
+ * from its highlight, shows the failure with its Retry. The socket is routed so each failure lands on the exact post under test.
  */
 const backend = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 test.describe.configure({ timeout: 180_000 });
@@ -116,14 +116,13 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(row, 'retried-post');
 
-  // Stored, then failed: the box closes and the comment's own thread opens on its failure and Retry.
+  // Stored, then failed: the box closes, and the comment's own thread, opened from its highlight, holds its failure and Retry.
   fault = { note: 'Fails after queued', kind: 'fail-after-queued' };
   await selectPhrase(page, id, 'Second phrase');
   await commentEditor(page).fill('Fails after queued');
   await box.getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(commentEditor(page)).toHaveCount(0);
-  const failed = page.getByRole('dialog', { name: 'Comment thread' }).or(page.locator('.chat-margin .chat-margin-card.selected'));
-  await expect(failed).toBeVisible();
+  const failed = await openCommentThread(row, page, 'Second phrase');
   await expect(failed.locator('.failed-reply')).toContainText('Comment not delivered');
   await expect(failed.locator('.failed-reply').getByRole('button', { name: 'Retry', exact: true })).toHaveCount(1);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);

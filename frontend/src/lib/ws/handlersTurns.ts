@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
+import { reconcileOptimisticRow } from './reconcileOptimisticRow';
 import {
 	messages,
 	streamContentByThread,
@@ -86,8 +87,6 @@ function admitTerminalFrame(data: any): TurnIdentity | null {
 	return identity;
 }
 
-import { reconcileOptimisticRow } from './reconcileOptimisticRow';
-
 export function handleInputAccepted(data: any): void {
 	const threadId = data?.thread_id;
 	const inputId = data?.input_id;
@@ -98,8 +97,6 @@ export function handleInputAccepted(data: any): void {
 		!threadId || typeof inputId !== 'string' || typeof messageId !== 'string'
 		|| typeof createdAt !== 'string' || !identity
 	) return;
-	const draft = chatReplyDrafts.settle(threadId, inputId, 'accepted');
-	if (draft) data.chat_comment_target_id = draft.targetMessageId;
 	const transition = acceptInput(threadId, inputId, identity);
 	reconcileOptimisticRow(threadId, inputId, messageId, createdAt, {
 		delivery_state: 'delivered',
@@ -111,6 +108,7 @@ export function handleInputAccepted(data: any): void {
 			? { seq: data.seq }
 			: {}),
 	});
+	chatReplyDrafts.release(threadId, inputId);
 	resetPredecessor(threadId, transition);
 	emit('input_accepted', data);
 }

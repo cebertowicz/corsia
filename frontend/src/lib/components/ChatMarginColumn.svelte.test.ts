@@ -40,7 +40,7 @@ function thread() {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
-	chatReplyDrafts.settle('thread', 'test-input', 'accepted');
+	chatReplyDrafts.release('thread', 'test-input');
 	chatReplyDrafts.set('kept', '');
 	chatReplyDrafts.set('lost', '');
 	messages.set([]);
