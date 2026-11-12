@@ -1,7 +1,5 @@
-import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { Autolink, Strikethrough } from '@lezer/markdown';
 import { emitProductEvent } from '$lib/product_events';
 import { cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import {
@@ -15,6 +13,7 @@ import { CELL_THEME } from './widget-cell-theme';
 import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
 import { cellHighlight } from './theme';
+import { INLINE_MARKDOWN } from './widget-cell-markdown';
 
 /**
  * Editing the text of a rendered table cell where it is read.
@@ -22,11 +21,10 @@ import { cellHighlight } from './theme';
  * Clicking a drawn cell opens a small editor over that cell's own `<td>`, holding that cell's content as GFM reads it: its
  * source between its pipes with the table's own `\|` escapes out and its pads trimmed (`widget-cell-row.ts`). Each keystroke
  * writes that content back into the row through the one serializer, `writeCellEdit`, as one transaction of the minimal
- * changes to the row, so the document
- * keeps its single Yjs binding, its single undo manager and its single markdown parse: the nested editor holds no document
- * state of its own and is rewritten from the document whenever the two disagree, which is also how a live edit from
- * another client reaches the cell. Formatting renders while you type because the cell runs the document's own hide-syntax pass, handed
- * to it through `cellEditorExtensions`.
+ * changes to the row, so the document keeps its single Yjs binding, its single undo manager and its single markdown parse:
+ * the nested editor holds no document state of its own and is rewritten from the document whenever the two disagree, which
+ * is also how a live edit from another client reaches the cell. Formatting renders while you type because the cell parses
+ * inline markdown (`widget-cell-markdown.ts`) and runs the document's own hide-syntax pass (`cellEditorExtensions`).
  *
  * The editor sits in `widget-cell-layer.ts`'s layer rather than in the `<td>` itself, because a caret cannot be placed
  * inside the document's own editing host; the cell keeps its live rendered text underneath, unseen, so the row keeps
@@ -36,17 +34,6 @@ import { cellHighlight } from './theme';
 
 /** The extensions a cell's own editor runs over its source. `markdown-live.ts` supplies the document's hide-syntax pass. */
 export const cellEditorExtensions = Facet.define<Extension, readonly Extension[]>({ combine: (values) => values });
-
-/**
- * A cell holds inline content only, as GFM parses a cell: no block construct is parsed, so `-`, `# x`, `---`, `> q` or `1. x`
- * are the literal text the table draws, and no markdown key (Enter continuing a list) outranks the cell's own keys.
- */
-const INLINE_MARKDOWN = markdown({
-	addKeymap: false,
-	extensions: [Strikethrough, Autolink, {
-		remove: ['Blockquote', 'BulletList', 'OrderedList', 'ATXHeading', 'SetextHeading', 'HorizontalRule', 'FencedCode', 'IndentedCode', 'HTMLBlock', 'LinkReference']
-	}]
-});
 
 type Change = { from: number; to: number; insert: string };
 
@@ -262,9 +249,8 @@ class CellEditors {
 			if (changes.length) this.host.dispatch(event ? { changes, userEvent: event } : { changes });
 			else this.syncEditor(this.host.state, cell, editor);
 		}
-		// The reader's place is mirrored after the change, never before it: a caret at the end of a long insertion sits past
-		// the end of the document until the document holds what was typed, and the document refuses a selection there.
-		// Mirrored onto the cell as it stands after the write: a row that gained its leading pipe has moved the cell along.
+		// The reader's place is mirrored after the change, onto the cell as it then stands (a row that gained its leading pipe
+		// moved it along), never before: the document refuses a caret past what it holds yet, as after a long insertion.
 		const now = this.cell;
 		if (now && (update.selectionSet || update.docChanged)) this.mirrorToDocument(now, editor);
 	};
