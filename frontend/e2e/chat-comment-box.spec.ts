@@ -144,6 +144,12 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   // That Retry is the one way back for the comment, so on touch it is a full target.
   const retry = failed.locator('.failed-reply').getByRole('button', { name: 'Retry', exact: true });
   await touch(page);
+  // Measure the settled box: the 1440 popover opens from scale(0.98) (popoverMotion), so mid-open it reads 43.12.
+  await retry.evaluate(element => {
+    const running: Animation[] = [];
+    for (let node: Element | null = element; node; node = node.parentElement) running.push(...node.getAnimations());
+    return Promise.all(running.filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
+  });
   const target = (await retry.boundingBox())!;
   expect(target.height).toBeGreaterThanOrEqual(44);
   expect(target.width).toBeGreaterThanOrEqual(44);
