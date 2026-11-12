@@ -74,6 +74,15 @@ async function postComment(page: Page, row: Locator, messageId: string, quote: s
   await expect(commentEditor(page)).toHaveCount(0);
 }
 
+/**
+ * Open a comment's thread with its highlight scrolled to the middle of the transcript: on a phone a
+ * longer transcript otherwise leaves the highlight under the sticky header, which takes the tap.
+ */
+async function openThread(row: Locator, page: Page, quote: string) {
+  await row.locator('.cm-comment-anchor').filter({ hasText: quote }).evaluate(mark => mark.scrollIntoView({ block: 'center' }));
+  return openCommentThread(row, page, quote);
+}
+
 async function release(request: APIRequestContext, gate: string) {
   expect((await request.post(`${backend}/api/test/mock-gates/${gate}/release`)).ok()).toBeTruthy();
 }
@@ -113,12 +122,12 @@ for (const width of [1440, 900, 393]) test(`direct comment frames ${width}`, asy
   await commentOnMessage(row, 'Selected phrase');
   expect(await newestCid(request, thread)).toBe('c2.1');
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
-  let card = await openCommentThread(row, page, 'Selected phrase');
+  let card = await openThread(row, page, 'Selected phrase');
   await expect(card).toContainText('My direct comment');
   await captureOpenAndClosed(page, card, () => row, `after-post-${width}`);
   await release(request, `only-${width}`);
   await turnFinished(page);
-  card = await openCommentThread(row, page, 'Selected phrase');
+  card = await openThread(row, page, 'Selected phrase');
   await expect(card).toContainText('Answer in the comment.', { timeout: 30000 });
   await expect(messages).not.toContainText('Answer in the comment.');
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
@@ -139,7 +148,7 @@ for (const width of [1440, 900, 393]) test(`direct comment frames ${width}`, asy
   expect(await newestCid(request, thread)).toBe(mixedCid);
   await release(request, `mixed-${width}`);
   await turnFinished(page);
-  card = await openCommentThread(row, page, 'Second phrase');
+  card = await openThread(row, page, 'Second phrase');
   await expect(card).toContainText('Answer next to chat text.', { timeout: 30000 });
   await expect(messages).toContainText('Text for the chat.');
   await expect(messages).not.toContainText('Answer next to chat text.');
@@ -164,7 +173,7 @@ for (const width of [1440, 900, 393]) test(`direct comment frames ${width}`, asy
   await expect(page.locator('.messages .message.user')).toHaveCount(1);
   await expect(bubble.locator('.sent-comment')).toHaveCount(0);
   await expect(bubble).not.toContainText('Comment sent before typed text');
-  card = await openCommentThread(row, page, 'Third phrase');
+  card = await openThread(row, page, 'Third phrase');
   await expect(card).toContainText('Answer to the third comment.', { timeout: 30000 });
   await expect(messages).not.toContainText('Answer to the third comment.');
   await captureOpenAndClosed(page, card, () => bubble, `comment-plus-text-${width}`);
