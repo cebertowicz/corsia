@@ -54,7 +54,7 @@ _ENDS_ASK = {
 ASK_ENDINGS = ask_endings.ASK_ENDINGS
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
-_ASKS_CHANGED = "person_comment_task_reconcile"
+_COMMENT_TASKS = "person_comment_task_reconcile"
 
 
 def askable_sql(alias: str) -> str:
@@ -296,22 +296,22 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
     )
 
 
-def asks_changed(db, artifact_ids) -> None:
+def comment_tasks_changed(db, artifact_ids) -> None:
     """Reconcile each document's comment task once this write commits, once per document.
 
-    An ask opening or ending decides whether the document's comment task exists. In a
+    Called where an input of the task changes: an ask, a suggestion's decision, the owner. In a
     transaction nobody here owns, it reconciles in place and a failure fails that write.
     """
     ids = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
     if not ids:
         return
     try:
-        write_effects.after_commit_merged(db, _ASKS_CHANGED, ids, lambda owed: _reconcile_comment_tasks(db, owed))
+        write_effects.after_commit_merged(db, _COMMENT_TASKS, ids, lambda owed: _reconcile_comment_tasks(db, owed))
     except TransactionOwnershipError:
         from plans import person_comment_task
 
         for artifact_id in ids:
-            with write_transaction(db, scope=_ASKS_CHANGED) as connection:
+            with write_transaction(db, scope=_COMMENT_TASKS) as connection:
                 person_comment_task.reconcile(connection, artifact_id)
 
 
@@ -331,7 +331,7 @@ def hold_cleared(db, hold) -> None:
         )
         if row["provenance"] == PROVENANCE or (ask and row["role"] == "attention" and row["artifact_id"] == hold["owner_id"])
     ]
-    asks_changed(db, documents)
+    comment_tasks_changed(db, documents)
 
 
 def _reconcile_comment_tasks(db, artifact_ids) -> None:
@@ -345,7 +345,7 @@ def _reconcile_comment_tasks(db, artifact_ids) -> None:
     failures = []
     for artifact_id in artifact_ids:
         try:
-            with write_transaction(db, scope=_ASKS_CHANGED) as connection:
+            with write_transaction(db, scope=_COMMENT_TASKS) as connection:
                 person_comment_task.reconcile(connection, artifact_id)
         except Exception as error:
             error.add_note(f"comment task reconcile for document {artifact_id}")

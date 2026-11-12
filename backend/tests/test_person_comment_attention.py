@@ -228,18 +228,161 @@ def test_a_paused_owner_plan_keeps_the_task_until_it_resumes(isolated_db):
         db.close()
 
 
-def test_a_missing_document_closes_its_task(isolated_db):
+@pytest.mark.parametrize('table', ['artifact_registrations', 'artifact_identities'])
+def test_a_document_with_no_owner_row_or_no_identity_closes_its_task(isolated_db, table):
     db = get_db()
     try:
         seed_thread(db, 'owner')
         artifact, _, _ = _waiting_document(db)
         [task] = _open_tasks(db, artifact)
-        with write_transaction(db, scope='test_orphan') as connection:
-            connection.execute('PRAGMA defer_foreign_keys=ON')
-            connection.execute('DELETE FROM artifact_registrations WHERE artifact_id=?', (artifact,))
-            assert person_comment_task.reconcile(connection, artifact) is None
+        seen = []
+        # No code deletes an identity row, so the row is removed and the outcome read before rolling back.
+        with pytest.raises(LookupError):
+            with write_transaction(db, scope='test_orphan') as connection:
+                connection.execute('PRAGMA defer_foreign_keys=ON')
+                connection.execute('DELETE FROM artifact_registrations WHERE artifact_id=?', (artifact,))
+                if table == 'artifact_identities':
+                    connection.execute('DELETE FROM artifact_identities WHERE id=?', (artifact,))
+                assert person_comment_task.reconcile(connection, artifact) is None
+                seen = [_tasks(connection, artifact), _reason(connection, task)]
+                raise LookupError
+        expected = person_comment_task.DELETED if table == 'artifact_identities' else person_comment_task.NO_OWNER
+        assert seen == [[(task, 'closed')], expected]
+    finally:
+        db.close()
+
+
+def _identity(db, artifact):
+    row = db.execute('SELECT integration,type,external_id FROM artifact_identities WHERE id=?', (artifact,)).fetchone()
+    return {'integration': row[0], 'type': row[1], 'external_id': row[2]}
+
+
+def test_a_file_gone_closes_the_task_as_deleted_and_nothing_brings_it_back(isolated_db):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        models.retire(artifact, cause='file_gone', db=db)
         assert _tasks(db, artifact) == [(task, 'closed')]
-        assert _reason(db, task) == 'The document is gone.'
+        assert _reason(db, task) == person_comment_task.DELETED
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        public.comment_tasks_changed(db, [artifact])
+        assert _open_tasks(db, artifact) == []
+    finally:
+        db.close()
+
+
+def test_a_promoted_source_keeps_its_task_and_dismiss_settles_it(isolated_db):
+    from api.doc_comment_thread_views import _check_access
+    from doceditor import comment_thread_views
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        models.retire(artifact, tombstone=True, db=db)
+        public.comment_tasks_changed(db, [artifact])
+        assert _open_tasks(db, artifact) == [task]
+        _check_access(artifact, 'owner-token')
+        comment_thread_views.dismiss_all('owner-token', artifact)
+        assert _tasks(db, artifact) == [(task, 'accepted')]
+    finally:
+        db.close()
+
+
+def test_a_rehome_moves_the_task_to_the_new_owner_in_one_pass(isolated_db):
+    from registry import ownership
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        seed_thread(db, 'next', title='Research')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        ownership.rehome_artifact(**_identity(db, artifact), new_owner_thread_id='next', actor_thread_id=None,
+                                  authority='test', reason='test', source_path='test', db=db)
+        assert _reason(db, task) == person_comment_task.moved('Research')
+        [moved] = _open_tasks(db, artifact)
+        assert moved != task
+        assert db.execute('SELECT p.owner_id FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE n.id=?',
+                          (moved,)).fetchone()[0] == 'next'
+    finally:
+        db.close()
+
+
+def test_a_released_document_closes_its_task_as_ownerless(isolated_db):
+    from registry import ownership
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        ownership.release_artifact(**_identity(db, artifact), actor_thread_id=None, authority='test', reason='test',
+                                   source_path='test', db=db)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.NO_OWNER
+    finally:
+        db.close()
+
+
+def test_an_owner_thread_with_no_person_closes_its_task_as_ownerless(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_no_person') as connection:
+            connection.execute("UPDATE threads SET user_id='' WHERE id='owner'")
+            person_comment_task.reconcile(connection, artifact)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.NO_OWNER
+    finally:
+        db.close()
+
+
+def test_a_person_owned_document_with_no_supervisor_closes_its_task_as_ownerless(isolated_db, monkeypatch):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        monkeypatch.setattr(person_comment_task, '_supervisor', lambda _db, _artifact: None)
+        with write_transaction(db, scope='test_ui_owner') as connection:
+            connection.execute("UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?",
+                               (artifact,))
+            person_comment_task.reconcile(connection, artifact)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.NO_OWNER
+    finally:
+        db.close()
+
+
+def test_reopening_a_rejected_suggestion_brings_the_task_back(isolated_db):
+    from doceditor import comments
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, reply = _waiting_document(db)
+        suggestion, _ = add_comment(db, artifact, author_id='owner', parent_id=root['id'], replacement='better words')
+        with write_transaction(db, scope='test_read_reply') as connection:
+            mark_thread_viewed(connection, 'owner-token', artifact, root['id'], reply['id'])
+        assert person_comment_attention.counts(db, artifact, 'owner-token') == (0, 1)
+        with write_transaction(db, scope='test_reject') as connection:
+            comment_actions.record_decision(suggestion['id'], decision='reject', decided_by='Person',
+                                            decided_by_thread_id=None, db=connection)
+        assert _open_tasks(db, artifact) == []
+        row = db.execute('SELECT * FROM doc_comments WHERE id=?', (suggestion['id'],)).fetchone()
+        with write_transaction(db, scope='test_reopen') as connection:
+            comments.update(suggestion['id'], comment_actions.reopen_fields(dict(row), {'resolved': False}), db=connection)
+        assert person_comment_attention.counts(db, artifact, 'owner-token') == (0, 1)
+        assert len(_open_tasks(db, artifact)) == 1
     finally:
         db.close()
 
@@ -275,11 +418,11 @@ def test_two_asks_put_the_counts_on_the_earliest_only(isolated_db):
         db.close()
 
 
-def test_the_task_coming_and_going_does_not_reenter_asks_changed(isolated_db, monkeypatch):
+def test_the_task_coming_and_going_does_not_reenter_comment_tasks_changed(isolated_db, monkeypatch):
     from plans import user_ask
 
     calls = []
-    monkeypatch.setattr(user_ask, 'asks_changed', lambda db, ids: calls.append(list(ids)))
+    monkeypatch.setattr(user_ask, 'comment_tasks_changed', lambda db, ids: calls.append(list(ids)))
     db = get_db()
     try:
         seed_thread(db, 'owner')
@@ -559,7 +702,7 @@ def test_after_commit_reconcile_raises_every_failure_and_tries_every_document(is
         tried.clear()
         with caplog.at_level(logging.ERROR, logger='infra.write_effects'):
             with write_transaction(db, scope='test_committed') as connection:
-                user_ask.asks_changed(connection, [broken, fine])
+                user_ask.comment_tasks_changed(connection, [broken, fine])
         assert tried == [broken, fine]
         assert any(record.message == 'after-commit effect failed' and isinstance(record.exc_info[1], ExceptionGroup)
                    for record in caplog.records)
@@ -583,7 +726,7 @@ def test_in_place_reconcile_failure_fails_the_callers_write(isolated_db, monkeyp
         try:
             # A transaction nobody here owns: nothing would report its commit, so it reconciles in place.
             with pytest.raises(RuntimeError, match='reconcile broke'):
-                user_ask.asks_changed(db, [artifact])
+                user_ask.comment_tasks_changed(db, [artifact])
         finally:
             db.rollback()
     finally:

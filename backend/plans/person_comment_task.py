@@ -3,8 +3,10 @@
 The task exists only while the person has comments waiting on a document and no open review
 of that document carries them. ``reconcile`` is the one owner of that rule: it never creates
 the task while an ask covers it, closes it when one opens, and creates it again when the last
-one ends with comments still waiting. It runs after the asks on a document change
-(``user_ask.asks_changed``) and when the document owner's plan resumes.
+one ends with comments still waiting. It sits in the plan of the document's current owner, and
+moves when that owner changes. It runs where an input changes (``user_ask.comment_tasks_changed``),
+when the owner's plan resumes, and closes as deleted when the document's file is gone
+(``registry.models.retire``).
 """
 
 import json
@@ -16,11 +18,18 @@ from infra.config import WORKSPACE
 from plans import artifact_links, node_states, notifications, review_evidence, review_requests, service, user_ask
 from plans.feedback_items import artifact_name
 from registry import models as registry_models
+from registry.identity_bridge import OWNER_REGISTRATION_STATES
 from registry.shared_principals import document_scope
 
 PROVENANCE = 'document.person_comment_task'
-# Past tense: the reason stays on the closed node after the review ends, so it must stay true.
-COVERED = 'A review of this document took over these comments.'
+# Close reasons, one per cause; each stays true on the closed node.
+COVERED = "Covered by this document's review."
+DELETED = 'This document is deleted.'
+NO_OWNER = 'This document has no owner.'
+
+
+def moved(owner_title: str) -> str:
+    return f'This document belongs to {owner_title}.'
 
 
 def _supervisor(db, artifact: dict) -> str | None:
@@ -31,12 +40,14 @@ def _supervisor(db, artifact: dict) -> str | None:
     return document_scope(path, workspace=WORKSPACE, db=db)[1]
 
 
-def _owner_and_person(db, artifact: dict) -> tuple[str | None, str | None]:
+def _owner(db, artifact: dict | None):
+    """The current owner's thread row (the supervisor's for a person-owned document); none once released."""
+    if not artifact or artifact.get('relationship_state') not in OWNER_REGISTRATION_STATES:
+        return None
     owner = artifact.get('parent_thread_id')
     if owner == 'ui':
         owner = _supervisor(db, artifact)
-    row = db.execute('SELECT user_id FROM threads WHERE id=?', (owner,)).fetchone() if owner else None
-    return (str(owner) if owner else None, str(row['user_id']) if row and row['user_id'] else None)
+    return db.execute('SELECT id, user_id, title FROM threads WHERE id=?', (owner,)).fetchone() if owner else None
 
 
 def covering_asks(db, artifact_ids, user_id: str) -> dict[str, list[str]]:
@@ -83,22 +94,31 @@ def comment_tasks(db, node_ids) -> dict[str, str]:
     return {str(row['node_id']): str(row['artifact_id']) for row in rows}
 
 
-def _open_task(db, artifact_id: str) -> str | None:
+def _open_task(db, artifact_id: str) -> tuple[str | None, str | None]:
+    """The document's open task, in any plan, with the thread whose plan holds it."""
     row = db.execute(
-        f"""SELECT n.id FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id=l.node_id
+        f"""SELECT n.id, p.owner_id FROM plan_node_artifact_links l
+             JOIN plan_nodes n ON n.id=l.node_id JOIN plans p ON p.id=n.plan_id
             WHERE l.artifact_id=? AND l.provenance=? AND {node_states.open_sql('n')}
             ORDER BY l.created_at DESC LIMIT 1""",
         (artifact_id, PROVENANCE),
     ).fetchone()
-    return str(row['id']) if row else None
+    return (str(row['id']), str(row['owner_id'])) if row else (None, None)
 
 
-def _close(db, node_id: str, reason: str) -> None:
+def _close(db, node_id: str, reason: str) -> bool:
     """Close the task without deciding or reading anything; a paused plan or held task stays."""
     if review_evidence.stop_reason(db, service._node_row(db, node_id)) is not None:
-        return
+        return False
     review_requests.close_review_node(db, node_id, reason=reason, provenance=PROVENANCE)
+    return True
+
+
+def document_deleted(db, artifact_id: str) -> None:
+    """Its file is gone: close the open task. An ended document never gets a new one (``reconcile``)."""
+    node_id, _ = _open_task(db, artifact_id)
+    if node_id:
+        _close(db, node_id, DELETED)
 
 
 def _create(db, artifact_id: str, artifact: dict, owner: str) -> str:
@@ -116,15 +136,20 @@ def _create(db, artifact_id: str, artifact: dict, owner: str) -> str:
 
 
 def reconcile(db, artifact_id: str) -> str | None:
-    """Create, keep or end the one system-owned task against the live document and its asks."""
-    node_id = _open_task(db, artifact_id)
-    artifact = registry_models.get_artifact(artifact_id, db=db)
-    owner, user_id = _owner_and_person(db, artifact) if artifact else (None, None)
-    if not owner or not user_id:
+    """Create, keep, move or end the one system-owned task against the live document and its asks."""
+    node_id, holder = _open_task(db, artifact_id)
+    state = registry_models.identity_state(artifact_id, db=db)
+    if state is None:
         if node_id:
-            _close(db, node_id, 'The document is gone.' if not artifact
-                   else 'The document has no owner or person to carry this task.')
+            _close(db, node_id, DELETED)
         return None
+    artifact = registry_models.get_artifact(artifact_id, db=db)
+    owner = _owner(db, artifact)
+    if not owner or not owner['user_id']:
+        if node_id:
+            _close(db, node_id, NO_OWNER)
+        return None
+    owner_id, user_id = str(owner['id']), str(owner['user_id'])
     count = sum(person_comment_attention.counts(db, artifact_id, user_id))
     if not count:
         if node_id:
@@ -134,11 +159,16 @@ def reconcile(db, artifact_id: str) -> str | None:
                 stopped_note='{evidence}', stopped_event='person_comment_attention_cleared_while_stopped',
             )
         return None
+    if state != 'active':
+        # Retired without its file gone (a promoted source): the comments stay reachable only here.
+        return node_id
+    if node_id and holder != owner_id and _close(db, node_id, moved(owner['title'] or 'another agent')):
+        node_id = None
     if is_covered(db, artifact_id, user_id):
         if node_id:
             _close(db, node_id, COVERED)
         return None
-    return node_id or _create(db, artifact_id, artifact, owner)
+    return node_id or _create(db, artifact_id, artifact, owner_id)
 
 
 def plan_resumed(db, plan_id: str) -> None:
@@ -149,4 +179,4 @@ def plan_resumed(db, plan_id: str) -> None:
             WHERE n.plan_id=? AND l.provenance=? AND {node_states.open_sql('n')}""",
         (plan_id, PROVENANCE),
     ).fetchall()
-    user_ask.asks_changed(db, [str(row['artifact_id']) for row in rows])
+    user_ask.comment_tasks_changed(db, [str(row['artifact_id']) for row in rows])

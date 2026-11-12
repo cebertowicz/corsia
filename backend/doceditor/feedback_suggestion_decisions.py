@@ -82,10 +82,6 @@ def record_suggestion_decisions(
     """Tell a suggestion's agent author about one decision with a passive note."""
     if decision not in {"accepted", "rejected"}:
         raise ValueError("suggestion decision must be 'accepted' or 'rejected'")
-    from plans.public import reconcile_person_comment_task
-
-    for artifact_id in {str(comment['artifact_id']) for comment in comments}:
-        reconcile_person_comment_task(db, artifact_id)
     agent_suggestions = [
         comment for comment in comments
         if comment.get("replacement") is not None

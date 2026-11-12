@@ -152,7 +152,7 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
                 common["db"], params["node_id"], ask,
                 actor_id=common["actor_id"], provenance=common["provenance"],
             )
-            user_ask.asks_changed(common["db"], [ask])
+            user_ask.comment_tasks_changed(common["db"], [ask])
         return None
     scheduled_wait.require_event(params)
     return watch_operations.arm_write(plan_id, params, actor, common["db"])

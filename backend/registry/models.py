@@ -95,6 +95,12 @@ def get_artifact(artifact_id: str, db=None) -> dict | None:
             _db.close()
 
 
+def identity_state(artifact_id: str, *, db) -> str | None:
+    """The identity's own lifecycle state, whoever owns it; ``None`` only when no such identity exists."""
+    row = db.execute("SELECT state FROM artifact_identities WHERE id=?", (artifact_id,)).fetchone()
+    return row["state"] if row else None
+
+
 def find_identity_by_external_ids(
     integration: str,
     type: str,
@@ -208,9 +214,14 @@ def retire(
     artifact_id: str,
     *,
     tombstone: bool = False,
+    cause: str | None = None,
     db=None,
 ) -> None:
-    """Retire an artifact as archived or tombstoned."""
+    """Retire an artifact as archived or tombstoned.
+
+    ``cause="file_gone"``: its file left the disk, so its person's comment task closes as deleted. Other
+    retirements (a promoted source, an ended session) leave that task open: its comments stay there.
+    """
     with write_transaction(db, scope="retire_artifact") as _db:
         row = _db.execute(
             "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
@@ -240,6 +251,8 @@ def retire(
                      ('owner-pinned', 'owner-active', 'subscriber-parent-chain')""",
             (passive_state, now, artifact_id),
         )
+        if cause == "file_gone":
+            plans_public.close_deleted_comment_task(_db, artifact_id)
 
 
 def retire_owned_temporary(
@@ -285,7 +298,7 @@ def retire_missing_temporary_candidates(candidates: list[dict], *, db) -> list[s
                 (artifact_id, *_OWNER_REGISTRATION_STATES),
             ).fetchall()
             if any(dict(row) == candidate for row in current):
-                retire(artifact_id, tombstone=True, db=db)
+                retire(artifact_id, tombstone=True, cause="file_gone", db=db)
                 retired.add(artifact_id)
     return sorted(retired)
 

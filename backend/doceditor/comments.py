@@ -305,6 +305,9 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         if fields.get("resolved") or fields.get("decision"):
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+        if "decision" in fields:  # deciding or re-opening a suggestion moves the person's count
+            from plans.public import comment_tasks_changed
+            comment_tasks_changed(connection, [row["artifact_id"]])
         comment_recipients.tags_for_comments(connection, [row])
         comment_acks.attach(connection, [row])
         if "region_x" in fields:

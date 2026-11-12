@@ -107,6 +107,7 @@ from plans.user_ask import (
     ask_attention_state_sql,
     ask_linked_sql,
     cleared as ask_cleared,
+    comment_tasks_changed,
     defer_asks,
     open_ask_artifacts,
     open_asks_sql,
@@ -225,7 +226,8 @@ from plans.user_step_instructions import read_for_artifact as person_step_instru
 from plans.feedback_items import feedback_display, feedback_item_counts, load_feedback_items
 from plans.feedback_nodes import create_feedback_node, create_review_node, settle_feedback_node
 from plans.person_comment_task import (
-    PROVENANCE as PERSON_COMMENT_TASK, comment_tasks, covering_asks, reconcile as reconcile_person_comment_task,
+    PROVENANCE as PERSON_COMMENT_TASK, comment_tasks, covering_asks, document_deleted as close_deleted_comment_task,
+    reconcile as reconcile_person_comment_task,
 )
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,
