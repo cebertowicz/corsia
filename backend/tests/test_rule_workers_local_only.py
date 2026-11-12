@@ -245,3 +245,38 @@ async def test_cloud_off_owner_cloud_model_is_refused_with_repair(world, monkeyp
     assert [kind for kind, _ in worker_events()] == ["worker.no_result"]
     assert not get_db().execute("SELECT 1 FROM threads WHERE spawned_by=?", (OWNER,)).fetchone()
     sent.assert_not_awaited()
+
+
+def _harness_row(monkeypatch, *, sibling: str, runnable: str):
+    """A harness row whose selected account is usage-limited, read by the catalog's own predicate."""
+    row = {"id": LOCAL, "litellm_model": LOCAL, "display_name": "Local Qwen", "is_local": False,
+           "status": "unavailable", "runnable": {"status": runnable, "status_reason": None},
+           "runs_on": [{"account_id": "a", "selected": True, "status": "unavailable",
+                        "status_reason": "usage_limited"},
+                       {"account_id": "b", "selected": False, "status": sibling, "status_reason": None}]}
+    monkeypatch.setattr("llm.model_status.scoped_status_rows", lambda **_: [row])
+    # The selected account's own status, as ``effective_status`` reads it.
+    monkeypatch.setattr("llm.account_catalog.effective_status",
+                        lambda row: (row["runs_on"][0]["status"], row["runs_on"][0]["status_reason"]))
+
+
+@pytest.mark.asyncio
+async def test_usage_limited_selected_account_with_ready_sibling_still_starts(local_model, monkeypatch):
+    from automation import worker_runner
+    _harness_row(monkeypatch, sibling="ready", runnable="ready")
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 1
+    assert starts(rule)[0][0] == "started"
+
+
+@pytest.mark.asyncio
+async def test_usage_limited_selected_account_without_ready_sibling_is_refused(local_model, monkeypatch):
+    from automation import worker_runner
+    _harness_row(monkeypatch, sibling="unavailable", runnable="unavailable")
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    outcome, reason, _, worker = starts(rule)[0]
+    assert outcome == "refused" and worker is None
+    assert reason == "your model Local Qwen can't run now. Choose a model that is ready for this chat."
