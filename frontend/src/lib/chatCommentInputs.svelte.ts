@@ -48,12 +48,14 @@ function settle(inputId: string, refusal: string | null): void {
 function storedRow(frame: any, deliveryState: string): void {
 	const inputId = frame?.input_id;
 	if (typeof inputId !== 'string') return;
-	const prior = stored.find(row => row.metadata?.input_id === inputId);
+	// The server's copy may have reached this store first (a page load), under its message id and without the input id.
+	const prior = stored.find(row => row.metadata?.input_id === inputId || (!!frame.message_id && row.id === frame.message_id));
 	if (!prior || frame.thread_id !== prior.thread_id) return;
 	absorb([{
 		...prior,
 		...(typeof frame.message_id === 'string' && frame.message_id ? { id: frame.message_id } : {}),
 		...(typeof frame.created_at === 'string' && !prior.delivery_state ? { created_at: frame.created_at } : {}),
+		metadata: { ...prior.metadata, input_id: inputId },
 		delivery_state: deliveryState as Message['delivery_state'],
 		delivery_error: deliveryState === 'queued' || deliveryState === 'delivered' ? null
 			: typeof frame.delivery_error === 'string' && frame.delivery_error ? frame.delivery_error : plainErrorText(frame.message, 'Not delivered'),
