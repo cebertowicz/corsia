@@ -24,7 +24,7 @@ def mark_viewed(user_id: str, artifact_id: str, root_id: str, seen_reply_id: str
             from plans.public import reconcile_person_comment_task
 
             reconcile_person_comment_task(connection, artifact_id)
-            comment_notifications.announce_after_commit(connection, artifact_id, unread_attention_changed=True)
+            comment_notifications.announce_after_commit(connection, artifact_id)
         return remaining
     finally:
         db.close()
@@ -40,6 +40,6 @@ def dismiss_all(user_id: str, artifact_id: str) -> None:
         with write_transaction(db, scope="dismiss_doc_comment_attention") as connection:
             person_comment_attention.dismiss(connection, artifact_id, user_id)
             reconcile_person_comment_task(connection, artifact_id)
-            comment_notifications.announce_after_commit(connection, artifact_id, unread_attention_changed=True)
+            comment_notifications.announce_after_commit(connection, artifact_id)
     finally:
         db.close()

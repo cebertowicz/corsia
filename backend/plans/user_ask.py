@@ -303,7 +303,8 @@ def asks_changed(db, artifact_ids) -> None:
 
     An ask opening or ending on a document decides whether the person's comment task on
     it exists (``person_comment_task.reconcile``). A write inside a transaction nobody
-    here owns has no commit to wait for, so it reconciles in place, under that lock.
+    here owns has no commit to wait for, so it reconciles in place, under that lock, and
+    a failed reconcile fails that write.
     """
     ids = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
     if not ids:
@@ -311,27 +312,50 @@ def asks_changed(db, artifact_ids) -> None:
     try:
         write_effects.after_commit_merged(db, _ASKS_CHANGED, ids, lambda owed: _reconcile_comment_tasks(db, owed))
     except TransactionOwnershipError:
-        _reconcile_comment_tasks(db, ids)
+        from plans import person_comment_task
+
+        for artifact_id in ids:
+            with write_transaction(db, scope=_ASKS_CHANGED) as connection:
+                person_comment_task.reconcile(connection, artifact_id)
 
 
 def hold_cleared(db, hold) -> None:
-    """After ``holds.clear_write``: an ended ask on a document may bring its comment task back."""
-    if hold["kind"] == "blocked" and hold["owner_kind"] == "user" and hold["owner_id"] and db.execute(
-        "SELECT 1 FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=? AND role='attention'",
-        (hold["node_id"], hold["owner_id"]),
-    ).fetchone():
-        asks_changed(db, [hold["owner_id"]])
+    """After ``holds.clear_write``, the one path that ends a hold: reconcile what it may have changed.
+
+    An ended ask on a document may bring its comment task back. Any hold ending on a comment task
+    itself (a pause, a block, a watch) may let a close it was spared while held go through now.
+    """
+    from plans.person_comment_task import PROVENANCE
+
+    ask = hold["kind"] == "blocked" and hold["owner_kind"] == "user" and hold["owner_id"]
+    documents = [
+        row["artifact_id"]
+        for row in db.execute(
+            "SELECT artifact_id,role,provenance FROM plan_node_artifact_links WHERE node_id=?", (hold["node_id"],),
+        )
+        if row["provenance"] == PROVENANCE or (ask and row["role"] == "attention" and row["artifact_id"] == hold["owner_id"])
+    ]
+    asks_changed(db, documents)
 
 
 def _reconcile_comment_tasks(db, artifact_ids) -> None:
+    """After commit, reconcile each document in its own write; one failure never skips the rest.
+
+    The failures are raised together once every document has had its turn, so they reach the
+    after-commit failure path (``write_effects.run``) like any other committed effect's.
+    """
     from plans import person_comment_task
 
+    failures = []
     for artifact_id in artifact_ids:
         try:
             with write_transaction(db, scope=_ASKS_CHANGED) as connection:
                 person_comment_task.reconcile(connection, artifact_id)
-        except Exception:
-            log.exception("comment task reconcile failed for document %s", artifact_id)
+        except Exception as error:
+            error.add_note(f"comment task reconcile for document {artifact_id}")
+            failures.append(error)
+    if failures:
+        raise ExceptionGroup("comment task reconcile failed", failures)
 
 
 def withdraw_node_asks(

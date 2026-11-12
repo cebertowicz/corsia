@@ -12,9 +12,8 @@ _DIRECTED = f"""FROM doc_comments item
             WHERE item.artifact_id IN (SELECT value FROM json_each(?))
               AND {feedback_state.directed_sql('item')}"""
 
-# Past the thread's read watermark (time, then id).
-_UNREAD = """AND (item.created_at>COALESCE(view.seen_at,'')
-                   OR (item.created_at=COALESCE(view.seen_at,'') AND item.id>COALESCE(view.seen_reply_id,'')))"""
+# Past the thread's read watermark: the one definition ``unread_comment_rows`` uses.
+_UNREAD = f"AND {feedback_state.past_watermark_sql('item', 'view')}"
 
 
 def _params(artifact_ids, user_id: str) -> tuple:
@@ -39,12 +38,12 @@ def counts(db, artifact_id: str, user_id: str) -> tuple[int, int]:
 
 
 def dismiss(db, artifact_id: str, user_id: str) -> None:
-    """Mark directed items read without deciding suggestions."""
+    """Mark directed items read without deciding suggestions: one read, then one stamp per thread."""
     latest = {}
     for row in db.execute(
-        f"SELECT item.id, item.parent_id {_DIRECTED} ORDER BY item.created_at, item.id",
+        f"SELECT item.id, item.parent_id, item.created_at {_DIRECTED} {_UNREAD} ORDER BY item.created_at, item.id",
         _params([artifact_id], user_id),
     ).fetchall():
-        latest[row['parent_id'] or row['id']] = row['id']
-    for root_id, item_id in latest.items():
-        feedback_state.mark_thread_viewed(db, user_id, artifact_id, root_id, item_id)
+        latest[row['parent_id'] or row['id']] = (row['created_at'], row['id'])
+    for root_id, (seen_at, item_id) in latest.items():
+        feedback_state.stamp_thread_view(db, user_id, root_id, seen_at, item_id)

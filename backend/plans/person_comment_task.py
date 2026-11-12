@@ -19,7 +19,8 @@ from registry import models as registry_models
 from registry.shared_principals import document_scope
 
 PROVENANCE = 'document.person_comment_task'
-COVERED = 'An open review of this document now carries these comments.'
+# Past tense: the reason stays on the closed node after the review ends, so it must stay true.
+COVERED = 'A review of this document took over these comments.'
 
 
 def _supervisor(db, artifact: dict) -> str | None:
@@ -107,7 +108,7 @@ def _create(db, artifact_id: str, artifact: dict, owner: str) -> str:
     node = service.add_node(
         plan.id, kind='task', title=title, acceptance_criteria='Read the comments and decide the suggestions.',
         description='Open the document to read its comments and decide its suggestions.',
-        assignee='user', actor_id=None, provenance=PROVENANCE, db=db,
+        assignee='user', actor_id=None, provenance=PROVENANCE, db=db, announce=False,
     )
     artifact_links.link(node.id, artifact_id, 'input', actor_id=None, provenance=PROVENANCE, db=db)
     write_effects.after_commit(db, lambda: notifications.notify_after_commit((plan.id,), db=db))

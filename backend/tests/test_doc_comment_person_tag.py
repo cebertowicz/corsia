@@ -198,26 +198,11 @@ async def test_a_person_tag_never_becomes_an_agent_recipient(integration_client,
 
 
 @pytest.mark.asyncio
-async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them_and_reloads_the_surface(
-    integration_client, doc, _registrable_roots, monkeypatch,
+async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them(
+    integration_client, doc, _registrable_roots,
 ):
-    """The tag beats the noise rules in both places that apply them, not just in the unread read.
-
-    ``unread_comment_rows`` makes a person-tagged suggestion or review note eligible, and
-    ``may_change_unread_attention`` has to say so too: the comment surface reloads on that hint
-    alone, so a tag that only reached the SQL would stay invisible until something else refreshed.
-    """
-    from doceditor import comment_notifications
+    """``unread_comment_rows`` makes a person-tagged suggestion or review note eligible."""
     from tools.documents import DocCommentCreateTool
-
-    hints: list[bool] = []
-    announce = comment_notifications.announce_after_commit
-
-    def record(connection, artifact_id, **kwargs):
-        hints.append(bool(kwargs.get("unread_attention_changed")))
-        return announce(connection, artifact_id, **kwargs)
-
-    monkeypatch.setattr(comment_notifications, "announce_after_commit", record)
 
     writer = _mk_thread(integration_client, _OWNER, title="Writer")
     suggestion = json.loads(await DocCommentCreateTool().execute(
@@ -232,7 +217,6 @@ async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them_and_relo
     threads = _listed(integration_client, suggestion["artifact_id"])
     assert threads[suggestion["id"]]["new_comment"] is True
     assert threads[note["id"]]["new_comment"] is True
-    assert hints == [True, True]
 
 
 @pytest.mark.asyncio

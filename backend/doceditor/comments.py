@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -257,10 +257,7 @@ def create_with_status(
             if announce:
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
-                    author_thread_id=author_thread_id if named else None,
-                    # unread_attention_changed includes eligible new top-level comments.
-                    unread_attention_changed=feedback_state.may_change_unread_attention(
-                        author_kind, parent_id, replacement, review, tags_person=tagged_user_id is not None))
+                    author_thread_id=author_thread_id if named else None)
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
@@ -312,10 +309,7 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         comment_acks.attach(connection, [row])
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
-        comment_notifications.announce_after_commit(
-            connection, row["artifact_id"],
-            unread_attention_changed="resolved" in fields and row["parent_id"] is None,
-        )
+        comment_notifications.announce_after_commit(connection, row["artifact_id"])
         return row
 
 

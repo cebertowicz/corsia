@@ -214,18 +214,19 @@ def directed_sql(alias: str) -> str:
                            WHERE author.id={alias}.author_thread_id AND author.user_id=?))"""
 
 
-def may_change_unread_attention(
-    author_kind: str, parent_id: str | None, replacement: str | None, review: bool, *, tags_person: bool = False,
-) -> bool:
-    """Coarse reload hint: deliberately omits the earlier person-comment condition.
+def past_watermark_sql(item: str, view: str) -> str:
+    """SQL predicate: the item is past its thread's read watermark, ordered by creation time and id.
 
-    A tag of the person is the one exception to the noise rules it mirrors: it makes even a
-    suggestion or a review note need them, so the surface reloads for it (``_eligible_top_level``).
+    ``view`` is a LEFT-joined ``doc_comment_thread_views`` row; a thread never viewed has seen nothing.
+    Aliases are internal SQL identifiers.
     """
-    return author_kind == 'agent' and (tags_person or bool(parent_id or (replacement is None and not review)))
+    return f"""({item}.created_at>COALESCE({view}.seen_at, '')
+                 OR ({view}.seen_at IS NOT NULL
+                     AND {item}.created_at={view}.seen_at
+                     AND {item}.id>{view}.seen_reply_id))"""
 
 
-def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
+def unread_comment_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
     """The one definition of unread rows for replies and eligible top-level comments.
 
     Both use the same per-thread watermark, ordered by creation time and id. A tag of the
@@ -235,7 +236,6 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
     sql = f"""FROM doc_comments item
-           {"JOIN threads thread ON thread.id=item.author_thread_id" if include_author_thread else ""}
            JOIN doc_comments root ON root.id=COALESCE(item.parent_id, item.id)
            LEFT JOIN (
                SELECT DISTINCT parent_id FROM doc_comments
@@ -250,14 +250,7 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
                    AND (root.author_kind='user' OR touched.parent_id IS NOT NULL OR {_person_tagged('item')}))
                   OR ({_eligible_top_level('item')})
                   OR {directed_sql('item')})
-             AND (
-                 item.created_at>COALESCE(thread_view.seen_at, '')
-                 OR (
-                     thread_view.seen_at IS NOT NULL
-                     AND item.created_at=thread_view.seen_at
-                     AND item.id>thread_view.seen_reply_id
-                 )
-             )"""
+             AND {past_watermark_sql('item', 'thread_view')}"""
     # Text order: touched, thread_view, the scope, the two person-tag tests, then the directed set.
     directed = (USER_AUTHOR_ID, user_id)
     return sql, ((artifact_id, user_id, artifact_id, artifact_id, user_id, user_id, *directed) if scoped
@@ -296,6 +289,20 @@ def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[
         thread["new_reply_ids"] = [item for item in unread if item != thread["id"]]
 
 
+def stamp_thread_view(db, user_id: str, root_id: str, seen_at: str, seen_item_id: str) -> None:
+    """Move one thread's read watermark forward to an item the caller has checked; never back."""
+    db.execute(
+        """INSERT INTO doc_comment_thread_views(user_id,root_id,seen_at,seen_reply_id)
+           VALUES (?,?,?,?)
+           ON CONFLICT(user_id,root_id) DO UPDATE SET
+             seen_at=excluded.seen_at, seen_reply_id=excluded.seen_reply_id
+           WHERE excluded.seen_at>doc_comment_thread_views.seen_at
+              OR (excluded.seen_at=doc_comment_thread_views.seen_at
+                  AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
+        (user_id, root_id, seen_at, seen_item_id),
+    )
+
+
 def mark_thread_viewed(
     db, user_id: str, artifact_id: str, root_id: str, seen_item_id: str,
 ) -> list[str]:
@@ -316,16 +323,7 @@ def mark_thread_viewed(
     ).fetchone()
     if item is None:
         raise ValueError("reply_not_found")
-    db.execute(
-        """INSERT INTO doc_comment_thread_views(user_id,root_id,seen_at,seen_reply_id)
-           VALUES (?,?,?,?)
-           ON CONFLICT(user_id,root_id) DO UPDATE SET
-             seen_at=excluded.seen_at, seen_reply_id=excluded.seen_reply_id
-           WHERE excluded.seen_at>doc_comment_thread_views.seen_at
-              OR (excluded.seen_at=doc_comment_thread_views.seen_at
-                  AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
-        (user_id, root_id, item["created_at"], item["id"]),
-    )
+    stamp_thread_view(db, user_id, root_id, item["created_at"], item["id"])
     return [item_id for waiting_root, item_id in _unread_items(db, user_id, artifact_id)
             if waiting_root == root_id and item_id != root_id]
 

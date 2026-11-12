@@ -27,7 +27,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
-from doceditor import reply_attention, review_bar
+from doceditor import review_bar
 from plans import public
 from registry import artifact_record as AR
 from registry import attention
@@ -190,14 +190,6 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
-def _unread_items_for(user_id: str) -> list[dict]:
-    db = get_db()
-    try:
-        return reply_attention.unread_items(db, user_id)
-    finally:
-        db.close()
-
-
 # ── Lists ────────────────────────────────────────────────────────────────────
 
 # GETs authenticate via the shared require_user seam (Bearer header OR query) so
@@ -221,12 +213,10 @@ async def get_queue(user: dict = Depends(require_user)):
     always `items[0]`.
     """
     rows = await run_in_db(lambda: _queue_for(user["id"]))
-    unread_items = await run_in_db(lambda: _unread_items_for(user["id"]))
     return {
         "current": rows[0] if rows else None,
         "count": len(rows),
         "items": rows[:QUEUE_ITEMS_CAP],
-        **({"reply_items": unread_items} if unread_items else {}),
     }
 
 

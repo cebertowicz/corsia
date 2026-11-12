@@ -848,43 +848,6 @@ for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		const size = { width, height: width === 393 ? 852 : 900 };
 
-		test(`${TAG} ${theme} ${width}px: J3 arriving from the chat's control lands on the first reply; closing the list leaves the document's control for the rest`, async ({ page, request }, testInfo) => {
-			test.setTimeout(90_000);
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize(size);
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const doc = await seedTextDocument(page, request, threadId, `j3-${theme}-${width}`, 'launch-plan.md', [2, 6, 10]);
-			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'chat');
-			await openThread(page, threadTitle);
-			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-			// The chat's notice names the document; the document's own control, drawn once it opens, does not.
-			const chatChip = page.locator('.reply-chip-notice').filter({ hasText: 'launch-plan.md' }).getByRole('button');
-			await expect(chatChip).toContainText('3 new replies · launch-plan.md');
-			await expect(chatComposer(page)).toBeVisible();
-
-			await holdDwell(page, true);
-			await chatChip.click();
-			await expect(page.locator(`[data-comment-id="${doc.roots[2]}"]`)).toHaveClass(/focused/);
-			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-
-			await holdDwell(page, false);
-			// The first reply is read after its dwell. Put the comments list away: the document's control is back, counting the other two.
-			await awaitFocusedRead(page);
-			await closeComments(page);
-			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
-			await expectControl(page, '2 new');
-
-		});
-	}
-}
-
-for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
-		const size = { width, height: width === 393 ? 852 : 900 };
-
 		test(`${TAG} ${theme} ${width}px: States: one reply, twelve replies, a long document name, and all read`, async ({ page, request }, testInfo) => {
 			test.setTimeout(120_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');

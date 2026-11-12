@@ -67,11 +67,6 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		'    feedback_batches.record_comment(connection, row, created=created, delivery_policy=feedback_batches.IMMEDIATE)',
 		'db.close()',
 	].join('\n'), artifactId, threadId, secondArtifactId, unreadThreadId], { cwd: repo, env: { ...process.env, PYTHONPATH: 'backend:backend/tests', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
-	const queueResponse = await request.get(`/api/attention/queue?${query}`);
-	expect(queueResponse.ok(), await queueResponse.text()).toBeTruthy();
-	const queue = await queueResponse.json();
-	const replyDocuments = new Set((queue.reply_items ?? []).filter((item: { detail: { source: { thread_id: string } } }) => item.detail.source.thread_id === threadId).map((item: { detail: { destination: { id: string } } }) => item.detail.destination.id));
-	expect(replyDocuments.size).toBe(2);
 	await openAppPastLanding(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	const sidebar = sidebarThread(page, title);
@@ -180,7 +175,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const fileTaskClosed = async () => {
 		await expect(fileRows.locator('.count-text')).toHaveCount(0);
 		const node = await (await request.get(`/api/plans/${planId}/nodes/${fileTask.id}`, { headers: auth })).json();
-		expect([node.state, node.status_reason]).toEqual(['closed', 'An open review of this document now carries these comments.']);
+		expect([node.state, node.status_reason]).toEqual(['closed', 'A review of this document took over these comments.']);
 	};
 	await fileTaskClosed();
 	console.log(`ask over task ${width}: ${JSON.stringify(await countWhole(ask))}`);

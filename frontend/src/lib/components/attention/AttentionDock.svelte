@@ -14,7 +14,6 @@
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
 	import { onMount } from 'svelte';
-	import { subscribeUnreadAttention } from './replyItems';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -195,7 +194,6 @@
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
 		const offHeld = on('held_reply_changed', () => { void reload(); });
-		const offUnread = subscribeUnreadAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		const offActivity = watchDockActivity(TYPING_IDLE_MS, () => { lastKeydown = Date.now(); }, () => { busyTick += 1; });
@@ -219,7 +217,6 @@
 			forgetAutoOpen();
 			offNudge?.();
 			offHeld?.();
-			offUnread();
 			offConnection();
 			offToken();
 		};
@@ -334,8 +331,6 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
-	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
-	.attention-dock :global(.reply-chip-notice button),
 	.attention-dock [data-attention-dock] { pointer-events: auto; }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {

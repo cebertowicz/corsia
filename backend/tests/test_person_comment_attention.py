@@ -459,3 +459,191 @@ def test_review_bar_reads_the_comment_task_with_its_counts(isolated_db):
     assert step["comment_attention"] == {
         "artifact_id": artifact, "comments": 1, "suggestions": 0, "system_task": True,
     }
+
+
+def _cards_and_receipts(db, node_id):
+    cards = db.execute('SELECT COUNT(*) FROM thread_updates WHERE node_id=?', (node_id,)).fetchone()[0]
+    receipts = db.execute(
+        "SELECT COUNT(*) FROM messages WHERE json_extract(metadata,'$.node_id')=?", (node_id,),
+    ).fetchone()[0]
+    return cards, receipts
+
+
+def test_a_task_created_unannounced_leaves_no_card_or_receipt(isolated_db):
+    """The comment task's create, close and settle are bookkeeping; a person step added the usual way is news."""
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, reply = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        assert _cards_and_receipts(db, task) == (0, 0)
+        with write_transaction(db, scope='test_ask_opens') as connection:
+            ask = _ask_node(connection, 'owner')
+            hold = _raise(connection, ask.id, artifact, 'owner')
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _cards_and_receipts(db, task) == (0, 0)
+        with write_transaction(db, scope='test_ask_ends') as connection:
+            _end(connection, ask.id, hold, 'owner')
+        [again] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_read') as connection:
+            mark_thread_viewed(connection, 'owner-token', artifact, root['id'], reply['id'])
+            person_comment_task.reconcile(connection, artifact)
+        assert _tasks(db, artifact)[-1] == (again, 'accepted')
+        assert _cards_and_receipts(db, again) == (0, 0)
+        with write_transaction(db, scope='test_announced') as connection:
+            plan = service.ensure_plan('thread', 'owner', db=connection)
+            step = service.add_node(plan.id, kind='task', title='Sign in', acceptance_criteria='Done',
+                                    assignee='user', actor_id=None, provenance='test', db=connection)
+        assert _cards_and_receipts(db, step.id)[0] == 1
+    finally:
+        db.close()
+
+
+def test_a_covered_task_spared_by_its_own_hold_closes_when_the_hold_clears(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        node = service._node_row(db, task)
+        with write_transaction(db, scope='test_task_hold') as connection:
+            public.mutate(node['plan_id'], 'pause_node', {
+                'node_id': task, 'expected_revision': node['revision'], 'reason': 'Not now',
+            }, actor=_person(), provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
+        task_hold = db.execute(
+            'SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL', (task,),
+        ).fetchone()['id']
+        with write_transaction(db, scope='test_ask_opens') as connection:
+            ask = _ask_node(connection, 'owner')
+            _raise(connection, ask.id, artifact, 'owner')
+        # Its own hold spares it from the close while the ask covers it.
+        assert _open_tasks(db, artifact) == [task]
+        with write_transaction(db, scope='test_task_hold_clears') as connection:
+            node = service._node_row(connection, task)
+            public.mutate(node['plan_id'], 'resume_node', {
+                'node_id': task, 'expected_revision': node['revision'], 'hold_id': task_hold,
+            }, actor=_person(), provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.COVERED
+    finally:
+        db.close()
+
+
+def test_after_commit_reconcile_raises_every_failure_and_tries_every_document(isolated_db, monkeypatch, caplog):
+    import logging
+
+    from plans import user_ask
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        broken, _, _ = _waiting_document(db)
+        fine = seed_document(db, 'owner', name='fine.md')
+        tried = []
+        real = person_comment_task.reconcile
+
+        def reconcile(connection, artifact_id):
+            tried.append(artifact_id)
+            if artifact_id == broken:
+                raise RuntimeError('reconcile broke')
+            return real(connection, artifact_id)
+
+        monkeypatch.setattr(person_comment_task, 'reconcile', reconcile)
+        with pytest.raises(ExceptionGroup) as caught:
+            user_ask._reconcile_comment_tasks(db, [broken, fine])
+        assert tried == [broken, fine]
+        [error] = caught.value.exceptions
+        assert isinstance(error, RuntimeError)
+        assert f'comment task reconcile for document {broken}' in error.__notes__
+        # Through a commit, the group reaches the after-commit failure log; the write itself stands.
+        tried.clear()
+        with caplog.at_level(logging.ERROR, logger='infra.write_effects'):
+            with write_transaction(db, scope='test_committed') as connection:
+                user_ask.asks_changed(connection, [broken, fine])
+        assert tried == [broken, fine]
+        assert any(record.message == 'after-commit effect failed' and isinstance(record.exc_info[1], ExceptionGroup)
+                   for record in caplog.records)
+    finally:
+        db.close()
+
+
+def test_in_place_reconcile_failure_fails_the_callers_write(isolated_db, monkeypatch):
+    from plans import user_ask
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+
+        def reconcile(connection, artifact_id):
+            raise RuntimeError('reconcile broke')
+
+        monkeypatch.setattr(person_comment_task, 'reconcile', reconcile)
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            # A transaction nobody here owns: nothing would report its commit, so it reconciles in place.
+            with pytest.raises(RuntimeError, match='reconcile broke'):
+                user_ask.asks_changed(db, [artifact])
+        finally:
+            db.rollback()
+    finally:
+        db.close()
+
+
+def test_dismiss_reads_the_unread_items_once_whatever_the_thread_count(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        for _ in range(5):
+            root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+            add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+            add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        assert person_comment_attention.counts(db, artifact, 'owner-token') == (10, 0)
+        queries = []
+        with write_transaction(db, scope='test_dismiss') as connection:
+            connection.set_trace_callback(queries.append)
+            person_comment_attention.dismiss(connection, artifact, 'owner-token')
+            connection.set_trace_callback(None)
+        reads = [query for query in queries if query.lstrip().upper().startswith('SELECT')]
+        stamps = [query for query in queries if 'INSERT INTO doc_comment_thread_views' in query]
+        assert len(reads) == 1 and len(stamps) == 5
+        assert person_comment_attention.counts(db, artifact, 'owner-token') == (0, 0)
+    finally:
+        db.set_trace_callback(None)
+        db.close()
+
+
+def test_counts_and_unread_rows_share_one_watermark_including_ties(isolated_db):
+    """Both readers use ``past_watermark_sql``: never viewed, a tie on time broken by id, and fully read."""
+    from doceditor.feedback_state import _unread_items, stamp_thread_view
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+        first, _ = add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        second, _ = add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        low, high = sorted([first['id'], second['id']])
+        stamp = '2026-10-01T00:00:00+00:00'
+        with write_transaction(db, scope='test_tie') as connection:
+            connection.execute('UPDATE doc_comments SET created_at=? WHERE id IN (?,?)', (stamp, low, high))
+
+        def unread():
+            return (person_comment_attention.counts(db, artifact, 'owner-token'),
+                    sorted(item for _, item in _unread_items(db, 'owner-token', artifact) if item != root['id']))
+
+        assert unread() == ((2, 0), [low, high])
+        with write_transaction(db, scope='test_stamp_low') as connection:
+            stamp_thread_view(connection, 'owner-token', root['id'], stamp, low)
+        assert unread() == ((1, 0), [high])
+        with write_transaction(db, scope='test_stamp_back') as connection:
+            # Forward only: an earlier item never moves the watermark back.
+            stamp_thread_view(connection, 'owner-token', root['id'], '2026-01-01T00:00:00+00:00', low)
+        assert unread() == ((1, 0), [high])
+        with write_transaction(db, scope='test_stamp_high') as connection:
+            stamp_thread_view(connection, 'owner-token', root['id'], stamp, high)
+        assert unread() == ((0, 0), [])
+    finally:
+        db.close()

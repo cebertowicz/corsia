@@ -208,6 +208,10 @@ def append_node_transition(
     ).fetchone()
     if row is None or row["parent_id"] is not None:
         return None
+    from plans.workflow_fields import announced
+
+    if not announced(connection, node_id):
+        return None
     event_type, label = _MILESTONE_TRANSITIONS[str(new_state)]
     summary = f"{label}: {row['title']}"
     return append_owner_event(
@@ -248,18 +252,14 @@ def project_node_event(
     if from_schema_step(provenance):
         return
 
-    from plans.person_comment_task import PROVENANCE as COMMENT_TASK
-
-    # The comment task comes and goes with the person's comments; its moves are not updates.
-    if provenance != COMMENT_TASK:
-        append_node_transition(
-            connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
-            new_state=new_state, created_at=created_at,
-        )
-        update_cards.observe_node_event(
-            connection, node_id=node_id, event=event, event_id=event_id,
-            new_state=new_state, payload=payload, created_at=created_at,
-        )
+    append_node_transition(
+        connection, node_id=node_id, event_id=event_id, actor_id=actor_id,
+        new_state=new_state, created_at=created_at,
+    )
+    update_cards.observe_node_event(
+        connection, node_id=node_id, event=event, event_id=event_id,
+        new_state=new_state, payload=payload, created_at=created_at,
+    )
     delegation_notice.observe_node_event(
         connection, node_id=node_id, event=event, event_id=event_id,
         actor_id=actor_id, new_state=new_state, payload=payload,
