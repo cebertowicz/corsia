@@ -139,7 +139,8 @@ def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """Nodes carrying a workflow with no ancestor carrying the same workflow (design §3.1).
 
     A send-back's revision and an accepted step's follow-up keep their source's workflow
-    and continue that run.
+    and continue that run. ``scoped_runs(above=...)`` relies on this reading only a node's parent
+    chain and its one follow-up source: widen what this reads and ``_CHAINS_ABOVE`` widens too.
     """
     by_id = {node["id"]: node for node in nodes}
     roots = []
