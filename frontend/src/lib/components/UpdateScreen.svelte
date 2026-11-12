@@ -6,6 +6,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onStartupShellPage, recoverLocalService, shellInfo, type RecoveryIntent } from '$lib/remoteShell';
 	import { agentsSafe } from '$lib/update/model';
+	import { headlineParts } from '$lib/update/versionParts';
 	import { countUp } from '$lib/update/percentCountUp';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
 	import { dismissUpdateScreen, handOverScreen, updateScreenView } from '$lib/update/screenStore';
@@ -197,9 +198,9 @@
 		<div class="column">
 			<div class="mark"><LivingMark entry="none" /></div>
 			<h2 id="update-screen-title">{view.mode === 'done' ? `Updated to ${view.toVersion ?? ''}`.trim() : view.mode === 'failed' && view.failure ? view.failure.title : view.mode === 'start_failed' ? 'CORSIA didn’t restart' : 'Updating CORSIA'}</h2>
-			<div class="step" role="status" aria-live="polite" aria-atomic="true">
+			<div class="step" class:empty={serviceDownTerminal} role="status" aria-live="polite" aria-atomic="true">
 				{#if view.mode === 'failed' && !view.serviceDown && view.failure}
-					<p class="failure-headline">{view.failure.headline}</p>
+					<p class="failure-headline">{#each headlineParts(view.failure.headline) as part}{#if part.version}<span class="version">{part.text}</span>{:else}{part.text}{/if}{/each}</p>
 					<p class="detail">{view.failure.body}</p>
 				{:else if view.mode !== 'done' && !serviceDownTerminal}
 					<p class="step-label">{view.label}</p>
@@ -262,8 +263,10 @@
 	.mark { width: calc(var(--space-8) + var(--space-6)); height: calc(var(--space-8) + var(--space-6)); margin-bottom: var(--space-4); }
 	h2 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.step { min-height: calc(var(--text-body) * 1.5); margin-top: var(--space-2); }
+	.step.empty { min-height: 0; }
 	.step p, .detail { margin: 0; }
 	.step-label, .detail { color: var(--text-secondary); font-size: var(--text-body); }
+	.version { white-space: nowrap; }
 	.failure-headline { margin: 0; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-semibold); }
 	.percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
 	.bar { width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }

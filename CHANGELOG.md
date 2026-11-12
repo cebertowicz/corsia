@@ -16,7 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
-- A failed update now says it failed and which version CORSIA is on, without a percentage or progress bar; an update that couldn’t begin says Couldn’t start the update.
+- A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
