@@ -272,6 +272,45 @@ describe('MarkdownEditor edits', () => {
 				expect(onAnchorFocus).not.toHaveBeenCalled();
 			});
 
+			// A press opened `brown`; then something that is not a key moves the caret. It no longer holds the card the press opened.
+			const afterPress = async () => {
+				const onAnchorFocus = vi.fn(), onCaretAway = vi.fn();
+				const view = open({ highlights: [{ from: 0, to: 5, id: 'quick' }, { from: 6, to: 11, id: 'brown' }], onAnchorFocus, onCaretAway });
+				await press(view, 8, 14);
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+				return { view, onAnchorFocus, onCaretAway };
+			};
+
+			it.each([
+				['a paste with no key before it', 'input.paste'],
+				['an autocorrect or dictation compose', 'input.type.compose'],
+				['an undo', 'undo'],
+			])('%s that carries the caret out of the highlight a press opened releases its card, and typing into another picks none', async (_name, event) => {
+				const { view, onAnchorFocus, onCaretAway } = await afterPress();
+				view.dispatch({ changes: { from: 15, insert: 'x' }, selection: { anchor: 16 }, userEvent: event }); flushSync();
+				expect(onCaretAway).toHaveBeenCalledOnce();
+				// The same change landing inside another highlight is editing there, not arriving in it.
+				view.dispatch({ changes: { from: 2, insert: 'y' }, selection: { anchor: 3 }, userEvent: event }); flushSync();
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+			});
+
+			it('a caret move that is not a key and not the press (a programmatic or voice move) releases the card, and moving into another highlight picks it', async () => {
+				const { view, onAnchorFocus, onCaretAway } = await afterPress();
+				view.dispatch({ selection: { anchor: 14 }, userEvent: 'move' }); flushSync();
+				expect(onCaretAway).toHaveBeenCalledOnce();
+				view.dispatch({ selection: { anchor: 3 }, userEvent: 'move' }); flushSync();
+				expect(onAnchorFocus).toHaveBeenCalledTimes(2);
+				expect(onAnchorFocus).toHaveBeenLastCalledWith('quick', expect.anything(), undefined, undefined);
+			});
+
+			it('a selection-only report with no user event after a press is still the press\'s own caret and releases nothing', async () => {
+				const { view, onAnchorFocus, onCaretAway } = await afterPress();
+				view.dispatch({ selection: { anchor: 14 } }); flushSync();
+				view.dispatch({ selection: { anchor: 14 }, userEvent: 'select' }); flushSync();
+				expect(onCaretAway).not.toHaveBeenCalled();
+				expect(onAnchorFocus).toHaveBeenCalledOnce();
+			});
+
 			it('a caret that a key carries into a highlight after a press opens it, and a later press decides again', async () => {
 				const onAnchorFocus = vi.fn();
 				const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });
