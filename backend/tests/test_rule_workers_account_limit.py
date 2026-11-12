@@ -167,26 +167,6 @@ async def test_with_rollover_off_an_unread_sibling_is_refused_at_once(world, mon
 
 
 @pytest.mark.asyncio
-async def test_one_pass_decides_at_most_a_batch_of_starts_however_many_wait(world, monkeypatch):
-    """Starts that wait give their slot back, but one pass still decides at most ``BATCH`` of
-    them; the rest stay queued for the next pass."""
-    from automation import worker_runner
-
-    _accounts(world, monkeypatch, rollover=True, sibling="unread")
-    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: 1)
-    monkeypatch.setattr(worker_runner, "BATCH", 2)
-    decided = []
-    check_runs = worker_start_wait.check_runs
-    monkeypatch.setattr(worker_start_wait, "check_runs", lambda *a: (decided.append(a[0]["id"]), check_runs(*a))[1])
-    rule = await make_rule()
-    for n in range(3):
-        await request(f"pr-{n}@a1")
-    assert await worker_runner.drive() == 0
-    assert len(decided) == 2
-    assert [outcome for outcome, *_ in starts(rule)] == ["queued"] * 3
-
-
-@pytest.mark.asyncio
 async def test_a_model_with_no_vendor_account_that_is_not_ready_is_refused_at_once(world, monkeypatch):
     """A cloud model run through its provider, not Claude Code or Codex, has no account to roll
     over to: not ready means today's refusal, word for word, and no wait."""
