@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
+import { afterEach, describe, expect, it } from 'vitest';
+import { get } from 'svelte/store';
+import { messages } from '$lib/stores/threads';
 import { buildTranscriptPresentation, isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
 
 const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
@@ -21,14 +22,15 @@ function presentation(sends: any[]) {
   const rows: any[] = [target];
   sends.forEach((row, i) => rows.push(work(i + 1), row));
   rows.push(work(4), last);
-  const placed = suppressibleCommentEnvelopes(rows, 'thread');
-  return { placed, entries: buildTranscriptPresentation(rows, true, null, undefined, [], placed) };
+  // Comment sends never reach the transcript, whatever their target or delivery state, so the work around them is one fold.
+  messages.set(rows);
+  return { entries: buildTranscriptPresentation(get(messages) as any[], true) };
 }
+afterEach(() => messages.set([]));
 
 describe('Focus comment sends', () => {
-  it('joins work across three placed sends', () => {
-    const { entries, placed } = presentation([send(1), send(2), send(3)]);
-    expect([...placed]).toEqual(['send-1', 'send-2', 'send-3']);
+  it('joins work across three comment sends', () => {
+    const { entries } = presentation([send(1), send(2), send(3)]);
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
   it('hides a send whose target is unavailable', () => {
@@ -37,9 +39,8 @@ describe('Focus comment sends', () => {
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
     expect(entries.some(e => e.kind === 'message' && e.message.id === 'send-2')).toBe(false);
   });
-  it('hides an optimistic send between work blocks', () => {
-    const { entries, placed } = presentation([send(1, { _optimistic: true })]);
-    expect(placed.has('send-1')).toBe(true);
+  it.each(['queued', 'ambiguous', 'cancelled'])('hides a %s send between work blocks', state => {
+    const { entries } = presentation([send(1, { delivery_state: state })]);
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
   it('keeps a previously expanded inner stub open after merging', () => {
@@ -48,18 +49,18 @@ describe('Focus comment sends', () => {
     });
     const stubs = [stub('a', 'b', 2, 3), stub('c', 'd', 5, 6), stub('e', 'f', 8, 9)];
     const rows: any[] = [{ ...target, seq: 1 }, { ...send(1), seq: 4 }, { ...send(2), seq: 7 }, { ...last, seq: 10 }];
-    const placed = suppressibleCommentEnvelopes(rows, 'thread');
     const before = buildTranscriptPresentation(rows, true, null, undefined, stubs);
     const expanded = new Set(runTokens(before, 3, true));
-    const after = buildTranscriptPresentation(rows, true, null, undefined, stubs, placed);
+    messages.set(rows);
+    const after = buildTranscriptPresentation(get(messages) as any[], true, null, undefined, stubs);
     const tokens = runTokens(after, 1, true);
     expect(isRunExpanded(tokens, expanded)).toBe(true);
     expect(isRunExpanded(tokens, toggleRun(tokens, expanded))).toBe(false);
   });
   it('hides a failed send with an unseen target', () => {
     const failed = send(2, { delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'unplaced', root_cid: 'missing', root_user_message_id: 'missing' }] } } });
-    const { entries, placed } = presentation([send(1), failed, send(3)]);
-    expect(placed.has('send-2')).toBe(true);
+    const { entries } = presentation([send(1), failed, send(3)]);
+    expect(entries.some(e => e.kind === 'message' && e.message.id === 'send-2')).toBe(false);
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
   });
 });

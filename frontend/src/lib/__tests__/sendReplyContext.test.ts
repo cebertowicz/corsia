@@ -2,11 +2,10 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { beginComposing, cancelComposing, setVisibleRows } from '../stores/replyContextCapture';
 import { subagentMeta, type SubagentRef } from '../stores/subagents';
-import { activeThreadId, messages } from '../stores/threads';
+import { activeThreadId, messages, threads } from '../stores/threads';
 import { visitDividers } from '../stores/threadUpdateCards';
 import { setWs } from '../ws/state';
-import { sendMessage } from '../ws/send';
-import { suppressibleCommentEnvelopes } from '../chatCommentDelivery';
+import { sendCommentInput, sendMessage } from '../ws/send';
 
 function rows(threadId: string, ...seqs: number[]) {
 	return seqs.map((seq) => ({ threadId, seq }));
@@ -47,20 +46,26 @@ describe('reply context send payload', () => {
 		expect(sent.at(-1)?.reply_context).toEqual({ comments: [comment], in_view: [[3, 4, 2]], first_unread: { seq: 4, truncated: false } });
 	});
 
-	it('keeps a comment-only send\'s row for its delivery, out of the sender\'s transcript', () => {
-		// The row carries the comment and the server's delivery state; the transcript leaves it to the comment's thread.
+	it('posts a comment as no chat message: no row, no new last line, and the captured context left for the next message', () => {
 		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
+		const chat = { id: 'main', last_message: 'Earlier line' } as never;
 		activeThreadId.set('main');
 		messages.set([]);
+		threads.set([chat]);
+		setVisibleRows(rows('main', 3));
+		beginComposing('main');
 		try {
-			const inputId = sendMessage('main', '', undefined, undefined, undefined, 'apply_now', [comment])!;
-			expect(get(messages)).toMatchObject([{ id: inputId, _optimistic: true, metadata: { reply_context: { comments: [comment] } } }]);
-			expect(suppressibleCommentEnvelopes(get(messages), 'main')).toEqual(new Set([inputId]));
+			const inputId = sendCommentInput('main', comment)!;
+			expect(sent.at(-1)).toMatchObject({ type: 'message', thread_id: 'main', content: '', input_id: inputId, reply_context: { comments: [comment] } });
+			expect(sent.at(-1)?.reply_context).not.toHaveProperty('in_view');
+			expect(get(messages)).toEqual([]);
+			expect(get(threads)).toEqual([chat]);
 			sendMessage('main', 'plain');
-			expect(get(messages).at(-1)?.metadata).not.toHaveProperty('reply_context');
+			expect(sent.at(-1)?.reply_context).toEqual({ in_view: [[3, 3, 1]] });
 		} finally {
 			activeThreadId.set(null);
 			messages.set([]);
+			threads.set([]);
 		}
 	});
 

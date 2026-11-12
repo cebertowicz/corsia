@@ -1,5 +1,6 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived, get, type Writable } from 'svelte/store';
 import { activeThreadId } from './activeThreadId';
+import { admitTranscriptRows } from '../chatCommentInputs.svelte';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
 export interface Thread extends ThreadModelSwitchState {
@@ -126,7 +127,13 @@ export function demoteAgentLocally(threadId: string): void {
 }
 
 export { activeThreadId, draftAccountId } from './activeThreadId';
-export const messages = writable<Message[]>([]);
+const transcript = writable<Message[]>([]);
+/** The chat's rows. A comment-only input is no chat message: whatever path brings one, it goes to its comment's thread instead. */
+export const messages: Writable<Message[]> = {
+	subscribe: transcript.subscribe,
+	set: rows => transcript.set(admitTranscriptRows(rows)),
+	update: change => transcript.update(rows => admitTranscriptRows(change(rows))),
+};
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
 	states: ReadonlyMap<string, ThreadTurnState>,

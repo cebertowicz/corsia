@@ -5,6 +5,7 @@ import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 import { apiFetch } from '$lib/api/request';
+import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
@@ -40,7 +41,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		try {
 			const answers = await read(threadId, answerIds);
 			const cids = new Set(answers.rows.flatMap(row => row.chat_answer_cids ?? []));
-			const contextComments = rows.flatMap(row => row.metadata?.reply_context?.comments ?? []);
+			const contextComments = [...rows, ...chatCommentInputs.rows(threadId)].flatMap(row => row.metadata?.reply_context?.comments ?? []);
 			const knownTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid) || c.answers.some(answer => answer.cid && cids.has(answer.cid)))));
 			// The server names the message a landed reply sits on. A comment this page never carried is
 			// still a target: its row is what draws the notice and carries the quote to announce.
@@ -67,12 +68,10 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 			if (replies !== null) setChatReplyAttention(threadId, replies, sequence);
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
-	// This socket gets no added-message frame for its own send: its own row, settled by these frames, names the comments.
+	// This socket gets no added-message frame for its own send: the comment it posted names what to refresh.
 	function refreshOwnInput(frame: any) {
-		const row = get(messages).find(item => item.thread_id === frame?.thread_id
-			&& (item.id === frame?.message_id || item.metadata?.input_id === frame?.input_id));
-		const comments = row?.metadata?.reply_context?.comments;
-		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
+		const comments = typeof frame?.thread_id === 'string' ? chatCommentInputs.comments(frame.thread_id, frame.input_id, frame.message_id) : [];
+		if (comments.length) void refresh(frame, comments);
 	}
 	const stops = [on('turn_complete', frame => refresh(frame)), on('input_queued', refreshOwnInput),
 		on('input_accepted', refreshOwnInput), on('message_added', frame => {

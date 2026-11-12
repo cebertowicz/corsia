@@ -8,7 +8,6 @@ import type { Message } from '../stores/threads';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { addedMessage, deliveryRevision } from './messageProjection';
 import { emit } from './events';
-import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
@@ -168,11 +167,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			if (inputId && typeof data.thread_id === 'string') {
 				recoverInput(data.thread_id, inputId);
 			}
-			if (data.queue_kind === 'messages' && inputId && typeof data.thread_id === 'string' && typeof data.message_id === 'string') {
-				reconcileQueuedInputReceipt(data);
-				// Stored: a comment's row now carries its text and delivery, so its draft goes.
-				chatReplyDrafts.release(data.thread_id, inputId);
-			}
+			if (data.queue_kind === 'messages') reconcileQueuedInputReceipt(data);
 			emit('input_queued', data);
 			break;
 		}

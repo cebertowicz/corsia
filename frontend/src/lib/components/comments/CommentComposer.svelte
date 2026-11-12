@@ -8,7 +8,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection() }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -26,6 +26,8 @@
 		onBody?: (text: string) => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onCancel: () => void;
+		/** Escape, when it should close without discarding the text (as a click outside does); Cancel by default. */
+		onEscape?: () => void;
 	} = $props();
 	let text = $state(untrack(() => body));
 	const explanationId = $props.id();
@@ -46,7 +48,7 @@
 	}
 	function onKey(event: KeyboardEvent) {
 		if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
-		if (event.key === 'Escape') { selectedTags.clear(); onCancel(); }
+		if (event.key === 'Escape') { selectedTags.clear(); (onEscape ?? onCancel)(); }
 	}
 </script>
 

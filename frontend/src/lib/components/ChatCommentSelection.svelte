@@ -2,6 +2,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
+	import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 	import { clipChatSelection, refusalText, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
@@ -12,7 +13,6 @@
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
-	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import { keepAboveSheet, transcriptBounds } from './chatCommentViewport';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import type { MarginComposer } from '$lib/docMarginSource';
@@ -35,7 +35,7 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
-	const rootDraft = $derived(threadId && draft ? chatReplyDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
+	const rootDraft = $derived(threadId && draft ? chatCommentInputs.root(threadId, draft.messageId, draft.anchor) : undefined);
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -47,8 +47,14 @@
 	let returnFocus: HTMLElement | null = null;
 	let closing = $state(false);
 	let afterClose: (() => void) | null = null;
-	// A post answered after this surface is gone has no box to show its refusal in.
-	let mounted = true;
+	// The comment this box posted: the box stays, read-only, until the server stores it, then closes; a refusal keeps it open with its cause.
+	let posted = $state<{ inputId: string; draft: Pick } | null>(null);
+	$effect(() => {
+		if (!posted || chatCommentInputs.posting(posted.inputId)) return;
+		const stored = draft === posted.draft && !rootDraft;
+		posted = null;
+		if (stored) requestClose();
+	});
 	const above = $derived(!!pick && !coarse && pick.rect.top > 96);
 	const left = $derived.by(() => {
 		if (!pick) return 0;
@@ -88,7 +94,7 @@
 	}
 	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
 	/** Cancel lets the passage's typed text and any failure go, so they never come back on the next comment. */
-	function cancel() { if (draft && threadId) chatReplyDrafts.dropRoot(threadId, draft.messageId, draft.anchor); requestClose(); }
+	function cancel() { if (draft && threadId) chatCommentInputs.dropRoot(threadId, draft.messageId, draft.anchor); requestClose(); }
 	function closed() { const finish = afterClose; afterClose = null; finish?.(); closing = false; }
 	function readSelection() {
 		if (open) return;
@@ -141,8 +147,8 @@
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
-		// One pass over the loaded sends for the whole pass, read per comment below.
-		const replies = threadId ? chatReplyIndex($messages, threadId) : null;
+		// One pass over this chat's comment inputs for the whole pass, read per comment below.
+		const replies = threadId ? chatReplyIndex(chatCommentInputs.rows(threadId), threadId) : null;
 		const focusedMark = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
 			? document.activeElement.closest<HTMLElement>('[data-comment-ids][role="button"]') : null;
 		const focusedId = focusedMark?.dataset.commentIds?.split(',')[0];
@@ -233,7 +239,7 @@
 		queued = true;
 		void tick().then(() => requestAnimationFrame(() => { queued = false; paint(); }));
 	}
-	$effect(() => { void comments; void editingId; void draft; void $messages; void marginComments; schedule(); });
+	$effect(() => { void comments; void editingId; void draft; void $messages; void chatCommentInputs.rows(threadId); void marginComments; schedule(); });
 	// A picked card belongs to the transcript it was picked in, so changing thread drops the pick. Untracked: close() reads the open thread, and opening one must not close it.
 	$effect(() => { void threadId; untrack(() => { close(); selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
 	// The column coming up while a thread is open hands that thread to its card: picked there, with its unsent reply, so it is never open twice.
@@ -290,7 +296,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { mounted = false; for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);
@@ -312,9 +318,8 @@
 			const id = crypto.randomUUID();
 			try { inputId = onSendReply({ id, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }) ?? null; }
 			catch (failure) { error = refusalText(failure, 'comment'); /* Keep the draft and show the failure in its box. */ }
-			// The box stays, read-only, until the server stores the comment; then it closes, unless it has moved to another passage.
-			void chatReplyDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, inputId, error, () => mounted && draft === currentDraft && !closing)
-				.then(stored => { if (stored && draft === currentDraft) requestClose(); });
+			chatCommentInputs.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, inputId, error);
+			if (inputId) posted = { inputId, draft: currentDraft };
 			return;
 		}
 		if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));
@@ -348,7 +353,7 @@
 	{/if}
 {/if}
 {#snippet composerBody()}
-	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatReplyDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.inputId} error={rootDraft?.error ?? ''} retainText={!!draft} onSubmit={submit} onCancel={cancel} />
+	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentInputs.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.inputId} error={rootDraft?.error ?? ''} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
 {/snippet}
 {#snippet marginBody()}
 	{#key target}<div role="dialog" aria-label={heading}>{@render composerBody()}</div>{/key}

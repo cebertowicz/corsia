@@ -5,7 +5,8 @@ import { messages } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 import ChatMarginColumn from './ChatMarginColumn.svelte';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
-import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
+import { emit } from '$lib/ws/events';
 
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
@@ -40,9 +41,9 @@ function thread() {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
-	chatReplyDrafts.release('thread', 'test-input');
-	chatReplyDrafts.set('kept', '');
-	chatReplyDrafts.set('lost', '');
+	emit('error', { input_id: 'test-input', message: 'reset' });
+	chatCommentInputs.set('kept', '');
+	chatCommentInputs.set('lost', '');
 	messages.set([]);
 	host?.remove();
 	document.body.innerHTML = '';
@@ -163,7 +164,7 @@ it('says why a card\'s reply is refused when its message has no place in history
 	expect(get(toasts).map(toast => toast.message)).not.toContain(sentence);
 	expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Please change it');
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
-	chatReplyDrafts.set('kept', '');
+	chatCommentInputs.set('kept', '');
 });
 
 it('keeps an unsent reply when the canvas narrows and the same thread opens in its popover', () => {
@@ -184,5 +185,5 @@ it('keeps an unsent reply when the canvas narrows and the same thread opens in i
 	component = mount(ChatCommentThreads, { target: popover, props: { messageId: 'm1', threadId: 'thread', comments: [lost], onReply: vi.fn() } });
 	flushSync();
 	expect(popover.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('The one in the closet');
-	chatReplyDrafts.set('lost', '');
+	chatCommentInputs.set('lost', '');
 });

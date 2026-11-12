@@ -1,6 +1,4 @@
 import { get } from 'svelte/store';
-import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
-import { reconcileOptimisticRow } from './reconcileOptimisticRow';
 import {
 	messages,
 	streamContentByThread,
@@ -87,6 +85,27 @@ function admitTerminalFrame(data: any): TurnIdentity | null {
 	return identity;
 }
 
+function reconcileOptimisticRow(
+	threadId: string,
+	inputId: string,
+	messageId: string,
+	createdAt: string,
+	delivery: Pick<Message, 'delivery_state' | 'delivery_error' | 'delivery_revision' | 'seq'> = {},
+): void {
+	if (!isDisplayedThread(threadId)) return;
+	messages.update(current => current.map(message =>
+		(message.metadata?.input_id === inputId || message.id === inputId)
+			? mergeMessageDelivery(message, {
+				...message,
+				id: messageId,
+				created_at: createdAt,
+				_optimistic: false,
+				...delivery,
+			})
+			: message
+	).sort(compareMessageOrder));
+}
+
 export function handleInputAccepted(data: any): void {
 	const threadId = data?.thread_id;
 	const inputId = data?.input_id;
@@ -108,7 +127,6 @@ export function handleInputAccepted(data: any): void {
 			? { seq: data.seq }
 			: {}),
 	});
-	chatReplyDrafts.release(threadId, inputId);
 	resetPredecessor(threadId, transition);
 	emit('input_accepted', data);
 }

@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 
 import { subagentMeta } from '../stores/subagents';
-import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
+import { chatCommentInputs } from '../chatCommentInputs.svelte';
 import { activeThreadId, messages } from '../stores/threads';
 import { handleMessage } from './handlers';
-import { _unconfirmedFrameIdsForTests, resendUnconfirmedFrames, sendMessage } from './send';
+import { _unconfirmedFrameIdsForTests, resendUnconfirmedFrames, sendCommentInput, sendMessage } from './send';
 import { setWs } from './state';
 import { _resetTurnStateForTests, getTurnState, resetTurnState } from './turnState';
 
@@ -40,14 +40,17 @@ beforeEach(() => {
 describe('resending what a dropped socket never confirmed', () => {
 	it('resends a comment and hands its text from the draft to its stored row on a queued receipt', () => {
 		const anchor = { from_off: 0, to_off: 1, quote: 'q', anchor_prefix: '', anchor_suffix: '' };
-		const inputId = sendMessage(THREAD, '', undefined, undefined, undefined, 'apply_now', [{ id: 'c', seq: 1, ...anchor, note: 'keep' }])!;
-		void chatReplyDrafts.postRoot(THREAD, 'target', anchor, 'keep', inputId, undefined, () => true);
+		const comment = { id: 'c', seq: 1, ...anchor, note: 'keep' };
+		const inputId = sendCommentInput(THREAD, comment)!;
+		chatCommentInputs.sending(inputId, THREAD, comment);
+		chatCommentInputs.postRoot(THREAD, 'target', anchor, 'keep', inputId, '');
 		const { socket, sent } = newSocket();
 		resendUnconfirmedFrames(socket);
 		expect(sent).toEqual([JSON.parse(frames[0])]);
 		handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: THREAD, input_id: inputId, message_id: inputId, delivery_state: 'queued' }, () => {});
-		expect(chatReplyDrafts.root(THREAD, 'target', anchor)).toBeUndefined();
-		expect(get(messages)).toMatchObject([{ id: inputId, delivery_state: 'queued', metadata: { reply_context: { comments: [{ id: 'c', note: 'keep' }] } } }]);
+		expect(chatCommentInputs.root(THREAD, 'target', anchor)).toBeUndefined();
+		expect(get(messages)).toEqual([]);
+		expect(chatCommentInputs.rows(THREAD)).toMatchObject([{ id: inputId, delivery_state: 'queued', metadata: { reply_context: { comments: [{ id: 'c', note: 'keep' }] } } }]);
 		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
 	});
 

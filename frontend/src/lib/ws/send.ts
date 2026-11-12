@@ -91,6 +91,8 @@ export function resubscribeWatchedThreads(): void {
  * never grow past the inputs actually waiting.
  */
 const unconfirmedFrames = new Map<string, { threadId: string; frame: string }>();
+// Inputs sent with no transcript row, kept past their receipt: a failure can follow a stored input.
+const rowlessInputs = new Set<string>();
 
 turnStates.subscribe(states => {
 	for (const [inputId, stored] of unconfirmedFrames) {
@@ -153,8 +155,6 @@ export function sendMessage(
 		created_at: new Date().toISOString(),
 		_optimistic: true,
 	};
-	// A comment-only send keeps its row too: the server's frames settle its delivery on it, and the
-	// transcript leaves it to the comment's thread.
 	if (isDisplayedThread(threadId)) {
 		messages.update(m => [...m, msg]);
 	}
@@ -180,7 +180,7 @@ export function sendMessage(
 	threads.update(ss => {
 		const updated = ss.map(s =>
 			s.id === threadId
-				? { ...s, updated_at: now, last_message: content || !comments.length ? content.slice(0, 100) : s.last_message }
+				? { ...s, updated_at: now, last_message: content.slice(0, 100) }
 				: s
 		);
 		updated.sort((a, b) => {
@@ -193,7 +193,7 @@ export function sendMessage(
 
 	const effort = get(reasoningEffort);
 	// The captured context belongs to this send.
-	const replyContext = !content && comments.length ? {} : takeReplyContext(threadId) ?? {};
+	const replyContext = takeReplyContext(threadId) ?? {};
 	if (comments.length) replyContext.comments = comments;
 	const hasReplyContext = Object.keys(replyContext).length > 0;
 	const frame = JSON.stringify({
@@ -211,6 +211,36 @@ export function sendMessage(
 	ws.send(frame);
 	unconfirmedFrames.set(inputId, { threadId, frame });
 	return inputId;
+}
+
+/**
+ * Post a comment, or a reply in a comment thread, with no chat text. It is no chat message: no transcript
+ * row and no new last line for the chat. Its box and its thread follow it by the frames answering its input id.
+ */
+export function sendCommentInput(threadId: string, comment: ReplyComment, modelId?: string): string | null {
+	if (!ws || ws.readyState !== WebSocket.OPEN) return null;
+	const inputId = crypto.randomUUID();
+	const viewingDocument = viewingDocumentForThread(threadId);
+	const subagent = get(subagentMeta).has(threadId);
+	const effort = get(reasoningEffort);
+	requestInput(threadId, inputId);
+	const frame = JSON.stringify({
+		type: subagent ? 'subagent_feed' : 'message',
+		...(viewingDocument ? { viewing_document: viewingDocument } : {}),
+		reply_context: { comments: [comment] },
+		thread_id: threadId, content: '', input_id: inputId,
+		...(!subagent && modelId ? { model_id: modelId } : {}),
+		...(!subagent && effort ? { reasoning_effort: effort } : {}),
+	});
+	ws.send(frame);
+	unconfirmedFrames.set(inputId, { threadId, frame });
+	rowlessInputs.add(inputId);
+	return inputId;
+}
+
+/** Whether this client sent the input with no transcript row, so its own box, not the transcript, says what became of it. */
+export function sentWithoutRow(inputId: string): boolean {
+	return rowlessInputs.has(inputId);
 }
 
 /**

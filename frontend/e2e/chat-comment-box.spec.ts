@@ -62,6 +62,12 @@ async function passageInView(page: Page, messageId: string): Promise<boolean> {
   }, messageId);
 }
 
+/** Make the page's primary pointer a finger (Chromium), so `(pointer: coarse)` styles apply from here on. */
+async function touch(page: Page) {
+  await (await page.context().newCDPSession(page)).send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  await expect.poll(() => page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+}
+
 async function release(request: APIRequestContext, gate: string) {
   expect((await request.post(`${backend}/api/test/mock-gates/${gate}/release`)).ok()).toBeTruthy();
 }
@@ -127,10 +133,26 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await expect(failed.locator('.failed-reply').getByRole('button', { name: 'Retry', exact: true })).toHaveCount(1);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(failed, 'failed-after-queued');
+
+  // That Retry is the one way back for the comment, so on touch it is a full target.
+  const retry = failed.locator('.failed-reply').getByRole('button', { name: 'Retry', exact: true });
+  await touch(page);
+  const target = (await retry.boundingBox())!;
+  expect(target.height).toBeGreaterThanOrEqual(44);
+  expect(target.width).toBeGreaterThanOrEqual(44);
+  await frame(failed, 'failed-retry-touch');
+
+  // Pressing it sends nothing the transcript shows: the server's answer for the comment's row never becomes a chat bubble.
+  const retried = page.waitForResponse(response => /\/messages\/[^/]+\/retry$/.test(new URL(response.url()).pathname));
+  await retry.click();
+  expect((await retried).ok()).toBeTruthy();
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await expect(page.locator('.messages .message.user')).toHaveCount(0);
+  await frame(failed, 'failed-retry-pressed');
   await release(request, `held-${width}`);
 });
 
-test('the comment popover leaves its passage uncovered and keeps focus until Escape, 900', async ({ page, request }) => {
+test('the comment popover leaves its passage uncovered, keeps focus until Escape, and keeps its text after Escape, 900', async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name !== 'chromium-desktop', 'Requires a disposable mock instance');
   await page.setViewportSize({ width: 900, height: 900 });
   const title = 'Comment popover focus';
@@ -158,6 +180,17 @@ test('the comment popover leaves its passage uncovered and keeps focus until Esc
     await page.keyboard.press(key);
     expect(await inside()).toBe(true);
   }
+  // Escape closes the box like a click outside: the typed text stays with its passage; only Cancel discards it.
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
+  await selectPhrase(page, id, 'Second phrase');
+  await expect(commentEditor(page)).toHaveValue('Typed before tabbing');
+  await commentEditor(page).press('Escape');
+  await expect(popover).toHaveCount(0);
+
+  // On touch the selection pill is a full target at any width.
+  await touch(page);
+  await selectPhrase(page, id, 'First phrase', false);
+  await expect.poll(() => page.locator('.sel-comment').evaluate(element => (element as HTMLElement).offsetHeight)).toBeGreaterThanOrEqual(44);
+  if (framesDirectory) { fs.mkdirSync(framesDirectory, { recursive: true }); await capture(page, page.locator('.sel-comment'), 'pill-touch-900'); }
 });

@@ -6,6 +6,7 @@ const wsMocks = vi.hoisted(() => {
 	const listeners = new Map<string, Set<(data: any) => void>>();
 	return {
 		sendMessage: vi.fn(),
+		sendCommentInput: vi.fn(),
 		stopTurn: vi.fn(),
 		on: vi.fn((event: string, handler: (data: any) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());
@@ -1409,7 +1410,7 @@ describe('a comment reply the composer cannot send', () => {
 		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(noModel));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(noModel);
-		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		expect(wsMocks.sendCommentInput).not.toHaveBeenCalled();
 	});
 
 	it('says CORSIA is restarting while an update restart is in flight', () => {
@@ -1430,7 +1431,7 @@ describe('a comment reply the composer cannot send', () => {
 		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(restarting));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(restarting);
-		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		expect(wsMocks.sendCommentInput).not.toHaveBeenCalled();
 	});
 
 	it('says the reply was not accepted when the send returns nothing', () => {
@@ -1440,7 +1441,7 @@ describe('a comment reply the composer cannot send', () => {
 			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
 		}]);
 		activeThreadId.set('thread-1');
-		wsMocks.sendMessage.mockReturnValue(undefined);
+		wsMocks.sendCommentInput.mockReturnValue(null);
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();

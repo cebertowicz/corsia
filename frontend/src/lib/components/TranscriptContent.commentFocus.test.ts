@@ -1,15 +1,16 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it } from 'vitest';
+import { get } from 'svelte/store';
 import { messages } from '$lib/stores/threads';
 import { coreSettings } from '$lib/stores/settings';
-import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
 import TranscriptContent from './TranscriptContent.svelte';
 import { buildTranscriptPresentation } from './transcriptFocusModel';
 
 let instance: Record<string, unknown> | undefined;
 afterEach(() => { if (instance) unmount(instance); instance = undefined; messages.set([]); coreSettings.set(null as any); document.body.innerHTML = ''; });
 
-it('keeps a placed reply hidden alongside its target', () => {
+// A comment send never enters the transcript's store, so the transcript draws its target alone.
+it('draws a reply\'s target and never the reply', () => {
   const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
   const rows: any[] = [
     { ...base, id: 'target', role: 'assistant', content: 'Target', metadata: { for_user: true }, chat_comments: [{
@@ -19,10 +20,10 @@ it('keeps a placed reply hidden alongside its target', () => {
   ];
   messages.set(rows);
   coreSettings.set({ features: { focus_mode: true } } as any);
-  const baseline = buildTranscriptPresentation(rows, true);
+  const baseline = buildTranscriptPresentation(get(messages) as any[], true);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: baseline, commentEnvelopes: suppressibleCommentEnvelopes(rows, 'thread'), threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: baseline, threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();
@@ -44,11 +45,10 @@ it('shows a comment target when the combined run is expanded', () => {
   ];
   messages.set(rows);
   coreSettings.set({ features: { focus_mode: true } } as any);
-  const placed = suppressibleCommentEnvelopes(rows, 'thread');
-  const present = buildTranscriptPresentation(rows, true, null, undefined, [], placed);
+  const present = buildTranscriptPresentation(get(messages) as any[], true);
   const host = document.createElement('div'); document.body.appendChild(host);
   instance = mount(TranscriptContent, { target: host, props: {
-    entries: present, commentEnvelopes: placed, threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    entries: present, threadId: 'thread', renderedStreaming: false, historyComplete: true,
     expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
   }});
   flushSync();

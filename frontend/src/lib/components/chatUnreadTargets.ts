@@ -1,6 +1,7 @@
 import type { ChatComment, Message } from '$lib/stores/threads';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
 import { chatReplyIndex } from '$lib/chatCommentDelivery';
+import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 // The same composition the comment cards use for a quote label: markdown marks out, whitespace flattened, then the shared snippet cut.
 import { clean, snippet } from '$lib/cm/widget-cells';
 import { plainQuote } from '$lib/plainQuote';
@@ -39,8 +40,8 @@ export function unreadTargets(root: HTMLElement, messages: Message[], threadId: 
 	let below: UnreadTarget | null = null;
 	let count = 0;
 	let hidden: { quote: string; seq: number; destination: AttentionDestination } | null = null;
-	// One pass over the thread's sends for every comment, instead of a scan of all rows per comment.
-	const replies = threadId ? chatReplyIndex(messages, threadId) : null;
+	// One pass over the chat's comment inputs for every comment, instead of a scan per comment.
+	const replies = threadId ? chatReplyIndex(chatCommentInputs.rows(threadId), threadId) : null;
 	for (const message of messages) {
 		if (message.thread_id !== threadId || !message.chat_comments?.length || !replies) continue;
 		for (const comment of message.chat_comments) {

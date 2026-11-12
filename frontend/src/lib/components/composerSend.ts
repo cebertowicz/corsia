@@ -1,6 +1,7 @@
 import { emitProductEvent } from '$lib/product_events';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
-import { sendMessage } from '$lib/ws';
+import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
+import { sendCommentInput } from '$lib/ws';
 
 /** What a send asks the runtime to do with the turn in flight. */
 export type ComposerDeliveryIntent = 'apply_now' | 'queue_after_turn';
@@ -44,8 +45,9 @@ export function postChatComment(reply: ChatComment, threadId: string | null | un
 	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 	const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
 	emitComposerSend(threadId, '', 0, payload);
-	const inputId = sendMessage(threadId, '', modelId, [], undefined, 'apply_now', payload);
+	const inputId = sendCommentInput(threadId, payload[0], modelId);
 	if (!inputId) refuse('notAccepted', noun);
+	chatCommentInputs.sending(inputId, threadId, payload[0]);
 	return inputId;
 }
 

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { refusalText } from '$lib/chatCommentAnchors';
+	import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -10,28 +10,23 @@
 	import CommentThread from './comments/CommentThread.svelte';
 	import type { CommentThreadData } from './comments/CommentThreadData';
 	import CommentReplyList from './comments/CommentReplyList.svelte';
-	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './comments/comment-link.css';
 	import { apiFetch } from '$lib/api/request';
 
 	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false, picked = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => string | void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean } = $props();
-	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
-	const replies = $derived(chatReplyIndex($messages, threadId));
+	// Built once per change of this chat's comment inputs, then read per comment: the pending and failed sends of this thread.
+	const replies = $derived(chatReplyIndex(chatCommentInputs.rows(threadId), threadId));
 	const agentName = $derived.by(() => {
 		const current = $threads.find(item => item.id === threadId);
 		return current && isNavAgent(current) ? current.title : 'CORSIA';
 	});
-
-	// The reply field keeps a refused reply's text and cause while this thread is on screen.
-	let mounted = true;
-	onMount(() => () => { mounted = false; });
 
 	function postReply(comment: ChatComment, text: string): void {
 		let inputId: string | null = null;
 		let error = '';
 		try { inputId = onReply?.(text) ?? null; }
 		catch (failure) { error = refusalText(failure, 'reply'); /* Keep the reply and show the failure in its field. */ }
-		chatReplyDrafts.postReply(threadId, comment.id, text, inputId, error, () => mounted);
+		chatCommentInputs.postReply(comment.id, text, inputId, error);
 	}
 
 	function answerId(answer: ChatComment['answers'][number]): string {
@@ -67,7 +62,7 @@
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached && !margin}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatReplyDrafts.get(comment.id), (text) => chatReplyDrafts.set(comment.id, text)} replyPending={!!chatReplyDrafts.reply(comment.id)?.inputId} replyError={chatReplyDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { postReply(comment, text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentInputs.get(comment.id), (text) => chatCommentInputs.set(comment.id, text)} replyPending={!!chatCommentInputs.reply(comment.id)?.inputId} replyError={chatCommentInputs.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { postReply(comment, text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
 				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">
@@ -97,6 +92,8 @@
 <style>
 	.pending-reply > span { color: var(--text-secondary); font-size: var(--text-footnote); margin-left: var(--space-3); }
 	.failed-reply > span { color: var(--red); font-size: var(--text-footnote); margin-left: var(--space-3); }
+	/* Retry is the one way back for a failed comment, so on touch it is a full target. */
+	@media (pointer: coarse) { .failed-reply > .ct-link { min-width: var(--touch-target); min-height: var(--touch-target); padding-inline: var(--space-2); } }
 	.chat-comment-threads { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border); }
 	/* In a margin card the card is the frame, so the rail under the message is not drawn. */
 	.chat-comment-threads.margin { margin: 0; padding: 0; border: 0; }

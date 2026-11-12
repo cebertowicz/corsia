@@ -4,7 +4,7 @@
 	import { on, subscribeThread, unsubscribeThread } from '$lib/ws';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { messages } from '$lib/stores/threads';
-	import { isCommentEnvelope } from '$lib/chatCommentDelivery';
+	import { chatCommentInputs } from '$lib/chatCommentInputs.svelte';
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { adoptThreadSnapshot, claimDisplayedThread } from '$lib/stores/displayedThreads';
 	import MessageList from './MessageList.svelte';
@@ -93,10 +93,9 @@
 			if (data?.thread_id !== subscribed || data?.error_type === 'stop_failed') return;
 			void load();
 		};
-		// A comment posted here reloads the page so its thread shows the server's copy; its own row says it is one.
+		// A comment posted here reloads the page so its thread shows the server's copy.
 		const refreshComment = (data: any) => {
-			const row = $messages.find(item => item.thread_id === data?.thread_id && (item.id === data?.message_id || item.metadata?.input_id === data?.input_id));
-			if (row && isCommentEnvelope(row)) refreshLifecycle(data);
+			if (typeof data?.thread_id === 'string' && chatCommentInputs.comments(data.thread_id, data.input_id, data.message_id).length) refreshLifecycle(data);
 		};
 		const offCommentQueued = on('input_queued', refreshComment);
 		const offCommentAccepted = on('input_accepted', refreshComment);

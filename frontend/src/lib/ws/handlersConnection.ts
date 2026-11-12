@@ -1,8 +1,4 @@
 import { get } from 'svelte/store';
-import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
-import { isCommentEnvelope } from '../chatCommentDelivery';
-import { readMessageDeliveryState } from '../messageDelivery';
-import { toasts } from '../stores/toast';
 import { isMachineCode, plainErrorText } from '../plainError';
 import { clearExpiredSession, token, user } from '../stores/auth';
 import {
@@ -22,7 +18,7 @@ import { clearAllContextUsage } from '../stores/contextUsageByThread';
 import { loadUpdateStatus } from '../update/store';
 import { emit } from './events';
 import { subscribedThreads } from './state';
-import { resubscribeWatchedThreads, stopRequestedTurns, subscribeThread } from './send';
+import { resubscribeWatchedThreads, sentWithoutRow, stopRequestedTurns, subscribeThread } from './send';
 import { cancelThreadTypewriters } from './typewriter';
 import { frameIdentity, frameStartedAt } from './turnFrames';
 import {
@@ -154,17 +150,10 @@ export function handleWsError(data: any) {
 	}
 	const identity = frameIdentity(data);
 	if (typeof data?.input_id === 'string' && identity === null) {
-		const row = get(messages).find(item => item.metadata?.input_id === data.input_id || item.id === data.input_id);
-		// A failure that carries the server's delivery state was stored first; its row keeps that state.
-		const stored = readMessageDeliveryState(data.delivery_state) !== null;
-		const refusal = stored ? null : chatReplyDrafts.refuse(data.thread_id, data.input_id, plainErrorText(data.message, ''));
-		if (stored) chatReplyDrafts.release(data.thread_id, data.input_id);
+		// An input sent with no transcript row has its error shown by the box that sent it.
+		const rowless = sentWithoutRow(data.input_id);
 		handleInputRejected(data);
-		// Nothing was stored, so there is nothing on the server to retry: the box keeps the text and the cause, and the row goes.
-		if (refusal) messages.update(rows => rows.filter(item => item.metadata?.input_id !== data.input_id && item.id !== data.input_id));
-		// Comment traffic never shows in the transcript: the cause shows in its box, and as a toast only once that box is closed.
-		if (refusal) { if (!refusal.shown) toasts.show(refusal.cause, 'error'); }
-		else if (!row || !isCommentEnvelope(row)) appendVisibleError(data);
+		if (!rowless) appendVisibleError(data);
 		emit('error', data);
 		return;
 	}
