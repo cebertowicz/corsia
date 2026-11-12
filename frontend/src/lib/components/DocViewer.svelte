@@ -13,6 +13,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+	import { clearRevealRoom } from '$lib/cm/comment-marks';
 	import { createCommentOpeners } from '$lib/docViewerClickPoint';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages } from '$lib/docViewerImages';
@@ -133,8 +134,17 @@
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	const openCards = createCommentOpeners(commentUI, scroll);
+	$effect(() => { if (commentUI.sheetUp) return; const view = editorSurface?.editorView(); if (view) clearRevealRoom(view); });
+	// The text a comment card was opened from, so a phone's sheet can keep it in the band above it: the pressed spot when it lies on the thread's text, else where the thread begins (a table cell has no spot of its own).
+	let pressedAt = $state<number | null>(null);
+	function notePress(ids: string[], click?: MouseEvent) {
+		const range = highlights.find((h) => h.id === ids[0]);
+		const at = click && click.detail !== 0 ? editorSurface?.editorView()?.posAtCoords({ x: click.clientX, y: click.clientY }, false) : null;
+		pressedAt = range ? (at != null && at >= range.from && at <= range.to ? at : range.from) : null;
+	}
+	const revealCard = (opening: boolean) => { const at = pressedAt; if (at !== null && (editorSurface?.draftCovered(at, opening) ?? opening)) scroll.value = { from: at, to: at, origin: 'press-reveal' }; };
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click)); }
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { notePress(ids, click); arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click)); }
 	function onDocEdit(changes: ChangeDesc, open: ReadonlySet<string>) { if (loadedArtifactId) remapComments(loadedArtifactId, changes, open); images.remap((p) => changes.mapPos(p)); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
@@ -327,7 +337,7 @@
 		scrollTo={scroll.value}
 		onSave={flushNow}
 		onSelect={draftController.select}
-		onAnchorFocus={openCards.comment}
+		onAnchorFocus={(id, anchor, viaSuggestion, click) => { notePress([id], click); openCards.comment(id, anchor, viaSuggestion, click); }}
 		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
 		onTyping={closeTextCard}
 		cardMode={commentSurface?.cardMode()}
@@ -383,6 +393,7 @@
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetUp = open}
 		onRevealDraft={revealDraft}
+		onRevealCard={revealCard}
 		images={images.groups}
 		{covered}
 		{readStampSuppressed}

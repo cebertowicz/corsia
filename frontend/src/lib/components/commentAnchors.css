@@ -24,3 +24,12 @@
 .sel-comment:hover { filter: brightness(1.08); }
 @keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 @media (max-width: 768px) { .sel-comment { padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3); font-size: var(--text-subhead); gap: var(--space-2); } .sel-comment svg { width: var(--space-4); height: var(--space-4); } }
+
+/* PROTOTYPE (uncommitted), option D: while a thread is unread its highlight is the sign. A stronger accent wash and a medium underline in the text colour replace the read highlight's amber ones. The underline is the text colour, never the accent, so it is not read as a link (a link is accent-coloured text); nothing is added to the line, so nothing can overlap or crowd. */
+.cm-comment-anchor[data-unread] { background-color: color-mix(in srgb, var(--accent) 22%, transparent); border-bottom: medium solid var(--text-primary); }
+.cm-md-table td.cm-comment-anchor[data-unread], .cm-md-table th.cm-comment-anchor[data-unread] { background-color: color-mix(in srgb, var(--accent) 22%, transparent); border-bottom-width: 1px; box-shadow: inset 0 calc(var(--space-1) * -0.75) 0 var(--text-primary) !important; }
+/* Forced colours drop the wash, the shadow and the border colours: a thick double rule in the system highlight colour plus an outline keep an unread highlight different from a read one (a thin plain rule). */
+@media (forced-colors: active) {
+	.cm-comment-anchor[data-unread] { border-bottom: var(--space-1) double Highlight; outline: 1px solid Highlight; outline-offset: -1px; }
+	.cm-md-table td.cm-comment-anchor[data-unread], .cm-md-table th.cm-comment-anchor[data-unread] { border-bottom: var(--space-1) double Highlight; box-shadow: none !important; }
+}

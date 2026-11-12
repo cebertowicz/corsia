@@ -34,7 +34,7 @@
 	import { paneOverlay } from '$lib/stores/artifactCanvas';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { hasRoomForMargin, type CardMode, type CommentAnchor, type CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
-	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false, quiet = false, draftOverColumn = false, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
+	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, phone = null, onRelease, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onRevealCard, onThreadMissing, reviewBar, reviewVisible = false, quiet = false, draftOverColumn = false, resolvedCount = $bindable(0), resolvedOpen = $bindable(false) }: {
 		state: CommentSurfaceState;
 		reviewBar?: Snippet<[boolean]>;
 		reviewVisible?: boolean;
@@ -94,6 +94,8 @@
 		onSheetModalChange?: (open: boolean) => void;
 		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
 		onRevealDraft?: (opening: boolean) => void;
+		/** Asks the editor to keep the text a phone's thread sheet was opened from clear of it, now and whenever the sheet moves. */
+		onRevealCard?: (opening: boolean) => void;
 		/** Resolved threads at every width (zero on an image's drawer), for the header control that opens their drawer. */
 		resolvedCount?: number;
 		/** A new comment is being written over the margin column: the column stays, its cards where they were, with the composer beside the text. */
@@ -169,7 +171,7 @@
 	$effect(() => observeSheetTyping(listSheet ?? draftSheet, (value) => typing = value));
 	$effect(() => trackOverlaySheet(bounds, () => covered || !sheet.open ? null : sheet.state?.kind === 'list' && sheetDrawer ? listSheet : draftSheet));
 	// The draft sheet exists only at phone width; a narrow canvas's composer is a popover, with no sheet to keep the subject above.
-	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : null, onRevealDraft));
+	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : surfaceState?.kind === 'thread' && cardMode() === 'sheet' ? draftSheet : null, surfaceState?.kind === 'draft' ? onRevealDraft : onRevealCard));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -191,6 +193,8 @@
 		// An image's comments read in number order, like its tags.
 		return image ? [...allShown].sort(byCommentNumber) : allShown;
 	});
+	/** Two or more threads on the pressed text: the list's title, which also names its sheet. */
+	const stackedTitle = $derived(sheet.state?.kind === 'thread' && sheet.state.ids && sheet.state.ids.length > 1 ? `${sheet.state.ids.length} threads` : null);
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -297,6 +301,7 @@
 {#snippet content()}
 	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
+		{#if stackedTitle && cardMode() !== 'sheet'}<h2 class="stacked-title">{stackedTitle}</h2>{/if}
 		{#if !readOnly && sheet.state?.kind !== 'thread'}{@render acceptAllBar()}{/if}
 		<!-- One thread in the popover or the sheet draws flat: the container is its card. -->
 		{@render threadList(displayed, undefined, undefined, sheet.state?.kind === 'thread', sheet.state?.kind === 'thread' && displayed.length === 1)}
@@ -328,7 +333,7 @@
 		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
+	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} ariaLabel={stackedTitle ?? "Document comments"} heading={sheet.state.kind === 'draft' ? 'New comment' : stackedTitle} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}{@render cardPopover()}{/if}
 {/if}
 <!-- Its own drawer over the document pane (`within` the leaf body, as the comment sheet is), at every width: never inside the margin column or the sheet. -->
@@ -349,6 +354,7 @@
 	.canvas-comment-drawer.margin > :global(*) { min-width: 287px; }
 	/* The column never scrolls on its own: its cards are part of the page and overflow it downward, so the scroller reaches them. */
 	.drawer-comments.in-margin { position: relative; overflow: visible; scrollbar-gutter: auto; }
+	.stacked-title { margin: 0; padding: var(--space-1) var(--space-3) var(--space-1); color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */

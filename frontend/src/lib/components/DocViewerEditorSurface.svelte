@@ -138,6 +138,7 @@
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
+	export function editorView() { return editor?.editorView(); }
 
 	// The button follows the selection's end but never leaves the visible document column.
 	const EDGE = 8;

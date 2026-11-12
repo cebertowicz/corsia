@@ -16,7 +16,7 @@
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { CaretRule, releasesPress } from '$lib/cm/caret-rule';
-	import { commentMarks, coveredByMove, highlightAtPress, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, highlightAtPress, highlightsAtPress, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -198,7 +198,11 @@
 			const { hit, arrived } = read;
 			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
 			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
-			if (hit && opens && v.coordsAtPos(r.from)) {
+			const stacked = hit && click ? highlightsAtPress(v, click, curHighlights).filter((h) => !h.suggestion) : [];
+			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) {
+				// Two or more threads on the pressed text open as a list of them, the way their margin marker does.
+				focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click);
+			} else if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {

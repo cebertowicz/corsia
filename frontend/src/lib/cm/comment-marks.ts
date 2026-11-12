@@ -55,9 +55,14 @@ export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify
  * so at an end the press must also be on the highlight's side of it and on that end's own row.
  */
 export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange | undefined {
+	return highlightsAtPress(view, press, ranges)[0];
+}
+
+/** Every highlight under a press by the same rule, in range order: two threads on overlapping text are both there. */
+export function highlightsAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange[] {
 	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
 	const onRow = (edge: { top: number; bottom: number } | null) => !edge || (press.clientY >= edge.top && press.clientY <= edge.bottom);
-	return ranges.find((r) => {
+	return ranges.filter((r) => {
 		if (r.point || at < r.from || at > r.to) return false;
 		if (at === r.to && r.to > r.from) {
 			const edge = view.coordsAtPos(r.to, -1);
@@ -126,7 +131,8 @@ export const MAX_SCROLL_PASSES = 8;
 const STEADY_CHECKS = 2;
 
 /** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
-export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
+/** `press-reveal` keeps the text a phone's thread sheet was opened from in the band above the sheet: no move when it is there, else it is centred in that band. */
+export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap' | 'press-reveal';
 
 const QUOTE_MARGIN = 8;
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
@@ -145,6 +151,19 @@ export function coveredByMove(view: EditorView, from: number, before: Box | null
 	return { band, covered: !!before && within(box, before) && !within(box, band) };
 }
 
+const revealRoom = new WeakMap<EditorView, { scroller: HTMLElement; before: string }>();
+function addRevealRoom(view: EditorView, scroller: HTMLElement, extra: number) {
+	if (!revealRoom.has(view)) revealRoom.set(view, { scroller, before: scroller.style.paddingBottom });
+	scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + extra}px`;
+}
+/** Gives back the room a reveal added below the document once the sheet it was for is gone. */
+export function clearRevealRoom(view: EditorView) {
+	const held = revealRoom.get(view);
+	if (!held) return;
+	held.scroller.style.paddingBottom = held.before;
+	revealRoom.delete(view);
+}
+
 /** The frame watch of the jump that last moved the reader: one at a time, so a new jump retires the previous one. */
 const placedIn = new WeakMap<EditorView, () => void>();
 
@@ -153,7 +172,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const widget = widgetTarget(view, target);
 	const quote = origin === 'quote-tap';
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
-	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	if ((origin === 'comment-save' || origin === 'press-reveal') && within(boxOf(view), visibleRegion(view).band)) return;
+	const reveal = origin === 'press-reveal';
 	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
 	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
@@ -170,6 +190,18 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				},
 			});
 			// The reader's place is taken again from where this lands.
+			releasePlace(view);
+			return;
+		}
+		const box = reveal && !widget ? boxOf(view) : null;
+		if (box) {
+			// Text in the band above the sheet: its middle is the band's middle, which CodeMirror's own centring (the scroller's middle) is not.
+			const { band, scroller } = visibleRegion(view);
+			const move = box.top - (band.top + band.bottom - (box.bottom - box.top)) / 2;
+			// A line near the end of the document cannot be lifted above the sheet without room below it: the scroller gets that room while the sheet is up.
+			const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+			if (move > room) addRevealRoom(view, scroller, Math.ceil(move - room));
+			scroller.scrollTop += move;
 			releasePlace(view);
 			return;
 		}

@@ -33,9 +33,53 @@
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
 	let editingId = $state<string | null>(null);
-	let viewing = $state<{ messageId: string; commentId: string } | null>(null);
-	const viewedComment = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId)?.chat_comments?.find(comment => comment.id === viewing?.commentId));
+	// `list` is every thread on the pressed text when there are two or more; `listed` says the list, not one of its threads, is showing.
+	let viewing = $state<{ messageId: string; commentId: string; list?: string[]; listed?: boolean } | null>(null);
+	const viewedMessage = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId));
+	const viewedComment = $derived(viewedMessage?.chat_comments?.find(comment => comment.id === viewing?.commentId));
+	const listedComments = $derived(viewing?.listed ? (viewing.list ?? []).flatMap(id => viewedMessage?.chat_comments?.find(comment => comment.id === id) ?? []) : []);
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
+	// The list's title and the sheet's name: how many threads the list holds. A thread opened from the list says Back in the header's leading slot.
+	const listing = $derived(!!viewing?.listed);
+	const fromList = $derived(!!viewing?.list && !viewing.listed);
+	const sheetName = $derived(listing ? `${viewing?.list?.length ?? 0} threads` : 'Comment thread');
+	// Moving between the list and one of its threads keeps focus in the sheet: into a thread it lands on Back, back to the list it returns to that thread's Reply.
+	let shownMode: 'list' | 'thread' | null = null;
+	$effect(() => {
+		const mode = viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, id = viewing?.commentId;
+		untrack(() => {
+			const previous = shownMode; shownMode = mode;
+			if (previous === 'list' && mode === 'thread') void tick().then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>('.thread-back')?.focus()));
+			else if (previous === 'thread' && mode === 'list') void tick().then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-reply-comment="${id}"]`)?.focus()));
+		});
+	});
+	let sheetPanel = $state<HTMLElement | null>(null);
+	/** The line the person pressed, kept so a sheet that opens over the transcript can lift it clear. */
+	let press: { el: HTMLElement; line: number } | null = null;
+	// A sheet over the transcript covers its lower part: the pressed line is lifted above it, with scroll room added below when the transcript ends under the sheet. Opening and any later resize of the sheet only ever lift a line it newly covers.
+	$effect(() => {
+		const panel = sheetPanel, root = messageRoot();
+		if (!panel || !root) return;
+		const padding = root.style.paddingBottom;
+		const lift = () => {
+			const el = press?.el;
+			if (!el?.isConnected || !panel.isConnected) return;
+			const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
+			const top = backdrop ? backdrop.getBoundingClientRect().bottom - panel.offsetHeight : panel.getBoundingClientRect().top;
+			const rects = [...el.getClientRects()];
+			const line = rects[Math.min(press!.line, rects.length - 1)];
+			if (!line || line.top >= top + panel.offsetHeight) return;
+			const over = line.bottom + 24 - top;
+			if (over <= 0) return;
+			const room = root.scrollHeight - root.clientHeight - root.scrollTop;
+			if (room < over) root.style.paddingBottom = `calc(${getComputedStyle(root).paddingBottom} + ${Math.ceil(over - room)}px)`;
+			root.scrollTop += over;
+		};
+		const frame = requestAnimationFrame(lift);
+		const observer = new ResizeObserver(() => requestAnimationFrame(lift));
+		observer.observe(panel);
+		return () => { cancelAnimationFrame(frame); observer.disconnect(); root.style.paddingBottom = padding; };
+	});
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	let buttonWidth = $state(0);
@@ -243,11 +287,19 @@
 			const { threadId: sourceThread, messageId, commentId, target } = (event as CustomEvent<{ threadId: string; messageId: string; commentId: string; target: HTMLElement }>).detail;
 			const message = $messages.find(item => item.id === messageId && item.thread_id === threadId);
 			const comment = message?.chat_comments?.find(item => item.id === commentId);
-			if (open || sourceThread !== threadId || !messageRoot()?.contains(target)) return;
+			if (open || sourceThread !== threadId || !(messageRoot()?.contains(target) || viewing?.listed)) return;
 			// One reply behavior: a thread's Reply opens that comment's thread, whose send goes straight through onSendReply, the same as the popover and the drawer. It never routes through the composer.
-			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id }; }
+			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id, list: viewing?.list }; }
 		};
 		const openHighlight = (ids: string[], source: HTMLElement) => {
+			// Two or more threads on the pressed text open as a list of them; a row's Reply opens that thread, and Back returns to the list.
+			if (!marginComments && !comments.some(comment => ids.includes(comment.id))) {
+				for (const message of $messages) {
+					if (message.thread_id !== threadId) continue;
+					const stacked = ids.filter(id => message.chat_comments?.some(item => item.id === id));
+					if (stacked.length > 1) { returnFocus = source; viewing = { messageId: message.id, commentId: stacked[0], list: stacked, listed: true }; return; }
+				}
+			}
 			const pending = comments.find(comment => ids.includes(comment.id));
 			if (pending) { returnFocus = source; editingId = pending.id; return; }
 			for (const message of $messages) {
@@ -264,7 +316,11 @@
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
-			const ids = hit.dataset.commentIds?.split(',') ?? [];
+			const rows = [...hit.getClientRects()];
+			press = { el: hit, line: Math.max(0, rows.findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom)) };
+			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
+			const ids: string[] = [];
+			for (let el: HTMLElement | null | undefined = hit; el && root.contains(el); el = el.parentElement?.closest<HTMLElement>('[data-comment-ids]')) for (const id of el.dataset.commentIds?.split(',') ?? []) if (id && !ids.includes(id)) ids.push(id);
 			if (closing) {
 				const finish = afterClose;
 				afterClose = () => { finish?.(); openHighlight(ids, hit); };
@@ -336,14 +392,23 @@
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}
-{#if viewing && viewedComment && threadId && !open}
+{#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of threads" onclick={() => { if (viewing) viewing = { ...viewing, listed: true }; }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}
+{#snippet threadsBody(keep: boolean)}
+	{#if viewing?.listed}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={listedComments} />
+	{:else if viewing && viewedComment}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible={keep} />{/if}
+{/snippet}
+{#if viewing && (viewing.listed ? listedComments.length > 0 : viewedComment) && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
+		<AdaptiveDrawer bind:panel={sheetPanel} ariaLabel={sheetName} heading={listing ? sheetName : null} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			{@render threadsBody(true)}
 		</AdaptiveDrawer>
 	{:else}
 		<Popover anchor={threadAnchor} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
+			<div role="dialog" aria-label={sheetName}>
+				{#if listing}<h2 class="thread-list-title">{sheetName}</h2>{/if}
+				{#if fromList}{@render backButton()}{/if}
+				{@render threadsBody(false)}
+			</div>
 		</Popover>
 	{/if}
 {/if}
@@ -370,5 +435,9 @@
 {/if}
 
 <style>
+	/* The way back to the list: the Back of the other drill-in screens (chevron and the word), a touch-sized target. */
+	.thread-back { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch-target); min-width: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
+	.thread-back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.thread-list-title { margin: 0; padding: var(--space-1) var(--space-3) 0; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.comment-dialog { display: flex; flex-direction: column; min-height: 0; }
 </style>
