@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { closeComments, showAllThreads, showResolved } from '../support/commentDrawer';
+import { closeComments, showAllThreads, showResolved, openComments } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
@@ -213,7 +213,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await openComments(page);
 	await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');

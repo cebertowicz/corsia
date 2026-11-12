@@ -1,4 +1,4 @@
-import { inResolved, replyField, resolvedEntry, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, resolvedEntry, showAllThreads, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
@@ -188,7 +188,7 @@ for (const [width, height, project] of layouts) {
 			const remote = `remote ${stamp}`;
 			await typeAtDocumentEnd(writer, remote);
 			await expect(reader.locator('.cm-content')).toContainText(remote);
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await openComments(reader);
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
 			await drawerRow(reader, red.id).getByRole('button', { name: 'Accept', exact: true }).click();
 			// A decided suggestion leaves the open cards for the Resolved list.
@@ -217,7 +217,7 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await openComments(reader);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			await drawer.getByRole('button', { name: `Accept all from ${red.author}`, exact: true }).click();
@@ -241,7 +241,7 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
+			await openComments(reader);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			const replyId = await drawer.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }).getAttribute('data-comment-id');

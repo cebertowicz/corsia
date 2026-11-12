@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
-import { closeComments, openResolved, resolvedList } from '../support/commentDrawer';
+import { closeComments, openResolved, resolvedList, openComments } from '../support/commentDrawer';
 
 test('@flow:document-comment-save preserves the visible editor viewport', async ({ page, request }, testInfo) => {
 	test.setTimeout(60_000);
@@ -315,7 +315,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		// Measure the re-open from the reader's place, whatever the Resolve above did to it.
 		await placeTarget();
 		const caretBeforeDrawer = await caretBeforeFocusLeft();
-		await page.getByRole('button', { name: /0 threads/ }).click();
+		await openComments(page);
 		const drawer = page.locator('[data-doc-comments-drawer]');
 		await expect(drawer).toBeVisible();
 		await openResolved(drawer);

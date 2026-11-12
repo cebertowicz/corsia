@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { closeComments, openResolved, replyField, showAllThreads } from '../support/commentDrawer';
+import { closeComments, openResolved, replyField, showAllThreads, openComments as openCommentsPill } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -43,7 +43,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^1 thread\b/ }).click();
+		await openCommentsPill(page);
 		await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
 		await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	};
@@ -111,7 +111,7 @@ test('@flow:resolved-reply a person can reply to an agent on a resolved thread',
 	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	// The agent's reply is still unread after the agent resolved the thread, so the default list keeps it, open.
-	await page.getByRole('button', { name: /^1 thread, 1 unread\b/ }).click();
+	await openCommentsPill(page);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved.getByRole('button', { name: 'Resolved · 2 messages' })).toBeVisible();
@@ -150,7 +150,7 @@ test('@flow:document-comment-highlight a resolved comment loses its highlight, s
 	await expect(anchorMark).toHaveCount(0);
 	await saveEvidenceScreenshot(page, testInfo, 'highlight-2-resolved', { fullPage: false });
 	// Picking the resolved comment in the drawer shows which text it was.
-	await page.getByRole('button', { name: /^0 threads\b/ }).click();
+	await openCommentsPill(page);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await showAllThreads(drawer);
 	await drawer.getByRole('button', { name: /^Go to text: / }).click();

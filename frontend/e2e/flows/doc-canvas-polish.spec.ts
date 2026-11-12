@@ -4,6 +4,7 @@ import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { deleteRenderedLine, openLiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
+import { openComments } from '../support/commentDrawer';
 
 async function chooseThread(page: Page, title: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -129,7 +130,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('[data-doc-activity-pill]')).toHaveCount(0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	const paneLabel = await page.locator('.pane-scope').textContent();
-	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	await openComments(page);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await expect(drawer).toBeVisible();
 	const viewportBefore = await page.evaluate(() => window.visualViewport?.height ?? window.innerHeight);
@@ -227,7 +228,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	}
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
 	if (mobile) expect(await page.locator('.comment-status').evaluate((button) => getComputedStyle(button).paddingLeft)).toBe('8px');
-	await page.locator('.comment-status').click();
+	await openComments(page);
 	await expect(drawer).toBeVisible();
 	await drawer.getByRole('button', { name: 'Show comment: text unavailable', exact: true }).click();
 	await expect(drawer).toContainText('This comment has no text to jump to.');

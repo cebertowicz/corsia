@@ -3,6 +3,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { waitForPanelsToSettle } from '../support/sidebar';
+import { openComments } from '../support/commentDrawer';
 
 /**
  * Activating a comment in the Comments sheet takes the reader to its text, whether they press the quote line or the
@@ -78,7 +79,7 @@ test.describe(`comment jump at ${phone.name}`, () => {
 					{ quote: quoteOf('Sixth'), body: 'Comment on the sixth target.' },
 				]);
 				await expect(page.locator('.cm-scroller')).toBeVisible();
-				await page.locator('.comment-status').click();
+				await openComments(page);
 				await expect(drawer).toBeVisible();
 				await parkInMiddle(page);
 				const id = section === 'First' ? above : below;
@@ -111,7 +112,7 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 	}
 	await expect.poll(async () => (await page.locator('.doc').boundingBox())!.width).toBeGreaterThanOrEqual(900);
 	await waitForPanelsToSettle(page);
-	await page.locator('.comment-status').click();
+	await openComments(page);
 	// Inside the column's opening hold, which keeps the reader's line steady while the text narrows.
 	await parkInMiddle(page, { wheel: true });
 	const scrolling = await canvasScroller(page);

@@ -25,15 +25,33 @@ export async function showAllThreads(drawer: Locator): Promise<void> {
 	await expect(drawer.locator('.peers > .peer')).toHaveCount(1);
 }
 
+/** The document header's comments control: on the page, or in the viewer that holds `scope`. */
+function commentsPill(scope: Page | Locator): Locator {
+	const viewer = 'goto' in scope ? scope : scope.locator('xpath=ancestor::*[.//*[contains(concat(" ", @class, " "), " comment-status ")]][1]');
+	return viewer.locator('.comment-status');
+}
+
+/**
+ * Opens the comments as a person does, and ends with them open. The control toggles, and a canvas wide enough for the margin
+ * column opens the column by itself once the document's comments load, so a click made after that would close it: press the
+ * control only when it does not already report them open.
+ */
+export async function openComments(scope: Page | Locator): Promise<void> {
+	const pill = commentsPill(scope);
+	if ((await pill.getAttribute('aria-expanded')) !== 'true') await pill.click();
+	await expect(pill).toHaveAttribute('aria-expanded', 'true');
+}
+
 /**
  * Closes the comments as a person does. The sheet and the inline drawer have a Close button; the margin column beside a text
- * document has none and closes with the document header's comments control.
+ * document has none and closes with the document header's comments control, pressed only while it reports them open.
  */
 export async function closeComments(scope: Page | Locator): Promise<void> {
 	const close = scope.getByRole('button', { name: 'Close comments', exact: true });
 	if (await close.count()) return close.click();
-	const viewer = 'goto' in scope ? scope : scope.locator('xpath=ancestor::*[.//*[contains(concat(" ", @class, " "), " comment-status ")]][1]');
-	await viewer.locator('.comment-status').click();
+	const pill = commentsPill(scope);
+	if ((await pill.getAttribute('aria-expanded')) === 'true') await pill.click();
+	await expect(pill).toHaveAttribute('aria-expanded', 'false');
 }
 
 /** The control that opens a text document's resolved threads: the document header's "Resolved" button, at every width. */
