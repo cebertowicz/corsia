@@ -127,13 +127,7 @@ for (const { theme, width, wide } of CONFIGS) {
 		const close = page.getByRole('button', { name: 'Close comments', exact: true });
 		if (await close.count()) await close.first().click();
 		await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
-		// The prototype's D placement: the tinted highlight (the default draws dev's placement).
 		await expect.poll(() => page.locator('[data-highlight-dot]').count(), { timeout: 30_000 }).toBeGreaterThan(0);
-		await page.evaluate(async () => {
-			(await import('/src/lib/components/comments/highlightDot.ts')).proto.variant = 'tint';
-			window.dispatchEvent(new Event('resize'));
-			await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-		});
 		await expect.poll(() => page.locator('.cm-comment-anchor[data-unread]').count(), { timeout: 30_000 }).toBeGreaterThan(0);
 		await page.waitForTimeout(1500);
 		await page.route('**/comments/*/viewed', (route) => route.abort());

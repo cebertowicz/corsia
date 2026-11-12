@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { placeHighlightDot, proto } from '$lib/components/comments/highlightDot';
+	import { placeHighlightDot } from '$lib/components/comments/highlightDot';
 	import '$lib/components/commentAnchors.css';
 
 	// PROTOTYPE (uncommitted): a chat transcript with unread comment threads, drawn with the real new-sign code.
@@ -18,10 +18,10 @@
 		{ id: 'same-word', title: 'Two unread threads on the same word', text: 'The vendor list for Lisbon still needs a final headcount from Marcus Chen, and the budget line cannot close until that number is in.', marks: [{ quote: 'headcount' }, { quote: 'headcount' }] },
 	];
 	const params = new URLSearchParams(location.search);
-	const variant = (params.get('variant') ?? 'before') as typeof proto.variant;
+	// 'before' draws dev's look on the same code (its word shown, no unread highlight); 'tint' is the app's own, D.
+	const variant = (params.get('variant') ?? 'tint') as 'before' | 'tint';
 	const theme = params.get('theme') ?? 'light';
 	const rail = params.get('rail') === '1';
-	proto.variant = variant;
 	document.documentElement.setAttribute('data-theme', theme);
 
 	let scroller: HTMLElement;
@@ -76,7 +76,11 @@
 					else { from = text.indexOf(mk.quote); to = from + mk.quote.length; }
 					const span = wrap(body, from, to, `${c.id}-${i}`);
 					if (mk.read) span.dataset.read = '1';
-					if (!mk.read) cleanups.push(placeHighlightDot(body, span, null, undefined, 'New reply'));
+					if (!mk.read) {
+						cleanups.push(placeHighlightDot(body, span, null, undefined, 'New reply'));
+						if (variant === 'before') document.querySelectorAll<HTMLElement>('[data-highlight-dot]').forEach((host) => { host.style.opacity = '1'; });
+						else span.dataset.unread = '';
+					}
 				});
 			});
 			document.documentElement.dataset.ready = '1';

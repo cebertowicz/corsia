@@ -1,13 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { messages, type Message } from '$lib/stores/threads';
-	import { proto } from '$lib/components/comments/highlightDot';
 	import ChatCommentSelection from '$lib/components/ChatCommentSelection.svelte';
 	import '$lib/components/commentAnchors.css';
 
 	// PROTOTYPE (uncommitted): the real chat comment surface over a transcript where two unread threads share text, to try a press on it.
 	const params = new URLSearchParams(location.search);
-	proto.variant = (params.get('variant') ?? 'tint') as typeof proto.variant;
 	const theme = params.get('theme') ?? 'light';
 	document.documentElement.setAttribute('data-theme', theme);
 	const THREAD = 't-press';

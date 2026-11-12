@@ -246,6 +246,8 @@
 					current.wraps[0].tabIndex = 0; current.wraps[0].setAttribute('role', 'button'); current.wraps[0].setAttribute('aria-haspopup', 'dialog');
 				}
 			}
+			// An unread thread's highlight is its sign: every wrap of it is drawn unread, and only while it is unread.
+			for (const el of body.querySelectorAll('[data-unread]')) el.removeAttribute('data-unread');
 			for (const comment of sent) {
 				const failed = !!replies?.failed(comment).length;
 				const sending = !!replies?.pending(comment).length;
@@ -253,6 +255,7 @@
 				if (!failed && !sending && !unread) continue;
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
+				if (unread) for (const wrap of wraps) wrap.dataset.unread = '';
 				if (anchor) {
 					const quote = quoteLabel(comment.quote);
 					wraps[0].setAttribute('aria-label', failed ? `Your reply on ${quote} wasn’t delivered.` : sending ? `Your reply on ${quote} is sending.` : `The comment on ${quote} has a new reply.`);

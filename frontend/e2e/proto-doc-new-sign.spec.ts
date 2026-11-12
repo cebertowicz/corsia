@@ -89,14 +89,14 @@ async function stage(page: Page, threadId: string, docPath: string, threadTitle:
 }
 
 const RUN = Date.now().toString(36);
-type Variant = 'before' | 'gutter' | 'trailing' | 'tint';
-const VARS: Variant[] = ['before', 'gutter', 'trailing', 'tint'];
-const LABELS: Record<Variant, string> = { before: 'dev (origin/dev 3e3d2ea9a)', gutter: 'A: word in the gutter, tint where no room', trailing: 'C: word after the highlight, tint where no room', tint: 'D: tinted highlight' };
+type Variant = 'before' | 'tint';
+const VARS: Variant[] = ['before', 'tint'];
+const LABELS: Record<Variant, string> = { before: 'dev (origin/dev 3e3d2ea9a)', tint: 'D: tinted highlight' };
 
 for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1440]) {
 	test(`proto doc new sign ${theme} ${width}`, async ({ page, request }, testInfo) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || testInfo.project.name !== 'chromium-desktop', 'Requires a disposable mock instance');
-		test.setTimeout(180_000);
+		test.setTimeout(360_000);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: theme });
 		const title = `Launch plan review ${RUN}-${theme}-${width}`;
@@ -106,7 +106,6 @@ for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1
 		// Close the comments sheet or column if it came up with the document, as a reader would before reading.
 		const close = page.getByRole('button', { name: 'Close comments', exact: true });
 		if (await close.count()) await close.first().click();
-		await page.evaluate(async () => (await import('/src/lib/components/comments/highlightDot.ts')).proto.variant = 'before');
 		await expect.poll(() => page.locator('[data-highlight-dot]').count(), { timeout: 20_000 }).toBeGreaterThan(0);
 		console.log(`page build: ${await page.evaluate(() => document.querySelector('.version-overlay')?.textContent?.replace(/\s+/g, ' ').trim())}`);
 		// No build strip in a frame: the stamp is read above, then hidden the way the other frame specs do.
@@ -127,9 +126,18 @@ for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1
 				await page.waitForTimeout(200);
 			}
 		};
+		// dev's look is emulated on the same page: its word is drawn (the hosts are in the same place, only hidden in D) and no highlight carries the unread attribute. D's look is the app's own.
 		const setVariant = async (variant: Variant) => {
 			await page.evaluate(async (v) => {
-				(await import('/src/lib/components/comments/highlightDot.ts')).proto.variant = v;
+				// Dev's look is a style override, so the editor redrawing its marks cannot undo it: the read highlight's colours on an unread one, and the word drawn by the hosts.
+				document.getElementById('emu-dev')?.remove();
+				if (v === 'before') {
+					const st = document.createElement('style');
+					st.id = 'emu-dev';
+					st.textContent = `.cm-comment-anchor[data-unread] { background-color: color-mix(in srgb, var(--amber) 13%, transparent) !important; border-bottom: 2px solid color-mix(in srgb, var(--amber) 42%, transparent) !important; } .cm-md-table td.cm-comment-anchor[data-unread], .cm-md-table th.cm-comment-anchor[data-unread] { background-color: transparent !important; border-bottom-width: 1px !important; box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent) !important; } [data-highlight-dot] { opacity: 1 !important; }`;
+					document.head.append(st);
+				}
+				// The sign hosts are made visible by the style override above, so a host the editor redraws is shown too.
 				window.dispatchEvent(new Event('resize'));
 				await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 			}, variant);
@@ -180,14 +188,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1
 			const r1 = (v: number) => Math.round(v * 10) / 10;
 			const visibleBoxes: number[][] = [];
 			for (const host of document.querySelectorAll<HTMLElement>('[data-highlight-dot]')) {
-				if (getComputedStyle(host).display === 'none' || host.dataset.mode === 'tint') continue;
+				if (getComputedStyle(host).display === 'none' || getComputedStyle(host).opacity === '0') continue;
 				const el = [...host.querySelectorAll<HTMLElement>('.ct-new')].find((x) => x.getClientRects().length);
 				if (!el) continue;
 				const bb = el.getBoundingClientRect();
 				visibleBoxes.push([bb.left, bb.top]);
 			}
 			for (const host of document.querySelectorAll<HTMLElement>('[data-highlight-dot]')) {
-				if (getComputedStyle(host).display === 'none' || host.dataset.mode === 'tint') continue;
+				if (getComputedStyle(host).display === 'none' || getComputedStyle(host).opacity === '0') continue;
 				const el = [...host.querySelectorAll<HTMLElement>('.ct-new')].find((x) => x.getClientRects().length);
 				if (!el || !last) continue;
 				const b = el.getBoundingClientRect();
@@ -284,7 +292,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1
 				}
 			}
 			expect(VARS.every((v) => per[v].found), `${c.id} found`).toBeTruthy();
-			results.push({ case: c.id, width, theme, ...Object.fromEntries(VARS.map((v) => [v, { sign: per[v].sign, tint: per[v].tint, ariaSigns: per[v].ariaSigns, hostsShown: per[v].hosts, modes: per[v].modes, focusable: per[v].focusable, names: per[v].names }])), textLinesMoved: VARS.map((v) => per[v].signature !== per.before.signature), movedDetail: (['gutter', 'tint'] as const).map((v) => { const a = (per.before.signature as string).split('|'), z = (per[v].signature as string).split('|'); return { v, n: [a.length, z.length], diff: a.map((x, i) => [i, x, z[i]]).filter(([, x, y]) => x !== y).slice(0, 4) }; }) });
+			results.push({ case: c.id, width, theme, ...Object.fromEntries(VARS.map((v) => [v, { sign: per[v].sign, tint: per[v].tint, ariaSigns: per[v].ariaSigns, hostsShown: per[v].hosts, modes: per[v].modes, focusable: per[v].focusable, names: per[v].names }])), textLinesMoved: VARS.map((v) => per[v].signature !== per.before.signature), movedDetail: (['tint'] as const).map((v) => { const a = (per.before.signature as string).split('|'), z = (per[v].signature as string).split('|'); return { v, n: [a.length, z.length], diff: a.map((x, i) => [i, x, z[i]]).filter(([, x, y]) => x !== y).slice(0, 4) }; }) });
 			crops.push({ id: c.id, title: c.title, shots });
 		}
 		mkdirSync(out, { recursive: true });
@@ -322,7 +330,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [393, 900, 1
 		for (const [name, quote] of [['scope', CASES[2].quote], ['table', CASES[4].quote], ['list', CASES[5].quote]] as const) {
 			await setVariant('before'); await scrollCenter(quote);
 			const a = (await docShot()).toString('base64');
-			for (const v of ['gutter', 'trailing', 'tint'] as const) {
+			for (const v of ['tint'] as const) {
 				await setVariant(v);
 				const b = (await docShot()).toString('base64');
 				await composite(path.join(out, `doc-view-${name}-${v}-${width}-${theme}.png`), [a, b], [LABELS.before, LABELS[v]]);

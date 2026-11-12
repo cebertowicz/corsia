@@ -80,7 +80,7 @@ const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
 /** An unread thread's highlight names its thread, so its sign can find where the highlight ends. */
 const markOf = (range: CommentRange) => !range.unread ? (range.focused ? anchorFocused : anchor)
-	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id } });
+	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id, 'data-unread': '' } });
 
 // A suggestion with an empty quote is a pure insertion: its range is a point.
 const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to) || (!!range.point && range.from === range.to);
@@ -135,6 +135,8 @@ const STEADY_CHECKS = 2;
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap' | 'press-reveal';
 
 const QUOTE_MARGIN = 8;
+/** The band less one line of the text's own height at its bottom edge: text meant to stay readable above a sheet leaves at least a line's worth of the page between it and the sheet. */
+const clearOfSheet = (box: Box | null, band: Box): Box => ({ top: band.top, bottom: band.bottom - (box ? box.bottom - box.top : 0) });
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
 
 // Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
@@ -145,10 +147,10 @@ const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof wi
  * band as of the last movement), and the band now leaves it out. Text the reader had scrolled out of view is not covered by a movement.
  * Returns the band now, which is the next movement's `before`.
  */
-export function coveredByMove(view: EditorView, from: number, before: Box | null): { band: Box; covered: boolean } {
+export function coveredByMove(view: EditorView, from: number, before: Box | null, oneLineClear = false): { band: Box; covered: boolean } {
 	const { band } = visibleRegion(view);
 	const target = Math.min(from, view.state.doc.length), box = boxAt(view, target, widgetTarget(view, target));
-	return { band, covered: !!before && within(box, before) && !within(box, band) };
+	return { band, covered: !!before && within(box, before) && !within(box, oneLineClear ? clearOfSheet(box, band) : band) };
 }
 
 const revealRoom = new WeakMap<EditorView, { scroller: HTMLElement; before: string }>();
@@ -172,8 +174,10 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const widget = widgetTarget(view, target);
 	const quote = origin === 'quote-tap';
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
-	if ((origin === 'comment-save' || origin === 'press-reveal') && within(boxOf(view), visibleRegion(view).band)) return;
 	const reveal = origin === 'press-reveal';
+	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	if (reveal && !widget) { const box = boxOf(view), { band } = visibleRegion(view); if (within(box, clearOfSheet(box, band))) return; }
+	if (reveal && widget) { const box = boxOf(view); if (within(box, visibleRegion(view).band)) return; }
 	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
 	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
