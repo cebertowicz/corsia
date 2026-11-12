@@ -441,7 +441,7 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		await openComments(page);
 		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
