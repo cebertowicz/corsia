@@ -2,20 +2,22 @@ import fs from 'node:fs';
 import { expect, test, type APIRequestContext, type Locator, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
-import { closeCommentThread, commentEditor, commentOnMessage, openCommentThread } from './support/chatComments';
+import { closeCommentThread, commentEditor, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 import { capture, framesDirectory as directory, selectPhrase } from './support/chatCommentFrames';
 
 const backend = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 test.describe.configure({ timeout: 180_000 });
 test.use({ seedPerTest: true, colorScheme: 'light', video: 'off' });
 
+/** A cid is `c<input order>.<position>` (backend/infra/chat_comment_ids.py), so the newest input's sorts last. */
+const byCid = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
 /** The cid the server gave the newest posted comment, read through the messages API. */
 async function newestCid(request: APIRequestContext, thread: string): Promise<string> {
   let cid = '';
   await expect.poll(async () => {
     const body = await (await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`)).json();
-    const posted = body.messages.filter((message: any) => message.metadata?.reply_context?.comments?.length);
-    cid = posted.at(-1)?.metadata.reply_context.comments[0].cid ?? '';
+    cid = postedComments(body.messages).map(comment => comment.cid).sort(byCid).at(-1) ?? '';
     return cid;
   }).not.toBe('');
   return cid;

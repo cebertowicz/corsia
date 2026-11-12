@@ -3,7 +3,7 @@ import { expect, test } from './support/test';
 import { createSession, openAppPastLanding, sidebarThread, waitForWsConnected, TEST_TOKEN } from './support/corsia';
 import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { setFocusMode } from './support/focusMode';
-import { commentEditor, commentEditorClosed, commentOnMessage } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage, postedComments } from './support/chatComments';
 
 test.use({ seedPerTest: true });
 
@@ -76,10 +76,10 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await expect.poll(async () => {
     const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
     const body = await response.json();
-    const sent = body.messages.find((message: any) => message.role === 'user' && message.metadata?.reply_context?.comments?.length);
+    const [sent] = postedComments(body.messages);
     const answer = body.messages.find((message: any) => message.role === 'assistant' && message.content.includes('This is the answer.'));
     answerId = answer?.id ?? '';
-    return { cid: sent?.metadata.reply_context.comments[0].cid, answer: answer?.content, visible: answer?.chat_visible_content };
+    return { cid: sent?.cid, answer: answer?.content, visible: answer?.chat_visible_content };
   }, { timeout: 30_000 }).toEqual({ cid: 'c2.1', answer: '[c2.1] This is the answer.', visible: '' });
   await expect(page.locator(`[data-message-id="${answerId}"]`)).not.toBeVisible();
   if (mode === 'normal') {

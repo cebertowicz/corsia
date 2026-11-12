@@ -1,7 +1,7 @@
 import { expect, test } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
-import { commentEditor, commentOnMessage, openCommentThread } from './support/chatComments';
+import { commentEditor, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 
 test.use({ seedPerTest: true, viewport: { width: 1440, height: 900 } });
 test('posts from the comment box and keeps answers out of chat', async ({ page, request }) => {
@@ -40,7 +40,7 @@ test('posts from the comment box and keeps answers out of chat', async ({ page, 
   await expect.poll(async () => {
     const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
     const body = await response.json();
-    cid = body.messages.find((message: any) => message.metadata?.reply_context?.comments?.length)?.metadata.reply_context.comments[0].cid ?? '';
+    cid = postedComments(body.messages)[0]?.cid ?? '';
     return cid;
   }).not.toBe('');
   expect(cid).toBe('c2.1');

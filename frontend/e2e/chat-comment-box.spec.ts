@@ -8,7 +8,9 @@ import { capture, framesDirectory, selectPhrase } from './support/chatCommentFra
 /**
  * A comment's post failing, seen where the person wrote it: refused before it is stored, the box keeps the text and
  * says why, and its one Retry posts it; stored and then failed, the box closes and the comment's own thread, opened
- * from its highlight, shows the failure with its Retry. The socket is routed so each failure lands on the exact post under test.
+ * from its highlight, shows the failure with its Retry. The comment route is routed so each failure lands on the exact
+ * post under test: a refusal is the route's own error answer, and a stored post that then failed is the server's answer
+ * with that comment's delivery marked failed, as its row reads when delivery fails.
  */
 const backend = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 test.describe.configure({ timeout: 180_000 });
@@ -18,36 +20,40 @@ const MESSAGE = 'First phrase is refused once. Second phrase fails after it is s
 // The server's own words when it refuses a send because the chat's model is down.
 const REFUSAL = 'Model unavailable: the provider is not responding. Please select a different model.';
 
+const UNDELIVERED = 'The accepted input did not reach a Turn.';
+
 type Fault = { note: string; kind: 'refuse' | 'fail-after-queued' };
 
-/** Route the chat socket so the frame carrying `fault().note` is refused, or is stored and then reported failed. */
+/** Mark the comment, or the person's reply, written as `note` failed wherever an answer carries it. */
+function markFailed(value: unknown, note: string): void {
+  if (Array.isArray(value)) { value.forEach(item => markFailed(item, note)); return; }
+  if (!value || typeof value !== 'object') return;
+  const row = value as Record<string, unknown>;
+  const comment = Array.isArray(row.answers) && row.note === note;
+  const reply = row.author_kind === 'user' && row.text === note;
+  if (comment || reply) Object.assign(row, { delivery_state: 'failed', delivery_error: UNDELIVERED });
+  Object.values(row).forEach(child => markFailed(child, note));
+}
+
+/** Route the comment post and the reads of its thread so `fault().note` is refused, or is stored and then reads failed. */
 async function routeFaults(page: Page, fault: () => Fault | null) {
-  await page.routeWebSocket(/\/ws(\?|$)/, socket => {
-    const server = socket.connectToServer();
-    const failing = new Set<string>();
-    server.onMessage(frame => {
-      if (typeof frame === 'string' && failing.size) {
-        const data = JSON.parse(frame);
-        if (data.type === 'input_queued' && failing.delete(data.input_id)) {
-          socket.send(JSON.stringify({ ...data, delivery_state: 'failed', delivery_error: 'The accepted input did not reach a Turn.' }));
-          return;
-        }
-      }
-      socket.send(frame);
-    });
-    socket.onMessage(frame => {
-      const now = fault();
-      if (now && typeof frame === 'string' && frame.includes(now.note)) {
-        const data = JSON.parse(frame);
-        if (now.kind === 'refuse') {
-          socket.send(JSON.stringify({ type: 'error', thread_id: data.thread_id, input_id: data.input_id, message: REFUSAL }));
-          return;
-        }
-        failing.add(data.input_id);
-      }
-      server.send(frame);
-    });
+  const failing = new Set<string>();
+  await page.route(/\/api\/threads\/[^/]+\/(chat-comments|chat-comment-threads|messages)(\?|$)/, async route => {
+    const now = fault();
+    const posted = route.request().postData() ?? '';
+    const post = new URL(route.request().url()).pathname.endsWith('/chat-comments');
+    if (now?.kind === 'refuse' && post && posted.includes(now.note)) {
+      await route.fulfill({ status: 503, json: { detail: REFUSAL } });
+      return;
+    }
+    if (now?.kind === 'fail-after-queued' && post && posted.includes(now.note)) failing.add(now.note);
+    if (!failing.size) { await route.fallback(); return; }
+    const response = await route.fetch();
+    const json = await response.json();
+    for (const note of failing) markFailed(json, note);
+    await route.fulfill({ response, json });
   });
+  return { stop: () => failing.clear() };
 }
 
 /** The passage being commented (its draft highlight, which is not a control) sits below the shell header and above the open sheet. */
@@ -78,7 +84,7 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   const frame = async (target: Parameters<typeof capture>[1], name: string) => { if (framesDirectory) await capture(page, target, `${name}-${width}`); };
   await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
   let fault: Fault | null = null;
-  await routeFaults(page, () => fault);
+  const faults = await routeFaults(page, () => fault);
   const title = `Comment failure ${width}`;
   const thread = await createSession(request, title);
   const id = await injectMessage(request, thread, { role: 'assistant', content: MESSAGE, metadata: { for_user: true } }, TEST_TOKEN);
@@ -143,6 +149,7 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await frame(failed, 'failed-retry-touch');
 
   // Pressing it sends nothing the transcript shows: the server's answer for the comment's row never becomes a chat bubble.
+  faults.stop();
   const retried = page.waitForResponse(response => /\/messages\/[^/]+\/retry$/.test(new URL(response.url()).pathname));
   await retry.click();
   const response = await retried;

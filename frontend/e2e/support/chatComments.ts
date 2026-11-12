@@ -7,6 +7,17 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * transcript while the previous surface is still closing.
  */
 
+/**
+ * Every comment the person posted, and every reply they wrote in a comment thread, as the server's page read
+ * carries them: on the commented rows' threads, since a comment's own input row never reaches chat.
+ * Each has the server's `cid` and the `user_message_id` of the input that carried it.
+ */
+export function postedComments(rows: any[]): { cid: string; user_message_id: string; note?: string; text?: string }[] {
+	return rows.flatMap((row) => (row.chat_comments ?? []).flatMap((comment: any) => [
+		comment, ...(comment.answers ?? []).filter((answer: any) => answer.author_kind === 'user'),
+	]));
+}
+
 /** The editor for a comment or reply, open on screen. */
 export function commentEditor(page: Page, kind: 'Comment' | 'Reply' = 'Comment') {
 	return page.getByPlaceholder(`${kind}…`);

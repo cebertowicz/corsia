@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
-import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 
 const text = 'First selected phrase. Second selected phrase.';
 const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-comments-real');
@@ -75,9 +75,8 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
     await expect.poll(async () => {
       const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
       const body = await response.json();
-      const sent = body.messages.filter((m: any) => m.role === 'user' && m.metadata?.reply_context?.comments?.length);
-      comments = sent.flatMap((m: any) => m.metadata.reply_context.comments);
-      sentIds = sent.map((m: any) => m.id);
+      comments = postedComments(body.messages);
+      sentIds = [...new Set(comments.map((c: any) => c.user_message_id))];
       return comments.length;
     }).toBe(count);
     expect(new Set(comments.map((c: any) => c.cid)).size).toBe(count);

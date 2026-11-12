@@ -106,7 +106,12 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
             reasoning_effort=None if subagent else (body.reasoning_effort or thread_row.get('reasoning_effort')),
         )
     except SendRejected as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
+        # Stored, then not delivered: the comment is in its thread with that failure and Retry,
+        # so the box closes on it rather than offering a second post of the same text.
+        stored = exc.input_undeliverable and await run_read(lambda: _posted(user['id'], thread_id, input_id))
+        if not stored:
+            raise HTTPException(exc.status_code, exc.detail) from exc
+        return stored
     except ValueError:
         # This input id is already stored: a second press, or a press after a lost response.
         # Its row answers, whatever has become of it since.

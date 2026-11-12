@@ -61,6 +61,37 @@ def test_a_refused_comment_is_not_stored(target, frames, publish_only):
     assert user_rows(frames) == notices(frames) == []
 
 
+def test_stored_then_undelivered_answers_with_the_failed_comment(target, frames, publish_only, monkeypatch):
+    import infra.send_service as send_service
+    from infra.send_types import SendRejected
+
+    real_send = send_service.send_thread_input
+
+    async def send_then_fail(*args, **kwargs):
+        await real_send(*args, **kwargs)
+        target.execute("UPDATE messages SET delivery_state='failed', delivery_error='Not delivered' WHERE id='box-1'")
+        target.commit()
+        raise SendRejected(409, "Not delivered", input_undeliverable=True)
+
+    monkeypatch.setattr(send_service, "send_thread_input", send_then_fail)
+    result = _post()
+    # The box closes on it: the comment's own thread holds the failure and its Retry.
+    assert (result["delivery_state"], result["messages"][0]["chat_comments"][0]["delivery_state"]) == ("failed", "failed")
+
+
+def test_an_undeliverable_input_that_was_never_stored_is_refused(target, frames, publish_only, monkeypatch):
+    import infra.send_service as send_service
+    from infra.send_types import SendRejected
+
+    async def refuse(*_args, **_kwargs):
+        raise SendRejected(502, "Provider refused the input", input_undeliverable=True)
+
+    monkeypatch.setattr(send_service, "send_thread_input", refuse)
+    with pytest.raises(HTTPException) as refused:
+        _post()
+    assert (refused.value.status_code, refused.value.detail) == (502, "Provider refused the input")
+
+
 def test_another_persons_thread_is_not_found(target, frames, publish_only):
     target.execute("UPDATE threads SET user_id='someone-else' WHERE id=?", (THREAD,))
     target.commit()
