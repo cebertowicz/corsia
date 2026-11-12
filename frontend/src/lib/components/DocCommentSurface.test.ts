@@ -367,6 +367,14 @@ describe('DocCommentSurface suggestions', () => {
 		render({ narrow, state: { kind: 'thread', id: suggestion.id }, ...(narrow ? {} : { bounds: noRoomCanvas() }) });
 		const card = document.body.querySelector<HTMLElement>(`${narrow ? '[data-adaptive-drawer]' : '[data-popover]'} .ct`)!;
 		expect(card.classList.contains('flat')).toBe(true);
+		// Only the sheet shows the thread's replies in full, so only there may its count give way to the name.
+		expect(!!card.closest('[data-sheet-thread]')).toBe(narrow);
+	});
+
+	it('keeps the reply count context off the list sheet', () => {
+		render({ narrow: true, state: { kind: 'list' } });
+		expect(document.body.querySelector('[data-adaptive-drawer] .ct')).not.toBeNull();
+		expect(document.body.querySelector('[data-sheet-thread]')).toBeNull();
 	});
 
 	it('leaves the focus in the text a card was picked from, and moves it into a card opened any other way', async () => {

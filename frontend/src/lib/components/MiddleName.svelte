@@ -4,10 +4,12 @@
 	const parts = $derived(name.length > 20 ? { head: name.slice(0, -4), tail: name.slice(-4) } : { head: name, tail: '' });
 </script>
 
-<span class="name" title={name}><span class="name-head">{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}</span>
+<span class="name" title={name}><span class="name-head" class:cut={!!parts.tail}>{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}</span>
 
 <style>
 	.name { display: flex; min-width: 0; white-space: nowrap; }
 	.name-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	/* A name cut in the middle keeps its first letter and the ellipsis, so a short row never shows only the tail. */
+	.name-head.cut { min-width: 1.8em; }
 	.name-tail { flex: none; }
 </style>

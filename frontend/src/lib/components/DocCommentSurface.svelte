@@ -347,7 +347,7 @@
 		<Popover anchor={listEntry} placement="bottom-end" {bounds} fill {covered} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => target instanceof Node && !!listEntry?.contains(target)}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
 	{:else if surfaceState?.kind === 'list' && image}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
+	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{#if sheet.state.kind === 'thread'}<div class="sheet-thread" data-sheet-thread>{@render content()}</div>{:else}{@render content()}{/if}</AdaptiveDrawer>
 	{:else if surfaceState && surfaceState.kind !== 'list' && !forColumn}{@render cardPopover()}{/if}
 {/if}
 <!-- On a phone its own sheet over the document pane (`within` the leaf body, as the comment sheet is), never inside the comment sheet. -->
@@ -370,6 +370,9 @@
 	/* The column never scrolls on its own: its cards are part of the page and overflow it downward, so the scroller reaches them. */
 	.drawer-comments.in-margin { position: relative; overflow: visible; scrollbar-gutter: auto; }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
+	/* The single-thread sheet shows every reply in full, so its card's reply count gives its room to the author's name. */
+	.sheet-thread { display: contents; }
+	.sheet-thread :global(.ct-reply-count) { display: none; }
 	.canvas-comment-drawer.list-pop { flex: 1; padding: 0; border: 0; }
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */
