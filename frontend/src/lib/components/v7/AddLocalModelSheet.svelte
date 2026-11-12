@@ -40,7 +40,7 @@
 		const t = get(token);
 		if (!t) { error = 'Couldn’t check which models fit this computer.'; return; }
 		try {
-			const result = await fetchLocalModelRecommendations(t);
+			const result = await fetchLocalModelRecommendations();
 			if (result.state !== 'ready') {
 				error = result.message ?? 'Couldn’t check which models fit this computer.';
 				retryable = !result.message;
@@ -58,7 +58,7 @@
 		if (!t) return;
 		try {
 			const previous = download;
-			download = (await fetchSources(t)).find((source) => source.source === 'omlx')?.settings_download ?? null;
+			download = (await fetchSources()).find((source) => source.source === 'omlx')?.settings_download ?? null;
 			if (previous && !download) await refreshList();
 		} catch { /* Keep the last known state if the source cannot be read. */ }
 	}
@@ -72,7 +72,7 @@
 		if (!t) { rowError = { repository, message: 'Couldn’t start the download. Try again.' }; return; }
 		if (busy) return;
 		pending = { repository, action: 'start' }; rowError = null;
-		try { await startLocalModelDownload(t, repository); onStarted?.(); await refreshDownload(); }
+		try { await startLocalModelDownload(repository); onStarted?.(); await refreshDownload(); }
 		catch (caught) { rowError = { repository, message: caught instanceof Error ? caught.message : 'Couldn’t start the download. Try again.' }; }
 		finally { pending = null; }
 	}
@@ -81,7 +81,7 @@
 		if (!t || busy) return;
 		const repository = download?.repository ?? '';
 		pending = { repository, action: 'cancel' }; rowError = null;
-		try { await cancelLocalDownload(t); await refreshDownload(); }
+		try { await cancelLocalDownload(); await refreshDownload(); }
 		catch {
 			const message = 'Couldn’t cancel the local model download. Try again.';
 			if (runningListed) rowError = { repository, message }; else error = message;
@@ -92,7 +92,7 @@
 		const t = get(token);
 		if (!t || busy) return;
 		pending = { repository, action: 'delete' }; rowError = null;
-		try { await deleteLocalModelDownload(t, repository); await refreshDownload(); await refreshList(); }
+		try { await deleteLocalModelDownload(repository); await refreshDownload(); await refreshList(); }
 		catch (caught) { rowError = { repository, message: caught instanceof Error ? caught.message : 'Couldn’t delete the download. Try again.' }; }
 		finally { pending = null; }
 	}

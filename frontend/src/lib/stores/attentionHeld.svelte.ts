@@ -38,7 +38,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   expandedId.set(null);
   activeId.set(follower ? follower.external_id : null);
 
-  const outcome = await decideHeldReply(bearer, id, verb);
+  const outcome = await decideHeldReply(id, verb);
   if (generation !== identityEpoch()) return;
   if (outcome.status === "unauthorized") {
     clearExpiredSession();

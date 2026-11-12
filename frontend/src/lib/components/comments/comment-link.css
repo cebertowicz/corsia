@@ -1,5 +1,6 @@
 .ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; padding: 0; cursor: pointer; }
 .ct-link:hover { text-decoration: underline; }
+.ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* A comment control drawn smaller than its target keeps its drawn size; its hit area grows to an icon button's 24px
    (DESIGN-SYSTEM §0), 44px on a touch screen, centred on it. A control already that large adds nothing. */

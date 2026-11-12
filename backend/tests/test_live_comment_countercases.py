@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import httpx
 import pytest
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 
 from api import doc_comments
 from auth_fixtures import OWNER_TOKEN
@@ -51,7 +51,7 @@ async def test_missing_reservation_refuses_and_the_reserved_range_not_the_quote_
         reserve(ownership_scope, entry, 'other-quote', 0, 1)
         value = doc_comments.CommentCreate(body='other quote', anchor_text='b', from_off=0, to_off=1,
                                           live_capture=True, client_id='other-quote', delivery_policy='immediate')
-        await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, value, BackgroundTasks())
+        await doc_comments.create_comment(entry.artifact_id, OWNER_TOKEN, value)
         row = await run_in_db(comments.get_comment, 'other-quote')
         assert row['anchor_text'] == entry.live.text[0:1] != 'b'
     finally:

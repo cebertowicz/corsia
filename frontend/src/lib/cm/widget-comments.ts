@@ -1,5 +1,5 @@
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { caretAt, touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
+import { caretAt, selectInWidget, touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
 export { touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
@@ -7,6 +7,7 @@ import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey }
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
+import { caretToWidget } from './widget-caret';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -104,6 +105,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private recentTouch = () => Date.now() - this.lastTouchAt < 750;
 		private readonly down = (event: PointerEvent) => {
 			this.pointer = event.pointerType;
+			// A touch may be the start of a scroll, so its caret waits for the click that confirms a tap.
+			if (event.button === 0 && event.pointerType !== 'touch') caretToWidget(this.view, event);
 			if (event.pointerType === 'touch') { this.touchStart = { x: event.clientX, y: event.clientY }; this.touchMoved = false; this.lastTouchAt = Date.now(); }
 		};
 		private readonly move = (event: PointerEvent) => {
@@ -113,6 +116,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private frame = 0;
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
 		private readonly click = (event: MouseEvent) => {
+			if (this.pointer === 'touch' && !this.touchMoved) caretToWidget(this.view, event);
 			const origin = event.target instanceof Element ? event.target : null;
 			const widget = origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();
@@ -133,14 +137,11 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const target = event.target instanceof Element ? event.target : null;
 			const widget = target && widgetOf(this.view, target);
 			if (!widget || target.closest('a')) return;
-			const selection = document.getSelection();
-			if (!selection) return;
 			const cell = widget.matches(TABLE) ? target.closest('td, th') : null;
 			if (widget.matches(TABLE) && !cell) return;
-			selection.removeAllRanges();
 			const range = document.createRange();
 			if (cell) range.selectNodeContents(cell); else range.selectNodeContents(widget);
-			selection.addRange(range);
+			selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
 			this.listen();
 		}
 
@@ -157,7 +158,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 				const { clientX, clientY } = event;
 				const release = (e: MouseEvent) => {
 					window.removeEventListener('mouseup', release);
-					if (Math.hypot(e.clientX - clientX, e.clientY - clientY) > 4) { document.getSelection()?.selectAllChildren(widget); this.listen(); }
+					if (Math.hypot(e.clientX - clientX, e.clientY - clientY) > 4) { selectInWidget(this.view, (selection) => selection.selectAllChildren(widget)); this.listen(); }
 				};
 				window.addEventListener('mouseup', release);
 				return;
@@ -169,10 +170,9 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			// This is the existing press path for table selection, so read the range synchronously here.
 			if (emptyCell && !emptyCell.textContent?.trim()) {
 				event.preventDefault();
-				const selection = document.getSelection(), range = document.createRange();
+				const range = document.createRange();
 				range.selectNodeContents(emptyCell);
-				selection?.removeAllRanges();
-				selection?.addRange(range);
+				selectInWidget(this.view, (selection) => { selection.removeAllRanges(); selection.addRange(range); });
 				const release = () => { window.removeEventListener('mouseup', release); this.listen(); };
 				window.addEventListener('mouseup', release);
 				return;
@@ -180,8 +180,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const start = caretAt(event.clientX, event.clientY);
 			if (!start) return;
 			event.preventDefault();
-			const selection = document.getSelection()!;
-			selection.setBaseAndExtent(start.node, start.offset, start.node, start.offset);
+			selectInWidget(this.view, (selection) => selection.setBaseAndExtent(start.node, start.offset, start.node, start.offset));
 			// Painting the pending mark rewraps the cell's text and detaches start.node, which freezes the drag, so paint once on release.
 			this.dragging = true;
 			const move = (e: MouseEvent) => {
@@ -191,7 +190,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					return;
 				}
 				const at = caretAt(e.clientX, e.clientY);
-				if (at && widget.contains(at.node)) selection.setBaseAndExtent(start.node, start.offset, at.node, at.offset);
+				if (at && widget.contains(at.node)) selectInWidget(this.view, (selection) => selection.setBaseAndExtent(start.node, start.offset, at.node, at.offset));
 			};
 			const up = () => { this.dragging = false; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.listen(); };
 			window.addEventListener('mousemove', move);
@@ -250,9 +249,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			// is not the editor's, so the editor gives up focus and the same range is put back.
 			if (raised && this.view.hasFocus) {
 				const kept = range!.cloneRange();
-				this.view.contentDOM.blur();
-				selection!.removeAllRanges();
-				selection!.addRange(kept);
+				selectInWidget(this.view, (selected) => { selected.removeAllRanges(); selected.addRange(kept); });
 			}
 			if (raised) { this.raised = true; hooks.onSelect({ ...raised, top: raised.anchor()?.top ?? raised.top }); }
 			else if (this.raised) { this.raised = false; hooks.onSelect(null); }

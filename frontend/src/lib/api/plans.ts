@@ -17,22 +17,20 @@ export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 
 
-import { authHeaders, readPlan, safeErrorMessage } from './planRead';
-
+import { conditionalHeaders, readPlan, safeErrorMessage } from './planRead';
+import { apiFetch } from './request';
 async function readOperator(
 	url: string,
-	bearerValue: string,
 	etag: string | null | undefined,
 ): Promise<OperatorReadOutcome> {
-	return readPlan(url, bearerValue, etag, decodeOperatorEnvelope);
+	return readPlan(url, etag, decodeOperatorEnvelope);
 }
 
 async function readActivityIndex(
 	url: string,
-	bearerValue: string,
 	etag: string | null | undefined,
 ): Promise<ActivityIndexReadOutcome> {
-	return readPlan(url, bearerValue, etag, decodeActivityIndexEnvelope);
+	return readPlan(url, etag, decodeActivityIndexEnvelope);
 }
 
 
@@ -45,7 +43,6 @@ export type PlanLifecycleMutationOutcome =
 
 /** Post one audited, revision-safe plan mutation as the authenticated user. */
 async function postPlanMutation(
-	bearerValue: string,
 	planId: string,
 	body: { operation: string; mutation_id: string; params: Record<string, unknown> },
 	failure: string,
@@ -53,10 +50,9 @@ async function postPlanMutation(
 ): Promise<PlanLifecycleMutationOutcome> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/plans/${encodeURIComponent(planId)}/mutations`, {
+		res = await apiFetch(`/api/plans/${encodeURIComponent(planId)}/mutations`, {
 			method: 'POST',
 			headers: {
-				Authorization: `Bearer ${bearerValue}`,
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(body),
@@ -86,13 +82,12 @@ async function refusalDetail(res: Response): Promise<string | undefined> {
 
 /** Apply one closed, revision-safe whole-plan lifecycle mutation. */
 export async function mutatePlanLifecycle(
-	bearerValue: string,
 	planId: string,
 	operation: PlanLifecycleOperation,
 	expectedRevision: number,
 	mutationId: string,
 ): Promise<PlanLifecycleMutationOutcome> {
-	return postPlanMutation(bearerValue, planId, {
+	return postPlanMutation(planId, {
 		operation,
 		mutation_id: mutationId,
 		params: { expected_revision: expectedRevision },
@@ -101,7 +96,6 @@ export async function mutatePlanLifecycle(
 
 /** Apply the user's control on a task: Mark done, Pause, Resume or Won't do (with its reason). */
 export async function mutateUserTask(
-	bearerValue: string,
 	planId: string,
 	operation: OperatorUserAction,
 	nodeId: string,
@@ -109,7 +103,7 @@ export async function mutateUserTask(
 	mutationId: string,
 	reason?: string,
 ): Promise<PlanLifecycleMutationOutcome> {
-	return postPlanMutation(bearerValue, planId, {
+	return postPlanMutation(planId, {
 		operation,
 		mutation_id: mutationId,
 		params: {
@@ -121,42 +115,35 @@ export async function mutateUserTask(
 }
 
 
-export async function readActivityWorkspace(
-	bearerValue: string, etag?: string | null,
+export async function readActivityWorkspace(etag?: string | null,
 ): Promise<ActivityIndexReadOutcome> {
-	return readActivityIndex('/api/plans/activity/scopes/workspace', bearerValue, etag);
+	return readActivityIndex('/api/plans/activity/scopes/workspace', etag);
 }
 
-export async function readActivityProject(
-	bearerValue: string, projectId: string, etag?: string | null,
+export async function readActivityProject(projectId: string, etag?: string | null,
 ): Promise<ActivityIndexReadOutcome> {
 	return readActivityIndex(
 		`/api/plans/activity/scopes/projects/${encodeURIComponent(projectId)}`,
-		bearerValue,
 		etag,
 	);
 }
 
-export async function readOperatorWorkspace(
-	bearerValue: string, etag?: string | null,
+export async function readOperatorWorkspace(etag?: string | null,
 ): Promise<OperatorReadOutcome> {
-	return readOperator('/api/plans/operator/scopes/workspace', bearerValue, etag);
+	return readOperator('/api/plans/operator/scopes/workspace', etag);
 }
 
-export async function readOperatorProject(
-	bearerValue: string, projectId: string, etag?: string | null,
+export async function readOperatorProject(projectId: string, etag?: string | null,
 ): Promise<OperatorReadOutcome> {
 	return readOperator(
 		`/api/plans/operator/scopes/projects/${encodeURIComponent(projectId)}`,
-		bearerValue,
 		etag,
 	);
 }
 
-export async function readOperatorThread(
-	bearerValue: string, threadId: string, etag?: string | null,
+export async function readOperatorThread(threadId: string, etag?: string | null,
 ): Promise<OperatorReadOutcome> {
-	return readOperator(`/api/plans/operator/threads/${encodeURIComponent(threadId)}`, bearerValue, etag);
+	return readOperator(`/api/plans/operator/threads/${encodeURIComponent(threadId)}`, etag);
 }
 
 /**
@@ -164,11 +151,11 @@ export async function readOperatorThread(
  * `seenThrough` was on screen. The server only moves it forward. False when
  * the report did not land.
  */
-export async function recordThreadPlanSeen(bearerValue: string, threadId: string, seenThrough: string): Promise<boolean> {
+export async function recordThreadPlanSeen(threadId: string, seenThrough: string): Promise<boolean> {
 	try {
-		const res = await fetch(`/api/plans/operator/threads/${encodeURIComponent(threadId)}/seen`, {
+		const res = await apiFetch(`/api/plans/operator/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ seen_through: seenThrough }),
 		});
 		return res.ok;
@@ -177,10 +164,9 @@ export async function recordThreadPlanSeen(bearerValue: string, threadId: string
 	}
 }
 
-export async function readOperatorChild(
-	bearerValue: string, nodeId: string, etag?: string | null,
+export async function readOperatorChild(nodeId: string, etag?: string | null,
 ): Promise<OperatorReadOutcome> {
-	return readOperator(`/api/plans/operator/nodes/${encodeURIComponent(nodeId)}/child`, bearerValue, etag);
+	return readOperator(`/api/plans/operator/nodes/${encodeURIComponent(nodeId)}/child`, etag);
 }
 
 /** The chat list's word for a thread (#2220); the server derives it from canonical plan and lease state. */
@@ -220,11 +206,11 @@ export interface ThreadPlanStateEntry {
 }
 
 /** Mark a thread read (seen through now) or unread on every device. False when the server refused it. */
-export async function markThreadSeen(bearerValue: string, threadId: string, unread: boolean): Promise<boolean> {
+export async function markThreadSeen(threadId: string, unread: boolean): Promise<boolean> {
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/seen`, {
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/seen`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearerValue}`, 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ unread }),
 		});
 		return res.ok;
@@ -235,12 +221,11 @@ export async function markThreadSeen(bearerValue: string, threadId: string, unre
 
 /** One batched read of each named thread's state; an absent thread is idle. Null when the read failed. */
 export async function readThreadPlanStates(
-	bearerValue: string,
 	threadIds: string[],
 ): Promise<Record<string, ThreadPlanStateEntry> | null> {
 	const ids = threadIds.map(encodeURIComponent).join(',');
 	try {
-		const res = await fetch(`/api/plans/operator/thread-states?ids=${ids}`, authHeaders(bearerValue, null));
+		const res = await apiFetch(`/api/plans/operator/thread-states?ids=${ids}`, conditionalHeaders(null));
 		if (!res.ok) return null;
 		const body = (await res.json()) as { states?: unknown } | null;
 		const states = body?.states;

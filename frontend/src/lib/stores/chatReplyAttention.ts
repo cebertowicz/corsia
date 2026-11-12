@@ -2,6 +2,7 @@ import { get, writable } from 'svelte/store';
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { token } from '$lib/stores/auth';
 import { activeThreadId } from '$lib/stores/threads';
+import { apiFetch } from '$lib/api/request';
 
 export const chatReplyAttention = writable<{ threadId: string; items: CommentReplyItem[] } | null>(null);
 // Every endpoint returns a thread-wide snapshot, including message pages.
@@ -37,8 +38,8 @@ export async function refreshChatReplyAttention(threadId: string): Promise<void>
 	const bearer = get(token);
 	if (!bearer || get(activeThreadId) !== threadId) return;
 	const sequence = beginChatReplyAttentionRead();
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
-		method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+	const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comment-threads`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ message_ids: [] }),
 	});
 	if (!response.ok) throw new Error(`HTTP ${response.status}`);

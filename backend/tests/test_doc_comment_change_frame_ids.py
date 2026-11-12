@@ -73,8 +73,9 @@ async def test_user_comments_replies_and_updates_name_nothing(
 
     user = _user_comment(integration_client, artifact_id)
     assert user.status_code == 200, user.text
-    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
     assert [message for message in sent if message["artifact_id"] == artifact_id] == [plain]
+    _settle(artifact_id)
+    assert [message for message in sent if message["artifact_id"] == artifact_id] == [plain, plain]
 
     del sent[:]
     root = json.loads(await DocCommentCreateTool().execute(

@@ -4,7 +4,8 @@ gws's ``--dry-run`` prints the one request a command would send (method, address
 parameters, body) without sending it. The check reads only Google's method and path from
 that preview, so gws's shortcuts and future commands are covered with nothing built for them.
 The host is checked only to be Google's: HTTPS on googleapis.com or one of its subdomains, Gmail's
-refused. Google serves each API under more than one host, so the path, not the host, names its API.
+refused except archiving a message or marking it read. Google serves each API under more than one
+host, so the path, not the host, names its API.
 """
 
 from __future__ import annotations
@@ -26,6 +27,10 @@ UPDATE_EVENT = "update_event"
 SAVE_CALENDAR = "save_calendar"
 
 _DOCS_BATCH = re.compile(r"^/v1/documents/[^/]+:batchUpdate$")
+# The one Gmail change allowed: removing labels from messages, one or a batch.
+_GMAIL_MODIFY = re.compile(r"^/gmail/v1/users/me/messages/(?:[^/]+/modify|batchModify)$")
+# Archive (INBOX) and mark read (UNREAD) are the only labels it may remove.
+_TIDY_LABELS = frozenset({"INBOX", "UNREAD"})
 _DRIVE_FILE = re.compile(r"^/drive/v3/files/([^/]+)$")
 _CALENDAR_EVENT = re.compile(r"^/calendar/v3/calendars/([^/]+)/events/([^/]+)$")
 _CALENDAR_CLEAR = re.compile(r"^/calendar/v3/calendars/([^/]+)/clear$")
@@ -85,6 +90,23 @@ def _is_mail(host: str, path: str) -> bool:
     return host == "gmail.googleapis.com" or path.startswith(("/gmail/", "/upload/gmail/"))
 
 
+def _archive_or_mark_read(method: str, path: str, body: object) -> bool:
+    """True only for a messages modify or batchModify that removes INBOX or UNREAD and changes nothing else.
+
+    Any added label, any other removed label and any other field, today's or a future one, is refused.
+    """
+    if method != "POST" or not _GMAIL_MODIFY.match(path) or not isinstance(body, dict):
+        return False
+    removed = body.get("removeLabelIds")
+    allowed_fields = {"removeLabelIds", "addLabelIds"} | ({"ids"} if path.endswith("/batchModify") else set())
+    return (
+        set(body) <= allowed_fields
+        and not body.get("addLabelIds")
+        and isinstance(removed, list) and bool(removed)
+        and all(isinstance(label, str) and label in _TIDY_LABELS for label in removed)
+    )
+
+
 def _unguarded_docs_delete(preview: dict) -> bool:
     """True when a Docs batchUpdate deletes or replaces content without the revision the agent read."""
     body = preview.get("body")
@@ -136,7 +158,7 @@ def decide(preview: dict) -> Decision:
     if url.scheme != "https" or not _is_google(host):
         return _refuse(gws_messages.NO_PREVIEW)
     if _is_mail(host, path):
-        return _refuse(gws_messages.MAIL)
+        return Decision() if _archive_or_mark_read(method, path, preview.get("body")) else _refuse(gws_messages.MAIL)
     if method == "DELETE":
         return _delete(path)
     if method in ("PATCH", "PUT") and (found := _CALENDAR_EVENT.match(path)):

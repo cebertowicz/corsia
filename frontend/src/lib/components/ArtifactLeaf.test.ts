@@ -262,7 +262,10 @@ describe('ArtifactLeaf subagent conversation presentation', () => {
 		render();
 
 		await vi.waitFor(() => expect(host.textContent).toContain('Working inside the child'));
-		expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/threads/child-thread/messages?'));
+		expect(fetchMock).toHaveBeenCalledWith(
+			expect.stringContaining('/api/threads/child-thread/messages?'),
+			{ headers: { Authorization: 'Bearer test-bearer' } },
+		);
 		expect(get(threadWorkspaces)[THREAD].activeSurface).toBe('artifact');
 		expect(get(threadWorkspaces)[THREAD].tabs[0]).toMatchObject({
 			kind: 'subagent',

@@ -29,16 +29,16 @@ describe('retryLocalSetup', () => {
 		vi.mocked(setupLocalSource).mockResolvedValue({ ok: true });
 
 		expect(await retryLocalSetup('setup')).toEqual({ ok: true });
-		expect(setupLocalSource).toHaveBeenCalledWith('token');
+		expect(setupLocalSource).toHaveBeenCalledWith();
 	});
 
 	it('retries a Settings download through conductorSources after the models_updated read', async () => {
 		vi.mocked(fetchSources).mockResolvedValue([{ source: 'omlx', name: 'Local model', state: 'ready', settings_download: { name: 'Qwen', repository: 'org/model', percent: null, failed: true } }]);
 		const stop = watchLocalStatus();
-		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
+		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith());
 
 		expect(await retryLocalSetup('settings')).toEqual({ ok: true });
-		expect(startLocalModelDownload).toHaveBeenCalledWith('token', 'org/model');
+		expect(startLocalModelDownload).toHaveBeenCalledWith('org/model');
 		stop();
 	});
 
@@ -46,7 +46,7 @@ describe('retryLocalSetup', () => {
 		vi.mocked(fetchSources).mockResolvedValue([{ source: 'omlx', name: 'Local model', state: 'ready', settings_download: { name: 'Qwen', repository: 'org/model', percent: null, failed: true } }]);
 		vi.mocked(startLocalModelDownload).mockRejectedValue(new Error("Couldn't download that model: it isn't in the list for this computer right now. Pick another from the list."));
 		const stop = watchLocalStatus();
-		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
+		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith());
 
 		expect(await retryLocalSetup('settings')).toEqual({ ok: false, message: "Couldn't download that model: it isn't in the list for this computer right now. Pick another from the list." });
 		stop();
@@ -63,7 +63,7 @@ describe('what the local row lets the picker offer', () => {
 	async function read(row: Record<string, unknown>) {
 		vi.mocked(fetchSources).mockResolvedValue([{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...row }] as never);
 		const stop = watchLocalStatus();
-		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
+		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith());
 		await new Promise((resolve) => setTimeout(resolve, 0)); // the read resolves into the store
 		return stop;
 	}

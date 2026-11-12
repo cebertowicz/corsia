@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { token } from '$lib/stores/auth';
 	import { formatKnownCost, type ModelEntry } from '$lib/stores/costs';
-	import { get } from 'svelte/store';
+	import { apiFetch } from '$lib/api/request';
 
 	interface Props {
 		providerName: string;
@@ -18,11 +17,10 @@
 
 	$effect(() => {
 		const days = costWindow;
-		const t = get(token) || '';
 		(async () => {
 			loading = true; err = '';
 			try {
-				const res = await fetch(`/api/costs/summary?token=${t}&days=${days}`);
+				const res = await apiFetch(`/api/costs/summary?days=${days}`, { sessionInAddress: true });
 				if (!res.ok) { err = `HTTP ${res.status}`; return; }
 				const data = await res.json();
 				const all: CostRow[] = data.by_model ?? [];

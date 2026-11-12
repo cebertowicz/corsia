@@ -208,7 +208,6 @@
 		activeRequest = controller;
 		try {
 			const response = await fetchHostAccessLeases(
-				currentToken,
 				controller.signal,
 				{
 					rootThreadId: requestedThreadId,
@@ -255,7 +254,7 @@
 		error = '';
 		let refreshTruth = true;
 		try {
-			await decideHostAccessLease(currentToken, lease, decision);
+			await decideHostAccessLease(lease, decision);
 		} catch (caught) {
 			if (!isCurrentDecision(lease.id, decisionAttempt) || threadId !== decisionThreadId) return;
 			error = caught instanceof Error ? caught.message : 'Host-access decision failed.';

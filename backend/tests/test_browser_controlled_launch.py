@@ -6,13 +6,16 @@ import json
 import os
 import socket
 import sys
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import psutil
 import pytest
 
-from host_access import browser_chrome, browser_cli, browser_launch, browser_ports, browser_session_launch
+from host_access import (browser_chrome, browser_cli, browser_download, browser_launch, browser_owner_lock,
+                         browser_ports, browser_session_launch)
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionRecord
 from tools.host_path_policy import ProtectedHostPathPolicy
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
@@ -119,7 +122,8 @@ async def test_protection_overrides_are_refused_before_spawn(tmp_path, monkeypat
         browser_cli.check_local_mode(('open', 'about:blank'))
     # The actual producer also refuses it if an internal caller bypasses admission.
     with pytest.raises(BrowserIdentityError, match='remove it from AGENT_BROWSER_ARGS'):
-        await browser_chrome.ChromeProcess.launch('fixture', profile=None, headless=True, ua=None)
+        await browser_chrome.ChromeProcess.launch('fixture', profile=None, headless=True, ua=None,
+                                                  record=(tmp_path, 'session123456'))
     spawn.assert_not_awaited()
     assert not list(tmp_path.iterdir())
 
@@ -226,7 +230,8 @@ async def test_cancellation_during_spawn_reaps_the_eventual_owned_child(tmp_path
         return child
 
     monkeypatch.setattr(asyncio, 'create_subprocess_exec', delayed_spawn)
-    task = asyncio.create_task(browser_chrome.ChromeProcess.launch('fixture', profile=None, headless=True, ua=None))
+    task = asyncio.create_task(browser_chrome.ChromeProcess.launch(
+        'fixture', profile=None, headless=True, ua=None, record=(tmp_path, 'session123456')))
     try:
         await asyncio.wait_for(created.wait(), 5)
         task.cancel()
@@ -255,7 +260,8 @@ async def test_failed_chrome_start_releases_ports_and_temporary_profile(tmp_path
     monkeypatch.setattr(asyncio, 'create_subprocess_exec', AsyncMock(side_effect=OSError('fixture spawn failure')))
     before = set(tmp_path.iterdir())
     with pytest.raises(OSError, match='fixture spawn failure'):
-        await browser_chrome.ChromeProcess.launch('missing-chrome', profile=None, headless=True, ua=None)
+        await browser_chrome.ChromeProcess.launch('missing-chrome', profile=None, headless=True, ua=None,
+                                                  record=(tmp_path, 'session123456'))
     assert set(tmp_path.iterdir()) == before
     first, second = browser_ports.reserve_pair()
     try:
@@ -263,3 +269,107 @@ async def test_failed_chrome_start_releases_ports_and_temporary_profile(tmp_path
     finally:
         first.close()
         second.close()
+
+
+RECORDED_SESSION = 'session123456'
+
+
+def _free_port_pair():
+    """Two loopback ports this sandbox will let the test hold, standing in for the inventory."""
+    ports = []
+    for _ in range(2):
+        probe = socket.socket()
+        probe.bind(('127.0.0.1', 0))
+        ports.append(probe.getsockname()[1])
+        probe.close()
+    return tuple(ports)
+
+
+def _start_chrome_with(tmp_path, monkeypatch, code, listener):
+    """Drive the real start_chrome launch with a stand-in child running `code`."""
+    sockets = tmp_path / 'sockets'
+    sockets.mkdir(mode=0o700)
+    children = []
+    actual_spawn = asyncio.create_subprocess_exec
+
+    async def fixture_spawn(*_argv, **kwargs):
+        child = await actual_spawn(sys.executable, '-c', code, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(browser_launch, 'profile_root', lambda: tmp_path)
+    monkeypatch.setattr(browser_ports, 'RESERVED_PORTS', _free_port_pair())
+    monkeypatch.setattr(browser_session_launch.sys, 'platform', 'darwin')
+    monkeypatch.setattr(browser_download, 'is_private_download', lambda _: True)
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', fixture_spawn)
+    monkeypatch.setattr(browser_chrome, 'require_listener', listener)
+    runtime = BrowserRuntime(BrowserSessionRecord('thread', RECORDED_SESSION))
+    owner = SimpleNamespace(_chrome='chrome', _user_agent=None, socket_dir=sockets, _sessions={},
+                            _invoke=AsyncMock(), _session_argv=lambda *_: (), _observe_attempt=AsyncMock())
+    return browser_session_launch.start_chrome(owner, runtime), children, sockets / f'{RECORDED_SESSION}.chrome'
+
+
+async def _reap(children):
+    for child in children:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+
+
+async def test_a_child_is_recorded_before_the_launch_waits(tmp_path, monkeypatch):
+    """A backend that dies after the spawn must leave the trace the startup sweep reads.
+
+    The record used to be written only once the launch had returned, which is up to ten seconds
+    later, while it waits for the listener and asks the endpoint who it is.
+    """
+    seen = []
+
+    def fixture_listener(_pid, _port):
+        seen.append(record.exists())
+        raise AssertionError('fixture: the launch stops at the listener check')
+
+    start, children, record = _start_chrome_with(tmp_path, monkeypatch, 'import time; time.sleep(60)',
+                                                 fixture_listener)
+    try:
+        with pytest.raises(AssertionError, match='fixture'):
+            await start
+    finally:
+        await _reap(children)
+    assert seen == [True]
+
+
+async def test_a_chrome_gone_before_its_record_reports_that_it_exited(tmp_path, monkeypatch):
+    """A Chrome that exits at once (a locked profile, bad flags) keeps its known startup cause.
+
+    Recording runs before the exit check, so the child can already be gone when its record is
+    written. That must still read as CHROME_EXITED, the message the service log is allowed to show.
+    """
+    from host_access.browser_orphan import startup_message
+    start, children, record = _start_chrome_with(
+        tmp_path, monkeypatch, 'raise SystemExit(3)',
+        lambda *_: pytest.fail('a Chrome that exited never reaches the listener check'))
+    actual_record = browser_owner_lock.record_launched_chrome
+
+    def record_after_exit(*args):
+        # Hold the record step until the child has exited (a zombie, or already reaped by
+        # asyncio's watcher) without reaping it here.
+        for _ in range(500):
+            try:
+                if psutil.Process(children[0].pid).status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail('fixture child did not exit')
+        actual_record(*args)
+
+    monkeypatch.setattr(browser_owner_lock, 'record_launched_chrome', record_after_exit)
+    try:
+        with pytest.raises(RuntimeError) as failure:
+            await start
+    finally:
+        await _reap(children)
+    assert str(failure.value) == browser_chrome.CHROME_EXITED
+    assert startup_message(failure.value) == browser_chrome.CHROME_EXITED
+    assert not record.exists()

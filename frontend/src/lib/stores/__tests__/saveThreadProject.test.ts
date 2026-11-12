@@ -15,21 +15,21 @@ describe('saveThreadProject', () => {
 	it('keeps the optimistic move when the PATCH succeeds', async () => {
 		seed(null);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
-		await saveThreadProject('s1', 'p1', 'tok');
+		await saveThreadProject('s1', 'p1');
 		expect(currentPid()).toBe('p1');
 	});
 
 	it('rolls back AND re-throws when the PATCH returns !res.ok', async () => {
 		seed(null);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })));
-		await expect(saveThreadProject('s1', 'p1', 'tok')).rejects.toThrow();
+		await expect(saveThreadProject('s1', 'p1')).rejects.toThrow();
 		expect(currentPid()).toBe(null);
 	});
 
 	it('rolls back to the PRIOR project AND re-throws on a network error', async () => {
 		seed('p0');
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
-		await expect(saveThreadProject('s1', null, 'tok')).rejects.toThrow();
+		await expect(saveThreadProject('s1', null)).rejects.toThrow();
 		expect(currentPid()).toBe('p0');
 	});
 });

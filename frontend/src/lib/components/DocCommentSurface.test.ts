@@ -430,7 +430,7 @@ describe('DocCommentSurface suggestions', () => {
 			const accept = document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
 			drawn = null;
 			accept.click();
-			await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.'));
+			await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document."));
 			expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
 			await vi.waitFor(() => expect(placed()).toEqual(before));
 			expect(onClose).not.toHaveBeenCalled();
@@ -605,7 +605,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		expect(accept().textContent).toBe('Accept');
 		expect(accept().disabled).toBe(true);
-		expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+		expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document.");
 		expect(onSuggestionAccepted).not.toHaveBeenCalled();
 	});
 

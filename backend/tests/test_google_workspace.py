@@ -87,6 +87,20 @@ async def test_mail_auth_and_unpreviewable_commands_never_reach_google(tool, mon
     assert fake.real_runs() == []
 
 
+async def test_archiving_mail_runs_the_same_command_signed_in(tool, monkeypatch):
+    fake = use(monkeypatch, FakeGws(recorded("gmail_batch_modify_archive_read"), {"gmail users messages": ""}))
+    params, body = {"userId": "me"}, {"ids": ["M1", "M2"], "removeLabelIds": ["UNREAD", "INBOX"]}
+    assert await tool.execute(args=["gmail", "users", "messages", "batchModify"], params=params, body=body) == "Done."
+    assert fake.real_runs() == [[
+        "gmail", "users", "messages", "batchModify", "--params", json.dumps(params), "--json", json.dumps(body),
+    ]]
+    assert [token for _, token in fake.calls] == [None, SIGN_IN]
+    fake.preview = recorded("gmail_modify_add_label")
+    body = {"addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}
+    assert await tool.execute(args=["gmail", "users", "messages", "modify"], body=body) == gws_messages.MAIL
+    assert len(fake.real_runs()) == 1
+
+
 async def test_emptying_the_trash_and_unguarded_docs_deletes_are_refused(tool, monkeypatch):
     fake = use(monkeypatch, FakeGws(recorded("drive_empty_trash")))
     assert await tool.execute(args=["drive", "files", "emptyTrash"]) == gws_messages.TRASH

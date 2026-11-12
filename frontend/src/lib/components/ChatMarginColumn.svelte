@@ -44,7 +44,8 @@
 		view: () => {
 			if (!scroller) return null;
 			const box = scroller.getBoundingClientRect();
-			return { top: box.top, bottom: box.bottom - (parseFloat(getComputedStyle(scroller).getPropertyValue('--input-bar-height')) || 100) };
+			const headerBottom = document.querySelector('.shell-header')?.getBoundingClientRect().bottom ?? box.top;
+			return { top: Math.max(box.top, headerBottom), bottom: box.bottom - (parseFloat(getComputedStyle(scroller).getPropertyValue('--input-bar-height')) || 100) };
 		},
 		// Where the comment is drawn: its highlight, or the message body its text left once nothing is painted any more.
 		anchor: (id) => {

@@ -27,7 +27,7 @@
 		deleting = true;
 		error = '';
 		try {
-			await deleteLocalModelDownload(t, model.id);
+			await deleteLocalModelDownload(model.id);
 			await onDeleted();
 			onClose();
 		} catch (caught) {

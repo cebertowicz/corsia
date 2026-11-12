@@ -151,7 +151,14 @@ bootout_service_and_wait() {
     local domain="$1" label="$2" bootout_status
     # launchd owns KeepAlive and termination; the wrapper confirms the job is
     # unloaded and its processes have exited, inside one deadline.
+    if declare -F _corsia_lifecycle_record_teardown > /dev/null && \
+        ! _corsia_lifecycle_record_teardown; then
+        fail "$label teardown could not record its state; no service was stopped"
+        return 1
+    fi
+    _corsia_unconfirmed_bootout=true
     if launchctl_bootout_wait "$domain/$label"; then
+        _corsia_unconfirmed_bootout=false
         return 0
     else
         bootout_status=$?
@@ -162,6 +169,7 @@ bootout_service_and_wait() {
         return 2
     fi
     if service_is_loaded; then
+        _corsia_unconfirmed_bootout=false
         return 1
     fi
     fail "$label bootout did not confirm teardown completed; launchd no longer reports the job and no replacement was started"
@@ -393,7 +401,7 @@ render_env_file_vars() {
                 continue ;;
             BACKEND_PORT|CORSIA_E2E_MODEL|CORSIA_SERVICE_GENERATION|\
                 CORSIA_RESTART_BACKEND_PORT|CORSIA_RESTART_OPERATION_ID|\
-                CORSIA_RESTART_CALLER_TOKEN|CORSIA_RESTART_CURL|PATH)
+                CORSIA_RESTART_CALLER_TOKEN|PATH)
                 warn "$ENV_FILE sets $key — ignored: pinned by the canonical service plist" >&2
                 continue ;;
         esac

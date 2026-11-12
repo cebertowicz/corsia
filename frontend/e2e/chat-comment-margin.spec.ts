@@ -1,8 +1,10 @@
 import { expect, test } from './support/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage, seedMockResponses } from './support/mock';
+import { injectMessage, seedMockResponses, waitForThreadReply } from './support/mock';
 import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
+
 
 /**
  * One comment, three surfaces, by the width of the chat canvas (design R5): its thread is a card in the
@@ -15,7 +17,7 @@ const QUOTE = 'selected phrase';
 
 /** Opens a chat of the given canvas width holding one commented message, and returns its row. */
 async function commentedMessage(page: Page, request: APIRequestContext, width: number) {
-	const title = `Margin comments ${width}`;
+	const title = `Margin comments ${width} ${crypto.randomUUID()}`;
 	const thread = await createSession(request, title);
 	await injectMessage(request, thread, { role: 'assistant', content: 'Earlier context.\n\n'.repeat(24), metadata: { for_user: true } }, TEST_TOKEN);
 	const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
@@ -49,13 +51,45 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
 	await chatComposer(page).fill('Please address this');
 	await page.getByRole('button', { name: 'Send message' }).click();
 	await commentOnMessage(row, QUOTE);
+	await waitForThreadReply(request, thread, 'Received comment');
 	return { row, narrow };
 }
 
-/** Puts a row mid-transcript and waits for the margin stack to place its cards, so a card is measured against its own line. */
+/**
+ * Puts a row mid-transcript and waits until its highlighted line has stopped moving and stands clear of the
+ * composer, so the click that follows lands where it was measured. Two animation frames are not enough: while the
+ * transcript is still settling, a click measured on the highlight is delivered onto text that has moved, and the
+ * card never opens (the recorded 1440 timeout; the saved trace shows the pointer landing under `.input-floater`).
+ */
 async function centerAndSettle(page: Page, row: Locator) {
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-	await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+	const read = () => row.evaluate((el) => {
+		const anchor = el.querySelector<HTMLElement>('.cm-comment-anchor') ?? el;
+		const box = anchor.getBoundingClientRect();
+		const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
+		const hits = [...anchor.getClientRects()].length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
+		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
+		return clear ? `settled:${Math.round(box.y)}` : 'covered';
+	});
+	await expect.poll(async () => {
+		const before = await read();
+		await page.waitForTimeout(80);
+		const after = await read();
+		return before === after ? before : `moved:${before}>${after}`;
+	}, { message: 'the highlighted line stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+$/);
+}
+
+/**
+ * Opens a margin card by the highlight it belongs to. A click that lands on text which has already moved — the
+ * recorded 1440 timeout, and the same intermittence at 1920 — leaves the card unselected, so the card takes the
+ * click instead, which is the select route a pointer on the card itself uses.
+ */
+async function openMarginCard(row: Locator, card: Locator) {
+	await row.locator('.cm-comment-anchor').filter({ hasText: QUOTE }).click();
+	const field = card.getByPlaceholder('Reply…');
+	if (await field.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false)) return;
+	await card.click();
+	await expect(field).toBeVisible();
 }
 
 /** Writes the same frame in both themes, for the design pack. */
@@ -119,6 +153,54 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await expect(card).not.toHaveClass(/selected/);
 });
 
+for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark'] as const) test(`a long chat margin reply stays usable at ${width} in ${theme}`, async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name !== 'chromium-desktop');
+	test.setTimeout(120_000);
+	const { row } = await commentedMessage(page, request, width);
+	await page.setViewportSize({ width, height: 900 });
+	await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+	await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+	const card = page.locator('.chat-margin .chat-margin-card');
+	await expect(card).toHaveCount(1);
+	await centerAndSettle(page, row);
+	await openMarginCard(row, card);
+	const input = card.getByPlaceholder('Reply…');
+	const send = card.getByRole('button', { name: 'Send reply' });
+	const check = async () => {
+		await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
+		await expect(send).toBeVisible();
+		for (const element of [card, send]) await expect.poll(() => element.evaluate(el => {
+			const box = el.getBoundingClientRect(), scroller = el.closest<HTMLElement>('.messages')!;
+			const view = scroller.getBoundingClientRect();
+			const inset = parseFloat(getComputedStyle(scroller).getPropertyValue('--input-bar-height')) || 100;
+			const headerBottom = document.querySelector('.shell-header')!.getBoundingClientRect().bottom;
+			return { left: Math.max(0, -box.left), right: Math.max(0, box.right - innerWidth), top: Math.max(0, Math.max(view.top, headerBottom) - box.top), bottom: Math.max(0, box.bottom - view.bottom + inset) };
+		})).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+		await send.click({ trial: true });
+	};
+	for (let i = 0; i < 40; i++) {
+		await input.pressSequentially(`typed reply ${i}`);
+		if (i < 39) await input.press('Shift+Enter');
+	}
+	await check();
+	await page.screenshot({ path: info.outputPath('typed-chat-margin-reply.png'), animations: 'disabled' });
+
+	await input.fill(Array.from({ length: 40 }, (_, i) => `long chat reply line ${i}`).join('\n'));
+	await check();
+	await page.screenshot({ path: info.outputPath('long-chat-margin-reply.png'), animations: 'disabled' });
+
+	await send.click();
+	await expect(card).toContainText('long chat reply line 0');
+	await input.fill(Array.from({ length: 40 }, (_, i) => `second margin reply ${i}`).join('\n'));
+	await expectDiscussionVisible(card, 'A note on the phrase');
+	await expectDiscussionVisible(card, 'long chat reply line 0');
+	await page.screenshot({ path: info.outputPath(`${width}-${theme}-second-margin-reply.png`), animations: 'disabled' });
+	await send.click();
+	await expect(card).toContainText('second margin reply 0');
+
+});
+
 test('a chat column too narrow for the card keeps the popover at the highlight', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
 	test.setTimeout(120_000);
@@ -129,6 +211,102 @@ test('a chat column too narrow for the card keeps the popover at the highlight',
 	const thread = await openCommentThread(row, page, QUOTE);
 	await expect(thread.getByText('A note on the phrase')).toBeVisible();
 	await capture(page, 'chat-narrow-popover');
+});
+
+for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] as const) test(`a chat popover keeps its anchor visible at 900x${height} in ${theme}`, async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name !== 'chromium-desktop');
+	test.setTimeout(120_000);
+	const { row } = await commentedMessage(page, request, 900);
+	await page.setViewportSize({ width: 900, height });
+	await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+	// Avoid starting a smooth scroll that continues after the click and dismisses the popover.
+	await row.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+	const anchor = row.locator('.cm-comment-anchor').filter({ hasText: QUOTE });
+	const thread = await openCommentThread(row, page, QUOTE);
+	const input = thread.getByPlaceholder('Reply…');
+	const send = thread.getByRole('button', { name: 'Send reply' });
+	const check = async () => {
+		await expect.poll(async () => {
+			const a = (await anchor.boundingBox())!, p = (await page.locator('[data-popover]').boundingBox())!;
+			const header = (await page.locator('.shell-header').boundingBox())!;
+			const composer = (await page.locator('.input-floater').boundingBox())!;
+			const clearsAnchor = p.x + p.width <= a.x || a.x + a.width <= p.x || p.y + p.height <= a.y || a.y + a.height <= p.y;
+			if (!clearsAnchor) return `popover ${Math.round(p.y)}-${Math.round(p.y + p.height)} covers the anchor ${Math.round(a.y)}-${Math.round(a.y + a.height)}`;
+			if (p.y < header.y + header.height) return `popover top ${Math.round(p.y)} above the header bottom ${Math.round(header.y + header.height)}`;
+			if (p.y + p.height > composer.y) return `popover bottom ${Math.round(p.y + p.height)} below the composer top ${Math.round(composer.y)}`;
+			return true;
+		}).toBe(true);
+		await send.click({ trial: true });
+	};
+	for (let i = 0; i < 8; i++) { await input.pressSequentially(`typed reply ${i}`); await input.press('Shift+Enter'); }
+	await check();
+	await page.screenshot({ path: info.outputPath('typed-chat-popover.png'), animations: 'disabled' });
+
+	await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `pasted reply ${i}`).join('\n'));
+	await check();
+	await page.screenshot({ path: info.outputPath('pasted-chat-popover.png'), animations: 'disabled' });
+
+	await send.click();
+	// Send goes once its text is posted; focus returns to the field, so the card holding it stays while the transcript moves.
+	await expect(input).toBeFocused();
+	await expect(thread).toContainText('pasted reply 0');
+	await input.fill(Array.from({ length: 40 }, (_, i) => `second chat reply ${i}`).join('\n'));
+	// At 420 tall the popover cannot hold the thread beside the field: field and Send stay pinned and clickable and
+	// the thread is reachable by scrolling inside the card. At 900 there is room, so both lines must show.
+	if (height === 420) {
+		await expectFieldAndSendUsable(thread, input);
+		await expectDiscussionReachableByScroll(thread, 'typed reply 0');
+	} else {
+		await expectDiscussionVisible(thread, 'A note on the phrase');
+		await expectDiscussionVisible(thread, 'typed reply 0');
+	}
+	await send.click();
+	await expect(input).toBeFocused();
+	await expect(thread).toContainText('second chat reply 0');
+
+});
+
+for (const height of [852, 420] as const) for (const theme of ['light', 'dark'] as const) test(`a long chat drawer reply stays usable at 393x${height} in ${theme}`, async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name !== 'chromium-mobile');
+	test.setTimeout(120_000);
+	const { row } = await commentedMessage(page, request, 393);
+	await page.setViewportSize({ width: 393, height });
+	await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+	const thread = await openCommentThread(row, page, QUOTE);
+	const input = thread.getByPlaceholder('Reply…');
+	const send = thread.getByRole('button', { name: 'Send reply' });
+	const checkReply = async (state: string) => {
+		// `finished` rejects when an ease is replaced, so settle rather than await.
+		await input.evaluate(async field => { await Promise.allSettled(field.getAnimations().map(animation => animation.finished)); });
+		await send.click({ trial: true });
+		await page.screenshot({ path: info.outputPath(`${state}.png`), animations: 'disabled' });
+		for (const element of [input, send]) await expect.poll(async () => {
+			const box = (await element.boundingBox())!;
+			return height - box.y - box.height;
+		// The browser rounds a fractional scroll offset to a device pixel.
+		}).toBeGreaterThanOrEqual(15);
+	};
+	for (let i = 0; i < 8; i++) { await input.pressSequentially(`typed reply ${i}`); await input.press('Shift+Enter'); }
+	await checkReply('typed');
+
+	await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `pasted reply ${i}`).join('\n'));
+	await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight && field.scrollTop > 0 && field.clientHeight > 45)).toBe(true);
+	await checkReply('pasted');
+
+	await send.click();
+	await expect(thread).toContainText('pasted reply 0');
+	await input.fill(Array.from({ length: 40 }, (_, i) => `second chat reply ${i}`).join('\n'));
+	// The short drawer has no room for the thread beside the field; the tall one does.
+	if (height === 420) {
+		await expectFieldAndSendUsable(thread, input);
+		await expectDiscussionReachableByScroll(thread, 'typed reply 0');
+	} else {
+		await expectDiscussionVisible(thread, 'A note on the phrase');
+		await expectDiscussionVisible(thread, 'typed reply 0');
+	}
+	await send.click();
+	await expect(thread).toContainText('second chat reply 0');
+
 });
 
 test('a phone keeps the drawer, with no margin column', async ({ page, request }) => {

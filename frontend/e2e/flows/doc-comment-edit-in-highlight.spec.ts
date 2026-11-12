@@ -107,6 +107,7 @@ test('@flow:doc-comment-edit-in-highlight below the margin width, a click opens 
 	await editInsideHighlight(page, () => expect(popover(page)).toContainText(ITEMS[FIRST].body), 'popover');
 });
 
+// The note a card whose text was deleted shows (CommentThread's `detachedNote`).
 const GONE = 'This text isn’t in the document';
 
 /** The caret at the start of the first highlight's line, where the highlight begins (the first comment's quote starts its paragraph). */

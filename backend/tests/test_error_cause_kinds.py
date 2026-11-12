@@ -74,6 +74,7 @@ def test_the_table_only_names_listed_kinds():
     (TimeoutError("slow"), None),
     (OmlxLoadedStateError("not loaded"), "provider_model_not_loaded"),
     (RuntimeError("You've hit your session limit"), "provider_usage_limit"),
+    (RuntimeError("You've hit your 5-hour limit · resets 10am (America/Los_Angeles)"), "provider_usage_limit"),
     (_status(openai.RateLimitError, 429, "You exceeded your current quota"), "provider_usage_limit"),
     (_status(openai.InternalServerError, 500), None),
     (RuntimeError("something odd"), None),
@@ -297,6 +298,7 @@ def test_process_exit_rows_carry_cause_and_cause_kind(monkeypatch, module, harne
 @pytest.mark.parametrize(("event", "cause", "kind"), [
     ({"result": _EXPIRED}, "sign_in_expired", "sign_in_expired"),
     ({"result": "You've hit your session limit"}, None, "usage_limit"),
+    ({"result": "You've hit your 5-hour limit · resets 3pm (America/Los_Angeles)"}, None, "usage_limit"),
     ({"result": "Prompt is too long"}, "context_window_exceeded", "context_overflow"),
     ({"result": "something broke"}, None, "unknown"),
 ])

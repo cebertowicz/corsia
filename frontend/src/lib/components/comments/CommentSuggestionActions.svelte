@@ -24,7 +24,7 @@
 
 {#if !readOnly}
 	<div class="ct-suggestion-actions">
-		<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || orphaned || textChanged} title={textChanged ? 'The text changed after this suggestion' : orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
+		<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || orphaned || textChanged} title={textChanged ? "Can't accept: the text doesn't match this suggestion." : orphaned ? "Can't accept: the text this suggestion replaces isn't in the document." : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
 		<button class="ct-link" aria-busy={decisionBusy === 'reject'} disabled={decisionBusy !== null} onclick={(e) => { e.stopPropagation(); decide('reject'); }}>{decisionBusy === 'reject' ? 'Rejecting…' : 'Reject'}</button>
 	</div>
 {/if}
@@ -35,7 +35,7 @@
 	.ct-suggestion-actions { display: flex; align-items: center; gap: var(--ct-hit); margin-top: 2px; }
 	.ct-suggestion-actions button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: var(--ct-hit); min-height: var(--ct-hit); }
 	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
-	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
+	.ct-suggestion-accept:disabled { opacity: 0.55; cursor: not-allowed; }
 	.ct-suggestion-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
 	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }

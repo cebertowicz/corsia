@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
-import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, geometry, open, pill, widen } from '../support/marginCards';
+import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
 import { resolvedList } from '../support/commentDrawer';
 
@@ -244,7 +244,7 @@ test('@flow:doc-margin-cards the column comes back when version history closes, 
 		if (close === 'the History button') await history.click(); else await page.getByRole('button', { name: 'Close history', exact: true }).click();
 		await expect(page.locator('[data-doc-history-drawer]'), close).toHaveCount(0);
 		await expect(card(page, doc, FIRST), `cards are back after ${close}`).toBeVisible();
-		await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first()).toBeVisible();
+		await expectMarginColumnUp(page);
 		expect(await page.locator('[data-margin-card]').count()).toBe(ITEMS.length);
 	}
 	// A reader who had the column closed before History opened does not get it opened after.

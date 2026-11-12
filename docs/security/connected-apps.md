@@ -44,11 +44,12 @@ The sign-in grants more than CORSIA's tools use. Labelling, trashing and calenda
 
 The `google_workspace` tool runs one command of Google's Workspace CLI (`gws`) on a connected account (`backend/tools/google_workspace.py`). CORSIA previews each command without the sign-in, checks the one request it would make, then runs it with the account's access token handed only to that `gws` process ([Secrets](secrets.md#where-keys-live)). The check, in CORSIA code (`backend/tools/gws_check.py`):
 
-- refuses mail (that goes through the email tools), sign-in commands, any address outside Google's APIs, emptying the trash, and any delete that can't be put back
+- refuses mail (that goes through the email tools) except archiving messages or marking them read: a Gmail `messages.modify` or `batchModify` that only removes the `INBOX` or `UNREAD` label
+- refuses sign-in commands, any address outside Google's APIs, emptying the trash, and any delete that can't be put back
 - turns a Drive delete into a move to the trash, and saves a calendar event before a change that would remove it
 - reads and writes local files only inside the workspace
 
-It doesn't ask you first. An agent can create, edit and share files, and change calendar events, including ones that email their guests. Edits appear as yours. On Linux the tool refuses to run, because `gws` starts only under the macOS sandbox.
+It doesn't ask you first. An agent can create, edit and share files, change calendar events, including ones that email their guests, and archive mail or mark it read. Edits appear as yours. On Linux the tool refuses to run, because `gws` starts only under the macOS sandbox.
 
 ## Microsoft
 

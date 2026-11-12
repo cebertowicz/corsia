@@ -1,3 +1,5 @@
+import { apiFetch } from '$lib/api/request';
+
 export type ClassifierState = { state: 'idle' | 'downloading' | 'verifying' | 'self_testing' | 'ready' | 'failed'; bytes_done?: number; bytes_total?: number; interrupted?: boolean; code?: string; reason?: string; retryable?: boolean; bytes_needed?: number };
 
 /** The one required background download. Setup never shows it and never waits on it: it starts, and a failure retries quietly. */
@@ -12,7 +14,7 @@ export function createSetupClassifier() {
 	// and from then on the backend nudges with `classifier_updated`.
 	async function read() {
 		try {
-			const response = await fetch('/api/setup/classifier');
+			const response = await apiFetch('/api/setup/classifier');
 			if (response.ok) accept(await response.json());
 		} catch { /* the next event or reconnect reads again */ }
 	}
@@ -20,7 +22,7 @@ export function createSetupClassifier() {
 	// Starts, joins or retries the one download; the backend keeps it going whether or not this screen stays open.
 	async function start() {
 		try {
-			const response = await fetch('/api/setup/classifier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+			const response = await apiFetch('/api/setup/classifier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 			if (response.ok) accept(await response.json());
 		} catch { /* the next read reports what the server says */ }
 	}
@@ -31,7 +33,7 @@ export function createSetupClassifier() {
 		if (state.state !== 'failed') return;
 		if (state.code !== 'disk_full') { await start(); return; }
 		try {
-			const response = await fetch('/api/setup/classifier/recheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+			const response = await apiFetch('/api/setup/classifier/recheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 			if (response.ok) accept(await response.json());
 		} catch { /* the next focus or the backend's own minute check looks again */ }
 	}

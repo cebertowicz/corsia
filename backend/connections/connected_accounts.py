@@ -96,6 +96,19 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
         return False
 
 
+def reached_projects(account_id: str, *, db: sqlite3.Connection) -> frozenset[str] | None:
+    """The projects an account's reach includes, where agents' mail rules may fire on its
+    unowned mail; ``None`` when they can't be read. Only-CORSIA reach includes none."""
+    try:
+        reach = _account_reach(account_id, db=db)
+        if reach.mode != "all":
+            return reach.project_ids if reach.mode == "selected" else frozenset()
+        return frozenset(row["id"] for row in db.execute("SELECT id FROM projects"))
+    except (ConnectedAccountError, sqlite3.Error):
+        log.exception("Rule scope for a connected account is unreadable")
+        return None
+
+
 def get_account(account_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
     """Return one account's non-credential facts and reach."""
     row = db.execute("SELECT * FROM connected_accounts WHERE id=?", (account_id,)).fetchone()

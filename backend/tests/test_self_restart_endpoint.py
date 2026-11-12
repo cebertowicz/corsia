@@ -1214,8 +1214,19 @@ async def test_after_response_steers_all_turns_once_and_returns_after_spawn(
         return {}
 
     rid = sr.try_acquire("t-steer", "steve", "aaa", "dev", "why")
+    import threading
+
     process = MagicMock()
     process.poll.return_value = None
+    waiting = threading.Event()
+    caller_thread = threading.get_ident()
+
+    def child_wait():
+        seen["wait_thread"] = threading.get_ident()
+        waiting.set()
+        return 0
+
+    process.wait.side_effect = child_wait
     with (
         patch("automation.restart.begin_restart_drain", _fake_drain),
         patch(_SPAWN, return_value=process),
@@ -1228,7 +1239,8 @@ async def test_after_response_steers_all_turns_once_and_returns_after_spawn(
     assert seen["include"] is None
     assert seen["exclude"] is None
     assert seen["allow_hard_cap"] is True
-    process.wait.assert_not_called()
+    assert await asyncio.to_thread(waiting.wait, 2)
+    assert seen["wait_thread"] != caller_thread
 
 
 async def test_startup_materializes_restart_wake_then_releases_ingress(

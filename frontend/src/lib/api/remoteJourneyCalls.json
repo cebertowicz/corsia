@@ -1,0 +1,94 @@
+{
+  "calls": [
+    {
+      "journey": "thread open",
+      "method": "GET",
+      "path": "/api/threads",
+      "session_in_address": true
+    },
+    {
+      "journey": "thread open",
+      "method": "GET",
+      "path": "/api/corsia-agent",
+      "session_in_address": true
+    },
+    {
+      "journey": "thread open",
+      "method": "GET",
+      "path": "/api/threads/{thread}/messages",
+      "session_in_address": true
+    },
+    {
+      "journey": "thread open",
+      "method": "GET",
+      "path": "/api/threads/{thread}/artifacts",
+      "session_in_address": true
+    },
+    {
+      "journey": "send",
+      "method": "GET",
+      "path": "/api/upload/limits",
+      "session_in_address": false
+    },
+    {
+      "journey": "send",
+      "method": "POST",
+      "path": "/api/upload",
+      "session_in_address": true
+    },
+    {
+      "journey": "document open and comment",
+      "method": "GET",
+      "path": "/api/files/content",
+      "session_in_address": true
+    },
+    {
+      "journey": "document open and comment",
+      "method": "GET",
+      "path": "/api/artifacts/{artifact}/comments",
+      "session_in_address": true
+    },
+    {
+      "journey": "document open and comment",
+      "method": "POST",
+      "path": "/api/artifacts/{artifact}/comments",
+      "session_in_address": true
+    },
+    {
+      "journey": "review bar approve",
+      "method": "GET",
+      "path": "/api/attention/{artifact}/review",
+      "session_in_address": false
+    },
+    {
+      "journey": "review bar approve",
+      "method": "POST",
+      "path": "/api/attention/{artifact}/clear",
+      "session_in_address": false
+    },
+    {
+      "journey": "update screen",
+      "method": "GET",
+      "path": "/api/system/update-status",
+      "session_in_address": false
+    },
+    {
+      "journey": "update screen",
+      "method": "PUT",
+      "path": "/api/system/update-schedule",
+      "session_in_address": false
+    },
+    {
+      "journey": "settings",
+      "method": "GET",
+      "path": "/api/settings",
+      "session_in_address": false
+    },
+    {
+      "journey": "settings",
+      "method": "PATCH",
+      "path": "/api/settings",
+      "session_in_address": false
+    }
+  ]
+}

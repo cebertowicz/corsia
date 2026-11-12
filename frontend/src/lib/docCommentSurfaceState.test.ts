@@ -211,6 +211,32 @@ describe('comment surface state', () => {
 			expect(get(focusedDocComment)).toBeNull();
 		});
 
+		it('closes the column to the editor after a pick that a caret in plain text released', () => {
+			const editor = vi.fn();
+			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			surface.focusComment('c1', new DOMRect(), false, true);
+			expect(surface.release()).toBe(true);
+			surface.close();
+			surface.restoreFocus();
+			expect(surface.state).toBeNull();
+			expect(editor).toHaveBeenCalledTimes(1);
+		});
+
+		// The column sits beside the text, so closing it hands focus back to the caret, not to the button that opened it.
+		it('closes the column to the caret after a draft over it was cancelled', () => {
+			const editor = vi.fn(), button = document.body.appendChild(document.createElement('button'));
+			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			surface.openList(button);
+			surface.openDraft(new DOMRect());
+			surface.close();
+			expect(surface.state).toEqual({ kind: 'list' });
+			surface.close();
+			surface.restoreFocus();
+			expect(editor).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).not.toBe(button);
+			button.remove();
+		});
+
 		it('does nothing when nothing is picked, or without the margin column', () => {
 			const margin = createCommentSurfaceState(() => {}, undefined, () => true);
 			margin.openList(document.createElement('button'));

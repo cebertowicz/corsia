@@ -3,6 +3,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { expectCommentsShown } from '../support/commentDrawer';
+import { waitForPanelsToSettle } from '../support/sidebar';
 
 /**
  * Activating a comment in the Comments sheet takes the reader to its text, whether they press the quote line or the
@@ -110,6 +111,7 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	}
 	await expect.poll(async () => (await page.locator('.doc').boundingBox())!.width).toBeGreaterThanOrEqual(900);
+	await waitForPanelsToSettle(page);
 	await page.locator('.comment-status').click();
 	// Inside the column's opening hold, which keeps the reader's line steady while the text narrows.
 	await parkInMiddle(page, { wheel: true });

@@ -157,7 +157,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
                 review=request.review, replacement=request.replacement, insert_after=request.insert_after,
                 tagged_user_id=request.user_id if request.tag_person else None, client_id=identifier,
-                region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
+                region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
             )
             if created:
                 _record_tags(connection, request, row)

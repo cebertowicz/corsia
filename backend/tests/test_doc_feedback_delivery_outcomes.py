@@ -221,6 +221,7 @@ def test_a_reopen_follows_the_persons_delivery_policy(client, owner_thread):
         for _ in range(2):
             row, _feedback_result = add_comment(db, artifact, author_kind="user", author_id=None, author="Steve")
             db.execute("UPDATE doc_comments SET resolved=1 WHERE id=?", (row["id"],))
+            db.commit()
             rows.append(row["id"])
         db.execute("DELETE FROM doc_feedback_batches")
         db.commit()

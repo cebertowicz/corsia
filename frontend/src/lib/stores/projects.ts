@@ -5,6 +5,7 @@ import { plainResponseError } from '../plainError';
 import { enterScope, exitScope } from './uiScope';
 import { projectAccent } from '$lib/utils/projectColors';
 import type { Thread } from './threads';
+import { apiFetch } from '$lib/api/request';
 
 export interface ProjectInfo {
 	id: string;
@@ -50,7 +51,7 @@ export function loadProjects({ force = false }: { force?: boolean } = {}): Promi
 	projectLoadError.set(null);
 	const epoch = currentToken;
 	const requestGeneration = generation;
-	inFlight = fetch(`/api/projects?token=${encodeURIComponent(epoch)}&status=all`)
+	inFlight = apiFetch(`/api/projects?status=all`, { sessionInAddress: true })
 		.then(async (res) => {
 			if (!res.ok) throw new Error('Could not load projects');
 			const data = await res.json();
@@ -178,7 +179,8 @@ export async function createProject(input: {
 }): Promise<ProjectInfo> {
 	const currentToken = get(token);
 	if (!currentToken) throw new Error('Not authenticated');
-	const res = await fetch(`/api/projects?token=${encodeURIComponent(currentToken)}`, {
+	const res = await apiFetch(`/api/projects`, {
+		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
@@ -199,7 +201,8 @@ export async function updateProject(
 ): Promise<void> {
 	const currentToken = get(token);
 	if (!currentToken) throw new Error('Not authenticated');
-	const res = await fetch(`/api/projects/${id}?token=${encodeURIComponent(currentToken)}`, {
+	const res = await apiFetch(`/api/projects/${id}`, {
+		sessionInAddress: true,
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(patch),
@@ -229,7 +232,8 @@ export async function restoreProject(id: string): Promise<void> {
 async function _transition(id: string, to_status: 'archived' | 'active'): Promise<void> {
 	const currentToken = get(token);
 	if (!currentToken) throw new Error('Not authenticated');
-	const res = await fetch(`/api/projects/${id}/transition?token=${encodeURIComponent(currentToken)}`, {
+	const res = await apiFetch(`/api/projects/${id}/transition`, {
+		sessionInAddress: true,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ to_status }),

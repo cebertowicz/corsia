@@ -25,6 +25,18 @@ const button = (selector: string) => host.querySelector<HTMLButtonElement>(selec
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); });
 
 describe('CommentThread', () => {
+	it.each([
+		['expanded resolved comment', { resolved: true }],
+		['open suggestion', { replacement: 'new text' }],
+		['decided suggestion with an open conversation', { replacement: 'new text', decision: 'accepted' as const }],
+	])('exposes the discussion for sizing on an %s', (_label, state) => {
+		render(thread({ ...state, replies: [reply] }));
+		if ('resolved' in state && state.resolved) { button('.ct-res-head').click(); flushSync(); }
+		expect(host.querySelector('[data-discussion-original]')?.textContent).toContain('note');
+		expect(host.querySelector('[data-discussion-replies]')?.textContent).toContain(reply.text);
+		expect(host.querySelector('.ct-input')).not.toBeNull();
+	});
+
 	it('posts a reply and clears the input', async () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
@@ -32,6 +44,16 @@ describe('CommentThread', () => {
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
+	});
+
+	it('keeps focus in the reply field when a clicked Send goes away after posting', async () => {
+		render(thread());
+		const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		type(input, 'looks right');
+		button('.ct-send').focus();
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(host.querySelector('.ct-send')).toBeNull());
+		expect(document.activeElement).toBe(input);
 	});
 
 	it('draws no Reply field while hideReply is set, unless a reply is half typed', () => {
@@ -414,16 +436,16 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', orphaned: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe('The text this suggestion replaces has changed.');
-		expect(host.textContent).toContain('The text this suggestion replaces has changed.');
+		expect(accept.title).toBe("Can't accept: the text this suggestion replaces isn't in the document.");
+		expect(host.textContent).toContain("The text this suggestion replaces isn't in the document.");
 	});
 
 	it('disables accepting a suggestion edited inside, with the reason, while Reject and Reply stay', () => {
 		render(thread({ replacement: 'new text', textChanged: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe('The text changed after this suggestion');
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text changed after this suggestion');
+		expect(accept.title).toBe("Can't accept: the text doesn't match this suggestion.");
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe("The text doesn't match this suggestion.");
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
 		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
 	});

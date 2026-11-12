@@ -294,7 +294,7 @@ def deliver_platform_event_sync(
     event_type: str | None = None,
     *,
     repair_owner: str | None = None,
-    target_filter: Filter | None = None,
+    target_filter: Filter | None = None, unrouted_projects: frozenset[str] | None = frozenset(),
     db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
     """Normalize, resolve and deliver one connector event in one write transaction.
@@ -306,7 +306,7 @@ def deliver_platform_event_sync(
     deliveries, _ = deliver_envelope_sync(
         envelope, get_manifest(connector).decl(envelope.type),
         lambda conn: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
-        target_filter=target_filter, db=db,
+        target_filter=target_filter, unrouted_projects=unrouted_projects, db=db,
     )
     return deliveries
 
@@ -315,13 +315,13 @@ def deliver_envelope_sync(
     envelope: EventEnvelope, decl: EventTypeDecl,
     resolve: Callable[[sqlite3.Connection], list[Target]], *,
     target_filter: Filter | None = None,
-    repository_projects: frozenset[str] | None = frozenset(),
+    unrouted_projects: frozenset[str] | None = frozenset(),
     db: sqlite3.Connection | None = None,
 ) -> tuple[list[PlatformDelivery], rules.RulePlan | None]:
     """Deliver one normalized event to the targets ``resolve`` picks, then apply rules.
 
     One write transaction; the plan is returned so intake can say which rules acted.
-    ``repository_projects`` (``rule_reads.unrouted_projects``, read before the
+    ``unrouted_projects`` (``rule_reads.unrouted_projects``, read before the
     transaction) scope the rules when ``resolve`` routes the event to no thread;
     ``None``, that lookup failed, and no rule fires there (``rules.lookup_failed``).
     """
@@ -330,10 +330,10 @@ def deliver_envelope_sync(
         filtered = [target_filter(target, conn) if target_filter is not None else None for target in targets]
         skipped = [target.thread for target, reason in zip(targets, filtered) if reason is not None]
         event, plan = rule_event(envelope), None
-        if repository_projects is None and rules.routed(targets, skipped)[2] is None:
+        if unrouted_projects is None and rules.routed(targets, skipped)[2] is None:
             rules.record(conn, event, rules.lookup_failed(conn, event))
         else:
-            event = replace(event, repository_projects=repository_projects or frozenset())
+            event = replace(event, unrouted_projects=unrouted_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
             rules.record(conn, event, plan.settled if plan else ())  # rule_zero reads a script's claim
 

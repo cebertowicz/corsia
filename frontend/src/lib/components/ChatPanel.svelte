@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiFetch } from '$lib/api/request';
 	import { onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
@@ -147,7 +148,7 @@
 		// stdin channel and keeps Send live. A WS frame carries it on subscribe,
 		// but a socket that has not opened yet carries nothing — so read it.
 		const subagentRefresh = authToken
-			? hydrateSubagentThread(id, authToken).catch(() => null)
+			? hydrateSubagentThread(id).catch(() => null)
 			: Promise.resolve(null);
 		try {
 			await Promise.all([
@@ -249,7 +250,7 @@
 		const signal = firstPageRead.start();
 		const sequence = beginChatReplyAttentionRead();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
+			const res = await apiFetch(`/api/threads/${threadId}/messages?limit=${MSG_PAGE_SIZE}${focusParam()}`, { sessionInAddress: true, signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
@@ -299,7 +300,7 @@
 			pagerGeneration++;
 			pager = createPager();
 			const myGen = pagerGeneration;
-			await refreshVisibleThread(sid, get(token), loadFirstPage(sid, myGen));
+			await refreshVisibleThread(sid, loadFirstPage(sid, myGen));
 		};
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {

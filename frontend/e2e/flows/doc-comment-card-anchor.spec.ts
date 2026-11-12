@@ -2,6 +2,9 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { waitForPanelsToSettle } from '../support/sidebar';
+import { expectMarginColumnUp } from '../support/marginCards';
+import { readPainted } from '../support/paintedFrames';
 
 const SECTIONS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth'];
 const SECTION = 'Third';
@@ -34,6 +37,17 @@ async function drawnBox(target: Locator) {
 		return { x, y, width, height };
 	});
 	return found ?? box(target);
+}
+
+/** The drawn text of the line holding `text`, as the next painted frame shows it. */
+function paintedLine(page: Page, text: string): Promise<Rect> {
+	return readPainted(page.locator('.cm-content'), (content, text) => {
+		const line = [...content.querySelectorAll('.cm-line')].find((candidate) => candidate.textContent?.includes(text))!;
+		const span = document.createRange();
+		span.selectNodeContents(line);
+		const { x, y, width, height } = span.getBoundingClientRect();
+		return { x, y, width, height };
+	}, text);
 }
 
 /** The canvas's own scroller: the nearest scrolling ancestor of the editor. */
@@ -147,7 +161,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
 	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ comments?/i }).first().click();
-	await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first()).toBeVisible();
+	await expectMarginColumnUp(page);
 }
 
 /** The canvas at its widest: both side panels tucked away. */
@@ -158,6 +172,7 @@ async function expandCanvas(page: Page) {
 		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	}
 	await expect.poll(async () => (await box(page.locator('.doc'))).width).toBeGreaterThan(narrow + 100);
+	await waitForPanelsToSettle(page);
 }
 
 const layouts = [
@@ -249,7 +264,14 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			if (expanded) await expandCanvas(page);
 			await placeTarget(page, 0.5);
 			const line = lineOf(page, `The ${SECTION} target is right here`);
-			await line.dblclick({ position: { x: 12, y: 8 } });
+			const placed = await paintedLine(page, `The ${SECTION} target is right here`);
+			// Double-click where the reader sees the line. A locator dblclick that finds the line a pixel off between two frames
+			// retries by scrolling it to the canvas's bottom edge, which would leave no room for the wheel below; this check
+			// stands in for its stability check, so the app moving the line in front of the reader still fails here, with the move.
+			const now = await paintedLine(page, `The ${SECTION} target is right here`);
+			const move = { x: Math.round((now.x - placed.x) * 100) / 100, y: Math.round((now.y - placed.y) * 100) / 100 };
+			expect(Math.max(Math.abs(move.x), Math.abs(move.y)), `the line moved ${JSON.stringify(move)} px between placing it and the double-click`).toBeLessThanOrEqual(1);
+			await page.mouse.dblclick(now.x + 12, now.y + 8);
 			await page.locator('.sel-comment').click();
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);

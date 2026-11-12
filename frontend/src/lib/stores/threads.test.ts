@@ -8,6 +8,7 @@ import {
 	upsertVisibleThread,
 	type Thread,
 } from './threads';
+import { token as sessionStore } from './sessionToken';
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
 	return {
@@ -23,11 +24,13 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 beforeEach(() => {
+	sessionStore.set('a session');
 	threads.set([]);
 	reasoningEffort.set(null);
 });
 
 afterEach(() => {
+	sessionStore.set(null);
 	vi.unstubAllGlobals();
 });
 
@@ -70,11 +73,11 @@ describe('saveThreadTitle', () => {
 		const fetchMock = vi.fn().mockResolvedValue({ ok: true });
 		vi.stubGlobal('fetch', fetchMock);
 
-		await saveThreadTitle(thread.id, 'New title', 'token with spaces');
+		await saveThreadTitle(thread.id, 'New title');
 
 		expect(get(threads)[0].title).toBe('New title');
 		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/threads/agent-1?token=token%20with%20spaces',
+			'/api/threads/agent-1?token=a%20session',
 			expect.objectContaining({ method: 'PATCH' }),
 		);
 	});
@@ -88,7 +91,7 @@ describe('saveThreadTitle', () => {
 			json: async () => ({ detail: 'nope' }),
 		}));
 
-		await expect(saveThreadTitle(thread.id, 'New title', 'token')).rejects.toThrow('Rename failed (500)');
+		await expect(saveThreadTitle(thread.id, 'New title')).rejects.toThrow('Rename failed (500)');
 		expect(get(threads)[0].title).toBe('Old title');
 	});
 });

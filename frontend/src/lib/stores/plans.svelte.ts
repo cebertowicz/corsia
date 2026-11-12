@@ -117,13 +117,13 @@ function runtimeFor(keyStr: string): Runtime {
 
 type PlanReadOutcome = OperatorReadOutcome | ActivityIndexReadOutcome;
 
-function fetchForKey(key: PlanKey, bearer: string, etag: string | null): Promise<PlanReadOutcome> {
-	if (key.kind === 'workspace') return api.readOperatorWorkspace(bearer, etag);
-	if (key.kind === 'project') return api.readOperatorProject(bearer, key.id, etag);
-	if (key.kind === 'thread') return api.readOperatorThread(bearer, key.id, etag);
-	if (key.kind === 'child') return api.readOperatorChild(bearer, key.id, etag);
-	if (key.kind === 'activity-workspace') return api.readActivityWorkspace(bearer, etag);
-	return api.readActivityProject(bearer, key.id, etag);
+function fetchForKey(key: PlanKey, etag: string | null): Promise<PlanReadOutcome> {
+	if (key.kind === 'workspace') return api.readOperatorWorkspace(etag);
+	if (key.kind === 'project') return api.readOperatorProject(key.id, etag);
+	if (key.kind === 'thread') return api.readOperatorThread(key.id, etag);
+	if (key.kind === 'child') return api.readOperatorChild(key.id, etag);
+	if (key.kind === 'activity-workspace') return api.readActivityWorkspace(etag);
+	return api.readActivityProject(key.id, etag);
 }
 
 function ownerThreadIdFor(
@@ -187,7 +187,7 @@ async function issue(key: PlanKey, keyStr: string, myId: number): Promise<void> 
 		return;
 	}
 	patch(keyStr, { status: before.payload ? before.status : 'loading', refreshing: true });
-	const outcome = await fetchForKey(key, bearer, before.etag);
+	const outcome = await fetchForKey(key, before.etag);
 	if (!ownedRuntime(keyStr, myId)) return; // retired, cancelled, or superseded
 	applyOutcome(key, keyStr, outcome);
 }
