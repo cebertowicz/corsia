@@ -13,7 +13,6 @@ user clears that ask, the holds it placed clear and the agent is told
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from infra import write_effects
@@ -56,7 +55,6 @@ ASK_ENDINGS = ask_endings.ASK_ENDINGS
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
 _ASKS_CHANGED = "person_comment_task_reconcile"
-log = logging.getLogger(__name__)
 
 
 def askable_sql(alias: str) -> str:
@@ -301,10 +299,8 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
 def asks_changed(db, artifact_ids) -> None:
     """Reconcile each document's comment task once this write commits, once per document.
 
-    An ask opening or ending on a document decides whether the person's comment task on
-    it exists (``person_comment_task.reconcile``). A write inside a transaction nobody
-    here owns has no commit to wait for, so it reconciles in place, under that lock, and
-    a failed reconcile fails that write.
+    An ask opening or ending decides whether the document's comment task exists. In a
+    transaction nobody here owns, it reconciles in place and a failure fails that write.
     """
     ids = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
     if not ids:

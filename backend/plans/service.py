@@ -255,11 +255,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
              watchdog_budget_seconds: int | None = None, actor_id: str | None = None,
              provenance: str = "plan_service", db=None, later: bool = False,
              person_step: bool = True, announce: bool = True) -> PlanNode:
-    """Add one DOD-bearing node at a valid tree position.
-
-    ``announce`` False marks a task the system keeps in step with state outside the plan:
-    its moves are bookkeeping, so no update card or owner receipt reports them.
-    """
+    """Add one DOD-bearing node at a valid tree position; ``announce=False`` keeps its moves off cards and receipts."""
     with plan_write.transaction(db) as connection:
         return _create_node(
             connection, plan_id, kind=kind, title=title,
