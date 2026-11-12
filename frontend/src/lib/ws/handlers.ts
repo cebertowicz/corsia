@@ -8,7 +8,7 @@ import type { Message } from '../stores/threads';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { addedMessage, deliveryRevision } from './messageProjection';
 import { emit } from './events';
-import { chatReplyDrafts } from '../components/chatReplyDrafts.svelte';
+import { settleQueuedComment } from './commentFailure';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
@@ -169,11 +169,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 				recoverInput(data.thread_id, inputId);
 			}
 			if (data.queue_kind === 'messages' && inputId && typeof data.thread_id === 'string' && typeof data.message_id === 'string') {
-				// A stored input that failed carries its own failure and Retry in its comment's thread, so that thread opens.
-				const failed = !!data.delivery_state && !['queued', 'delivered'].includes(data.delivery_state);
-				const draft = chatReplyDrafts.settle(data.thread_id, inputId, failed ? 'stored_failed' : 'queued');
-				if (draft) data.chat_comment_target_id = draft.targetMessageId;
-				if (draft && failed) emit('chat_comment_draft_error', { threadId: draft.threadId, targetMessageId: draft.targetMessageId, commentId: draft.commentId ?? draft.postedId });
+				settleQueuedComment(data);
 				reconcileQueuedInputReceipt(data);
 			}
 			emit('input_queued', data);

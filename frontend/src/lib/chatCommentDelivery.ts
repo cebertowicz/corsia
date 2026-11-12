@@ -44,6 +44,8 @@ export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyInde
 	const failedByKey = new Map<string, Message[]>();
 	const pendingSeen = new Set<string>();
 	const failedSeen = new Set<string>();
+	// A root comment's own failed send, keyed by the comment's id: the sender learns of the failure before the server's cid reaches it.
+	const failedRoots = new Map<string, Message[]>();
 	for (const row of rows) {
 		if (row.thread_id !== threadId || row.role !== 'user') continue;
 		const targets = row.metadata?.reply_context?.comments;
@@ -54,7 +56,7 @@ export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyInde
 		for (const reply of targets) {
 			const key = replyKey(reply.root_user_message_id, reply.root_cid);
 			// A root comment that failed after it was stored has its failure and Retry in its own thread.
-			if (!key) { if (broken) addTo(failedByKey, replyKey(row.id, reply.cid), failedSeen, row); continue; }
+			if (!key) { if (broken) addTo(failedRoots, replyKey(row.id, reply.id), failedSeen, row); continue; }
 			if (sending) addTo(pendingByKey, key, pendingSeen, row);
 			if (broken) addTo(failedByKey, key, failedSeen, row);
 		}
@@ -63,6 +65,6 @@ export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyInde
 	// A comment's own send drops out once its text is recorded on that comment as a user answer; that check reads the comment's answers, not the transcript.
 	return {
 		pending: comment => of(pendingByKey)(comment).filter(row => !comment.answers?.some(answer => answer.author_kind === 'user' && answer.user_message_id === row.id)),
-		failed: of(failedByKey),
+		failed: comment => [...of(failedByKey)(comment), ...(failedRoots.get(replyKey(comment.user_message_id, comment.id)) ?? [])],
 	};
 }

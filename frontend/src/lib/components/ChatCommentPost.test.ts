@@ -1,4 +1,5 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, expect, it, vi } from 'vitest';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { handleWsError } from '$lib/ws/handlersConnection';
@@ -146,4 +147,6 @@ it('opens a stored comment\'s thread on its failure instead of dropping it', asy
 	expect(host.querySelector('[role="dialog"] textarea')).toBeNull();
 	expect(host.querySelector('[data-picked]')?.getAttribute('data-picked')).toBe('posted-comment');
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)).toBeUndefined();
+	// The sending socket never gets the stored row, so the failure its thread shows is written from the draft.
+	expect(get(messages).find(row => row.id === 'input-1')).toMatchObject({ delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'posted-comment', note: 'Keep my comment' }] } } });
 });

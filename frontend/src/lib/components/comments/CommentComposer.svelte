@@ -78,6 +78,7 @@
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
 	.submit:disabled { opacity: .4; cursor: default; }
-	@media (pointer: coarse) { .actions button { min-width: var(--touch-target); min-height: var(--touch-target); } }
+	/* At touch widths each button is a full target, a target's width apart, so a miss on Cancel never posts. */
+	@media (pointer: coarse), (max-width: 768px) { .actions { gap: var(--touch-target); } .actions button { min-width: var(--touch-target); min-height: var(--touch-target); } }
 	.selection-reason { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

@@ -30,6 +30,13 @@ describe('failed comment replies', () => {
 		expect(chatReplyIndex([own('author', 'queued')], 'thread').pending(root)).toEqual([]);
 		expect(chatReplyIndex([own('other', 'failed')], 'thread').failed(root)).toEqual([]);
 	});
+
+	it('finds a root comment\'s failed send by the comment\'s id, before the sender knows its cid', () => {
+		const sent = { id: 'author', thread_id: 'thread', role: 'user', content: '', created_at: 'now', delivery_state: 'failed',
+			metadata: { reply_context: { comments: [{ id: 'root', note: 'my comment' }] } } } as Message;
+		expect(chatReplyIndex([sent], 'thread').failed(root).map(message => message.id)).toEqual(['author']);
+		expect(chatReplyIndex([sent], 'thread').failed({ ...root, id: 'another' }).map(message => message.id)).toEqual([]);
+	});
 });
 
 describe('pending comment replies', () => {

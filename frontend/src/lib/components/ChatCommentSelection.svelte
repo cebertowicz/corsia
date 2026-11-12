@@ -14,6 +14,8 @@
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+	import { keepAboveSheet, transcriptBounds } from './chatCommentViewport';
+	import { focusTrap } from '$lib/actions/focusTrap';
 	import type { MarginComposer } from '$lib/docMarginSource';
 	import './commentAnchors.css';
 
@@ -21,16 +23,10 @@
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
-	function threadBounds(): DOMRect | null {
-		const root = messageRoot();
-		if (!root) return null;
-		const box = root.getBoundingClientRect();
-		const header = document.querySelector('.shell-header')?.getBoundingClientRect();
-		const composer = root.closest('.chat-content')?.querySelector('.input-floater')?.getBoundingClientRect();
-		const top = Math.max(box.top, header?.bottom ?? box.top);
-		const bottom = Math.min(box.bottom, composer?.top ?? box.bottom);
-		return new DOMRect(box.left, top, box.width, Math.max(0, bottom - top));
-	}
+	const threadBounds = () => transcriptBounds(messageRoot());
+	// On a phone the sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
+	let sheet = $state<HTMLElement | null>(null);
+	$effect(() => keepAboveSheet(sheet, messageRoot, () => open ? writingRect() : threadAnchor()));
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
@@ -70,11 +66,6 @@
 	const inMargin = $derived(open && marginComments && !narrow);
 	$effect(() => { marginComposer = inMargin ? { id: 'composer', anchor: writingRect, body: marginBody } : null; });
 	$effect(() => { if (closing && inMargin) closed(); });
-	const anchor = $derived.by(() => {
-		if (draft) return draft.rect;
-		if (!editing) return null;
-		return () => commentRect(editing.id, editing.messageId);
-	});
 
 	function bodyOf(row: Element | null): HTMLElement | null {
 		return messageBody(row);
@@ -86,8 +77,14 @@
 	function writingRect(): DOMRect | null {
 		if (editing) return commentRect(editing.id, editing.messageId);
 		if (!draft) return null;
-		const row = document.querySelector(`[data-message-id="${CSS.escape(draft.messageId)}"]`);
-		return [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])].find(el => el.dataset.commentIds?.split(',').includes('draft'))?.getBoundingClientRect() ?? draft.rect;
+		// The draft's highlight is not a control, so it carries no comment id: its wraps are the ones painted for it.
+		const body = bodyOf(document.querySelector(`[data-message-id="${CSS.escape(draft.messageId)}"]`));
+		const wraps = (body && painted.get(body)?.get('draft')?.wraps.filter(wrap => wrap.isConnected)) ?? [];
+		if (!wraps.length) return draft.rect;
+		const rects = wraps.map(wrap => wrap.getBoundingClientRect());
+		const top = Math.min(...rects.map(rect => rect.top)), bottom = Math.max(...rects.map(rect => rect.bottom));
+		const left = Math.min(...rects.map(rect => rect.left)), right = Math.max(...rects.map(rect => rect.right));
+		return new DOMRect(left, top, right - left, bottom - top);
 	}
 	function close() {
 		pick = null; draft = null; editingId = null; viewing = null; typed = null; awaitingRoot = null;
@@ -362,7 +359,7 @@
 {/if}
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+		<AdaptiveDrawer bind:panel={sheet} ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
@@ -380,12 +377,12 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer bind:panel={sheet} fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}
-			<Popover fill {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
-				<div class="comment-dialog" role="dialog" aria-label={heading}>
+			<Popover fill anchor={writingRect} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
+				<div class="comment-dialog" role="dialog" aria-label={heading} use:focusTrap={{ autoFocus: false }}>
 					{@render composerBody()}
 				</div>
 			</Popover>
