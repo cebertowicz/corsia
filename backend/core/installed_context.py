@@ -199,24 +199,21 @@ def _checkpoint_receipt(thread_id: str, db):
     ).fetchone()
 
 
-def _superseded_boundary_ids(thread_id: str, current_id: str, db) -> list[str]:
-    """Every record that can hold sources for this thread except the current one."""
-    ids = [
-        f"checkpoint-receipt:{row['id']}"
-        for row in db.execute("SELECT id FROM checkpoints WHERE thread_id=?", (thread_id,))
-    ]
-    ids.extend(str(row["id"]) for row in (
-        db.execute(
-            "SELECT id FROM messages WHERE thread_id=? AND seq IS NOT NULL "
-            "ORDER BY seq LIMIT 1",
-            (thread_id,),
-        ).fetchone(),
-        db.execute(
-            "SELECT id FROM messages WHERE thread_id=? AND input_order=1",
-            (thread_id,),
-        ).fetchone(),
-    ) if row is not None)
-    return [record_id for record_id in dict.fromkeys(ids) if record_id != current_id]
+def _superseded_sources_drop_sql() -> str:
+    """Drop source bytes from every other record of a thread that carries them.
+
+    The guard is statement text so SQLite reads only the rows in the
+    installed-boundary index; a bound key would scan the whole thread while
+    the write lock is held.
+    """
+    # learning_schema imports this module, so its guard is imported here.
+    from infra.learning_schema import installed_boundary_guard
+
+    return (
+        "UPDATE messages SET metadata=json_remove(metadata, ?) "
+        f"WHERE thread_id=? AND id<>? AND {installed_boundary_guard('metadata')} "
+        "AND json_valid(metadata)"
+    )
 
 
 def _boundary_record(thread_id: str, db) -> tuple[str, dict[str, Any], Any] | None:
@@ -307,17 +304,9 @@ def _retain_prepared_installed_delivery(
         (prepared.serialized_metadata, delivery.thread_id, prepared.message_id),
     )
     # Superseded boundaries keep their public map but drop their source bytes.
-    db.executemany(
-        "UPDATE messages SET metadata=json_remove(metadata, ?) "
-        "WHERE id=? AND thread_id=? AND instr(metadata, ?) > 0 "
-        "AND json_valid(metadata)",
-        [
-            (f'$."{INSTALLED_SOURCES}"', record_id, delivery.thread_id,
-             INSTALLED_SOURCES)
-            for record_id in _superseded_boundary_ids(
-                delivery.thread_id, prepared.message_id, db,
-            )
-        ],
+    db.execute(
+        _superseded_sources_drop_sql(),
+        (f'$."{INSTALLED_SOURCES}"', delivery.thread_id, prepared.message_id),
     )
     return "written"
 
