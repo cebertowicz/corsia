@@ -277,6 +277,10 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			await page.mouse.dblclick(now.x + 12, now.y + 8);
 			await page.locator('.sel-comment').click();
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
+			// Playwright's locator.dblclick scrolls the target into view when its stability check fails, and that check fails because
+			// CodeMirror refines its estimated line heights a couple of px after the jump that first draws them. A reader's own
+			// double-click never moves the line. Placing it again here keeps that retry's scroll out of the measurements below.
+			await placeTarget(page, 0.5);
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-${tag}`, { fullPage: false });
 			// The line still sits where placeTarget put it, so the wheel below keeps it inside the canvas.

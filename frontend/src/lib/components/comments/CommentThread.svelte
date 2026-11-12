@@ -200,7 +200,7 @@
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original use:scrollCue role="region" aria-label="Comment text"><CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -262,7 +262,7 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
 			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
 		{/if}
 	</div>
@@ -273,12 +273,12 @@
 		background: var(--ct-bg, color-mix(in srgb, var(--text-primary) 4%, transparent)); border: 1px solid var(--ct-border, transparent); border-radius: var(--ct-radius, var(--radius-sm)); box-shadow: var(--ct-shadow, none);
 		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
 		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
+		/* Its 3px focus ring must stay revealable at either edge of a drawer's own scroller, bordered or flat. */
+		scroll-margin-block: var(--space-1);
 	}
 	.ct.flat {
 		background: none; border: 0; border-radius: 0; box-shadow: none;
 		padding: 0; gap: var(--space-1);
-		/* Keep a row fully revealable at either edge of the drawer's own scroller. */
-		scroll-margin-block: var(--space-1);
 	}
 	.ct.flat.focused, .ct.flat.linked, .ct.flat.acked, .ct.flat.orphaned { background: none; border-color: transparent; box-shadow: none; }
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */

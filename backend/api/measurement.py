@@ -17,6 +17,7 @@ from api.measurement_findings import derive_findings_state
 from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
+from api.measurement_workflow_share import workflow_share_family
 from api.measurement_workflows import router as workflows_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_corrections import COVERAGE_METRICS, corrections_family, coverage_value
@@ -24,7 +25,7 @@ from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
     next_comparability_boundary, period_comparable,
 )
-from api.measurement_registry import REGISTRY, period_measured
+from api.measurement_registry import REGISTRY, data_start, period_measured
 from api.measurement_series_selection import metric_spine, requested_series
 from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
@@ -129,6 +130,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "answered_neither_pct":
         n = int(source.get("answered", 0) or 0)
         value = source.get("neither", 0) / n if n else None
+    elif metric == "under_workflow_pct": value = source.get("under_workflow", 0) / n if n else None
     elif metric == "fresh_tokens":
         # The calls behind the period: it is measured when any were recorded. A period whose
         # every call carried no count has no figure, and is never served as zero tokens.
@@ -182,6 +184,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                 corrections_family(db, page_grain, decision_rows) if family == "corrections" else
                                 decision_rows if family == "decisions" else
+                                workflow_share_family(db, user_id, selected_scope, page_grain.periods) if family == "workflows" else
                                 query_family(db, family, params))
                        for family in families}
         return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
@@ -286,17 +289,12 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...),
 
     selected_scope, cost_metadata, coverage, breaks = await run_bulk(query)
 
-    def data_start(name: str, item: Any) -> str | None:
-        source_start = first_availability_period(breaks[name])
-        if item.family == "size":
-            return max((start for start in (source_start, coverage.start_day) if start), default=None)
-        if item.presence_backed:
-            return coverage.start_day or source_start
-        return source_start
     definitions = [{"id": name, "display_name": name.replace("_", " ").title(),
                     "definition": f"Weekly aggregate for {name.replace('_', ' ')}.", "unit": item.unit,
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
-                    "method_version": item.method_version, "data_start": data_start(name, item), "proxy": item.proxy,
+                    "method_version": item.method_version,
+                    "data_start": data_start(item, first_availability_period(breaks[name]), coverage.start_day),
+                    "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
                     "comparability": {"before": comparability_start(breaks[name]), "restricted": name not in COMPARABILITY_UNRESTRICTED},
                     "breaks": breaks[name],
