@@ -9,13 +9,14 @@ const roots = $state<Record<string, Draft>>({});
 // A root draft belongs to the passage it comments on, so two passages of one message never share text, an error or a pending post.
 const rootKey = (threadId: string, messageId: string, anchor: Pick<ChatCommentAnchor, 'from_off' | 'to_off'>) => JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off]);
 const sendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;
-// The box that posted an input learns here whether the server stored it (true) or refused it (false).
-const waiting = new Map<string, (stored: boolean) => void>();
+// The box that posted an input learns here whether the server stored it (true) or refused it (false),
+// and says whether it is still on screen to show a refusal itself.
+const waiting = new Map<string, { resolve: (stored: boolean) => void; shown: () => boolean }>();
 
-function post(store: Record<string, Draft>, key: string, threadId: string, text: string, inputId: string | null, error: string | undefined, noun: 'comment' | 'reply'): Promise<boolean> {
+function post(store: Record<string, Draft>, key: string, threadId: string, text: string, inputId: string | null, error: string | undefined, noun: 'comment' | 'reply', shown: () => boolean): Promise<boolean> {
 	store[key] = { text, threadId, ...(inputId ? { inputId } : { error: error || sendFailure(noun) }) };
 	if (!inputId) return Promise.resolve(false);
-	return new Promise(resolve => waiting.set(inputId, resolve));
+	return new Promise(resolve => waiting.set(inputId, { resolve, shown }));
 }
 
 function find(threadId: string, inputId: string): { store: Record<string, Draft>; key: string; noun: 'comment' | 'reply' } | null {
@@ -27,7 +28,7 @@ function find(threadId: string, inputId: string): { store: Record<string, Draft>
 }
 
 function answer(inputId: string, stored: boolean): void {
-	waiting.get(inputId)?.(stored);
+	waiting.get(inputId)?.resolve(stored);
 	waiting.delete(inputId);
 }
 
@@ -39,8 +40,8 @@ export const chatReplyDrafts = {
 		if (text || prior?.inputId) replies[commentId] = { ...prior, text };
 		else delete replies[commentId];
 	},
-	postReply(threadId: string, commentId: string, text: string, inputId: string | null, error?: string): void {
-		void post(replies, commentId, threadId, text, inputId, error, 'reply');
+	postReply(threadId: string, commentId: string, text: string, inputId: string | null, error: string | undefined, shown: () => boolean): void {
+		void post(replies, commentId, threadId, text, inputId, error, 'reply', shown);
 	},
 	/** The draft the composer on this passage shows. */
 	root(threadId: string, messageId: string, anchor: ChatCommentAnchor): Draft | undefined {
@@ -58,8 +59,8 @@ export const chatReplyDrafts = {
 		if (!roots[key]?.inputId) delete roots[key];
 	},
 	/** Resolves true once the server stores the comment, false when the post is refused. */
-	postRoot(threadId: string, messageId: string, anchor: ChatCommentAnchor, text: string, inputId: string | null, error?: string): Promise<boolean> {
-		return post(roots, rootKey(threadId, messageId, anchor), threadId, text, inputId, error, 'comment');
+	postRoot(threadId: string, messageId: string, anchor: ChatCommentAnchor, text: string, inputId: string | null, error: string | undefined, shown: () => boolean): Promise<boolean> {
+		return post(roots, rootKey(threadId, messageId, anchor), threadId, text, inputId, error, 'comment', shown);
 	},
 	/** The server stored this input, so its row owns the text from here. True when it was a draft's. */
 	release(threadId: string, inputId: string): boolean {
@@ -69,13 +70,14 @@ export const chatReplyDrafts = {
 		answer(inputId, true);
 		return true;
 	},
-	/** The server refused this input before storing it: the draft keeps the text and shows the cause, which is returned; null when it was no draft's. */
-	refuse(threadId: string, inputId: string, error: string): string | null {
+	/** The server refused this input before storing it: the draft keeps the text and the cause. Returns the cause and whether the box that posted it still shows it; null when it was no draft's. */
+	refuse(threadId: string, inputId: string, error: string): { cause: string; shown: boolean } | null {
 		const hit = find(threadId, inputId);
 		if (!hit) return null;
 		const cause = error || sendFailure(hit.noun);
+		const shown = waiting.get(inputId)?.shown() ?? false;
 		hit.store[hit.key] = { ...hit.store[hit.key], inputId: undefined, error: cause };
 		answer(inputId, false);
-		return cause;
+		return { cause, shown };
 	},
 };

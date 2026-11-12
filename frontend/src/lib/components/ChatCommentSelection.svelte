@@ -47,6 +47,8 @@
 	let returnFocus: HTMLElement | null = null;
 	let closing = $state(false);
 	let afterClose: (() => void) | null = null;
+	// A post answered after this surface is gone has no box to show its refusal in.
+	let mounted = true;
 	const above = $derived(!!pick && !coarse && pick.rect.top > 96);
 	const left = $derived.by(() => {
 		if (!pick) return 0;
@@ -288,7 +290,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { mounted = false; for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);
@@ -311,7 +313,7 @@
 			try { inputId = onSendReply({ id, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }) ?? null; }
 			catch (failure) { error = refusalText(failure, 'comment'); /* Keep the draft and show the failure in its box. */ }
 			// The box stays, read-only, until the server stores the comment; then it closes, unless it has moved to another passage.
-			void chatReplyDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, inputId, error)
+			void chatReplyDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, inputId, error, () => mounted && draft === currentDraft && !closing)
 				.then(stored => { if (stored && draft === currentDraft) requestClose(); });
 			return;
 		}

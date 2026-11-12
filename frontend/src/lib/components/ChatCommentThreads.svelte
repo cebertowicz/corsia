@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { refusalText } from '$lib/chatCommentAnchors';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
@@ -21,12 +22,16 @@
 		return current && isNavAgent(current) ? current.title : 'CORSIA';
 	});
 
+	// The reply field keeps a refused reply's text and cause while this thread is on screen.
+	let mounted = true;
+	onMount(() => () => { mounted = false; });
+
 	function postReply(comment: ChatComment, text: string): void {
 		let inputId: string | null = null;
 		let error = '';
 		try { inputId = onReply?.(text) ?? null; }
 		catch (failure) { error = refusalText(failure, 'reply'); /* Keep the reply and show the failure in its field. */ }
-		chatReplyDrafts.postReply(threadId, comment.id, text, inputId, error);
+		chatReplyDrafts.postReply(threadId, comment.id, text, inputId, error, () => mounted);
 	}
 
 	function answerId(answer: ChatComment['answers'][number]): string {

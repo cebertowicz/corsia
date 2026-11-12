@@ -41,7 +41,7 @@ describe('resending what a dropped socket never confirmed', () => {
 	it('resends a comment and hands its text from the draft to its stored row on a queued receipt', () => {
 		const anchor = { from_off: 0, to_off: 1, quote: 'q', anchor_prefix: '', anchor_suffix: '' };
 		const inputId = sendMessage(THREAD, '', undefined, undefined, undefined, 'apply_now', [{ id: 'c', seq: 1, ...anchor, note: 'keep' }])!;
-		void chatReplyDrafts.postRoot(THREAD, 'target', anchor, 'keep', inputId);
+		void chatReplyDrafts.postRoot(THREAD, 'target', anchor, 'keep', inputId, undefined, () => true);
 		const { socket, sent } = newSocket();
 		resendUnconfirmedFrames(socket);
 		expect(sent).toEqual([JSON.parse(frames[0])]);

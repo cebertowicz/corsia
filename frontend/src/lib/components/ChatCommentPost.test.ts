@@ -67,6 +67,8 @@ it('keeps text pending, then shows rejection and retries until admission clears 
 	expect(host.querySelector<HTMLButtonElement>('button.submit')?.disabled).toBe(true);
 	reject(); await tick(); flushSync();
 	expect(host.querySelector('[role="alert"]')?.textContent).toContain('selected text changed');
+	// The open box says it, so no toast says it again over the passage.
+	expect(get(toasts)).toHaveLength(0);
 	expect(host.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('Keep my comment');
 	host.querySelector<HTMLButtonElement>('button.submit')!.click(); await tick(); flushSync();
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)?.inputId).toBe('input-2');
@@ -87,7 +89,7 @@ it('tells a closed box\'s rejection in a toast and keeps its text for the passag
 
 it('keeps a rejected draft when the target is not rendered and the user returns', () => {
 	setup();
-	void chatReplyDrafts.postRoot('thread', 'm1', anchor, 'keep this', 'other-input');
+	void chatReplyDrafts.postRoot('thread', 'm1', anchor, 'keep this', 'other-input', undefined, () => false);
 	activeThreadId.set('other'); host.querySelector('.message')!.remove();
 	reject('other-input');
 	expect(chatReplyDrafts.root('thread', 'm1', anchor)).toMatchObject({ text: 'keep this', error: 'The selected text changed.' });

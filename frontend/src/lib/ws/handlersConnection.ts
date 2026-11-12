@@ -162,8 +162,8 @@ export function handleWsError(data: any) {
 		handleInputRejected(data);
 		// Nothing was stored, so there is nothing on the server to retry: the box keeps the text and the cause, and the row goes.
 		if (refusal) messages.update(rows => rows.filter(item => item.metadata?.input_id !== data.input_id && item.id !== data.input_id));
-		// Comment traffic never shows in the transcript: the cause shows in its box, and as a toast in case that box is closed.
-		if (refusal) toasts.show(refusal, 'error');
+		// Comment traffic never shows in the transcript: the cause shows in its box, and as a toast only once that box is closed.
+		if (refusal) { if (!refusal.shown) toasts.show(refusal.cause, 'error'); }
 		else if (!row || !isCommentEnvelope(row)) appendVisibleError(data);
 		emit('error', data);
 		return;
