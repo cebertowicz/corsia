@@ -9,7 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
-- A chat held by Claude Code's 5-hour limit now waits for the reset, or moves to another account, as it does for other usage limits; before, it was treated as an ordinary failure.
+- A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
