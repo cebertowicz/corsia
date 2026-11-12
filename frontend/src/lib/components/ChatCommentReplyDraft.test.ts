@@ -50,9 +50,16 @@ it('keeps a reply that was stored and then failed, with its Retry, in its thread
 	expect(host.textContent?.split('keep my reply')).toHaveLength(2);
 });
 
-it('shows a comment whose own input failed as not delivered, with Retry', () => {
-	activeThreadId.set('thread'); show([{ ...comment, delivery_state: 'failed', delivery_error: 'Delivery failed.' }]);
-	expect(host.querySelector('.failed-reply')?.textContent).toContain('Comment not delivered');
+// An ended comment shows what chat shows for a message in that state, and chat's Retry only where chat offers one.
+it.each([
+	['failed', 'Not delivered: Delivery failed.', 'Retry'],
+	['ambiguous', 'Delivery uncertain', 'Retry anyway'],
+	['cancelled', 'Cancelled by you', null],
+])('shows a comment whose own input ended %s with chat\'s label and Retry', (state, label, retry) => {
+	activeThreadId.set('thread'); show([{ ...comment, delivery_state: state, delivery_error: 'Delivery failed.' } as ChatComment]);
+	const failure = host.querySelector('.failed-reply');
+	expect(failure?.textContent).toContain(label);
+	expect([...(failure?.querySelectorAll('button') ?? [])].map(button => button.textContent?.trim())).toEqual(retry ? [retry] : []);
 });
 
 // Retry answers with the canonical input row. That row is the comment's, not chat's: it must not reach the transcript.
@@ -60,11 +67,12 @@ it('retries a failed reply without putting its row in the transcript', async () 
 	// The chat on screen, so the retry's answer would be adopted if its row were there.
 	activeThreadId.set('thread');
 	messages.set([{ id: 'target', thread_id: 'thread', role: 'assistant', content: 'Answer', seq: 1, created_at: '2026-10-27T00:00:00Z', chat_comments: [failedReply] }] as never);
-	const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ thread_id: 'thread', message: { id: 'stored-1', thread_id: 'thread', role: 'user', content: '', delivery_state: 'queued', metadata: JSON.stringify({ reply_context: { comments: [{ note: 'keep my reply' }] } }) } }) }));
+	const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ message_id: 'stored-2', delivery_state: 'queued', delivery_error: null, messages: [{ id: 'target', role: 'assistant', chat_comments: [comment] }] }) }));
 	vi.stubGlobal('fetch', fetchMock);
 	show([failedReply]);
 	[...host.querySelectorAll<HTMLButtonElement>('.failed-reply button')].find(button => button.textContent === 'Retry')!.click();
 	await settle();
-	expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('/api/threads/thread/messages/stored-1/retry');
+	expect(String(fetchMock.mock.calls[0][0])).toBe('/api/threads/thread/chat-comments');
+	expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ retry_of: 'stored-1' });
 	expect(get(messages).map(row => [row.id, row.role])).toEqual([['target', 'assistant']]);
 });

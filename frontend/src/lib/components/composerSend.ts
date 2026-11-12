@@ -5,6 +5,7 @@ import { adoptCommentThreads } from '$lib/chatCommentRefresh';
 import { apiFetch } from '$lib/api/request';
 import { plainErrorText } from '$lib/plainError';
 import { reasoningEffort } from '$lib/stores/threads';
+import { toasts } from '$lib/stores/toast';
 import { viewingDocumentForThread } from '$lib/stores/documentViewport';
 
 /** What a send asks the runtime to do with the turn in flight. */
@@ -41,6 +42,19 @@ function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
 }
 
 /**
+ * The request a press of a box sent, by what it posts, until the server stores it. Pressing again after a
+ * refusal or a lost response sends that same request, so the server sees one input, never a second copy.
+ */
+const unsettledPosts = new Map<string, string>();
+
+/** Read the post's answer: the commented rows' threads as they now stand, or the sentence the box shows. */
+async function adoptPosted(response: Response, threadId: string, noun: 'comment' | 'reply'): Promise<void> {
+	const result = await response.json().catch(() => null);
+	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
+	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
+}
+
+/**
  * Post a comment, or a reply in a comment thread, from its own box. It is the chat's next input for the
  * agent but no chat message: the server keeps it on the comment it belongs to. Resolves once the server
  * has stored it, with the commented rows' threads as they now stand on screen; rejects with the sentence
@@ -55,18 +69,39 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 	const comment = { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid };
 	emitComposerSend(threadId, '', 0, [comment]);
-	const viewingDocument = viewingDocumentForThread(threadId);
-	const effort = get(reasoningEffort);
+	// Each press makes the comment a new id, so the post is known by what it says and where.
+	const key = JSON.stringify([threadId, seq, from_off, to_off, quote, note, root_user_message_id ?? null, root_cid ?? null]);
+	let body = unsettledPosts.get(key);
+	if (!body) {
+		const viewingDocument = viewingDocumentForThread(threadId);
+		const effort = get(reasoningEffort);
+		body = JSON.stringify({ input_id: crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) });
+		unsettledPosts.set(key, body);
+	}
 	let response: Response;
 	try {
 		response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
-			method: 'POST', headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ input_id: crypto.randomUUID(), comment, ...(viewingDocument ? { viewing_document: viewingDocument } : {}), ...(effort ? { reasoning_effort: effort } : {}) }),
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
 		});
 	} catch { refuse('notAccepted', noun); }
-	const result = await response.json().catch(() => null);
-	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
-	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
+	await adoptPosted(response, threadId, noun);
+	unsettledPosts.delete(key);
+}
+
+/**
+ * Retry a comment, or a reply, whose delivery ended undelivered: the server posts its comments again in its
+ * place, as one input however often it is pressed. A refusal says so where chat says it for a message.
+ */
+export async function retryChatComment(threadId: string, messageId: string, noun: 'comment' | 'reply'): Promise<void> {
+	const failure = `Couldn’t retry this ${noun}. Try again.`;
+	try {
+		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retry_of: messageId }),
+		});
+		await adoptPosted(response, threadId, noun);
+	} catch (error) {
+		toasts.show(error instanceof CommentSendRefused && error.message !== unknownSendFailure(noun) ? error.message : failure, 'error');
+	}
 }
 
 export type ReplySendBlock = 'restarting' | 'noModel' | 'notAccepted';

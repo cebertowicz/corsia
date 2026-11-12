@@ -54,8 +54,6 @@
 		let isComposing = false;
 	let fileInputsRef: InputBarFileInputs;
 	let pendingAttachments = $state<Attachment[]>([]);
-	let comments = $state<ChatComment[]>([]);
-	let commentSelection: ChatCommentSelection;
 	let uploadError = $state('');
 	let inputAreaEl = $state<HTMLDivElement | undefined>(undefined);
 	let isMultiLine = $state(false);
@@ -99,7 +97,7 @@
 		restore: restoreComposerDraft,
 		reset: resetComposer,
 		boundThreadId: () => boundThreadId,
-		hasText: () => inputText.length > 0 || comments.length > 0,
+		hasText: () => inputText.length > 0,
 	});
 
 	$effect(() => drafts.switchThread(boundThreadId));
@@ -138,7 +136,7 @@
 	}
 
 	function prepareMessage() {
-		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0) return null;
 		if (!boundThreadId && !onAutoCreateThread) return null;
 		const snapshot = () => boundThreadId ? ({
 			threadId: boundThreadId,
@@ -150,18 +148,16 @@
 	}
 
 	function currentComposerDraft(): ComposerDraft | null {
-		if (!inputText.trim() && pendingAttachments.length === 0 && comments.length === 0) return null;
+		if (!inputText.trim() && pendingAttachments.length === 0) return null;
 		return {
 			content: inputText,
 			attachments: [...pendingAttachments],
-			comments: [...comments],
 		};
 	}
 
 	function restoreComposerDraft(draft: ComposerDraft | undefined): void {
 		inputText = draft?.content ?? '';
 		pendingAttachments = draft ? [...draft.attachments] : [];
-		comments = draft?.comments ? [...draft.comments] : [];
 		isMultiLine = false;
 		if (inputEl) {
 			inputEl.textContent = inputText;
@@ -177,7 +173,6 @@
 		inputText = '';
 		if (inputEl) inputEl.textContent = '';
 		pendingAttachments = [];
-		comments = [];
 		uploadError = '';
 		if (inputEl) inputEl.style.height = 'auto';
 		isMultiLine = false;
@@ -193,9 +188,8 @@
 			content,
 			attachments: [...attachments],
 		};
-		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
-		emitComposerSend(threadId, content, attachments.length, payloadComments, deliveryIntent);
-		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
+		emitComposerSend(threadId, content, attachments.length, [], deliveryIntent);
+		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
 			return 'notified';
@@ -216,10 +210,10 @@
 	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
 	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
 	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, selection.models, allowUnlistedNoModelThread));
-	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0 || comments.length > 0);
+	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {
-		if (inputText.trim() || pendingAttachments.length > 0 || comments.length > 0) {
+		if (inputText.trim() || pendingAttachments.length > 0) {
 			handleSend();
 		} else if (isStreamingBoundThread && boundThreadId) {
 			stopTurn(boundThreadId);
@@ -293,10 +287,10 @@
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
 	export function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
-		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments], comments: [...comments] } : null;
+		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments] } : null;
 		const draftThreadId = boundThreadId;
 		inputText = text;
-		if (preserveDraft) { pendingAttachments = []; comments = []; }
+		if (preserveDraft) pendingAttachments = [];
 		if (inputEl) inputEl.textContent = text;
 		return sendAndRestoreDraft(draft, draftThreadId, tick, handleSend, restoreComposerDraft, drafts.saveCurrentDraft);
 	}
@@ -304,7 +298,6 @@
 	export async function setText(text: string) {
 		inputText = text;
 		pendingAttachments = [];
-		comments = [];
 		await setContentEditableText(inputEl, text, autoResize, placeCaretAtEnd);
 	}
 </script>
@@ -329,7 +322,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} {marginComments} bind:selectedCommentId bind:marginComposer onChange={value => comments = value} onSendReply={sendReply} />
+	<ChatCommentSelection threadId={boundThreadId} surface={inputAreaEl} {marginComments} bind:selectedCommentId bind:marginComposer onSendReply={sendReply} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>
@@ -360,9 +353,6 @@
 		bind:inputEl
 		threadId={boundThreadId}
 		{pendingAttachments}
-		{comments}
-		onEditComment={id => void commentSelection?.edit(id)}
-		onRemoveComment={id => comments = comments.filter(comment => comment.id !== id)}
 		{isMultiLine}
 		{sheetView}
 		{toggleSheet}

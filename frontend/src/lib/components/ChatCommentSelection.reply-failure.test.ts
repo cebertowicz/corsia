@@ -38,7 +38,7 @@ it('says why a reply on a comment that left the chat is refused, and keeps the d
 	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', chat_comments: [
 		{ id: 'one', cid: 'c1', user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] },
 	] }] as never);
-	component = mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply: vi.fn() } });
+	component = mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', onSendReply: vi.fn() } });
 	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
 	host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="one"]')!.click();
 	flushSync();

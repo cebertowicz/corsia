@@ -275,7 +275,7 @@ describe('InputBar send and queue preparation', () => {
 			undefined,
 			[],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 	});
 
@@ -307,7 +307,7 @@ describe('InputBar send and queue preparation', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'subagent-thread', 'hello worker', 'network/worker', [], undefined, 'apply_now', [],
+			'subagent-thread', 'hello worker', 'network/worker', [], undefined, 'apply_now',
 		);
 	});
 
@@ -328,26 +328,10 @@ describe('InputBar send and queue preparation', () => {
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it('reports counts for the comments and replies sent with a message', async () => {
-		activeThreadId.set('thread-1');
+	it('keeps typed text when the composer leaves and comes back', async () => {
+		activeThreadId.set('thread-2');
 		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
 		flushSync();
-		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
-		component.getDrafts().set('thread-2', { content: 'hello', attachments: [], comments: [{ ...anchor, id: 'comment' }, { ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
-		activeThreadId.set('thread-2'); flushSync();
-		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
-		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
-		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ comment_count: 2, reply_count: 1 }));
-		expect(wsMocks.sendMessage.mock.calls[0][6]).toHaveLength(2);
-	});
-
-	it('keeps typed text and a reply when the composer leaves and comes back', async () => {
-		activeThreadId.set('thread-1');
-		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
-		flushSync();
-		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
-		component.getDrafts().set('thread-2', { content: '', attachments: [], comments: [{ ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
-		activeThreadId.set('thread-2'); flushSync();
 		const input = host.querySelector<HTMLElement>('[contenteditable]')!;
 		input.textContent = 'typed after the reply';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -362,7 +346,6 @@ describe('InputBar send and queue preparation', () => {
 		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 		expect(wsMocks.sendMessage.mock.calls[0][1]).toBe('typed after the reply');
-		expect(wsMocks.sendMessage.mock.calls[0][6]).toEqual([expect.objectContaining({ id: 'reply', root_cid: 'c1' })]);
 	});
 
 	it('clears the composer after the local send and keeps its draft for recovery', async () => {
@@ -376,7 +359,7 @@ describe('InputBar send and queue preparation', () => {
 				'network/model',
 				[attachment],
 				undefined,
-				'apply_now', [],
+				'apply_now',
 			);
 		expect(onAutoCreateThread).not.toHaveBeenCalled();
 		expect(productEventMock).toHaveBeenCalledWith(
@@ -468,7 +451,7 @@ describe('InputBar send and queue preparation', () => {
 			'network/model',
 			[attachment],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 	});
 
@@ -512,7 +495,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledOnce();
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought', 'network/model', [], undefined, 'apply_now',
 		);
 
 		await component.setText('first thought, clarified');
@@ -520,7 +503,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(2);
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought, clarified', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought, clarified', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -572,7 +555,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(2);
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought', 'network/model-b', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought', 'network/model-b', [], undefined, 'apply_now',
 		);
 	});
 
@@ -734,7 +717,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await component.setAndSend('Connect a Google account for all my projects', true);
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('Keep this draft');
 		expect(host.querySelector('.attachment-chip')).not.toBeNull();
@@ -769,7 +752,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await automaticSend;
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now', [],
+			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('Keep this draft');
 		expect(host.querySelector('.attachment-chip')).not.toBeNull();
@@ -865,7 +848,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this for a model', undefined, [], undefined, 'apply_now', [],
+			'thread-1', 'hold this for a model', undefined, [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('');
 	});
@@ -892,7 +875,7 @@ describe('InputBar model readiness at the action seam', () => {
 			'model-unavailable',
 			[],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 		expect(onSend).toHaveBeenCalledOnce();
 		expect(component.getInputText()).toBe('');
@@ -938,13 +921,13 @@ describe('InputBar model readiness at the action seam', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 
 		await component.setText('ordinary send');
 		send.click();
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1028,7 +1011,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1136,7 +1119,7 @@ describe('InputBar model readiness at the action seam', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1159,7 +1142,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1210,7 +1193,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-armed')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1234,7 +1217,7 @@ describe('InputBar model readiness at the action seam', () => {
 		vi.useRealTimers();
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1264,7 +1247,7 @@ describe('InputBar model readiness at the action seam', () => {
 		vi.useRealTimers();
 
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1310,7 +1293,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await Promise.resolve();
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'keyboard queue', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'keyboard queue', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 

@@ -167,7 +167,7 @@ it('posts to the chat comment route and shows the stored comment in its thread, 
 	const body = JSON.parse(String(init?.body));
 	expect(body).toMatchObject({ comment: { seq: 1, from_off: 0, to_off: 4, quote: 'text', note: 'Keep my comment' } });
 	expect(typeof body.input_id).toBe('string');
-	expect(box()).toBeNull();
+	await vi.waitFor(() => { flushSync(); expect(box()).toBeNull(); });
 	expect(get(messages).map(row => [row.id, row.role])).toEqual([['m1', 'assistant']]);
 	expect(get(messages)[0].chat_comments).toEqual([stored]);
 });
@@ -179,4 +179,17 @@ it('keeps the text with the server\'s own sentence when the route refuses the po
 	expect(host.querySelector('[role="alert"]')?.textContent).toBe('This chat is closed. Your comment stays here.');
 	expect(box()?.value).toBe('Keep my comment');
 	expect(get(messages).map(row => row.id)).toEqual(['m1']);
+});
+
+it('sends the same request again when the first press got no answer, so the server stores one comment', async () => {
+	const ok = { ok: true, json: async () => ({ messages: [] }) };
+	const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('network down')).mockResolvedValueOnce(ok);
+	vi.stubGlobal('fetch', fetchMock);
+	setup(reply => postChatComment(reply, 'thread', false, true));
+	await openBox(); await post('Sent twice, stored once');
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
+	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click();
+	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+	const [first, again] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)));
+	expect(again).toEqual(first);
 });

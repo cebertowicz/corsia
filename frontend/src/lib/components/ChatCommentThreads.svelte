@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { failedSends } from '$lib/chatCommentDelivery';
+	import { endedSends, type EndedSend } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-	import { requestDeliveryAction } from '$lib/deliveryActions';
+	import { retryChatComment } from './composerSend';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { formatTime } from '$lib/time';
@@ -18,6 +18,14 @@
 		return current && isNavAgent(current) ? current.title : 'CORSIA';
 	});
 
+	/** The ended sends whose Retry is on its way, so a second press waits for the first. */
+	let retrying = $state<string[]>([]);
+	async function retry(send: EndedSend): Promise<void> {
+		retrying = [...retrying, send.messageId];
+		try { await retryChatComment(threadId, send.messageId, send.root ? 'comment' : 'reply'); }
+		finally { retrying = retrying.filter(id => id !== send.messageId); }
+	}
+
 	/** A refused reply keeps its text and shows why in its field. */
 	async function postReply(comment: ChatComment, text: string): Promise<void> {
 		if (onReply) await chatCommentDrafts.postReply(comment.id, text, () => onReply(text));
@@ -27,11 +35,12 @@
 		return JSON.stringify([answer.user_message_id, answer.cid, answer.author_kind === 'agent' ? answer.assistant_message_id : null]);
 	}
 	function thread(comment: ChatComment): CommentThreadData {
+		const ended = new Set(endedSends(comment).filter(send => !send.root).map(send => send.messageId));
 		return {
 			id: comment.cid, anchor: comment.quote, author: 'user', authorKind: 'user', text: comment.note,
 			at: formatTime(comment.created_at), createdAt: comment.created_at, resolved: false, orphaned: detached, detached,
-			// A reply that was not delivered shows below, with its Retry, not as a delivered reply.
-			replies: comment.answers.filter(answer => answer.author_kind !== 'user' || answer.delivery_state !== 'failed').map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
+			// A reply whose delivery ended shows below as chat shows it, not as a delivered reply.
+			replies: comment.answers.filter(answer => !ended.has(answer.user_message_id)).map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
 				authorThreadId: answer.author_kind === 'agent' ? threadId : undefined, authorKind: answer.author_kind, text: answer.text, at: formatTime(answer.created_at), createdAt: answer.created_at })),
 			newReplyIds: comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).map(answerId),
 		};
@@ -59,11 +68,13 @@
 				{#if !detached && !margin}<CommentQuote quote={comment.quote} />{/if}
 				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentDrafts.get(comment.id), (text) => chatCommentDrafts.set(comment.id, text)} replyPending={!!chatCommentDrafts.reply(comment.id)?.posting} replyError={chatCommentDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); await postReply(comment, text); }}>
 				{#snippet failure()}
-				{#each failedSends(comment) as failed (failed.messageId)}
+				{#each endedSends(comment) as send (send.messageId)}
 					<div class="failed-reply" role="status">
-						<CommentReplyList replies={[{ id: failed.messageId, author: 'user', authorKind: 'user', text: failed.note, at: formatTime(failed.createdAt) }]} />
-						<span>{failed.root ? 'Comment not delivered' : 'Not delivered'}</span>
-						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.messageId, failureText: `Couldn’t retry this ${failed.root ? 'comment' : 'reply'}. Try again.` })}>Retry</button>
+						<CommentReplyList replies={[{ id: send.messageId, author: 'user', authorKind: 'user', text: send.note, at: formatTime(send.createdAt) }]} />
+						<!-- Chat's label and red mark for a message in this state (UserMessageBubble). -->
+						{#if send.delivery.failed}<span class="delivery-failed-mark" title={send.delivery.title} aria-label="Needs your attention">!</span>{/if}
+						<span class="delivery-status" class:terminal={send.delivery.failed} title={send.delivery.title}>{send.delivery.label}</span>
+						{#if send.retry}<button class="ct-link" title={send.retry.title} disabled={retrying.includes(send.messageId)} onclick={() => retry(send)}>{send.retry.label}</button>{/if}
 					</div>
 				{/each}
 				{/snippet}
@@ -75,7 +86,9 @@
 {/if}
 
 <style>
-	.failed-reply > span { color: var(--red); font-size: var(--text-footnote); margin-left: var(--space-3); }
+	.failed-reply > .delivery-status { color: var(--text-secondary); font-size: var(--text-footnote); font-style: italic; margin-left: var(--space-1); }
+	.failed-reply > .delivery-status.terminal { color: var(--red); }
+	.delivery-failed-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: var(--space-3); border-radius: var(--radius-circle, 50%); background: var(--red); color: white; font-size: var(--text-caption); font-weight: 700; }
 	/* Retry is the one way back for a failed comment, so on touch it is a full target. */
 	@media (pointer: coarse) { .failed-reply > .ct-link { min-width: var(--touch-target); min-height: var(--touch-target); padding-inline: var(--space-2); } }
 	.chat-comment-threads { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border); }

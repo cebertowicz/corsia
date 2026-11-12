@@ -1,4 +1,4 @@
-/** The server's delivery of the input that carried a comment or a person's reply: `failed` shows Retry in its thread. */
+/** The server's delivery of the input that carried a comment or a person's reply; an ended one shows in its thread as chat shows it. */
 type Delivery = { delivery_state?: string | null; delivery_error?: string | null };
 
 export type ChatCommentAnswer = {
