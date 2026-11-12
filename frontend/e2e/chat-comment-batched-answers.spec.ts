@@ -33,10 +33,9 @@ async function comment(page: Page, id: string, quote: string, note: string) {
   }, { id, quote });
   await page.locator('.sel-comment').click();
   await commentEditor(page).fill(note);
+  // Posted from its own box while the first Turn runs, so the next Turn gets every comment as one batch.
   await page.getByRole('button', { name: 'Comment', exact: true }).click();
   await commentEditorClosed(page);
-  // Sent while the first Turn runs, so the next Turn gets every comment as one batch.
-  await page.getByRole('button', { name: 'Send message' }).click();
 }
 
 async function messages(request: any, thread: string) {
@@ -81,6 +80,8 @@ async function queueComments(page: Page, request: any, title: string, count: num
       .flatMap(m => m.metadata.reply_context.comments.map((c: any) => c.cid));
     return cids.length;
   }).toBe(count);
+  // The posted comments add no chat message: the typed "Start" is the transcript's only user row.
+  await expect(page.locator('.messages .message.user')).toHaveCount(1);
   return { thread, row, cids };
 }
 

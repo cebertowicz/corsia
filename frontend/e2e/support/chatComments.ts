@@ -17,12 +17,7 @@ export async function commentEditorClosed(page: Page, kind: 'Comment' | 'Reply' 
 	await expect(commentEditor(page, kind)).toHaveCount(0);
 }
 
-/** The comment shows on the message as an unsent highlight carrying its quote. */
-export async function commentPendingOnMessage(row: Locator, quote: string): Promise<void> {
-	await expect(row.locator('.cm-comment-pending').filter({ hasText: quote })).toBeVisible();
-}
-
-/** The sent comment shows on the message as its highlight, and nothing is left unsent. */
+/** The posted comment shows on the message as its highlight, and nothing is left unposted. */
 export async function commentOnMessage(row: Locator, quote: string): Promise<void> {
 	await expect(row.locator('.cm-comment-anchor').filter({ hasText: quote })).toBeVisible();
 	await expect(row.locator('.cm-comment-pending')).toHaveCount(0);

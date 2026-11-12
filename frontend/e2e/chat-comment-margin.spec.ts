@@ -1,6 +1,6 @@
 import { expect, test } from './support/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses, waitForThreadReply } from './support/mock';
 import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
 import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
@@ -43,14 +43,13 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
 	});
 	await page.locator('.sel-comment').click();
 	await commentEditor(page).fill('A note on the phrase');
+	// The comment posts from its own box and starts the Turn that answers it; it never becomes a chat message.
+	await seedMockResponses(request, [{ content: 'Received comment' }]);
 	await page.getByRole('button', { name: 'Comment', exact: true }).click();
 	await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
 	await commentEditorClosed(page);
-	// The comment belongs to the message only once the message carrying it is delivered.
-	await seedMockResponses(request, [{ content: 'Received comment' }]);
-	await chatComposer(page).fill('Please address this');
-	await page.getByRole('button', { name: 'Send message' }).click();
 	await commentOnMessage(row, QUOTE);
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 	await waitForThreadReply(request, thread, 'Received comment');
 	return { row, narrow };
 }
@@ -143,7 +142,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await card.getByRole('button', { name: 'Send reply' }).click();
 	await expect(card.getByText('Answer from the card')).toBeVisible();
 	// A reply goes to CORSIA, never into the transcript as a message of its own.
-	await expect(page.locator('.messages .message.user')).toHaveCount(1);
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 
 	// The first Escape lets the picked card go; the card itself stays beside its text.
 	await card.click();

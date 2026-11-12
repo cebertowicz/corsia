@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { expect, test } from './support/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, waitForWsConnected, TEST_TOKEN } from './support/corsia';
-import { injectMessage, seedMockResponses } from './support/mock';
+import { createSession, openAppPastLanding, sidebarThread, waitForWsConnected, TEST_TOKEN } from './support/corsia';
+import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { setFocusMode } from './support/focusMode';
-import { commentEditor, commentEditorClosed, commentPendingOnMessage } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage } from './support/chatComments';
 
 test.use({ seedPerTest: true });
 
@@ -33,6 +33,8 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await expect(work).toHaveCount(1);
     await work.getByRole('button', { name: /Expand (Worked|Background work)/ }).click();
   }
+  // The comment posts as soon as it is written; its answer is held until the comment is out of view, so it arrives unread.
+  await seedMockResponses(request, [{ content: '[c2.1] This is the answer.', completion_gate: 'threaded-answer' }]);
   await row.scrollIntoViewIfNeeded();
   await page.evaluate((id) => {
     const body = document.querySelector<HTMLElement>(`[data-message-id="${id}"] .long-message-body`)!;
@@ -53,7 +55,9 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await commentEditor(page).press('Control+Enter');
   // The comment popover closes on a transition; collapsing or scrolling under it leaves the next surface unopened.
   await commentEditorClosed(page);
-  await commentPendingOnMessage(row, 'The selected phrase');
+  // It stays on its highlight and never becomes a chat message.
+  await commentOnMessage(row, 'The selected phrase');
+  await expect(page.locator('.messages .message.user')).toHaveCount(0);
   if (mode === 'focus-collapsed') {
     const work = row.locator('xpath=ancestor::section[@data-work-block]');
     await expect(work).toHaveCount(1);
@@ -67,9 +71,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
       return !!targetBox && !!scrollBox && targetBox.y + targetBox.height <= scrollBox.y;
     }).toBe(true);
   }
-  await seedMockResponses(request, [{ content: '[c2.1] This is the answer.' }]);
-  await chatComposer(page).fill('Please answer the comment');
-  await chatComposer(page).press('Enter');
+  await releaseMockGate(request, 'threaded-answer');
   let answerId = '';
   await expect.poll(async () => {
     const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
