@@ -54,11 +54,11 @@ Arm the wake yourself; a horizon written only in a message wakes nothing. If not
 
 ## Report
 
-Only when the set changed, something needs the person, or one of their choices is still unanswered: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
+Only when the set changed, something needs the person, or one of their choices has not been asked yet: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
 
 ## Choices the owner sets
 
-Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the headroom the budget is first recorded with [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. Each open choice appears in that run's report; their answer replaces the default and is recorded.
+Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the headroom the budget is first recorded with [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. A choice is asked in one report; after that it is listed only in a report sent for another reason. Their answer replaces the default and is recorded.
 
 ## Never
 
