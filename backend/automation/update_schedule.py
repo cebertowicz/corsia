@@ -147,6 +147,35 @@ def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:
             connection.close()
 
 
+async def _launch_scheduled_update(
+    user: dict, schedule: dict, trigger: str, port: str
+) -> str | None:
+    """Launch one scheduled Update, or skip this tick when the preflight refuses.
+
+    A refused preflight means the check named no build to install, which is a
+    skipped tick rather than a failed one: the acquire refuses before it claims, so
+    Tonight and today's record stand and a later tick or a manual try still has its
+    chance. Any other launch failure still reaches the nightly job.
+    """
+    from fastapi import HTTPException
+
+    from api.system_admin import launch_update
+    from api.update_preflight import PREFLIGHT_REFUSALS
+
+    def claim(connection: Any) -> bool:
+        return trigger != "tonight" or claim_tonight(schedule, db=connection)
+
+    try:
+        launched = await launch_update(user, None, trigger, port=int(port), claim=claim)
+    except HTTPException as refused:
+        detail = refused.detail if isinstance(refused.detail, str) else ""
+        if refused.status_code not in {409, 503} or detail not in PREFLIGHT_REFUSALS:
+            raise
+        logger.warning("scheduled update skipped: the update check named no build ({})", detail)
+        return None
+    return launched[0] if launched is not None else None
+
+
 async def run_scheduled_tick(now: datetime | None = None) -> str | None:
     """Apply D7's scheduled-update transition matrix once.
 
@@ -156,7 +185,6 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
     sends one detached conductor notice. Every other non-due or failed-check
     outcome preserves the schedule.
     """
-    from api.system_admin import launch_update
     from automation.update_failure_notice import tell_scheduled_lapse_detached
     from infra.accounts import get_user
     from infra.db_async import run_in_db
@@ -211,14 +239,4 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
         logger.error("scheduled update cannot launch: BACKEND_PORT is not a port number")
         return None
 
-    def claim(connection: Any) -> bool:
-        return trigger != "tonight" or claim_tonight(schedule, db=connection)
-
-    launched = await launch_update(
-        user,
-        None,
-        trigger,
-        port=int(port),
-        claim=claim,
-    )
-    return launched[0] if launched is not None else None
+    return await _launch_scheduled_update(user, schedule, trigger, port)

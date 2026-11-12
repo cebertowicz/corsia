@@ -19,6 +19,8 @@ from api.restart_compensation import (
 from api.restart_shell import spawn_restart_lifecycle
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
 from api.update_preflight import fresh_update_target
+from api.update_preflight import restamp_staged_target
+from api.update_preflight import with_failure_code as _with_failure_code
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -44,13 +46,6 @@ def _update_log_path(operation_id: str | None = None) -> Path:
     from infra.config import LOGS_DIR
 
     return LOGS_DIR / f"update-{operation_id or uuid.uuid4().hex}.log"
-
-
-
-def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
-    """Name the durable cause the Update journey shows for this failure."""
-    setattr(failure, "update_failure_code", code)
-    return failure
 
 
 def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
@@ -217,6 +212,7 @@ async def _prepare_owned_release(
     )
     try:
         await _await_preparation(task)
+        await restamp_staged_target(operation_id)
     except asyncio.CancelledError as error:
         await _compensate_cancelled_acquire(acquired_ids, error)
         raise

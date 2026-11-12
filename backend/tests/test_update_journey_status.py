@@ -271,9 +271,9 @@ def test_settings_update_acquire_stamps_a_fresh_probe_not_the_cache(monkeypatch)
     ],
 )
 def test_update_acquire_refuses_when_the_fresh_probe_names_no_build(
-    monkeypatch, available, error, status, detail
+    monkeypatch, tmp_path, available, error, status, detail
 ):
-    """A probe that cannot name a newer build must not start an Update.
+    """A packaged Update with no build to name must not start.
 
     Acquiring anyway stamps no target, so verification of whatever the shell
     installs could only fail as unverified and roll a good build back.
@@ -286,6 +286,7 @@ def test_update_acquire_refuses_when_the_fresh_probe_names_no_build(
     from automation import self_restart
     from infra import update_status
 
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: tmp_path / "CORSIA.app")
     monkeypatch.setattr(
         update_status,
         "update_status",
@@ -299,6 +300,53 @@ def test_update_acquire_refuses_when_the_fresh_probe_names_no_build(
 
     assert (refused.value.status_code, refused.value.detail) == (status, detail)
     assert acquired == []
+
+
+@pytest.mark.parametrize(
+    ("available", "error", "target"),
+    [
+        (None, "Could not reach the remote: timed out", None),
+        (False, None, "0.4.3-dev.1312"),
+    ],
+)
+def test_a_source_checkout_is_never_refused_by_the_fresh_probe(
+    monkeypatch, available, error, target
+):
+    """Only a packaged install verifies a version, so only it can be refused.
+
+    A source checkout records its own specific cause and a durable row in
+    `corsia prepare-redeploy` (`checkout_detached`, `fetch_failed`, ...); one
+    generic refusal here would replace both with nothing.
+    """
+    from types import SimpleNamespace
+
+    from api.settings_restart import _acquire_settings_restart
+    from automation import self_restart
+    from infra import db_async, update_status
+
+    captured: list[dict] = []
+
+    async def run_in_db(function):
+        return function()
+
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: None)
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda force=False: SimpleNamespace(
+            available=available, error=error, target_version=target, changes=None
+        ),
+    )
+    monkeypatch.setattr(db_async, "run_in_db", run_in_db)
+    monkeypatch.setattr(
+        self_restart, "try_acquire", lambda *_a, **kwargs: captured.append(kwargs) or "operation-id"
+    )
+    acquired: list[str] = []
+
+    assert asyncio.run(_acquire_settings_restart({"id": "user"}, "update", acquired)) == "operation-id"
+
+    assert acquired == ["operation-id"]
+    assert captured[-1]["target_version"] == target
 
 
 def test_drain_wait_matches_the_lifecycle_script_default():
