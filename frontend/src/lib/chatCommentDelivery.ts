@@ -2,7 +2,7 @@ import type { ChatComment } from '$lib/stores/threads';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { deliveryPresentation, readMessageDeliveryState, type DeliveryPresentation, type MessageDeliveryState } from '$lib/messageDelivery';
 
-/** The Retry chat offers a person's message in this state (UserMessageBubble), or null where it offers none. */
+/** The Retry chat offers a person's message in this state (UserMessageBubble), or null where it offers none; its title names the comment. */
 export type RetryControl = { label: 'Retry' | 'Retry anyway'; title: string };
 
 /** A comment, or a reply in its thread, that the server stored and whose delivery to the agent ended undelivered. */
@@ -16,8 +16,8 @@ export type EndedSend = {
 const ENDED: readonly MessageDeliveryState[] = ['failed', 'ambiguous', 'cancelled'];
 
 function retryControl(state: MessageDeliveryState): RetryControl | null {
-	if (state === 'ambiguous') return { label: 'Retry anyway', title: 'This may send the message twice if the provider received it before the connection failed' };
-	return state === 'failed' ? { label: 'Retry', title: 'Send this message again' } : null;
+	if (state === 'ambiguous') return { label: 'Retry anyway', title: 'This may send the comment twice if the provider received it before the connection failed' };
+	return state === 'failed' ? { label: 'Retry', title: 'Send this comment again' } : null;
 }
 
 function ended(messageId: string, note: string, createdAt: string, root: boolean, rawState: unknown, error: string | null | undefined): EndedSend | null {

@@ -131,6 +131,7 @@ def _end(state, message_id="box-1"):
 @pytest.mark.parametrize("state, warned", [("failed", False), ("ambiguous", True)])
 def test_retry_posts_the_ended_comment_again_in_its_place(target, frames, publish_only, state, warned):
     from core.message_history import render_agent_envelope
+    from core.reply_context import DELIVERY_WARNING
 
     _post()
     _end(state)
@@ -146,7 +147,7 @@ def test_retry_posts_the_ended_comment_again_in_its_place(target, frames, publis
     assert target.execute("SELECT content FROM chat_visible_content WHERE message_id=?", (copy,)).fetchone()[0] == ""
     assert user_rows(frames) == [] and notices(frames) == [NOTICE]
     rendered = render_agent_envelope(content, metadata).content
-    assert ("may repeat an earlier delivery" in rendered) is warned
+    assert (DELIVERY_WARNING in rendered) is warned
     assert NOTE in rendered
 
 
@@ -160,13 +161,36 @@ def test_a_second_retry_press_is_the_same_input(target, frames, publish_only):
     ).fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("state", ["queued", "delivered", "cancelled"])
+@pytest.mark.parametrize("state", ["delivered", "cancelled"])
 def test_retry_is_refused_where_chat_offers_none(target, frames, publish_only, state):
     _post()
     _end(state)
     with pytest.raises(HTTPException) as refused:
         _retry()
     assert (refused.value.status_code, refused.value.detail) == (409, "comment_not_retryable")
+
+
+def test_retry_of_a_queued_comment_drives_it_in_place_as_chat_does(target, frames, publish_only):
+    _post()
+    result = _retry()
+    assert (result["message_id"], result["delivery_state"]) == ("box-1", "queued")
+    assert target.execute("SELECT COUNT(*) FROM messages WHERE role='user'").fetchone()[0] == 1
+
+
+def test_an_uncertain_chat_message_retry_still_leads_with_the_warning(target, frames, publish_only):
+    # Only a comment-only input carries the warning in its reply context; a typed message keeps chat's prefix.
+    from api.thread_inbox_actions import retry_thread_delivery_now
+    from core.reply_context import DELIVERY_WARNING
+
+    target.execute(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,delivery_state) "
+        "VALUES ('typed',?,'user','hello','{}','t','ambiguous')", (THREAD,),
+    )
+    target.commit()
+    copy = asyncio.run(retry_thread_delivery_now(THREAD, "typed", OWNER_USER))["revived_message_id"]
+    content, metadata = target.execute("SELECT content,metadata FROM messages WHERE id=?", (copy,)).fetchone()
+    assert content == f"{DELIVERY_WARNING}\n\nhello"
+    assert json.loads(metadata)["possible_duplicate"] is True and "reply_context" not in json.loads(metadata)
 
 
 def test_retry_of_a_chat_message_is_refused(target, frames, publish_only):

@@ -8,6 +8,8 @@ import uuid
 from fastapi import HTTPException
 
 from api.thread_message_rows import public_delivery_message
+from core.reply_context import DELIVERY_WARNING
+from infra.chat_comment_index import comment_only
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
@@ -142,10 +144,11 @@ def _retry_content(message: dict) -> tuple[str, dict]:
     content = str(message.get("content") or "")
     if message.get("delivery_state") == "ambiguous":
         metadata["possible_duplicate"] = True
-        content = (
-            "[DELIVERY WARNING: the prior attempt may have reached the model; "
-            "this retry may duplicate it.]\n\n" + content
-        )
+        if comment_only(content, metadata):
+            # A comment's copy has no text, so it stays out of chat; its reply context carries the warning.
+            metadata["reply_context"] = {**metadata["reply_context"], "possible_duplicate": True}
+        else:
+            content = f"{DELIVERY_WARNING}\n\n{content}"
     return content, metadata
 
 

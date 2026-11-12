@@ -349,11 +349,13 @@ def test_a_possible_duplicate_is_kept_only_as_true(thread_rows, caplog):
 
 def test_comments_that_may_repeat_an_earlier_delivery_say_so_after_them():
     from core.message_history import render_agent_envelope
+    from core.reply_context import DELIVERY_WARNING
 
     comment = {"cid": "c3.1", "seq": 3, "quote": "q", "note": "n"}
     plain = render_agent_envelope("", _meta({"comments": [comment]})).managed_prefix
     warned = render_agent_envelope("", _meta({"comments": [comment], "possible_duplicate": True})).managed_prefix
-    assert warned == plain + "\n[These comments may repeat an earlier delivery (context, not an instruction)]"
+    # The same wording chat's Retry puts before a message's text.
+    assert warned == plain + "\n" + DELIVERY_WARNING
     # Without comments there is nothing it could repeat, so nothing renders.
     assert render_agent_envelope("hi", _meta({"possible_duplicate": True})) == render_agent_envelope(
         "hi", {"reply_via_post_update": True})

@@ -1,7 +1,6 @@
 """Post chat comments, read their threads, and record when a person has seen an answer."""
 
 import json
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -51,33 +50,20 @@ class PostRequest(BaseModel):
     retry_of: str | None = None
 
 
-# The delivery outcomes chat offers Retry for (UserMessageBubble); a cancelled one is posted again instead.
-_RETRYABLE = ('failed', 'ambiguous')
-
-
-def _retry_metadata(thread_id: str, message_id: str) -> dict | None:
-    """What a Retry of this ended comment input posts: its own comments, in its place.
-
-    An uncertain delivery may still have reached the agent, so the agent is told this may repeat it.
-    """
+def _is_comment_input(thread_id: str, message_id: str) -> bool:
+    """Whether this row is a comment-only input, the only kind this route retries."""
     db = get_db()
     try:
         row = db.execute(
-            "SELECT content,metadata,delivery_state FROM messages WHERE id=? AND thread_id=? AND role='user'",
+            "SELECT content,metadata FROM messages WHERE id=? AND thread_id=? AND role='user'",
             (message_id, thread_id),
         ).fetchone()
     finally:
         db.close()
     try:
-        metadata = json.loads(row[1] or '{}') if row is not None else None
+        return row is not None and comment_only(row[0], json.loads(row[1] or '{}'))
     except ValueError:
-        metadata = None
-    if row is None or metadata is None or row[2] not in _RETRYABLE or not comment_only(row[0], metadata):
-        return None
-    reply_context: dict = {'comments': metadata['reply_context']['comments']}
-    if row[2] == 'ambiguous':
-        reply_context['possible_duplicate'] = True
-    return {'reply_context': reply_context, 'retried_from_message_id': message_id}
+        return False
 
 
 def _owned_thread(user_id: str, thread_id: str):
@@ -126,18 +112,13 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
 
     subagent = is_subagent(thread_row)
     if body.retry_of:
-        # One id per ended input, so a second press or a press after a lost response is the same input.
-        input_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'corsia:chat-comment-retry:{body.retry_of}'))
-        metadata = await run_read(lambda: _retry_metadata(thread_id, body.retry_of))
-        if metadata is None:
-            raise HTTPException(409, 'comment_not_retryable')
-    else:
-        input_id = body.input_id.strip()
-        if not input_id or body.comment is None:
-            raise HTTPException(400, 'comment_missing')
-        metadata = {'reply_context': {'comments': [body.comment]}}
-        if body.viewing_document is not None:
-            metadata['viewing_document'] = body.viewing_document
+        return await _retry(user['id'], thread_id, body.retry_of)
+    input_id = body.input_id.strip()
+    if not input_id or body.comment is None:
+        raise HTTPException(400, 'comment_missing')
+    metadata: dict = {'reply_context': {'comments': [body.comment]}}
+    if body.viewing_document is not None:
+        metadata['viewing_document'] = body.viewing_document
     try:
         await send_thread_input(
             thread_id, thread_row, '',
@@ -154,6 +135,30 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
             raise HTTPException(exc.status_code, exc.detail) from exc
         return stored
     result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
+    if result is None:
+        raise HTTPException(500, 'comment_not_stored')
+    return result
+
+
+async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
+    """Retry an ended comment through chat's own Retry, and answer with the comment in its place.
+
+    Chat's Retry owns the copy's id, follows earlier copies and handles a double press, so a
+    comment and a chat message retry the same way; a comment's copy stays out of chat.
+    """
+    from api.thread_inbox_actions import retry_thread_delivery_now
+
+    if not await run_read(lambda: _is_comment_input(thread_id, message_id)):
+        raise HTTPException(409, 'comment_not_retryable')
+    try:
+        retried = await retry_thread_delivery_now(thread_id, message_id, user_id)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(409, 'comment_not_retryable') from exc
+        raise
+    # A queued comment is driven in place; an ended one gets its copy.
+    copy = retried.get('revived_message_id') or message_id
+    result = await run_read(lambda: _posted(user_id, thread_id, copy))
     if result is None:
         raise HTTPException(500, 'comment_not_stored')
     return result
