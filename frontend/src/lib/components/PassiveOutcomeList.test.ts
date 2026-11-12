@@ -247,7 +247,7 @@ describe('completed task rows', () => {
   let finish!: (value: unknown) => void;
   foldedRead.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   render([card(1)]); openList(); expand(0); await settle();
-  expect(foldedRead).toHaveBeenCalledWith('tok', 'plan-1', 'node-1');
+  expect(foldedRead).toHaveBeenCalledWith('plan-1', 'node-1');
   expect(rowButton(0).getAttribute('aria-expanded')).toBe('true');
   expect(host.querySelector('.skeleton')).not.toBeNull();
   finish({ status: 'fresh', etag: '', payload: planNode('node-1', 'step-9', { description: 'What was done' }) });

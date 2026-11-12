@@ -1,11 +1,10 @@
 import { get, writable } from 'svelte/store';
-import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
+import { apiFetch } from '$lib/api/request';
 export type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 
 const BASE = '';
-const auth = () => get(token) || '';
 
 export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
 	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !removed.some((row) => row.id === account.id)), ...removed];
@@ -39,8 +38,8 @@ function confirmAccounts(update: (accounts: VendorAccount[]) => VendorAccount[])
 }
 
 function url(path: string, query: Record<string, string> = {}): string {
-	const params = new URLSearchParams({ token: auth(), ...query });
-	return `${BASE}${path}?${params.toString()}`;
+	const params = new URLSearchParams(query).toString();
+	return params ? `${BASE}${path}?${params}` : `${BASE}${path}`;
 }
 
 async function detail(response: Response, fallback: string): Promise<{ error: string; code?: string; ref?: string }> {
@@ -56,7 +55,7 @@ function replace(account: VendorAccount): VendorAccount {
 
 async function request<T>(path: string, init: RequestInit, fallback: string, query?: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number; code?: string; ref?: string }> {
 	try {
-		const response = await fetch(url(path, query), init);
+		const response = await apiFetch(url(path, query), { ...init, sessionInAddress: true });
 		if (!response.ok) return { ok: false, ...await detail(response, fallback), status: response.status };
 		return { ok: true, data: await response.json() as T };
 	} catch {

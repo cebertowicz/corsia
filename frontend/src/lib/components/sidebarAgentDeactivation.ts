@@ -1,11 +1,11 @@
 import { SERVER_UNREACHABLE } from '$lib/plainError';
+import { apiFetch } from '$lib/api/request';
 
 /** Deactivate an agent, returning user-facing failure copy or null on success. */
-export async function deactivateSidebarAgent(id: string, authToken: string): Promise<string | null> {
+export async function deactivateSidebarAgent(id: string): Promise<string | null> {
 	let response: Response;
 	try {
-		const query = new URLSearchParams({ token: authToken });
-		response = await fetch(`/api/agents/${id}?${query}`, { method: 'DELETE' });
+		response = await apiFetch(`/api/agents/${id}`, { sessionInAddress: true, method: 'DELETE' });
 	} catch (error) {
 		console.error('Could not deactivate agent', error);
 		return SERVER_UNREACHABLE;

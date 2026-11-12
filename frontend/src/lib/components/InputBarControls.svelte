@@ -225,7 +225,6 @@
 		}
 		void ensureContextPreview({
 			threadId: boundThreadId,
-			authToken: t,
 			modelId: previewModelId,
 			...ids,
 			retryError: opening,
@@ -266,7 +265,7 @@
 		const authToken = $token;
 		if (!boundThreadId || !authToken) return;
 		try {
-			await requestManualCheckpoint(boundThreadId, authToken);
+			await requestManualCheckpoint(boundThreadId);
 		} catch (error) {
 			// The sheet only offers this button when the backend already says a
 			// checkpoint is possible, so a refusal here means the preview went

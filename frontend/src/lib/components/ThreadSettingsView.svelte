@@ -2,7 +2,6 @@
 	import ThreadContextPanel from './ThreadContextPanel.svelte';
 	import ThreadAgentPanel from './ThreadAgentPanel.svelte';
 	import { activeThread, activeThreadId } from '$lib/stores/threads';
-	import { token } from '$lib/stores/auth';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { fetchScopeTarget, type CoordinationTarget } from '$lib/utils/conductor';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
@@ -22,7 +21,7 @@
 		const threadId = $activeThreadId;
 		scopeTarget = null;
 		conductorLoading = true;
-		fetchScopeTarget($token, $uiScope).then((lookup) => {
+		fetchScopeTarget($uiScope).then((lookup) => {
 			if (active) {
 				// Absent and unknown both leave the settings unavailable to retry:
 				// only a matching target can back this view.

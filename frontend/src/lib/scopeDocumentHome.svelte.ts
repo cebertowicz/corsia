@@ -1,5 +1,3 @@
-import { get } from 'svelte/store';
-import { token } from '$lib/stores/auth';
 import { canOpenArtifact } from '$lib/openArtifactInThread';
 import { fetchScopeTarget, type CoordinationLookup } from '$lib/utils/conductor';
 
@@ -23,7 +21,7 @@ export function createScopeDocumentHome(projectId: () => string | null, namedThr
 		if (canOpenArtifact(namedThread())) return;
 		let current = true;
 		const scope = project ? { id: project, name: '', color: '' } : null;
-		void fetchScopeTarget(get(token), scope).then((found) => {
+		void fetchScopeTarget(scope).then((found) => {
 			if (current) lookup = found;
 		});
 		return () => { current = false; };

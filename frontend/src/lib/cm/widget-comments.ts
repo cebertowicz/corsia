@@ -7,6 +7,7 @@ import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey }
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
+import { caretToWidget } from './widget-caret';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -104,6 +105,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private recentTouch = () => Date.now() - this.lastTouchAt < 750;
 		private readonly down = (event: PointerEvent) => {
 			this.pointer = event.pointerType;
+			// A touch may be the start of a scroll, so its caret waits for the click that confirms a tap.
+			if (event.button === 0 && event.pointerType !== 'touch') caretToWidget(this.view, event);
 			if (event.pointerType === 'touch') { this.touchStart = { x: event.clientX, y: event.clientY }; this.touchMoved = false; this.lastTouchAt = Date.now(); }
 		};
 		private readonly move = (event: PointerEvent) => {
@@ -113,6 +116,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private frame = 0;
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
 		private readonly click = (event: MouseEvent) => {
+			if (this.pointer === 'touch' && !this.touchMoved) caretToWidget(this.view, event);
 			const origin = event.target instanceof Element ? event.target : null;
 			const widget = origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();

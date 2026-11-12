@@ -20,6 +20,7 @@ import type {
 import type { MeasurementPeriod } from './measurementPeriod';
 import { measurementScope, type MeasurementScope } from './measurement';
 import { grainScopeParams, measurementGrain, type MeasurementGrain } from './measurementGrain';
+import { apiFetch } from '$lib/api/request';
 
 /**
  * The Agents wire vocabulary lives in ``api/measurementAgentsTypes.ts``, the one home for
@@ -154,7 +155,7 @@ export async function loadMeasurementAgents(
 		const params = grainScopeParams(grain, scope);
 		params.set('metric', view.metric);
 		params.set('sort', view.sort);
-		const response = await fetch(`/api/measurement/agents?${params}`, { signal: controller.signal });
+		const response = await apiFetch(`/api/measurement/agents?${params}`, { signal: controller.signal });
 		if (!response.ok) throw new Error('Could not load agents');
 		const body = await response.json();
 		if (controllers.get('agents') !== controller

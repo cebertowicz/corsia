@@ -4,6 +4,7 @@ import { loadComposerModels } from './modelsLoad';
 import { threads } from './threads';
 import { acceptsThreadAccountFrame, loadThreadVendorAccounts, threadAccountFields } from './threadVendorAccounts';
 import { SERVER_UNREACHABLE } from '$lib/plainError';
+import { apiFetch } from '$lib/api/request';
 
 export type PinResult = { ok: true; changed: boolean } | { ok: false; message: string };
 
@@ -32,7 +33,8 @@ export async function pinThreadAccount(threadId: string, accountId: string): Pro
 	if (!auth) return { ok: false, message: PIN_FAILED };
 	let body: Record<string, unknown> | null;
 	try {
-		const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account?token=${encodeURIComponent(auth)}`, {
+		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/vendor-account`, {
+			sessionInAddress: true,
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ account_id: accountId }),

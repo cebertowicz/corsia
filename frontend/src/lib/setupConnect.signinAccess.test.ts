@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 
 import type { ModelSource } from './conductorSources';
 import { createSetupConnect } from './setupConnect.svelte';
@@ -29,6 +30,9 @@ function flowFor(source: typeof claude) {
 	const token = () => 'session';
 	return createSetupConnect({ token, sources: () => [source], refreshSources: vi.fn(async () => undefined) });
 }
+
+beforeEach(() => { sessionStore.set('session'); });
+afterEach(() => { sessionStore.set(null); });
 
 afterEach(() => { vi.unstubAllGlobals(); });
 

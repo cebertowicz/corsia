@@ -20,14 +20,19 @@ DESCRIPTION = (
     'Where others are editing, use `writeMode: SUGGEST`. Calendar: '
     'use `patch` and send the whole `attendees` list; '
     'guests are emailed only with `sendUpdates: all`. '
-    "Your edits appear as the person's own. Email is not available here: "
-    'use the email tools. Deleting a Drive file moves it to the trash. '
+    "Your edits appear as the person's own. Email goes through the email tools; "
+    'the one Gmail change here is archiving or marking read: '
+    '`["gmail","users","messages","modify"]` (or `batchModify` with `ids`) '
+    'removing only `INBOX` or `UNREAD`. Deleting a Drive file moves it to the trash. '
     'A deleted event is saved first in `google-deletions/<account>/`; '
     'to bring it back, recreate it from there (ask before re-inviting its guests). '
     "CORSIA signs in for you; you never handle the account's sign-in."
 )
 
-MAIL = 'Not available here: email goes through the email tools.'
+MAIL = (
+    'Not available here: email goes through the email tools. The one Gmail change here is '
+    '`gmail users messages modify` or `batchModify` removing only `INBOX` (archive) or `UNREAD` (mark read).'
+)
 NO_PREVIEW = "This command can't be checked before it runs, so it isn't available here."
 PATHS = 'upload and output must be files in your workspace.'
 TRASH = "Emptying the trash isn't available here; Google empties it after 30 days."

@@ -43,6 +43,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	viewport?.addEventListener('resize', schedule);
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
 	if (owner) observer?.observe(owner);
+	observer?.observe(node);
 	queueMicrotask(reveal);
 
 	return {

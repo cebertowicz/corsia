@@ -47,7 +47,6 @@ type PreviewRequest = {
 	threadId: string;
 	owner: string;
 	key: string;
-	authToken: string;
 	modelId: string | null;
 	retryError?: boolean;
 };
@@ -209,7 +208,7 @@ async function readContextPreview(request: PreviewRequest, sequence: number): Pr
 	const shown = current?.owner === owner ? current.usage : null;
 	setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: shown, loading: true, error: '' });
 	try {
-		const usage = await fetchNextTurnPreview(threadId, request.authToken, request.modelId);
+		const usage = await fetchNextTurnPreview(threadId, request.modelId);
 		if (previewSequences.get(threadId) !== sequence) return false;
 		const preview = usage ? { ...usage, thread_id: threadId } : null;
 		setMapEntry(contextPreviewByThread, threadId, { owner, key, usage: preview, loading: false, error: '' });

@@ -25,7 +25,7 @@ export function createHistoryNode(input: { planId: () => string; nodeId: () => s
 		state = { status: 'loading' };
 		const bearer = get(token);
 		const outcome = bearer
-			? await readFoldedNode(bearer, planId, nodeId)
+			? await readFoldedNode(planId, nodeId)
 			: ({ status: 'unauthorized' } as const);
 		if (run !== epoch) return;
 		state = outcome.status === 'fresh' ? { status: 'ready', node: outcome.payload } : { status: 'error' };

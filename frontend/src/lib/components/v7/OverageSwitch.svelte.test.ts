@@ -1,5 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 
 vi.mock('$lib/stores/models', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/models')>()),
@@ -22,10 +23,13 @@ async function settle() {
 	flushSync();
 }
 
+beforeEach(() => { sessionStore.set('tok'); });
+
 describe('OverageSwitch', () => {
 	let components: ReturnType<typeof mount>[] = [];
 
 	afterEach(() => {
+		sessionStore.set(null);
 		components.forEach((component) => unmount(component));
 		components = [];
 		document.body.innerHTML = '';

@@ -48,7 +48,9 @@ def is_provider_usage_or_quota_limit(value: object) -> bool:
         or "quota" in low
         # Claude Code's throttle wording. On 2026-08-19, 35 of 36 recovered
         # limits said "You've hit your session limit" or "weekly limit" (#1177).
+        # By 2026-11 the session wording reads "You've hit your 5-hour limit".
         or "session limit" in low
+        or "5-hour limit" in low
         # Codex: "workspace is out of credits".
         or "out of credits" in low
         or "credit balance" in low

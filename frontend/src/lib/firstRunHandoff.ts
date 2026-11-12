@@ -42,7 +42,7 @@ export function createFirstRunHandoff() {
 			onLookup: (lookup: CoordinationLookup) => void;
 			open: FirstRunOpen;
 		}) {
-			void fetchScopeTarget(token, scope).then((lookup) => {
+			void fetchScopeTarget(scope).then((lookup) => {
 				if (!isActive()) return;
 				onLookup(lookup);
 				latestLookup = { lookup, scope };

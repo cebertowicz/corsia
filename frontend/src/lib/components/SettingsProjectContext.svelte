@@ -4,6 +4,7 @@
 	import { plainResponseError } from '$lib/plainError';
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsContextCreate from './SettingsContextCreate.svelte';
+	import { apiFetch } from '$lib/api/request';
 
 	// One project's level on Settings › Context: the markdown files in its context/.
 	let { projectId }: { projectId: string } = $props();
@@ -21,7 +22,7 @@
 		loading = true;
 		error = '';
 		try {
-			const res = await fetch(`/api/projects/${encodeURIComponent(id)}?token=${encodeURIComponent(t)}`);
+			const res = await apiFetch(`/api/projects/${encodeURIComponent(id)}`, { sessionInAddress: true });
 			if (!res.ok) throw new Error("Couldn't load this project's context");
 			const body = await res.json();
 			files = Array.isArray(body.context_files) ? body.context_files.map(String) : [];
@@ -42,9 +43,9 @@
 		busy = true;
 		error = '';
 		try {
-			const res = await fetch('/api/context/bootloader/file', {
+			const res = await apiFetch('/api/context/bootloader/file', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ scope: 'project', project_id: projectId, path, content: `# ${path}\n` }),
 			});
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not create that. Try again.'));

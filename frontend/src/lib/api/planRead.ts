@@ -1,6 +1,6 @@
 /** Shared authenticated, conditional read boundary for both plan representations. */
 import type { OperatorReadOutcome } from './plansTypes';
-
+import { apiFetch } from './request';
 export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
@@ -10,22 +10,21 @@ export function safeErrorMessage(status: number): string {
 	return `Unable to load this scope (HTTP ${status}).`;
 }
 
-/** Bearer-auth GET headers, matching the existing api/attention.ts seam. */
-export function authHeaders(bearerValue: string, etag: string | null): RequestInit {
-	const headers: Record<string, string> = { Authorization: `Bearer ${bearerValue}` };
+/** The conditional-read headers; the session is attached by `apiFetch`. */
+export function conditionalHeaders(etag: string | null): RequestInit {
+	const headers: Record<string, string> = {};
 	if (etag) headers['If-None-Match'] = etag;
 	return { headers };
 }
 
 export async function readPlan<T>(
 	url: string,
-	bearerValue: string,
 	etag: string | null | undefined,
 	decode: (body: unknown) => T | null,
 ): Promise<ReadOutcome<T>> {
 	let res: Response;
 	try {
-		res = await fetch(url, authHeaders(bearerValue, etag ?? null));
+		res = await apiFetch(url, conditionalHeaders(etag ?? null));
 	} catch (error) {
 		return { status: 'error', message: error instanceof Error ? error.message : String(error) };
 	}

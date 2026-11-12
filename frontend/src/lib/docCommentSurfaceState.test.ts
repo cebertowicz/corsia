@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
@@ -150,6 +150,31 @@ describe('comment surface state', () => {
 			expect(surface.release()).toBe(true);
 			expect(surface.state).toEqual({ kind: 'list' });
 			expect(get(focusedDocComment)).toBeNull();
+		});
+
+		it('closes the column to the editor after a pick that a caret in plain text released', () => {
+			const editor = vi.fn();
+			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			surface.focusComment('c1', new DOMRect(), false, true);
+			expect(surface.release()).toBe(true);
+			surface.close();
+			surface.restoreFocus();
+			expect(surface.state).toBeNull();
+			expect(editor).toHaveBeenCalledTimes(1);
+		});
+
+		it('closes the column to the button that opened it after a draft over it was cancelled', () => {
+			const editor = vi.fn(), button = document.body.appendChild(document.createElement('button'));
+			const surface = createCommentSurfaceState(editor, undefined, () => true);
+			surface.openList(button);
+			surface.openDraft(new DOMRect());
+			surface.close();
+			expect(surface.state).toEqual({ kind: 'list' });
+			surface.close();
+			surface.restoreFocus();
+			expect(document.activeElement).toBe(button);
+			expect(editor).not.toHaveBeenCalled();
+			button.remove();
 		});
 
 		it('does nothing when nothing is picked, or without the margin column', () => {

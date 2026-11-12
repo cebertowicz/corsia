@@ -57,6 +57,8 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		const from = last;
 		last = now;
 		if (!enabled || typeof node.animate !== 'function' || Math.abs(now - from) <= 1) return;
+		// Growing around an open thread must not clip its discussion and reply field during the resize.
+		if (now > from && node.querySelector('[data-autosize-room] textarea')) return;
 		if (contentEases()) return;
 		if (reduced) fadeIn();
 		else run(from, now);

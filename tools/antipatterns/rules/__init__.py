@@ -20,6 +20,7 @@ from . import (
     missing_public_docstring,
     mock_where_real_needed,
     periodic_server_reread,
+    raw_api_request,
     silent_error_swallow,
     untracked_todo,
 )
@@ -35,6 +36,7 @@ ALL_RULES: list[Rule] = [
     mock_where_real_needed.RULE,
     untracked_todo.RULE,
     periodic_server_reread.RULE,
+    raw_api_request.RULE,
 ]
 
 

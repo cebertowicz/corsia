@@ -9,6 +9,7 @@
 	import LivingMark from './LivingMark.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
+	import { apiFetch } from '$lib/api/request';
 
 	interface Props { onNoAccount?: () => void; }
 	const { onNoAccount }: Props = $props();
@@ -32,7 +33,7 @@
 	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
 	async function setupCapable(): Promise<boolean> {
 		try {
-			const response = await fetch('/api/setup/status');
+			const response = await apiFetch('/api/setup/status');
 			if (!response.ok && response.status !== 403 && response.status !== 409) throw new Error('setup status');
 			return response.ok;
 		} catch {
@@ -43,7 +44,7 @@
 
 	async function loadStatus() {
 		try {
-			const res = await fetch('/api/auth/status');
+			const res = await apiFetch('/api/auth/status');
 			if (!res.ok) throw new Error(`status check failed (${res.status})`);
 			const data = await res.json();
 			phase = data.has_users ? 'form' : 'no-account';
@@ -64,7 +65,7 @@
 		loginError = '';
 		submitting = true;
 		try {
-			const res = await fetch('/api/auth/login', {
+			const res = await apiFetch('/api/auth/login', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ username: username.trim(), password }),
