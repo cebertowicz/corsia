@@ -1,16 +1,17 @@
 import fs from 'node:fs';
-import { expect, test, type APIRequestContext, type Page } from './support/test';
-import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage, seedMockResponses } from './support/mock';
-import { commentEditor, commentOnMessage, openCommentThread } from './support/chatComments';
+import { expect, test, type APIRequestContext, type Locator, type Page } from './support/test';
+import { createSession, openAppPastLanding, sendChatMessage, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { failQueuedInput, injectMessage, readMockCallCount, seedMockResponses } from './support/mock';
+import { commentEditor, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 import { capture, framesDirectory, selectPhrase } from './support/chatCommentFrames';
 
 /**
- * A comment's post failing, seen where the person wrote it: refused before it is stored, the box keeps the text and
- * says why, and its one Retry posts it; stored and then failed, the box closes and the comment's own thread, opened
- * from its highlight, shows the failure with its Retry. The comment route is routed so each failure lands on the exact
- * post under test: a refusal is the route's own error answer, and a stored post that then failed is the server's answer
- * with that comment's delivery marked failed, as its row reads when delivery fails.
+ * A comment's post failing, seen where the person wrote it. Refused before it is stored: the box keeps the text and
+ * says why, and its one Retry posts it (the refusal is the route's own error answer, routed onto that one post).
+ * Stored and then ended: the box closes, and the comment's own thread, opened from its highlight, shows chat's label
+ * for that state and chat's Retry for it. A failed comment is a queued input the test ends through the server's own
+ * writer for an undeliverable input; an uncertain one is real, stopped after a Turn took it and began its model call.
+ * Retrying either posts the comment again through the comment route and never reaches the transcript.
  */
 const backend = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 test.describe.configure({ timeout: 180_000 });
@@ -22,38 +23,35 @@ const REFUSAL = 'Model unavailable: the provider is not responding. Please selec
 
 const UNDELIVERED = 'The accepted input did not reach a Turn.';
 
-type Fault = { note: string; kind: 'refuse' | 'fail-after-queued' };
-
-/** Mark the comment, or the person's reply, written as `note` failed wherever an answer carries it. */
-function markFailed(value: unknown, note: string): void {
-  if (Array.isArray(value)) { value.forEach(item => markFailed(item, note)); return; }
-  if (!value || typeof value !== 'object') return;
-  const row = value as Record<string, unknown>;
-  const comment = Array.isArray(row.answers) && row.note === note;
-  const reply = row.author_kind === 'user' && row.text === note;
-  if (comment || reply) Object.assign(row, { delivery_state: 'failed', delivery_error: UNDELIVERED });
-  Object.values(row).forEach(child => markFailed(child, note));
+/** Answer the comment post carrying `note()` with the route's refusal, while `note()` names one. */
+async function refuse(page: Page, note: () => string | null) {
+  await page.route(/\/api\/threads\/[^/]+\/chat-comments$/, async route => {
+    const now = note();
+    if (now && (route.request().postData() ?? '').includes(now)) await route.fulfill({ status: 503, json: { detail: REFUSAL } });
+    else await route.fallback();
+  });
 }
 
-/** Route the comment post and the reads of its thread so `fault().note` is refused, or is stored and then reads failed. */
-async function routeFaults(page: Page, fault: () => Fault | null) {
-  const failing = new Set<string>();
-  await page.route(/\/api\/threads\/[^/]+\/(chat-comments|chat-comment-threads|messages)(\?|$)/, async route => {
-    const now = fault();
-    const posted = route.request().postData() ?? '';
-    const post = new URL(route.request().url()).pathname.endsWith('/chat-comments');
-    if (now?.kind === 'refuse' && post && posted.includes(now.note)) {
-      await route.fulfill({ status: 503, json: { detail: REFUSAL } });
-      return;
-    }
-    if (now?.kind === 'fail-after-queued' && post && posted.includes(now.note)) failing.add(now.note);
-    if (!failing.size) { await route.fallback(); return; }
-    const response = await route.fetch();
-    const json = await response.json();
-    for (const note of failing) markFailed(json, note);
-    await route.fulfill({ response, json });
-  });
-  return { stop: () => failing.clear() };
+/** The comments the person posted with this note, as the server's page read carries them. */
+async function posted(request: APIRequestContext, thread: string, note: string) {
+  const response = await request.get(`${backend}/api/threads/${thread}/messages`, { params: { token: TEST_TOKEN } });
+  expect(response.ok()).toBeTruthy();
+  return postedComments((await response.json()).messages).filter(comment => comment.note === note);
+}
+
+/** Press a comment's Retry twice in quick succession, and wait for the comment route's answer. */
+async function retryTwice(page: Page, retry: Locator) {
+  const retried = page.waitForResponse(response => response.request().method() === 'POST' && /\/chat-comments$/.test(new URL(response.url()).pathname));
+  await retry.dblclick();
+  const response = await retried;
+  expect(response.ok()).toBeTruthy();
+  await response.finished();
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
+/** The comment was posted exactly once more: one comment with this note, carried by an input other than `before`. */
+async function postedOnceMore(request: APIRequestContext, thread: string, note: string, before: string) {
+  await expect.poll(async () => (await posted(request, thread, note)).map(comment => comment.user_message_id !== before)).toEqual([true]);
 }
 
 /** The passage being commented (its draft highlight, which is not a control) sits below the shell header and above the open sheet. */
@@ -83,8 +81,8 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   if (framesDirectory) fs.mkdirSync(framesDirectory, { recursive: true });
   const frame = async (target: Parameters<typeof capture>[1], name: string) => { if (framesDirectory) await capture(page, target, `${name}-${width}`); };
   await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-  let fault: Fault | null = null;
-  const faults = await routeFaults(page, () => fault);
+  let refused: string | null = null;
+  await refuse(page, () => refused);
   const title = `Comment failure ${width}`;
   const thread = await createSession(request, title);
   const id = await injectMessage(request, thread, { role: 'assistant', content: MESSAGE, metadata: { for_user: true } }, TEST_TOKEN);
@@ -99,7 +97,7 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   const box = page.getByRole('dialog', { name: 'New comment' });
 
   // Refused before it is stored: the box stays, with the text and the server's reason, and one Retry.
-  fault = { note: 'Refused once', kind: 'refuse' };
+  refused = 'Refused once';
   await selectPhrase(page, id, 'First phrase', false);
   // Its layout height: the pill scales in as it appears, so its drawn box is briefly smaller.
   if (width === 393) expect(await page.locator('.sel-comment').evaluate(element => (element as HTMLElement).offsetHeight)).toBeGreaterThanOrEqual(44);
@@ -121,21 +119,24 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await frame(box, 'failed-post');
 
   // Retry posts the same text from the same box.
-  fault = null;
+  refused = null;
   await box.getByRole('button', { name: 'Retry', exact: true }).click();
   await commentOnMessage(row, 'First phrase');
   await expect(commentEditor(page)).toHaveCount(0);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(row, 'retried-post');
 
-  // Stored, then failed: the box closes, and the comment's own thread, opened from its highlight, holds its failure and Retry.
-  fault = { note: 'Fails after queued', kind: 'fail-after-queued' };
+  // Stored, then failed: queued behind the held turn, its input is ended as undeliverable. The box closes, and the
+  // comment's own thread, opened from its highlight, holds chat's label for a failed message and chat's Retry.
   await selectPhrase(page, id, 'Second phrase');
   await commentEditor(page).fill('Fails after queued');
   await box.getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(commentEditor(page)).toHaveCount(0);
+  await expect.poll(async () => (await posted(request, thread, 'Fails after queued')).length).toBe(1);
+  const [queued] = await posted(request, thread, 'Fails after queued');
+  await failQueuedInput(request, thread, queued.user_message_id, UNDELIVERED);
   const failed = await openCommentThread(row, page, 'Second phrase');
-  await expect(failed.locator('.failed-reply')).toContainText('Comment not delivered');
+  await expect(failed.locator('.failed-reply')).toContainText(`Not delivered: ${UNDELIVERED}`);
   await expect(failed.locator('.failed-reply').getByRole('button', { name: 'Retry', exact: true })).toHaveCount(1);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(failed, 'failed-after-queued');
@@ -148,17 +149,57 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   expect(target.width).toBeGreaterThanOrEqual(44);
   await frame(failed, 'failed-retry-touch');
 
-  // Pressing it sends nothing the transcript shows: the server's answer for the comment's row never becomes a chat bubble.
-  faults.stop();
-  const retried = page.waitForResponse(response => /\/messages\/[^/]+\/retry$/.test(new URL(response.url()).pathname));
-  await retry.click();
-  const response = await retried;
-  expect(response.ok()).toBeTruthy();
-  await response.finished();
-  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+  // Pressing it twice posts the comment once more through the comment route, and nothing reaches the transcript.
+  await retryTwice(page, retry);
+  await postedOnceMore(request, thread, 'Fails after queued', queued.user_message_id);
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(failed, 'failed-retry-pressed');
   await release(request, `held-${width}`);
+});
+
+test('a comment stopped after its turn began writing reads uncertain and retries once, 1440', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name !== 'chromium-desktop', 'Requires a disposable mock instance');
+  if (framesDirectory) fs.mkdirSync(framesDirectory, { recursive: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const title = 'Comment uncertain 1440';
+  const thread = await createSession(request, title);
+  const id = await injectMessage(request, thread, { role: 'assistant', content: MESSAGE, metadata: { for_user: true } }, TEST_TOKEN);
+  // The turn reads a file, takes the comment at the boundary after that call, and is stopped while its next model call is open.
+  await seedMockResponses(request, [
+    { tool_calls: [{ id: 'read-uncertain', name: 'read_file', arguments: JSON.stringify({ path: 'README.md' }) }], finish_reason: 'tool_calls', response_gate: 'uncertain-start' },
+    { content: 'Never written.', response_gate: 'uncertain-write' },
+    { content: 'Finished.' },
+  ]);
+  await openAppPastLanding(page);
+  await sidebarThread(page, title).click();
+  await waitForWsConnected(page);
+  const row = page.locator(`[data-message-id="${id}"]`);
+  await expect(row).toBeVisible();
+  await sendChatMessage(page, 'Read the readme.');
+  await expect(page.locator('.messages .message.user')).toHaveCount(1);
+
+  await selectPhrase(page, id, 'Second phrase');
+  await commentEditor(page).fill('Stopped mid-write');
+  await page.getByRole('dialog', { name: 'New comment' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(commentEditor(page)).toHaveCount(0);
+  await expect.poll(async () => (await posted(request, thread, 'Stopped mid-write')).length).toBe(1);
+  const [sent] = await posted(request, thread, 'Stopped mid-write');
+  await release(request, 'uncertain-start');
+  await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(2);
+  await page.getByRole('button', { name: 'Stop turn' }).click();
+
+  const uncertain = await openCommentThread(row, page, 'Second phrase');
+  await expect(uncertain.locator('.failed-reply')).toContainText('Delivery uncertain');
+  const retry = uncertain.locator('.failed-reply').getByRole('button', { name: 'Retry anyway', exact: true });
+  await expect(retry).toHaveCount(1);
+  await expect(page.locator('.messages .message.user')).toHaveCount(1);
+  if (framesDirectory) await capture(page, uncertain, 'uncertain-after-stop-1440');
+
+  await retryTwice(page, retry);
+  await postedOnceMore(request, thread, 'Stopped mid-write', sent.user_message_id);
+  await expect(page.locator('.messages .message.user')).toHaveCount(1);
+  if (framesDirectory) await capture(page, uncertain, 'uncertain-retry-pressed-1440');
+  await request.post(`${backend}/api/test/mock-gates/uncertain-write/release`);
 });
 
 test('the comment popover leaves its passage uncovered, keeps focus until Escape, and keeps its text after Escape, 900', async ({ page, request }) => {
