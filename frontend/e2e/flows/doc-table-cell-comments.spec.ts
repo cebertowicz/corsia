@@ -162,9 +162,8 @@ for (const layout of LAYOUTS) {
 			const name = card ? 'with a comment card open, a click or tap in a cell types where it landed' : 'a click or tap on a wrapped line of a cell types where it landed';
 			test(name, async ({ page }) => {
 				test.skip(at === 900, 'proven at the desktop and phone widths');
-				// On a phone the card is a modal sheet: a tap outside it lands on its backdrop, which closes it and reaches no cell.
-				test.fixme(card && layout.project === 'chromium-mobile', 'a tap through the open card\'s backdrop is not settled');
 				test.setTimeout(120_000);
+				const phone = layout.project === 'chromium-mobile';
 				const seeded = await openTableDocument(page, layout);
 				if (card) {
 					await page.locator(`[data-comment-ids*="${seeded.commentId}"]`).first().click({ delay: 80 });
@@ -175,12 +174,24 @@ for (const layout of LAYOUTS) {
 				// line, so the caret goes in front of it and nowhere else. The cell wraps over several lines, so its editor has to
 				// wrap them at the same words for the click to land on the word that was drawn there.
 				const target = cell(page, 3, 1);
-				const word = await wordsIn(target, 'few');
-				const point = { x: word.x + 1, y: (word.y + word.bottom) / 2 };
+				const pointAtWord = async () => { const word = await wordsIn(target, 'few'); return { x: word.x + 1, y: (word.y + word.bottom) / 2 }; };
+				const press = async () => {
+					const point = await pointAtWord();
+					if (phone) await page.touchscreen.tap(point.x, point.y);
+					else await page.mouse.click(point.x, point.y, { delay: 80 });
+				};
 				const tag = `${card ? 'card-open' : 'wrapped'}-${at}`;
 				await frame(page, `05-${tag}-before`);
-				if (layout.project === 'chromium-mobile') await page.touchscreen.tap(point.x, point.y);
-				else await page.mouse.click(point.x, point.y, { delay: 80 });
+				await press();
+				if (card && phone) {
+					// On a phone the card is a modal sheet, as every sheet is: the first tap outside it closes it and reaches no
+					// cell; the next tap places the caret where it lands.
+					await expect(page.getByText('Which way does it point now?').first(), 'the first tap closes the card').toBeHidden();
+					await settled(page);
+					await expect(editorIn(page), 'and opens no cell').toHaveCount(0);
+					await frame(page, `05-${tag}-closed`);
+					await press();
+				}
 				await editorInCell(page, target);
 				await expect(cellContent(page), 'focus is inside the cell editor').toBeFocused();
 				await page.keyboard.type('ZZ');
