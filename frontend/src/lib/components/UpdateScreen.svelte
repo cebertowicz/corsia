@@ -6,6 +6,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onStartupShellPage, recoverLocalService, shellInfo, type RecoveryIntent } from '$lib/remoteShell';
 	import { agentsSafe } from '$lib/update/model';
+	import { headlineParts } from '$lib/update/versionParts';
 	import { countUp } from '$lib/update/percentCountUp';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
 	import { dismissUpdateScreen, handOverScreen, updateScreenView } from '$lib/update/screenStore';
@@ -37,7 +38,11 @@
 
 	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
 	const longer = $derived(view?.mode === 'longer');
-	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
+	// A wrong-version headline already says `not <target>`, so the From → To line would repeat it.
+	const headlineNamesTarget = $derived(view?.mode === 'failed' && !view.serviceDown && Boolean(view.toVersion) && Boolean(view.failure?.headline.includes(`, not ${view.toVersion}.`)));
+	// CORSIA has stopped: no step is running, so no step label.
+	const serviceDownTerminal = $derived(view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
+	const recovery = $derived(longer || view?.startupProgressUnavailable === true || serviceDownTerminal);
 	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
 	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
 	let shown = $state(0);
@@ -80,7 +85,7 @@
 			pending = null;
 			return;
 		}
-		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && recoveryFailure === null && !starting && !deferred) recoveryFailure = 'automatic';
+		if (serviceDownTerminal && recoveryFailure === null && !starting && !deferred) recoveryFailure = 'automatic';
 		if (!onShell && localDesktop && (longer || hasStartAction)) {
 			handOver();
 			return;
@@ -194,11 +199,13 @@
 	>
 		<div class="column">
 			<div class="mark"><LivingMark entry="none" /></div>
-			<h2 id="update-screen-title">{view.mode === 'done' ? `Updated to ${view.toVersion ?? ''}`.trim() : view.mode === 'failed' && view.failure ? view.failure.title : 'Updating CORSIA'}</h2>
-			<div class="step" role="status" aria-live="polite" aria-atomic="true">
+			<h2 id="update-screen-title">{view.mode === 'done' ? `Updated to ${view.toVersion ?? ''}`.trim() : view.mode === 'failed' && view.failure ? view.failure.title : view.mode === 'start_failed' ? 'CORSIA didn’t restart' : 'Updating CORSIA'}</h2>
+			<div class="step" class:empty={serviceDownTerminal} role="status" aria-live="polite" aria-atomic="true">
 				{#if view.mode === 'failed' && !view.serviceDown && view.failure}
-					<p class="failure-headline">{view.failure.headline}</p>
+					<p class="failure-headline">{#each headlineParts(view.failure.headline) as part}{#if part.version}<span class="version">{part.text}</span>{:else}{part.text}{/if}{/each}</p>
 					<p class="detail">{view.failure.body}</p>
+				{:else if serviceDownTerminal}
+					<span class="sr-only">{view.mode === 'start_failed' ? 'CORSIA didn’t restart.' : `${view.failure?.title ?? 'Update failed'}.`}</span>
 				{:else if view.mode !== 'done'}
 					<p class="step-label">{view.label}</p>
 					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
@@ -211,7 +218,7 @@
 					<i style:width={`${shown}%`}></i>
 				</div>
 			{/if}
-			{#if view.fromVersion && view.toVersion && view.mode !== 'done'}
+			{#if view.fromVersion && view.toVersion && view.mode !== 'done' && !headlineNamesTarget}
 				<p class="versions">{view.fromVersion} → {view.toVersion}</p>
 			{/if}
 			<div class="copy">
@@ -233,7 +240,7 @@
 							<p class="detail" role="alert">Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.</p>
 						{:else if recoveryFailure === 'manual'}
 							<p class="detail" role="alert">It still didn’t start. Click Start CORSIA to try again, or quit CORSIA with ⌘Q and open it again.</p>
-						{:else if recoveryFailure === 'automatic'}
+						{:else if recoveryFailure === 'automatic' && view.mode !== 'start_failed'}
 							<p class="detail">It didn’t start on its own.</p>
 						{/if}
 						{#if hasStartAction && !view.startupProgressUnavailable}
@@ -260,8 +267,11 @@
 	.mark { width: calc(var(--space-8) + var(--space-6)); height: calc(var(--space-8) + var(--space-6)); margin-bottom: var(--space-4); }
 	h2 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.step { min-height: calc(var(--text-body) * 1.5); margin-top: var(--space-2); }
+	.step.empty { min-height: 0; }
+	.sr-only { position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.step p, .detail { margin: 0; }
 	.step-label, .detail { color: var(--text-secondary); font-size: var(--text-body); }
+	.version { white-space: nowrap; }
 	.failure-headline { margin: 0; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-semibold); }
 	.percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
 	.bar { width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }

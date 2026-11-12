@@ -8,7 +8,6 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
-- A failed update now says it failed and which version CORSIA is on, instead of describing the check that failed.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
@@ -17,6 +16,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
+- A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
