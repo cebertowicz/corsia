@@ -36,7 +36,7 @@
 	.comment-count { flex: 0 1 auto; min-width: 0; color: var(--accent); white-space: normal; }
 	/* The sidebar's needs-you dot (ThreadPlanStateMark), set in the text line. */
 	.comment-dot {
-		display: inline-block; width: 8px; height: 8px; margin-right: var(--space-1);
+		display: inline-block; width: var(--space-2); height: var(--space-2); margin-right: var(--space-1);
 		border-radius: var(--radius-circle); background: var(--amber); vertical-align: 0.05em;
 	}
 </style>
