@@ -61,18 +61,38 @@ def rollover_destination(
     usage is unread gets its vendor's usage read; one that reads allowed offers
     the held heads again (``offer_destination``) and is the destination from then on.
     """
+    destination, unread = _scan(provider, source_id, base, project, db=db)
+    if destination is None:
+        from connections.harness_usage_check import schedule_account_check
+
+        for identity in unread:
+            schedule_account_check(provider, identity)
+    return destination
+
+
+def awaits_usage_read(provider: str, source_id: str | None, base: dict | None, project: str | None, *, db) -> bool:
+    """Whether rollover has no destination only because a ready candidate's usage is unread.
+
+    ``rollover_destination`` asks for those reads; one that reads allowed is the destination.
+    """
+    destination, unread = _scan(provider, source_id, base, project, db=db)
+    return destination is None and bool(unread)
+
+
+def _scan(provider, source_id, base, project, *, db) -> tuple[str | None, list[str]]:
+    """The destination along the order, and the ready candidates before it whose usage is unread."""
     from llm.model_status import USAGE_LIMITED
 
     policy = effective_policy(project, provider, db=db)
     order = rollover_order(provider, project, policy, db=db)
     if base is None or not order or source_id is None:
-        return None
+        return None, []
     if source_id in order:
         source = get_account(source_id, db=db)
         from llm.account_catalog import account_model_status
 
         if account_model_status(source, base, project_ids=[project], db=db)['status_reason'] != USAGE_LIMITED:
-            return None
+            return None, []
         candidates = [identity for identity in order if identity != source_id]
     else:
         candidates = order
@@ -82,13 +102,9 @@ def rollover_destination(
         if decision is None or decision['status'] != 'ready':
             continue
         if decision['usage']['state'] == 'allowed':
-            return identity
+            return identity, unread
         unread.append(identity)
-    from connections.harness_usage_check import schedule_account_check
-
-    for identity in unread:
-        schedule_account_check(provider, identity)
-    return None
+    return None, unread
 
 
 def movable_hold(thread_id: str, model: str, reason: str | None, *, db) -> bool:

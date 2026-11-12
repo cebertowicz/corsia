@@ -44,19 +44,16 @@ def check_runs(row: Mapping[str, Any], name: str, project: str | None, db: sqlit
 
 
 def _usage_unread(row: Mapping[str, Any], project: str | None, db: sqlite3.Connection) -> bool:
-    """Whether a refusal is worth asking again: the selected account is at its usage limit, the
-    project rolls this vendor over, and another account is ready with its usage not read as
-    allowed. Never whether the start runs; the next pass asks ``effective_status`` again."""
-    from connections.provider_policy import effective_policy
-    from llm.model_status import USAGE_LIMITED
+    """Whether a refusal is worth asking again: rollover's own answer that it waits on a usage
+    read (``account_rollover.awaits_usage_read``) for the account the project's turn starts from.
+    Never whether the start runs; the next pass asks ``effective_status`` again."""
+    from connections.account_policy import turn_account
+    from connections.account_rollover import awaits_usage_read
+    from llm.model_status import harness_base_row
 
-    runs_on = row.get("runs_on") or ()
-    selected = next((entry for entry in runs_on if entry["selected"]), None)
-    if selected is None or selected["status_reason"] != USAGE_LIMITED or not any(
-            not entry["selected"] and entry["status"] == "ready" and entry["usage"].get("state") != "allowed"
-            for entry in runs_on):
-        return False
-    return bool(effective_policy(project, str(row["connection"]), db=db)["rollover"])
+    provider = str(row["connection"])
+    source, _reason = turn_account(provider, project_id=project, db=db)  # no model: before any move
+    return awaits_usage_read(provider, source, harness_base_row(str(row["litellm_model"]), db=db), project, db=db)
 
 
 def still_waiting(decision_id: int) -> bool:
