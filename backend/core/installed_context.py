@@ -33,6 +33,9 @@ Claude Code process launch and spawn, and every cold Codex start.
   changed after collection, nothing is written (``reason=boundary-moved``)
   and the next dispatch collects against the new boundary;
 - writing a boundary drops the source bytes from every superseded record.
+  Only boundary records (checkpoint receipts and the first message) ever
+  hold them, so the drop looks those rows up by id and never reads the rest
+  of the thread while it holds the write lock.
 """
 
 from __future__ import annotations
@@ -196,6 +199,26 @@ def _checkpoint_receipt(thread_id: str, db):
     ).fetchone()
 
 
+def _superseded_boundary_ids(thread_id: str, current_id: str, db) -> list[str]:
+    """Every record that can hold sources for this thread except the current one."""
+    ids = [
+        f"checkpoint-receipt:{row['id']}"
+        for row in db.execute("SELECT id FROM checkpoints WHERE thread_id=?", (thread_id,))
+    ]
+    ids.extend(str(row["id"]) for row in (
+        db.execute(
+            "SELECT id FROM messages WHERE thread_id=? AND seq IS NOT NULL "
+            "ORDER BY seq LIMIT 1",
+            (thread_id,),
+        ).fetchone(),
+        db.execute(
+            "SELECT id FROM messages WHERE thread_id=? AND input_order=1",
+            (thread_id,),
+        ).fetchone(),
+    ) if row is not None)
+    return [record_id for record_id in dict.fromkeys(ids) if record_id != current_id]
+
+
 def _boundary_record(thread_id: str, db) -> tuple[str, dict[str, Any], Any] | None:
     row = _checkpoint_receipt(thread_id, db) or _first_message(thread_id, db)
     if row is None:
@@ -284,12 +307,17 @@ def _retain_prepared_installed_delivery(
         (prepared.serialized_metadata, delivery.thread_id, prepared.message_id),
     )
     # Superseded boundaries keep their public map but drop their source bytes.
-    db.execute(
+    db.executemany(
         "UPDATE messages SET metadata=json_remove(metadata, ?) "
-        "WHERE thread_id=? AND id<>? AND instr(metadata, ?) > 0 "
+        "WHERE id=? AND thread_id=? AND instr(metadata, ?) > 0 "
         "AND json_valid(metadata)",
-        (f'$."{INSTALLED_SOURCES}"', delivery.thread_id, prepared.message_id,
-         INSTALLED_SOURCES),
+        [
+            (f'$."{INSTALLED_SOURCES}"', record_id, delivery.thread_id,
+             INSTALLED_SOURCES)
+            for record_id in _superseded_boundary_ids(
+                delivery.thread_id, prepared.message_id, db,
+            )
+        ],
     )
     return "written"
 
