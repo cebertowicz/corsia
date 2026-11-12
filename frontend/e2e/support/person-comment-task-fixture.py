@@ -68,6 +68,22 @@ try:
                 feedback_batches.record_comment(connection, row, created=created,
                                                delivery_policy=feedback_batches.IMMEDIATE)
             person_comment_task.reconcile(connection, artifact_id)
+    elif mode == 'highlights':
+        # Three agent comments tagging the person, each on its own highlight of the document text the spec saves:
+        # a one-word one, a longer one, and one left unread so the count stays on screen after both taps.
+        text = 'Launch plan details for review. The rollout waits on sign-off.'
+        user_id = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0]
+        with write_transaction(db, scope='seed_highlights') as connection:
+            for quote, body in (('details', 'Which details?'), ('The rollout waits on sign-off', 'Who signs off?'),
+                                ('Launch', 'Launch when?')):
+                start = text.index(quote)
+                row, created = comments.create_with_status(
+                    artifact_id, body=body, author='Reviewer', author_kind='agent', author_thread_id=thread_id,
+                    anchor_text=quote, from_off=start, to_off=start + len(quote), tagged_user_id=user_id,
+                    db=connection)
+                feedback_batches.record_comment(connection, row, created=created,
+                                               delivery_policy=feedback_batches.IMMEDIATE)
+            person_comment_task.reconcile(connection, artifact_id)
     elif mode == 'reply':
         # A new agent reply in the person's first thread: the task comes back after the person read or dismissed it.
         root_id = db.execute(

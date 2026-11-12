@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
-import { shoot } from '../support/comment-count-probe';
+import { shoot, useScheme } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
 
@@ -183,4 +183,63 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await expect(ask.locator('.count-text')).toHaveText('1 comment');
 	await expect(plan.getByRole('listitem').filter({ hasText: 'Rollout notes.md' })).toHaveCount(0);
 	await frame('10-open-ask-eligible');
+});
+
+// On a phone a tap on a comment's highlight opens its card in the sheet. That open is a read, as a card press is: the
+// file task's count falls by one for a one-word highlight and for a longer one. The text matches the fixture's 'highlights'.
+test.describe('comment task highlight taps', () => {
+	test.use({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true });
+
+	test('comment task highlight taps at 393px', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Size and touch are set by the spec itself');
+		test.setTimeout(180_000);
+		page.on('request', (r) => { if (r.url().includes('/viewed')) console.log(`TAP request ${r.method()} ${new URL(r.url()).pathname}`); });
+		const workspace = process.env.CORSIA_E2E_WORKSPACE;
+		const state = process.env.CORSIA_E2E_STATE_DIR;
+		const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+		if (!workspace || !state || !python || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires disposable mock environment');
+		const title = `Tap walk ${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const docFolder = path.join(workspace, 'comment-task-tap');
+		mkdirSync(docFolder, { recursive: true });
+		const query = new URLSearchParams({ token: TEST_TOKEN });
+		const saved = await request.put(`/api/files/content?${query}`, { data: { path: path.join(docFolder, 'Tap notes.md'), text: 'Launch plan details for review. The rollout waits on sign-off.', thread_id: threadId, create: true } });
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		const artifactId = (await saved.json()).artifact.id as string;
+		execFileSync(python, ['frontend/e2e/support/person-comment-task-fixture.py', 'highlights', artifactId, threadId], {
+			cwd: repo, encoding: 'utf8', env: { ...process.env, PYTHONPATH: 'backend:backend/tests', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state },
+		});
+
+		await openAppPastLanding(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, title).click();
+		await page.getByRole('button', { name: /^Open plan —/ }).tap();
+		const row = page.getByRole('list', { name: 'Plan steps' }).getByRole('listitem').filter({ hasText: 'Tap notes.md' }).filter({ has: page.locator('.count-text') });
+		await expect(row.locator('.count-text')).toHaveText('3 comments');
+		await row.getByRole('button').first().tap();
+		await page.getByRole('button', { name: 'Done', exact: true }).tap();
+		const bar = page.locator('.review-bar');
+		await expect(bar).toContainText('3 comments to review');
+
+		const sheet = page.locator('.drawer-panel');
+		const light = async (name: string) => {
+			await useScheme(page, 'light');
+			await page.screenshot({ path: testInfo.outputPath(`393-tap-${name}-light.png`) });
+		};
+		for (const [quote, body, after, name] of [['details', 'Which details?', '2 comments', '1-one-word'], ['The rollout waits on sign-off', 'Who signs off?', '1 comment', '2-longer']] as const) {
+			const anchor = page.locator('.cm-comment-anchor').filter({ hasText: quote }).first();
+			await expect(anchor).toBeVisible();
+			await light(`${name}-before`);
+			// The longer highlight wraps onto a second line at this width, so the middle of its whole box can be past its
+			// text: tap the middle of its first line's piece.
+			const box = await anchor.evaluate((el) => { const r = el.getClientRects()[0]; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+			await page.touchscreen.tap(box.x, box.y);
+			await expect(sheet.getByText(body), `the tap on "${quote}" opens its card`).toBeVisible();
+			await expect(bar).toContainText(`${after} to review`);
+			console.log(`TAP "${quote}": bar=${JSON.stringify(await bar.first().innerText())}`);
+			await light(`${name}-after`);
+			await sheet.getByRole('button', { name: /^Close( comments)?$/ }).tap();
+			await expect(sheet).toHaveCount(0);
+		}
+	});
 });
