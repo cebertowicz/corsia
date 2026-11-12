@@ -146,6 +146,7 @@
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
 	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
 	import { openCellState } from '$lib/cm/widget-cell-state';
+	import { cellEditorExtensions } from '$lib/cm/widget-cell-editor';
 
 	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
@@ -201,17 +202,17 @@
 	onMount(() => {
 		activeText = liveText;
 		binding = activeText ? liveDocumentBinding(activeText) : undefined;
+		// The save key is the document's in prose and in an open table cell alike; a cell's edit is in the document as it is typed.
+		const saveKey = keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { onSave?.(); return true; } }]);
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
 			dispatchTransactions: dispatchKeepingPlace,
 			extensions: [
 				documentComp.of(binding?.extensions ?? localHistory),
-				keymap.of([
-					{ key: 'Mod-s', preventDefault: true, run: () => { onSave?.(); return true; } },
-					indentWithTab,
-					...defaultKeymap
-				]),
+				saveKey,
+				cellEditorExtensions.of(saveKey),
+				keymap.of([indentWithTab, ...defaultKeymap]),
 				markdown({ extensions: GFM }),
 				docTheme,
 				docHighlight,

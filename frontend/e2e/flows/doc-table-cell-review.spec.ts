@@ -164,7 +164,7 @@ for (const layout of LAYOUTS) {
 			await frame(page, `f3-padded-typed-${at}`);
 		});
 
-		test('a click on commented words opens the cell with the caret at the click, keeps the card, and typed text lands there', async ({ page }) => {
+		test('a click on commented words opens the cell with the caret at the click (on a phone once its sheet closes), keeps the card, and typed text lands there', async ({ page }) => {
 			test.setTimeout(120_000);
 			const seeded = await openTableDocument(page, layout, { text: DOC, quoted: QUOTED });
 			const target = cell(page, 1, 1);
@@ -175,7 +175,17 @@ for (const layout of LAYOUTS) {
 			await settled(page);
 			await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 			await expect(page.getByText('Which way does it point now?').first(), 'the card is still open').toBeVisible();
+			if (layout.project === 'chromium-mobile') {
+				// On a phone the card is a modal sheet, as over prose: the cell closes under it, and Close opens it again where
+				// the tap left the caret.
+				await expect(editorIn(page), 'the cell closed under the sheet').toHaveCount(0);
+				await frame(page, `f4-sheet-over-cell-${at}`);
+				const drawer = page.locator('[data-adaptive-drawer] .drawer-panel');
+				await drawer.getByRole('button', { name: 'Close', exact: true }).click();
+				await expect(drawer).toHaveCount(0);
+			}
 			await editorInCell(page, target);
+			await expect(cellContent(page), 'the cell holds the focus').toBeFocused();
 			await frame(page, `f4-opened-at-click-${at}`);
 			await page.keyboard.type('Q');
 			await savedContaining(page, seeded, 'points the Qwrong way');
@@ -197,6 +207,13 @@ for (const layout of LAYOUTS) {
 			expect(inside.x >= cellBox.x - 1 && inside.y >= cellBox.y - 1 && inside.x + inside.width <= cellBox.x + cellBox.width + 1 && inside.y + inside.height <= cellBox.y + cellBox.height + 1,
 				`the offer sits inside the empty cell's box (${JSON.stringify({ inside, cellBox })})`).toBe(true);
 			await frame(page, `f5-empty-offer-${at}`);
+			// The offer goes with the first character and comes back while it is still leaving: it is back whole, where it was.
+			await page.keyboard.type('x');
+			await page.keyboard.press('Backspace');
+			await expect(offer).toBeVisible();
+			const back = await boxOf(offer);
+			expect(await offer.evaluate((el) => getComputedStyle(el).opacity), 'the offer is drawn, not left faded out').toBe('1');
+			expect(Math.abs(back.y - inside.y) < 0.5 && Math.abs(back.x - inside.x) < 0.5, `in the same place (${JSON.stringify({ inside, back })})`).toBe(true);
 			await page.keyboard.press('Escape');
 
 			const plain = cell(page, 4, 1);
