@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { GAP, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
@@ -31,15 +31,19 @@
 			const el = selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null;
 			if (!el || !(performance.now() < revealUntil || el.contains(document.activeElement))) return;
 			const shift = revealShift(el.getBoundingClientRect(), source.view?.() ?? scroller.getBoundingClientRect());
-			if (shift) scroller.scrollBy?.({ top: shift, behavior: get(prefersReducedMotion) ? 'auto' : 'smooth' });
+			if (shift) scroller.scrollBy?.({ top: shift, behavior: el.contains(document.activeElement) || get(prefersReducedMotion) ? 'auto' : 'smooth' });
 		};
 		let frame = 0;
 		const read = () => {
+			// Fit the reply inside the same view and bottom gap used by reveal, including any floating chrome.
+			const view = source.view?.();
+			const room = `${(view ? view.bottom - view.top : scroller.clientHeight) - GAP}px`;
 			const columnTop = column.getBoundingClientRect().top;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {
 				const at = id === writing?.id ? writing.anchor()?.top : source.anchor(id)?.getBoundingClientRect().top;
 				const card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
+				card?.style.setProperty('--autosize-room', room);
 				if (at !== undefined && card) {
 					items.push({ id, y: Math.max(0, at - columnTop), h: card.offsetHeight });
 				} else if (card) loose.push({ id, y: 0, h: card.offsetHeight });
@@ -75,7 +79,7 @@
 	});
 </script>
 
-<div class="margin-stack" bind:this={stackEl}>{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
+<div class="margin-stack" bind:this={stackEl}>{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} data-autosize-room style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} data-autosize-room style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
 
 <style>
 	/* The cards take the Frosted card role through these tokens, which the thread card reads; their corners are the comment popover's. A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */

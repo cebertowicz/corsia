@@ -291,8 +291,9 @@ jobs:
 
       - name: Upload backend timing report
         if: always()
-        # Diagnostics only: a failed upload must not turn a passing job red.
+        # Diagnostics only: a failed or stalled upload must not turn a passing job red.
         continue-on-error: true
+        timeout-minutes: 2
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-report-${{ github.run_id }}

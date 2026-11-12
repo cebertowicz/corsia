@@ -38,6 +38,8 @@ beforeEach(() => {
 	Range.prototype.getClientRects = vi.fn(() => [] as unknown as DOMRectList);
 	Range.prototype.getBoundingClientRect = vi.fn(() => new DOMRect());
 	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue(null);
+	// No layout here: a press lands where the test put the caret, as the browser does under the pointer.
+	vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: EditorView) { return this.state.selection.main.head; });
 	vi.spyOn(toasts, 'show').mockReturnValue('refusal');
 	vi.spyOn(console, 'error').mockImplementation(() => {});
 	connectionState.set('connected'); stop = startLiveDocuments();

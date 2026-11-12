@@ -20,6 +20,16 @@
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
+	function threadBounds(): DOMRect | null {
+		const root = messageRoot();
+		if (!root) return null;
+		const box = root.getBoundingClientRect();
+		const header = document.querySelector('.shell-header')?.getBoundingClientRect();
+		const composer = root.closest('.chat-content')?.querySelector('.input-floater')?.getBoundingClientRect();
+		const top = Math.max(box.top, header?.bottom ?? box.top);
+		const bottom = Math.min(box.bottom, composer?.top ?? box.bottom);
+		return new DOMRect(box.left, top, box.width, Math.max(0, bottom - top));
+	}
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
@@ -357,11 +367,11 @@
 {/if}
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
-		<Popover anchor={threadAnchor} bounds={messageRoot()} placement="bottom" open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
+		<Popover anchor={threadAnchor} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
 			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
 		</Popover>
 	{/if}
@@ -375,15 +385,19 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}
-			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
-				<div role="dialog" aria-label={heading}>
+			<Popover fill {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
+				<div class="comment-dialog" role="dialog" aria-label={heading}>
 					{@render composerBody()}
 				</div>
 			</Popover>
 		{/if}
 	{/key}
 {/if}
+
+<style>
+	.comment-dialog { display: flex; flex-direction: column; min-height: 0; }
+</style>

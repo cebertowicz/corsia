@@ -15,6 +15,7 @@ it('keeps its opening side while it grows, then chooses again for a new anchor o
 	try {
 		const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
 		await vi.waitFor(() => expect(surface().style.top).toBe('428px'));
+		expect(surface().style.maxHeight).toContain(`${window.innerHeight - 428 - 8}px`);
 		height = 350; window.dispatchEvent(new Event(ANCHOR_MOVED)); flushSync();
 		expect(surface().style.top).toBe(`${window.innerHeight - height - 8}px`);
 		flushSync(() => fixture.setKey('second'));
@@ -103,4 +104,27 @@ it('clamps into the screen when its own content grows, with no other signal', as
 		height = window.innerHeight - 20; grown.forEach((fire) => fire()); flushSync();
 		expect(surface().style.top).toBe(`${window.innerHeight - height - 8}px`);
 	} finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); observer.mockRestore(); }
+});
+
+it('repositions and limits the card when the visual viewport changes', async () => {
+ const viewport = Object.assign(new EventTarget(), { offsetTop: 0, height: 700 });
+ const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+ Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+ const host = document.createElement('div'); document.body.appendChild(host);
+ const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+ const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
+ const fixture = mount(Fixture, { target: host }); flushSync();
+ try {
+  const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
+  await vi.waitFor(() => expect(surface().style.top).toBe('428px'));
+  expect(surface().style.maxHeight).toContain('264px');
+  viewport.height = 400; viewport.offsetTop = 100;
+  viewport.dispatchEvent(new Event('scroll')); flushSync();
+  expect(surface().style.top).toBe('392px');
+  expect(surface().style.maxHeight).toContain('100px');
+ } finally {
+  await unmount(fixture); host.remove(); width.mockRestore(); tall.mockRestore();
+  if (original) Object.defineProperty(window, 'visualViewport', original);
+  else Reflect.deleteProperty(window, 'visualViewport');
+ }
 });
