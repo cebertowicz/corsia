@@ -387,7 +387,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its threads, then any unsent messages: "2 threads, 2 messages not sent yet".
+	// The pill names its threads first ("2 threads, …"); openComments checks that name, then opens the comments.
 	await openComments(page, /^2 threads\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
