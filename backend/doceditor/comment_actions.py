@@ -281,7 +281,7 @@ async def _decide_suggestion(
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
             if decision == "accept" and comment.get("insert_after"):
                 comment["_accepted_insertions"] = store.accepted_insertions(
-                    comment["artifact_id"], comment["anchor_text"], db=db)
+                    comment["artifact_id"], [comment["anchor_text"]], db=db)[comment["anchor_text"]]
             return comment, artifact, owner[1] if owner else None
         finally:
             db.close()

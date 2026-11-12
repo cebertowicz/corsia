@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UnseenDocActivity, bottomNoticesHeight, watchCanvasAndBand, type ActivityPosition } from './docCanvasActivity';
+import { describe, expect, it } from 'vitest';
+import { UnseenDocActivity, type ActivityPosition } from './docCanvasActivity';
 import type { DocActivityFrame } from './docPresence';
 
 const frame = (id: string, from = 100): DocActivityFrame => ({
@@ -48,72 +48,5 @@ describe('unseen document arrivals', () => {
 		expect(unseen.pill(position)?.span.from).toBe(120);
 		unseen.clear();
 		expect(unseen.pill(position)).toBeNull();
-	});
-});
-
-describe('bottomNoticesHeight', () => {
-	const clip = new DOMRect(0, 0, 393, 700);
-	const band = (height: number) => new DOMRect(0, 700 - height, 393, height);
-
-	it('is nothing with no notice showing', () => {
-		expect(bottomNoticesHeight(clip, undefined, null)).toBe(0);
-	});
-
-	it('follows the band as it grows from one notice to a stack, so a stacked band is covered as fully as a single one', () => {
-		expect(bottomNoticesHeight(clip, band(70), null)).toBe(70);
-		expect(bottomNoticesHeight(clip, band(122), null)).toBe(122);
-	});
-
-	it('reaches the top of a below pill standing over the band, or alone at the foot', () => {
-		expect(bottomNoticesHeight(clip, band(70), 700 - 70 - 48)).toBe(118);
-		expect(bottomNoticesHeight(clip, undefined, 700 - 48)).toBe(48);
-	});
-});
-
-describe('watchCanvasAndBand', () => {
-	afterEach(() => vi.unstubAllGlobals());
-
-	it('watches the size of a bottom band that appears later, so the pill moves when the band grows in place', async () => {
-		const observed: Element[] = [];
-		vi.stubGlobal('ResizeObserver', class { observe(node: Element) { observed.push(node); } disconnect() {} });
-		const root = document.createElement('div');
-		const changed = vi.fn();
-		const stop = watchCanvasAndBand(root, changed);
-		expect(observed).toEqual([root]);
-		const band = root.appendChild(document.createElement('div'));
-		band.setAttribute('data-doc-bottom-band', '');
-		await Promise.resolve();
-		expect(observed).toEqual([root, band]);
-		expect(changed).toHaveBeenCalledTimes(2);
-		stop();
-		root.removeChild(band);
-		await Promise.resolve();
-		expect(changed).toHaveBeenCalledTimes(2);
-	});
-
-	it('stops watching a band once it is removed, and watches the one that replaces it', async () => {
-		const observed = new Set<Element>();
-		vi.stubGlobal('ResizeObserver', class {
-			observe(node: Element) { observed.add(node); }
-			unobserve(node: Element) { observed.delete(node); }
-			disconnect() { observed.clear(); }
-		});
-		const root = document.createElement('div');
-		const addBand = () => {
-			const band = document.createElement('div');
-			band.setAttribute('data-doc-bottom-band', '');
-			return root.appendChild(band);
-		};
-		const stop = watchCanvasAndBand(root, vi.fn());
-		const first = addBand();
-		await Promise.resolve();
-		expect([...observed]).toEqual([root, first]);
-		root.removeChild(first);
-		await Promise.resolve();
-		expect([...observed]).toEqual([root]);
-		const second = addBand();
-		await Promise.resolve();
-		expect([...observed]).toEqual([root, second]);
-		stop();
 	});
 });

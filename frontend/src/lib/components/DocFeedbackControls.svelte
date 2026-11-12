@@ -19,6 +19,8 @@
 	// A narrow bar confirms only its own lane's send; the document header confirms any send of the document it shows, since the
 	// document's canvas carries no delivery notice of its own.
 	const sentHere = $derived(lane !== null && feedback.sent > 0 && (feedback.sentLane === lane || !compact));
+	// The slot says Sent once its own lane has gone, or for a moment after the other lane went while this one still holds: then its Send returns.
+	const saysSent = $derived(held === 0 || (sentHere && feedback.sentLane !== lane));
 	let sender = $state<HTMLSpanElement>(), notSent = $state<HTMLSpanElement>();
 
 	async function send() {
@@ -40,7 +42,7 @@
      for a moment first. Leaving, the slot keeps what it last showed; a send not delivered swaps it for Retry at once. -->
 {#if lane && (held > 0 || sentHere)}
 	<span bind:this={sender} class="sending-now" class:compact in:inlineSlot out:inlineSlot={{ instant: feedback.handedToRetry }}>
-		{#if held === 0}
+		{#if saysSent}
 			<span class="sent">
 				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
 				Sent

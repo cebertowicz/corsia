@@ -132,9 +132,22 @@ export const docTheme = EditorView.theme({
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
-// A line the editor scrolls into view stops above whatever floats over the text's foot. The scroller's CSS
-// scroll-padding-bottom (set by the document canvas, 0 elsewhere) is the one value, so native and CodeMirror scrolls agree.
-export const docScrollMargin = EditorView.scrollMargins.of((view) => ({ bottom: parseFloat(getComputedStyle(view.scrollDOM).scrollPaddingBottom) || 0 }));
+/** One bottom notice's row over a document's foot: a touch target and a 4px gap (DocViewer.css draws the same row). */
+export const NOTICE_ROW = 48;
+const NOTICE_AIR = 12;
+
+/** How far above the foot a line brought into view stops while `rows` notices show there; nothing while none does. */
+export function noticeRoom(rows: number): number {
+	return rows > 0 ? rows * NOTICE_ROW + NOTICE_AIR : 0;
+}
+
+// A line the editor scrolls into view stops above the notices floating over a document's foot, read from the same flags the
+// canvas's scroll-padding rules read (DocViewer.css), so native and CodeMirror scrolls agree. Outside a document canvas, nothing.
+export const docScrollMargin = EditorView.scrollMargins.of((view) => {
+	const canvas = view.dom.closest<HTMLElement>('.doc');
+	if (!canvas) return null;
+	return { bottom: noticeRoom(Number(canvas.hasAttribute('data-notice-jump')) + Number(canvas.hasAttribute('data-notice-below'))) };
+});
 
 export const docHighlight = syntaxHighlighting(
 	HighlightStyle.define([

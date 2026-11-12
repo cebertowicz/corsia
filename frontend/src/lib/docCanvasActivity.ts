@@ -51,34 +51,3 @@ export function locateDocumentActivity(view: EditorView, clip: DOMRect, from: nu
 	if (spanTop >= bottom) return { direction: 'below', distance: spanTop - bottom };
 	return { direction: 'visible', distance: 0 };
 }
-
-/**
- * How far up from the text's foot the bottom notices reach: the band's notices, and a below pill standing over them. A line
- * brought into view stops above this height, so one measure covers a single notice and notices stacked alike.
- */
-export function bottomNoticesHeight(clip: DOMRect, band: DOMRect | undefined, pillTop: number | null): number {
-	return Math.max(0, clip.bottom - Math.min(band?.top ?? clip.bottom, pillTop ?? clip.bottom));
-}
-
-/**
- * Calls `changed` whenever the canvas or its bottom band changes size, so a below pill stays above the band's notices: the band
- * comes and goes without resizing the canvas, and grows in place when a notice or the jump control joins it. Returns the stop.
- */
-export function watchCanvasAndBand(root: HTMLElement, changed: () => void): () => void {
-	const resize = new ResizeObserver(changed);
-	resize.observe(root);
-	let band: Element | null = null;
-	const watchBand = () => {
-		const now = root.querySelector(':scope > [data-doc-bottom-band]');
-		if (now !== band) {
-			if (band) resize.unobserve(band);
-			if (now) resize.observe(now);
-			band = now;
-		}
-		changed();
-	};
-	const children = new MutationObserver(watchBand);
-	children.observe(root, { childList: true });
-	watchBand();
-	return () => { resize.disconnect(); children.disconnect(); };
-}

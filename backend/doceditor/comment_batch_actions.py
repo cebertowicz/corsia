@@ -72,23 +72,32 @@ def _still_open_with_siblings(artifact_id: str, rows: list[dict]) -> list[dict]:
     """Re-read the chosen rows under the accept lock: drop any decided meanwhile, attach accepted siblings."""
     db = get_db()
     try:
-        all_rows = store.list_for_artifact(artifact_id, db=db)
+        return _reread_open(db, artifact_id, rows)
     finally:
         db.close()
-    current = {row["id"]: row for row in all_rows}
-    fresh = [current[row["id"]] for row in rows if row["id"] in current and is_pending_suggestion(current[row["id"]])]
-    _attach_accepted_insertions(fresh, all_rows)
+
+
+def _reread_open(db, artifact_id: str, rows: list[dict]) -> list[dict]:
+    """Read only the chosen rows, then every insertion quote's accepted siblings in one query, never the whole document.
+
+    Two queries whatever the batch; each binds one parameter per id or quote, within SQLite's 32,766.
+    """
+    if not rows:
+        return []
+    ids = [row["id"] for row in rows]
+    marks = ",".join("?" * len(ids))
+    current = {
+        found["id"]: dict(found) for found in db.execute(
+            f"SELECT * FROM doc_comments WHERE artifact_id=? AND id IN ({marks})", (artifact_id, *ids),
+        ).fetchall()
+    }
+    fresh = [{**row, **current[row["id"]]} for row in rows if row["id"] in current]
+    fresh = [row for row in fresh if is_pending_suggestion(row)]
+    insertions = [row for row in fresh if row.get("insert_after")]
+    siblings = store.accepted_insertions(artifact_id, list(dict.fromkeys(row["anchor_text"] for row in insertions)), db=db)
+    for row in insertions:
+        row["_accepted_insertions"] = siblings[row["anchor_text"]]
     return fresh
-
-
-def _attach_accepted_insertions(rows: list[dict], all_rows: list[dict]) -> None:
-    siblings: dict[tuple, list[dict]] = {}
-    for row in all_rows:
-        if store.is_accepted_insertion(row):
-            siblings.setdefault((row["artifact_id"], row["anchor_text"]), []).append(row)
-    for row in rows:
-        if row.get("insert_after"):
-            row["_accepted_insertions"] = siblings.get((row["artifact_id"], row["anchor_text"]), [])
 
 
 def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:

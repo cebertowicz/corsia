@@ -6,7 +6,7 @@ import pytest
 
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import applied_text, suggestion_span
-from doceditor.comment_batch_actions import _attach_accepted_insertions, _batch_text
+from doceditor.comment_batch_actions import _batch_text, _reread_open
 from doceditor.comment_validation import validate_create
 from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
 
@@ -60,10 +60,16 @@ def test_single_insert_skips_accepted_older_sibling():
 
 
 def test_open_older_sibling_does_not_split_an_accepted_one_it_prefixes():
-    open_t = {**row("a", " t", "1"), "artifact_id": "doc", "decision": None}
-    accepted = {**row("b", " two", "2"), "artifact_id": "doc", "decision": "accepted"}
-    third = {**row("c", " three", "3"), "artifact_id": "doc"}
-    _attach_accepted_insertions([third], [open_t, accepted, third])
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    columns = ("id", "artifact_id", "parent_id", "anchor_text", "from_off", "to_off", "anchor_prefix", "anchor_suffix",
+               "replacement", "insert_after", "created_at", "decision", "resolved", "review")
+    db.execute(f"CREATE TABLE doc_comments ({', '.join(columns)})")
+    for identifier, text, created, decision in (("a", " t", "1", None), ("b", " two", "2", "accepted"), ("c", " three", "3", None)):
+        db.execute(f"INSERT INTO doc_comments VALUES ({','.join('?' * len(columns))})",
+                   (identifier, "doc", None, "Heading", 0, 7, "", "\n", text, 1, created, decision, 0, 0))
+    (third,) = _reread_open(db, "doc", [{"id": "c"}])
+    assert [sibling["id"] for sibling in third["_accepted_insertions"]] == ["b"]
     assert applied_text(third, "Heading two\n") == "Heading two three\n"
 
 

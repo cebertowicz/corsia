@@ -30,6 +30,13 @@
 	const hasToast = $derived(confirmsDelivery && !!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
 	// The name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
 	const label = $derived(`${jump().count} new, next ${jump().direction}: ${jump().target?.label ?? ''}`);
+	// The jump control stands over a document's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).
+	$effect(() => {
+		const canvas = root;
+		if (!canvas || !hasJump) return;
+		canvas.setAttribute('data-notice-jump', '');
+		return () => canvas.removeAttribute('data-notice-jump');
+	});
 </script>
 
 {#if hasJump || hasToast}

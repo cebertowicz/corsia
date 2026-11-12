@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
-import { docTheme } from './theme';
+import { NOTICE_ROW, docScrollMargin, docTheme, noticeRoom } from './theme';
 
 function mountedCss(): string {
 	const sheets = [...document.styleSheets, ...(document.adoptedStyleSheets ?? [])];
@@ -27,5 +27,27 @@ describe('document editor theme', () => {
 		expect(css).toMatch(/::selection ?\{ ?background-color: var\(--accent-selection\)/);
 		expect(css).not.toMatch(/::selection ?\{[^}]*color-mix/);
 		expect(css).toMatch(/\.cm-selectionMatch ?\{ ?background-color: var\(--accent-wash\)/);
+	});
+
+	it('stops a scrolled-to line above the notices a document canvas says are showing, a row each, and nowhere else', () => {
+		const canvas = document.createElement('div');
+		canvas.className = 'doc';
+		document.body.appendChild(canvas);
+		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docScrollMargin] }), parent: canvas });
+		const bottom = () => view.state.facet(EditorView.scrollMargins).map((margin) => margin(view)?.bottom ?? 0).reduce((a, b) => a + b, 0);
+		expect(bottom()).toBe(0);
+		canvas.setAttribute('data-notice-jump', '');
+		expect(bottom()).toBe(noticeRoom(1));
+		canvas.setAttribute('data-notice-below', '');
+		expect(bottom()).toBe(noticeRoom(2));
+		expect(noticeRoom(2) - noticeRoom(1)).toBe(NOTICE_ROW);
+		canvas.removeAttribute('data-notice-jump');
+		canvas.removeAttribute('data-notice-below');
+		expect(bottom()).toBe(0);
+		view.destroy();
+		canvas.remove();
+		const bare = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docScrollMargin] }), parent: document.body });
+		expect(bare.state.facet(EditorView.scrollMargins).map((margin) => margin(bare))).toEqual([null]);
+		bare.destroy();
 	});
 });

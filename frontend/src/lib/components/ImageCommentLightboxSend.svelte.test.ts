@@ -156,7 +156,8 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(feedback.documentHeld).toBe(0);
 		expect(sendIn(doc.target)).toBeNull();
 	});
-	for (const syncFirst of [true, false]) it(`keeps the reopened document header actionable when its sync lands ${syncFirst ? 'before' : 'after'} an image send result`, async () => {
+	for (const syncFirst of [true, false]) it(`says Sent in the reopened document header after an image send, then keeps its Send actionable, when its sync lands ${syncFirst ? 'before' : 'after'} the result`, async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		const refresh = vi.fn();
 		const doc = documentStatus('document-held', refresh);
 		const feedback = doc.component.controller();
@@ -175,6 +176,13 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		flushSync();
 		expect(feedback.documentHeld).toBe(1);
 		expect(feedback.imageHeld).toBe(0);
+		// The document has no canvas notice: its header says the image's comments went, in Send's slot, for a moment.
+		expect(doc.target.querySelector('.sent')?.textContent?.trim()).toBe('Sent');
+		expect(sendIn(doc.target)).toBeNull();
+		vi.advanceTimersByTime(SENT_HOLD_MS);
+		flushSync();
+		vi.useRealTimers();
+		expect(doc.target.querySelector('.sent')).toBeNull();
 		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment');
 		expect(sendIn(doc.target)!.disabled).toBe(false);
 		expect(refresh).toHaveBeenCalledOnce();
@@ -386,7 +394,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
 		// The image viewer's list opens on All, so its pill counts the resolved thread too.
-		expect(pill.getAttribute('aria-label')).toBe('2 comments, 3 changes waiting for Send');
+		expect(pill.getAttribute('aria-label')).toBe('2 comments, 3 waiting for Send');
 		expect(pill.querySelector('.count-unit')!.textContent).toBe('comments');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 	});
@@ -400,7 +408,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
-		expect(pill.getAttribute('aria-label')).toBe('3 comments, 2 changes waiting for Send');
+		expect(pill.getAttribute('aria-label')).toBe('3 comments, 2 waiting for Send');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		doc.component.sync('art-doc', pending(0));
 		flushSync();

@@ -4,7 +4,7 @@
 	import { Button } from './ui';
 	import { displayedDocument } from '$lib/ws/presence';
 	import { isViewing, onRecordedDocActivity, type DocActivityFrame, type DocSpan } from '$lib/docPresence';
-	import { UnseenDocActivity, bottomNoticesHeight, locateDocumentActivity, watchCanvasAndBand, type ActivityPill } from '$lib/docCanvasActivity';
+	import { UnseenDocActivity, locateDocumentActivity, type ActivityPill } from '$lib/docCanvasActivity';
 
 	let { root, artifactId, threadId, onJump }: {
 		root?: HTMLElement; artifactId: string | null; threadId: string | null;
@@ -29,22 +29,15 @@
 	}
 	function measure() {
 		pendingMeasure = null;
-		if (viewing) {
-			unseen.seen(locate);
-			pill = unseen.pill(locate);
-		} else { unseen.clear(); eligible.clear(); pill = null; }
+		if (!viewing) { unseen.clear(); eligible.clear(); pill = null; return; }
+		unseen.seen(locate);
+		pill = unseen.pill(locate);
 		const clip = root?.querySelector('.doc-main')?.getBoundingClientRect();
-		if (!clip || !root) return;
-		// Both float over the text's foot: a below pill sits above the bottom band's notices rather than on them.
-		const band = root.querySelector(':scope > [data-doc-bottom-band]')?.getBoundingClientRect();
-		const below = Math.min(clip.bottom, band?.top ?? clip.bottom) - 48;
-		if (pill) {
+		if (clip && root && pill) {
 			const box = root.getBoundingClientRect();
-			top = (pill.direction === 'above' ? clip.top + 4 : below) - box.top;
+			top = (pill.direction === 'above' ? clip.top + 4 : clip.bottom - 48) - box.top;
 			right = box.right - clip.right + 8;
 		}
-		// What this places is what a line brought into view must clear (DocViewer.css `--doc-bottom-float`).
-		root.style.setProperty('--doc-bottom-notices', `${bottomNoticesHeight(clip, band, pill?.direction === 'below' ? below : null)}px`);
 	}
 	function schedule() {
 		if (pendingMeasure !== null) return;
@@ -65,6 +58,13 @@
 		artifactId; threadId;
 		unseen.clear(); eligible.clear(); pill = null;
 	});
+	// A below pill stands over the text's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).
+	$effect(() => {
+		const canvas = root;
+		if (!canvas || !viewing || pill?.direction !== 'below') return;
+		canvas.setAttribute('data-notice-below', '');
+		return () => canvas.removeAttribute('data-notice-below');
+	});
 	$effect(() => {
 		viewing;
 		if (!viewing) { unseen.clear(); eligible.clear(); pill = null; }
@@ -78,13 +78,14 @@
 			eligible.add(identity(frame));
 			if (frame.kind === 'read') void arrive(frame);
 		});
-		const stopWatching = watchCanvasAndBand(element, schedule);
+		const resize = new ResizeObserver(schedule);
+		resize.observe(element);
 		const updateVisibility = () => { visibility = document.visibilityState; };
 		updateVisibility();
 		document.addEventListener('visibilitychange', updateVisibility);
 		element.addEventListener('scroll', schedule, true);
 		return () => {
-			recorded(); stopWatching();
+			recorded(); resize.disconnect();
 			document.removeEventListener('visibilitychange', updateVisibility);
 			element.removeEventListener('scroll', schedule, true);
 			if (pendingMeasure !== null) cancelAnimationFrame(pendingMeasure);

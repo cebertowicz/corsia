@@ -290,7 +290,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		const watch = await watchSenders(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		// The document still holds its own two, so its Send stays; the header's status says what the image sent.
+		// The header says Sent where its Send stands, for a moment, and its status says what the image sent; the document still
+		// holds its own two, so its Send then returns.
+		await expect(headerSent(page)).toHaveText('Sent');
 		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page)).toHaveText('Send 2 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
@@ -394,10 +396,12 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await captureFrame(page, 'image-bar-send-3', '393');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
+		await expect(headerSent(page), 'the header says the image\'s comments went, for a moment').toHaveText('Sent');
+		// The status says so for the same moment, so it is read before the document's own Send returns in Sent's place.
+		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page)).toHaveText('Send 2 comments');
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		expect(deliveredBatches(seeded.artifactId, 'image-held')).toBe(1);
-		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(sentToast(page, '3 comments sent')).toHaveCount(0);
 		await captureFrame(page, 'post-image-close', '393');
 	});
