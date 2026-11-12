@@ -28,10 +28,10 @@ export function createCommentOpeners(ui: ReturnType<typeof createCommentSurfaceS
 			if (!ui.focusComment(id, point ?? anchor, viaSuggestion, !!point)) return;
 			if (point) scroll.stay(id); else scroll.toComment(id, false, 'navigation');
 		},
-		markers(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) {
+		markers(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent, fromText = false) {
 			const point = clicked(click, reading ?? (() => (opener.isConnected ? opener.getBoundingClientRect() : null)));
 			if (point) scroll.stay(ids[0]); else if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation');
-			ui.focusMarker(ids, opener, point ?? reading, !!point);
+			ui.focusMarker(ids, opener, point ?? reading, !!point, fromText);
 		},
 	};
 }
