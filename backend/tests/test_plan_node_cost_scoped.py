@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from plans import mutations, node_cost, node_cost_scoped, service
 from tests.test_plan_node_time_rollup import (  # noqa: F401  (db is the fixture)
     T0, _phase, _task, _turn, _watch, db,
@@ -131,6 +133,64 @@ def test_working_seconds_equals_the_scoped_rolled_execution_seconds_per_node(db)
     assert lean[idle.id] == 10 * 60  # the running Turn, 100 to 110 min; the unknown Turn adds none
     assert lean[delegate.id] == 30 * 60  # union of 10-30 and 20-40 in the child plan
     assert lean[phase.id] == 20 * 60 + 30 * 60 + 10 * 60  # 70-90 merged, the child's 30, the running 10
+
+
+def test_working_seconds_rolls_a_nested_delegation_and_matches_the_full_plan_per_node(db):
+    """Two plans deep, siblings and a repeated Turn: each wanted node's seconds are the concrete union below.
+
+    The roll that skips the totals must carry a grandchild plan's span through the child plan's
+    delegating step, merge overlapping siblings once, and equal ``project_many``'s rolled figure.
+    """
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _phase(db, plan.id)
+    sibling = _task(db, plan.id, "Sibling", parent_id=phase.id)
+    first = _task(db, plan.id, "Delegate one", parent_id=phase.id, spawn_kind="claude-code")
+    service.transition_node(first.id, "active", db=db)
+    service.ensure_plan("thread", "child", db=db)
+    mutations.attach_spawned_thread(first.id, "child", db=db)
+    child = db.execute("SELECT * FROM plans WHERE owner_kind='thread' AND owner_id='child'").fetchone()
+    inner = _phase(db, child["id"], "Inner")
+    deeper = _task(db, child["id"], "Deeper delegate", parent_id=inner.id, spawn_kind="claude-code")
+    service.transition_node(deeper.id, "active", db=db)
+    db.execute(
+        "INSERT INTO threads (id,user_id,project_id,spawned_by,model,created_at,updated_at) "
+        "VALUES ('grandchild','user-1','project-1','child','test/model','t','t')"
+    )
+    service.ensure_plan("thread", "grandchild", db=db)
+    mutations.attach_spawned_thread(deeper.id, "grandchild", db=db)
+    grand = db.execute("SELECT * FROM plans WHERE owner_kind='thread' AND owner_id='grandchild'").fetchone()
+    leaf = _task(db, grand["id"], "Leaf")
+    _turn(db, leaf, 0, 20, thread_id="grandchild")  # 20 min, two plans below the step
+    _turn(db, leaf, 10, 30, thread_id="grandchild")  # overlaps it: the leaf's union is 0-30
+    _turn(db, inner, 25, 50, thread_id="child")  # 25 min, overlaps the leaf's last 5
+    _turn(db, sibling, 100, 110)  # 10 min, apart from the rest
+    _turn(db, sibling, 100, 105)  # inside the first
+    db.commit()
+
+    now = T0 + timedelta(minutes=200)
+    nodes = [phase.id, sibling.id, first.id]
+    lean = node_cost_scoped.working_seconds(nodes, db=db, now=now)
+    full = node_cost.project_many([plan.id], db=db, now=now)[plan.id]
+    assert lean[first.id] == 50 * 60  # 0-30 from the grandchild, merged with 25-50 in the child plan
+    assert lean[sibling.id] == 10 * 60
+    assert lean[phase.id] == (50 + 10) * 60
+    for node_id in nodes:
+        assert lean[node_id] == full[node_id]["rolled"]["execution"]["seconds"], node_id
+
+
+def test_own_many_timed_no_longer_takes_working_only(db):
+    """The working-only read is its own private function, not a mode of the public one."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id, "Only")
+    _turn(db, node, 0, 10)
+    db.commit()
+    now = T0 + timedelta(minutes=60)
+    with pytest.raises(TypeError):
+        node_cost.own_many_timed([node.id], db=db, working_only=True)
+    spans = node_cost._own_many_working_timed([node.id], db=db, now=now)
+    own, full_spans = node_cost.own_many_timed([node.id], db=db, now=now)
+    assert spans == {node.id: {"working": full_spans[node.id]["working"], "waiting": []}}
+    assert own[node.id]["execution"]["seconds"] == 10 * 60
 
 
 def test_a_scoped_initiative_with_a_same_plan_split_sibling_equals_the_full_plan_figure(db):
