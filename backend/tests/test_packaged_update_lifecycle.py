@@ -641,3 +641,51 @@ async def test_update_verifies_the_build_staging_installed(
     assert row["failure_code"] is None
     if restart._RESUME_TASKS:
         await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
+async def test_update_keeps_the_probed_target_when_nothing_is_staged(
+    isolated_db, monkeypatch, tmp_path
+):
+    """With no staged bundle to read, the acquired stamp stands and Update proceeds.
+
+    Staging already refuses a bundle whose `CORSIAVersion` it cannot parse
+    (`ensure_staged_bundle_version`, desktop/src-tauri/src/update_stage.rs), so the
+    read that names nothing only happens when the bundle is not there. Post-swap
+    verification decides that update's outcome, as it does on every source checkout.
+    """
+    import shutil
+    from unittest.mock import MagicMock
+
+    from api import settings_restart
+    from infra import update_status
+    from infra.config import LOGS_DIR
+
+    bundle = _packaged_install(tmp_path, monkeypatch, staged_version="0.4.2-dev.1312")
+    shutil.rmtree(bundle.with_name("CORSIA.app.staged"))
+    monkeypatch.setattr(
+        update_status, "update_status", lambda force=False: update_status.UpdateStatus(
+            branch=None, current_sha=None, remote_sha=None, commits_behind=None,
+            available=True, checked_at=0.0, error=None, current_version="0.4.1",
+            target_version="0.4.2-dev.1311", changes=None,
+        )
+    )
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_current_release", lambda *_args: None)
+    monkeypatch.setattr(
+        settings_restart, "spawn_restart_lifecycle", MagicMock(return_value=object())
+    )
+    stamped: list[str | None] = []
+
+    async def drain(operation_id: str, _mode: str) -> None:
+        stamped.append(self_restart.operation_by_id(operation_id)["target_version"])
+
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    operation_id, _process = await settings_restart.prelaunch_settings_restart(
+        {"id": "steve"}, "update", tmp_path / "corsia", {"CORSIA_RESTART_BACKEND_PORT": "1957"},
+        ["restart"], lambda name: tmp_path / name, caller_token="[REDACTED]",
+    )
+
+    assert stamped == ["0.4.2-dev.1311"]
+    assert self_restart.operation_by_id(operation_id)["target_version"] == "0.4.2-dev.1311"
