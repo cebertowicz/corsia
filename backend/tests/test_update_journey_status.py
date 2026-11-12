@@ -202,10 +202,12 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
 
     monkeypatch.setattr(update_status, "update_status", lambda refresh: Status())
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
+    monkeypatch.setattr("infra.build_info._RUNNING_APP_VERSION", "0.4.3-dev.1288")
     monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "17")
 
     result = asyncio.run(system_update_status(user={}))
 
+    assert result["running_version"] == "0.4.3-dev.1288"
     assert result["drain_cap_seconds"] == 17
     assert result["usual_seconds"] is None
     assert result["agents_working"] == 3

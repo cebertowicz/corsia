@@ -79,6 +79,31 @@ async def test_version_reports_unavailable_head_outside_a_repository(tmp_path, m
     assert result["backend"]["current_head"] == _UNAVAILABLE_HEAD
 
 
+def test_running_app_version_stays_at_the_start_value_when_the_bundle_on_disk_changes(tmp_path, monkeypatch):
+    """An update swaps the bundle before the restart, so the disk is not what is running."""
+    import json
+
+    from infra import build_info
+
+    stamp = tmp_path / "build-info.json"
+    stamp.write_text(json.dumps({"app": {"version": "0.4.3-dev.1288"}}))
+    monkeypatch.setattr(build_info, "FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: tmp_path / "CORSIA.app")
+    # What the module does once at import.
+    monkeypatch.setattr(build_info, "_RUNNING_APP_VERSION", build_info.app_version())
+
+    stamp.write_text(json.dumps({"app": {"version": "0.4.3-dev.1311"}}))
+    monkeypatch.setattr(build_info, "app_version", lambda *_a: pytest.fail("the running version was re-read from disk"))
+
+    assert build_info.running_app_version() == "0.4.3-dev.1288"
+
+
+def test_running_app_version_is_the_one_value_read_at_import():
+    from infra import build_info
+
+    assert build_info.running_app_version() == build_info._RUNNING_APP_VERSION
+
+
 @pytest.mark.asyncio
 async def test_app_bundle_reports_bundled_build_identity_and_service_generation(
     tmp_path, monkeypatch

@@ -204,10 +204,13 @@
 					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
 				{/if}
 			</div>
-			<div class="percent" data-state={view.mode} aria-hidden="true">{wholePercent}%</div>
-			<div class="bar" role="progressbar" aria-label={view.mode === 'failed' && view.failure ? view.failure.title : view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={wholePercent}>
-				<i style:width={`${shown}%`}></i>
-			</div>
+			<!-- A failed update has no progress to show, so the number and the bar go. -->
+			{#if view.mode !== 'failed' && view.mode !== 'start_failed'}
+				<div class="percent" data-state={view.mode} aria-hidden="true">{wholePercent}%</div>
+				<div class="bar" role="progressbar" aria-label={view.label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={wholePercent}>
+					<i style:width={`${shown}%`}></i>
+				</div>
+			{/if}
 			{#if view.fromVersion && view.toVersion && view.mode !== 'done'}
 				<p class="versions">{view.fromVersion} → {view.toVersion}</p>
 			{/if}
@@ -261,7 +264,6 @@
 	.step-label, .detail { color: var(--text-secondary); font-size: var(--text-body); }
 	.failure-headline { margin: 0; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-semibold); }
 	.percent { margin-top: var(--space-4); font-size: calc(var(--text-title1) * 2); line-height: 1.1; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
-	.percent[data-state='failed'] { color: var(--text-tertiary); }
 	.bar { width: 100%; height: var(--space-2); margin-top: var(--space-3); border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-tertiary); }
 	.bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 	.versions { margin: var(--space-3) 0 0; color: var(--text-tertiary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
