@@ -167,7 +167,8 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.drawer-panel')).toBeVisible();
 		await settled(page);
-		await caretInCell(page, 'the sheet the tap opened left the caret in the cell the same tap opened');
+		// The sheet is modal, as over prose: the cell the same tap opened closes under it, and no caret is left beneath it.
+		await expect(page.locator('.cm-md-cell-editor .cm-editor'), 'the cell closed under the sheet').toHaveCount(0);
 
 		// The sheet covers the table: the tap lands on whatever is on top of the highlight, as a reader's does.
 		await highlight.tap({ force: true });

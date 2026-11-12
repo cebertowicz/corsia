@@ -26,7 +26,7 @@ function editorIn(surface: HTMLElement) {
 }
 
 /** The new-comment sheet at phone width (or a popover beside it) over a document; jsdom has no layout, so the sheet is given one. */
-function openSheet(state: { kind: 'draft' } | { kind: 'list' } | { kind: 'thread'; id: string; fromText?: boolean }, narrow = true, onRevealDraft = vi.fn(), canvasWidth = 0) {
+function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, onRevealDraft = vi.fn(), canvasWidth = 0) {
 	host = document.body.appendChild(document.createElement('div'));
 	bounds = document.body.appendChild(document.createElement('div'));
 	const view = editorIn(bounds);
@@ -115,40 +115,5 @@ describe('the phone composer sheet over a commented cell', () => {
 		expect(document.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
 		delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
 		delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
-	});
-});
-
-describe('the phone card a tap in a table cell opens', () => {
-	const cardUp = () => document.querySelector('[data-adaptive-drawer] .drawer-panel');
-	const cellEditorWithCaret = () => {
-		const holder = document.body.appendChild(document.createElement('div'));
-		holder.className = 'cm-md-cell-editor';
-		const input = holder.appendChild(document.createElement('textarea'));
-		input.focus();
-		return input;
-	};
-
-	it('shows without taking the caret from the cell that same tap opened, with nothing timed or retried', async () => {
-		const input = cellEditorWithCaret();
-		openSheet({ kind: 'thread', id: 'c1', fromText: true });
-		expect(cardUp(), 'the card is up').not.toBeNull();
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(document.activeElement, 'the caret is still in the cell').toBe(input);
-	});
-
-	it('is still a dialog with its own Close control, so the comments list or a screen reader finds it', async () => {
-		const input = cellEditorWithCaret();
-		openSheet({ kind: 'thread', id: 'c1', fromText: true });
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(document.activeElement).toBe(input);
-		expect(cardUp()?.getAttribute('role'), 'announced as a dialog').toBe('dialog');
-		expect(cardUp()?.querySelector('button.drawer-done'), 'with its Close control in the tab order').not.toBeNull();
-	});
-
-	it('still takes the focus when no cell holds the caret, as a card opened in prose does', async () => {
-		const outside = document.body.appendChild(document.createElement('textarea'));
-		outside.focus();
-		openSheet({ kind: 'thread', id: 'c1', fromText: true });
-		await vi.waitFor(() => expect(cardUp()?.contains(document.activeElement)).toBe(true));
 	});
 });

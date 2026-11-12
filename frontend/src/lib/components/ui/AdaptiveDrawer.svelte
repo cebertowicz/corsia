@@ -22,7 +22,6 @@
 		children,
 		above,
 		initialFocusSelector = '[data-drawer-autofocus]',
-		keepFocus = () => false,
 		fill = false,
 		flushBottom = false,
 		followKeyboard = false,
@@ -56,8 +55,6 @@
 		/** A row above the chrome title, below the grabber. */
 		above?: Snippet;
 		initialFocusSelector?: string;
-		/** Asked as the drawer opens: true leaves the focus where it is, with the reader's caret, instead of moving it into the drawer. */
-		keepFocus?: () => boolean;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
 		/** Let a child-owned sticky footer reach the edge of the scroll region. The child owns its safe-area inset. */
@@ -133,7 +130,7 @@
 		});
 		let mounted = true;
 		void tick().then(() => {
-			if (!mounted || !panel?.isConnected || keepFocus()) return;
+			if (!mounted || !panel?.isConnected) return;
 			(panel.querySelector<HTMLElement>(initialFocusSelector) ?? panel).focus();
 		});
 		return () => {

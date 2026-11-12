@@ -6,7 +6,7 @@ import {
 	CELL_SYNC, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
 import { heldText, heldToSource, runDifference, sourceToHeld, writeCellEdit } from './widget-cell-row';
-import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
+import { adjacentCell, caretAfterTable, cellBelow, tableOfCell, typingBelowFinalTable } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
 import { CellPresses } from './widget-cell-presses';
 import { CELL_THEME } from './widget-cell-theme';
@@ -294,7 +294,7 @@ class CellEditors {
 const cellEditing = ViewPlugin.fromClass(CellEditors);
 
 export const markdownCellEditing: Extension = [
-	openCellState,
+	openCellState, typingBelowFinalTable,
 	cellEditing,
 	EditorView.updateListener.of((update) => update.view.plugin(cellEditing)?.settle(update)),
 ];

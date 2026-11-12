@@ -168,14 +168,29 @@ for (const layout of LAYOUTS) {
 			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });
 			const whole = page.locator(`td[data-comment-ids*="${seeded.commentId}"]`);
 			await expect(whole, 'the comment is drawn on the whole cell').toBeVisible();
-			await whole.click({ delay: 80 });
+			const phone = layout.project === 'chromium-mobile';
+			if (phone) await whole.tap(); else await whole.click({ delay: 80 });
 			await expect(page.getByText('Which way does it point now?').first()).toBeVisible();
-			await expect(editorIn(page), 'the cell opened with the comment').toBeVisible();
 			// Whatever would close the comment (the cell editor taking focus, the document reading the press) has run by the next two frames.
 			await settled(page);
 			await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 			await expect(page.getByText('Which way does it point now?').first(), 'the comment is still open').toBeVisible();
-			await expect(editorIn(page), 'the cell is still open').toBeVisible();
+			if (!phone) {
+				await expect(editorIn(page), 'the cell opened with the comment, and is still open').toBeVisible();
+				return;
+			}
+			// On a phone the comment is a modal sheet, as over prose: the cell closes under it, and Close opens it again where
+			// the tap left the caret, so typing goes on there.
+			await expect(editorIn(page), 'the cell closed under the sheet').toHaveCount(0);
+			const drawer = page.locator('[data-adaptive-drawer] .drawer-panel');
+			await drawer.getByRole('button', { name: 'Close', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			await editorInCell(page, whole);
+			await expect(cellContent(page), 'Close gives the cell its focus back').toBeFocused();
+			await page.keyboard.type('Q');
+			// Where in the words the tap put the caret is the browser's to say: the Q is somewhere in that cell's text.
+			const typedInCell = (text: string) => text.split('\n').some((line) => line.includes('Q') && line.replace('Q', '').includes('Plain words in a cell.'));
+			await expect.poll(async () => typedInCell(await savedText(page, seeded)), { message: 'the Q reached the commented cell', timeout: 20_000 }).toBe(true);
 		});
 
 		for (const card of [false, true]) {
@@ -190,6 +205,11 @@ for (const layout of LAYOUTS) {
 					await expect(page.getByText('Which way does it point now?').first(), 'setup: the comment card is open').toBeVisible();
 				}
 				await settled(page);
+				if (card && phone) {
+					// The sheet is modal: the cell the same tap opened closes under it, and no caret or keyboard is left beneath it.
+					await expect(editorIn(page), 'the cell under the sheet closed').toHaveCount(0);
+					expect(await page.evaluate(() => !!document.activeElement?.closest('.cm-editor')), 'no editor under the sheet holds the focus').toBe(false);
+				}
 				// Inside the long cell, clear of the card wherever it opens: just inside the start of "few", in the middle of its
 				// line, so the caret goes in front of it and nowhere else. The cell wraps over several lines, so its editor has to
 				// wrap them at the same words for the click to land on the word that was drawn there.
@@ -205,10 +225,10 @@ for (const layout of LAYOUTS) {
 				await press();
 				if (card && phone) {
 					// On a phone the card is a modal sheet, as every sheet is: the first tap outside it closes it and reaches no
-					// cell; the next tap places the caret where it lands.
+					// cell under it; the next tap places the caret where it lands.
 					await expect(page.getByText('Which way does it point now?').first(), 'the first tap closes the card').toBeHidden();
 					await settled(page);
-					await expect(editorIn(page), 'and opens no cell').toHaveCount(0);
+					await expect(target, 'and does not open the tapped cell').not.toHaveClass(/cm-md-cell-editing/);
 					await frame(page, `05-${tag}-closed`);
 					await press();
 				}

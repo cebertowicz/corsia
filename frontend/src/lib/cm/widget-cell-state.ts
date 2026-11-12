@@ -75,6 +75,14 @@ function rowReplaced(changes: ChangeDesc, doc: Text, rowStart: number) {
 	return replaced;
 }
 
+/** The drawn cell whose source holds document position `pos`, from the editor's own parse; null outside every cell. */
+export function cellAtPosition(state: EditorState, pos: number): OpenCell | null {
+	const block = tableAt(state, pos, pos);
+	if (!block) return null;
+	const span = tableGrid(state.sliceDoc(block.from, block.to)).find((item) => !item.padded && block.from + item.rawFrom <= pos && pos <= block.from + item.rawTo);
+	return span ? cellAtSpan(block.from, span) : null;
+}
+
 /** The cell to open from a click on the drawn cell at `row`/`col` of the table that starts at `tableFrom`. */
 export function cellToOpen(state: EditorState, tableFrom: number, row: number, col: number): OpenCell | null {
 	const block = tableAt(state, tableFrom, tableFrom);
