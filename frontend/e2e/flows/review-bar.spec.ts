@@ -285,7 +285,7 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(headerSend(page)).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
-	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 comments and edits waiting for Send$/);
+	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 changes waiting for Send$/);
 	await expect(approve).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
 	await approve.click();
@@ -390,7 +390,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its comments, then what waits for Send: "2 comments, 2 comments and edits waiting for Send".
+	// The pill names its comments, then what waits for Send: "2 comments, 2 changes waiting for Send".
 	await page.getByRole('button', { name: /^2 comments\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expectCommentsShown(drawer);
@@ -543,7 +543,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await page.getByRole('button', { name: /^6 comments, 6 comments and edits waiting for Send$/ }).click();
+	await page.getByRole('button', { name: /^6 comments, 6 changes waiting for Send$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expectCommentsShown(drawer);
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);

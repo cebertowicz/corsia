@@ -83,7 +83,7 @@ const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
 const docComments = (page: Page) => page.locator('.document-header .comment-status');
 /** The document's pending batch, as its header pill names it; its Send is the document header's. */
-const unsentName = (count: number) => new RegExp(`, ${count} ${count === 1 ? 'comment or edit' : 'comments and edits'} waiting for Send$`);
+const unsentName = (count: number) => new RegExp(`, ${count} ${count === 1 ? 'change' : 'changes'} waiting for Send$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
 /** The document's own delivery row: what was sent, or not delivered with Retry. */
 const docDelivery = (page: Page) => page.locator('.document-header .feedback-controls');

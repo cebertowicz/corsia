@@ -23,9 +23,9 @@
 	} & { [attribute: `data-${string}`]: string | boolean } = $props();
 
 	// Comments, unread ones and what waits for Send each contribute their already-visible status to the pill name; what waits is
-	// the person's comments and edits together, so it is named as both.
+	// the person's comments and edits together, counted under its own noun so the name never uses "comments" for two counts.
 	const unreadPhrase = $derived(`${unread} unread`);
-	const unsentPhrase = $derived(`${unsent} ${unsent === 1 ? 'comment or edit' : 'comments and edits'} waiting for Send`);
+	const unsentPhrase = $derived(`${unsent} ${unsent === 1 ? 'change' : 'changes'} waiting for Send`);
 	const noun = $derived(count === 1 ? 'comment' : 'comments');
 	const label = $derived(unknown ? 'Comments unavailable until the document opens' : `${count} ${noun}${unread ? `, ${unreadPhrase}` : ''}${unsent ? `, ${unsentPhrase}` : ''}`);
 </script>

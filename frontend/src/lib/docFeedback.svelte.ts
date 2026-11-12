@@ -39,10 +39,10 @@ const plural = (count: number) => `${count} comment${count === 1 ? '' : 's'}`;
 export class DocFeedback {
 	artifactId = $state<string | null>(null);
 	targetInstanceId = $state<string | null>(null);
-	/** Every comment waiting for a Send, in either held lane; one going at once never waits, so it is not counted. */
-	pendingCount = $state(0);
 	documentHeld = $state(0);
 	imageHeld = $state(0);
+	/** Every comment waiting for a Send, in either held lane; one going at once never waits, so it is not counted. */
+	readonly pendingCount = $derived(this.documentHeld + this.imageHeld);
 	undelivered = $state<UndeliveredBatch[]>([]);
 	/** The lane whose Send or Retry is in flight for this document, if any. */
 	sendingLane = $state<HeldLane | null>(null);
@@ -102,7 +102,6 @@ export class DocFeedback {
 		this.confirmSent(0);
 		this.artifactId = artifactId;
 		this.targetInstanceId = targetInstanceId;
-		this.pendingCount = 0;
 		this.documentHeld = 0;
 		this.imageHeld = 0;
 		this.unsynced = false;
@@ -123,7 +122,6 @@ export class DocFeedback {
 		this.revision += 1;
 		this.feedback = current;
 		this.applyCounts({
-			open_count: current.open_count,
 			document_held_count: current.document_held_count ?? 0,
 			image_held_count: current.image_held_count ?? 0,
 		});
@@ -134,8 +132,7 @@ export class DocFeedback {
 		if (this.sentLane && this.heldCount(this.sentLane) > 0) this.confirmSent(0);
 	}
 
-	private applyCounts(counts: { open_count: number; document_held_count: number; image_held_count: number }) {
-		this.pendingCount = counts.document_held_count + counts.image_held_count;
+	private applyCounts(counts: { document_held_count: number; image_held_count: number }) {
 		this.documentHeld = counts.document_held_count;
 		this.imageHeld = counts.image_held_count;
 	}

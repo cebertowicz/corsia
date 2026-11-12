@@ -66,7 +66,7 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await installWorkspace(page, threadId, [document], 0);
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
-	await expect(page.getByRole('button', { name: /^1 comment, 1 comment or edit waiting for Send$/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^1 comment, 1 change waiting for Send$/ })).toBeVisible();
 	await expect(headerSend(page)).toHaveText('Send 1 comment');
 	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
 
@@ -102,7 +102,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	await installWorkspace(page, threadId, [narrow], 0);
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
-	await expect(page.getByRole('button', { name: /^2 comments, 2 comments and edits waiting for Send$/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^2 comments, 2 changes waiting for Send$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
 	await expect(headerSend(page)).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).toBeInViewport({ ratio: 1 });

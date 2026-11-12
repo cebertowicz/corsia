@@ -42,9 +42,10 @@
 .doc-body.email-scroll .cm-scroller { overflow: visible; }
 .doc-body.email-scroll .cm-content { padding-bottom: var(--space-3); }
 /* Here the column scrolls, not the editor, so its foot keeps room for the band at all times: room that came and went with a notice would
-   move the text when the notice leaves. The band holds one notice, the jump control (a touch target), with the band's padding, plus the
-   same air as `--doc-bottom-float`. While a notice shows, a line brought into view stops above it. */
-.doc-body.email-scroll { padding-bottom: calc(var(--touch-target) + var(--space-2) + var(--space-3)); }
+   move the text when the notice leaves. That room is the band's one notice, the jump control (a touch target), with the band's padding,
+   plus the same air as `--doc-bottom-float`; notices measured taller than that (a below pill over the jump control) take the measured
+   `--doc-bottom-float` instead, so the foot never holds less than what shows. While a notice shows, a line brought into view stops above it. */
+.doc-body.email-scroll { padding-bottom: max(var(--doc-bottom-float), calc(var(--touch-target) + var(--space-2) + var(--space-3))); }
 .doc:has(> [data-doc-bottom-band], [data-doc-activity-pill][data-direction='below']) .doc-body.email-scroll { scroll-padding-bottom: var(--doc-bottom-float); }
 /* An email draft's notes: the loud ones are EmailNotes.svelte, the quiet ones cm/email-header.ts. */
 .ed-wrap .cm-scroller { overscroll-behavior: contain; }

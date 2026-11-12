@@ -70,9 +70,15 @@ async function openDraft(page: Page, request: Parameters<typeof createSession>[0
 
 const column = (page: Page) => page.locator('.doc-body.email-scroll');
 
+/** Scrolls the column to its end until its height reads the same twice running: the earlier emails lay out after the draft. */
 async function scrollToEnd(page: Page) {
-	await column(page).evaluate((node) => { node.scrollTop = node.scrollHeight; });
-	await page.waitForTimeout(150);
+	let last = -1;
+	await expect.poll(async () => {
+		const height = await column(page).evaluate((node) => { node.scrollTop = node.scrollHeight; return node.scrollHeight; });
+		const settled = height === last;
+		last = height;
+		return settled;
+	}, { message: 'the column is at its end and its height has settled' }).toBe(true);
 }
 
 /** Where the column's last line ends, in the window, and where its foot is: the band floats up from that foot. */
