@@ -10,6 +10,9 @@
 	import type { HeldDocument } from '$lib/stores/documentWire';
 	import type { DeviceRecovery } from '$lib/stores/deviceRecovery';
 
+	/** How long a write stays unsettled before the notice shows. */
+	const SETTLING_NOTICE_AFTER_MS = 2000;
+
 	let { session = null, openRefusal = null, liveUnavailable = null, tabText = '', onReopen, onRead, connectionStatusId }: {
 		session?: LiveDocumentSession | null;
 		openRefusal?: DocOpenRefusal | null;
@@ -22,6 +25,14 @@
 	type Snapshot = { connection: string; deviceSaved: boolean; deviceError: string; failureLines: string[];
 		pending: boolean; held: HeldDocument | null; recovery: DeviceRecovery[]; text: string; writable: boolean; refusal: DocOpenRefusal | null };
 	let view = $state.raw<Snapshot | null>(null);
+	// Every save is unsettled for a moment, and the notice sits above the text, so showing it on each save moved the document down and back. Only a write that stays unsettled is worth saying so.
+	const pending = $derived(view?.pending ?? false);
+	let settling = $state(false);
+	$effect(() => {
+		if (!pending) { settling = false; return; }
+		const timer = setTimeout(() => { settling = true; }, SETTLING_NOTICE_AFTER_MS);
+		return () => clearTimeout(timer);
+	});
 	let detailsOpen = $state(false);
 	let opener = $state<HTMLElement | null>(null);
 	let busy = $state(false);
@@ -80,7 +91,7 @@
 	function closeDetails(): void { detailsOpen = false; opener?.focus(); }
 	// A load refusal, or a live session refused on reopen, keeps its text; damaged-store and reasonless non-live refusals have no Retry.
 	const refusal = $derived(openRefusal ?? view?.refusal ?? null);
-	const hasDetails = $derived(Boolean(view?.pending || view?.held || view?.recovery.length || view?.deviceError));
+	const hasDetails = $derived(Boolean(settling || view?.held || view?.recovery.length || view?.deviceError));
 </script>
 
 {#if refusal}
@@ -103,7 +114,7 @@
 	{#if view.connection === 'connected' && view.deviceError}
 		<div class="live-block" role="status">Changes aren't saved on this device; keep this tab open. <Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button></div>
 	{/if}
-	{#if view.pending}<div class="live-block" role="status">This write is still settling. The file may already have changed; saving on the server is not confirmed.</div>{/if}
+	{#if settling}<div class="live-block" role="status">This write is still settling. The file may already have changed; saving on the server is not confirmed.</div>{/if}
 	{#if view.held}<div class="live-block" role="status">This file changed outside CORSIA while a write was being saved.</div>{/if}
 	{#if view.recovery.length}<div class="live-block" role="status">This document was reset on the server. Your unsaved text is on this device.</div>{/if}
 	{#if view.failureLines.length}

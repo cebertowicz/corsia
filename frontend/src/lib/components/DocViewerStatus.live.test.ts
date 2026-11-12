@@ -11,7 +11,7 @@ const copy = vi.fn().mockResolvedValue(undefined);
 afterEach(async () => {
 	if (component) await unmount(component);
 	host?.remove(); session?.destroy(); session?.doc.destroy();
-	vi.restoreAllMocks(); vi.unstubAllGlobals(); copy.mockClear();
+	vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); copy.mockClear();
 });
 function setup(send: (frame: Record<string, unknown>) => boolean = () => true) {
 	vi.stubGlobal('navigator', { clipboard: { writeText: copy } });
@@ -43,12 +43,38 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
+const SETTLING = 'This write is still settling. The file may already have changed; saving on the server is not confirmed.';
+// The wait before the notice; real timers elsewhere in this file, so each case turns fake timers on and the afterEach above restores them.
+function passTime(ms: number) { vi.advanceTimersByTime(ms); flushSync(); }
+
+it('says nothing at 1.9 s of an unsettled write, shows the notice at 2.1 s, and drops it once the write settles', () => {
+	vi.useFakeTimers(); setup(); session.pending = true; render();
+	passTime(1900); expect(host.textContent).not.toContain('still settling'); expect(button('Details')).toBeUndefined();
+	passTime(200); expect(host.textContent).toContain(SETTLING); expect(button('Details')).toBeDefined();
+	session.handle({ type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', pending: false }); flushSync();
+	expect(host.textContent).not.toContain('still settling'); expect(button('Details')).toBeUndefined();
+});
+it('restarts the wait when a settled write is followed by another, so a run of saves never shows the notice', () => {
+	vi.useFakeTimers(); setup(); render();
+	for (let save = 0; save < 5; save += 1) {
+		session.handle({ type: 'doc_pending', artifact_id: 'artifact', store_id: 'store', pending: true }); flushSync(); passTime(1500);
+		expect(host.textContent).not.toContain('still settling');
+		session.handle({ type: 'doc_pending', artifact_id: 'artifact', store_id: 'store', pending: false }); flushSync();
+		expect(host.textContent).not.toContain('still settling');
+	}
+});
+it('keeps counting a stuck write through unrelated updates to the session', () => {
+	vi.useFakeTimers(); setup(); session.pending = true; render();
+	passTime(1500); expect(host.textContent).not.toContain('still settling'); session.reconnecting(); flushSync();
+	passTime(600); expect(host.textContent).toContain(SETTLING);
+});
 it('shows the approved settling row and offers reading and copying without a second write', async () => {
-	setup(); session.pending = true;
+	vi.useFakeTimers(); setup(); session.pending = true;
 	const retry = vi.spyOn(session, 'retry'); const flush = vi.spyOn(session, 'flush');
-	render(); expect(host.textContent).toContain('This write is still settling. The file may already have changed; saving on the server is not confirmed.');
+	render(); passTime(2100); expect(host.textContent).toContain('This write is still settling. The file may already have changed; saving on the server is not confirmed.');
 	button('Details').click(); flushSync();
 	expect(document.body.textContent).toContain('Read the document before writing again.');
+	vi.useRealTimers();
 	button('Copy text').click(); await vi.waitFor(() => expect(copy).toHaveBeenCalledWith('live text'));
 	expect(retry).not.toHaveBeenCalled(); expect(flush).not.toHaveBeenCalled(); expect(button('Retry')).toBeUndefined();
 });
@@ -99,9 +125,9 @@ function blockers(pending = false) {
 }
 
 it('keeps settling precedence and two neutral blockers with one disabled Retry and full text Copy', async () => {
-	setup(); blockers(true);
+	vi.useFakeTimers(); setup(); blockers(true);
 	const retry = vi.spyOn(session, 'retry'), flush = vi.spyOn(session, 'flush');
-	render();
+	render(); passTime(2100); vi.useRealTimers();
 	expect(host.textContent).toContain('This write is still settling.');
 	expect(host.textContent).toContain("Live updates couldn't be shared for this document.");
 	expect(host.textContent).toContain("Live editing couldn't start for this document.");
