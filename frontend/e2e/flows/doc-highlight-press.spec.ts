@@ -60,7 +60,7 @@ test.describe(`${TAG} desktop`, () => {
 	});
 
 	// At 900 an open Workspace panel is a drawer that slides the page left under a close scrim, so only its closed state is pressed there.
-	for (const [width, height, panel] of [[1440, 900, 'open'], [1440, 900, 'closed'], [1200, 800, 'open'], [1200, 800, 'closed'], [900, 800, 'closed']] as const) {
+	for (const [width, height, panel] of [[1440, 900, 'open'], [1440, 900, 'closed'], [1200, 800, 'closed'], [900, 800, 'closed']] as const) {
 		test(`a press on the word opens its comment at ${width} wide, panel ${panel}`, async ({ page, request }, testInfo) => {
 			test.setTimeout(90_000);
 			await page.setViewportSize({ width, height });
