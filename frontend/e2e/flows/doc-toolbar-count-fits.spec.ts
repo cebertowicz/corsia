@@ -161,11 +161,17 @@ async function measureTools(page: Page) {
 			return rows;
 		}, []).map((row) => row.names.sort((a, b) => a.left - b.left).map((item) => item.name));
 		const label = tools.querySelector<HTMLElement>('.delivery-toggle > span')!;
-		// The gap a person sees: from the label's right edge to the switch's drawn track, which sits centred inside the button's hit box.
+		// The gap a person sees: from the label's right edge to the switch. The switch's button is its track; the touch hit area is a span inside it.
 		const toggleButton = tools.querySelector<HTMLElement>('.delivery-toggle .tg')!;
-		const hit = toggleButton.getBoundingClientRect();
-		const trackLeft = hit.left + (hit.width - parseFloat(getComputedStyle(toggleButton, '::before').width)) / 2;
-		const labelToToggle = trackLeft - label.getBoundingClientRect().right;
+		const button = toggleButton.getBoundingClientRect();
+		const labelToToggle = button.left - label.getBoundingClientRect().right;
+		const hitArea = toggleButton.querySelector<HTMLElement>('.hit')!.getBoundingClientRect();
+		const inView = hitArea.top >= 0 && hitArea.bottom <= window.innerHeight && hitArea.left >= 0 && hitArea.right <= window.innerWidth;
+		if (!inView) toggleButton.scrollIntoView({ block: 'center' });
+		const area = toggleButton.querySelector<HTMLElement>('.hit')!.getBoundingClientRect();
+		// A tap on each corner (one pixel in) and the centre of the hit area lands on the switch.
+		const probes: Array<[number, number]> = [[area.left + 1, area.top + 1], [area.right - 1, area.top + 1], [area.left + 1, area.bottom - 1], [area.right - 1, area.bottom - 1], [area.left + area.width / 2, area.top + area.height / 2]];
+		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggleButton).map((el) => `${el?.tagName}.${el?.className}`);
 		const pill = tools.querySelector<HTMLElement>('.comment-status')!;
 		const parts = [...pill.querySelectorAll<HTMLElement>('.count, .count-unit, .unread')].map((part) => {
 			const partStyle = getComputedStyle(part);
@@ -191,7 +197,7 @@ async function measureTools(page: Page) {
 			deliverLabel: label.textContent?.trim() ?? null,
 			names: { send: sendButton?.getAttribute('aria-label') ?? null, count: pill.getAttribute('aria-label') },
 			overlaps, minControlHeight: Math.min(...controls.filter((control) => control.name !== 'deliver').map((control) => control.bottom - control.top)),
-			toggleHit: { width: Math.round(hit.width * 10) / 10, height: Math.round(hit.height * 10) / 10 },
+			toggleHit: { button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 }, area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 }, tapMisses },
 			headerOverflow: header.scrollWidth - header.clientWidth, pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
 			content, tools: box(tools), controls, parts, headerContentWidth: content.right - content.left, groupWidths, expectedGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chip-inline-padding')),
 			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
@@ -226,9 +232,11 @@ function expectLayout(measured: Measured, label: string) {
 	expect.soft(measured.headerOverflow, `${label}: the header does not scroll sideways`).toBeLessThanOrEqual(1);
 	expect.soft(measured.pageOverflow, `${label}: the page does not scroll sideways`).toBeLessThanOrEqual(1);
 	expect.soft(measured.minControlHeight, `${label}: no control but the switch row is shorter than the toolbar's 28 px`).toBeGreaterThanOrEqual(27.5);
-	// The switch's button is either its plain 30 x 17 or the 44 x 44 touch size, never a shrunken in-between.
-	const { width: hitWidth, height: hitHeight } = measured.toggleHit;
-	expect.soft((Math.abs(hitWidth - 30) <= 0.5 && Math.abs(hitHeight - 17) <= 0.5) || (hitWidth >= 43.5 && hitHeight >= 43.5), `${label}: the switch keeps its plain or its 44 px touch size, measured ${hitWidth} x ${hitHeight}`).toBe(true);
+	// The switch's button stays its 30 x 17 track, so the label keeps its gap; its hit area is the track itself or a 44 x 44 touch size, and a tap on each corner and the centre lands on the switch.
+	const { button: toggleBox, area: hitArea, tapMisses } = measured.toggleHit;
+	expect.soft(Math.abs(toggleBox.width - 30) <= 0.5 && Math.abs(toggleBox.height - 17) <= 0.5, `${label}: the switch button is its 30 x 17 track, measured ${toggleBox.width} x ${toggleBox.height}`).toBe(true);
+	expect.soft((Math.abs(hitArea.width - 30) <= 0.5 && Math.abs(hitArea.height - 17) <= 0.5) || (hitArea.width >= 43.5 && hitArea.height >= 43.5), `${label}: the switch hit area is its track or the 44 px touch size, measured ${hitArea.width} x ${hitArea.height}`).toBe(true);
+	expect.soft(tapMisses, `${label}: taps on the four corners and the centre of the switch's hit area land on the switch`).toEqual([]);
 	// The label is the full "Deliver immediately", the normal chip padding from its switch at every width.
 	expect.soft(measured.deliverLabel, `${label}: the delivery label is the full wording`).toBe('Deliver immediately');
 	expect.soft(Math.abs(measured.labelToToggle - measured.expectedGap), `${label}: the label is ${measured.expectedGap}px from the switch, measured ${measured.labelToToggle}`).toBeLessThanOrEqual(0.5);
@@ -315,7 +323,9 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 			results.push({ label, ...measured });
 			expectWholeInsideOneRow(measured, label);
 			if (header) expect.soft(Math.abs(measured.headerContentWidth - header), `${label}: the header's content is ${header}px wide, measured ${measured.headerContentWidth}`).toBeLessThanOrEqual(0.5);
-			const crop = header ? { x: Math.max(0, measured.content.left - 24), y: 0, width: measured.content.right - measured.content.left + 48, height: 240 } : { x: 0, y: 0, width: viewport, height: 240 };
+			// Tall enough for every row the cluster makes.
+			const cropHeight = Math.max(240, Math.ceil(measured.tools.bottom + 40));
+			const crop = header ? { x: Math.max(0, measured.content.left - 24), y: 0, width: measured.content.right - measured.content.left + 48, height: cropHeight } : { x: 0, y: 0, width: viewport, height: cropHeight };
 			if (frames && (header || split || variant || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-${header ? `header-${header}` : split ? `${viewport}-split-${split}` : viewport}${variant.replace(/\s+/g, '-')}.png`), clip: crop });
 		};
 		for (const width of PHONE_SWEEP) {

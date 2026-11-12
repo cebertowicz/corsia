@@ -494,9 +494,9 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await openThread(page, threadId, title);
 			await turnOffDocumentComments(page);
 			await expect(headerSend(page)).toHaveText(`Send ${count} comment${count === 1 ? '' : 's'}`);
-			await expectHeaderToolsShareRow(page, 1440);
+			await expectHeaderToolsWithinTwoRows(page, 1440);
 			await page.setViewportSize({ width: 393, height: 852 });
-			await expectHeaderToolsShareRow(page, 393);
+			await expectHeaderToolsWithinTwoRows(page, 393);
 		}
 	});
 
@@ -571,7 +571,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		// On a phone the canvas is the whole screen: the header's Send, on one line, inside it.
 		await expect(headerSend(page)).toHaveText('Send 101 comments');
 		await expectOneLine(headerSend(page), 393);
-		await expectHeaderToolsShareRow(page, 393);
+		await expectHeaderToolsWithinTwoRows(page, 393);
 		await captureFrame(page, 'header-101', '393');
 		await expectSenders(page, ['header: Send 101 comments']);
 
@@ -583,7 +583,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expectSenders(page, ['chat: Send 101 comments']);
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await expectOneLine(headerSend(page), 1440);
-		await expectHeaderToolsShareRow(page, 1440);
+		await expectHeaderToolsWithinTwoRows(page, 1440);
 		await captureFrame(page, 'header-101', '1440');
 		await page.getByRole('button', { name: 'Collapse Files' }).click();
 		await expectOneLine(chatSend(page), 1440);
@@ -592,7 +592,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 });
 
 /** Send and the document controls stay inside the header at every supported canvas width, wrapping to a second row only when they do not fit. */
-async function expectHeaderToolsShareRow(page: Page, width: number) {
+async function expectHeaderToolsWithinTwoRows(page: Page, width: number) {
 	const send = headerSend(page);
 	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
 	const comments = page.locator('.document-tools .comment-status');

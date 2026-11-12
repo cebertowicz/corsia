@@ -187,7 +187,7 @@
 			<!-- Two groups, the only places the cluster may break: what is being sent and counted, then how it is delivered and reviewed. -->
 			<span class="tool-group tool-send">
 			{#if artifactId}
-				<!-- Send belongs to this compact tool row with the comment count, delivery preference, and review action. -->
+				<!-- Send belongs to this tool cluster with the comment count, delivery preference, and review action. -->
 				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
@@ -201,7 +201,7 @@
 				<span class="tool-group tool-deliver">
 					<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 						<span>Deliver immediately</span>
-						<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+						<Toggle size="sm" touch checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
 					</span>
 				</span>
 			{/if}
@@ -298,7 +298,7 @@
 	.tool-review:not(:has(:global(*))) { display: none; }
 	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
 	.feedback-controls { flex: none; min-width: max-content; }
-	/* The label is always the same distance from the drawn switch: the touch size makes the button wider than its track, so it steps back by the difference. */
+	/* The label sits the chip padding from the switch at every width: the switch's touch size is a hit area inside the switch, so it never moves the label. */
 	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
 	@container doc-header (max-width: 32.5rem) {
 		.document-tools, .tool-group { gap: 0; }
@@ -306,10 +306,9 @@
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
-		/* The delivery label is the full "Deliver immediately" at every width; at phone width only the tool padding and the touch size change, and the cluster wraps between its groups when one row cannot hold it. */
+		/* The delivery label is the full "Deliver immediately" at every width; at phone width only the tool padding and the switch's hit area change, and the cluster wraps between its groups when one row cannot hold it. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
-		.delivery-toggle { min-height: var(--touch-target); }
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); margin-inline-start: calc((var(--w) - var(--touch-target)) / 2); }
+		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
 	}
@@ -334,7 +333,7 @@
 		.history-tool .label { display: none; }
 	}
 	@media (max-width: 768px) {
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); margin-inline-start: calc((var(--w) - var(--touch-target)) / 2); }
+		.delivery-toggle { --toggle-hit: var(--touch-target); }
 	}
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {

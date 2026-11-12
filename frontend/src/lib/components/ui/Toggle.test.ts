@@ -34,3 +34,18 @@ describe('Toggle held state', () => {
 		expect(onchange).not.toHaveBeenCalled();
 	});
 });
+
+describe('Toggle touch hit area', () => {
+	it('adds an aria-hidden hit area inside the button only when asked, and a tap on it toggles', () => {
+		const plain = render({ checked: false, onchange: vi.fn(), ariaLabel: 'Plain' });
+		expect(plain.querySelector('.hit')).toBeNull();
+		unmount(component!);
+		host.remove();
+		const onchange = vi.fn();
+		const touch = render({ checked: false, onchange, ariaLabel: 'Touch', touch: true });
+		const hit = touch.querySelector<HTMLElement>('.hit');
+		expect(hit?.getAttribute('aria-hidden')).toBe('true');
+		hit!.click();
+		expect(onchange).toHaveBeenCalledWith(true);
+	});
+});
