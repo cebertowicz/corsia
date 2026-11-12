@@ -26,6 +26,9 @@ PROVENANCE = 'document.person_comment_task'
 COVERED = "Covered by this document's review."
 DELETED = 'This document is deleted.'
 NO_OWNER = 'This document has no owner.'
+PROMOTED = "This document is in another place, and its comments can't be shown there. CORSIA keeps them."
+# The retirement causes that end a document's task, each with its reason.
+_RETIRED = {'file_gone': DELETED, 'promoted': PROMOTED}
 
 
 def moved(owner_title: str) -> str:
@@ -114,11 +117,13 @@ def _close(db, node_id: str, reason: str) -> bool:
     return True
 
 
-def document_deleted(db, artifact_id: str) -> None:
-    """Its file is gone: close the open task. An ended document never gets a new one (``reconcile``)."""
-    node_id, _ = _open_task(db, artifact_id)
+def document_retired(db, artifact_id: str, cause: str | None) -> None:
+    """Close the open task when the retirement ends its comments' place: the file is gone, or a promote
+    tombstoned it without carrying the comments over. An ended document never gets a new one (``reconcile``)."""
+    reason = _RETIRED.get(cause or '')
+    node_id = _open_task(db, artifact_id)[0] if reason else None
     if node_id:
-        _close(db, node_id, DELETED)
+        _close(db, node_id, reason)
 
 
 def _create(db, artifact_id: str, artifact: dict, owner: str) -> str:
@@ -160,7 +165,7 @@ def reconcile(db, artifact_id: str) -> str | None:
             )
         return None
     if state != 'active':
-        # Retired without its file gone (a promoted source): the comments stay reachable only here.
+        # Retired for a cause that leaves the document readable (``document_retired`` closes the others).
         return node_id
     if node_id and holder != owner_id and _close(db, node_id, moved(owner['title'] or 'another agent')):
         node_id = None

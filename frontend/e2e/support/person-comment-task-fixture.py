@@ -108,6 +108,29 @@ try:
         with write_transaction(db, scope='seed_reply') as connection:
             person_comment_task.reconcile(connection, artifact_id)
         print('FIXTURE_RESULT=' + json.dumps({'root': root_id, 'reply': reply['id']}))
+    elif mode == 'working-root':
+        # The thread's own working folder, where a file it writes waits to be promoted.
+        from pathlib import Path
+        from infra.config import WORKSPACE
+        from registry.durable_writes import resolve_thread_working_root
+
+        print('FIXTURE_RESULT=' + json.dumps({'root': str(resolve_thread_working_root(Path(WORKSPACE), thread_id))}))
+    elif mode == 'promote':
+        # The agent promotes the document into shared documents, as promote_file does.
+        from pathlib import Path
+        from infra.config import WORKSPACE
+        from registry import durable_writes
+
+        source = Path(db.execute('SELECT path FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0])
+        category = Path(WORKSPACE) / 'shared' / 'documents'
+        category.mkdir(parents=True, exist_ok=True)
+        (category / 'INDEX.md').write_text('# Documents\n')
+        shared = durable_writes.promote_file(
+            source, 'documents', thread_id=thread_id, project_id=None, workspace=Path(WORKSPACE),
+            description='Promoted launch plan', update_trigger='When the launch plan changes', owner='user',
+        )
+        source_state = db.execute('SELECT state FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0]
+        print('FIXTURE_RESULT=' + json.dumps({'shared': shared['artifact']['id'], 'source_state': source_state}))
     elif mode == 'agent-root':
         # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
         # them only through the agent's open ask on that document.

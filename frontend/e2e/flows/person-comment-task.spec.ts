@@ -175,7 +175,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const fileTaskClosed = async () => {
 		await expect(fileRows.locator('.count-text')).toHaveCount(0);
 		const node = await (await request.get(`/api/plans/${planId}/nodes/${fileTask.id}`, { headers: auth })).json();
-		expect([node.state, node.status_reason]).toEqual(['closed', 'A review of this document took over these comments.']);
+		expect([node.state, node.status_reason]).toEqual(['closed', "Covered by this document's review."]);
 	};
 	await fileTaskClosed();
 	console.log(`ask over task ${width}: ${JSON.stringify(await countWhole(ask))}`);

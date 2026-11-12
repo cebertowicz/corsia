@@ -275,7 +275,27 @@ def test_a_file_gone_closes_the_task_as_deleted_and_nothing_brings_it_back(isola
         db.close()
 
 
-def test_a_promoted_source_keeps_its_task_and_dismiss_settles_it(isolated_db):
+def test_a_promote_that_leaves_the_source_closes_its_task_with_the_promote_reason(isolated_db):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        models.retire(artifact, tombstone=True, cause='promoted', db=db)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == (
+            "This document is in another place, and its comments can't be shown there. CORSIA keeps them."
+        )
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        public.comment_tasks_changed(db, [artifact])
+        assert _open_tasks(db, artifact) == []
+    finally:
+        db.close()
+
+
+def test_a_retirement_with_no_cause_keeps_its_task_and_dismiss_settles_it(isolated_db):
     from api.doc_comment_thread_views import _check_access
     from doceditor import comment_thread_views
     from registry import models

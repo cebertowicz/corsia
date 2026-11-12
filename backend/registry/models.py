@@ -219,8 +219,9 @@ def retire(
 ) -> None:
     """Retire an artifact as archived or tombstoned.
 
-    ``cause="file_gone"``: its file left the disk, so its person's comment task closes as deleted. Other
-    retirements (a promoted source, an ended session) leave that task open: its comments stay there.
+    ``cause``: "file_gone" (its file left the disk) or "promoted" (a promote tombstoned it, and its comments
+    did not follow) closes its person's comment task with that cause's reason. Other retirements (an ended
+    session) leave that task open.
     """
     with write_transaction(db, scope="retire_artifact") as _db:
         row = _db.execute(
@@ -251,8 +252,7 @@ def retire(
                      ('owner-pinned', 'owner-active', 'subscriber-parent-chain')""",
             (passive_state, now, artifact_id),
         )
-        if cause == "file_gone":
-            plans_public.close_deleted_comment_task(_db, artifact_id)
+        plans_public.close_retired_comment_task(_db, artifact_id, cause)
 
 
 def retire_owned_temporary(
