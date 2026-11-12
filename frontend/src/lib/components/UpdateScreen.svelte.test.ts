@@ -93,3 +93,33 @@ describe('UpdateScreen remote copy', () => {
 		expect(document.body.textContent).not.toContain('doesn’t come back');
 	});
 });
+
+describe('UpdateScreen stopped and failed states', () => {
+	const base = { operationId: 'update-1', step: 'restarting', label: 'Updating', percent: 40, estimated: false, fromVersion: '0.4.3-dev.1288', toVersion: '0.4.3-dev.1311' } as const;
+	const failed = (headline: string) => ({ title: 'Update failed', headline, body: '', toastLine: null, retryLabel: 'Retry' });
+	const region = () => document.querySelector('[role="status"]')?.textContent?.trim() ?? '';
+	const versionsLine = () => document.querySelector('.versions');
+
+	it('keeps the live region non-empty when CORSIA is stopped', () => {
+		showLocal({ ...base, mode: 'start_failed', failure: null, serviceDown: true });
+		expect(region()).toBe('CORSIA didn’t restart.');
+	});
+
+	it('says what happened in the live region for a failed update with the service down', () => {
+		showLocal({ ...base, mode: 'failed', failure: failed('x'), serviceDown: true });
+		expect(region()).toBe('Update failed. It didn’t start on its own.');
+	});
+
+	it('hides the versions line only when the headline already names the target', () => {
+		showLocal({ ...base, mode: 'failed', failure: failed('CORSIA is on 0.4.3-dev.1288, not 0.4.3-dev.1311.'), serviceDown: false });
+		expect(versionsLine()).toBeNull();
+	});
+
+	it.each([
+		['wrong_version_running without a target', 'CORSIA is on 0.4.3-dev.1288.'],
+		['build_failed', 'Couldn’t build the update.'],
+	])('keeps the versions line for %s', (_name, headline) => {
+		showLocal({ ...base, mode: 'failed', failure: failed(headline), serviceDown: false });
+		expect(versionsLine()?.textContent).toBe('0.4.3-dev.1288 → 0.4.3-dev.1311');
+	});
+});

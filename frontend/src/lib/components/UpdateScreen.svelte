@@ -38,6 +38,8 @@
 
 	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
 	const longer = $derived(view?.mode === 'longer');
+	// A wrong-version headline already says `not <target>`, so the From → To line would repeat it.
+	const headlineNamesTarget = $derived(view?.mode === 'failed' && !view.serviceDown && Boolean(view.toVersion) && Boolean(view.failure?.headline.includes(`, not ${view.toVersion}.`)));
 	// CORSIA has stopped: no step is running, so no step label.
 	const serviceDownTerminal = $derived(view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
 	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
@@ -202,7 +204,9 @@
 				{#if view.mode === 'failed' && !view.serviceDown && view.failure}
 					<p class="failure-headline">{#each headlineParts(view.failure.headline) as part}{#if part.version}<span class="version">{part.text}</span>{:else}{part.text}{/if}{/each}</p>
 					<p class="detail">{view.failure.body}</p>
-				{:else if view.mode !== 'done' && !serviceDownTerminal}
+				{:else if serviceDownTerminal}
+					<span class="sr-only">{view.mode === 'start_failed' ? 'CORSIA didn’t restart.' : `${view.failure?.title ?? 'Update failed'}. It didn’t start on its own.`}</span>
+				{:else if view.mode !== 'done'}
 					<p class="step-label">{view.label}</p>
 					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
 				{/if}
@@ -214,7 +218,7 @@
 					<i style:width={`${shown}%`}></i>
 				</div>
 			{/if}
-			{#if view.fromVersion && view.toVersion && view.mode !== 'done'}
+			{#if view.fromVersion && view.toVersion && view.mode !== 'done' && !headlineNamesTarget}
 				<p class="versions">{view.fromVersion} → {view.toVersion}</p>
 			{/if}
 			<div class="copy">
@@ -264,6 +268,7 @@
 	h2 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.step { min-height: calc(var(--text-body) * 1.5); margin-top: var(--space-2); }
 	.step.empty { min-height: 0; }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.step p, .detail { margin: 0; }
 	.step-label, .detail { color: var(--text-secondary); font-size: var(--text-body); }
 	.version { white-space: nowrap; }
