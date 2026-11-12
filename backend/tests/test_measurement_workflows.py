@@ -673,15 +673,47 @@ def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, mo
         section["coverage"]["under_workflow"])
 
 
-def test_the_runs_above_some_tasks_are_read_without_the_rest_of_the_scope(db) -> None:
-    """``scoped_runs(above=...)`` reads only the chains above the named tasks and decides them alike.
+def _decided(read: tuple, nodes: list[str]) -> dict[str, tuple[bool, str]]:
+    """For each node: whether ``run_roots`` made it a run, and the run ``workflow_run_of`` gives it."""
+    from core.correction_attribution import workflow_run_of
 
-    Each task gets the run the whole-scope read gives it, and the read holds those tasks, the nodes
-    above them and the nodes those follow up, so it does not grow with the scope's other history.
-    The continued phase is the case only the follow-up read decides: it carries the workflow of the
-    run it follows, which sits on no chain above its step, so it must not be taken for a run.
+    rows, roots = read
+    parents = {str(row["id"]): row["parent_id"] for row in rows}
+    root_ids = frozenset(str(row["id"]) for row in roots)
+    return {node: (node in root_ids, workflow_run_of(node, parents, root_ids)) for node in nodes}
+
+
+def _wider_roots(rows) -> set[str]:
+    """A stricter run rule than ``run_roots``: it also walks every ancestor of the follow-up source.
+
+    Not a rule the product has. It stands for any later rule that follows a row's links further than
+    today's, which the bounded read must still answer as the whole-scope read does.
     """
-    from core.correction_attribution import NOT_IN_WORKFLOW, workflow_run_of
+    by_id = {str(row["id"]): row for row in rows}
+
+    def carries(start: str | None, workflow: str) -> bool:
+        seen: set[str] = set()
+        while start in by_id and start not in seen:
+            if by_id[start]["workflow_ref"] == workflow:
+                return True
+            seen.add(start)
+            start = by_id[start]["parent_id"]
+        return False
+
+    return {node for node, row in by_id.items() if row["workflow_ref"]
+            and not carries(row["parent_id"], row["workflow_ref"])
+            and not carries(row["follow_up_of"], row["workflow_ref"])}
+
+
+def test_the_runs_above_some_tasks_are_read_without_the_rest_of_the_scope(db) -> None:
+    """``scoped_runs(above=...)`` reads only what is reachable from the named tasks and decides it alike.
+
+    Each task gets the run the whole-scope read gives it, and the read holds those tasks and the nodes
+    their rows link to, so it does not grow with the scope's other history. The continued phase is the
+    case only the follow-up link decides: it carries the workflow of the run it follows, which sits on
+    no chain above its step, so it must not be taken for a run.
+    """
+    from core.correction_attribution import NOT_IN_WORKFLOW
     from core.workflow_builtin_operands import scoped_runs
     from infra.database import get_db
 
@@ -696,23 +728,67 @@ def test_the_runs_above_some_tasks_are_read_without_the_rest_of_the_scope(db) ->
         connection.commit()
         tasks = ["a-gather", "c-reconcile-2", "cont-gather", "plain-1"]
         scope = MeasurementScope("all", None)
-
-        def runs(read: tuple) -> dict[str, str]:
-            nodes, roots = read
-            parents = {str(row["id"]): row["parent_id"] for row in nodes}
-            return {node: workflow_run_of(node, parents, frozenset(str(row["id"]) for row in roots))
-                    for node in tasks}
-
         whole = scoped_runs(connection, "steve", scope)
         above = scoped_runs(connection, "steve", scope, above=tasks)
     finally:
         connection.close()
 
-    assert runs(above) == runs(whole)
-    assert runs(whole)["a-gather"] == "close-v3-a" and runs(whole)["c-reconcile-2"] == "close-v4-c"
-    assert runs(whole)["plain-1"] == NOT_IN_WORKFLOW
-    assert runs(whole)["cont-gather"] != "close-v3-a-continued"
-    assert {str(row["id"]) for row in above[0]} == {
+    returned = sorted(str(row["id"]) for row in above[0])
+    runs = {node: run for node, (_, run) in _decided(whole, tasks).items()}
+    assert _decided(above, returned) == _decided(whole, returned)
+    assert runs["a-gather"] == "close-v3-a" and runs["c-reconcile-2"] == "close-v4-c"
+    assert runs["plain-1"] == NOT_IN_WORKFLOW
+    assert runs["cont-gather"] != "close-v3-a-continued"
+    assert returned == sorted([
         "a-gather", "close-v3-a", "c-reconcile-2", "c-reconcile", "close-v4-c",
-        "cont-gather", "close-v3-a-continued", "plain-1"}
+        "cont-gather", "close-v3-a-continued", "plain-1"])
     assert len(whole[0]) > len(above[0])
+
+
+def test_every_node_the_bounded_read_returns_is_decided_as_the_whole_scope_decides_it(db) -> None:
+    """Over many plan shapes, no rule that follows a row's links can tell the two reads apart.
+
+    Each forest hangs nodes under earlier ones, lets any node follow up any earlier one (so follow-ups
+    chain, and a source can sit under another branch) and gives some a workflow. For every node the
+    bounded read returns, ``run_roots`` and ``workflow_run_of`` answer as they do on the whole scope,
+    and so does a rule that walks further along the same links than ``run_roots`` does today.
+    """
+    import random
+
+    from core.workflow_builtin_operands import scoped_runs
+    from infra.database import get_db
+
+    seed()
+    connection = get_db()
+    try:
+        asked_by_forest = []
+        for forest in range(12):
+            rng = random.Random(forest)
+            made: list[str] = []
+            with raw_plan_seed(connection):
+                for index in range(30):
+                    node = f"forest-{forest}-{index}"
+                    parent = rng.choice(made) if made and rng.random() < 0.7 else None
+                    follows = rng.choice(made) if made and rng.random() < 0.35 else None
+                    workflow = rng.choice([CLOSE, INVOICE]) if rng.random() < 0.4 else None
+                    connection.execute(
+                        "INSERT INTO plan_nodes (id,plan_id,parent_id,follow_up_of,order_key,kind,title,"
+                        "acceptance_criteria,state,size,workflow_ref,workflow_version,commitment_id,"
+                        "requirements_revision,revision,created_at,updated_at) "
+                        "VALUES (?,'plan-root',?,?,?,'task','A node','Check','accepted','M',?,?,?,1,1,'t','t')",
+                        (node, parent, follows, index, workflow, V3 if workflow else None, node))
+                    made.append(node)
+            asked_by_forest.append(rng.sample(made, 5))
+        connection.commit()
+        scope = MeasurementScope("all", None)
+        whole = scoped_runs(connection, "steve", scope)
+        bounded = [scoped_runs(connection, "steve", scope, above=asked) for asked in asked_by_forest]
+    finally:
+        connection.close()
+
+    wider_whole = _wider_roots(whole[0])
+    for asked, above in zip(asked_by_forest, bounded):
+        returned = sorted(str(row["id"]) for row in above[0])
+        assert set(asked) <= set(returned) and len(returned) < 30
+        assert _decided(above, returned) == _decided(whole, returned)
+        assert _wider_roots(above[0]) == wider_whole & set(returned)

@@ -184,7 +184,7 @@ def _series_read(requested: list[str], project: str, agent: str, page_grain: Gra
                                 [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                 corrections_family(db, page_grain, decision_rows) if family == "corrections" else
                                 decision_rows if family == "decisions" else
-                                workflow_share_family(db, params, page_grain, page_grain.periods, user_id=user_id, scope=selected_scope) if family == "workflows" else
+                                workflow_share_family(db, user_id, selected_scope, page_grain.periods) if family == "workflows" else
                                 query_family(db, family, params))
                        for family in families}
         return selected_scope.response(), family_rows, first_limit_period, so_far, coverage, breaks
