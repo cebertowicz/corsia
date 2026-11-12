@@ -142,6 +142,25 @@ def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
     return {node_id: node_cost._settled(rolled[node_id]) for node_id in shape["ids"]}
 
 
+def working_seconds(wanted, *, db, now: datetime | None = None) -> dict[str, int]:
+    """Each wanted node's rolled working seconds: ``project``'s ``rolled[node]["execution"]["seconds"]``.
+
+    Rolled working time is the length of the union of the Turn intervals of the node's
+    subtree and the plans it carries, so it reads no usage ledger, failure, waiting or
+    initiative fact. This skips those reads and the pricing; the shapes and the roll are
+    ``project``'s own.
+    """
+    clock = now or datetime.now(timezone.utc)
+    with service._connection(db) as connection:
+        rolls = [_roll_shape(connection, plan_id, ids) for plan_id, ids in _by_plan(connection, wanted).items()]
+        needed = sorted({node_id for shape in rolls for node_id in shape["needs"]})
+        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, working_only=True)
+    return {
+        node_id: figures["execution"]["seconds"]
+        for shape in rolls for node_id, figures in _roll(shape, own, spans).items()
+    }
+
+
 def project(
     listed, wanted, commitment_ids: Collection[str], *, db, now: datetime | None = None,
 ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict | None], usage_cost.Ledger]:
