@@ -9,7 +9,7 @@ import { createSession, loginByUrl, sidebarThread, TEST_TOKEN } from './support/
 import { syntheticPng } from './support/syntheticImages';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const OUT = path.join(process.env.CORSIA_E2E_WORKSPACE ?? '/tmp/b827-out', 'r5');
+const OUT = process.env.R5_OUT ?? path.join(process.env.CORSIA_E2E_WORKSPACE ?? '/tmp/b827-out', 'r5');
 const P_INTRO = 'This plan covers the Q4 launch of the new onboarding flow: what ships, who owns it, when it happens and what could go wrong.';
 const P_GOALS = 'Cut the time from install to first useful result to under ten minutes for a new person. Keep the support queue flat through launch week. Land the announcement with every channel on the same day, and tell each partner team before the public post goes out.';
 const P_SCOPE = 'In scope: the redesigned first-run screens, the guided project setup, and the updated help pages. Out of scope: the mobile app, pricing changes and anything that needs a new integration.';
@@ -103,6 +103,10 @@ for (const theme of THEMES) for (const width of WIDTHS) {
 			const c = page.getByRole('button', { name: /^Close( comments)?$/ });
 			if (await c.count()) { try { await c.last().tap({ timeout: 3000 }); } catch { try { await c.last().click({ timeout: 3000 }); } catch { /* none */ } } }
 			await page.waitForTimeout(700);
+			// A popover has no Close button: Escape, then a press on the page title, ends it.
+			const open = () => page.evaluate(() => !!document.querySelector('[role=dialog], [data-popover], [data-adaptive-drawer]'));
+			if (await open()) { await page.keyboard.press('Escape'); await page.waitForTimeout(500); }
+			if (await open()) { await page.locator('.doc .cm-content h1').first().click({ position: { x: 4, y: 4 } }); await page.waitForTimeout(700); }
 		};
 		await closeSurface();
 
@@ -133,7 +137,13 @@ for (const theme of THEMES) for (const width of WIDTHS) {
 		}, { word, ms });
 		const pressWord = async (word: string) => {
 			const el = page.locator('.doc .cm-content').locator(`xpath=.//*[contains(@class,"cm-comment-anchor")][contains(normalize-space(.), ${JSON.stringify(word)})]`).last();
-			await el.scrollIntoViewIfNeeded();
+			// The editor only renders its viewport: walk the scroller from the top until the anchor is drawn.
+			await page.evaluate(() => { (document.querySelector('.doc .cm-scroller') as HTMLElement).scrollTop = 0; });
+			for (let i = 0; i < 60 && (await el.count()) === 0; i++) {
+				await page.evaluate(() => { const s = document.querySelector('.doc .cm-scroller') as HTMLElement; s.scrollTop += Math.max(200, s.clientHeight * 0.6); });
+				await page.waitForTimeout(250);
+			}
+			await el.scrollIntoViewIfNeeded({ timeout: 15_000 });
 			await page.waitForTimeout(300);
 			const sampler = sample(word, 5000);
 			if (touch) await el.tap({ position: { x: 3, y: 5 } }); else await el.click({ position: { x: 3, y: 5 } });

@@ -87,9 +87,11 @@ async function stage(page: Page, threadId: string, docPath: string, threadTitle:
 	})), { threadId, docPath, wide });
 	await loginByUrl(page);
 	// Wide: the sidebar folded away, so the document pane is 660 px or more and the margin column has room.
-	if (width === 393 || wide) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	// The thread is picked before the sidebar folds: clicking it while the sidebar animates away left the click outside the viewport.
+	if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await sidebarThread(page, threadTitle).click();
 	await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
+	if (wide) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 }
 
 test.use({ hasTouch: true });
