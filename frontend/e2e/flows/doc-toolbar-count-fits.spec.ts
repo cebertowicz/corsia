@@ -1,8 +1,9 @@
 import path from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '../support/test';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
  * The document toolbar's "N threads · N unread" count shows whole, inside the toolbar and clear of the other controls,
@@ -111,5 +112,145 @@ for (const { width, scheme } of CASES) {
 			expect.soft(measured.tools.bottom - measured.tools.top, `${label}: the tools stay one row`).toBeLessThanOrEqual(Math.max(...measured.rowHeights) + 1);
 			await info.attach(`count-${threads}-${unread}`, { body: JSON.stringify(measured), contentType: 'application/json' });
 		}
+		// A comments request still in flight when the test ends would fail its route callback with a closed page.
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
 	});
 }
+
+/**
+ * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 threads · 45 unread" and four
+ * readers in the presence row. The tool cluster cannot shrink, so wherever the header is narrow it has to fit inside
+ * it: on one row where one row can hold it, and wrapped inside the header where it cannot. Full window from 320 to
+ * 1440 px (a fresh load at each phone and tablet width, one desktop load resized across the rest; the Workspace panel closed so the document has the room) and a narrow
+ * desktop split at 1440 and 1024, and a wide pane (1000 px) that holds the full label. The delivery label is short exactly where the header is under the one threshold.
+ */
+const LABEL_THRESHOLD = 820;
+const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
+const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index * 40), 900].sort((a, b) => a - b); // 800..1440, resized within one desktop load
+const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
+const FRAME_SIZES = [393, 900];
+
+async function measureTools(page: Page) {
+	return page.evaluate(() => {
+		const header = document.querySelector<HTMLElement>('.document-header')!;
+		const tools = header.querySelector<HTMLElement>('.document-tools')!;
+		const style = getComputedStyle(header);
+		const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+		const outer = header.getBoundingClientRect();
+		const content = { left: outer.left + parseFloat(style.paddingLeft), right: outer.right - parseFloat(style.paddingRight) };
+		const controls = [...tools.querySelectorAll<HTMLElement>('.sending-now .btn, .delivery-toggle, .comment-status, .reviewer-group, .review-request, .history-tool, .resolved-tool')]
+			.filter((control) => control.getBoundingClientRect().width > 0)
+			.map((control) => ({ name: control.getAttribute('aria-label') ?? control.className.split(' ')[0], ...box(control) }));
+		const label = tools.querySelector<HTMLElement>('.delivery-toggle > span')!;
+		const pill = tools.querySelector<HTMLElement>('.comment-status')!;
+		const parts = [...pill.querySelectorAll<HTMLElement>('.count, .count-unit, .unread')].map((part) => {
+			const partStyle = getComputedStyle(part);
+			return { name: part.className.split(' ')[0], shown: partStyle.display !== 'none' && partStyle.visibility !== 'hidden', width: part.getBoundingClientRect().width, fits: part.scrollWidth <= part.clientWidth || partStyle.display === 'inline', ...box(part) };
+		});
+		const saved = tools.style.cssText;
+		tools.style.cssText = 'position:fixed;left:0;top:0;flex-wrap:nowrap;max-inline-size:none;width:max-content';
+		const natural = tools.getBoundingClientRect().width;
+		tools.style.cssText = saved;
+		return {
+			natural, rows: new Set(controls.map((control) => Math.round(control.top))).size,
+			content, tools: box(tools), controls, parts, labelCompact: getComputedStyle(label).fontSize === '0px', headerContentWidth: content.right - content.left,
+			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
+			sendText: tools.querySelector<HTMLElement>('.sending-now .btn')?.textContent?.trim() ?? null,
+			reviewerMore: tools.querySelector('.reviewer-group .more')?.textContent ?? null,
+		};
+	});
+}
+
+type Measured = Awaited<ReturnType<typeof measureTools>>;
+function expectWholeInsideOneRow(measured: Measured, label: string) {
+	expect.soft(measured.sendText, `${label}: Send 99+ is in the row`).toMatch(/^Send 10\d comments?$/);
+	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
+	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+	for (const control of measured.controls) {
+		expect.soft(control.left, `${label}: ${control.name} starts inside the header`).toBeGreaterThanOrEqual(measured.content.left - 0.5);
+		expect.soft(control.right, `${label}: ${control.name} ends inside the header`).toBeLessThanOrEqual(measured.content.right + 0.5);
+	}
+	const centres = measured.controls.map((control) => (control.top + control.bottom) / 2);
+	const spread = Math.max(...centres) - Math.min(...centres);
+	// One row wherever one row can hold the cluster; where it cannot, it wraps inside the header instead of clipping.
+	if (measured.natural <= measured.headerContentWidth + 0.5 || measured.headerContentWidth >= LABEL_THRESHOLD) expect.soft(spread, `${label}: the tool cluster is one row`).toBeLessThanOrEqual(2);
+	expect.soft(measured.labelCompact, `${label}: the delivery label is short exactly below ${LABEL_THRESHOLD}px`).toBe(measured.headerContentWidth < LABEL_THRESHOLD);
+	for (const part of measured.parts) {
+		expect.soft(part.shown && part.width > 0 && part.fits, `${label}: ${part.name} is shown and not clipped`).toBe(true);
+	}
+}
+
+test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster stays inside the header at every width, worst content at once', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+	test.setTimeout(600_000);
+	await setMockCorsiaAgentModel(request);
+	await setDebugVersionOverlay(request, false);
+	const title = `toolbar-worst-${Date.now()}-a-document-title-long-enough-to-prove-the-header-keeps-its-tools-together`;
+	const threadId = await createSession(request, title);
+	const doc = await seedTextDocument(request, threadId, title, 'worst');
+	await seedHeldComments(request, doc.artifactId, 101);
+	// Seeding releases the hold on its way out, and a long sweep would then see the 101 delivered; this state is disposable, so keep the hold for the whole run.
+	holdPersonBatches(true);
+	const shown = { threads: 120, unread: 45 };
+	await page.route(new RegExp(`/api/artifacts/${doc.artifactId}/comments(\\?|$)`), async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const response = await route.fetch();
+		const body = await response.json();
+		const [row] = body.comments;
+		body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: index === 0 ? row.id : `${row.id}-copy-${index}`, new_comment: index < shown.unread }));
+		await route.fulfill({ response, json: body });
+	});
+	await page.route(new RegExp(`/api/artifacts/${doc.artifactId}/reviews(\\?|$)`), async (route) => {
+		const reviews = Array.from({ length: 5 }, (_, index) => ({
+			id: `review-${index}`, reviewer_thread_id: `reviewer-${index}`, reviewer_name: `Reviewer ${index}`, requester_name: 'You',
+			created_at: new Date().toISOString(), may_cancel: false, state: 'delivered', outcome: 'open', comment_count: 0,
+		}));
+		await route.fulfill({ json: { reviews, reviewers: [], taggable_agents: [] } });
+	});
+	const frames = process.env.CORSIA_FRAMES_DIR;
+	if (frames) mkdirSync(frames, { recursive: true });
+	const results: Array<{ label: string } & Measured> = [];
+	const readers = async () => page.evaluate(async (artifactId) => {
+		const { recordDocActivity } = await import('/src/lib/docPresence.ts');
+		for (let index = 0; index < 4; index++) recordDocActivity({ type: 'doc_activity', artifact_id: artifactId, thread_id: `reader-${index}`, agent: `Reader ${index}`, kind: 'read', span: null, comment_id: null, revision: null, at: new Date().toISOString() });
+	}, doc.artifactId);
+	const open = async (viewport: number, split: number | null) => {
+		await page.setViewportSize({ width: viewport, height: viewport < 700 ? 852 : 900 });
+		await installWorkspace(page, threadId, [doc], 0, split ? { splitWidth: split } : {});
+		const load = async () => {
+			await openThread(page, threadId, title);
+			await expect(page.locator('.cm-content')).toContainText('A commentable document.');
+			if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
+			await turnOffDocumentComments(page);
+			await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+			await readers();
+			await expect(page.locator('.document-header .reviewer-group .more')).toHaveText('+2');
+		};
+		await load();
+		await expect(page.locator('.document-header .sending-now .btn')).toBeVisible();
+	};
+	const take = async (viewport: number, split: number | null) => {
+		await page.waitForTimeout(500);
+		const label = split ? `${viewport}px window, pane ${split}px` : `${viewport}px window`;
+		const measured = await measureTools(page);
+		results.push({ label, ...measured });
+		expectWholeInsideOneRow(measured, label);
+		if (frames && (split || FRAME_SIZES.includes(viewport))) await page.screenshot({ path: path.join(frames, `worst-${split ? `${viewport}-split-${split}` : viewport}.png`), clip: { x: 0, y: 0, width: viewport, height: 240 } });
+	};
+	for (const width of PHONE_SWEEP) {
+		await open(width, null);
+		await take(width, null);
+	}
+	await open(DESKTOP_SWEEP[0], null);
+	for (const width of DESKTOP_SWEEP) {
+		await page.setViewportSize({ width, height: 900 });
+		await take(width, null);
+	}
+	for (const { viewport, split } of SPLITS) {
+		await open(viewport, split);
+		await take(viewport, split);
+	}
+	await page.unrouteAll({ behavior: 'ignoreErrors' });
+	if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify(results.map(({ label, headerContentWidth, labelCompact, controls, tools, ...rest }) => ({ label, ...rest, headerContentWidth, labelCompact, toolsLeft: tools.left, controlLeft: Math.min(...controls.map((control) => control.left)) })), null, 1));
+});

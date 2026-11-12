@@ -279,36 +279,19 @@
 	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
-	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
+	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
 	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
 	.feedback-controls { flex: none; min-width: max-content; }
 	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
 	@container doc-header (max-width: 32.5rem) {
-		/* Keep the approved compact row; a held sender may wrap rather than leave the canvas. */
-		.document-tools { flex-wrap: nowrap; align-items: center; gap: 0; }
-		.document-tools:has(:global(.sending-now)) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
-		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
-		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
+		.document-tools { gap: 0; }
 	}
-	@media (max-width: 768px) {
-		@container doc-header (width < 408px) {
-			/* A phone's 99 and 100+ counts, and a reviewer group that overflows into "+N", need the shorter visible preference label so Send stays whole in one row; the accessible name and 44px target stay unchanged. */
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle { gap: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span { font-size: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
-		}
-	}
-	@container doc-header (width < 408px) {
-		/* The count's "· N unread" makes the one-row tool cluster wider than a compact header, which right-aligns it and pushes the count past the left edge, so the delivery label takes its existing short form, as it does for a 99+ Send. Any viewport: a split pane is as narrow as a phone. */
-		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle { gap: 0; }
-		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle > span { font-size: 0; }
-		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+	@container doc-header (width < 820px) {
+		/* The one-row tool cluster cannot shrink, and with the worst content it is 818px wide, so below 820px the delivery label takes its short form; the accessible name and 44px target stay unchanged. */
+		.delivery-toggle { gap: 0; }
+		.delivery-toggle > span { font-size: 0; }
+		.delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
 	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
@@ -319,8 +302,6 @@
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
-		/* Reload is the one action a changed file needs, so while it shows the row wraps within the header, as a held sender's does, rather than push Reload past the left edge. */
-		.document-tools:has(.stale-control) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
 	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
