@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-import semver
-
 from automation import self_restart
 from automation.restart_settlement import settle_restart_control
 from infra import build_info, update_status
@@ -38,14 +36,7 @@ def version_failure(operation: dict) -> tuple[str | None, dict]:
         restored = previous is not None and running == update_status.normalize_packaged_version(previous)
     except (TypeError, ValueError):
         restored = False
-    if restored:
-        return "rolled_back", {**detail, "reason": "mismatch"}
-    # The target is stamped from a feed probe; the shell fetches the feed again
-    # when it stages, so a build published in between installs instead. A newer
-    # build than the stamp is a finished Update, not a wrong one.
-    if semver.Version.parse(running) > semver.Version.parse(target):
-        return None, detail
-    return "wrong_version_running", {**detail, "reason": "mismatch"}
+    return ("rolled_back" if restored else "wrong_version_running"), {**detail, "reason": "mismatch"}
 
 
 async def confirm_packaged_update(

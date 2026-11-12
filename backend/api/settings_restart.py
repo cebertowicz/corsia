@@ -133,17 +133,20 @@ async def _acquire_settings_restart(
     acquired_ids: list[str],
     *,
     trigger: str | None = None,
-    target_version: str | None = None,
     claim: Callable[[object], bool] | None = None,
 ) -> str | None:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
-    from infra.update_status import cached_changes, cached_target_version
+    from infra.update_status import update_status
+
+    # Stamp the build the installer will fetch: it reads the feed fresh when it
+    # stages, so a cached probe can name a build that is no longer the newest.
+    fresh = await asyncio.to_thread(update_status, True) if mode == "update" else None
 
     def _try_acquire() -> str | None:
-        version = (target_version or cached_target_version()) if mode == "update" else None
-        changes = cached_changes() if mode == "update" else None
+        version = fresh.target_version if fresh is not None else None
+        changes = fresh.changes if fresh is not None else None
         requested_id = uuid.uuid4().hex if mode == "update" else None
         operation_id = self_restart.try_acquire(
             None,
@@ -329,7 +332,6 @@ async def prelaunch_settings_restart(
     *,
     caller_token: str | None,
     trigger: str | None = "manual",
-    target_version: str | None = None,
     claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Hand Settings restart ownership from acquisition through child launch."""
@@ -344,7 +346,6 @@ async def prelaunch_settings_restart(
                 mode,
                 acquired_ids,
                 trigger=trigger,
-                target_version=target_version,
                 claim=claim,
             )
         except asyncio.CancelledError as error:

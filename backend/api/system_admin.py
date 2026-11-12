@@ -34,8 +34,7 @@ def _authenticated_user(request: Request) -> dict | None:
 
 
 async def launch_update(
-    user: dict, caller_token: str | None, trigger: str,
-    target_version: str | None, *, port: int,
+    user: dict, caller_token: str | None, trigger: str, *, port: int,
     claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Launch the one Settings Update lifecycle from any approved trigger."""
@@ -63,7 +62,6 @@ async def launch_update(
         caller_token=caller_token,
         claim=claim,
         trigger=trigger,
-        target_version=target_version,
     )
     if prelaunch is None:
         return None
@@ -108,7 +106,6 @@ async def system_restart(
             user,
             token,
             "manual",
-            None,
             port=port,
         )
     else:

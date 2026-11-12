@@ -211,12 +211,20 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
     assert datetime.fromisoformat(result["server_time"]).tzinfo == timezone.utc
 
 
-def test_settings_update_acquire_uses_cached_target_version(monkeypatch):
+def test_settings_update_acquire_stamps_a_fresh_probe_not_the_cache(monkeypatch):
+    """The installer reads the feed fresh when it stages, so the stamp must too.
+
+    A cached probe from before the newest publish stamped 1311 while the shell
+    installed 1312, and verification rolled the good build back.
+    """
+    from types import SimpleNamespace
+
     from api.settings_restart import _acquire_settings_restart
     from automation import self_restart
     from infra import db_async, update_status
 
     captured: list[dict] = []
+    probes: list[bool] = []
 
     async def run_in_db(function):
         return function()
@@ -225,15 +233,22 @@ def test_settings_update_acquire_uses_cached_target_version(monkeypatch):
         captured.append(kwargs)
         return "operation-id"
 
+    def probe(force=False):
+        probes.append(force)
+        if not force:
+            return SimpleNamespace(target_version="0.4.3-dev.1311", changes={"kind": "changelog", "items": ["old"]})
+        return SimpleNamespace(target_version="0.4.3-dev.1312", changes={"kind": "changelog", "items": ["new"]})
+
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
     monkeypatch.setattr(self_restart, "try_acquire", acquire)
-    monkeypatch.setattr(update_status, "cached_target_version", lambda: "1.2.3")
-    monkeypatch.setattr(update_status, "cached_changes", lambda: {"kind": "changelog", "items": ["A"]})
+    monkeypatch.setattr(update_status, "update_status", probe)
 
     assert asyncio.run(_acquire_settings_restart({"id": "user"}, "update", [])) == "operation-id"
-    assert captured[-1]["target_version"] == "1.2.3"
-    assert json.loads(captured[-1]["changes"]) == {"kind": "changelog", "items": ["A"]}
+    assert probes == [True]
+    assert captured[-1]["target_version"] == "0.4.3-dev.1312"
+    assert json.loads(captured[-1]["changes"]) == {"kind": "changelog", "items": ["new"]}
     assert asyncio.run(_acquire_settings_restart({"id": "user"}, "restart", [])) == "operation-id"
+    assert probes == [True]
     assert captured[-1]["target_version"] is None
     assert captured[-1]["changes"] is None
 
