@@ -97,6 +97,80 @@ async def test_update_room_check_failure_leaves_no_in_flight_operation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "staged_state",
+    ["missing", "not_a_plist", "truncated_plist", "no_version_key", "bad_version"],
+)
+async def test_unverifiable_staged_build_fails_before_any_drain(
+    isolated_db, monkeypatch, tmp_path, staged_state
+):
+    """Nothing swaps toward a build whose version cannot be checked once it runs.
+
+    The staged bundle is the only record of what the swap installs: keeping the
+    probed stamp would fail a good newer build, and stamping nothing could only
+    verify as unverified.
+    """
+    import plistlib
+    from unittest.mock import MagicMock
+
+    from api import settings_restart
+    from infra.database import get_db
+
+    bundle = tmp_path / "CORSIA.app"
+    (bundle / "Contents" / "Resources").mkdir(parents=True)
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    staged_plist = bundle.with_name("CORSIA.app.staged") / "Contents" / "Info.plist"
+    if staged_state != "missing":
+        staged_plist.parent.mkdir(parents=True)
+        payload = {
+            "not_a_plist": None,
+            "truncated_plist": None,
+            "no_version_key": {"CFBundleShortVersionString": "0.4.2"},
+            "bad_version": {"CORSIAVersion": "not-a-version"},
+        }
+        if staged_state == "not_a_plist":
+            staged_plist.write_bytes(b"not a plist at all")
+        elif staged_state == "truncated_plist":
+            staged_plist.write_bytes(b'<?xml version="1.0"?><plist version="1.0"><dict>')
+        else:
+            with staged_plist.open("wb") as handle:
+                plistlib.dump(payload[staged_state], handle)
+
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_current_release", lambda *_args: None)
+    discard = MagicMock()
+    monkeypatch.setattr(settings_restart, "_discard_prepared_release", discard)
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    spawn = MagicMock(return_value=object())
+    monkeypatch.setattr(settings_restart, "spawn_restart_lifecycle", spawn)
+
+    with pytest.raises(HTTPException) as refused:
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
+            lambda name: Path(name), caller_token="lifecycle-credential",
+        )
+
+    assert refused.value.status_code == 409
+    assert "staged build's version could not be read" in refused.value.detail
+    connection = get_db()
+    try:
+        row = dict(connection.execute(
+            "SELECT status,phase,kind,trigger,failure_code,target_version "
+            "FROM self_restart_requests"
+        ).fetchone())
+    finally:
+        connection.close()
+    assert row == {
+        "status": "failed", "phase": None, "kind": "update", "trigger": "manual",
+        "failure_code": "staged_bundle_unverifiable", "target_version": "1.0.1",
+    }
+    discard.assert_called_once()
+    drain.assert_not_awaited()
+    spawn.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "raised_error",
     [sqlite3.OperationalError("token store unavailable"), AccountError("account unavailable")],
 )

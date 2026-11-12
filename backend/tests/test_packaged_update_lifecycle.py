@@ -533,3 +533,87 @@ async def test_pre_protocol_update_mismatch_never_claims_rollback(isolated_db, m
     assert row["status"] == "failed"
     assert row["failure_code"] == "wrong_version_running"
     assert self_restart.previous_version(row) is None
+
+
+def _packaged_install(tmp_path, monkeypatch, *, staged_version: str):
+    """Make this test run in a packaged install with one build staged beside it.
+
+    The updater unpacks the build it just downloaded at `CORSIA.app.staged` and the
+    swap installs that copy, so its stamped `CORSIAVersion` is the version the next
+    start reports through `build_info.app_version()`.
+    """
+    import plistlib
+
+    bundle = tmp_path / "CORSIA.app"
+    (bundle / "Contents" / "Resources").mkdir(parents=True)
+    staged = bundle.with_name("CORSIA.app.staged")
+    (staged / "Contents").mkdir(parents=True)
+    with (staged / "Contents" / "Info.plist").open("wb") as handle:
+        plistlib.dump(
+            {
+                "CFBundleShortVersionString": staged_version.split("-")[0],
+                "CORSIAVersion": staged_version,
+            },
+            handle,
+        )
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    return bundle
+
+
+async def test_update_verifies_the_build_staging_installed(isolated_db, monkeypatch, tmp_path):
+    """The stamp follows the staged bundle, not the earlier feed read.
+
+    The probe before acquiring named 0.4.2-dev.1311 while staging took
+    0.4.2-dev.1312 off the same feed, so strict verification failed the good build
+    as `wrong_version_running` and the shell rolled it back.
+    """
+    from unittest.mock import MagicMock
+
+    from api import settings_restart
+    from automation.update_verification import confirm_packaged_update
+    from infra import update_status
+
+    _packaged_install(tmp_path, monkeypatch, staged_version="0.4.2-dev.1312")
+    monkeypatch.setattr(
+        update_status, "update_status", lambda force=False: update_status.UpdateStatus(
+            branch=None, current_sha=None, remote_sha=None, commits_behind=None,
+            available=True, checked_at=0.0, error=None, current_version="0.4.1",
+            target_version="0.4.2-dev.1311", changes=None,
+        )
+    )
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_current_release", lambda *_args: None)
+    monkeypatch.setattr(
+        settings_restart, "spawn_restart_lifecycle", MagicMock(return_value=object())
+    )
+
+    stamped: list[str | None] = []
+
+    async def drain(operation_id: str, _mode: str) -> None:
+        # The drain is the point of no return: the launch and the swap follow it.
+        stamped.append(self_restart.operation_by_id(operation_id)["target_version"])
+
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+
+    from infra.config import LOGS_DIR
+
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    operation_id, _process = await settings_restart.prelaunch_settings_restart(
+        {"id": "steve"}, "update", tmp_path / "corsia", {"CORSIA_RESTART_BACKEND_PORT": "1957"},
+        ["restart"], lambda name: tmp_path / name, caller_token="lifecycle-credential",
+    )
+
+    assert stamped == ["0.4.2-dev.1312"]
+    assert self_restart.operation_by_id(operation_id)["target_version"] == "0.4.2-dev.1312"
+
+    with get_db() as db:
+        db.execute(
+            "UPDATE self_restart_requests SET phase='verifying' WHERE id=?", (operation_id,)
+        )
+    monkeypatch.setattr("infra.build_info.app_version", lambda: "0.4.2-dev.1312")
+    monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
+    row = await confirm_packaged_update(operation_id, healthy=True)
+    assert row["status"] == "complete"
+    assert row["failure_code"] is None
+    if restart._RESUME_TASKS:
+        await asyncio.gather(*tuple(restart._RESUME_TASKS))
