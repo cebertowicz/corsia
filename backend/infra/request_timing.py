@@ -25,6 +25,8 @@ _BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
 _FLUSH_SECONDS = 60
 _SLOW_MS = 1_000
 _UNMATCHED_ROUTE = "<unmatched>"
+#: Recorded for a request whose caller gave up first (the handler was cancelled): the client-closed status.
+CLIENT_CLOSED = 499
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
@@ -196,6 +198,12 @@ class RequestTimingMiddleware:
 
         try:
             await self.app(scope, receive, timed_send)
+        except asyncio.CancelledError:
+            # A caller that stops waiting (an in-process call's own time limit) cancels the handler. Unrecorded,
+            # the slowest requests would be the ones missing from the route timing.
+            if not recorded:
+                self._record(scope, started_at, CLIENT_CLOSED, timing, None)
+            raise
         except Exception:
             # Unhandled errors reach ServerErrorMiddleware outside this one, so
             # its 500 response never passes through timed_send; count it here.
