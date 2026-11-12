@@ -32,10 +32,7 @@ import { INLINE_MARKDOWN } from './widget-cell-markdown';
  * the whole edit because `widget-table.ts` keeps it, and this `<td>`, alive across edits.
  */
 
-/**
- * The extensions a cell's own editor runs over its source. `markdown-live.ts` supplies the document's hide-syntax pass and
- * `MarkdownEditor.svelte` the document's save key, since a key pressed in a cell never reaches the document's keymap.
- */
+/** A cell editor's added extensions: the hide-syntax pass (`markdown-live.ts`) and the save key (`MarkdownEditor.svelte`), as cell keys skip the doc's keymap. */
 export const cellEditorExtensions = Facet.define<Extension, readonly Extension[]>({ combine: (values) => values });
 
 type Change = { from: number; to: number; insert: string };
