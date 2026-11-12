@@ -27,6 +27,7 @@
 	import CommentReplyList from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 	import { createThreadOpen } from './threadOpen';
+	import { createReplyStamps } from './replyStamps';
 	import { observeArrivedThread } from './arrivedThread.svelte';
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
@@ -121,9 +122,6 @@
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
 	let observeTick = $state(0);
-	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
-	let lastStamped: string | null = null;
-	const stampedReplies = new Set<string>();
 	// Keep the collapse point stable while this thread is mounted, even as the server clears New marks.
 	// Otherwise replies would disappear from under the reader when the viewed stamp lands.
 	const seenForCollapse = new Set<string>();
@@ -131,75 +129,12 @@
 		for (const id of comment.newReplyIds ?? []) seenForCollapse.add(id);
 		return new Set(seenForCollapse);
 	});
-	// Chat answers retain their visible dwell; document threads stamp when the person opens the card.
-	const VIEWED_DWELL_MS = 1_500;
-	const dwellTimers = new Map<string, number>();
-	const dwelled = new Set<string>();
-	let stampTimer: number | null = null;
 	const unreadKey = $derived(JSON.stringify(comment.newReplyIds ?? []));
+	const { stamp, dwellThenStamp, cancelDwell } = createReplyStamps(() => comment, () => chatSurface, () => onViewed);
 	const replyVisibility = createReplyVisibility(dwellThenStamp, (id) => cancelDwell(id), () => cancelDwell());
-	function cancelDwell(replyId?: string) {
-		for (const [id, timer] of dwellTimers) {
-			if (!replyId || id === replyId) { window.clearTimeout(timer); dwellTimers.delete(id); }
-		}
-		if (!replyId && stampTimer !== null) { window.clearTimeout(stampTimer); stampTimer = null; }
-	}
 
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
-	function stamp(replyId: string) {
-		if (!onViewed || document.visibilityState !== 'visible' || (!comment.newComment && !comment.newReplyIds?.length)) return;
-		if (chatSurface) {
-			if (stampedReplies.has(replyId)) return;
-			stampedReplies.add(replyId);
-			onViewed(comment.id, replyId).catch((err) => {
-				stampedReplies.delete(replyId);
-				console.warn('Could not record the viewed reply', err);
-			});
-			return;
-		}
-		const replyIndex = comment.replies.findIndex((r) => r.id === replyId);
-		if (replyId !== comment.id && replyIndex < 0) return;
-		const position = replyId === comment.id ? 0 : replyIndex + 1;
-		const lastPosition = lastStamped === comment.id ? 0 : comment.replies.findIndex((r) => r.id === lastStamped) + 1;
-		if (lastStamped !== null && position <= lastPosition) return;
-		const previous = lastStamped;
-		lastStamped = replyId;
-		onViewed?.(comment.id, replyId).catch((err) => {
-			console.warn('Could not record the viewed reply', err);
-			// A failed stamp leaves the marker; the next opening retries it.
-			if (lastStamped === replyId) lastStamped = previous;
-		});
-	}
-	function advanceStamp() {
-		stampTimer = null;
-		const unread = new Set(comment.newReplyIds ?? []);
-		if (chatSurface) {
-			for (const replyId of unread) if (dwelled.has(replyId)) stamp(replyId);
-			return;
-		}
-		let through: string | undefined;
-		for (const reply of comment.replies) {
-			if (!reply.id || !unread.has(reply.id)) continue;
-			if (!dwelled.has(reply.id)) break;
-			through = reply.id;
-		}
-		if (through) stamp(through);
-	}
-	function dwellThenStamp(replyId: string) {
-		if (document.visibilityState !== 'visible' || dwellTimers.has(replyId)) return;
-		if (dwelled.has(replyId)) {
-			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
-			return;
-		}
-		dwellTimers.set(replyId, window.setTimeout(() => {
-			dwellTimers.delete(replyId);
-			dwelled.add(replyId);
-			// Coalesce replies that finish their dwell together into one watermark update.
-			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
-		}, VIEWED_DWELL_MS));
-	}
 	$effect(() => {
 		observeTick;
 		newestReply;

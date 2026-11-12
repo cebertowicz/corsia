@@ -7,6 +7,7 @@
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
+	import { transcriptTextChanged } from './chatTranscriptMutations';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
@@ -306,20 +307,7 @@
 		document.addEventListener('keydown', keydown);
 		document.addEventListener('chat-comment-reply', replyClick);
 		observer = new MutationObserver(records => {
-			const changedContent = records.some(record => {
-				const target = record.target instanceof Element ? record.target : record.target.parentElement;
-				if (target?.closest('[data-highlight-dot]')) return false;
-				const nodes = [...record.addedNodes, ...record.removedNodes];
-				const row = target?.closest('.message[data-message-id]') ?? null;
-				if (target && bodyOf(row)?.contains(target)) {
-					return record.type === 'characterData' || nodes.some(node => !(node instanceof Element && node.matches('[data-highlight-dot]')));
-				}
-				return nodes.some(node => node instanceof Element && (
-					node.matches('.message[data-message-id]') || !!node.querySelector('.message[data-message-id]') ||
-					(!!row && (node.matches('.long-message-body, .bubble-content') || !!node.querySelector('.long-message-body, .bubble-content')))
-				));
-			});
-			if (!painting && changedContent) schedule();
+			if (!painting && transcriptTextChanged(records)) schedule();
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
