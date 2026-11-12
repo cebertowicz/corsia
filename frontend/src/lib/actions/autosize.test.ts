@@ -262,6 +262,39 @@ describe('autosize', () => {
 		expect(node.style.transition).toBe('');
 	});
 
+	/** A just-opened thread card in a panel that is as tall as its content (237px) and may grow to `cap`. */
+	function openedCard(cap: string) {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; owner.style.maxHeight = cap; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const text = document.createElement('div'); text.className = 'ct-markdown'; text.style.lineHeight = '20px'; original.append(text);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply'; const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '20px'; reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 32, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
+		const fixed = (el: HTMLElement, h: number) => Object.defineProperty(el, 'offsetHeight', { get: () => Number.parseFloat(el.style.maxHeight) || h, configurable: true });
+		fixed(original, 55); fixed(replies, 110);
+		Object.defineProperty(thread, 'offsetHeight', { get: () => 40 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0), configurable: true });
+		Object.defineProperty(owner, 'clientHeight', { get: () => Math.min(thread.offsetHeight, Number.parseFloat(cap)), configurable: true });
+		Object.defineProperty(owner, 'offsetHeight', { get: () => owner.clientHeight, configurable: true });
+		return { original, replies, action: autosize(node, { value: '', fit: true }) };
+	}
+	it('leaves a just-opened card its whole discussion when its panel has room to grow to its max-height', () => {
+		const { original, replies, action } = openedCard('400px');
+		expect(original.style.maxHeight).toBe('');
+		expect(replies.style.maxHeight).toBe('');
+		action.destroy();
+	});
+	it('scrolls the discussion inside a card taller than its panel may grow', () => {
+		const { original, replies, action } = openedCard('180px');
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeLessThan(110);
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeGreaterThan(0);
+		expect(replies.getAttribute('tabindex')).toBe('0');
+		expect(original.style.maxHeight).not.toBe('');
+		action.destroy();
+	});
+
 	it('holds its room across refits when the panel is sized by its own content', () => {
 		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
 		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);

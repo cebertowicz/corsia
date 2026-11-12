@@ -1,5 +1,15 @@
 import { scroller } from './keepInView';
 
+/** How much taller `node` may grow before an ancestor's `max-height` stops it; zero when no ancestor has one. */
+function headroom(node: HTMLElement): number {
+	let room = Number.POSITIVE_INFINITY;
+	for (let parent: HTMLElement | null = node; parent && parent !== document.body; parent = parent.parentElement) {
+		const cap = Number.parseFloat(getComputedStyle(parent).maxHeight);
+		if (Number.isFinite(cap)) room = Math.min(room, Math.max(0, cap - parent.offsetHeight));
+	}
+	return Number.isFinite(room) ? room : 0;
+}
+
 /** The field's value, or the value and `fit`: grow until what scrolls the field (a popover, a sheet) would have to scroll, then scroll. */
 type AutosizeParam = string | undefined | { value: string; fit?: boolean };
 
@@ -62,7 +72,10 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 		const alreadyBounded = !!replies?.style.maxHeight;
 		if (original) original.style.maxHeight = '';
 		if (replies) replies.style.maxHeight = '';
-		const height = owner && card ? (Number.isFinite(viewHeight) ? viewHeight : owner.clientHeight - ownerPadding) : null;
+		// A panel sized by its content up to a max-height (a popover; a drawer's panel around its scroller) can still grow by what
+		// that cap leaves. Fitting to its height right now would shrink a card that has just opened below what it may show.
+		const growth = owner && ownerStyle ? headroom(owner) : 0;
+		const height = owner && card ? (Number.isFinite(viewHeight) ? viewHeight : owner.clientHeight - ownerPadding + growth) : null;
 		if (height !== null && original) {
 			const originalHeight = original.offsetHeight, repliesHeight = replies?.offsetHeight ?? 0;
 			const line = Number.parseFloat(style.lineHeight) || 0;
