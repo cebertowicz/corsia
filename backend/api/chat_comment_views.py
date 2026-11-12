@@ -1,4 +1,4 @@
-"""Record when a person has seen a chat-comment answer."""
+"""Post chat comments, read their threads, and record when a person has seen an answer."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,6 +9,7 @@ from infra.chat_comment_answers import has_comment_cid
 from infra.chat_comment_index import attach_comments
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
+from infra.queries import get_thread_for_user
 
 router = APIRouter(prefix="/api", tags=["chat-comments"])
 
@@ -35,6 +36,85 @@ async def chat_comment_threads(thread_id: str, body: ThreadsRequest, user: dict 
     result = await run_read(lambda: _threads(user['id'], thread_id, body.message_ids))
     if result is None:
         raise HTTPException(404)
+    return result
+
+
+class PostRequest(BaseModel):
+    input_id: str
+    comment: dict
+    viewing_document: dict | None = None
+    reasoning_effort: str | None = None
+
+
+def _owned_thread(user_id: str, thread_id: str):
+    db = get_db()
+    try:
+        row = get_thread_for_user(thread_id, user_id, db=db)
+        return dict(row) if row is not None else None
+    finally:
+        db.close()
+
+
+def _posted(user_id: str, thread_id: str, input_id: str) -> dict | None:
+    """The stored input's delivery, and the commented rows with their threads as they now stand."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT delivery_state,delivery_error FROM messages WHERE id=? AND thread_id=? AND role='user'",
+            (input_id, thread_id),
+        ).fetchone()
+        targets = [target for (target,) in db.execute(
+            "SELECT DISTINCT target_message_id FROM chat_comments WHERE thread_id=? AND user_message_id=?",
+            (thread_id, input_id),
+        )]
+    finally:
+        db.close()
+    if row is None:
+        return None
+    return {'message_id': input_id, 'delivery_state': row[0], 'delivery_error': row[1],
+            **(_threads(user_id, thread_id, targets) or {'messages': []})}
+
+
+@router.post('/threads/{thread_id}/chat-comments')
+async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depends(require_user_header_only)):
+    """Post a comment, or a reply in a comment thread, as the thread's next input.
+
+    It is admitted like any input, so the agent's Turn takes it in as before, but it is
+    no chat message: its broadcast reaches chat clients as a `chat_comments_changed`
+    notice (infra/send_broadcast.py), and chat never draws its row. The response is the
+    box's whole answer. A subagent pane posts to the child thread the same way.
+    """
+    input_id = body.input_id.strip()
+    if not input_id:
+        raise HTTPException(400, 'Missing input_id')
+    thread_row = await run_in_db(_owned_thread, user['id'], thread_id)
+    if thread_row is None:
+        raise HTTPException(404, 'Thread not found')
+    from infra.execution_class import is_subagent
+    from infra.send_service import SendRejected, send_thread_input
+
+    subagent = is_subagent(thread_row)
+    metadata: dict = {'reply_context': {'comments': [body.comment]}}
+    if body.viewing_document is not None:
+        metadata['viewing_document'] = body.viewing_document
+    try:
+        await send_thread_input(
+            thread_id, thread_row, '',
+            user=user, metadata=metadata, human_origin=True, input_id=input_id,
+            native_mode='delegation' if subagent else 'event',
+            touch_thread_on_insert=True, trim_content=False,
+            reasoning_effort=None if subagent else (body.reasoning_effort or thread_row.get('reasoning_effort')),
+        )
+    except SendRejected as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except ValueError:
+        # This input id is already stored: a second press, or a press after a lost response.
+        # Its row answers, whatever has become of it since.
+        if await run_read(lambda: _posted(user['id'], thread_id, input_id)) is None:
+            raise
+    result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
+    if result is None:
+        raise HTTPException(500, 'The comment was not stored')
     return result
 
 

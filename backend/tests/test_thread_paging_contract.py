@@ -15,6 +15,8 @@ import sqlite3
 
 import pytest
 
+from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
 _spec = importlib.util.spec_from_file_location("_contract_thread_paging", _module_path)
@@ -50,6 +52,8 @@ class _Thread:
             "CREATE TABLE active_turns (id TEXT, thread_id TEXT, turn_order INTEGER, status TEXT, "
             "started_at TEXT)"
         )
+        # A page never draws a comment-only input, which this table marks.
+        self.conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
         self._next = 0
 
     def add(self, mid, role, content="", *, metadata=None, seq=..., ts=None,

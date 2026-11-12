@@ -8,12 +8,25 @@ import sqlite3
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
 
 
+def comment_only(content: str | None, metadata: dict | None) -> bool:
+    """A user input that carries chat comments and nothing else: no text, no attachments.
+
+    Its comments are its whole content, so chat draws nothing for it; it lives in
+    its comment thread only.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    reply_context = metadata.get('reply_context')
+    comments = reply_context.get('comments') if isinstance(reply_context, dict) else None
+    return bool(comments) and not metadata.get('attachments') and not (content or '').strip()
+
+
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
                    metadata: dict | None, created_at: str) -> None:
     """Place validated comments in the transaction that stores the input.
 
     A retry replaces its original's comments that have no answer and no reply;
-    any other keeps its thread beside the retry's.
+    any other keeps its thread beside the retry's. A comment-only input also
+    records that it draws nothing in chat (an empty `chat_visible_content`).
     """
     retried_from = (metadata or {}).get('retried_from_message_id')
     if retried_from:
@@ -33,6 +46,12 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
             "SELECT ?,id,?,?,?,?,? FROM messages WHERE thread_id=? AND seq=? AND role='assistant'",
             (thread_id, user_message_id, comment['cid'], created_at,
              comment.get('root_user_message_id'), comment.get('root_cid'), thread_id, comment['seq']),
+        )
+    stored = db.execute("SELECT content FROM messages WHERE id=?", (user_message_id,)).fetchone() if comments else None
+    if stored is not None and comment_only(stored[0], metadata):
+        db.execute(
+            "INSERT OR REPLACE INTO chat_visible_content(message_id,thread_id,content) VALUES (?,?,'')",
+            (user_message_id, thread_id),
         )
 
 
@@ -77,13 +96,17 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
     if not sender_ids:
         return
     senders = db.execute(
-        "SELECT id,metadata FROM messages WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
+        "SELECT id,metadata,delivery_state,delivery_error FROM messages "
+        "WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
         (thread_id, json.dumps(sender_ids)),
     ).fetchall()
     comments = {}
-    for sender_id, metadata in senders:
+    # A comment is its input: it shows that input's delivery, so a failure stays in its thread with Retry.
+    for sender_id, metadata, delivery_state, delivery_error in senders:
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
-            comments[(sender_id, comment['cid'])] = comment
+            comments[(sender_id, comment['cid'])] = {
+                **comment, 'delivery_state': delivery_state, 'delivery_error': delivery_error,
+            }
     threads = {}
     for target, sender, cid, created, _, _, _, root_sender, _, _ in rows:
         comment = comments.get((sender, cid))
@@ -102,6 +125,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
             threads[key]['answers'].append({
                 'author_kind': 'user', 'user_message_id': sender, 'cid': cid,
                 'text': comment['note'], 'created_at': created, 'unread': False,
+                'delivery_state': comment['delivery_state'], 'delivery_error': comment['delivery_error'],
             })
             replies_added.add((sender, cid))
         if answer_id and text is not None:
