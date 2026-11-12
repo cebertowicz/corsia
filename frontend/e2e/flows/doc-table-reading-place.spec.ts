@@ -191,7 +191,8 @@ interface Placement { scrollTop: number; rowTop: number; rowBottom: number; rowX
  * as the next painted frame shows them: as the text narrows, a read in a task can see the row before the editor holds it.
  */
 async function placement(page: Page, key: string): Promise<Placement> {
-	return readPainted(page.locator('.cm-scroller'), (scroller, key) => {
+	// The document's scroller: a click on a cell opens that cell's own editor, which has one too.
+	return readPainted(page.locator('.cm-scroller:not(.cm-md-cell-editor .cm-scroller)'), (scroller, key) => {
 		const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`))!;
 		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = tr.querySelector('strong')!.getBoundingClientRect();
 		// At phone width the comments come up as a sheet over the text; beside a wide canvas they sit in the margin.
