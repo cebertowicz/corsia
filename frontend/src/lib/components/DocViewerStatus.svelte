@@ -304,6 +304,12 @@
 			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
 		}
 	}
+	@container doc-header (width < 408px) {
+		/* The count's "· N unread" makes the one-row tool cluster wider than a compact header, which right-aligns it and pushes the count past the left edge, so the delivery label takes its existing short form, as it does for a 99+ Send. Any viewport: a split pane is as narrow as a phone. */
+		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle { gap: 0; }
+		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle > span { font-size: 0; }
+		:global(.document-tools:has(.comment-status .unread)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
