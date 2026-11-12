@@ -198,16 +198,22 @@
 			</span>
 			<span class="tool-group tool-more">
 			{#if artifactId}
-				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
-					<span>Deliver immediately</span>
-					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+				<span class="tool-group tool-deliver">
+					<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
+						<span>Deliver immediately</span>
+						<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+					</span>
 				</span>
+			{/if}
+			<span class="tool-group tool-review">
+			{#if artifactId}
 				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
 			{/if}
 			{#if historyAvailable && onOpenHistory}<button type="button" class="doc-tool history-tool" aria-label="History" title="History" aria-expanded={historyOpen} onclick={onOpenHistory}>
 				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>
 				<span class="label">History</span>
 			</button>{/if}
+			</span>
 			</span>
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
@@ -286,9 +292,10 @@
 	.identity-details { display: none; }
 	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
 	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
-	/* The cluster breaks only between its two groups, never inside the second: that one stays on a single line. The first can wrap for the held reason, Reload and a long count. */
+	/* The cluster breaks only where content does not fit, in this order: between [Send · count] and the rest; inside the rest, between [Deliver immediately · switch] and [reviewers · Request review · History]; and, only when [Send · count] alone is wider than the header, between Send and the count. The label never leaves its switch, and the reviewers, Request review and History stay on one row. */
 	.tool-group { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); max-inline-size: 100%; }
-	.tool-more { flex-wrap: nowrap; }
+	.tool-deliver, .tool-review { flex-wrap: nowrap; }
+	.tool-review:not(:has(:global(*))) { display: none; }
 	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
 	.feedback-controls { flex: none; min-width: max-content; }
 	/* The label is always the same distance from the drawn switch: the touch size makes the button wider than its track, so it steps back by the difference. */

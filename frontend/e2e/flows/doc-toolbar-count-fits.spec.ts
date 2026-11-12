@@ -7,16 +7,19 @@ import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seed
 
 /**
  * The document toolbar's "N threads · N unread" count shows whole, inside the toolbar and clear of the other controls,
- * at a phone's 393 px and at 900 and 1440, with one-, two- and three-digit counts. The row stays one row tall.
+ * at 320, 360 and 393 px phones and at 900 and 1440, with one-, two- and three-digit counts. The tool cluster breaks into rows only in PE's order, and never clips, overlaps or shrinks a control.
  */
 
 const TEXT = '# Toolbar count probe\n\nA paragraph of ordinary prose to hold a comment.\n';
 const COUNTS = [{ threads: 1, unread: 1 }, { threads: 12, unread: 3 }, { threads: 120, unread: 45 }];
 const CASES = [
+	{ width: 320, scheme: 'light' as const }, { width: 360, scheme: 'light' as const },
 	{ width: 393, scheme: 'light' as const }, { width: 393, scheme: 'dark' as const },
 	{ width: 900, scheme: 'light' as const }, { width: 1440, scheme: 'light' as const },
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
+// The rows the ordinary counts make at each width, for worst-sweep.json (the desktop project runs these before the worst-content test).
+const ordinaryRows: Array<Record<string, unknown>> = [];
 
 for (const { width, scheme } of CASES) {
 	test(`@flow:doc-toolbar-count-fits @surface:documents ${width}px ${scheme}: the thread and unread count shows whole`, async ({ page }, info) => {
@@ -91,7 +94,6 @@ for (const { width, scheme } of CASES) {
 					siblings: [...tools.querySelectorAll<HTMLElement>('button, [role="switch"], .save-ghost')]
 						.filter((el) => el !== pillEl && !pillEl.contains(el) && el.getBoundingClientRect().width > 0)
 						.map((el) => ({ name: el.getAttribute('aria-label') ?? el.className, ...box(el) })),
-					rowHeights: [...tools.children].map((el) => el.getBoundingClientRect().height),
 				};
 			});
 			const label = `${threads}/${unread} at ${width} ${scheme}`;
@@ -112,7 +114,10 @@ for (const { width, scheme } of CASES) {
 				const apart = other.right <= measured.pill.left + 0.5 || other.left >= measured.pill.right - 0.5 || other.bottom <= measured.pill.top + 0.5 || other.top >= measured.pill.bottom - 0.5;
 				expect.soft(apart, `${label}: ${other.name} does not overlap the pill ${JSON.stringify([other, measured.pill])}`).toBe(true);
 			}
-			expect.soft(measured.tools.bottom - measured.tools.top, `${label}: the tools stay one row`).toBeLessThanOrEqual(Math.max(...measured.rowHeights) + 1);
+			// Rows follow the break order, from a 329 px header at most two, and nothing clips, overlaps or shrinks.
+			const layout = await measureTools(page);
+			expectLayout(layout, label);
+			ordinaryRows.push({ label: `ordinary content ${threads}/${unread} at ${width}px ${scheme}`, headerContentWidth: layout.headerContentWidth, rows: layout.rows, rowContents: layout.rowContents, groupWidths: layout.groupWidths, labelToToggle: layout.labelToToggle, controlWidths: Object.fromEntries(layout.controls.map((control) => [control.name, Math.round((control.right - control.left) * 10) / 10])) });
 			await info.attach(`count-${threads}-${unread}`, { body: JSON.stringify(measured), contentType: 'application/json' });
 		}
 		// A comments request still in flight when the test ends would fail its route callback with a closed page.
@@ -131,9 +136,7 @@ for (const { width, scheme } of CASES) {
 const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
 const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index * 40), 900].sort((a, b) => a - b); // 800..1440, resized within one desktop load
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
-const FRAME_SIZES = [393, 900];
-const FIRST_GROUP = ['send', 'count'];
-const SECOND_GROUP = ['deliver', 'reviewers', 'request', 'history'];
+const FRAME_SIZES = [320, 360, 393, 900];
 // A 1920 window with the pane set so the header's content is this wide (measured, asserted): the range where the cluster first has to break.
 const HEADER_SWEEP = [{ split: 784, header: 720 }, { split: 824, header: 760 }, { split: 864, header: 800 }];
 
@@ -170,21 +173,26 @@ async function measureTools(page: Page) {
 		});
 		// Each group's width on one line: what the header has to hold for that group not to wrap.
 		const groupWidth = (selector: string) => {
-			const group = tools.querySelector<HTMLElement>(selector)!;
+			const group = tools.querySelector<HTMLElement>(selector);
+			if (!group) return 0;
 			const kept = group.style.cssText;
 			group.style.cssText = 'position:fixed;left:0;top:0;flex-wrap:nowrap;max-inline-size:none;width:max-content';
 			const width = group.getBoundingClientRect().width;
 			group.style.cssText = kept;
 			return Math.round(width * 10) / 10;
 		};
-		const groupWidths = { first: groupWidth('.tool-send'), second: groupWidth('.tool-more') };
-		const saved = tools.style.cssText;
-		tools.style.cssText = 'position:fixed;left:0;top:0;flex-wrap:nowrap;max-inline-size:none;width:max-content';
-		const natural = tools.getBoundingClientRect().width;
-		tools.style.cssText = saved;
+		const groupWidths = { first: groupWidth('.tool-send'), second: groupWidth('.tool-more'), deliver: groupWidth('.tool-deliver'), review: groupWidth('.tool-review') };
+		// The whole cluster on one line: its two groups and the gap between them.
+		const natural = groupWidths.first + groupWidths.second + (parseFloat(getComputedStyle(tools).columnGap) || 0);
+		const overlaps = controls.flatMap((one, index) => controls.slice(index + 1).filter((other) => Math.min(one.right, other.right) - Math.max(one.left, other.left) > 0.5 && Math.min(one.bottom, other.bottom) - Math.max(one.top, other.top) > 0.5).map((other) => `${one.name}/${other.name}`));
+		const sendButton = tools.querySelector<HTMLElement>('.sending-now .btn');
 		return {
 			natural, rows: rowsOf.length, rowContents: rowsOf, labelToToggle: Math.round(labelToToggle * 10) / 10,
 			deliverLabel: label.textContent?.trim() ?? null,
+			names: { send: sendButton?.getAttribute('aria-label') ?? null, count: pill.getAttribute('aria-label') },
+			overlaps, minControlHeight: Math.min(...controls.filter((control) => control.name !== 'deliver').map((control) => control.bottom - control.top)),
+			toggleHit: { width: Math.round(hit.width * 10) / 10, height: Math.round(hit.height * 10) / 10 },
+			headerOverflow: header.scrollWidth - header.clientWidth, pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
 			content, tools: box(tools), controls, parts, headerContentWidth: content.right - content.left, groupWidths, expectedGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chip-inline-padding')),
 			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
 			sendText: tools.querySelector<HTMLElement>('.sending-now .btn')?.textContent?.trim() ?? null,
@@ -194,24 +202,51 @@ async function measureTools(page: Page) {
 }
 
 type Measured = Awaited<ReturnType<typeof measureTools>>;
-function expectWholeInsideOneRow(measured: Measured, label: string) {
-	expect.soft(measured.sendText, `${label}: Send 99+ is in the row`).toMatch(/^Send 10\d comments?$/);
-	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
-	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+/** The rows the cluster has to make, by PE's break order: nothing breaks while it fits; then between [Send · count] and the rest; then inside the rest between [Deliver immediately · switch] and [reviewers · Request review · History]; and between Send and the count only when [Send · count] alone is wider than the header. */
+function expectedRows(measured: Measured): string[][] {
+	const present = new Set(measured.controls.map((control) => control.name));
+	const first = ['send', 'count', 'resolved'].filter((name) => present.has(name));
+	const deliver = ['deliver'].filter((name) => present.has(name));
+	const review = ['reviewers', 'request', 'history'].filter((name) => present.has(name));
+	const room = measured.headerContentWidth + 0.5;
+	if (measured.natural <= room) return [[...first, ...deliver, ...review]];
+	const sendAlone = measured.groupWidths.first > room && first[0] === 'send' && first.length > 1;
+	const rows = sendAlone ? [['send'], first.slice(1)] : [first];
+	rows.push(...(measured.groupWidths.second > room && deliver.length && review.length ? [deliver, review] : [[...deliver, ...review]]));
+	return rows.filter((row) => row.length);
+}
+
+/** Layout rules that hold for any content: the cluster stays inside the header, breaks only where PE ruled, keeps the label one step from its switch and every hit target whole. */
+function expectLayout(measured: Measured, label: string) {
 	for (const control of measured.controls) {
 		expect.soft(control.left, `${label}: ${control.name} starts inside the header`).toBeGreaterThanOrEqual(measured.content.left - 0.5);
 		expect.soft(control.right, `${label}: ${control.name} ends inside the header`).toBeLessThanOrEqual(measured.content.right + 0.5);
 	}
-	// The label is the full "Deliver immediately", the same distance from its switch (the normal chip padding) at every width, and read once.
+	expect.soft(measured.overlaps, `${label}: no control overlaps another`).toEqual([]);
+	expect.soft(measured.headerOverflow, `${label}: the header does not scroll sideways`).toBeLessThanOrEqual(1);
+	expect.soft(measured.pageOverflow, `${label}: the page does not scroll sideways`).toBeLessThanOrEqual(1);
+	expect.soft(measured.minControlHeight, `${label}: no control but the switch row is shorter than the toolbar's 28 px`).toBeGreaterThanOrEqual(27.5);
+	// The switch's button is either its plain 30 x 17 or the 44 x 44 touch size, never a shrunken in-between.
+	const { width: hitWidth, height: hitHeight } = measured.toggleHit;
+	expect.soft((Math.abs(hitWidth - 30) <= 0.5 && Math.abs(hitHeight - 17) <= 0.5) || (hitWidth >= 43.5 && hitHeight >= 43.5), `${label}: the switch keeps its plain or its 44 px touch size, measured ${hitWidth} x ${hitHeight}`).toBe(true);
+	// The label is the full "Deliver immediately", the normal chip padding from its switch at every width.
 	expect.soft(measured.deliverLabel, `${label}: the delivery label is the full wording`).toBe('Deliver immediately');
 	expect.soft(Math.abs(measured.labelToToggle - measured.expectedGap), `${label}: the label is ${measured.expectedGap}px from the switch, measured ${measured.labelToToggle}`).toBeLessThanOrEqual(0.5);
-	// The cluster breaks only between [Send · count] and [Deliver immediately · switch · reviewers · Request review · History]: one row of all six, or those two groups on two rows, never a control alone.
-	// A group wider than the header cannot sit on one line; that width is reported in the sweep file with its measurements, and not solved by another rule.
-	const room = measured.headerContentWidth + 0.5;
-	if (measured.groupWidths.first <= room && measured.groupWidths.second <= room) {
-		expect.soft(measured.rowContents, `${label}: the rows are the two groups, or one row of both`).toEqual(measured.rowContents.length === 1 ? [[...FIRST_GROUP, ...SECOND_GROUP]] : [FIRST_GROUP, SECOND_GROUP]);
-		expect.soft(Math.min(...measured.rowContents.map((row) => row.length)), `${label}: no row holds a single control`).toBeGreaterThan(1);
-	}
+	const expected = expectedRows(measured);
+	expect.soft(measured.rowContents, `${label}: the rows follow the break order (header ${measured.headerContentWidth}, groups ${JSON.stringify(measured.groupWidths)})`).toEqual(expected);
+	// A header of 329 (a 393 phone) or wider holds the cluster in at most two rows, whatever the content.
+	if (measured.headerContentWidth >= 329) expect.soft(measured.rows, `${label}: at most two control rows from a 329 px header`).toBeLessThanOrEqual(2);
+	// When Send is split from the count, the count pill leads the next row; Send keeps its own number in its own name.
+	if (measured.rowContents[0]?.length === 1 && measured.rowContents[0][0] === 'send') expect.soft(measured.rowContents[1]?.[0], `${label}: the count pill leads the row after Send`).toBe('count');
+}
+
+function expectWholeInsideOneRow(measured: Measured, label: string) {
+	expect.soft(measured.sendText, `${label}: Send 99+ is in the row`).toMatch(/^Send 10\d comments?$/);
+	expect.soft(measured.names.send, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
+	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 threads, 45 unread/);
+	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
+	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+	expectLayout(measured, label);
 	for (const part of measured.parts) {
 		expect.soft(part.shown && part.width > 0 && part.fits, `${label}: ${part.name} is shown and not clipped`).toBe(true);
 	}
@@ -306,6 +341,6 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 		await open(393, null);
 		await take(393, null, undefined, ' dark');
 		await page.unrouteAll({ behavior: 'ignoreErrors' });
-		if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify(results.map(({ label, headerContentWidth, controls, tools, ...rest }) => ({ label, ...rest, headerContentWidth, controlWidths: Object.fromEntries(controls.map((control) => [control.name, Math.round((control.right - control.left) * 10) / 10])), unfit: [rest.groupWidths.first > headerContentWidth + 0.5 && 'first group', rest.groupWidths.second > headerContentWidth + 0.5 && 'second group'].filter(Boolean), toolsLeft: tools.left, controlLeft: Math.min(...controls.map((control) => control.left)) })), null, 1));
+		if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify([...ordinaryRows, ...results.map(({ label, headerContentWidth, controls, tools, ...rest }) => ({ label, ...rest, headerContentWidth, controlWidths: Object.fromEntries(controls.map((control) => [control.name, Math.round((control.right - control.left) * 10) / 10])), unfit: [rest.groupWidths.first > headerContentWidth + 0.5 && 'first group', rest.groupWidths.second > headerContentWidth + 0.5 && 'second group'].filter(Boolean), toolsLeft: tools.left, controlLeft: Math.min(...controls.map((control) => control.left)) }))], null, 1));
 	} finally { holdPersonBatches(false); }
 });

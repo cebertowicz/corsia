@@ -591,7 +591,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 	});
 });
 
-/** Send and the document controls form one compact row at every supported canvas width. */
+/** Send and the document controls stay inside the header at every supported canvas width, wrapping to a second row only when they do not fit. */
 async function expectHeaderToolsShareRow(page: Page, width: number) {
 	const send = headerSend(page);
 	const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
@@ -624,7 +624,12 @@ async function expectHeaderToolsShareRow(page: Page, width: number) {
 	}, { send: '.sending-now .btn', toggle: '[aria-label="Deliver comments immediately"]', comments: '.comment-status', review: '.review-request' });
 	expect(result.containsSend, 'Send is inside the document tools row').toBe(true);
 	expect(result.wrap, 'the compact tools row permits wrapping when Send is present').toBe('wrap');
-	expect(Math.max(...result.centers) - Math.min(...result.centers), 'Send, count, toggle, and review are vertically centered as one row').toBeLessThanOrEqual(2);
+	// Controls on one row share a vertical center. They wrap to a second row only when they do not fit, and a header of 329 px or wider (393 up) never needs a third.
+	const rowCenters: number[] = [];
+	for (const center of [...result.centers].sort((a, b) => a - b)) {
+		if (rowCenters.length === 0 || center - rowCenters[rowCenters.length - 1] > 2) rowCenters.push(center);
+	}
+	expect(rowCenters.length, `the controls sit on at most two rows at ${width}px`).toBeLessThanOrEqual(2);
 	expect(result.controls.every((box) => box.left >= result.contentLeft - 0.5), 'each control starts inside the header content edge').toBe(true);
 	expect(result.controls.every((box) => box.right <= result.contentRight + 0.5), 'each control ends inside the header content edge').toBe(true);
 }
