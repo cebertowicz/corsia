@@ -25,7 +25,7 @@ function inFlight(operationId = 'update-1'): UpdateOperation {
 function status(operation: UpdateOperation, usualSeconds: number | null = 45): UpdateStatus {
 	return {
 		branch: 'dev', current_sha: 'old', remote_sha: 'new', commits_behind: 1, available: true,
-		checked_at: 0, error: null, current_version: '2026.10.12', target_version: '2026.10.13', usual_seconds: usualSeconds,
+		checked_at: 0, error: null, current_version: '2026.10.12', running_version: '2026.10.12', target_version: '2026.10.13', usual_seconds: usualSeconds,
 		operation,
 	};
 }
@@ -431,15 +431,24 @@ describe('update screen store', () => {
 
 		it.each([
 			[false, 'CORSIA is still on 2026.10.12.'],
-			[true, 'CORSIA is still on the version it had.'],
-		])('words a failure from the live version only while the service answers (down=%s)', (down, body) => {
+			[true, "CORSIA's version didn't change."],
+		])('words a failure from the running version only while the service answers (down=%s)', (down, body) => {
 			updateStatus.set(status(inFlight()));
 			tickUpdateScreen(1_000);
 			// The service is already down when the last status read it answered with is stale.
 			updateUnreachable.set(down);
-			updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }));
+			// The update has already put 2026.10.13 on disk; the process that is running started on 2026.10.12.
+			updateStatus.set({ ...status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }), current_version: '2026.10.13', running_version: '2026.10.12' });
 			tickUpdateScreen(1_001);
 			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { title: 'Update failed', body } });
+		});
+
+		it('never names the on-disk version when no running version was reported', () => {
+			updateStatus.set(status(inFlight()));
+			tickUpdateScreen(1_000);
+			updateStatus.set({ ...status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }), current_version: '2026.10.13', running_version: null });
+			tickUpdateScreen(1_001);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { body: "CORSIA's version didn't change." } });
 		});
 
 		it('keeps a latched launch failure across the shell handoff', () => {

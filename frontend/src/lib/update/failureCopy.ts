@@ -1,6 +1,16 @@
 /** What a failed update says: one plain sentence per cause, and what state CORSIA is in. */
 
 import type { ClientVerdict, UpdateFailure, UpdateOperation } from './model';
+import type { UpdateStatus } from './types';
+
+/**
+ * The version of the process that is running, for every surface that words a failure. `running_version` is read once when
+ * that process starts; `current_version` is what is on disk, and an update replaces that before the restart. A service that
+ * is down has no reading: the last one may belong to a process that has since gone.
+ */
+export function runningVersionOf(status: UpdateStatus | null | undefined, serviceDown = false): string | null {
+	return serviceDown ? null : (status?.running_version ?? null);
+}
 
 function parseDetail(detail: string | null | undefined): Record<string, unknown> {
 	try {
@@ -52,13 +62,17 @@ export interface FailureCopy {
 const RAN_ON = 'CORSIA kept running and nothing was changed.';
 // A failed pull can update Git's tracking refs, but not the checked-out code.
 const CODE_UNCHANGED = "CORSIA kept running and your code wasn't changed.";
-// The checkout may already hold the new version, so without a live reading this claims only what is certain.
+// The version is the running process's, captured when it started. Without one this claims only what is certain.
 function stillOn(version: string | null | undefined): string {
-	return version ? `CORSIA is still on ${version}.` : 'CORSIA is still on the version it had.';
+	return version ? `CORSIA is still on ${version}.` : "CORSIA's version didn't change.";
+}
+// For a version that may be neither the old one nor the target, so "still" could be false.
+function onVersion(version: string): string {
+	return `CORSIA is on ${version}.`;
 }
 
 function refusal(headline: string, body: string, retryLabel: string | null): FailureCopy {
-	return { title: "Update didn't start", headline, body, toastLine: null, retryLabel };
+	return { title: "Couldn't start the update", headline, body, toastLine: null, retryLabel };
 }
 
 function stopped(headline: string, body: string): FailureCopy {
@@ -74,7 +88,7 @@ function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
 	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. Free up space, then select Retry. ${RAN_ON}` : `Free up space, then select Retry. ${RAN_ON}`;
 	return {
-		title: "Update didn't start",
+		title: "Couldn't start the update",
 		headline: 'Not enough disk space for a safety backup.',
 		body,
 		toastLine: disk ? `Needs ${Math.max(1, disk.neededGb - disk.freeGb)} GB more free space` : null,
@@ -95,7 +109,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 	}
 	if (failure.client) {
 		return {
-			title: "Update didn't start",
+			title: "Couldn't start the update",
 			headline: failure.client.message,
 			body: '',
 			toastLine: null,
@@ -107,7 +121,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			return diskCopy(failure.detail);
 		case 'fetch_failed':
 			return {
-				title: "Update didn't start",
+				title: "Couldn't start the update",
 				headline: "Couldn't download the update.",
 				body: RAN_ON,
 				toastLine: null,
@@ -115,7 +129,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			};
 		case 'build_failed':
 			return {
-				title: "Update didn't start",
+				title: "Couldn't start the update",
 				headline: "Couldn't build the update.",
 				body: stillOn(runningVersion),
 				toastLine: null,
@@ -124,7 +138,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 		case 'update_refused':
 			return {
 				title: 'Update failed',
-				headline: parseDetail(failure.detail).backend_healthy === true ? stillOn(runningVersion) : 'The update stopped before it finished.',
+				headline: parseDetail(failure.detail).backend_healthy === true ? stillOn(runningVersion) : runningVersion ? onVersion(runningVersion) : stillOn(null),
 				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
@@ -139,16 +153,16 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			};
 		case 'version_unverified':
 			return {
-				title: 'Update failed',
-				headline: "Couldn't confirm the new version.",
-				body: runningVersion ? `CORSIA is on ${runningVersion}.` : "The update's last check didn't pass, so CORSIA can't tell which version is running.",
+				title: "Couldn't confirm the update",
+				headline: runningVersion ? onVersion(runningVersion) : "CORSIA can't tell which version is running.",
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'wrong_version_running':
 			return {
 				title: 'Update failed',
-				headline: stillOn(runningVersion),
+				headline: runningVersion ? onVersion(runningVersion) : "Couldn't start the new version.",
 				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
@@ -156,7 +170,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 		case 'rolled_back':
 			return {
 				title: 'Update failed',
-				headline: "The new version didn't start.",
+				headline: "Couldn't start the new version.",
 				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',

@@ -30,7 +30,7 @@ it('dismisses a refusal and shows its reason and own log in Settings Details', (
 	components.push(mount(UpdateScreen, { target: document.body }));
 	flushSync();
 	expect(document.querySelector('#update-screen-title')?.textContent).toBe('Update failed');
-	expect(document.body.textContent).toContain('CORSIA is still on the version it had.');
+	expect(document.body.textContent).toContain("CORSIA's version didn't change.");
 	expect([...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Retry')).toBe(true);
 	const dismiss = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Dismiss');
 	expect(dismiss).toBeDefined();

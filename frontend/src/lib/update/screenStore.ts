@@ -2,7 +2,7 @@ import { tick } from 'svelte';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
-import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy } from './failureCopy';
+import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf, type FailureCopy } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
@@ -154,7 +154,7 @@ function copyFor(failure: NonNullable<Latch['failure']>, operation: UpdateOperat
 	const source = failure.verdict ? failureFromVerdict({ kind: 'version_mismatch', message: failure.detail ?? '' })
 		: operation && isFailedOperation(operation) ? failureFromOperation(operation)
 			: { code: failure.code, detail: failure.detail, summary: null, conductorTold: false, log: null };
-	return failureCopy(source, serviceDown ? null : (get(updateStatus)?.current_version ?? null)); // a status read is stale once down
+	return failureCopy(source, runningVersionOf(get(updateStatus), serviceDown));
 }
 
 /** Recompute from the existing update operation, current PID-validated file, and confirmed-version cue. */

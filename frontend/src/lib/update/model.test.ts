@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failureCopy, failureFromVerdict } from './failureCopy';
+import { failureCopy, failureFromVerdict, runningVersionOf } from './failureCopy';
 import { changeList, costLine, currentOperation, formatScheduleTime, holdsNewWork, plainChangeTitle, stepIndex, stepMessage, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
@@ -70,7 +70,7 @@ describe('update model', () => {
 		['checkout_no_upstream', "This branch isn't set to track another branch.", 'Retry', "Ask the CORSIA agent to set the branch it should track, then select Retry. CORSIA kept running and your code wasn't changed."],
 		['checkout_diverged', 'This branch and the branch it tracks have both changed.', 'Retry', "Ask the CORSIA agent to combine their changes, then select Retry. CORSIA kept running and your code wasn't changed."],
 		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
-		['version_unverified', "Couldn't confirm the new version.", 'Retry', "The update's last check didn't pass, so CORSIA can't tell which version is running."],
+		['version_unverified', "CORSIA can't tell which version is running.", 'Retry', ''],
 	] as const)('words %s truthfully and names its action', (code, headline, retryLabel, body) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
@@ -79,10 +79,20 @@ describe('update model', () => {
 	});
 
 	it.each([
-		['rolled_back', "The new version didn't start.", 'CORSIA is still on the version it had.'],
-		['wrong_version_running', 'CORSIA is still on the version it had.', ''],
+		['rolled_back', "Couldn't start the new version.", "CORSIA's version didn't change."],
+		['wrong_version_running', "Couldn't start the new version.", ''],
 	] as const)('words %s with no version reading', (code, headline, body) => {
 		expect(failureCopy(failure(code))).toMatchObject({ title: 'Update failed', headline, body, retryLabel: 'Retry' });
+	});
+
+	it('words version_unverified under its own title, with and without a reading', () => {
+		expect(failureCopy(failure('version_unverified'))).toMatchObject({ title: "Couldn't confirm the update", headline: "CORSIA can't tell which version is running.", body: '' });
+		expect(failureCopy(failure('version_unverified'), '0.4.3-dev.1311')).toMatchObject({ title: "Couldn't confirm the update", headline: 'CORSIA is on 0.4.3-dev.1311.', body: '' });
+	});
+
+	it('says a wrong running version is "on", never "still on", since it may be neither the old nor the new one', () => {
+		expect(failureCopy(failure('wrong_version_running'), '0.4.3-dev.1288')).toMatchObject({ title: 'Update failed', headline: 'CORSIA is on 0.4.3-dev.1288.', body: '' });
+		expect(failureCopy(failure('wrong_version_running'), '0.4.3-dev.1300').headline).not.toContain('still');
 	});
 
 	it.each([
@@ -96,9 +106,21 @@ describe('update model', () => {
 	it.each([true, false])('words pre-stop refusal with health=%s', (healthy) => {
 		const copy = failureCopy({ ...failure('update_refused'), detail: JSON.stringify({ backend_healthy: healthy }) });
 		expect(copy.title).toBe('Update failed');
-		expect(copy.headline).toBe(healthy ? 'CORSIA is still on the version it had.' : 'The update stopped before it finished.');
+		expect(copy.headline).toBe("CORSIA's version didn't change.");
 		expect(copy.body).toBe('');
 		expect(copy.retryLabel).toBe('Retry');
+	});
+
+	it.each([
+		[true, 'CORSIA is still on 0.4.3-dev.1288.'],
+		[false, 'CORSIA is on 0.4.3-dev.1288.'],
+	])('names the running version in a pre-stop refusal with health=%s', (healthy, headline) => {
+		const copy = failureCopy({ ...failure('update_refused'), detail: JSON.stringify({ backend_healthy: healthy }) }, '0.4.3-dev.1288');
+		expect(copy).toMatchObject({ title: 'Update failed', headline, body: '' });
+	});
+
+	it('words a pre-stop refusal with no health reading like an unhealthy one', () => {
+		expect(failureCopy(failure('update_refused'), '0.4.3-dev.1288').headline).toBe('CORSIA is on 0.4.3-dev.1288.');
 	});
 
 	it('offers a restart when it can recover an unfinished update', () => {
@@ -136,7 +158,7 @@ describe('update model', () => {
 		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', 'rolled_back', null] as const;
 		for (const code of untouched) expect(failureCopy(failure(code)).body).toContain('nothing was changed');
 		for (const code of touched) expect(failureCopy(failure(code)).body).not.toContain('nothing was changed');
-		expect(failureCopy(failure('build_failed')).body).toBe('CORSIA is still on the version it had.');
+		expect(failureCopy(failure('build_failed')).body).toBe("CORSIA's version didn't change.");
 	});
 
 	it('gives a client verdict its own copy, never the operation copy', () => {
@@ -146,11 +168,11 @@ describe('update model', () => {
 		expect(mismatch.body).toBe('Versions differ.');
 		const rolledBack = failureCopy(failure('rolled_back'));
 		expect(rolledBack.title).toBe('Update failed');
-		expect(rolledBack.headline).toBe("The new version didn't start.");
-		expect(rolledBack.body).toBe('CORSIA is still on the version it had.');
+		expect(rolledBack.headline).toBe("Couldn't start the new version.");
+		expect(rolledBack.body).toBe("CORSIA's version didn't change.");
 		expect(rolledBack.retryLabel).toBe('Retry');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
-		expect(refused.title).toBe("Update didn't start");
+		expect(refused.title).toBe("Couldn't start the update");
 		expect(refused.headline).toBe('A restart is already in flight.');
 		expect(refused.headline).not.toContain('old version');
 	});
@@ -158,18 +180,29 @@ describe('update model', () => {
 	it('names the running version when it is known', () => {
 		const v = '0.4.3-dev.1288';
 		const known = 'CORSIA is still on 0.4.3-dev.1288.';
-		expect(failureCopy(failure('wrong_version_running'), v)).toMatchObject({ title: 'Update failed', headline: known, body: '' });
-		expect(failureCopy(failure('rolled_back'), v)).toMatchObject({ headline: "The new version didn't start.", body: known });
-		expect(failureCopy(failure('version_unverified'), v)).toMatchObject({ headline: "Couldn't confirm the new version.", body: 'CORSIA is on 0.4.3-dev.1288.' });
+		expect(failureCopy(failure('wrong_version_running'), v)).toMatchObject({ title: 'Update failed', headline: 'CORSIA is on 0.4.3-dev.1288.', body: '' });
+		expect(failureCopy(failure('rolled_back'), v)).toMatchObject({ headline: "Couldn't start the new version.", body: known });
+		expect(failureCopy(failure('version_unverified'), v)).toMatchObject({ title: "Couldn't confirm the update", headline: 'CORSIA is on 0.4.3-dev.1288.', body: '' });
 		expect(failureCopy({ ...failure('update_refused'), detail: JSON.stringify({ backend_healthy: true }) }, v).headline).toBe(known);
 		expect(failureCopy(failure('launch_failed'), v).body).toBe(known);
 		expect(failureCopy(failure('build_failed'), v).body).toBe(known);
 	});
 
+	it('names only the running version, never the one on disk, and none once the service is down', () => {
+		const status = { current_version: '0.4.3-dev.1311', running_version: '0.4.3-dev.1288' };
+		const base = { branch: null, current_sha: null, remote_sha: null, commits_behind: null, available: null, checked_at: null, error: null };
+		expect(runningVersionOf({ ...base, ...status })).toBe('0.4.3-dev.1288');
+		expect(runningVersionOf({ ...base, ...status }, true)).toBeNull();
+		expect(runningVersionOf({ ...base, current_version: '0.4.3-dev.1311' })).toBeNull();
+		expect(runningVersionOf({ ...base, current_version: '0.4.3-dev.1311', running_version: null })).toBeNull();
+		expect(runningVersionOf(null)).toBeNull();
+		expect(runningVersionOf(undefined)).toBeNull();
+	});
+
 	it('falls back to wording that claims no version when the running one is unknown', () => {
 		for (const unknown of [null, undefined, '']) {
-			expect(failureCopy(failure('wrong_version_running'), unknown).headline).toBe('CORSIA is still on the version it had.');
-			expect(failureCopy(failure('rolled_back'), unknown).body).toBe('CORSIA is still on the version it had.');
+			expect(failureCopy(failure('wrong_version_running'), unknown).headline).toBe("Couldn't start the new version.");
+			expect(failureCopy(failure('rolled_back'), unknown).body).toBe("CORSIA's version didn't change.");
 		}
 	});
 
