@@ -59,6 +59,7 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
  * composer, so the click that follows lands where it was measured. Two animation frames are not enough: while the
  * transcript is still settling, a click measured on the highlight is delivered onto text that has moved, and the
  * card never opens (the recorded 1440 timeout; the saved trace shows the pointer landing under `.input-floater`).
+ * Both axes count: a side pane closing slides the transcript sideways while its lines keep their height.
  */
 async function centerAndSettle(page: Page, row: Locator) {
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
@@ -68,14 +69,14 @@ async function centerAndSettle(page: Page, row: Locator) {
 		const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
 		const hits = [...anchor.getClientRects()].length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
 		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
-		return clear ? `settled:${Math.round(box.y)}` : 'covered';
+		return clear ? `settled:${Math.round(box.x)},${Math.round(box.y)}` : 'covered';
 	});
 	await expect.poll(async () => {
 		const before = await read();
 		await page.waitForTimeout(80);
 		const after = await read();
 		return before === after ? before : `moved:${before}>${after}`;
-	}, { message: 'the highlighted line stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+$/);
+	}, { message: 'the highlighted line stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+,-?\d+$/);
 }
 
 /**

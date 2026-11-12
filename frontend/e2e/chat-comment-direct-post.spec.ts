@@ -1,5 +1,5 @@
 import { expect, test } from './support/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { chatComposer, createSession, openAppPastLanding, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
 import { commentEditor, commentOnMessage, openCommentThread } from './support/chatComments';
 
@@ -60,7 +60,8 @@ test('posts from the comment box and keeps answers out of chat', async ({ page, 
   await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
   await chatComposer(page).fill('A plain follow-up');
   await seedMockResponses(request, [{ content: 'Follow-up received.' }]);
-  await chatComposer(page).press('Enter');
+  // Send, not Enter: on a touch device Enter starts a new line.
+  await sendButton(page).click();
   const bubble = page.locator('.messages .message.user').filter({ hasText: 'A plain follow-up' });
   await expect(bubble).toBeVisible();
   await expect(bubble.locator('.sent-comment')).toHaveCount(0);
