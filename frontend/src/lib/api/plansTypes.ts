@@ -156,6 +156,9 @@ export type UserActionHandler = (
 	reason?: string,
 ) => Promise<string | null> | void;
 
+/** A document's comments and suggestions waiting for the person; `system_task` marks the document's own comment task. */
+export interface CommentAttention { artifact_id: string; comments: number; suggestions: number; system_task: boolean }
+
 export interface OperatorNode {
 	/** What this row waits on outside the plan and when its agent checks back (EW11); the thread state's value. */
 	wait?: OperatorWait | null;
@@ -165,7 +168,7 @@ export interface OperatorNode {
 	kind: string;
 	title: string;
 	description: string | null;
-	comment_attention?: { artifact_id: string; comments: number; suggestions: number; system_task: boolean };
+	comment_attention?: CommentAttention;
 	/** Open steps in this plan that this user-assigned step releases. */
 	waiting_on: string[];
 	acceptance_criteria: string;

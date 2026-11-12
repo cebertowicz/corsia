@@ -132,7 +132,7 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(subline('Pick a name')).toBe('Needs your decision');
 	});
 
-	it('keeps an open ask\'s own subtext and adds the needs-you dot and the accent count after it', () => {
+	it('keeps an open ask\'s own subtext, then a visible separator, then the dot against the accent count', () => {
 		render([node({
 			id: 'ask', title: 'Review launch plan', state: 'review_requested', requires_user_action: true,
 			review: { kind: 'human_decision', label: 'Needs your decision', actor: { kind: 'user', id: null, label: 'You' } },
@@ -142,7 +142,10 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		const lines = row('Review launch plan').querySelectorAll('.row-subline');
 		expect(lines).toHaveLength(1);
 		expect(lines[0].textContent).toBe('Needs your decision · 2 comments, 1 suggestion');
-		expect(lines[0].querySelector('.comment-count .comment-dot')).not.toBeNull();
+		// The separator is drawn, and the dot sits after it, against the count: one dot, part of the count.
+		expect(lines[0].querySelector('.comment-count > .count-sep')!.textContent).toBe(' · ');
+		expect(lines[0].querySelector('.comment-count > .count-text > .comment-dot')).not.toBeNull();
+		expect(lines[0].querySelectorAll('.comment-dot')).toHaveLength(1);
 	});
 
 	it('gives a file task the same dot and accent count as its only subtext', () => {
@@ -155,11 +158,13 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(lines).toHaveLength(1);
 		expect(lines[0].textContent).toBe('1 comment, 1 suggestion');
 		expect(lines[0].querySelector('.comment-count .comment-dot')).not.toBeNull();
-		expect(countLineSource).toMatch(/\.comment-count\s*\{[^}]*color:\s*var\(--accent\)/);
+		expect(lines[0].querySelector('.count-sep')).toBeNull();
+		// The accent's text role holds 4.5:1 for small text in both themes; the fill colour does not.
+		expect(countLineSource).toMatch(/\.count-text\s*\{[^}]*color:\s*var\(--accent-text\)/);
 		expect(countLineSource).toMatch(/\.comment-dot\s*\{[^}]*background:\s*var\(--amber\)/);
 	});
 
-	it('never cuts the count: the subtext ahead of it is the run that truncates', () => {
+	it('cuts nothing: the subtext keeps its words and the count wraps below it', () => {
 		render([node({
 			id: 'ask', title: 'Review launch plan', state: 'review_requested', requires_user_action: true,
 			review: { kind: 'human_decision', label: 'Needs your decision', actor: { kind: 'user', id: null, label: 'You' } },
@@ -169,11 +174,14 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		const line = row('Review launch plan').querySelector('.row-subline')!;
 		expect(line.classList.contains('counted')).toBe(true);
 		expect(line.querySelector('.count-lead')!.textContent).toBe('Needs your decision');
-		expect(line.querySelector('.comment-count')!.textContent).toBe('12 comments, 3 suggestions');
-		// Only the lead carries the ellipsis; the count wraps (its own line, then between words) instead.
-		expect(countLineSource).toMatch(/\.count-lead\s*\{[^}]*text-overflow:\s*ellipsis/);
-		expect(countLineSource).toMatch(/\.count-line\s*\{[^}]*flex-wrap:\s*wrap/);
-		expect(countLineSource).not.toMatch(/\.(count-run|comment-count)\s*\{[^}]*(overflow:\s*hidden|text-overflow)/);
+		expect(line.querySelector('.count-text')!.textContent).toBe('12 comments, 3 suggestions');
+		// No part carries an ellipsis; the count wraps (its own line, then between words) instead.
+		expect(countLineSource).not.toMatch(/text-overflow/);
+		expect(countLineSource).toMatch(/\.count-lead\s*\{[^}]*white-space:\s*normal/);
+		expect(countLineSource).toMatch(/\.count-flow\s*\{[^}]*flex-wrap:\s*wrap/);
+		// The clip only hides a wrapped count's separator, left of the line's edge.
+		expect(countLineSource).toMatch(/\.count-line\.has-lead\s*\{[^}]*overflow:\s*hidden/);
+		expect(rowFaceSource).toMatch(/\.row-subline\.counted \.subline-text[^{]*\{[^}]*white-space:\s*pre-wrap/);
 		expect(rowFaceSource).toMatch(/\.row-subline\.counted\s*\{[^}]*overflow:\s*visible[^}]*white-space:\s*normal/);
 	});
 

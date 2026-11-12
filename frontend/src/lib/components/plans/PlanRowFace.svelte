@@ -115,8 +115,9 @@
 	.row-subline.needs-you { color: var(--amber-text); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
-	/* A line carrying a comment count never truncates as a whole: CommentCountLine cuts the subtext ahead of it. */
+	/* A line carrying a comment count cuts nothing: the subtext keeps its words and the count wraps below it (CommentCountLine). */
 	.row-subline.counted { overflow: visible; text-overflow: clip; white-space: normal; }
+	.row-subline.counted .subline-text, .row-subline.counted .subline-moment { white-space: pre-wrap; }
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;

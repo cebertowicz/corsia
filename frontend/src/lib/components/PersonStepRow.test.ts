@@ -114,15 +114,18 @@ describe('PersonStepRow', () => {
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
 	});
 
-	it('an open ask carrying comments: the dot and the accent count follow "Needs you" and its time, and the name says them', () => {
+	it('an open ask carrying comments: a plain separator and the accent count follow "Needs you" and its time, with no second dot', () => {
 		nav.plan.nodes = [{ id: 'n1', state: 'pending', comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 2, system_task: false } } as never];
 		render({ card: card(1) });
 		const line = chip()!.querySelector('.ctx .count-line')!;
-		// The state and time are the run that gives way; the count is outside it, so it is never the part cut.
+		// The state and time keep their text; the count follows them, wrapping below when they don't share a line.
 		expect(line.querySelector('.count-lead')!.textContent).toMatch(/^\s*Needs you\s*·/);
 		expect(line.querySelector('.count-lead')!.textContent).not.toContain('comment');
-		expect(line.querySelector('.comment-count')!.textContent).toBe('2 comments, 2 suggestions');
-		expect(line.querySelector('.comment-count .comment-dot')).not.toBeNull();
+		expect(line.querySelector('.comment-count > .count-sep')!.textContent).toBe(' · ');
+		expect(line.querySelector('.count-text')!.textContent).toBe('2 comments, 2 suggestions');
+		// The state's own dot is the line's one dot.
+		expect(line.querySelector('.comment-dot')).toBeNull();
+		expect(chip()!.querySelectorAll('.ctx .dot')).toHaveLength(1);
 		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Needs you, 2 comments, 2 suggestions');
 	});
 
