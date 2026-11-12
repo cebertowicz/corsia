@@ -5,6 +5,7 @@ import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
 import rowFaceSource from '$lib/components/plans/PlanRowFace.svelte?raw';
+import countLineSource from '$lib/components/comments/CommentCountLine.svelte?raw';
 
 /**
  * Owner decision, 2026-09-16: a plan row is one line. The icon carries status and the
@@ -154,8 +155,37 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(lines).toHaveLength(1);
 		expect(lines[0].textContent).toBe('1 comment, 1 suggestion');
 		expect(lines[0].querySelector('.comment-count .comment-dot')).not.toBeNull();
-		expect(rowFaceSource).toMatch(/\.comment-count\s*\{\s*color:\s*var\(--accent\)/);
-		expect(rowFaceSource).toMatch(/\.comment-dot\s*\{[^}]*background:\s*var\(--amber\)/);
+		expect(countLineSource).toMatch(/\.comment-count\s*\{[^}]*color:\s*var\(--accent\)/);
+		expect(countLineSource).toMatch(/\.comment-dot\s*\{[^}]*background:\s*var\(--amber\)/);
+	});
+
+	it('never cuts the count: the subtext ahead of it is the run that truncates', () => {
+		render([node({
+			id: 'ask', title: 'Review launch plan', state: 'review_requested', requires_user_action: true,
+			review: { kind: 'human_decision', label: 'Needs your decision', actor: { kind: 'user', id: null, label: 'You' } },
+			comment_attention: { artifact_id: 'doc', comments: 12, suggestions: 3, system_task: false },
+		})]);
+
+		const line = row('Review launch plan').querySelector('.row-subline')!;
+		expect(line.classList.contains('counted')).toBe(true);
+		expect(line.querySelector('.count-lead')!.textContent).toBe('Needs your decision');
+		expect(line.querySelector('.comment-count')!.textContent).toBe('12 comments, 3 suggestions');
+		// Only the lead carries the ellipsis; the count wraps (its own line, then between words) instead.
+		expect(countLineSource).toMatch(/\.count-lead\s*\{[^}]*text-overflow:\s*ellipsis/);
+		expect(countLineSource).toMatch(/\.count-line\s*\{[^}]*flex-wrap:\s*wrap/);
+		expect(countLineSource).not.toMatch(/\.(count-run|comment-count)\s*\{[^}]*(overflow:\s*hidden|text-overflow)/);
+		expect(rowFaceSource).toMatch(/\.row-subline\.counted\s*\{[^}]*overflow:\s*visible[^}]*white-space:\s*normal/);
+	});
+
+	it('an agent\'s feedback row and a file task keep the whole count on a counted line', () => {
+		render([
+			node({ id: 'feedback', title: 'Author left 12 comments', state: 'active', comment_attention: { artifact_id: 'a', comments: 12, suggestions: 3, system_task: false } }),
+			node({ id: 'file', title: 'Launch plan.md', requires_user_action: true, assignee: 'user', comment_attention: { artifact_id: 'b', comments: 12, suggestions: 3, system_task: true } }),
+		]);
+		for (const title of ['Author left 12 comments', 'Launch plan.md']) {
+			const line = row(title).querySelector('.row-subline.counted')!;
+			expect(line.textContent).toBe('12 comments, 3 suggestions');
+		}
 	});
 
 	it('shows an agent\'s feedback task its count without the needs-you dot', () => {

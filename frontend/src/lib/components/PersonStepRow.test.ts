@@ -114,6 +114,25 @@ describe('PersonStepRow', () => {
 		expect(nav.doStep).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
 	});
 
+	it('an open ask carrying comments: the dot and the accent count follow "Needs you" and its time, and the name says them', () => {
+		nav.plan.nodes = [{ id: 'n1', state: 'pending', comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 2, system_task: false } } as never];
+		render({ card: card(1) });
+		const line = chip()!.querySelector('.ctx .count-line')!;
+		// The state and time are the run that gives way; the count is outside it, so it is never the part cut.
+		expect(line.querySelector('.count-lead')!.textContent).toMatch(/^\s*Needs you\s*·/);
+		expect(line.querySelector('.count-lead')!.textContent).not.toContain('comment');
+		expect(line.querySelector('.comment-count')!.textContent).toBe('2 comments, 2 suggestions');
+		expect(line.querySelector('.comment-count .comment-dot')).not.toBeNull();
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Needs you, 2 comments, 2 suggestions');
+	});
+
+	it('an ask with no comments waiting keeps its plain state line', () => {
+		nav.plan.nodes = [{ id: 'n1', state: 'pending', comment_attention: { artifact_id: 'doc', comments: 0, suggestions: 0, system_task: false } } as never];
+		render({ card: card(1) });
+		expect(chip()!.querySelector('.count-line')).toBeNull();
+		expect(chip()!.getAttribute('aria-label')).toBe('Do: Step 1, Needs you');
+	});
+
 	it('every task settled: only receipts remain', () => {
 		const cards = [card(1), card(2)];
 		nav.plan.nodes = [{ id: 'n1', state: 'accepted' }, { id: 'n2', state: 'accepted' }];

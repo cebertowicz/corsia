@@ -159,6 +159,31 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		if (width <= 768) await page.getByRole('button', { name: /^Open plan —/ }).click();
 		else if (width <= 1024) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	};
+	const reopenChat = async () => {
+		await openAppPastLanding(page);
+		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, title).click();
+	};
+	// The count is never the part cut: the whole count sits inside its line and its row, whatever the width.
+	const countWhole = async (scope: import('@playwright/test').Locator) => {
+		const fit = await scope.locator('.count-line').first().evaluate((line) => {
+			const count = line.querySelector('.comment-count') as HTMLElement;
+			const lead = line.querySelector('.count-lead') as HTMLElement | null;
+			const holder = (line.closest('li, [data-step-chip]') ?? line) as HTMLElement;
+			const [lineBox, countBox, holderBox] = [line, count, holder].map((element) => element.getBoundingClientRect());
+			return {
+				text: count.textContent,
+				inside: countBox.left >= lineBox.left - 1 && countBox.right <= lineBox.right + 1
+					&& countBox.left >= holderBox.left - 1 && countBox.right <= holderBox.right + 1,
+				// The count has its own line under the lead.
+				wrapped: lead ? countBox.top >= lead.getBoundingClientRect().bottom - 1 : false,
+				leadCut: lead ? lead.scrollWidth > lead.clientWidth + 1 : false,
+			};
+		});
+		expect(fit.inside, JSON.stringify(fit)).toBe(true);
+		return fit;
+	};
+	const card = page.locator('[data-person-step]').filter({ hasText: 'Review launch plan' }).first();
 	const capture = async (name: string) => {
 		await settled(page);
 		console.log(`build stamp ${width} ${name}: ${await page.locator('.version-overlay').innerText()}`);
@@ -166,7 +191,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	};
 	seed('ask');
 	await reopenPlan();
-	const ask = page.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
+	const ask = plan.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
 	await expect(ask).toBeVisible();
 	await capture('ask-before-comments');
 	const askSubtext = (await ask.locator('.row-subline').first().innerText()).trim();
@@ -189,7 +214,16 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		return color;
 	}));
 	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
+	console.log(`ask row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-with-comments');
+	// The ask's card in chat is the same ask: the same dot and accent count after "Needs you".
+	if (width === 393) await reopenChat();
+	await card.scrollIntoViewIfNeeded();
+	await expect(card.locator('.comment-count')).toHaveText('2 comments, 2 suggestions');
+	await expect(card.locator('.comment-count .comment-dot')).toHaveCount(1);
+	await expect(card.getByRole('button', { name: /Needs you, 2 comments, 2 suggestions$/ })).toHaveCount(1);
+	console.log(`ask card ${width}: ${JSON.stringify(await countWhole(card))}`);
+	if (width === 393) await capture('ask-card');
 	const viewed = await request.post(`/api/artifacts/${artifactId}/comments/${ids.replies[0][0]}/viewed`, {
 		headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: ids.replies[0][1] },
 	});
@@ -198,5 +232,34 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	expect(decided.ok(), await decided.text()).toBeTruthy();
 	await reopenPlan();
 	await expect(ask).toContainText('1 comment, 1 suggestion');
+	console.log(`reduced row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-counts-reduced');
+
+	const longCount = '12 comments, 3 suggestions';
+	seed('long');
+	await reopenPlan();
+	await expect(ask.locator('.comment-count')).toHaveText(longCount);
+	console.log(`long row ${width}: ${JSON.stringify(await countWhole(ask))}`);
+	if (width !== 393) {
+		await expect(card.locator('.comment-count')).toHaveText(longCount);
+		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
+	}
+	await capture('long-count');
+	if (width === 1440) {
+		// The desktop Workspace panel has one fixed width; a narrower one is forced here to show the count wrapping.
+		const pane = page.locator('aside.pane');
+		await pane.evaluate((element) => element.style.setProperty('--pane-width', '240px'));
+		await expect.poll(() => pane.evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(240);
+		const narrow = await countWhole(ask);
+		console.log(`long row narrow panel ${width}: ${JSON.stringify(narrow)}`);
+		expect(narrow.wrapped).toBe(true);
+		await capture('long-count-narrow-panel');
+	}
+	if (width === 393) {
+		await reopenChat();
+		await card.scrollIntoViewIfNeeded();
+		await expect(card.locator('.comment-count')).toHaveText(longCount);
+		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
+		await capture('long-count-card');
+	}
 });

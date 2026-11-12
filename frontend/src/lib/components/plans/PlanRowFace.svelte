@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
-	import { feedbackLine } from '$lib/api/messageCards';
+	import CommentCountLine from '$lib/components/comments/CommentCountLine.svelte';
 	import { activeToolsByThread } from '$lib/stores/threads';
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
@@ -74,16 +74,20 @@
 		<span class="row-status sr-only">{label}</span>
 	</span>
 	{#if attention && !countFollows}
-		<span class="row-subline {state} {tone}">{@render commentCount(attention)}</span>
+		<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot={attention.system_task || node.requires_user_action} /></span>
 	{/if}
 	{#if !attention?.system_task && liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}{#if attention && countFollows}<span class="subline-text">{' · '}</span>{@render commentCount(attention)}{/if}</span>
-	{:else if !attention?.system_task && (subline.lead || subline.moment)}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}{#if attention && countFollows}<span class="subline-text">{' · '}</span>{@render commentCount(attention)}{/if}</span>
-	{:else if attention && countFollows}<span class="row-subline {state} {tone}">{@render commentCount(attention)}</span>{/if}
+		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={liveRun} /></span>
+		{:else}<span class="row-subline {state} {tone}">{@render liveRun()}</span>{/if}
+	{:else if !attention?.system_task && (subline.lead || subline.moment)}
+		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={plainRun} /></span>
+		{:else}<span class="row-subline {state} {tone}">{@render plainRun()}</span>{/if}
+	{:else if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot /></span>{/if}
 </span>
 
-<!-- Comments waiting for the person: the needs-you dot, then the count in the accent colour. -->
-{#snippet commentCount(counted: NonNullable<OperatorNode['comment_attention']>)}<span class="comment-count">{#if counted.system_task || node.requires_user_action}<span class="comment-dot" aria-hidden="true"></span>{/if}{feedbackLine(counted)}</span>{/snippet}
+<!-- The row's own subtext: one inline run that truncates once, at its end. -->
+{#snippet liveRun()}{#if liveStep}<PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{/if}{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}{/snippet}
+{#snippet plainRun()}{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}{/snippet}
 
 <style>
 	.row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
@@ -111,12 +115,8 @@
 	.row-subline.needs-you { color: var(--amber-text); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
-	.comment-count { color: var(--accent); white-space: pre; }
-	/* The sidebar's needs-you dot (ThreadPlanStateMark), set in the text line. */
-	.comment-dot {
-		display: inline-block; width: 8px; height: 8px; margin-right: var(--space-1);
-		border-radius: var(--radius-circle); background: var(--amber); vertical-align: 0.05em;
-	}
+	/* A line carrying a comment count never truncates as a whole: CommentCountLine cuts the subtext ahead of it. */
+	.row-subline.counted { overflow: visible; text-overflow: clip; white-space: normal; }
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;
