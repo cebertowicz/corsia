@@ -883,10 +883,17 @@ async def test_hard_cap_is_ready_once_recovery_is_durable(
         "service stop",
         allow_hard_cap=True,
     )
+    # The hard cap answers an HTTP request: every write it makes must leave the loop.
+    from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
+
+    monkeypatch.setenv(LOOP_WRITE_STRICT_ENV, "1")
     result = await restart.enforce_restart_hard_cap(started["operation_id"])
 
     assert result["force_stop_ready"] is True
     assert result["failures"] == [f"{thread_id}:stop"]
+    from automation import self_restart
+
+    assert self_restart.in_flight_request()["phase"] == "ready"
 
     db = get_db()
     try:
