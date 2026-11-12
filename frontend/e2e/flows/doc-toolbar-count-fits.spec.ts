@@ -26,6 +26,7 @@ for (const { width, scheme } of CASES) {
 		await page.setViewportSize({ width, height: mobile ? 852 : 960 });
 		await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'no-preference' });
 		const request = page.request;
+		await setDebugVersionOverlay(request, false);
 		const params = { token: TEST_TOKEN };
 		const title = `toolbar-count-${width}-${scheme}-${Date.now()}`;
 		const threadId = await createSession(request, title);
@@ -231,7 +232,12 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 		await expect(page.locator('.document-header .sending-now .btn')).toBeVisible();
 	};
 	const take = async (viewport: number, split: number | null) => {
-		await page.waitForTimeout(500);
+		// Measure once the window has the width asked for, no animation is running, and the header's width holds across two frames.
+		await expect.poll(() => page.evaluate((expected) => new Promise<string>((resolve) => {
+			const read = () => `${window.innerWidth === expected ? 'at' : 'not'}:${Math.round(document.querySelector('.document-header')!.getBoundingClientRect().width * 10)}:${document.getAnimations().length}`;
+			const first = read();
+			requestAnimationFrame(() => requestAnimationFrame(() => { const second = read(); resolve(first === second && second.startsWith('at:') && second.endsWith(':0') ? 'settled' : 'moving'); }));
+		}), viewport), { message: 'the header layout settles', timeout: 15_000 }).toBe('settled');
 		const label = split ? `${viewport}px window, pane ${split}px` : `${viewport}px window`;
 		const measured = await measureTools(page);
 		results.push({ label, ...measured });
