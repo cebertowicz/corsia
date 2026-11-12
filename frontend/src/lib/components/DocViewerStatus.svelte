@@ -184,6 +184,8 @@
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools document-status-row">
+			<!-- Two groups, the only places the cluster may break: what is being sent and counted, then how it is delivered and reviewed. -->
+			<span class="tool-group tool-send">
 			{#if artifactId}
 				<!-- Send belongs to this compact tool row with the comment count, delivery preference, and review action. -->
 				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
@@ -193,6 +195,8 @@
 			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
+			</span>
+			<span class="tool-group tool-more">
 			{#if artifactId}
 				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>
@@ -204,6 +208,7 @@
 				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>
 				<span class="label">History</span>
 			</button>{/if}
+			</span>
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
@@ -281,25 +286,23 @@
 	.identity-details { display: none; }
 	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
 	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
+	/* The cluster breaks only between its two groups, never inside the second: that one stays on a single line. The first can wrap for the held reason, Reload and a long count. */
+	.tool-group { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); max-inline-size: 100%; }
+	.tool-more { flex-wrap: nowrap; }
 	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
 	.feedback-controls { flex: none; min-width: max-content; }
+	/* The label is always the same distance from the drawn switch: the touch size makes the button wider than its track, so it steps back by the difference. */
 	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
 	@container doc-header (max-width: 32.5rem) {
-		.document-tools { gap: 0; }
-	}
-	@container doc-header (width < 820px) {
-		/* The one-row tool cluster cannot shrink, and with the worst content it is 818px wide, so below 820px the delivery label takes its short form; the accessible name and 44px target stay unchanged. */
-		.delivery-toggle { gap: 0; }
-		.delivery-toggle > span { font-size: 0; }
-		.delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+		.document-tools, .tool-group { gap: 0; }
 	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
-		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
+		/* The delivery label is the full "Deliver immediately" at every width; at phone width only the tool padding and the touch size change, and the cluster wraps between its groups when one row cannot hold it. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
 		.delivery-toggle { min-height: var(--touch-target); }
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
+		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); margin-inline-start: calc((var(--w) - var(--touch-target)) / 2); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
 	}
@@ -313,7 +316,7 @@
 	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
 	@container doc-header (width < 408px) {
-		/* The compact toolbar remains one row even when the review surface occupies the header. */
+		/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. */
 		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
 		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	}
@@ -324,7 +327,7 @@
 		.history-tool .label { display: none; }
 	}
 	@media (max-width: 768px) {
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
+		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); margin-inline-start: calc((var(--w) - var(--touch-target)) / 2); }
 	}
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
