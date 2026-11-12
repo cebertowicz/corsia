@@ -23,6 +23,11 @@ def comment_only_receipt_turns(db: sqlite3.Connection, thread_id: str, turn_ids:
           AND EXISTS (SELECT 1 FROM messages i WHERE i.active_turn_id=t.id AND i.input_order IS NOT NULL)
           AND NOT EXISTS (
             SELECT 1 FROM messages i WHERE i.active_turn_id=t.id AND i.input_order IS NOT NULL
+            -- A passive context digest rides along with the input that started the Turn;
+            -- it never starts one (`thread_input_rows.starts_turn`), so it is not a cause.
+            AND NOT (i.role='system' AND CASE WHEN json_valid(i.metadata) THEN
+                json_extract(i.metadata, '$.type')='context_event'
+                AND json_extract(i.metadata, '$.event_disposition')='passive' ELSE 0 END)
             AND (i.role != 'user' OR trim(COALESCE(i.content, ''), ?) != ''
               OR NOT json_valid(i.metadata)
               OR CASE WHEN json_valid(i.metadata) THEN

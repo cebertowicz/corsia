@@ -1,5 +1,7 @@
 """Terminal receipt facts use the same persisted turn classification as Focus."""
 
+import json
+
 import pytest
 
 from infra.chat_comment_receipts import comment_only_receipt_field
@@ -23,6 +25,20 @@ async def test_terminal_receipt_uses_persisted_turn_and_output():
     assert await comment_only_receipt_field(_SID, "comment", db=db) == _FACT
     db.execute("UPDATE chat_visible_content SET content='Chat answer'")
     assert await comment_only_receipt_field(_SID, "comment", db=db) == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("disposition", "expected"), [("passive", _FACT), ("wake", {})])
+async def test_admitted_context_digest_counts_only_when_passive(disposition, expected):
+    # Input admission binds a passive digest to the Turn with the comment that starts it.
+    db = _turn_db()
+    meta = json.dumps({"type": "context_event", "event_disposition": disposition})
+    db.execute(
+        "INSERT INTO messages (id, thread_id, role, content, metadata, input_order, active_turn_id, seq, created_at) "
+        "VALUES ('digest', ?, 'system', '[PASSIVE CONTEXT DIGEST]', ?, 0, 'comment', 0, 't')",
+        (_SID, meta),
+    )
+    assert await comment_only_receipt_field(_SID, "comment", db=db) == expected
 
 
 @pytest.mark.asyncio
