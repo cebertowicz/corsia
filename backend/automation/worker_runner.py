@@ -110,7 +110,7 @@ async def drive() -> int:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
         claimed_ids: set[int] = set()
         made = 0
-        while claimed := await run_in_db(_claim, None, frozenset(claimed_ids)):
+        while len(claimed_ids) < BATCH and (claimed := await run_in_db(_claim, None, frozenset(claimed_ids))):
             for row, run_input in claimed:
                 claimed_ids.add(row["id"])
                 made += await _start(row, run_input)
