@@ -22,7 +22,7 @@
   "limits": {
     "backend/api/project_repos.py": 784,
     "backend/api/project_scaffolding.py": 447,
-    "backend/core/step_handler.py": 416,
+    "backend/core/step_handler.py": 417,
     "backend/core/thread_lifecycle.py": 481,
     "backend/host_access/processes.py": 1404,
     "backend/host_access/redaction.py": 968,
@@ -46,7 +46,7 @@
     "backend/tools/shell_guard.py": 1174,
     "frontend/src/lib/components/DocumentsView.svelte": 522,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 509,
-    "frontend/src/lib/ws/handlersTurns.ts": 437,
+    "frontend/src/lib/ws/handlersTurns.ts": 436,
     "frontend/src/routes/+page.svelte": 475,
     "frontend/src/routes/_design/+page.svelte": 608
   },

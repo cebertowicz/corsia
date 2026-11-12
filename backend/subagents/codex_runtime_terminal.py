@@ -14,7 +14,6 @@ from core.turn_core import (
     settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
-from infra.chat_comment_receipts import comment_only_receipt_field
 from infra.context_receipts import (
     attach_context_receipt,
     live_context_usage_payload,
@@ -375,7 +374,6 @@ async def publish_claimed_terminal(
         context_usage=context_usage,
         db=db,
     )
-    payload.update(await comment_only_receipt_field(thread_id, identity.turn_id, db=db))
     live.thinking_buf = ""
     live.thinking_provenance = None
     bcast(thread_id, payload)

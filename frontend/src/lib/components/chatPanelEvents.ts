@@ -22,7 +22,6 @@ export interface ChatPanelEventPort {
 	followBottom: () => void;
 	fetchThreadMessages: (threadId: string) => Promise<void>;
 	clearWarmKeys: (threadId: string) => void;
-	refreshCommentRuns?: (threadId: string, turnId: string) => void;
 }
 
 /** Subscribe the panel to transcript-affecting live events and return cleanup. */
@@ -47,9 +46,6 @@ export function subscribeChatPanelEvents(port: ChatPanelEventPort): () => void {
 		const sid = data?.thread_id;
 		if (!sid || typeof data?.turn_id !== 'string') return;
 		port.clearWarmKeys(sid);
-		if (data.comment_only_receipt === true && sid === get(port.activeThreadId)) {
-			port.refreshCommentRuns?.(sid, data.turn_id);
-		}
 		refreshLifecycle(data);
 		if (sid === get(port.activeThreadId) && port.isNearBottom()) port.scrollToBottom();
 	};

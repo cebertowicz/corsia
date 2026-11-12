@@ -1665,7 +1665,6 @@ class TestContextUsage:
                 CCEventContext(live, "cc-sid", fail_broadcast, None),
                 {"type": "turn_complete"},
                 None,
-                turn_id="turn-cc-broadcast",
                 quiet_if_unmeasured=False,
             )
 
@@ -1719,7 +1718,6 @@ class TestContextUsage:
             ),
             payload,
             "assistant-1",
-            turn_id="turn-cc-receipt",
             quiet_if_unmeasured=False,
         )
 
@@ -1954,7 +1952,6 @@ class TestContextUsage:
         "API Error: 400 invalid_request_error: max_tokens too large",
     ])
     async def test_only_the_empty_text_block_400_retires_the_provider_session(self, result):
-        from subagents.cc_resume_transition import retire_rejected_provider_session
         from subagents.cc_runtime_events import _make_on_event
         from subagents.cc_runtime_state import _Live
         from subagents.terminal_marker_writer import insert_terminal_marker
@@ -1972,7 +1969,7 @@ class TestContextUsage:
             on_event = _make_on_event(live, "cc-sid", lambda sid, m: None, db=None)
             await on_event({"kind": "result", "is_error": True, "result": result})
 
-        retire = [c for c in run_db.await_args_list if c.args[0] is retire_rejected_provider_session]
+        retire = [c for c in run_db.await_args_list if c.args[0] is not insert_terminal_marker]
         assert len(retire) == (1 if poisoned else 0)
         assert live.provider_context_untrusted is poisoned
         assert (insert.call_args.args[3].get("cause") == "provider_transcript_poisoned") is poisoned

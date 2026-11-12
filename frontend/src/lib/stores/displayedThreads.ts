@@ -62,25 +62,6 @@ export function retainDisplayedRows(threadId: string): void {
 		row.thread_id === threadId || isDisplayedThread(row.thread_id)));
 }
 
-/**
- * The Turn a row belongs to: the one its metadata names, else the Turn that consumed it. Only an
- * input row carries `active_turn_id`, so a context digest that rode in with a Turn is that Turn's.
- * The twin of the backend's `row_turn_id`.
- */
-function rowTurnId(message: Message): string | null {
-	const turn = message.metadata?.turn_id;
-	if (typeof turn === 'string') return turn;
-	return message.active_turn_id || null;
-}
-
-/** Mark a displayed thread's rows of a Turn the server found comment-only (see `isCommentOnlyWork`). */
-export function markCommentOnlyTurn(threadId: string, turnId: string): void {
-	if (!isDisplayedThread(threadId)) return;
-	messages.update((current) => current.map((message) =>
-		message.thread_id === threadId && rowTurnId(message) === turnId
-			? { ...message, commentOnlyReceipt: true } : message));
-}
-
 export function _resetDisplayedThreadsForTests(): void {
 	claims.set(new Map());
 }

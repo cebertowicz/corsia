@@ -7,7 +7,6 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from infra.chat_comment_answers import VisibleAnswerStream, message_answer_fields
-from infra.chat_comment_receipts import comment_only_receipt_field
 from infra.database import write_transaction
 from infra.sidebar_preview import sidebar_update
 from infra.time import utc_now_iso
@@ -18,7 +17,7 @@ from infra.context_receipts import (
     context_usage_receipt, context_usage_summary, live_context_usage_payload,
 )
 from core.turn_error_surface import broadcast_llm_error, persist_llm_error
-from infra.queries import insert_message, message_transcript_seq
+from infra.queries import insert_message
 from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
 from core.turn_core import TurnIdentity
@@ -29,6 +28,9 @@ log = logging.getLogger(__name__)
 
 async def _step_seq(thread_id: str, message_id: str) -> int | None:
     """Return one persisted Step's indexed transcript position off the event loop."""
+    from infra.db_async import run_in_db
+    from infra.queries import message_transcript_seq
+
     try:
         return await run_in_db(message_transcript_seq, thread_id, message_id)
     except Exception:
@@ -354,7 +356,6 @@ class StepHandler:
             "step_ids": self.step_ids,
             **terminal_context,
         }
-        ws_payload.update(await comment_only_receipt_field(self.thread_id, self.turn_id))
         await self._emit(ws_payload)
 
         try:

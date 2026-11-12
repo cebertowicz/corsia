@@ -12,7 +12,7 @@ import {
 	mergeMessageDelivery,
 } from '../stores/threads';
 import { settleActiveTool, startActiveTool } from '../stores/activeTools';
-import { isDisplayedThread, markCommentOnlyTurn } from '../stores/displayedThreads';
+import { isDisplayedThread } from '../stores/displayedThreads';
 import { recordMeasuredUsage, setContextUsage } from '../stores/contextUsageByThread';
 import { readMessageDeliveryState } from '../messageDelivery';
 import { compareMessageOrder } from '../messageHistory';
@@ -387,7 +387,6 @@ export function handleTurnComplete(data: any) {
 	const identity = admitTerminalFrame(data);
 	if (!threadId || !identity) return;
 	clearTerminalTransients(threadId, identity);
-	if (data.comment_only_receipt === true) markCommentOnlyTurn(threadId, identity.turnId);
 	emit('turn_complete', data);
 	if (!isDisplayedThread(threadId)) return;
 	recordMeasuredUsage(threadId, data.context_usage ?? null);

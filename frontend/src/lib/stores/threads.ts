@@ -49,10 +49,10 @@ export function isNavAgent(s: Thread): boolean {
 }
 
 export type { ChatComment } from '../chatCommentTypes';
-import type { ChatCommentRowFields } from '../chatCommentTypes';
+import type { ChatComment } from '../chatCommentTypes';
 import { apiFetch } from '$lib/api/request';
 
-export interface Message extends ChatCommentRowFields {
+export interface Message {
 	id: string;
 	thread_id: string;
 	role: 'user' | 'assistant' | 'system';
@@ -76,6 +76,10 @@ export interface Message extends ChatCommentRowFields {
 	next_attempt_at?: string | null;
 	/** Artifact cards the server computed for this message when it was read (display rows only). */
 	cards?: import('../api/messageCards').MessageCard[];
+	/** Server-computed transcript content after placed chat answers are removed. */
+	chat_visible_content?: string;
+	chat_comments?: ChatComment[];
+	chat_answer_cids?: string[];
 }
 
 function validDeliveryRevision(value: unknown): number | null {

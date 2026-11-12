@@ -11,7 +11,8 @@
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { refreshVisibleThread, subscribeChatPanelEvents } from './chatPanelEvents';
-	import { createReplyAnnouncements } from './chatReplyAnnouncements.svelte';
+	import { watchChatCommentThreads } from '$lib/chatCommentRefresh';
+	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
@@ -23,7 +24,7 @@
 	import { createChatCommentMargin } from './chatCommentMargin.svelte';
 	import { coreSettings } from '$lib/stores/settings';
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
-	import { loadRunRange, refreshCommentRuns } from '$lib/focusRunLoader';
+	import { loadRunRange } from '$lib/focusRunLoader';
 	import InputBar from './InputBar.svelte';
 	import type { SendOutcome } from './composerSendReadiness';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
@@ -224,7 +225,13 @@
 	// A newer first-page read makes the older one stale: abort it, never download both.
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
-	const replyAnnouncements = createReplyAnnouncements(MSG_PAGE_SIZE, () => $activeThreadId);
+	let replyAnnouncements = $state<{ id: number; text: string }[]>([]);
+	// The live region announces what is added to it: keep the three newest, keyed so each reply adds a node, and clear them when the chat changes.
+	$effect(() => {
+		void $activeThreadId;
+		replyAnnouncements = [];
+		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), { id: (replyAnnouncements.at(-1)?.id ?? 0) + 1, text: `New reply on ${quoteLabel(quote)}` }]; });
+	});
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -283,8 +290,6 @@
 			followBottom: () => messageListRef?.followBottom(),
 			fetchThreadMessages,
 			clearWarmKeys: clearWarmKeysForThread,
-			refreshCommentRuns: (threadId, turnId) =>
-				void refreshCommentRuns(threadId, turnId, () => focusRuns, (next) => { focusRuns = next; }),
 		});
 		const handleVisibilityChange = async () => {
 			if (document.visibilityState !== 'visible') return;
@@ -303,7 +308,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements.items as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
+	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
 	<ChatThreadBindings />
 	<div class="chat-content" bind:this={chatCanvas} use:toastAnchorSurface>
 		<div class="transcript-area">

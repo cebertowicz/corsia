@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadRunRange, refreshCommentRuns } from '$lib/focusRunLoader';
+import { loadRunRange } from '$lib/focusRunLoader';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
@@ -110,40 +110,5 @@ describe('reading a stub run', () => {
 		await read;
 
 		expect(get(messages)).toEqual([]);
-	});
-});
-
-describe('refreshing a run after a comment-only Turn settles', () => {
-	const mixed: RunStub = { ...stub, turnIds: ['t1', 'comment'], continuesOlder: true };
-	const projection = { runs: [{
-		kind: 'run', first_id: 'm2', last_id: 'm4', first_seq: 2, last_seq: 4,
-		count: 3, weight: 1, turn_ids: ['t1'], kinds: ['steps'], continues_older: false,
-	}] };
-
-	it('replaces the stale aggregate with the server projection', async () => {
-		let runs: RunStub[] = [mixed];
-		const calls = serve([{ body: projection }]);
-		await refreshCommentRuns('thread-1', 'comment', () => runs, (next) => { runs = next; });
-		expect(calls).toHaveLength(1);
-		expect(Object.fromEntries(calls[0].searchParams)).toMatchObject({
-			view: 'focus-run', from_id: 'm2', to_id: 'm9', limit: '1',
-		});
-		expect(runs).toMatchObject([{ count: 3, weight: 1, turnIds: ['t1'], continuesOlder: true }]);
-	});
-
-	it('drops a response that arrives after the run changed', async () => {
-		let runs: RunStub[] = [mixed];
-		globalThis.fetch = vi.fn(async () => {
-			runs = [{ ...mixed, count: 20 }];
-			return { ok: true, status: 200, json: async () => projection };
-		}) as unknown as typeof fetch;
-		await refreshCommentRuns('thread-1', 'comment', () => runs, (next) => { runs = next; });
-		expect(runs[0].count).toBe(20);
-	});
-
-	it('reads nothing for a thread that is not on screen', async () => {
-		const calls = serve([{ body: projection }]);
-		await refreshCommentRuns('thread-2', 'comment', () => [mixed], () => {});
-		expect(calls).toHaveLength(0);
 	});
 });

@@ -86,16 +86,6 @@ export function isSystemNotice(message: TranscriptMessage): boolean {
 	return !ACTIVITY_SYSTEM_TYPES.has(type) && !NEVER_DRAWN_SYSTEM_TYPES.has(type);
 }
 
-/**
- * Whether `message` is work of a completed Turn that only answered chat comments, so
- * it leaves no Worked receipt. The server marks the Turn (`commentOnlyReceipt`); a
- * notice Focus shows stays. The client twin of the backend's `is_comment_only_work`.
- */
-export function isCommentOnlyWork(message: TranscriptMessage): boolean {
-	if (message.commentOnlyReceipt !== true) return false;
-	return message.role === 'assistant' || (message.role === 'system' && !isSystemNotice(message));
-}
-
 /** The kinds a run stub names; the vocabulary is shared with the backend's `row_kind`. */
 export type RowKind =
 	| 'steps' | 'context_update' | 'account_move' | 'model_switch'

@@ -15,9 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import (
-    COMMENT_ONLY_WORK_SQL, FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql,
-)
+from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -27,7 +25,6 @@ from api.thread_paging import (
 from api.thread_turn_summaries import page_turn_summaries
 from history.projection import in_read_snapshot
 from infra.message_activity import ACTIVITY_WEIGHT_SQL, DISPLAY_ROW_SELECT
-from infra.chat_comment_receipts import drop_comment_only_work, shown_anchors
 from infra.queries import get_thread_for_user
 
 # Rows one Focus page may inspect. A page of a 0.7%-visible thread needs about 7100.
@@ -43,10 +40,9 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 # statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
 # `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
-_VISIBLE_COLUMN = f"CASE WHEN {COMMENT_ONLY_WORK_SQL} THEN 0 ELSE ({FOCUS_VISIBLE_SQL}) END AS vis"
-_CANDIDATE_COLUMN = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.turn_id') END AS turn_id"
+_VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
 _RUN_COLUMNS = (
-    f"{_VISIBLE_COLUMN}, {COMMENT_ONLY_WORK_SQL} AS suppressed, {ACTIVITY_WEIGHT_SQL} AS weight, "
+    f"{_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
     "CASE WHEN role = 'assistant' AND instr(metadata, '\"browser_chip\"') > 0 AND json_valid(metadata) "
     "THEN json_extract(metadata, '$.browser_chip') END AS chip, "
@@ -72,12 +68,11 @@ def _anchors_cte(columns: str) -> str:
     )
 
 
-# The first `:newest_n` anchors newest-first, each with whether Focus shows it and its
-# Turn. `_visible_anchors` stops reading at the page's last visible anchor, so SQLite
-# reads no further than the page; that anchor's seq is where the walk stops.
-_STREAM_SQL = (
-    f"WITH {_anchors_cte(f'{FOCUS_VISIBLE_SQL} AS vis, role, ' + _CANDIDATE_COLUMN)} "
-    "SELECT id, seq, vis, role, turn_id FROM anchors ORDER BY seq DESC"
+# The newest `:budget` visible anchors among the first `:newest_n` anchors; only they
+# cross into Python. When the budget fills, the last one's seq is where the walk stops.
+_VISIBLE_SQL = (
+    f"WITH {_anchors_cte(_VISIBLE_COLUMN)} "
+    "SELECT id, seq FROM anchors WHERE vis = 1 ORDER BY seq DESC LIMIT :budget"
 )
 
 # Every hidden run among the first `:cap` anchors, aggregated in SQLite. A run closes
@@ -95,7 +90,7 @@ scanned AS (
     SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
 ),
 bounded AS (
-    SELECT id, seq, vis, suppressed, weight, row_kind, turn_id, chip, rn, retry_for, error_turn,
+    SELECT id, seq, vis, weight, row_kind, turn_id, chip, rn, retry_for, error_turn,
         COALESCE(SUM(vis) OVER (ORDER BY seq DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
         CASE WHEN turn_id IS NOT NULL
@@ -107,7 +102,7 @@ hidden AS (
     SELECT *, MAX(CASE WHEN live IS NOT NULL THEN rn * 2 + live END) OVER (
         PARTITION BY seg ORDER BY seq DESC
         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_known
-    FROM bounded WHERE vis = 0 AND NOT suppressed
+    FROM bounded WHERE vis = 0
 ),
 split AS (
     SELECT *, SUM(CASE WHEN live IS NOT NULL AND prev_known IS NOT NULL
@@ -140,15 +135,13 @@ SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
     json_group_array(DISTINCT ends.row_kind) AS kinds,
-    substr(MAX(printf('%020d', ends.seq) || ends.chip), 21) AS browser_chip,
-    NULL AS oldest_kept_id
+    substr(MAX(printf('%020d', ends.seq) || ends.chip), 21) AS browser_chip
 FROM ends LEFT JOIN run_turns USING (seg, run_no)
 GROUP BY ends.seg, ends.run_no
 UNION ALL
 SELECT 'meta', NULL, NULL, (SELECT COUNT(*) FROM anchors), 0,
     (SELECT id FROM scanned WHERE rn = MIN((SELECT COUNT(*) FROM anchors), :cap)),
-    NULL, NULL, '[]', NULL,
-    (SELECT id FROM scanned WHERE rn <= :cap AND NOT suppressed ORDER BY rn DESC LIMIT 1)
+    NULL, NULL, '[]', NULL
 ORDER BY first_seq
 """
 
@@ -171,35 +164,25 @@ class _Walk:
     scanned: int = 0
 
 
-def _visible_anchors(db, thread_id: str, args: dict, budget: int) -> tuple[list, set[str]]:
-    """The newest `budget` anchors Focus shows, and the comment-only Turns among the rows read."""
-    cursor = db.execute(_STREAM_SQL, args)
-    try:
-        return shown_anchors(db, thread_id, iter(cursor), budget)
-    finally:
-        cursor.close()
-
-
 def _walk(
     db, thread_id: str, cursor_seq: int | None,
-    budget: int, cap: int, *, range_floor: int | None = None,
+    budget: int, cap: int,
 ) -> _Walk:
     """Walk newest-first until `budget` visible anchors or `cap` rows are read.
 
-    Two statements, both in SQLite: the first finds the visible anchors (and so
-    where the walk stops), the second reduces the hidden rows in that range to run
-    stubs. The page's anchors and the stubs cross into Python.
+    Two statements, both aggregating in SQLite: the first finds the visible anchors
+    (and so where the walk stops), the second reduces the hidden rows in that range
+    to run stubs. Only visible anchors and stubs cross into Python.
     """
-    args = {"thread": thread_id, "after": cursor_seq, "floor": range_floor, "cap": cap}
-    visible, suppressed = _visible_anchors(db, thread_id, {**args, "newest_n": cap}, budget)
-    args["suppressed"] = json.dumps(sorted(suppressed))
-    floor = visible[-1]["seq"] if len(visible) >= budget else range_floor
+    args = {"thread": thread_id, "after": cursor_seq, "floor": None, "cap": cap}
+    visible = db.execute(_VISIBLE_SQL, {**args, "newest_n": cap, "budget": budget}).fetchall()
     walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)])
+    floor = visible[-1]["seq"] if len(visible) >= budget else None
     rows = db.execute(_RUNS_SQL, {**args, "floor": floor, "newest_n": cap + 1}).fetchall()
     meta = next(row for row in rows if row["kind"] == "meta")
     walk.oldest_id = meta["first_id"]
     walk.scanned = min(meta["count"], cap)
-    if floor is None or range_floor is not None:
+    if floor is None:
         walk.has_more = meta["count"] > cap
     else:
         walk.has_more = db.execute(_OLDER_EXISTS_SQL, (thread_id, floor)).fetchone() is not None
@@ -218,8 +201,8 @@ def _walk(
             "continues_older": False,
             **({"browser_chip": json.loads(row["browser_chip"])} if row["browser_chip"] else {}),
         })
-    # Suppressed work consumes scan budget but cannot close an ordinary run.
-    if walk.runs and walk.runs[0]["first_id"] == meta["oldest_kept_id"]:
+    # The oldest run is cut off by the cap or budget only if it holds the last row read.
+    if walk.runs and walk.runs[0]["first_id"] == walk.oldest_id:
         walk.runs[0]["continues_older"] = walk.has_more
     return walk
 
@@ -353,7 +336,7 @@ def page_run_range(
     newest_first = [dict(row) for row in rows]
     has_more = len(newest_first) > limit
     selected = list(reversed(newest_first[:limit]))
-    display = project_anchors(db, thread_id, drop_comment_only_work(db, thread_id, selected))
+    display = project_anchors(db, thread_id, selected)
     finish_display(db, thread_id, display, include_tool_results=False)
     return {
         "messages": display,

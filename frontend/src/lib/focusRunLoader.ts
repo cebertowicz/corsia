@@ -8,7 +8,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from './messageHistory';
-import { parseRunStubs, type RunLoad, type RunStub } from './focusRuns';
+import type { RunLoad, RunStub } from './focusRuns';
 import { apiFetch } from '$lib/api/request';
 
 export interface RunLoaderDeps {
@@ -53,36 +53,5 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 	} catch (e) {
 		console.error('loadRunRange failed:', e);
 		if (get(activeThreadId) === threadId) fail();
-	}
-}
-
-/**
- * Re-read the stubs holding `turnId` after it settled comment-only, so their counts
- * stay server-owned. A response that arrives after the stub or the thread on screen
- * changed is dropped.
- */
-export async function refreshCommentRuns(
-	threadId: string,
-	turnId: string,
-	runs: () => readonly RunStub[],
-	setRuns: (next: RunStub[]) => void,
-): Promise<void> {
-	if (!get(token) || get(activeThreadId) !== threadId) return;
-	for (const stub of runs().filter((run) => run.turnIds.includes(turnId))) {
-		const params = new URLSearchParams({
-			view: 'focus-run', limit: '1', from_id: stub.firstId, to_id: stub.lastId,
-		});
-		try {
-			const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const page = await res.json();
-			if (get(activeThreadId) !== threadId || !runs().includes(stub)) continue;
-			const next = parseRunStubs(page);
-			// The range ends where the stub did, so whether older rows continue it is unchanged.
-			if (next.length) next[0].continuesOlder = stub.continuesOlder;
-			setRuns(runs().flatMap((run) => (run === stub ? next : [run])));
-		} catch (e) {
-			console.error('refreshCommentRuns failed:', e);
-		}
 	}
 }
