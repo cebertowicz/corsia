@@ -48,7 +48,7 @@
 			await dismissCommentAttention(attention.artifact_id);
 			onDismissed?.();
 		} catch {
-			failure = 'Could not dismiss comments. Try again.';
+			failure = 'Couldn’t dismiss comments. Try again.';
 		} finally {
 			action = 'idle';
 		}

@@ -53,7 +53,7 @@
 			}
 			onClose();
 		} catch {
-			error = 'Could not dismiss comments. Try again.';
+			error = 'Couldn’t dismiss comments. Try again.';
 		} finally {
 			busy = false;
 		}
