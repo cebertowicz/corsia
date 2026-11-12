@@ -7,7 +7,6 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import HTTPException
 from loguru import logger
 
 from infra.database import get_db, write_transaction
@@ -16,11 +15,6 @@ from infra.settings import get_update_schedule, parse_update_schedule_time, set_
 
 SCHEDULE_WINDOW = timedelta(hours=1)
 _SCHEDULE_NOTICE_TASKS: set[asyncio.Task] = set()
-
-#: The two causes `fresh_update_target` refuses a packaged Update for. Both mean
-#: "this check named no build to install", which is a skipped tick, not a failed
-#: one, and must not reach the nightly job as an unexpected failure.
-_PREFLIGHT_REFUSALS = frozenset({"update_check_failed", "update_not_available"})
 
 
 def next_local_time(now: datetime, value: str) -> datetime:
@@ -163,7 +157,10 @@ async def _launch_scheduled_update(
     Tonight and today's record stand and a later tick or a manual try still has its
     chance. Any other launch failure still reaches the nightly job.
     """
+    from fastapi import HTTPException
+
     from api.system_admin import launch_update
+    from api.update_preflight import PREFLIGHT_REFUSALS
 
     def claim(connection: Any) -> bool:
         return trigger != "tonight" or claim_tonight(schedule, db=connection)
@@ -172,7 +169,7 @@ async def _launch_scheduled_update(
         launched = await launch_update(user, None, trigger, port=int(port), claim=claim)
     except HTTPException as refused:
         detail = refused.detail if isinstance(refused.detail, str) else ""
-        if refused.status_code not in {409, 503} or detail not in _PREFLIGHT_REFUSALS:
+        if refused.status_code not in {409, 503} or detail not in PREFLIGHT_REFUSALS:
             raise
         logger.warning("scheduled update skipped: the update check named no build ({})", detail)
         return None

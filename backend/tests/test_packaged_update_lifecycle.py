@@ -535,18 +535,19 @@ async def test_pre_protocol_update_mismatch_never_claims_rollback(isolated_db, m
     assert self_restart.previous_version(row) is None
 
 
-def _packaged_install(tmp_path, monkeypatch, *, staged_version: str):
+def _packaged_install(tmp_path, monkeypatch, *, staged_version: str, bundle_name: str = "CORSIA.app"):
     """Make this test run in a packaged install with one build staged beside it.
 
-    The updater unpacks the build it just downloaded at `CORSIA.app.staged` and the
-    swap installs that copy, so its stamped `CORSIAVersion` is the version the next
-    start reports through `build_info.app_version()`.
+    The updater unpacks the build it just downloaded at `CORSIA.app.staged` whatever
+    the installed app is called, and the swap installs that copy, so its stamped
+    `CORSIAVersion` is the version the next start reports through
+    `build_info.app_version()`.
     """
     import plistlib
 
-    bundle = tmp_path / "CORSIA.app"
+    bundle = tmp_path / bundle_name
     (bundle / "Contents" / "Resources").mkdir(parents=True)
-    staged = bundle.with_name("CORSIA.app.staged")
+    staged = bundle.parent / "CORSIA.app.staged"
     (staged / "Contents").mkdir(parents=True)
     with (staged / "Contents" / "Info.plist").open("wb") as handle:
         plistlib.dump(
@@ -560,25 +561,34 @@ def _packaged_install(tmp_path, monkeypatch, *, staged_version: str):
     return bundle
 
 
-async def test_update_verifies_the_build_staging_installed(isolated_db, monkeypatch, tmp_path):
+@pytest.mark.parametrize("bundle_name", ["CORSIA.app", "CORSIA 2.app"])
+async def test_update_verifies_the_build_staging_installed(
+    isolated_db, monkeypatch, tmp_path, bundle_name
+):
     """The stamp follows the staged bundle, not the earlier feed read.
 
     The probe before acquiring named 0.4.2-dev.1311 while staging took
     0.4.2-dev.1312 off the same feed, so strict verification failed the good build
-    as `wrong_version_running` and the shell rolled it back.
+    as `wrong_version_running` and the shell rolled it back. The staged build is
+    found under the name the updater writes it to, so an install kept beside the
+    current one under another name verifies too.
     """
     from unittest.mock import MagicMock
 
     from api import settings_restart
     from automation.update_verification import confirm_packaged_update
     from infra import update_status
+    from infra.update_operation import project_update_operation
 
-    _packaged_install(tmp_path, monkeypatch, staged_version="0.4.2-dev.1312")
+    _packaged_install(
+        tmp_path, monkeypatch, staged_version="0.4.2-dev.1312", bundle_name=bundle_name
+    )
     monkeypatch.setattr(
         update_status, "update_status", lambda force=False: update_status.UpdateStatus(
             branch=None, current_sha=None, remote_sha=None, commits_behind=None,
             available=True, checked_at=0.0, error=None, current_version="0.4.1",
-            target_version="0.4.2-dev.1311", changes=None,
+            target_version="0.4.2-dev.1311",
+            changes={"kind": "changelog", "items": ["Notes for the build the probe named"]},
         )
     )
     monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
@@ -604,7 +614,21 @@ async def test_update_verifies_the_build_staging_installed(isolated_db, monkeypa
     )
 
     assert stamped == ["0.4.2-dev.1312"]
-    assert self_restart.operation_by_id(operation_id)["target_version"] == "0.4.2-dev.1312"
+    row = self_restart.operation_by_id(operation_id)
+    assert row["target_version"] == "0.4.2-dev.1312"
+    # Notes acquired with the probed build describe a build that is not installing,
+    # so they go: a null is shown as no notes, never as the wrong build's notes.
+    assert row["changes"] is None
+    assert project_update_operation(row)["changes"] is None
+    # A restamp that names the same build again keeps the notes the row already has.
+    with get_db() as db:
+        db.execute(
+            "UPDATE self_restart_requests SET changes=? WHERE id=?",
+            (json.dumps({"kind": "changelog", "items": ["Kept"]}), operation_id),
+        )
+    assert self_restart.restamp_target_version(operation_id, "0.4.2-dev.1312") is True
+    kept = json.loads(self_restart.operation_by_id(operation_id)["changes"])
+    assert kept["items"] == ["Kept"]
 
     with get_db() as db:
         db.execute(

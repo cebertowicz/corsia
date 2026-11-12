@@ -151,7 +151,10 @@ async def test_unverifiable_staged_build_fails_before_any_drain(
         )
 
     assert refused.value.status_code == 409
-    assert "staged build's version could not be read" in refused.value.detail
+    assert refused.value.detail == (
+        "Couldn’t check the downloaded update, so CORSIA removed it and is still on "
+        "your current version. Try Update again."
+    )
     connection = get_db()
     try:
         row = dict(connection.execute(
@@ -167,6 +170,50 @@ async def test_unverifiable_staged_build_fails_before_any_drain(
     discard.assert_called_once()
     drain.assert_not_awaited()
     spawn.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_staged_build_that_cannot_be_removed_still_reports_the_plain_refusal(
+    isolated_db, monkeypatch, tmp_path
+):
+    """What the person reads is the refusal, never the cleanup exception's text.
+
+    A failed cleanup is a support detail: it belongs in the log beside the version
+    that could not be read, not in the sentence the Update journey shows.
+    """
+    from unittest.mock import MagicMock
+
+    from api import settings_restart, update_preflight
+
+    bundle = tmp_path / "CORSIA.app"
+    (bundle / "Contents" / "Resources").mkdir(parents=True)
+    staged_plist = bundle.parent / "CORSIA.app.staged" / "Contents" / "Info.plist"
+    staged_plist.parent.mkdir(parents=True)
+    staged_plist.write_bytes(b"not a plist at all")
+    monkeypatch.setattr("infra.platform_paths.app_bundle_root", lambda: bundle)
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_current_release", lambda *_args: None)
+    monkeypatch.setattr(
+        settings_restart,
+        "_discard_prepared_release",
+        MagicMock(side_effect=OSError("prepared frontend cleanup failed")),
+    )
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+    logged = MagicMock()
+    monkeypatch.setattr(update_preflight, "logger", logged)
+
+    with pytest.raises(HTTPException) as refused:
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", tmp_path / "corsia", {}, ["restart"],
+            lambda name: tmp_path / name, caller_token="[REDACTED]",
+        )
+
+    assert refused.value.update_failure_code == "staged_bundle_unverifiable"
+    assert refused.value.detail.startswith("Couldn’t check the downloaded update")
+    assert "prepared frontend cleanup failed" not in refused.value.detail
+    assert logged.warning.call_count == 2  # the unreadable version, then the cleanup
+    drain.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,20 @@ _BUNDLE_VERSION_KEY = "CORSIAVersion"
 #: string version, or a version string semver cannot parse.
 _STAGED_VERSION_ERRORS = (ExpatError, OSError, TypeError, ValueError)
 
+# The updater always unpacks the new build under this name beside the installed
+# app, whatever the installed app itself is called: `staged_path`
+# (desktop/src-tauri/src/update_stage.rs) uses `with_file_name`, and
+# `app_mode_staged_path` (scripts/corsia.d/app_mode.sh) uses
+# `$(dirname "$_corsia_app_bundle")/CORSIA.app.staged`.
+_STAGED_BUNDLE_NAME = "CORSIA.app.staged"
+
+#: The two causes a packaged Update is refused for before any drain, named once so
+#: the scheduled path can tell a skipped tick from a failed one over the same set
+#: instead of restating the codes.
+_REFUSAL_CHECK_FAILED = "update_check_failed"
+_REFUSAL_NOT_AVAILABLE = "update_not_available"
+PREFLIGHT_REFUSALS = frozenset({_REFUSAL_CHECK_FAILED, _REFUSAL_NOT_AVAILABLE})
+
 
 def with_failure_code(failure: HTTPException, code: str) -> HTTPException:
     """Name the durable cause the Update journey shows for this failure."""
@@ -53,8 +67,8 @@ async def fresh_update_target() -> UpdateStatus:
             "update refused before acquire: available=%s error=%s", fresh.available, fresh.error
         )
         if fresh.error:
-            raise HTTPException(503, "update_check_failed")
-        raise HTTPException(409, "update_not_available")
+            raise HTTPException(503, _REFUSAL_CHECK_FAILED)
+        raise HTTPException(409, _REFUSAL_NOT_AVAILABLE)
     return fresh
 
 
@@ -72,7 +86,7 @@ def _staged_bundle_target() -> str | None:
     bundle = platform_paths.app_bundle_root()
     if bundle is None:
         return None
-    staged = bundle.with_name(f"{bundle.name}.staged")
+    staged = bundle.parent / _STAGED_BUNDLE_NAME
     try:
         with (staged / "Contents" / "Info.plist").open("rb") as handle:
             payload = plistlib.load(handle)
@@ -109,17 +123,22 @@ async def restamp_staged_target(operation_id: str, discard_staged: Callable[[], 
         raise with_failure_code(
             HTTPException(
                 409,
-                "Update stopped before restart: the staged build's version could not be recorded.",
+                "Couldn’t start the update. CORSIA is still on your current version. "
+                "Try Update again.",
             ),
             "update_refused",
         )
-    reason = "the staged build's version could not be read from its bundle"
     try:
         await asyncio.to_thread(discard_staged)
-    except Exception as discarded:  # cleanup never replaces the cause
-        reason += f"; the staged build could not be removed either ({discarded})"
+    except Exception as discarded:
+        # The cleanup failure belongs in the log, never in what the person reads.
+        logger.warning("staged update could not be removed: %s", discarded)
     raise with_failure_code(
-        HTTPException(409, f"Update stopped before restart: {reason}."),
+        HTTPException(
+            409,
+            "Couldn’t check the downloaded update, so CORSIA removed it and is still on "
+            "your current version. Try Update again.",
+        ),
         "staged_bundle_unverifiable",
     )
 

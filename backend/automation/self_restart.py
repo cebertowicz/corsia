@@ -242,9 +242,10 @@ def restamp_target_version(operation_id: str, target_version: str, *, db=None) -
     """Point one in-flight Update at the build staging left behind, not the one probed."""
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
-            "UPDATE self_restart_requests SET target_version=?,updated_at=? "
+            "UPDATE self_restart_requests SET target_version=?,updated_at=?, "
+            "changes=CASE WHEN target_version IS ? THEN changes END "
             "WHERE id=? AND kind='update' AND status='in_flight'",
-            (target_version, _now_iso(), operation_id),
+            (target_version, _now_iso(), target_version, operation_id),
         )
         return cur.rowcount == 1
 
