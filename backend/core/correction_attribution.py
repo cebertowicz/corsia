@@ -104,8 +104,7 @@ _ATTRIBUTED_SQL = _SOURCES_SQL + f"""
 """
 """Each source and what finds its turn; the turn itself is found by :class:`_ThreadTurns`.
 
-The search per source used to be a subquery here, which scanned and sorted every turn of the thread
-once per source: minutes on a production Measurement read.
+The turn search stays out of SQL: a per-source subquery scans and sorts the thread's turns once per source.
 """
 
 _TURN_BATCH = 500
@@ -118,14 +117,15 @@ class _ThreadTurns:
     def __init__(self, db: sqlite3.Connection, thread_ids: Iterable[str]) -> None:
         by_thread: dict[str, list[tuple[str, int, str, str | None]]] = {}
         ids = sorted(set(thread_ids))
+        cursor = db.cursor()
+        cursor.row_factory = None  # plain tuples: this reads every turn of the threads involved
         for at in range(0, len(ids), _TURN_BATCH):
             batch = ids[at:at + _TURN_BATCH]
-            for row in db.execute(
-                f"SELECT thread_id,{_ts('started_at')} AS started,turn_order,id,plan_node_id FROM active_turns "
+            for thread_id, started, order, turn_id, node_id in cursor.execute(
+                f"SELECT thread_id,{_ts('started_at')},turn_order,id,plan_node_id FROM active_turns "
                 f"WHERE thread_id IN ({','.join('?' * len(batch))})", batch,
             ):
-                by_thread.setdefault(row['thread_id'], []).append(
-                    (row['started'], row['turn_order'], row['id'], row['plan_node_id']))
+                by_thread.setdefault(thread_id, []).append((started, order, turn_id, node_id))
         for turns in by_thread.values():
             turns.sort(key=lambda turn: (turn[0], turn[1]))
         self._turns = by_thread

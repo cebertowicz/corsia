@@ -135,18 +135,20 @@ def test_missing_source_arrival_time_stays_unattributed(db) -> None:
     )
 
 
-_SUBQUERY_ORACLE = correction_attribution._SOURCES_SQL + """
-    SELECT s.source_id,
-      (SELECT t.plan_node_id FROM active_turns t
-        WHERE t.thread_id=s.thread_id AND t.id IS NOT s.active_turn_id
-          AND replace(t.started_at,'T',' ') < replace(s.source_at,'T',' ')
-        ORDER BY replace(t.started_at,'T',' ') DESC,t.turn_order DESC LIMIT 1) AS node_id
-    FROM sources s
-"""
-"""The per-source subquery the turn search replaced, kept as the reference it must agree with."""
+def _answered_node_by_rule(db, thread: str, arrived: str, own_turn: str | None) -> str | None:
+    """The rule stated directly over every stored turn: latest by (start, turn order) before arrival, never its own."""
+    def text(stamp: str) -> str:
+        return stamp.replace("T", " ")
+
+    earlier = [row for row in db.execute("SELECT id,started_at,turn_order,plan_node_id FROM active_turns "
+                                         "WHERE thread_id=?", (thread,))
+               if row["id"] != own_turn and text(row["started_at"]) < text(arrived)]
+    if not earlier:
+        return None
+    return max(earlier, key=lambda row: (text(row["started_at"]), row["turn_order"]))["plan_node_id"]
 
 
-def test_turn_search_matches_the_subquery_it_replaced_on_ties_separators_and_own_turns(db) -> None:
+def test_each_correction_finds_its_answered_turn_across_ties_separators_and_own_turns(db) -> None:
     import random
 
     rng = random.Random(20261112)
@@ -170,7 +172,9 @@ def test_turn_search_matches_the_subquery_it_replaced_on_ties_separators_and_own
         legacy_fact(db, f"m{index}")
     legacy_fact(db, "missing-source")
 
-    expected = {row["source_id"]: row["node_id"] for row in db.execute(_SUBQUERY_ORACLE)}
+    expected = {row["id"]: _answered_node_by_rule(db, row["thread_id"], row["created_at"], row["active_turn_id"])
+                for row in db.execute("SELECT id,thread_id,created_at,active_turn_id FROM messages")}
+    expected["missing-source"] = None
     found = {fact.source_id: fact.node_id for fact in attributed_facts(db)}
     assert found == expected
     assert sum(node is not None for node in found.values()) > 100  # the fixture exercises real matches
