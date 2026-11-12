@@ -2,19 +2,18 @@
 // in the messages store carries its text and delivery state, and the comment's thread shows them.
 // Drafts belong to the comment, not the surface showing it: a margin card, popover and drawer can
 // replace one another without losing the typed text.
-import type { ChatCommentAnchor } from '$lib/chatCommentAnchors';
+import { unknownSendFailure, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 type Draft = { text: string; threadId?: string; inputId?: string; error?: string };
 const replies = $state<Record<string, Draft>>({});
 const roots = $state<Record<string, Draft>>({});
 // A root draft belongs to the passage it comments on, so two passages of one message never share text, an error or a pending post.
 const rootKey = (threadId: string, messageId: string, anchor: Pick<ChatCommentAnchor, 'from_off' | 'to_off'>) => JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off]);
-const sendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;
 // The box that posted an input learns here whether the server stored it (true) or refused it (false),
 // and says whether it is still on screen to show a refusal itself.
 const waiting = new Map<string, { resolve: (stored: boolean) => void; shown: () => boolean }>();
 
 function post(store: Record<string, Draft>, key: string, threadId: string, text: string, inputId: string | null, error: string | undefined, noun: 'comment' | 'reply', shown: () => boolean): Promise<boolean> {
-	store[key] = { text, threadId, ...(inputId ? { inputId } : { error: error || sendFailure(noun) }) };
+	store[key] = { text, threadId, ...(inputId ? { inputId } : { error: error || unknownSendFailure(noun) }) };
 	if (!inputId) return Promise.resolve(false);
 	return new Promise(resolve => waiting.set(inputId, { resolve, shown }));
 }
@@ -74,7 +73,7 @@ export const chatReplyDrafts = {
 	refuse(threadId: string, inputId: string, error: string): { cause: string; shown: boolean } | null {
 		const hit = find(threadId, inputId);
 		if (!hit) return null;
-		const cause = error || sendFailure(hit.noun);
+		const cause = error || unknownSendFailure(hit.noun);
 		const shown = waiting.get(inputId)?.shown() ?? false;
 		hit.store[hit.key] = { ...hit.store[hit.key], inputId: undefined, error: cause };
 		answer(inputId, false);

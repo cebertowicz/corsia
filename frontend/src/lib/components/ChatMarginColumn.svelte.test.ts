@@ -157,7 +157,10 @@ it('says why a card\'s reply is refused when its message has no place in history
 	await tick();
 	flushSync();
 	expect(sent).toHaveLength(0);
-	expect(get(toasts).map(toast => toast.message)).toContain('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';
+	// The card says why; a toast as well would repeat it over the passage the comment is on.
+	expect(card.textContent).toContain(sentence);
+	expect(get(toasts).map(toast => toast.message)).not.toContain(sentence);
 	expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Please change it');
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	chatReplyDrafts.set('kept', '');

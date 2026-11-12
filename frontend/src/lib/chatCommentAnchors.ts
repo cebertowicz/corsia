@@ -1,5 +1,4 @@
 import type { ChatComment as StoredComment } from '$lib/chatCommentTypes';
-import { toasts } from '$lib/stores/toast';
 
 export interface ChatComment extends ChatCommentAnchor {
 	id: string;
@@ -10,12 +9,15 @@ export interface ChatComment extends ChatCommentAnchor {
 	root_cid?: string;
 }
 
-/** A comment or reply send refused before it left this device; its message is the sentence the person reads, also shown as a toast. */
+/** A comment or reply send refused before it left this device; its message is the sentence the person reads in the box. */
 export class CommentSendRefused extends Error {}
+
+/** The sentence for a send that failed for a cause nobody named. */
+export const unknownSendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;
 
 /** The sentence a comment's or reply's box shows for a send that threw: the refusal's own cause, or the generic one when the cause is unknown. */
 export function refusalText(error: unknown, noun: 'comment' | 'reply'): string {
-	return error instanceof CommentSendRefused ? error.message : `Couldn’t send this ${noun}. Try again.`;
+	return error instanceof CommentSendRefused ? error.message : unknownSendFailure(noun);
 }
 
 export interface ChatCommentAnchor {
@@ -33,9 +35,7 @@ export interface ChatCommentAnchor {
  */
 export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => string | void): string | void {
 	if (!message || !comment || typeof message.seq !== 'number') {
-		const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';
-		toasts.show(sentence, 'error');
-		throw new CommentSendRefused(sentence);
+		throw new CommentSendRefused('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	}
 	return send({
 		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,

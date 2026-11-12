@@ -1406,8 +1406,9 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(CommentSendRefused);
-		expect(get(toasts).map(toast => toast.message)).toContain(noModel);
+		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(noModel));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(noModel);
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
@@ -1426,8 +1427,9 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(CommentSendRefused);
-		expect(get(toasts).map(toast => toast.message)).toContain(restarting);
+		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(restarting));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(restarting);
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
@@ -1442,8 +1444,9 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow(CommentSendRefused);
-		expect(get(toasts).map(toast => toast.message)).toContain(notAccepted);
+		expect(() => composer.sendReply(reply)).toThrow(new CommentSendRefused(notAccepted));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(notAccepted);
 		// A reply sent from a thread is recorded like one sent from the composer, so reply_count still counts it.
 		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ thread_id: 'thread-1', comment_count: 1, reply_count: 1 }));
 	});

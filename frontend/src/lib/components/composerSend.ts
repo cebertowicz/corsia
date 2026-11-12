@@ -1,7 +1,6 @@
 import { emitProductEvent } from '$lib/product_events';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
 import { sendMessage } from '$lib/ws';
-import { toasts } from '$lib/stores/toast';
 
 /** What a send asks the runtime to do with the turn in flight. */
 export type ComposerDeliveryIntent = 'apply_now' | 'queue_after_turn';
@@ -24,18 +23,16 @@ export function emitComposerSend(threadId: string, content: string, attachmentCo
 /**
  * Why a comment or a reply typed in a comment thread cannot be sent, in the person's words. Each known
  * cause gets its own sentence (COPY-STANDARD C11), and each names what happens to the typed text and
- * what to do next (C9). The same sentence shows as a toast and in the box the text was typed in.
+ * what to do next (C9). It shows only in the box the text was typed in, which is open whenever a send starts.
  */
-export function sendFailure(cause: ReplySendBlock, noun: 'comment' | 'reply'): string {
+function blockedSendText(cause: ReplySendBlock, noun: 'comment' | 'reply'): string {
 	if (cause === 'restarting') return `Couldn’t send this ${noun} because CORSIA is restarting after an update. Your ${noun} stays here; try again once CORSIA is back.`;
 	if (cause === 'noModel') return `Couldn’t send this ${noun} because this chat’s model can’t answer it. Your ${noun} stays here; choose a model, then try again.`;
 	return `Couldn’t send this ${noun} because the connection is unavailable. Your ${noun} stays here; try again.`;
 }
 
 function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
-	const sentence = sendFailure(cause, noun);
-	toasts.show(sentence, 'error');
-	throw new CommentSendRefused(sentence);
+	throw new CommentSendRefused(blockedSendText(cause, noun));
 }
 
 export function postChatComment(reply: ChatComment, threadId: string | null | undefined, modelId: string | undefined, restarting: boolean, modelReady: boolean): string {

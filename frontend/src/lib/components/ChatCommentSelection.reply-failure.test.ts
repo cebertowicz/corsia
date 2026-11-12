@@ -5,7 +5,7 @@ import ChatCommentSelection from './ChatCommentSelection.svelte';
 import { messages } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 
-// The thread holds the draft when a reply is refused, so the refusal has to reach the person. This walks
+// The thread holds the draft when a reply is refused, so the refusal has to reach the person in that box. This walks
 // the real surface: a painted highlight, the thread opened on it, a typed reply, and the send refused
 // because the message the comment sits on no longer carries a place in history to answer into.
 
@@ -51,6 +51,10 @@ it('says why a reply on a comment that left the chat is refused, and keeps the d
 	flushSync();
 	document.querySelector<HTMLButtonElement>('[role="dialog"] [data-send-reply]')!.click();
 	await tick();
-	expect(get(toasts).map(toast => toast.message)).toContain('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	flushSync();
+	const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';
+	// The open box says why; a toast as well would repeat it over the passage the comment is on.
+	expect(document.querySelector('[role="dialog"]')?.textContent).toContain(sentence);
+	expect(get(toasts).map(toast => toast.message)).not.toContain(sentence);
 	expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('keep this draft');
 });
