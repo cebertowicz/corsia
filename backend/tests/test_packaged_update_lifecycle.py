@@ -263,7 +263,7 @@ async def test_failed_update_child_releases_when_cleanup_cannot_connect(isolated
         return operation_id, child
 
     monkeypatch.setattr(system_admin, "prelaunch_settings_restart", launch)
-    await system_admin.launch_update({"id": "steve"}, OWNER_TOKEN, "manual", None, port=12345)
+    await system_admin.launch_update({"id": "steve"}, OWNER_TOKEN, "manual", port=12345)
     await asyncio.wait_for(settled.wait(), 3)
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "failed"

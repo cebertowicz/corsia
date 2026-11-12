@@ -22,7 +22,8 @@ from connections.vendor_accounts import VENDORS
 from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
-_RECHECK_SECONDS = 300.0
+#: Scheduled reads of one account start at most this often (a failed read is retried after it).
+RECHECK_SECONDS = 300.0
 #: A Turn's end waits on ``check_login``: past the control read's own 30 s bound
 #: (``claude_discovery.run_claude_control``), so a slow read answers rather than
 #: times out, and inside the 35 s live-close bound
@@ -104,7 +105,7 @@ def _schedule(provider: str, account_id: str) -> None:
     if is_checking(account_id):
         return
     now = time.monotonic()
-    if now - _LAST_STARTED.get(account_id, float("-inf")) < _RECHECK_SECONDS:
+    if now - _LAST_STARTED.get(account_id, float("-inf")) < RECHECK_SECONDS:
         return
     _LAST_STARTED[account_id] = now
     _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))

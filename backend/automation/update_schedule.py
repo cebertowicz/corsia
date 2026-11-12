@@ -218,7 +218,6 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
         user,
         None,
         trigger,
-        details.get("target_version"),
         port=int(port),
         claim=claim,
     )

@@ -166,6 +166,47 @@ async def test_run_in_db_cancellation_joins_exact_executor_work() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancelled_bulk_read_still_queued_is_dropped_but_a_started_one_is_joined() -> None:
+    """A bulk-lane job no worker has started never runs once its caller is cancelled; started ones are joined."""
+    from infra import db_async
+    from infra.db_async import run_bulk
+
+    release = threading.Event()
+    started = [threading.Event() for _ in range(db_async._bulk_pool._max_workers)]
+    ran_queued = threading.Event()
+
+    def hold(event: threading.Event) -> None:
+        event.set()
+        release.wait(timeout=10)
+
+    holders = [asyncio.create_task(run_bulk(hold, event)) for event in started]
+    try:
+        for event in started:
+            await _wait_started(event)
+        queued = asyncio.create_task(run_bulk(ran_queued.set))
+        await asyncio.sleep(0)
+        queued.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(queued, timeout=_START_WAIT_SECONDS)
+
+        holders[0].cancel()
+        await asyncio.sleep(0)
+        assert not holders[0].done()  # a started job still holds its caller until it finishes
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await holders[0]
+        await asyncio.gather(*holders[1:])
+        # These can only finish while every lane worker runs one of them at once, so any job queued
+        # ahead of them (the queue is FIFO) has finished by then.
+        barrier = threading.Barrier(len(started), timeout=_START_WAIT_SECONDS)
+        await asyncio.gather(*(run_bulk(barrier.wait) for _ in started))
+        assert not ran_queued.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(*holders, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_run_in_db_cancellation_clears_worker_transaction(
     isolated_db,
 ) -> None:

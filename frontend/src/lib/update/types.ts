@@ -15,6 +15,8 @@ export interface UpdateStatus {
 	checked_at: number | null;
 	error: string | null;
 	current_version?: string | null;
+	/** The version of the running process, read once when it started; `current_version` is what is on disk. */
+	running_version?: string | null;
 	target_version?: string | null;
 	changes?: UpdateChanges | null;
 	drain_cap_seconds?: number | null;

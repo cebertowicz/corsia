@@ -156,13 +156,24 @@ async def _run_shielded(executor, lane, fn, /, *args, **kwargs):
     shutdown/restart isolation: the old process can mutate newly recovered
     delivery state after its task registry is empty. Shield the worker future,
     join it on cancellation, consume its result, then propagate cancellation.
+
+    On the read-only lanes a job still waiting in the queue when its caller is
+    cancelled is dropped instead: it has touched nothing, its result has no
+    reader, and running it would only hold a lane worker that later reads queue
+    behind. A job that writes always runs once queued, as before.
     """
     loop = asyncio.get_running_loop()
     scope = getattr(fn, "__qualname__", type(fn).__name__)
     if args or kwargs:
         fn = partial(fn, *args, **kwargs)
     submitted_at = time.perf_counter()
-    future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope)
+    queued = None
+    if lane is None:
+        future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope)
+    else:
+        # What run_in_executor does, keeping the pool's future so an unstarted job can be withdrawn.
+        queued = executor.submit(_run_timed_db_job, fn, scope)
+        future = asyncio.wrap_future(queued, loop=loop)
     try:
         timed = await asyncio.shield(future)
         from infra.request_timing import add_db_timing
@@ -181,6 +192,8 @@ async def _run_shielded(executor, lane, fn, /, *args, **kwargs):
         if not isinstance(error, asyncio.CancelledError):
             raise
         cancelled = error
+        if queued is not None:
+            queued.cancel()  # succeeds only if no worker has started it
         while not future.done():
             try:
                 await asyncio.shield(future)
