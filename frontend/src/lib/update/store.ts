@@ -266,9 +266,9 @@ export async function startUpdate(): Promise<void> {
 		const latest = get(updateStatus)?.operation;
 		// A new in-flight operation proves it started; a new failed row surfaces itself through the poll.
 		if (latest?.operation_id !== previousOperationId && (isInFlight(latest) || isFailedOperation(latest))) return;
-		const message = result.message ?? "Couldn't start the update.";
+		const message = result.message ?? "Couldn’t start the update.";
 		updateFailureVerdict.set({ kind: 'refused', message });
-		toasts.pin('update', { type: 'error', message: "Couldn't start the update", detail: message, action: { label: 'Details', run: openUpdates } });
+		toasts.pin('update', { type: 'error', message: "Couldn’t start the update", detail: message, action: { label: 'Details', run: openUpdates } });
 		return;
 	}
 	await loadUpdateStatus(true);

@@ -9,6 +9,7 @@ import {
 	resetUpdateStoreForTests,
 	updateFailureVerdict,
 	updateStatus,
+	updateUnreachable,
 	type UpdateStatus,
 } from '$lib/update/store';
 
@@ -287,18 +288,28 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).not.toContain('still on 1.1.0');
 	});
 
+	it('names no version while the service is unreachable, since the last reading may be a stopped process', () => {
+		const failed = { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'drain_failed', settled_at: '2026-10-14T01:33:58Z' } as const;
+		updateStatus.set(status({ running_version: '1.0.0', operation: { ...failed } }));
+		updateUnreachable.set(true);
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+		expect(host.textContent).toContain("CORSIA's version didn't change.");
+		expect(host.textContent).not.toContain('1.0.0.');
+	});
+
 	it('drops the failed pill once a restart has activated the staged update', () => {
 		const failed = { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'restart_pending', settled_at: '2026-10-14T01:33:58Z' } as const;
 		updateStatus.set(status({ operation: { ...failed } }));
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
-		expect(host.textContent).toContain("Couldn't start the update");
+		expect(host.textContent).toContain("Couldn’t start the update");
 		unmount(component);
 
 		updateStatus.set(status({ operation: { ...failed, activated_by_restart: true } }));
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
-		expect(host.textContent).not.toContain("Couldn't start the update");
+		expect(host.textContent).not.toContain("Couldn’t start the update");
 		expect(host.textContent).not.toContain('Retry');
 		expect(host.textContent).not.toContain('Installed');
 	});

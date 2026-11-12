@@ -72,7 +72,7 @@ function onVersion(version: string): string {
 }
 
 function refusal(headline: string, body: string, retryLabel: string | null): FailureCopy {
-	return { title: "Couldn't start the update", headline, body, toastLine: null, retryLabel };
+	return { title: "Couldn’t start the update", headline, body, toastLine: null, retryLabel };
 }
 
 function stopped(headline: string, body: string): FailureCopy {
@@ -88,7 +88,7 @@ function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
 	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. Free up space, then select Retry. ${RAN_ON}` : `Free up space, then select Retry. ${RAN_ON}`;
 	return {
-		title: "Couldn't start the update",
+		title: "Couldn’t start the update",
 		headline: 'Not enough disk space for a safety backup.',
 		body,
 		toastLine: disk ? `Needs ${Math.max(1, disk.neededGb - disk.freeGb)} GB more free space` : null,
@@ -109,7 +109,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 	}
 	if (failure.client) {
 		return {
-			title: "Couldn't start the update",
+			title: "Couldn’t start the update",
 			headline: failure.client.message,
 			body: '',
 			toastLine: null,
@@ -121,7 +121,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			return diskCopy(failure.detail);
 		case 'fetch_failed':
 			return {
-				title: "Couldn't start the update",
+				title: "Couldn’t start the update",
 				headline: "Couldn't download the update.",
 				body: RAN_ON,
 				toastLine: null,
@@ -129,7 +129,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			};
 		case 'build_failed':
 			return {
-				title: "Couldn't start the update",
+				title: "Couldn’t start the update",
 				headline: "Couldn't build the update.",
 				body: stillOn(runningVersion),
 				toastLine: null,
@@ -153,7 +153,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 			};
 		case 'version_unverified':
 			return {
-				title: "Couldn't confirm the update",
+				title: "Couldn’t confirm the update",
 				headline: runningVersion ? onVersion(runningVersion) : "CORSIA can't tell which version is running.",
 				body: '',
 				toastLine: null,
@@ -162,7 +162,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 		case 'wrong_version_running':
 			return {
 				title: 'Update failed',
-				headline: runningVersion ? onVersion(runningVersion) : "Couldn't start the new version.",
+				headline: runningVersion ? onVersion(runningVersion) : "Couldn’t start the new version.",
 				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
@@ -170,7 +170,7 @@ export function failureCopy(failure: UpdateFailure, runningVersion?: string | nu
 		case 'rolled_back':
 			return {
 				title: 'Update failed',
-				headline: "Couldn't start the new version.",
+				headline: "Couldn’t start the new version.",
 				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',

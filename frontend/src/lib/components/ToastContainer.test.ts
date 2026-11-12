@@ -158,7 +158,7 @@ describe('ToastContainer pinned slot', () => {
 	});
 
 	it('gives a toast with a body one inset class so the mark, text and controls align', () => {
-		toasts.pin('update', { type: 'error', message: "Couldn't start the update", detail: 'Needs 12 GB more free space', action: { label: 'Details', run: vi.fn() } });
+		toasts.pin('update', { type: 'error', message: "Couldn’t start the update", detail: 'Needs 12 GB more free space', action: { label: 'Details', run: vi.fn() } });
 		mountContainer();
 
 		expect(host.querySelector('.toast--multi')).toBeTruthy();
@@ -322,7 +322,7 @@ describe('ToastContainer fit', () => {
 	});
 
 	it('renders a pinned failure detail as a second line', () => {
-		toasts.pin('update', { type: 'error', message: "Couldn't start the update", detail: 'Needs 12 GB more free space' });
+		toasts.pin('update', { type: 'error', message: "Couldn’t start the update", detail: 'Needs 12 GB more free space' });
 		mountContainer();
 		expect(host.querySelector('.toast-detail')?.textContent).toBe('Needs 12 GB more free space');
 	});

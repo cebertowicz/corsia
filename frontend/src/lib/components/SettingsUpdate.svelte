@@ -16,7 +16,7 @@
 	const running = $derived($updateInFlight);
 	// A verdict the client reached itself wins over whatever the latest operation says.
 	const failure = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : isFailedOperation(operation) ? failureFromOperation(operation) : null);
-	const copy = $derived(failure ? failureCopy(failure, runningVersionOf($updateStatus)) : null);
+	const copy = $derived(failure ? failureCopy(failure, runningVersionOf($updateStatus, $updateUnreachable)) : null);
 	const completedVersion = $derived(operation?.status === 'complete' ? operation.target_version : null);
 	// A same-day development build is told apart by time; the update that installed it carries that longer form.
 	const currentVersion = $derived(

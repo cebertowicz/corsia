@@ -134,7 +134,7 @@ describe('update store', () => {
 		await startUpdate();
 
 		expect(get(updateFailureVerdict)?.kind).toBe('refused');
-		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Couldn't start the update" })]);
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Couldn’t start the update" })]);
 	});
 
 	it('does not adopt an operation that was already in flight before the click', async () => {
@@ -148,7 +148,7 @@ describe('update store', () => {
 
 		expect(get(updateOperation)?.operation_id).toBe('update-1');
 		expect(get(updateFailureVerdict)?.kind).toBe('refused');
-		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Couldn't start the update" })]);
+		expect(pinned()).toEqual([expect.objectContaining({ type: 'error', message: "Couldn’t start the update" })]);
 	});
 
 	it('refreshes a completed update into the restarted server status', async () => {
@@ -378,7 +378,7 @@ describe('update store', () => {
 		await startUpdate();
 		expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/system/update-operations/update-0/outcome-seen')).toBe(true);
 		expect(get(updateFailureVerdict)).toEqual({ kind: 'refused', message: 'A restart is already in flight.' });
-		expect(pinned()[0]).toMatchObject({ message: "Couldn't start the update", type: 'error', action: { label: 'Details' } });
+		expect(pinned()[0]).toMatchObject({ message: "Couldn’t start the update", type: 'error', action: { label: 'Details' } });
 	});
 
 	it('leaves the failed operation this request recorded to its own toast instead of a verdict', async () => {
