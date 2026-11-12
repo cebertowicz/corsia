@@ -114,7 +114,8 @@
 		if (clearAnchor && !(engaged && (rect.bottom < area.top || rect.top > area.bottom)) && (placement === 'pointer' || placement === 'bottom' || placement === 'bottom-end' || (rect.right + gap + width > area.right - gap && rect.left - gap - width < area.left + gap))) {
 			const above = Math.max(0, rect.top - area.top - 2 * gap);
 			const below = Math.max(0, area.bottom - rect.bottom - 2 * gap);
-			rememberedSide ??= below >= above ? 'below' : 'above';
+			// A card opened at a click keeps the pointer rule: below the line whenever it fits there.
+			rememberedSide ??= (placement === 'pointer' && height <= below) || below >= above ? 'below' : 'above';
 			const room = rememberedSide === 'above' ? above : below;
 			// A composer being typed in keeps its own height: the anchor can move while the person types, and a band
 			// below the card's own minimum clips the field and Send out of the card. The discussion regions are
