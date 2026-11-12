@@ -7,7 +7,9 @@ import { waitForPanelsToSettle } from '../support/sidebar';
 /**
  * A press on a comment's highlight opens that comment's card, wherever the highlight sits. The one-word comment here lies inside the
  * longer quote of an agent's suggestion: the press is in both highlights, and it is the word's comment the reader pressed, so it is that
- * card that opens (on a phone a tap in a suggestion's struck text opens no card, so a tap on the word opened nothing).
+ * card that opens (on a phone a tap in a suggestion's struck text opens no card, so a tap on the word opened nothing). The reverse
+ * nesting, a suggestion on one word inside a longer comment, opens the suggestion on desktop (the innermost) and the comment on a
+ * phone, where a suggestion's card does not open by tap: no nesting leaves a press that opens nothing.
  */
 
 const TAG = '@flow:doc-highlight-press @surface:documents';
@@ -16,6 +18,8 @@ const WORD = 'Which reviewer?';
 const SUGGESTION = 'Say a reviewer instead.';
 const COMMENT = { quote: 'reviewer', body: WORD, author: 'person' as const };
 const ITEMS = [COMMENT, { quote: 'the reviewer signs', replacement: 'a reviewer signs', body: SUGGESTION }];
+const LONG = 'Is this the right sign-off?';
+const REVERSE = [{ quote: 'the reviewer signs', body: LONG, author: 'person' as const }, { quote: 'reviewer', replacement: 'reviewers', body: SUGGESTION }];
 
 test.beforeEach(({}, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Size and touch are set by the spec itself');
@@ -26,6 +30,12 @@ test.beforeEach(({}, testInfo) => {
 const wordCentre = (page: Page) => page.evaluate(() => {
 	const anchor = [...document.querySelectorAll('.cm-comment-anchor')].find((el) => el.textContent === 'reviewer')!;
 	const box = anchor.getBoundingClientRect();
+	return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+});
+
+/** The middle of a suggestion's struck word, read from the real layout. */
+const struckCentre = (page: Page) => page.evaluate(() => {
+	const box = [...document.querySelectorAll('.cm-suggestion-del')].find((el) => el.textContent === 'reviewer')!.getBoundingClientRect();
 	return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
 });
 
@@ -59,6 +69,19 @@ test.describe(`${TAG} desktop`, () => {
 		await saveEvidenceScreenshot(page, testInfo, 'press-1440-suggestion');
 	});
 
+	test('a press on a suggestion\'s word inside a longer comment opens the suggestion, at 1440 wide', async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await openSuggestionDocument(page, request, TEXT, REVERSE, { splitWidth: 540 });
+		await expect(page.locator('.cm-suggestion-del', { hasText: /^reviewer$/ })).toBeVisible();
+		const { x, y } = await struckCentre(page);
+		await page.mouse.click(x, y);
+		await expect(page.getByText(SUGGESTION), 'the innermost, the suggestion, opens').toBeVisible();
+		await expect(page.getByText(LONG)).toHaveCount(0);
+		await logBuild(page, testInfo);
+		await saveEvidenceScreenshot(page, testInfo, 'press-1440-reverse');
+	});
+
 	// At 900 an open Workspace panel is a drawer that slides the page left under a close scrim, so only its closed state is pressed there.
 	for (const [width, height, panel] of [[1440, 900, 'open'], [1440, 900, 'closed'], [1200, 800, 'closed'], [900, 800, 'closed']] as const) {
 		test(`a press on the word opens its comment at ${width} wide, panel ${panel}`, async ({ page, request }, testInfo) => {
@@ -88,5 +111,17 @@ test.describe(`${TAG} phone`, () => {
 		await expect(sheet.getByText(SUGGESTION)).toHaveCount(0);
 		await logBuild(page, testInfo);
 		await saveEvidenceScreenshot(page, testInfo, 'tap-393');
+	});
+
+	test('a tap on a suggestion\'s word inside a longer comment opens the comment in the sheet', async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		await openSuggestionDocument(page, request, TEXT, REVERSE, { splitWidth: 540 });
+		await expect(page.locator('.cm-suggestion-del', { hasText: /^reviewer$/ })).toBeVisible();
+		const { x, y } = await struckCentre(page);
+		await page.touchscreen.tap(x, y);
+		const sheet = page.locator('.drawer-panel');
+		await expect(sheet.getByText(LONG), 'the comment around the suggestion opens in the sheet').toBeVisible();
+		await logBuild(page, testInfo);
+		await saveEvidenceScreenshot(page, testInfo, 'tap-393-reverse');
 	});
 });
