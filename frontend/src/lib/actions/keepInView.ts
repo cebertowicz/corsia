@@ -27,6 +27,7 @@ export function keepInView(node: HTMLElement, enabled: boolean) {
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
 	const owner = scroller(node);
 	if (owner) observer?.observe(owner);
+	observer?.observe(node);
 	queueMicrotask(reveal);
 
 	return {

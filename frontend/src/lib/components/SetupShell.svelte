@@ -4,6 +4,7 @@
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 	import { peerFade } from '$lib/popoverMotion';
+	import { scrollCue } from '$lib/actions/scrollCue';
 	import { isSetupWide } from '$lib/stores/viewport';
 	import LivingMark from './LivingMark.svelte';
 
@@ -163,24 +164,6 @@
 			duration: direction === 'out' ? standard * 0.7 : standard,
 			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
-	}
-
-	/**
-	 * Marks the body `data-more` while content sits under the dock edge and `data-above` while it sits under the title
-	 * and intro, so each edge fades its content out only on the side where there is more to scroll to.
-	 */
-	function scrollCue(node: HTMLElement) {
-		const sync = () => {
-			node.dataset.more = String(node.scrollTop + node.clientHeight < node.scrollHeight - 1);
-			node.dataset.above = String(node.scrollTop > 1);
-		};
-		node.addEventListener('scroll', sync, { passive: true });
-		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
-		resize?.observe(node);
-		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(sync);
-		mutate?.observe(node, { childList: true, subtree: true });
-		sync();
-		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
 	}
 
 	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {

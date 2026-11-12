@@ -81,6 +81,18 @@ describe('settleHeight', () => {
 		expect(animate.mock.calls[0][1]).toMatchObject({ fill: 'backwards' });
 	});
 
+	it('does not clip a newly expanded thread and its reply field while the panel grows', () => {
+		const node = panel();
+		settleHeight(node, { enabled: true });
+		const thread = document.createElement('div');
+		thread.setAttribute('data-autosize-room', '');
+		thread.appendChild(document.createElement('textarea'));
+		node.appendChild(thread);
+		height = 400;
+		notify();
+		expect(animate).not.toHaveBeenCalled();
+	});
+
 	it('cuts when disabled, as under reduced motion or a drag', () => {
 		const node = panel();
 		const action = settleHeight(node, { enabled: true });
