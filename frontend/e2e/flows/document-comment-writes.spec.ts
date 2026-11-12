@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads } from '../support/commentDrawer';
+import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -44,7 +44,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
 		await page.getByRole('button', { name: /^1 comment\b/ }).click();
-		await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
+		await expectCommentsShown(page.getByRole('region', { name: 'Document comments', exact: true }));
 		await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	};
 	await loginByUrl(page);

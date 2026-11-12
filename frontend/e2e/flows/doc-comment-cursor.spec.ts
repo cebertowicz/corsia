@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { closeComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -327,7 +327,7 @@ for (const motion of MOTIONS) {
 		await locateLine(page, 'qx-a-plain', true);
 		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
-		await expect(list).toBeVisible();
+		await expectCommentsShown(list);
 		// The adaptive comments drawer overlays the document at widths where it cannot use a side column. Where it covers
 		// the place a clicked line rests at, the document cannot be clicked until it closes; elsewhere the clicks land.
 		const sheetCovers = await page.evaluate((place) => {

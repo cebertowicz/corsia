@@ -43,6 +43,24 @@ describe('CommentThread', () => {
 		expect(host.querySelector<HTMLTextAreaElement>('.ct-input')?.value).toBe('half a reply');
 	});
 
+	it('draws an unpicked document margin card as a short preview: replies counted, not shown, an unread one marked New, its text clamped to 3 lines', () => {
+		const unread = { ...reply, id: 'r1' };
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { hideReply: true, inMargin: true });
+		expect(host.textContent).toContain('1 reply');
+		expect(host.textContent).not.toContain(reply.text);
+		expect(host.querySelector('.ct-head')?.textContent).toContain('New');
+		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(true);
+		unmount(component!); host.remove();
+		// Picked, it shows the whole conversation at the usual clamp.
+		render(thread({ replies: [unread], newReplyIds: ['r1'] }), false, { inMargin: true, focused: true, scrollOnFocus: false });
+		expect(host.textContent).toContain(reply.text);
+		expect(host.querySelector('.ct')!.classList.contains('preview')).toBe(false);
+		unmount(component!); host.remove();
+		// A chat card at rest keeps its answers showing: they are read by being seen.
+		render(thread({ replies: [unread] }), false, { hideReply: true, inMargin: true, chatSurface: true });
+		expect(host.textContent).toContain(reply.text);
+	});
+
 	it('keeps a draft typed while the previous reply was still sending', async () => {
 		let finish!: () => void;
 		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));

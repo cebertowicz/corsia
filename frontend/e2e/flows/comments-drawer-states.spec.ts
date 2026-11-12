@@ -19,6 +19,11 @@ const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
 /** The list is showing its threads. Read from a thread, not the list: the margin column's own box is 0 px tall, its cards placed beside their lines. */
 const listShown = (drawer: Locator) => expect(drawer.locator('[data-comment-id]').first()).toBeVisible();
 const pill = (page: Page) => page.locator('.comment-status');
+/** A margin card at rest is a short preview that counts its replies; picking it (by its header: its jump button lies under it) shows them. A list row or a sheet shows them already. */
+async function showReplies(drawer: Locator) {
+	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
+	if (await card.evaluate((el) => el.classList.contains('preview'))) await card.locator('.ct-head').click({ position: { x: 14, y: 10 } });
+}
 
 async function reply(request: APIRequestContext, doc: Doc, parentId: string, body: string): Promise<string> {
 	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId, delivery_policy: 'immediate' } });
@@ -69,6 +74,7 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await settled(page);
 	if (mode === 'phone') await expect(drawer.locator('.drawer-heading h2')).toHaveText('Comments 2');
 	await expect(drawer.locator('.ct-reply-count')).toContainText('2 replies');
+	await showReplies(drawer);
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await shot(page, 'rs-13a-thread-replies-visible', info);
 	await settled(page);
@@ -181,6 +187,7 @@ journey('a read-only document lists comments without writing controls', [['1440 
 	await pill(page).click();
 	const drawer = drawerOf(page);
 	await expect(drawer.locator('.ct-reply-count')).toContainText('1 reply');
+	await showReplies(drawer);
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await expect(drawer.locator('.ct-act:visible'), 'no reply, agree or resolve control').toHaveCount(0);
 	await expect(drawer.locator('.ct-compose:visible')).toHaveCount(0);
@@ -249,6 +256,9 @@ journey('the server names the new replies, a long thread keeps only them and the
 	await listShown(drawer);
 	await settled(page);
 	if (mode === 'closed') {
+		// At rest the card carries one New mark for its unread replies; picked, each new reply carries its own.
+		await expect(drawer.locator('.ct-new')).toHaveCount(1);
+		await showReplies(drawer);
 		await expect(drawer.locator('.ct-new'), 'both agent replies are new; the person\'s own is not').toHaveCount(2);
 		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
 		await shot(page, 'rs-23a-new-replies-marked', info);
@@ -281,6 +291,9 @@ journey('new replies clear once the thread is opened, and the person\'s own neve
 	await stamped;
 	await open(page, doc, mode, theme);
 	await pill(page).click();
+	await listShown(drawerOf(page));
+	await expect(drawerOf(page).locator('.ct-new'), 'no New mark at rest once the replies were seen').toHaveCount(0);
+	await showReplies(drawerOf(page));
 	await expect(drawerOf(page).getByText('My own newest reply.')).toBeVisible();
 	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(0);
 });

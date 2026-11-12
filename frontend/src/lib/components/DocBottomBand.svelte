@@ -6,8 +6,9 @@
 	import DocJumpControl from './DocJumpControl.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 
-	// The document surface's bottom slot: the one jump control, and the notice that a comment you sent was delivered.
-	let { artifactId, threads, root, ready, covered, sheetModalOpen, onJump, ignoreConfirmationId = null }: {
+	// The canvas's bottom slot: the one jump control and, over an image, the notice that a comment you sent was delivered. A document
+	// says that in its header instead (the Sent mark where Send stood), since a notice here would float over its text and margin cards.
+	let { artifactId, threads, root, ready, covered, sheetModalOpen, onJump, confirmsDelivery = false, ignoreConfirmationId = null }: {
 		artifactId: string | null;
 		threads: DocComment[];
 		/** The canvas the unread items are drawn in: the document, or the image shown over it. */
@@ -16,6 +17,8 @@
 		covered: boolean;
 		sheetModalOpen: boolean;
 		onJump: (thread: DocComment) => void;
+		/** Shows the delivery notice: an image viewer's band, which has no header to say it in. */
+		confirmsDelivery?: boolean;
 		ignoreConfirmationId?: string | null;
 	} = $props();
 
@@ -24,7 +27,7 @@
 	const jump = createJumpRead(() => (mayJump ? root : undefined), () => threads);
 	const jumped = $derived(jumpedThread(threads, jump().target));
 	const hasJump = $derived(mayJump && !!jumped);
-	const hasToast = $derived(!!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
+	const hasToast = $derived(confirmsDelivery && !!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
 	// The name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
 	const label = $derived(`${jump().count} new, next ${jump().direction}: ${jump().target?.label ?? ''}`);
 </script>

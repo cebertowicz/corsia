@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { expectCommentsShown } from '../support/commentDrawer';
 
 /**
  * Activating a comment in the Comments sheet takes the reader to its text, whether they press the quote line or the
@@ -78,7 +79,7 @@ test.describe(`comment jump at ${phone.name}`, () => {
 				]);
 				await expect(page.locator('.cm-scroller')).toBeVisible();
 				await page.locator('.comment-status').click();
-				await expect(drawer).toBeVisible();
+				await expectCommentsShown(drawer);
 				await parkInMiddle(page);
 				const id = section === 'First' ? above : below;
 				const row = drawer.locator(`[data-comment-id="${id}"]`);

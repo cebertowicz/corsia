@@ -62,7 +62,7 @@ describe('DocMarginStack', () => {
 		expect(document.activeElement).toBe(writing.querySelector('textarea'));
 	});
 
-	it('draws its head as a card at the column top that no card goes under, even one picked level with text above its foot', () => {
+	it('draws its head as the column\'s first card: at rest no card goes under it; a card picked level with text above its foot keeps its line and the head steps up', () => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 		const scroller = document.createElement('div');
 		const column = document.createElement('div');
@@ -74,13 +74,58 @@ describe('DocMarginStack', () => {
 		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.hasAttribute('data-margin-head') ? 40 : 0; });
 		const source: MarginAnchorSource = { scroller: () => scroller, column: () => column, anchor: (id) => id === 'a' ? mark : null, moved: () => [], resized: () => [] };
 		const head = createRawSnippet(() => ({ render: () => '<button>Accept all from Sam</button>' }));
-		component = mount(DocMarginStack, { target: column, props: { source, pinned: [thread('a')], selectedId: 'a', card, head } });
-		flushSync();
+		const place = (selectedId: string | null) => {
+			if (component) unmount(component);
+			component = mount(DocMarginStack, { target: column, props: { source, pinned: [thread('a')], selectedId, card, head } });
+			flushSync();
+			const top = column.querySelector<HTMLElement>('.margin-stack > [data-margin-head]')!;
+			expect(top.classList.contains('placed')).toBe(true);
+			expect(top.textContent).toBe('Accept all from Sam');
+			return { head: top.style.top, card: column.querySelector<HTMLElement>('[data-margin-card="a"]')!.style.top };
+		};
 
-		const top = column.querySelector<HTMLElement>('.margin-stack > [data-margin-head]')!;
-		expect(top.classList.contains('placed')).toBe(true);
-		expect(top.textContent).toBe('Accept all from Sam');
-		expect(column.querySelector<HTMLElement>('[data-margin-card="a"]')!.style.top).toBe('48px');
+		expect(place(null)).toEqual({ head: '0px', card: '48px' });
+		expect(place('a')).toEqual({ head: '-38px', card: '10px' });
+		vi.restoreAllMocks();
+	});
+
+	it('brings a picked card into view from the place it is given, not the place its box held before the pick', () => {
+		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+		const scroller = document.createElement('div');
+		const column = document.createElement('div');
+		scroller.append(column);
+		document.body.append(scroller);
+		const scrollBy = vi.fn();
+		scroller.scrollBy = scrollBy as unknown as typeof scroller.scrollBy;
+		const marks: Record<string, HTMLElement> = {};
+		for (const [id, top] of [['a', 100], ['b', 400]] as const) {
+			marks[id] = document.createElement('span');
+			marks[id].getBoundingClientRect = () => ({ top }) as DOMRect;
+			scroller.append(marks[id]);
+		}
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.hasAttribute('data-margin-card') ? 120 : 0; });
+		// The card's box is where it sat before this pick, low in the stack and below the view, until the new place is drawn.
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			return (this.hasAttribute('data-margin-card') ? { top: 900, bottom: 1020 } : { top: 0, bottom: 0 }) as DOMRect;
+		});
+		const view = { top: 0, bottom: 600 };
+		const source: MarginAnchorSource = { scroller: () => scroller, column: () => column, anchor: (id) => marks[id] ?? null, moved: () => [], resized: () => [], view: () => view };
+		const pick = (selectedId: string) => {
+			if (component) unmount(component);
+			component = mount(DocMarginStack, { target: column, props: { source, pinned: [thread('a'), thread('b')], selectedId, card } });
+			flushSync();
+		};
+
+		// Placed at its line (400 to 520), the card is in view: the text does not move.
+		pick('b');
+		expect(column.querySelector<HTMLElement>('[data-margin-card="b"]')!.style.top).toBe('400px');
+		expect(scrollBy).not.toHaveBeenCalled();
+
+		// Placed where its foot passes the view's, the text moves by exactly that much.
+		marks.b.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
+		pick('b');
+		expect(scrollBy).toHaveBeenCalledTimes(1);
+		expect(scrollBy.mock.calls[0][0].top).toBe(500 + 120 + 8 - 600);
 		vi.restoreAllMocks();
 	});
 });

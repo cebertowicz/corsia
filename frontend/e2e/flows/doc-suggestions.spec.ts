@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { inResolved, openResolved, replyField, resolvedList, showAllThreads } from '../support/commentDrawer';
+import { inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
@@ -18,7 +18,7 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
 		await page.getByRole('button', { name: /^3 comments\b/ }).click();
-		await expect(seeded.drawer).toBeVisible();
+		await expectCommentsShown(seeded.drawer);
 		await showAllThreads(seeded.drawer);
 	};
 	return { ...seeded, fine, loose, openComments, stale, text };
@@ -376,7 +376,7 @@ test('@flow:document-suggestions a document opens after the text a decided sugge
 	const pill = page.getByRole('button', { name: /^1 comment\b/ });
 	await expect(pill).not.toHaveAccessibleName(/couldn't be placed/);
 	await pill.click();
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await showAllThreads(drawer);
 	await expect(row(open)).toBeVisible();
 	await inResolved(drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${decided}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());

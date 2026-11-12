@@ -1,5 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+/**
+ * The comments list is showing. In the margin its section has no height of its own (its cards are placed out of flow beside
+ * their text), so what shows is a card or control inside it; in a popover or sheet, the same holds for the list's contents.
+ */
+export async function expectCommentsShown(drawer: Locator): Promise<void> {
+	await expect(drawer.locator('*:visible').first()).toBeVisible();
+}
+
 /** Returns the reply field that every writable open thread keeps visible. */
 export async function replyField(thread: Locator): Promise<Locator> {
 	const field = thread.getByPlaceholder('Reply…');
@@ -97,7 +105,7 @@ export async function inResolved<T>(drawer: Locator, check: () => Promise<T>): P
 		if (opened) {
 			await closeResolved(drawer);
 			if (listWasOpen && !(await drawer.count())) await page.locator('.comment-status').click();
-			if (listWasOpen) await expect(drawer).toBeVisible();
+			if (listWasOpen) await expectCommentsShown(drawer);
 		}
 	}
 }

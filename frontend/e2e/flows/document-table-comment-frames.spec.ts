@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { closeComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -160,7 +160,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		const { ids } = await openDocument(page, { width: 2400, height: 900 });
 		// At this width the comment column opens with the document, so the comments button would close it.
 		const side = page.locator('[data-doc-comments-drawer]');
-		await expect(side).toBeVisible();
+		await expectCommentsShown(side);
 		await expect(page.locator('[data-adaptive-drawer]'), 'the list is the side-by-side drawer, not a sheet').toHaveCount(0);
 		const { band, scrollTop, handle } = await viewportOf(page);
 		const drawerBox = (await side.boundingBox())!, editorBox = (await page.locator('.cm-editor').boundingBox())!;

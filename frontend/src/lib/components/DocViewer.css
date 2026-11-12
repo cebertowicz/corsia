@@ -19,12 +19,12 @@
 }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
-/* The bottom notices (the jump control, a delivery note, the below activity pill) float over the text, so the text runs to the pane's foot and
+/* The bottom notices (the jump control and the below activity pill) float over the text, so the text runs to the pane's foot and
    never moves or shrinks as one comes or goes. The editor's own bottom padding lets the last line scroll clear of them, and while one shows a
    line brought into view (`--doc-bottom-float`, which the editor's scroll margin reads too) stops above where it sits. With none showing the
    foot is plain text: a click there places the caret without the browser scrolling it up out of a padded strip. The float is how far
-   the notices showing reach up from the foot, as DocCanvasActivity measures where it places them (`--doc-bottom-notices`: one notice or
-   a stack, with a below pill over them), plus air. */
+   the notices showing reach up from the foot, as DocCanvasActivity measures where it places them (`--doc-bottom-notices`: the jump
+   control, with a below pill over it), plus air. */
 .doc { --doc-bottom-notices: 0px; --doc-bottom-float: calc(var(--doc-bottom-notices) + var(--space-3)); }
 .doc:has(> [data-doc-bottom-band], [data-doc-activity-pill][data-direction='below']) .cm-scroller { scroll-padding-bottom: var(--doc-bottom-float); }
 .doc > .doc-bottom-band[data-doc-bottom-band] { grid-area: editor; align-self: end; position: relative; z-index: 2; padding-bottom: var(--space-2); pointer-events: none; }
@@ -41,11 +41,10 @@
 .doc-body.email-scroll .cm-editor { height: auto; }
 .doc-body.email-scroll .cm-scroller { overflow: visible; }
 .doc-body.email-scroll .cm-content { padding-bottom: var(--space-3); }
-/* Here the column scrolls, not the editor, so its foot keeps room for the most the bottom notices stack at all times: room that came and
-   went with a notice would move the text when the notice leaves. That most is the jump control over a delivery note (each a touch target;
-   the note adds its own padding) with the band's gap and padding, 122px on a phone, plus the same air as `--doc-bottom-float`. While a
-   notice shows, a line brought into view stops above it. */
-.doc-body.email-scroll { padding-bottom: calc(var(--touch-target) * 2 + var(--space-2) * 4 + var(--space-3)); }
+/* Here the column scrolls, not the editor, so its foot keeps room for the band at all times: room that came and went with a notice would
+   move the text when the notice leaves. The band holds one notice, the jump control (a touch target), with the band's padding, plus the
+   same air as `--doc-bottom-float`. While a notice shows, a line brought into view stops above it. */
+.doc-body.email-scroll { padding-bottom: calc(var(--touch-target) + var(--space-2) + var(--space-3)); }
 .doc:has(> [data-doc-bottom-band], [data-doc-activity-pill][data-direction='below']) .doc-body.email-scroll { scroll-padding-bottom: var(--doc-bottom-float); }
 /* An email draft's notes: the loud ones are EmailNotes.svelte, the quiet ones cm/email-header.ts. */
 .ed-wrap .cm-scroller { overscroll-behavior: contain; }

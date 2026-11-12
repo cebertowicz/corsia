@@ -46,7 +46,7 @@
 		focusReply?: boolean;
 		/** A text jump exposes this thread's Reply field without moving focus from the document. */
 		showReply?: boolean;
-		/** An unpicked margin card has no Reply field; one holding an unsent draft keeps it. */
+		/** An unpicked margin card has no Reply field; one holding an unsent draft keeps it. A document's is a short preview: its replies are counted, not shown, and its text clamps sooner. */
 		hideReply?: boolean;
 		/** A card in the margin column: focusing it adds the quote, replies and Reply field, and leaves the header's one row (names stay as they read at rest). */
 		inMargin?: boolean;
@@ -101,6 +101,8 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
+	// Chat answers are read by being seen (their dwell), so a chat card keeps them showing.
+	const preview = $derived(hideReply && !chatSurface);
 	// A suggestion may have no text of its own; its tags still show.
 	const hasBody = $derived(!!(comment.text || comment.taggedPerson || comment.taggedAgents?.length));
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
@@ -276,14 +278,14 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
+	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} class:preview bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
-			{#if comment.newComment}<NewMarker />{/if}
+			{#if comment.newComment || (preview && comment.newReplyIds?.length)}<NewMarker />{/if}
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
 			{/if}
@@ -319,7 +321,7 @@
 			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />
 		{/if}
 
-		{#if comment.replies.length && !leaving}
+		{#if comment.replies.length && !leaving && !preview}
 			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
@@ -339,6 +341,8 @@
 		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
 		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
 	}
+	/* A resting margin card is a short preview: its text clamps at 3 lines (Show more opens the rest). */
+	.ct.preview { --ct-body-lines: 3; }
 	.ct.flat {
 		background: none; border: 0; border-radius: 0; box-shadow: none;
 		padding: 0; gap: var(--space-1);
@@ -358,12 +362,7 @@
 	.ct-head { display: flex; align-items: center; gap: 7px; }
 	/* One row at every width: a long name shortens in the middle (CommentMeta), so the time and actions never drop below it. */
 	.ct-reply-count { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
-	/* Avatar owns the shared initials presentation. */
-	.ct-act { display: flex; padding: 3px; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
-	.ct-act.ack { margin-left: auto; }
-	.ct-act.ack:hover { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
-	.ct-act.ack.on { color: var(--green); }
-	.ct-act.resolve:hover { background: var(--bg-hover); color: var(--text-primary); }
+	/* Avatar owns the shared initials presentation; the Agree and Resolve boxes are in comment-link.css. */
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
 	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
@@ -380,8 +379,6 @@
 	.ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
-
-	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } }
 
 	.ct.resolved:not(.drawerCard) { padding: 0; background: none; cursor: default; gap: 0; }
 	.ct-res-meta { padding: var(--space-2) 10px 0; }

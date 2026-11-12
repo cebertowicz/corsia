@@ -101,7 +101,7 @@ describe('DocViewerStatus freshness metadata', () => {
 
 	it('names unsent feedback in the comment pill; Send waits for held document comments', () => {
 		render(value(), undefined, { commentCount: 2 });
-		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 3, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		const pill = host.querySelector('.comment-status');
 		expect(pill?.getAttribute('aria-label')).toBe('2 comments, 3 comments and edits waiting for Send');
@@ -111,6 +111,16 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector('.sending-now')).toBeNull();
 		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Send now');
 		expect(host.textContent).not.toContain('Sending to');
+	});
+
+	it('does not mark comments going at once as waiting for Send', () => {
+		render(value(), undefined, { commentCount: 2 });
+		// Open, but in the immediate lane: no Send closes it, so nothing waits for one.
+		component!.sync('artifact-1', { open_count: 3, document_held_count: 0, image_held_count: 0, owner_label: 'Style', undelivered_batches: [] });
+		flushSync();
+		const pill = host.querySelector('.comment-status');
+		expect(pill?.getAttribute('aria-label')).toBe('2 comments');
+		expect(pill?.querySelector('.unsent-dot')).toBeNull();
 	});
 
 	it('turning immediate delivery on sends the held document lane once with its toast, leaving the image lane held', async () => {
@@ -153,7 +163,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill.querySelector('.count-unit')!.textContent).toBe('comment');
 		expect(pill.getAttribute('aria-label')).toBe('1 comment');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
-		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 1, image_held_count: 1, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		expect(pill.getAttribute('aria-label')).toBe('1 comment, 1 comment or edit waiting for Send');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
@@ -209,7 +219,7 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it.each([
-		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 comments, 3 comments and edits waiting for Send'],
+		['unsent only', { commentCount: 2 }, { open_count: 3, image_held_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 comments, 3 comments and edits waiting for Send'],
 		['neither', { commentCount: 2 }, null, '2 comments'],
 	])('names %s comment status once', (_state, props, feedback, expected) => {
 		render(value(), undefined, props);

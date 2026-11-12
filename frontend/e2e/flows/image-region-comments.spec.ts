@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { imageBarSend, sendByKeyboard } from '../support/heldComments';
+import { expectCommentsShown } from '../support/commentDrawer';
 import {
 	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,
 	sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
@@ -117,7 +118,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(pill(page)).toHaveAttribute('aria-label', /^3 comments(, |$)/);
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
-			await expect(drawer).toBeVisible();
+			await expectCommentsShown(drawer);
 			await pill(page).hover();
 			const activePillColor = await pill(page).evaluate((el) => getComputedStyle(el).color);
 			const inactiveZoomForPill = page.locator('.image-viewer:visible .zoom button[aria-pressed="false"]');

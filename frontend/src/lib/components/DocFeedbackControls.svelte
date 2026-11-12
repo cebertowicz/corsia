@@ -16,7 +16,9 @@
 	const held = $derived(lane ? feedback.heldCount(lane) : 0);
 	const undelivered = $derived(feedback.undeliveredCount(lane));
 	const summary = $derived(feedback.undeliveredSummary(lane));
-	const sentHere = $derived(lane !== null && feedback.sentLane === lane && feedback.sent > 0);
+	// A narrow bar confirms only its own lane's send; the document header confirms any send of the document it shows, since the
+	// document's canvas carries no delivery notice of its own.
+	const sentHere = $derived(lane !== null && feedback.sent > 0 && (feedback.sentLane === lane || !compact));
 	let sender = $state<HTMLSpanElement>(), notSent = $state<HTMLSpanElement>();
 
 	async function send() {

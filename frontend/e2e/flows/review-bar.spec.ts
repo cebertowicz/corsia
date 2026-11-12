@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -393,7 +393,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	// The pill names its comments, then what waits for Send: "2 comments, 2 comments and edits waiting for Send".
 	await page.getByRole('button', { name: /^2 comments\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
 	const jump = drawer.locator('[data-comment-jump]').first();
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
@@ -402,7 +402,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	// A real tap on a quote jump leaves every drawer control reachable.
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	// A quote jump moves the phone sheet to its half detent. Wait for that finite transition before measuring the close control.
 	await settled(page);
 	await expect(hitAtCentre(close)).resolves.toBe(true);
@@ -545,7 +545,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
 	await page.getByRole('button', { name: /^6 comments, 6 comments and edits waiting for Send$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
 	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
 	await settled(page);

@@ -391,7 +391,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await openImage(page);
 		await expect(viewerSend(page)).toHaveCount(0);
 		// On a phone Back shows only "Back"; its name still says where it goes.
-		await expect(bar(page).getByRole('button', { name: 'Back to walkthrough.md' })).toHaveText(/^\s*Back\s*$/);
+		await expect(bar(page).getByRole('button', { name: 'Back to walkthrough.md' })).toHaveText('Back', { useInnerText: true });
 		await expect(bar(page).getByRole('button', { name: 'Fit', exact: true })).toBeVisible();
 		await expect(bar(page).locator('[data-image-comment]')).toBeVisible();
 		await expect(bar(page).locator('[data-image-comments-pill]')).toBeVisible();

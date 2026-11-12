@@ -5,11 +5,10 @@ import { createSession, loginByUrl, replacePreviousFixtureThread, sidebarThread,
 import { FOUR, NEWER, markEmailDraft, mockEmailDraftContext, reply } from '../support/emailDraftContext';
 import { isolatedDb } from '../support/heldComments';
 
-// An email draft scrolls as one column (the draft, then the earlier emails), not inside its editor. The bottom notices (a
-// delivery note and the jump control) float over that column, so with a notice showing, the column scrolled to its end must
-// still bring its last line out from under it, with room left for the other notice stacked on top, and nothing may move when
-// the notice leaves. On a phone, a line the caret moves onto while the delivery note shows stops above the note, in a document and
-// in an email draft alike, and above the jump control too when it stands over the note.
+// An email draft scrolls as one column (the draft, then the earlier emails), not inside its editor. The bottom band (the jump
+// control) floats over that column, so the column keeps room at its foot for the band at all times: scrolled to its end, its last
+// line ends above where the band stands, and nothing moves as the band comes or goes. On a phone, a line the caret moves onto while
+// the jump control shows stops above it. A delivered send is said in the document's header, never in this band.
 const TAG = '@surface:email-draft-bottom-band';
 const BODY = [
 	'From: Alex Rivera <alex.rivera@example.com>', 'To: dana.whitfield@example.com', 'Subject: Re: Saturday work day: tools and parking', '',
@@ -25,10 +24,11 @@ const WIDTHS = [
 	{ width: 393, height: 852, mobile: true },
 ];
 
-/** The reader's comment on a line near the draft's end with an agent's unread reply, so the jump control points down to it. */
+/** The reader's comment on the draft's last line with an agent's unread reply, so the jump control points down to it. The last
+    line is below the fold at every checked width (at 900 the line above it reaches the window's foot, its New sign on screen). */
 async function unreadBelow(request: Parameters<typeof createSession>[0], artifactId: string, thread: string) {
-	const quote = 'Item 8: I will bring the sign-in sheet';
-	const from = BODY.indexOf(quote);
+	const quote = 'Alex';
+	const from = BODY.lastIndexOf(quote);
 	const made = await request.post(`/api/artifacts/${artifactId}/comments`, {
 		params: { token: TEST_TOKEN },
 		data: { body: 'Can we confirm the gate code?', anchor_text: quote, from_off: from, to_off: from + quote.length, delivery_policy: 'immediate' },
@@ -75,57 +75,46 @@ async function scrollToEnd(page: Page) {
 	await page.waitForTimeout(150);
 }
 
-/**
- * Where the column's last line ends and where the topmost bottom notice starts, in the window, and how much higher that top
- * would sit with the jump control stacked over the note (its touch target plus the band's gap).
- */
+/** Where the column's last line ends, in the window, and where its foot is: the band floats up from that foot. */
 function measure(page: Page) {
 	return column(page).evaluate((node) => {
 		const box = node.getBoundingClientRect();
 		const pad = parseFloat(getComputedStyle(node).paddingBottom) || 0;
-		const band = document.querySelector<HTMLElement>('[data-doc-bottom-band]');
-		const notices = [...document.querySelectorAll('[data-doc-bottom-band] [data-doc-jump], [data-doc-bottom-band] .delivery-confirmation')]
-			.map((el) => el.getBoundingClientRect()).filter((rect) => rect.height > 0);
-		const bandStyle = band ? getComputedStyle(band) : null;
 		return {
 			atEnd: node.scrollTop + node.clientHeight >= node.scrollHeight - 1,
 			scrolls: node.scrollHeight > node.clientHeight,
 			lastLine: box.top + node.scrollHeight - pad - node.scrollTop,
-			noticeTop: Math.min(...notices.map((rect) => rect.top)),
-			notices: notices.length,
-			secondNotice: (parseFloat(bandStyle?.getPropertyValue('--touch-target') ?? '') || 44) + (parseFloat(bandStyle?.rowGap ?? '') || 0),
+			foot: box.bottom,
 		};
 	});
 }
 
+/** How far the band reaches up from the editor's foot with the jump control in it, measured in a document where it shows. */
+async function bandReach(page: Page) {
+	const jump = page.locator('[data-doc-bottom-band] [data-doc-jump]');
+	await expect(jump, 'the jump control points at the unread comment below').toBeVisible();
+	return page.locator('.doc').evaluate((doc) => {
+		const top = doc.querySelector<HTMLElement>('[data-doc-bottom-band] [data-doc-jump]')!.getBoundingClientRect().top;
+		return doc.querySelector<HTMLElement>('.doc-main')!.getBoundingClientRect().bottom - top;
+	});
+}
+
 for (const { width, height, mobile } of WIDTHS) {
-	test(`${TAG} ${width}px: the last line of an email draft scrolls clear of a delivery note and a jump control over it, and stays put when the note leaves`, async ({ page, request }, info) => {
+	test(`${TAG} ${width}px: the last line of an email draft scrolls clear of the jump control's band, and stays put`, async ({ page, request }, info) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || mobile !== info.project.name.endsWith('mobile'), 'Each device project checks its own width.');
 		test.setTimeout(90_000);
 		await page.setViewportSize({ width, height });
-		const { artifactId } = await openDraft(page, request, `${width}`);
-		// The delivery note lasts three seconds, so it is shown and measured inside that time.
-		await page.evaluate(async (id) => {
-			const { deliveryConfirmation } = await import('/src/lib/stores/deliveryConfirmation.ts');
-			deliveryConfirmation.show(id, 2);
-		}, artifactId);
-		await expect(page.locator('[data-doc-bottom-band] .delivery-confirmation')).toBeVisible();
+		// The band's reach, from a document where the jump control shows (in an email draft it does not show yet).
+		await openDraft(page, request, `${width}-doc`, false, true);
+		const reach = await bandReach(page);
+		await openDraft(page, request, `${width}`);
 		await scrollToEnd(page);
 		const at = await measure(page);
 
-		expect(at.notices, 'the delivery note shows').toBe(1);
 		expect(at.scrolls && at.atEnd, 'the column scrolls and is at its end').toBe(true);
-		expect(at.lastLine, 'the last line ends above the note').toBeLessThanOrEqual(at.noticeTop);
-		expect(at.lastLine, 'and above a jump control stacked over the note').toBeLessThanOrEqual(at.noticeTop - at.secondNotice);
-
-		await page.evaluate(async () => {
-			const { deliveryConfirmation } = await import('/src/lib/stores/deliveryConfirmation.ts');
-			deliveryConfirmation.dismiss();
-		});
-		await expect(page.locator('[data-doc-bottom-band]')).toHaveCount(0);
+		expect(at.lastLine, 'the last line ends above where the jump control stands').toBeLessThanOrEqual(at.foot - reach);
 		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-		const after = await measure(page);
-		expect(after.lastLine, 'the text does not move when the note leaves').toBeCloseTo(at.lastLine, 0);
+		expect((await measure(page)).lastLine, 'the text does not move').toBeCloseTo(at.lastLine, 0);
 	});
 }
 
@@ -143,46 +132,32 @@ function caretLineBottom(page: Page) {
 	});
 }
 
-// The stack is checked in a document: in an email draft the jump control does not yet stay up once the column scrolls (it reads
-// the editor's own box, which grows to its text), and the float there is the same measure.
-for (const [email, stacked] of [[false, false], [false, true], [true, false]] as const) {
-	const over = stacked ? 'the jump control stacked over the delivery note' : 'the delivery note';
-	test(`${TAG} 393px: in ${email ? 'an email draft' : 'a document'}, a line the caret moves onto stops above ${over} while it shows`, async ({ page, request }, info) => {
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'), 'A phone-width check.');
-		test.setTimeout(90_000);
-		await page.setViewportSize({ width: 393, height: 852 });
-		const { artifactId } = await openDraft(page, request, `caret-${email ? 'email' : 'doc'}${stacked ? '-stacked' : ''}`, email, stacked);
-		const jump = page.locator('[data-doc-bottom-band] [data-doc-jump]');
-		if (stacked) await expect(jump, 'the jump control points at the unread comment below').toBeVisible();
-		const scroller = page.locator(email ? '.doc-body.email-scroll' : '.doc .cm-scroller');
-		const foot = await scroller.evaluate((node) => node.getBoundingClientRect().bottom);
-		// With no notice showing, walk the caret down to the foot of the view.
-		await page.locator('.cm-line').first().click();
-		for (let step = 0; step < 120; step++) {
-			const bottom = await caretLineBottom(page);
-			if (bottom !== null && bottom > foot - 100) break;
-			await page.keyboard.press('ArrowDown');
-		}
-		const before = await scroller.evaluate((node) => node.scrollTop);
-		// The delivery note lasts three seconds, so the caret moves and is measured inside that time.
-		await page.evaluate(async (id) => {
-			const { deliveryConfirmation } = await import('/src/lib/stores/deliveryConfirmation.ts');
-			deliveryConfirmation.show(id, 2);
-		}, artifactId);
-		const note = page.locator('[data-doc-bottom-band] .delivery-confirmation');
-		await expect(note).toBeVisible();
-		// Keys go once the note has been placed and measured (the float follows the band a frame after it changes size).
-		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-		for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowDown');
-		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-		const lineBottom = await caretLineBottom(page);
-		const noticeTop = await page.locator('[data-doc-bottom-band]').evaluate((band) =>
-			Math.min(...[...band.querySelectorAll('[data-doc-jump], .delivery-confirmation')].map((el) => el.getBoundingClientRect().top)));
+// Checked in a document: in an email draft the jump control does not show yet (it reads the editor's own box, which grows to its
+// text), and the float there is the same measure.
+test(`${TAG} 393px: in a document, a line the caret moves onto stops above the jump control while it shows`, async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'), 'A phone-width check.');
+	test.setTimeout(90_000);
+	await page.setViewportSize({ width: 393, height: 852 });
+	await openDraft(page, request, 'caret-doc', false, true);
+	const jump = page.locator('[data-doc-bottom-band] [data-doc-jump]');
+	await expect(jump, 'the jump control points at the unread comment below').toBeVisible();
+	const scroller = page.locator('.doc .cm-scroller');
+	const foot = await scroller.evaluate((node) => node.getBoundingClientRect().bottom);
+	// Walk the caret down to the foot of the view, then three lines on.
+	await page.locator('.cm-line').first().click();
+	for (let step = 0; step < 120; step++) {
+		const bottom = await caretLineBottom(page);
+		if (bottom !== null && bottom > foot - 100) break;
+		await page.keyboard.press('ArrowDown');
+	}
+	const before = await scroller.evaluate((node) => node.scrollTop);
+	for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowDown');
+	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const lineBottom = await caretLineBottom(page);
+	await expect(jump, 'the jump control still shows').toBeVisible();
+	const jumpTop = await jump.evaluate((el) => el.getBoundingClientRect().top);
 
-		await expect(note, 'the note still shows').toBeVisible();
-		if (stacked) await expect(jump, 'the jump control still stands over the note').toBeVisible();
-		expect(await scroller.evaluate((node) => node.scrollTop), 'the view scrolled to follow the caret').toBeGreaterThan(before);
-		expect(lineBottom, `the caret line ends above ${over}`).not.toBeNull();
-		expect(lineBottom ?? Infinity, `the caret line ends above ${over}`).toBeLessThanOrEqual(noticeTop);
-	});
-}
+	expect(await scroller.evaluate((node) => node.scrollTop), 'the view scrolled to follow the caret').toBeGreaterThan(before);
+	expect(lineBottom, 'the caret line ends above the jump control').not.toBeNull();
+	expect(lineBottom ?? Infinity, 'the caret line ends above the jump control').toBeLessThanOrEqual(jumpTop);
+});

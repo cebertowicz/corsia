@@ -1,4 +1,4 @@
-import { closeComments, inResolved, resolvedList, showAllThreads } from '../support/commentDrawer';
+import { closeComments, inResolved, resolvedList, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
@@ -12,7 +12,7 @@ const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ co
 
 async function openComments(page: Page, drawer: Locator) {
 	await commentsButton(page).click();
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await showAllThreads(drawer);
 }
 

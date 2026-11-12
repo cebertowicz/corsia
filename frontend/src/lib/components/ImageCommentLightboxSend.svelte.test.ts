@@ -381,7 +381,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 	});
 
 	it('marks the pill while the image artifact\'s own batch has messages not sent yet, with the drawer closed', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), { ...onImage('done', 2), resolved: true }], feedback: pending(3) });
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), { ...onImage('done', 2), resolved: true }], feedback: pending(3, { image: 3 }) });
 		const shown = await imageTab();
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
@@ -392,9 +392,9 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 	});
 
 	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s threads', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2) });
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2, { image: 2 }) });
 		const doc = documentStatus();
-		doc.component.sync('art-doc', pending(2));
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
 		const shown = await viewer({
 			src: SRC, alt: 'Mock', artifactId: 'art-doc',
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),

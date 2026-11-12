@@ -42,15 +42,32 @@ describe('placeCards: soft-pinned margin cards', () => {
 		}
 	});
 
-	it('never places a card above the floor: cards above a selected one with no room to step up stack down from it, the selected card after them', () => {
-		const items = [card('a', 20), card('b', 30), card('c', 40)];
-		const tops = placeCards(items, 'c', 50);
-		expect(tops).toEqual({ a: 50, b: 50 + 100 + GAP, c: 50 + 2 * (100 + GAP) });
-		expect(Math.min(...Object.values(placeCards(items, null, 50)))).toBe(50);
-		// With room above, the selected card stays level with its text.
-		expect(placeCards([card('a', 300), card('b', 310)], 'b', 50)).toEqual({ a: 310 - GAP - 100, b: 310 });
-		// A first card held on the floor (its text is above it) stays there; a pick lower down still keeps its line and steps its neighbour up.
-		expect(placeCards([card('a', 20), card('b', 400), card('c', 410)], 'c', 50)).toEqual({ a: 50, b: 410 - GAP - 100, c: 410 });
+	it('at rest, stacks every card under what heads the column (its first item, at the top)', () => {
+		const items = [card('head', 0, 42), card('a', 20), card('b', 30), card('c', 40)];
+		expect(placeCards(items, null)).toEqual({ head: 0, a: 50, b: 50 + 100 + GAP, c: 50 + 2 * (100 + GAP) });
+	});
+
+	it('keeps a picked card at its line even when the cards above it would not fit between it and the column top: they step up past the top, the head with them', () => {
+		const items = [card('head', 0, 42), card('a', 20), card('b', 30), card('c', 40)];
+		const tops = placeCards(items, 'c');
+		expect(tops.c).toBe(40);
+		expect(tops).toEqual({ head: 40 - 2 * (100 + GAP) - GAP - 42, a: 40 - 2 * (100 + GAP), b: 40 - 100 - GAP, c: 40 });
+		expect(overlaps(items, tops)).toBe(false);
+	});
+
+	it('steps the cards above a pick up only as far as they must: the head stays at the top and a card with room keeps its line', () => {
+		expect(placeCards([card('head', 0, 42), card('a', 300), card('b', 310)], 'b')).toEqual({ head: 0, a: 310 - GAP - 100, b: 310 });
+		// A first card held under the head (its text is above the head's foot) stays there; the pick keeps its line and steps its neighbour up.
+		expect(placeCards([card('head', 0, 42), card('a', 20), card('b', 400), card('c', 410)], 'c')).toEqual({ head: 0, a: 50, b: 410 - GAP - 100, c: 410 });
+	});
+
+	it('keeps a picked card at its line however tall the cluster above it is', () => {
+		const items = [card('head', 0, 42), ...Array.from({ length: 6 }, (_, i) => card(`t${i}`, 540 + 10 * i, 120))];
+		for (const item of items.slice(1)) {
+			const tops = placeCards(items, item.id);
+			expect(tops[item.id]).toBe(item.y);
+			expect(overlaps(items, tops)).toBe(false);
+		}
 	});
 
 	it('gives every card a top, and an unknown selection changes nothing', () => {

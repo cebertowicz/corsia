@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, replacePreviousFixtureThread, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
@@ -663,7 +663,7 @@ for (const width of [1440, 393]) {
 			await holdDwell(page, true);
 			await page.keyboard.press(key);
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
-			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
+			await expectCommentsShown(page.locator('[data-doc-comments-drawer]'));
 			await expect.poll(() => page.locator('[data-doc-comments-drawer]').evaluate((drawer) => drawer.contains(document.activeElement) || !!drawer.closest('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
 
 			await closeComments(page);
@@ -850,14 +850,9 @@ for (const theme of ['light', 'dark'] as const) {
 			await expectControl(page, '2 new');
 			await expectControlPoints(page, 2, 'above');
 			await holdDwell(page, false);
-			// Opening the document delivers the two pin comments, and the delivery toast sits at the bottom of the same cell.
-			const delivered = page.locator('.toast').filter({ hasText: /comments? sent/ });
-			await expect(delivered).toBeVisible();
-			const toastBox = (await delivered.boundingBox())!;
-			const noticeBox = (await controlBox(page).boundingBox())!;
-			expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(noticeBox.y);
-
-			await expect(delivered).toHaveCount(0, { timeout: 15_000 });
+			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
+			await expect(page.locator('.document-header .feedback-controls [role="status"]')).toHaveText(/^2 comments sent/);
+			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
 
 			await holdDwell(page, true);
 			if (width === 1440) await page.evaluate(() => {

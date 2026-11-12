@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
-import { closeComments, openResolved, resolvedList } from '../support/commentDrawer';
+import { closeComments, openResolved, resolvedList, expectCommentsShown } from '../support/commentDrawer';
 
 test('@flow:document-comment-save preserves the visible editor viewport', async ({ page, request }, testInfo) => {
 	test.setTimeout(60_000);
@@ -317,7 +317,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		const caretBeforeDrawer = await caretBeforeFocusLeft();
 		await page.getByRole('button', { name: /^0 comments\b/ }).click();
 		const drawer = page.locator('[data-doc-comments-drawer]');
-		await expect(drawer).toBeVisible();
+		await expectCommentsShown(drawer);
 		await openResolved(drawer);
 		await expect(resolvedList(page).locator('.ct-res-head')).toBeVisible();
 		const beforeReopen = await lifecyclePosition();

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { openResolved, replyField, showAllThreads } from '../support/commentDrawer';
+import { openResolved, replyField, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 
 test('@flow:document-second-canvas a reply and a resolve made in one canvas appear in a second open canvas', async ({ page, request }, testInfo) => {
@@ -41,7 +41,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 		await canvas.getByText(title, { exact: true }).first().click();
 		await waitForWsConnected(canvas);
 		await canvas.getByRole('button', { name: /^1 comment\b/ }).click();
-		await expect(canvas.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
+		await expectCommentsShown(canvas.getByRole('region', { name: 'Document comments', exact: true }));
 		await showAllThreads(canvas.getByRole('region', { name: 'Document comments', exact: true }));
 		const comment = canvas.getByRole('region', { name: /^Comment by / });
 		await expect(comment).toContainText('Review this sentence.');

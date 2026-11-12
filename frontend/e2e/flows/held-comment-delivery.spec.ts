@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 import { createSession, loadPastFirstRunLanding } from '../support/corsia';
 import {
 	chatSend, chatSendGroup, deliveredBatches, headerSend, heldIn, imageBarSend, installWorkspace,
-	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
+	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, headerSent, headerSentStatus, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
 } from '../support/heldComments';
 import {
 	bar, commentOnRegion, expectBarFits, openDocument, openImage, overlay, putSheetAway, seedImageDocument,
@@ -130,13 +130,16 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		expect(sends.document).toHaveLength(0);
 		await captureFrame(page, 'document-comment-held', String(width) as '1440' | '393');
 		await headerSend(page).click();
-		await expect(sentToast(page, '1 comment sent')).toBeVisible();
-		await captureFrame(page, 'document-send-toast', String(width) as '1440' | '393');
-		await sentToast(page, '1 comment sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
+		// The header says it went, where Send stood; nothing floats over the document's text or its margin cards.
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
+		await expect(page.locator('.document-canvas .delivery-confirmation')).toHaveCount(0);
+		await captureFrame(page, 'document-sent', String(width) as '1440' | '393');
 		if (width === 1440) await page.keyboard.press('Escape');
 		await post('Please check this revision too.');
 		await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).click();
-		await expect(sentToast(page, '1 comment sent')).toBeVisible();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toHaveAttribute('aria-pressed', 'true');
 		expect(sends.document.map((body) => JSON.parse(body).delivery_policy)).toEqual(['document-held', 'document-held']);
@@ -217,8 +220,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 
 		// The header sends its own document; the chat then reads the one that is left, which is not on screen.
 		await headerSend(page).click();
-		await expect(sentToast(page, '2 comments sent')).toBeVisible();
-		await sentToast(page, '2 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expect(chatSend(page)).toHaveText('Send 2 comments');
 		expect(heldIn(first.artifactId, 'document-held'), 'the first document sent').toBe(0);
@@ -287,11 +290,10 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		const watch = await watchSenders(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(sentToast(page, '3 comments sent')).toBeVisible();
+		// The document still holds its own two, so its Send stays; the header's status says what the image sent.
+		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page)).toHaveText('Send 2 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
-		await captureFrame(page, 'post-image-close-confirmation', '1440');
-		await sentToast(page, '3 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
 		await expect(sentToast(page, '3 comments sent')).toHaveCount(0);
 		await captureFrame(page, 'post-image-close', '1440');
 		const seen = await watch.stop();
@@ -365,7 +367,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await page.getByText(seeded.sessionTitle).first().click();
 		await expect(page.locator('.document-header')).toBeVisible();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(sentToast(page, '2 comments sent')).toBeVisible();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		await captureFrame(page, 'reload-containing-document-remount', String(width) as '1440' | '393');
 		expect(deliveredBatches(seeded.artifactId, 'image-held'), 'the remainder was delivered once').toBe(1);
@@ -394,9 +397,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await expect(headerSend(page)).toHaveText('Send 2 comments');
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		expect(deliveredBatches(seeded.artifactId, 'image-held')).toBe(1);
-		await expect(sentToast(page, '3 comments sent')).toBeVisible();
-		await captureFrame(page, 'post-image-close-confirmation', '393');
-		await sentToast(page, '3 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
+		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(sentToast(page, '3 comments sent')).toHaveCount(0);
 		await captureFrame(page, 'post-image-close', '393');
 	});

@@ -1,4 +1,4 @@
-import { replyField } from '../support/commentDrawer';
+import { replyField, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import {
@@ -30,7 +30,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await reader.getByRole('button', { name: /^3 comments\b/ }).click();
 			const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
-			await expect(comments).toBeVisible();
+			await expectCommentsShown(comments);
 			const jump = comments.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).first();
 			await jump.click();
 			await expect(reader.locator('.cm-comment-focused').filter({ hasText: quote })).toBeInViewport();

@@ -16,6 +16,8 @@ async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'botto
       current = current.parentElement;
     }
     if (!current) throw new Error('Scenario has no scrollable content');
+    // Scroll as a reader does: their wheel ends the document's reading-line hold, which otherwise puts a bare scrollTop back.
+    current.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: scroll === 'top' ? -1 : 1 }));
     current.scrollTop = scroll === 'top' ? 0 : current.scrollHeight;
   }, { selector, scroll });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

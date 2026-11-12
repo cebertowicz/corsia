@@ -576,7 +576,9 @@ describe('reply stamping through the document canvas', () => {
 		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
-		await vi.waitFor(() => expect(document.querySelector('[data-reply-id="reply"]')).not.toBeNull());
+		// The resting margin card is a short preview: it counts the reply and does not draw it, so nothing could read it by view.
+		await vi.waitFor(() => expect(document.querySelector('[data-margin-card="comment"]')?.textContent).toContain('1 reply'));
+		expect(document.querySelector('[data-reply-id="reply"]')).toBeNull();
 	}
 	// A document reply is read only when its thread is opened, never by being in view.
 	it('never marks a document reply read from view, including when its image opens', async () => {

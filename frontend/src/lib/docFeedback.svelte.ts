@@ -39,7 +39,7 @@ const plural = (count: number) => `${count} comment${count === 1 ? '' : 's'}`;
 export class DocFeedback {
 	artifactId = $state<string | null>(null);
 	targetInstanceId = $state<string | null>(null);
-	/** Every unsent comment on the document, whichever lane holds it. */
+	/** Every comment waiting for a Send, in either held lane; one going at once never waits, so it is not counted. */
 	pendingCount = $state(0);
 	documentHeld = $state(0);
 	imageHeld = $state(0);
@@ -129,13 +129,13 @@ export class DocFeedback {
 		});
 		this.undelivered = current.undelivered_batches;
 		this.unsynced = false;
-		if (this.pendingCount > 0) {
-			this.confirmSent(0);
-		}
+		// The "sent" line goes once the lane it spoke for holds comments again; the other lane's own held comments leave it standing,
+		// since the document header now says what the image sent while its own Send stays.
+		if (this.sentLane && this.heldCount(this.sentLane) > 0) this.confirmSent(0);
 	}
 
 	private applyCounts(counts: { open_count: number; document_held_count: number; image_held_count: number }) {
-		this.pendingCount = counts.open_count;
+		this.pendingCount = counts.document_held_count + counts.image_held_count;
 		this.documentHeld = counts.document_held_count;
 		this.imageHeld = counts.image_held_count;
 	}
