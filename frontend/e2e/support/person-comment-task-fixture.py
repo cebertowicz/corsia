@@ -68,6 +68,19 @@ try:
                 feedback_batches.record_comment(connection, row, created=created,
                                                delivery_policy=feedback_batches.IMMEDIATE)
             person_comment_task.reconcile(connection, artifact_id)
+    elif mode == 'reply':
+        # A new agent reply in the person's first thread: the task comes back after the person read or dismissed it.
+        root_id = db.execute(
+            "SELECT id FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL AND author_kind='user'"
+            " ORDER BY created_at, id LIMIT 1", (artifact_id,),
+        ).fetchone()[0]
+        add_comment(db, artifact_id, author_id=thread_id, parent_id=root_id)
+        with write_transaction(db, scope='seed_reply') as connection:
+            person_comment_task.reconcile(connection, artifact_id)
+    elif mode == 'agent-root':
+        # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
+        # them only through the agent's open ask on that document.
+        add_comment(db, artifact_id, author_id=thread_id)
     else:
         raise ValueError(mode)
 finally:

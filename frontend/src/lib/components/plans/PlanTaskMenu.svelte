@@ -2,6 +2,7 @@
 	import type { OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import Menu from '$lib/components/ui/Menu.svelte';
 	import { dismissCommentAttention } from '$lib/api/docs';
+	import { DISMISS_ALL, isCommentTask } from '$lib/components/comments/commentTask';
 
 	let {
 		node,
@@ -32,10 +33,10 @@
 		node.child?.available === true && node.user_actions.some((a) => a === 'close_node' || a === 'mark_done'),
 	);
 	const items = $derived([
-		...(node.comment_attention?.system_task ? [] : node.user_actions.map((action) => ({
+		...(isCommentTask(node) ? [] : node.user_actions.map((action) => ({
 			id: action, label: LABELS[action], danger: action === 'close_node',
 		}))),
-		...(node.comment_attention ? [{ id: 'dismiss_comments', label: 'Dismiss all', danger: false }] : []),
+		...(node.comment_attention ? [{ id: 'dismiss_comments', label: DISMISS_ALL, danger: false }] : []),
 	]);
 
 	/** Every action, Won't do included, is one tap: no prompt stands in front of it. */

@@ -78,14 +78,19 @@ async def _authorize(artifact_id: str, user: dict) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
 
-def _review_bar(artifact_id: str) -> dict | None:
+def _review_bar(artifact_id: str, user_id: str) -> dict | None:
     """The review bar's read for a document or image, or None for any other type."""
+    from doceditor.person_comment_projection import person_step_attention
+
     db = get_db()
     try:
         row = AR.identity_row_for(artifact_id, db=db)
         if row is None or row["type"] not in public.ASKABLE_TYPES:
             return None
         person_step = public.person_step_instructions(str(row["id"]), db=db)
+        attention = person_step and person_step_attention(db, person_step["node_id"], str(row["id"]), user_id)
+        if attention:
+            person_step = {**person_step, "comment_attention": attention}
         return {
             "artifact_id": artifact_id, "artifact_type": row["type"],
             **review_bar.round_state(db, str(row["id"])),
@@ -242,7 +247,7 @@ async def get_review(artifact_id: str, user: dict = Depends(require_user),
     raised ask and the round's feedback (DCOL-FR12.4).
     """
     await _authorize(artifact_id, user)
-    bar = await run_in_db(lambda: _review_bar(artifact_id))
+    bar = await run_in_db(lambda: _review_bar(artifact_id, user["id"]))
     if bar is not None:
         return bar
     try:

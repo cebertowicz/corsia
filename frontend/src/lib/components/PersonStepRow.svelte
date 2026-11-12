@@ -102,7 +102,7 @@
 	{#if more}<span class="sep" aria-hidden="true">·</span><span class="more">{more}</span>{/if}
 {/snippet}
 {#snippet stateLine()}
-	{#if attention}<span class="counted-state"><CommentCountLine counts={attention} dot lead={stateRun} /></span>{:else}{@render stateRun()}{/if}
+	{#if attention}<span class="counted-state"><CommentCountLine counts={attention} lead={stateRun} /></span>{:else}{@render stateRun()}{/if}
 {/snippet}
 {#snippet doMark()}<span class="act" aria-hidden="true">Do →</span>{/snippet}
 {#snippet tile()}
@@ -163,11 +163,13 @@
 	/* The tile's lead slot is 36 px, as an artifact's type tile; the mark sits centred in it. */
 	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: var(--artifact-tile-size); height: var(--artifact-tile-size); }
 	.more { flex: 0 0 auto; }
-	/* With a count, the state line is one CommentCountLine: the state and time give way before the count does. */
+	/* With a count, the state line is one CommentCountLine: the state, its time and the count all keep their text,
+	   and the count wraps to its own line when they don't fit. The state's own dot is the line's one dot. */
 	.counted-state { flex: 1 1 auto; min-width: 0; white-space: normal; }
-	/* Inside the cut run the ctx gap no longer spaces the parts, so the separators carry it. */
+	/* Inside the lead the ctx gap no longer spaces the parts, so the separators carry it. */
 	.counted-state :global(.count-lead > .sep) { padding: 0 var(--space-1); }
-	/* Inline text, so a cut lead ends in an ellipsis rather than a clipped letter. */
+	.counted-state :global(.count-sep) { color: var(--text-tertiary); }
+	/* Inline text, so the lead wraps between words like a sentence. */
 	.counted-state :global(.count-lead time), .counted-state :global(.count-lead .state) { display: inline; }
 	.counted-state :global(.count-lead .dot) { display: inline-block; margin-right: var(--space-1); vertical-align: 0.05em; }
 	.sep { flex: 0 0 auto; color: var(--text-tertiary); }

@@ -38,6 +38,13 @@ def test_one_task_per_document_closes_and_can_reopen(isolated_db):
         with write_transaction(db, scope="test_reopen") as connection:
             second = person_comment_task.reconcile(connection, artifact)
         assert second and second != first
+        from doceditor.person_comment_projection import annotate
+        actor = PlanActor(thread_id=None, user_id="owner-token", project_id=None, kind="user")
+        envelope = public.read_operator_thread("owner", actor=actor, db=db)
+        shown = {n["id"]: n for n in annotate(db, envelope, "owner-token")["plans"][0]["nodes"]}
+        # The settled task stays listed as finished; only its open successor carries the count.
+        assert first in shown and "comment_attention" not in shown[first]
+        assert shown[second]["comment_attention"]["comments"] == 1
     finally:
         db.close()
 
@@ -440,3 +447,24 @@ def test_projection_batches_fifty_documents_with_twenty_threads_each(isolated_db
     finally:
         db.set_trace_callback(None)
         db.close()
+
+
+def test_review_bar_reads_the_comment_task_with_its_counts(isolated_db):
+    from api.attention import _review_bar
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact = seed_document(db, "owner", name="brief.md")
+        root, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+        add_comment(db, artifact, author_id="owner", parent_id=root["id"])
+        with write_transaction(db, scope="test_reconcile") as connection:
+            task = person_comment_task.reconcile(connection, artifact)
+    finally:
+        db.close()
+    step = _review_bar(artifact, "owner-token")["person_step"]
+    # The bar and the plan menu read the same marker, so neither offers Done or Won't do for this task.
+    assert step["node_id"] == task
+    assert step["comment_attention"] == {
+        "artifact_id": artifact, "comments": 1, "suggestions": 0, "system_task": True,
+    }

@@ -4,15 +4,9 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
+import { contrastBothThemes, countFit, settled, shoot } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
-
-async function settled(page: import('@playwright/test').Page) {
-	await expect.poll(() => page.evaluate(() => document.getAnimations().filter((animation) =>
-		animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity,
-	).length)).toBe(0);
-	await expect(page.getByText('Loading plan…')).toHaveCount(0);
-}
 
 for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at ${width}px`, async ({ page, request }, testInfo) => {
 	test.setTimeout(180_000);
@@ -82,9 +76,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const sidebar = sidebarThread(page, title);
 	const sidebarRow = page.locator('aside.sidebar').getByRole('listitem').filter({ hasText: title });
 	await expect(sidebarRow.getByRole('button', { name: /Needs you/ })).toBeVisible();
-	await settled(page);
-	console.log(`build stamp ${width} orange: ${await page.locator('.version-overlay').innerText()}`);
-	await page.screenshot({ path: testInfo.outputPath(`${width}-orange.png`) });
+	await shoot(page, testInfo, `${width}-orange`);
 	for (const id of [threadId, unreadThreadId]) {
 		const marked = await request.post(`/api/threads/${id}/seen?${query}`, { data: { unread: true }, headers: { Authorization: `Bearer ${TEST_TOKEN}` } });
 		expect(marked.ok(), await marked.text()).toBeTruthy();
@@ -99,14 +91,11 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const unreadRow = page.locator('aside.sidebar').getByRole('listitem').filter({ hasText: unreadTitle });
 	await expect(unreadRow.getByRole('button', { name: 'Update since your last visit' })).toBeVisible();
 	await expect(unreadRow.getByRole('button', { name: /Needs you/ })).toHaveCount(0);
-	console.log(`build stamp ${width} orange over unread: ${await page.locator('.version-overlay').innerText()}`);
-	await page.screenshot({ path: testInfo.outputPath(`${width}-orange-over-unread.png`) });
+	await shoot(page, testInfo, `${width}-orange-over-unread`);
 	await sidebar.click();
 	await expect(page.getByText(/\d+ new repl(?:y|ies).*\d+ documents/i)).toHaveCount(0);
 	if (width > 1024) await expect(page.getByRole('list', { name: 'Plan steps' })).toBeVisible();
-	await settled(page);
-	console.log(`build stamp ${width} chat: ${await page.locator('.version-overlay').innerText()}`);
-	await page.screenshot({ path: testInfo.outputPath(`${width}-chat-no-chip.png`) });
+	await shoot(page, testInfo, `${width}-chat-no-chip`, true);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: /^Open plan —/ }).click();
 	else if (width <= 1024) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	const plan = page.getByRole('list', { name: 'Plan steps' });
@@ -117,9 +106,10 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await expect(agentFeedback).toHaveCount(1);
 	await expect(agentFeedback).toContainText('1 comment');
 	console.log(`agent feedback row ${width}: ${await agentFeedback.innerText()}`);
-	await settled(page);
-	console.log(`build stamp ${width} task: ${await page.locator('.version-overlay').innerText()}`);
-	await page.screenshot({ path: testInfo.outputPath(`${width}-comment-task.png`) });
+	await shoot(page, testInfo, `${width}-comment-task`, true);
+	console.log(`file task ${width}: ${JSON.stringify(await countFit(row))}`);
+	await contrastBothThemes(page, row, `file task ${width}`);
+	console.log(`agent feedback row ${width}: ${JSON.stringify(await countFit(agentFeedback))}`);
 	if (width === 393) {
 		const box = await row.boundingBox();
 		if (!box) throw new Error('Task row has no bounds');
@@ -139,8 +129,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	expect(menuBox!.y).toBeGreaterThanOrEqual(0);
 	expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(width);
 	expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(900);
-	console.log(`build stamp ${width} menu: ${await page.locator('.version-overlay').innerText()}`);
-	await page.screenshot({ path: testInfo.outputPath(`${width}-comment-menu.png`) });
+	await shoot(page, testInfo, `${width}-comment-menu`);
 	await page.getByRole('menuitem', { name: 'Dismiss all' }).click();
 	await expect(row).not.toContainText('1 comment, 1 suggestion');
 	const comments = await request.get(`/api/artifacts/${artifactId}/comments?${query}`);
@@ -164,31 +153,9 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await sidebarThread(page, title).click();
 	};
-	// The count is never the part cut: the whole count sits inside its line and its row, whatever the width.
-	const countWhole = async (scope: import('@playwright/test').Locator) => {
-		const fit = await scope.locator('.count-line').first().evaluate((line) => {
-			const count = line.querySelector('.comment-count') as HTMLElement;
-			const lead = line.querySelector('.count-lead') as HTMLElement | null;
-			const holder = (line.closest('li, [data-step-chip]') ?? line) as HTMLElement;
-			const [lineBox, countBox, holderBox] = [line, count, holder].map((element) => element.getBoundingClientRect());
-			return {
-				text: count.textContent,
-				inside: countBox.left >= lineBox.left - 1 && countBox.right <= lineBox.right + 1
-					&& countBox.left >= holderBox.left - 1 && countBox.right <= holderBox.right + 1,
-				// The count has its own line under the lead.
-				wrapped: lead ? countBox.top >= lead.getBoundingClientRect().bottom - 1 : false,
-				leadCut: lead ? lead.scrollWidth > lead.clientWidth + 1 : false,
-			};
-		});
-		expect(fit.inside, JSON.stringify(fit)).toBe(true);
-		return fit;
-	};
+	const countWhole = countFit;
 	const card = page.locator('[data-person-step]').filter({ hasText: 'Review launch plan' }).first();
-	const capture = async (name: string) => {
-		await settled(page);
-		console.log(`build stamp ${width} ${name}: ${await page.locator('.version-overlay').innerText()}`);
-		await page.screenshot({ path: testInfo.outputPath(`${width}-${name}.png`) });
-	};
+	const capture = (name: string, panel = true) => shoot(page, testInfo, `${width}-${name}`, panel);
 	seed('ask');
 	await reopenPlan();
 	const ask = plan.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
@@ -202,28 +169,33 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const ids = JSON.parse(resultLine.slice('FIXTURE_RESULT='.length)) as { replies: string[][]; suggestions: string[] };
 	await reopenPlan();
 	await expect(ask).toContainText('2 comments, 2 suggestions');
-	// The ask keeps its own subtext; the needs-you dot and the accent count follow it.
-	if (askSubtext) await expect(ask.locator('.row-subline').first()).toContainText(askSubtext);
+	// The ask keeps its whole subtext; a drawn ' · ', then the one dot against the accent count.
+	if (askSubtext) await expect(ask.locator('.count-lead')).toHaveText(askSubtext);
+	await expect(ask.locator('.comment-count > .count-sep')).toHaveText(' · ');
+	await expect(ask.locator('.count-text > .comment-dot')).toHaveCount(1);
 	await expect(ask.locator('.comment-dot')).toHaveCount(1);
-	await expect(ask.locator('.comment-count')).toHaveCSS('color', await ask.evaluate((element) => {
+	await expect(ask.locator('.count-text')).toHaveCSS('color', await ask.evaluate((element) => {
 		const probe = document.createElement('span');
-		probe.style.color = 'var(--accent)';
+		probe.style.color = 'var(--accent-text)';
 		element.appendChild(probe);
 		const color = getComputedStyle(probe).color;
 		probe.remove();
 		return color;
 	}));
+	await contrastBothThemes(page, ask, `ask row ${width}`);
 	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
 	console.log(`ask row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-with-comments');
-	// The ask's card in chat is the same ask: the same dot and accent count after "Needs you".
+	// The ask's card in chat is the same ask: its state dot is the line's one dot; ' · ' and the accent count follow.
 	if (width === 393) await reopenChat();
 	await card.scrollIntoViewIfNeeded();
-	await expect(card.locator('.comment-count')).toHaveText('2 comments, 2 suggestions');
-	await expect(card.locator('.comment-count .comment-dot')).toHaveCount(1);
+	await expect(card.locator('.count-text')).toHaveText('2 comments, 2 suggestions');
+	await expect(card.locator('.comment-dot')).toHaveCount(0);
+	await expect(card.locator('.comment-count > .count-sep')).toHaveText(' · ');
+	await contrastBothThemes(page, card, `ask card ${width}`);
 	await expect(card.getByRole('button', { name: /Needs you, 2 comments, 2 suggestions$/ })).toHaveCount(1);
 	console.log(`ask card ${width}: ${JSON.stringify(await countWhole(card))}`);
-	if (width === 393) await capture('ask-card');
+	await capture('ask-card', false);
 	const viewed = await request.post(`/api/artifacts/${artifactId}/comments/${ids.replies[0][0]}/viewed`, {
 		headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: ids.replies[0][1] },
 	});
@@ -238,10 +210,10 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const longCount = '12 comments, 3 suggestions';
 	seed('long');
 	await reopenPlan();
-	await expect(ask.locator('.comment-count')).toHaveText(longCount);
+	await expect(ask.locator('.count-text')).toHaveText(longCount);
 	console.log(`long row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	if (width !== 393) {
-		await expect(card.locator('.comment-count')).toHaveText(longCount);
+		await expect(card.locator('.count-text')).toHaveText(longCount);
 		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
 	}
 	await capture('long-count');
@@ -253,12 +225,12 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		const narrow = await countWhole(ask);
 		console.log(`long row narrow panel ${width}: ${JSON.stringify(narrow)}`);
 		expect(narrow.wrapped).toBe(true);
-		await capture('long-count-narrow-panel');
+		await capture('long-count-narrow-panel', false);
 	}
 	if (width === 393) {
 		await reopenChat();
 		await card.scrollIntoViewIfNeeded();
-		await expect(card.locator('.comment-count')).toHaveText(longCount);
+		await expect(card.locator('.count-text')).toHaveText(longCount);
 		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
 		await capture('long-count-card');
 	}

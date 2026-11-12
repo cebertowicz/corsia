@@ -20,6 +20,14 @@ def _linked_tasks(db, node_ids: list[str]) -> dict[str, str]:
     return {str(row['node_id']): str(row['artifact_id']) for row in rows}
 
 
+def person_step_attention(db, node_id: str, artifact_id: str, user_id: str) -> dict | None:
+    """The counts a document's comment task carries in its review bar, as its plan row shows them."""
+    if artifact_id not in _linked_tasks(db, [node_id]).values():
+        return None
+    comments, suggestions = person_comment_attention.counts(db, artifact_id, user_id)
+    return {'artifact_id': artifact_id, 'comments': comments, 'suggestions': suggestions, 'system_task': True}
+
+
 def annotate(db, envelope: dict, user_id: str) -> dict:
     """Attach counts and hide the comment task while a document ask is open."""
     nodes = [node for plan in envelope.get('plans', []) for node in plan.get('nodes', [])]
@@ -50,7 +58,8 @@ def annotate(db, envelope: dict, user_id: str) -> dict:
             node_id = str(node['id'])
             artifact_id = linked.get(node_id)
             document = node_document.get(node_id)
-            if document:
+            # A finished row never carries the count: a settled comment task stays listed as Done while its successor counts.
+            if document and node.get('state') not in public.TERMINAL_STATES:
                 counts = attention[document][0]
                 if sum(counts):
                     node['comment_attention'] = {
