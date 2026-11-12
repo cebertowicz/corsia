@@ -75,11 +75,16 @@ async function postComment(page: Page, row: Locator, messageId: string, quote: s
 }
 
 /**
- * Open a comment's thread with its highlight scrolled to the middle of the transcript: on a phone a
- * longer transcript otherwise leaves the highlight under the sticky header, which takes the tap.
+ * Open a comment's thread after leaving the composer, as a person closes the keyboard first: on a
+ * phone a focused composer shrinks the transcript's top space, so the header covers the first message.
  */
 async function openThread(row: Locator, page: Page, quote: string) {
-  await row.locator('.cm-comment-anchor').filter({ hasText: quote }).evaluate(mark => mark.scrollIntoView({ block: 'center' }));
+  const mark = row.locator('.cm-comment-anchor').filter({ hasText: quote });
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(async () => {
+    const [markBox, headerBox] = [await mark.boundingBox(), await page.locator('.shell-header').boundingBox()];
+    return !!markBox && markBox.y >= (headerBox ? headerBox.y + headerBox.height : 0);
+  }).toBe(true);
   return openCommentThread(row, page, quote);
 }
 
