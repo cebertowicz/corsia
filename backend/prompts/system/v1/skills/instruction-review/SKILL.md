@@ -1,6 +1,6 @@
 ---
 name: instruction-review
-description: Use when the periodic line-by-line review of the instructions every agent always loads is due (weekly, or after a material roster or objective change), when an addition would exceed the recorded size budget, or when the person asks to cut instruction size. Not for a wording fix inside the task you were asked to do, for documents and artifacts the person owns, or for a project's goals, commitments or decision rights.
+description: Use when the periodic line-by-line review of the instructions every agent always loads is due (weekly, or after a material roster or objective change), or when an addition would exceed the recorded size budget. Not for a wording fix inside the task you were asked to do, for documents and artifacts the person owns, or for a project's goals, commitments or decision rights.
 metadata:
   corsia-data: corsia.yaml
   corsia-format: "1"
@@ -12,7 +12,7 @@ metadata:
 
 Improve agent behavior, not prose volume, and diagnose before you cut, per skill `context-stewardship`. Judge whether an agent would act rightly on its first move, not whether the file reads well.
 
-**Always-loaded** means a source an agent carries before it has read the task: the scope's project instructions, each agent's own responsibility context, and whatever this install injects every turn. A skill or a workflow step is the opposite: it arrives only when triggered, so a rule put there must be reachable at the moment it is first needed. **Budget** is one recorded number for the always-loaded set; **headroom** is what that number leaves above today's count.
+**Always-loaded** means a source an agent carries before it has read the task: the scope's project instructions, each agent's own responsibility context, and whatever this install injects every turn. A skill or a workflow step is the opposite: it arrives only when triggered, so a rule put there must be reachable at the moment it is first needed. **Budget** is the limit on the part of that set written on this install; **headroom** is the share above the first count that the budget starts with.
 
 Each step's section below reaches you when that step starts.
 
@@ -22,7 +22,9 @@ Find the set the way `context-stewardship` says: the effective-context view if y
 
 ## Measure
 
-Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. Record the budget once, on the first run: the person's headroom above that count, a quarter by default. From then on it stays fixed, so the set can only come back under it. Only an addition the person asked for raises it, by exactly that addition's size, and a headroom the person sets replaces it. Never re-base it on today's count: a budget that moves with the set never limits it, and one recorded at the exact count freezes the set so that even the person's own ask costs a removal.
+Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. Count text that shipped with the product apart from the rest: nobody on this install can cut it, so it is reported beside the budget and never set against it.
+
+The budget is the sum of three recorded numbers, and nothing else changes it: the first run's count of the text written on this install; the person's headroom on that count, a quarter by default; and the size of each addition the person has asked for since, so their own asks never cost a removal. A headroom the person sets later applies to that same first count. Never re-base the budget on today's count: a budget that moves with the set never limits it. What agents add on their own between reviews can take the set over the budget; this review brings it back under.
 
 ## Inventory
 
@@ -58,7 +60,7 @@ Only when the set changed, something needs the person, or one of their choices h
 
 ## Choices the owner sets
 
-Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the headroom the budget is first recorded with [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. A choice is asked in one report; after that it is listed only in a report sent for another reason. Their answer replaces the default and is recorded.
+Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the budget's headroom [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. A choice is asked in one report; after that it is listed only in a report sent for another reason. Their answer replaces the default and is recorded.
 
 ## Never
 

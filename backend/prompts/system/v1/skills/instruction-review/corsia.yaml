@@ -6,13 +6,13 @@ workflow:
       title: Always-loaded set named with owners
       instruction: "## Scope"
       required: true
-      check: every always-loaded source in scope listed once, each with its layer, its owner and whether you may edit it; this run's trigger named (horizon due, roster or objective change, an addition that would exceed the budget, or a request to cut instruction size)
+      check: every always-loaded source in scope listed once, each with its layer, its owner and whether you may edit it; this run's trigger named (horizon due, roster or objective change, or an addition that would exceed the budget)
       difficulty: {default: standard}
     - id: measure
-      title: Size counted against a fixed budget
+      title: Size counted against the recorded budget
       instruction: "## Measure"
       required: true
-      check: the count for the set and for each file, each named with its unit; the budget read back unchanged from the last run, or recorded on the first run with the owner's headroom above that count (a quarter by default), or raised by exactly the size of an addition the person asked for, with that ask cited; the review horizon recorded where a later run reads it
+      check: the count for the set and for each file, each named with its unit, with text that shipped with the product counted apart; the budget read back as its recorded parts (the first count, the person's headroom on it, a quarter by default, and each addition the person asked for since, with that ask cited), changed only where the person changed a part; the review horizon recorded where a later run reads it
       after: [scope]
       difficulty: {default: routine, hard_if: "no budget exists yet, or no unit was recorded before"}
     - id: inventory
@@ -54,12 +54,12 @@ workflow:
       title: Whole result checked against what went in
       instruction: "## Whole result"
       required: true
-      check: entries, dispositions and changes reconciled with no entry unaccounted for; the set measured again at or under the recorded budget; what happens to any change that fails stated; no new tool, checker or gate introduced
+      check: entries, dispositions and changes reconciled with no entry unaccounted for; the set, apart from shipped text, measured again at or under the recorded budget; what happens to any change that fails stated; no new tool, checker or gate introduced
       after: [reread]
       difficulty: {default: standard, hard_if: "the review moved or removed an invariant or an authority limit"}
       quality:
         - {name: nothing-needed-lost, good: "no correction, blocked first move, or agent question traceable to a line this review moved or removed, within 30 days", observed: signal, when: "lagging:30"}
-        - {name: set-not-growing, good: "at the next review the set count is at or below this run's, apart from additions the person asked for", observed: signal, when: "lagging:7"}
+        - {name: set-within-budget, good: "at the next review the set, apart from shipped text, is at or under the recorded budget", observed: signal, when: "lagging:7"}
     - id: cadence
       title: Next review armed to wake itself
       instruction: "## Cadence"
@@ -71,6 +71,6 @@ workflow:
       title: Person told what changed
       instruction: "## Report"
       required: true
-      check: when the set changed, something needs the person, or one of their choices has not been asked yet, one message sent in this run giving the set count before and after with headroom, what moved and where, what waits on another owner, what wakes the next review or that nothing here can, any choice still unanswered, and at most one ask; otherwise no message, and the result recorded on this run's phase
+      check: when the set changed, something needs the person, or one of their choices has not been asked yet, one message sent in this run giving the set count before and after against the budget, what moved and where, what waits on another owner, what wakes the next review or that nothing here can, any choice still unanswered, and at most one ask; otherwise no message, and the result recorded on this run's phase
       after: [cadence]
       difficulty: {default: routine}
