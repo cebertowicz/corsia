@@ -93,37 +93,6 @@ def test_dispatch_naming_a_usable_account_runs_while_the_default_is_limited(acco
 
 
 @pytest.mark.parametrize("provider", VENDORS)
-def test_a_start_in_a_project_is_ready_on_a_ready_sibling_only_while_rollover_is_on(accounts, provider):  # noqa: F811
-    """The Default is limited and a sibling is ready: a dispatch scoped to a project is eligible, and its
-    ready-alternatives list names the model, exactly when that project's rollover is on, so no listed
-    alternative is one a start would refuse or hold; an explicit account never rolls over."""
-    from llm.delegation_model import eligible_delegation_model
-
-    db = accounts[0]
-    v = _vendor(db, provider)
-    _discover(db, provider, v.first, v.model)
-    harness_usage.record_allowed(provider=provider, source="discovery", db=db,
-                                 receipt=capture_receipt(provider, account_id=v.first["id"], db=db))
-    harness_usage.record_limited(provider=provider, receipt=default_receipt(provider, db=db), **LIMIT)
-    default = next(a for a in list_accounts(provider=provider, db=db) if a["id"] not in (v.first["id"], v.second["id"]))
-    order = [default["id"], v.first["id"]]
-    disabled = [v.second["id"]]
-
-    set_policy("actor-project", provider, rollover=False, order=order, disabled=disabled, expected_revision=0, db=db)
-    selected, refusal = eligible_delegation_model(v.model, project_id="actor-project")
-    assert selected is None and "usage_limited" in refusal
-    _, unknown = eligible_delegation_model("no-such-model", project_id="actor-project")
-    assert v.model not in unknown
-
-    set_policy("actor-project", provider, rollover=True, order=order, disabled=disabled, expected_revision=1, db=db)
-    assert eligible_delegation_model(v.model, project_id="actor-project") == (v.model, None)
-    _, unknown = eligible_delegation_model("no-such-model", project_id="actor-project")
-    assert v.model in unknown
-    _, refusal = eligible_delegation_model(v.model, project_id="actor-project", account_id=default["id"])
-    assert "usage_limited" in refusal  # an explicit account never rolls over
-
-
-@pytest.mark.parametrize("provider", VENDORS)
 def test_dispatch_naming_no_account_reads_the_account_its_child_binds(accounts, provider):  # noqa: F811
     from llm.delegation_model import dispatch_scope, eligible_delegation_model
 

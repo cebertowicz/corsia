@@ -60,7 +60,7 @@ workflow:
 _FAKE = textwrap.dedent(
     '''\
     #!{python}
-    import os, sys, json
+    import sys, json
     def emit(o):
         sys.stdout.write(json.dumps(o) + "\\n"); sys.stdout.flush()
     open({reply!r} + ".argv", "w").write(json.dumps(sys.argv))
@@ -68,7 +68,6 @@ _FAKE = textwrap.dedent(
     for line in sys.stdin:
         if not line.strip():
             continue
-        open({reply!r} + ".turns", "a").write(os.environ.get("CLAUDE_CONFIG_DIR", "") + "\\n")
         reply = open({reply!r}).read()
         if reply == "HANG":
             continue
@@ -91,7 +90,7 @@ def fenced(payload: object) -> str:
 def world(signed_in_defaults, tmp_path, monkeypatch, _cc_runtime_cleanup):
     """The project, owner, skill, declarations and fake binary; yields its handles."""
     import connections.models as cm
-    from automation import script_runner, worker_runner
+    from automation import script_runner, worker_runner, worker_start_wait
     from infra import config
     from infra.database import get_db, write_transaction
     from infra.measure_registry import REGISTRY, sync
@@ -135,6 +134,7 @@ def world(signed_in_defaults, tmp_path, monkeypatch, _cc_runtime_cleanup):
     monkeypatch.setattr(script_runner, "_drive_owner", drive_owner)
     monkeypatch.setattr(worker_runner, "_state",
                         {"lock": None, "task": None, "again": False, "open": False, "waited": 0})
+    monkeypatch.setattr(worker_start_wait, "_waiting", {})
     yield {"root": root, "folder": folder, "project": project, "reply": reply, "driven": driven,
            "staging": folder / "staging" / "req"}
     shutil.rmtree(root, ignore_errors=True)

@@ -70,11 +70,7 @@ async def _deliver_initial_task(
     prepared: PreparedCCSpawn,
     admission: InputAdmission,
 ) -> None:
-    from infra.thread_input_types import FailedInputBatch, HeldAdmission
-
-    if isinstance(admission.batch, HeldAdmission):
-        # Usage-limited account: the hold owns the first turn and runs it, once, when it releases.
-        return
+    from infra.thread_input_types import FailedInputBatch
 
     if isinstance(admission.batch, FailedInputBatch):
         from infra.turn_admission_driver import drive_turn_admission

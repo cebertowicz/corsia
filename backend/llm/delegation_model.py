@@ -58,13 +58,13 @@ def _usage_summary(row: dict) -> str:
     )
 
 
-def _ready_alternatives(rows: list[dict], project_id: str | None, explicit_account: bool) -> str:
-    """Every row a start would accept; a harness row names no usage, its account does."""
-    from llm.account_catalog import startable_status
+def _ready_alternatives(rows: list[dict]) -> str:
+    """Every row ready on the account its turn would run on; a harness row names no usage, its account does."""
+    from llm.account_catalog import effective_status
 
     ready = [
         row["id"] if "runs_on" in row else f"{row['id']} ({_usage_summary(row)})"
-        for row in rows if startable_status(row, project_id, explicit_account=explicit_account)[0] == "ready"
+        for row in rows if effective_status(row)[0] == "ready"
     ][:8]
     return "; ".join(ready) if ready else "none"
 
@@ -135,22 +135,17 @@ def eligible_delegation_model(
         return None, "model is required; there is no silent default."
 
     from infra.database import get_db
-    from llm.account_catalog import startable_status
+    from llm.account_catalog import effective_status
 
     db = get_db()
     try:
         original, canonical, resolution_error = _canonical_row(requested, db)
-        policy_project = project_id
-        if thread_id is not None and project_id is None:
-            from connections.account_policy import thread_scope
-
-            policy_project = thread_scope(thread_id, db=db)["project_id"]
     finally:
         db.close()
     rows, account_error = _scoped_rows(thread_id, project_id, account_id)
     if rows is None:
         return None, account_error
-    alternatives = _ready_alternatives(rows, policy_project, account_id is not None)
+    alternatives = _ready_alternatives(rows)
     if resolution_error == "unknown":
         return None, f"model {requested!r} is unknown; choose a ready selector: {alternatives}."
     if resolution_error == "ambiguous":
@@ -173,7 +168,7 @@ def eligible_delegation_model(
             f"cannot be selected; do not retry it. Choose a ready selector: {alternatives}."
         )
     on_account = f" on account {_account_label(account_id)!r} ({account_id})" if account_id is not None else ""
-    status, status_reason = startable_status(status_row, policy_project, explicit_account=account_id is not None)
+    status, status_reason = effective_status(status_row)
     selected = next((item["account_id"] for item in status_row.get("runs_on") or () if item["selected"]), None)
     if account_id is not None and status_row.get("connection") in ("codex", "claude-code") and (
             selected != account_id and status == "ready"):

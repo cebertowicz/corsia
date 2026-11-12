@@ -196,30 +196,6 @@ def effective_status(row: dict) -> tuple[str | None, str | None]:
     return entry["status"], entry["status_reason"]
 
 
-def startable_status(row: dict, project_id: str | None, *, explicit_account: bool = False) -> tuple[str | None, str | None]:
-    """A scoped row's ``(status, status_reason)`` for starting a worker or delegate on it now.
-
-    The one start predicate (``delegate_task`` validation and its ready-alternatives list,
-    rule-started workers). Ready on the account the next turn runs on is ready. A usage-limited
-    selected account with a ready sibling is also ready while the project opted into rollover for
-    this vendor: the first turn then moves to the sibling, or is held until it can. With rollover
-    off, or an explicitly named account (which never rolls over), the selected account decides.
-    """
-    status = effective_status(row)
-    runnable = row.get("runnable")
-    if status[0] == "ready" or explicit_account or not runnable or runnable["status"] != "ready":
-        return status
-    from connections.provider_policy import effective_policy
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        rolls_over = effective_policy(project_id, str(row["connection"]), db=db)["rollover"]
-    finally:
-        db.close()
-    return ("ready", None) if rolls_over else status
-
-
 def _canonical_capabilities(row: dict, own: dict, *, db) -> dict:
     """One added account's capability block through the catalog's single owner.
 

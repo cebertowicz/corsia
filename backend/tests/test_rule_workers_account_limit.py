@@ -1,57 +1,47 @@
 """A rule-started worker whose owner's account is usage-limited, through the real start path.
 
-The catalog rows, account selection, rollover and held-input gate are the real ones. Only the
-vendor's usage verdicts are recorded (as its limit events would) and the worker's model call is
-stubbed. The owner runs a Codex model; the Claude Code cases are in
-``test_rule_workers_account_limit_cc.py``.
+The catalog rows, account selection and rollover are the real ones. Only the vendor's usage
+verdicts are recorded (as its limit events and usage reads would), the usage read itself is
+recorded instead of run, and the worker's ``claude`` is the shared fake. The owner runs Sonnet.
 """
 from __future__ import annotations
 
-import asyncio
-import json
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import AsyncMock
-
 import pytest
 
+from automation import worker_start_wait
 from tests.rule_worker_helpers import (  # noqa: F401
-    OWNER, make_rule, request, starts, world, worker_events,
+    OWNER, WORKFLOW, atool, make_rule, request, starts, world, worker_events,
 )
 
-PROVIDER, MODEL = "codex", "codex/gpt-5-codex"
+PROVIDER, MODEL = "claude-code", "claude-code/sonnet"
 LIMIT = dict(reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update")
 
 
-def _accounts(world, monkeypatch, *, rollover: bool, sibling: str):
-    """The Default (limited) and one added account in the owner's project, with the owner on Codex.
+def _accounts(world, monkeypatch, *, rollover: bool, sibling: str, scope_model: str | None = None):
+    """The Default (limited, for ``scope_model`` alone when given) and one added account in the
+    owner's project.
 
-    ``sibling`` is ``unread`` (discovered, usage never read), ``allowed`` or ``limited``.
+    ``sibling`` is ``unread`` (discovered, usage never read) or ``limited``.
     """
     from connections import harness_usage
     from connections.account_evidence import mark_discovery
     from connections.account_policy import set_policy
     from connections.account_receipts import capture_receipt
     from connections.vendor_accounts import add_account, default_account, set_account_state
-    from infra.database import get_db, write_transaction
+    from infra.database import get_db
     from tests.vendor_account_fixtures import default_receipt
 
-    with write_transaction(None, scope="rule_worker_codex_owner") as conn:
-        conn.execute("UPDATE threads SET model=? WHERE id=?", (MODEL, OWNER))
     db = get_db()
     default = default_account(PROVIDER, db=db)
     added = set_account_state(add_account(PROVIDER, "Added")["id"], "signed_in", expected_revision=0)
-    (Path(added["source_home"]) / "auth.json").write_text(json.dumps({
-        "auth_mode": "chatgpt", "tokens": {"access_token": "synthetic"}}))
     receipt = capture_receipt(PROVIDER, account_id=added["id"], db=db)
     assert mark_discovery(added["id"], receipt=receipt, status="ready",
                           models={MODEL: {"available": True, "resolved_identity": "synthetic"}}, db=db)
     db.commit()
-    if sibling == "allowed":
-        harness_usage.record_allowed(provider=PROVIDER, source="discovery", db=db, receipt=receipt)
-    elif sibling == "limited":
+    if sibling == "limited":
         harness_usage.record_limited(provider=PROVIDER, db=db, receipt=receipt, **LIMIT)
-    harness_usage.record_limited(provider=PROVIDER, receipt=default_receipt(PROVIDER, db=db), db=db, **LIMIT)
+    harness_usage.record_limited(provider=PROVIDER, receipt=default_receipt(PROVIDER, db=db), db=db,
+                                 **({"scope_model": scope_model} if scope_model else {}), **LIMIT)
     set_policy(world["project"], PROVIDER, rollover=rollover, order=[default["id"], added["id"]],
                disabled=[], expected_revision=0, db=db)
     checks = []
@@ -66,79 +56,147 @@ def _workers() -> list[str]:
     return [row[0] for row in get_db().execute("SELECT id FROM threads WHERE spawned_by=?", (OWNER,))]
 
 
-async def _status(worker: str) -> dict:
-    from tools.delegation import DelegateStatusTool
-
-    return json.loads(await DelegateStatusTool().execute(thread_id=worker, _thread_id=OWNER))
+REFUSAL_END = "can't run now. Choose a model that is ready for this chat."
 
 
-REFUSAL = "your model {name} can't run now. Choose a model that is ready for this chat."
+def _refused_plainly(reason: str) -> bool:
+    """Today's refusal, word for word: a wait adds no wording of its own."""
+    return reason.startswith("your model ") and reason.endswith(REFUSAL_END)
 
 
-def _spawned_models() -> set[str]:
-    from infra.database import get_db
+def _waiting_quietly(rule: str) -> None:
+    """The start is back in the queue: no worker, no refusal, nothing told to the owner."""
+    from tests.rule_worker_helpers import owner_wakes
 
-    return {row[0] for row in get_db().execute("SELECT model FROM threads WHERE spawned_by=?", (OWNER,))}
-
-
-@pytest.fixture
-def codex_worker(monkeypatch):
-    """A Codex worker's start needs its connection's version check; nothing else about it is stubbed."""
-    monkeypatch.setattr("subagents.codex_confinement.verify_version", AsyncMock())
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert (outcome, reason, worker) == ("queued", None, None)
+    assert _workers() == [] and owner_wakes() == [] and worker_events() == []
 
 
 @pytest.mark.asyncio
-async def test_an_unread_sibling_holds_the_workers_first_turn_then_releases_it_onto_the_sibling(
-        world, monkeypatch, codex_worker):
-    """The selected account is limited and a sibling is ready with its usage unread: the start is not
-    refused, the first turn is held (its reason shows in delegate_status), a usage check is asked of
-    the sibling, and no second start fires; when that read says allowed the turn moves to the sibling."""
-    import infra.app_loop as app_loop
+async def test_an_unread_sibling_waits_for_its_usage_read_then_starts_on_it(world, monkeypatch):
+    """The selected account is limited and a sibling is ready with its usage unread: the start
+    goes back to the queue (no worker, no slot, no refusal) and a usage read is asked of the
+    sibling; once that read says allowed, the next pass starts the worker on the sibling."""
     from automation import worker_runner
-    from connections import account_moves, harness_usage
+    from connections import harness_usage
     from connections.account_policy import chosen_account_id
     from infra.database import get_db
 
-    default, added, receipt, checks = _accounts(world, monkeypatch, rollover=True, sibling="unread")
-    monkeypatch.setattr(account_moves, "_publish", lambda _event: None)
+    _default, added, receipt, checks = _accounts(world, monkeypatch, rollover=True, sibling="unread")
     rule = await make_rule()
     await request()
+    assert await worker_runner.drive() == 0
+    _waiting_quietly(rule)
+    assert set(checks) == {(PROVIDER, added["id"])}
+    assert await worker_runner.drive() == 0  # still unread: still waiting
+    _waiting_quietly(rule)
+
+    harness_usage.record_allowed(provider=PROVIDER, source="rate_limit_update", receipt=receipt, db=get_db())
     assert await worker_runner.drive() == 1
-
     [(outcome, reason, _identity, worker)] = starts(rule)
-    assert outcome == "started" and reason is None and worker is not None
-    assert _workers() == [worker]
-    reset = datetime.fromisoformat(LIMIT["resets_at"]).astimezone()
-    expected = f"Held: account limit on codex, resets {reset:%b} {reset.day}, {reset:%Y at %-I:%M %p %Z}."
-    assert (await _status(worker))["held"] == expected
-    assert chosen_account_id(worker, PROVIDER, db=get_db()) == default["id"]
-    assert {(PROVIDER, added["id"])} == set(checks)
-    assert _spawned_models() == {MODEL}
-
-    admitted = AsyncMock()
-    monkeypatch.setattr("infra.thread_execution.drive_turn_admission", admitted)
-    app_loop.capture(asyncio.get_running_loop())
-    try:
-        db = get_db()
-        harness_usage.record_allowed(provider=PROVIDER, source="rate_limit_update", receipt=receipt, db=db)
-        for _ in range(3000):  # up to 30s on a loaded runner; exits at the first admission
-            if admitted.await_count:
-                break
-            await asyncio.sleep(0.01)
-    finally:
-        app_loop.clear()
-
-    batch = admitted.await_args.args[0]
-    assert type(batch).__name__ == "ClaimedBatch" and batch.thread_id == worker
+    assert outcome == "started" and reason is None and _workers() == [worker]
     assert chosen_account_id(worker, PROVIDER, db=get_db()) == added["id"]
-    assert await worker_runner.drive() == 0  # nothing is started again
-    assert [row[0] for row in starts(rule)] == ["started"] and _workers() == [worker]
-    assert _spawned_models() == {MODEL}
+    assert worker_start_wait._waiting == {}
+
+
+@pytest.mark.asyncio
+async def test_a_sibling_read_as_limited_ends_the_wait_with_todays_refusal(world, monkeypatch):
+    from automation import worker_runner
+    from connections import harness_usage
+    from infra.database import get_db
+    from tests.rule_worker_helpers import owner_wakes
+
+    _default, _added, receipt, _checks = _accounts(world, monkeypatch, rollover=True, sibling="unread")
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    _waiting_quietly(rule)
+
+    harness_usage.record_limited(provider=PROVIDER, db=get_db(), receipt=receipt, **LIMIT)
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert outcome == "refused" and worker is None and _refused_plainly(reason)
+    assert reason in owner_wakes()[0] and [kind for kind, _ in worker_events()] == ["worker.no_result"]
+    assert worker_start_wait._waiting == {}
+
+
+@pytest.mark.asyncio
+async def test_a_read_that_never_lands_ends_the_wait_with_todays_refusal(world, monkeypatch):
+    """A failed read, or none, leaves the sibling unread: the wait still ends, after
+    ``WAIT_SECONDS``, whether or not the workflow sets a time limit (this one sets none)."""
+    from automation import worker_runner
+    from tests.rule_worker_helpers import owner_wakes
+
+    _accounts(world, monkeypatch, rollover=True, sibling="unread")
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    _waiting_quietly(rule)
+
+    monkeypatch.setattr(worker_start_wait, "WAIT_SECONDS", 0)
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert outcome == "refused" and worker is None and _refused_plainly(reason)
+    assert reason in owner_wakes()[0] and [kind for kind, _ in worker_events()] == ["worker.no_result"]
+    assert worker_start_wait._waiting == {}
+
+
+@pytest.mark.asyncio
+async def test_with_rollover_off_an_unread_sibling_is_refused_at_once(world, monkeypatch):
+    from automation import worker_runner
+
+    _default, _added, _receipt, checks = _accounts(world, monkeypatch, rollover=False, sibling="unread")
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert outcome == "refused" and worker is None and _refused_plainly(reason)
+    assert checks == [] and worker_start_wait._waiting == {}
+
+
+OTHER = "rw-other-owner"
+
+
+async def _rule_for(owner: str, request_value: str) -> str:
+    created = await atool(owner, operation="create", connector="qa", event_type="request",
+                          action="start_worker", workflow_id=WORKFLOW, request_identity_fact="request",
+                          match=[{"field": "request", "op": "eq", "value": request_value}])
+    assert isinstance(created, dict), created
+    return created["id"]
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_start_gives_its_slot_to_a_younger_start_that_can_run(world, monkeypatch):
+    """With one slot free, the older start waits on an unread account and the younger start,
+    another owner's on a model that runs (the Default is limited for Sonnet alone), starts in
+    the same pass."""
+    from automation import worker_runner
+    from infra.database import write_transaction
+
+    _accounts(world, monkeypatch, rollover=True, sibling="unread", scope_model=MODEL)
+    monkeypatch.setattr("infra.subagent_caps.get_max_concurrent_live", lambda: 1)
+    with write_transaction(None, scope="rule_worker_other_owner") as conn:
+        conn.execute("INSERT INTO threads (id, user_id, title, model, project_id, created_at, updated_at) "
+                     "VALUES (?, 'user-1', 'Other', 'claude-code/opus', ?, 't', 't')", (OTHER, world["project"]))
+    staging = world["root"] / ".threads" / OTHER / "staging" / "req"
+    staging.mkdir(parents=True)
+    (staging / "change.diff").write_text("+ y = 2\n")
+    older, younger = await _rule_for(OWNER, "old"), await _rule_for(OTHER, "new")
+    await request("old")
+    await request("new")
+
+    assert await worker_runner.drive() == 1
+    assert starts(older)[0][0] == "queued" and starts(older)[0][3] is None
+    [(outcome, _reason, _identity, worker)] = starts(younger)
+    assert outcome == "started" and worker is not None
+    assert await worker_runner.drive() == 0  # no slot free now: the older start still waits
+    assert starts(older)[0][0] == "queued"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rollover", [True, False])
-async def test_every_account_limited_is_refused_visibly_and_starts_no_worker(world, monkeypatch, codex_worker, rollover):
+async def test_every_account_limited_is_refused_visibly_and_starts_no_worker(world, monkeypatch, rollover):
     from automation import worker_runner
     from tests.rule_worker_helpers import owner_wakes
 
@@ -148,9 +206,7 @@ async def test_every_account_limited_is_refused_visibly_and_starts_no_worker(wor
     assert await worker_runner.drive() == 0
 
     [(outcome, reason, _identity, worker)] = starts(rule)
-    assert outcome == "refused" and worker is None
-    assert reason == REFUSAL.format(name="GPT-5 Codex") or reason.endswith(
-        "can't run now. Choose a model that is ready for this chat.")
+    assert outcome == "refused" and worker is None and _refused_plainly(reason)
     assert reason in owner_wakes()[0] and [kind for kind, _ in worker_events()] == ["worker.no_result"]
     assert _workers() == []
 

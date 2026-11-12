@@ -6,18 +6,16 @@ spawn it makes runs inside, so no start is claimed twice:
 
 1. a started start a restart cut short (no worker, or a worker with no turn, no queued
    input and no process) settles ``no_result`` and releases its identity;
-2. with ``n`` slots free under the worker limit (Claude Code workers and rule workers),
-   the ``n`` oldest queued starts are claimed, each checked when it would start: its rule turned off or gone, or its owner
-   gone or paused, skips it (no replay; the identity is released) and takes no slot. At
-   no free slot nothing is claimed or written, and the starts wait in the queue. A
-   claimed start's inputs and brief are made (``automation.worker_inputs``) and it starts
-   through ``delegate_task`` with the ``untrusted`` confinement on the
-   owner's model. Local only owners run on their own local model. A model that cannot
-   run now is refused and reported through ``worker.no_result``. Spawn records the worker
-   on the start (``rule_start``) before its first turn can run. If another spawn took the
-   slot first, the start goes back to the queue
-   at its place, never refused for it. Any other refusal ends it ``refused`` and tells
-   the owner through ``worker.no_result``;
+2. with ``n`` slots free under the worker limit (Claude Code workers and rule workers), the ``n`` oldest
+   queued starts are claimed, each checked when it would start: its rule turned off or gone, or its owner gone
+   or paused, skips it (no replay; the identity is released) and takes no slot. At no free slot nothing is
+   claimed or written, and the starts wait in the queue. A claimed start's inputs and brief are made
+   (``automation.worker_inputs``) and it starts through ``delegate_task`` with the ``untrusted`` confinement
+   on the owner's model. Local only owners run on their own local model. A model that cannot run now is
+   refused and reported through ``worker.no_result``, after one wait for an unread account
+   (``automation.worker_start_wait``). Spawn records the worker on the start (``rule_start``) before its first
+   turn can run. If another spawn took the slot first, the start goes back to the queue at its place, never
+   refused for it. Any other refusal ends it ``refused`` and tells the owner through ``worker.no_result``;
 3. each worker that was already started when the pass began and whose last turn ended settles
    once (``automation.worker_settle``); a worker made in this pass is observed on the next
    pass, so its start is visible before its completion;
@@ -47,7 +45,7 @@ from typing import Any
 from loguru import logger
 
 from automation import review_intent, worker_inputs as inputs
-from automation import worker_settings, worker_settle
+from automation import worker_settings, worker_settle, worker_start_wait as wait
 from events import rule_runs, worker_starts
 from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
 from infra.database import write_transaction
@@ -110,11 +108,14 @@ async def drive() -> int:
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
                 await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
-        claimed = await run_in_db(_claim)
-        claimed_ids = {row["id"] for row, _run_input in claimed}
+        claimed_ids: set[int] = set()
         made = 0
-        for row, run_input in claimed:
-            made += await _start(row, run_input)
+        while claimed := await run_in_db(_claim, None, frozenset(claimed_ids)):
+            for row, run_input in claimed:
+                claimed_ids.add(row["id"])
+                made += await _start(row, run_input)
+            if not any(wait.is_waiting(row["id"]) for row, _run_input in claimed):
+                break  # a start that waits gave its slot back: claim the next one in its place
         settled = set()
         for item in await run_in_db(_read, worker_settle.ready):
             if item.decision_id not in claimed_ids:
@@ -155,9 +156,10 @@ def _free(conn: sqlite3.Connection) -> int:
     return get_max_concurrent_live() - len(set(working_thread_ids(db=conn)) | worker_starts.started_workers(conn))
 
 
-def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
-    """Claim up to one queued start per free slot, oldest first. With no slot free nothing
-    is written: the starts wait, and the newest of them is remembered as having waited."""
+def _claim(db: sqlite3.Connection | None = None, passed: frozenset[int] = frozenset(),
+           ) -> list[tuple[Mapping[str, Any], dict[str, Any]]]:
+    """Claim up to one queued start per free slot, oldest first, past ``passed``. With no slot
+    free nothing is written: the starts wait, and the newest of them is remembered as having waited."""
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
     cleanup: list[tuple[str, int, str | None]] = []
     with write_transaction(db, scope="worker_starts_claim") as conn:
@@ -166,9 +168,11 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
             newest = conn.execute("SELECT MAX(id) FROM event_route_decisions").fetchone()[0]
             _state["waited"] = max(_state["waited"], newest or 0)
             return claimed
-        for row in worker_starts.queued(conn, BATCH):
+        for row in worker_starts.queued(conn, BATCH + len(passed)):
             if len(claimed) == free:
                 break
+            if row["id"] in passed:
+                continue
             skipped = _skip(conn, row)
             if skipped is not None:
                 if row["origin"] and row["origin"].startswith("rule_set:"):
@@ -176,6 +180,7 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
                     facts = (data.get("event") or {}).get("facts") or {}
                     cleanup.append((row["thread_id"], row["id"], facts.get(inputs.STAGING_FACT)))
                 worker_starts.end(conn, row["id"], SKIPPED, skipped)
+                wait.forget(row["id"])
                 continue
             run_input = worker_starts.claim(conn, row["id"])
             if run_input is not None:
@@ -191,7 +196,6 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
     from infra.database import get_db
     from infra.queries import get_thread
     from events.rule_actions import reachable_workflows
-    from llm.account_catalog import startable_status
     from llm.delegation_model import dispatch_scope
     from llm.locality import locality_refusal
     from llm.model_status import scoped_status_rows
@@ -219,12 +223,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
                                   "cloud model. Choose a local model, or allow cloud models for this project.")
     if status_row is None:
         raise inputs.StartRefused("refused: this model can't be found. Choose another model for this chat.")
-    if startable_status(status_row, project)[0] != "ready":
-        if status_row.get("is_local"):
-            raise inputs.StartRefused(f"refused: your model {name} is not loaded. "
-                                      "Load it, or choose a local model that is loaded.")
-        raise inputs.StartRefused(f"refused: your model {name} can't run now. "
-                                  "Choose a model that is ready for this chat.")
+    wait.check_runs(status_row, name, project, db)
     # A skill whose declared result fails validation is not included, so one found here is valid.
     if shipped is not None:
         if shipped.error or project is None:
@@ -324,6 +323,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                             "intent": found["intent"][1]})
 
         async def record(worker: str) -> None:
+            wait.forget(row["id"])
             await run_in_db(_made, row["id"], worker, check)
             made.update(worker=worker, check=check)
 
@@ -332,6 +332,9 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             "read_paths": read_paths, "title": found["skill"].name, **found["spawn_extra"],
         }, rule_start=record)
     except inputs.StartRefused as exc:
+        if isinstance(exc, inputs.StartWaiting) and wait.still_waiting(row["id"]):
+            await run_in_db(_requeue, row["thread_id"], row["id"])  # at its place, holding no slot
+            return 0
         return await _refuse(row, run_input, str(exc), waited, made)
     except LiveSpawnCapExceeded:
         # Another spawn took the slot after the claim: back to the queue at its place.
@@ -373,6 +376,7 @@ async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, re
     """End a start no worker result settles, reported with what its row ``kept``: the
     claimed input or, once its worker was made, its check. ``detail`` is what refused it,
     for the owner (the ``detail`` fact), never in ``reason``."""
+    wait.forget(row["id"])
     check = {"workflow": row["workflow_id"], "waited": row["id"] <= _state["waited"], **kept}
     said = {"reason": reason, **worker_settle.detail(detail)}
     await _settle(worker_settle.settlement(row, check, outcome, said))
