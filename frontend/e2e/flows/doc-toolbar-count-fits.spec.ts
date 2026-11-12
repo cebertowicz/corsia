@@ -48,6 +48,15 @@ for (const { width, scheme } of CASES) {
 				} }, splitWidth: null,
 			}));
 		}, { threadId, docPath, fileName, artifactId, scheme });
+		const shown = { threads: 1, unread: 0 };
+		await page.route(new RegExp(`/api/artifacts/${artifactId}/comments(\\?|$)`), async (route) => {
+			if (route.request().method() !== 'GET') return route.fallback();
+			const response = await route.fetch();
+			const body = await response.json();
+			const [row] = body.comments;
+			body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: index === 0 ? row.id : `${row.id}-copy-${index}`, new_comment: index < shown.unread }));
+			await route.fulfill({ response, json: body });
+		});
 		await loginByUrl(page, { waitForComposer: true });
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await page.getByText(title, { exact: true }).first().click();
@@ -56,17 +65,14 @@ for (const { width, scheme } of CASES) {
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		for (const { threads, unread } of COUNTS) {
-			// The viewer's own comment store, filled with copies of the one real thread: the first `unread` of them unread.
-			await page.evaluate(async ({ artifactId, threads, unread }) => {
-				const { docComments } = await import('/src/lib/stores/docComments.ts');
-				docComments.update((all) => {
-					const [row] = all[artifactId];
-					const rows = Array.from({ length: threads }, (_, index) => ({ ...row, id: `${row.id}-copy-${index}`, newComment: index < unread }));
-					return { ...all, [artifactId]: rows };
-				});
-			}, { artifactId, threads, unread });
+			// The server's own answer, with the one real thread copied `threads` times, the first `unread` of them unread; the viewer loads it as it would any list.
+			shown.threads = threads; shown.unread = unread;
+			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
 			const pill = page.locator('.document-header .comment-status');
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`));
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			// A person sees the settled state: nothing may redraw the pill after the store update.
+			await page.waitForTimeout(800);
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const measured = await page.evaluate(() => {
 				const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
@@ -77,7 +83,7 @@ for (const { width, scheme } of CASES) {
 				return {
 					header: box(header), tools: box(tools), pill: box(pillEl),
 					pillScroll: { scrollWidth: pillEl.scrollWidth, clientWidth: pillEl.clientWidth },
-					text: text.map((part) => ({ name: part.className, ...box(part) })),
+					text: text.map((part) => ({ name: part.className, shown: getComputedStyle(part).display !== 'none' && getComputedStyle(part).visibility !== 'hidden', fits: part.scrollWidth <= part.clientWidth || getComputedStyle(part).display === 'inline', ...box(part) })),
 					siblings: [...tools.querySelectorAll<HTMLElement>('button, [role="switch"], .save-ghost')]
 						.filter((el) => el !== pillEl && !pillEl.contains(el) && el.getBoundingClientRect().width > 0)
 						.map((el) => ({ name: el.getAttribute('aria-label') ?? el.className, ...box(el) })),
@@ -86,19 +92,23 @@ for (const { width, scheme } of CASES) {
 			});
 			const label = `${threads}/${unread} at ${width} ${scheme}`;
 			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-${threads}-${unread}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, measured.header.bottom + 60) } });
-			expect(measured.pill.left, `${label}: the pill starts inside the toolbar`).toBeGreaterThanOrEqual(measured.header.left - 0.5);
-			expect(measured.pill.right, `${label}: the pill ends inside the toolbar`).toBeLessThanOrEqual(measured.header.right + 0.5);
-			expect(measured.pillScroll.scrollWidth, `${label}: the pill clips none of its text`).toBeLessThanOrEqual(measured.pillScroll.clientWidth);
+			expect.soft(measured.pill.left, `${label}: the pill starts inside the toolbar`).toBeGreaterThanOrEqual(measured.header.left - 0.5);
+			expect.soft(measured.pill.right, `${label}: the pill ends inside the toolbar`).toBeLessThanOrEqual(measured.header.right + 0.5);
+			expect.soft(measured.pillScroll.scrollWidth, `${label}: the pill clips none of its text`).toBeLessThanOrEqual(measured.pillScroll.clientWidth);
+			expect.soft(measured.text.map((part) => part.name.split(' ')[0]), `${label}: the number, its noun and the unread part all exist`).toEqual(['count', 'count-unit', 'unread']);
 			for (const part of measured.text) {
-				expect(part.left, `${label}: ${part.name} starts inside the pill`).toBeGreaterThanOrEqual(measured.pill.left - 0.5);
-				expect(part.right, `${label}: ${part.name} ends inside the pill`).toBeLessThanOrEqual(measured.pill.right + 0.5);
+				expect.soft(part.shown, `${label}: ${part.name} is displayed`).toBe(true);
+				expect.soft(part.right - part.left, `${label}: ${part.name} has width`).toBeGreaterThan(0);
+				expect.soft(part.fits, `${label}: ${part.name} is not clipped inside itself`).toBe(true);
+				expect.soft(part.left, `${label}: ${part.name} starts inside the pill`).toBeGreaterThanOrEqual(measured.pill.left - 0.5);
+				expect.soft(part.right, `${label}: ${part.name} ends inside the pill`).toBeLessThanOrEqual(measured.pill.right + 0.5);
 			}
-			expect(measured.tools.left, `${label}: the tools start inside the toolbar`).toBeGreaterThanOrEqual(measured.header.left - 0.5);
+			expect.soft(measured.tools.left, `${label}: the tools start inside the toolbar`).toBeGreaterThanOrEqual(measured.header.left - 0.5);
 			for (const other of measured.siblings) {
 				const apart = other.right <= measured.pill.left + 0.5 || other.left >= measured.pill.right - 0.5 || other.bottom <= measured.pill.top + 0.5 || other.top >= measured.pill.bottom - 0.5;
-				expect(apart, `${label}: ${other.name} does not overlap the pill ${JSON.stringify([other, measured.pill])}`).toBe(true);
+				expect.soft(apart, `${label}: ${other.name} does not overlap the pill ${JSON.stringify([other, measured.pill])}`).toBe(true);
 			}
-			expect(measured.tools.bottom - measured.tools.top, `${label}: the tools stay one row`).toBeLessThanOrEqual(Math.max(...measured.rowHeights) + 1);
+			expect.soft(measured.tools.bottom - measured.tools.top, `${label}: the tools stay one row`).toBeLessThanOrEqual(Math.max(...measured.rowHeights) + 1);
 			await info.attach(`count-${threads}-${unread}`, { body: JSON.stringify(measured), contentType: 'application/json' });
 		}
 	});
