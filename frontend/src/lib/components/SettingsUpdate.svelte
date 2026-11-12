@@ -2,7 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { Spinner, Toggle } from '$lib/components/ui';
 	import { saveUpdateSchedule, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
-	import { failureCopy, failureFromOperation, failureFromVerdict } from '$lib/update/failureCopy';
+	import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf } from '$lib/update/failureCopy';
 	import { changeList, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, isFailedOperation, releaseNotesFor, stepMessage } from '$lib/update/model';
 	import SettingsUpdateChanges from './SettingsUpdateChanges.svelte';
 	import SettingsUpdateLast from './SettingsUpdateLast.svelte';
@@ -16,7 +16,7 @@
 	const running = $derived($updateInFlight);
 	// A verdict the client reached itself wins over whatever the latest operation says.
 	const failure = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : isFailedOperation(operation) ? failureFromOperation(operation) : null);
-	const copy = $derived(failure ? failureCopy(failure) : null);
+	const copy = $derived(failure ? failureCopy(failure, runningVersionOf($updateStatus, $updateUnreachable)) : null);
 	const completedVersion = $derived(operation?.status === 'complete' ? operation.target_version : null);
 	// A same-day development build is told apart by time; the update that installed it carries that longer form.
 	const currentVersion = $derived(

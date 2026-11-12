@@ -216,13 +216,14 @@ async def drain_ready(token: str, body: dict):
     """Advance one quiescent exact operation to process-restart ownership."""
     _require_user(token)
     from automation.restart import advance_restart_readiness, mark_restarting
+    from infra.db_async import run_in_db
 
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    if not advance_restart_readiness(operation_id):
+    if not await run_in_db(advance_restart_readiness, operation_id):
         raise HTTPException(409, "restart operation is not quiescent")
-    if not mark_restarting(operation_id):
+    if not await run_in_db(mark_restarting, operation_id):
         raise HTTPException(409, "restart operation could not enter restarting")
     return {"ok": True, "operation_id": operation_id, "phase": "restarting"}
 
@@ -232,6 +233,7 @@ async def drain_hard_cap(token: str, body: dict):
     """Persist recovery and terminalize exact remaining Turns before force-stop."""
     _require_user(token)
     from automation.restart import enforce_restart_hard_cap, mark_restarting
+    from infra.db_async import run_in_db
 
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
@@ -240,6 +242,6 @@ async def drain_hard_cap(token: str, body: dict):
         outcome = await enforce_restart_hard_cap(operation_id)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    if outcome["force_stop_ready"] and not mark_restarting(operation_id):
+    if outcome["force_stop_ready"] and not await run_in_db(mark_restarting, operation_id):
         raise HTTPException(409, "restart operation could not enter restarting")
     return {"ok": outcome["force_stop_ready"], "operation_id": operation_id, **outcome}

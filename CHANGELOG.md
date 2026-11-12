@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A failed update now says it failed and which version CORSIA is on, instead of describing the check that failed.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
@@ -18,9 +19,11 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
+- A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
 - A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - A one-time reminder an agent sets for a time in another time zone now goes off at that time; before, it could go off hours early or late.
+- When an event rule starts an agent and its owner's Claude Code or Codex account has hit its limit or is signed out, the agent now waits up to eight minutes while CORSIA checks the usage of the project's next account, and starts there if that account isn't limited. Before, it was refused at once. It's still refused if that account is limited too, if the check doesn't finish in time, or if the project doesn't move chats to other accounts.
 - A suggestion whose text was edited, or whose original text is no longer in the document, now says so in plain terms, such as The text doesn't match this suggestion, and explains why Accept is off.
 - A summary of an agent's steps that read both a skill and another file no longer freezes the app when you open it; before, every summary after it stopped opening until you restarted. Steps stay listed when a provider repeats a call ID.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
@@ -33,6 +36,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - An agent starting another agent in its own project, and a pull request review, now use the account shown as ready in the model list when account rollover is on, instead of refusing because the default account is signed out.
 - An agent's answer to a chat comment now shows only in that comment's thread, also when several comments reach the agent together and while the answer is still being written; before, its text could show in chat.
 - An agent's email rule can now name a sender's domain, such as acme.com, which also covers its subdomains, or a sender's exact address in any capitalization. Its rule to itself now also wakes it for new mail in a conversation no agent has taken yet; before, such mail woke no agent.
+- An update now checks for the newest version when you start it, so a version published since the last check is installed and kept instead of being rolled back; if that check fails or finds nothing newer, the update stops before restarting and nothing changes.
 - Agents can now work in Google Docs, Sheets, Drive and Calendar on a connected Google account: create, read and edit documents, spreadsheets, files and events. Deleting a Drive file moves it to the trash. Before an event is deleted or cancelled, a repeating event's schedule is changed, or a calendar is cleared or deleted, the events it removes are saved so they can be recreated; for a repeating event, that includes occurrences that were changed. Any other delete that can't be undone is refused. For Gmail, agents can also archive messages and mark them read; they keep reading and sending email the way they already do.
 - Browser windows an agent opens no longer stay running and using your computer's processor after CORSIA stops unexpectedly while one is starting.
 - Chat comment replies stay with the highlighted text. A dot marks a new or undelivered reply, and you can jump to it or retry it from the thread.
@@ -56,6 +60,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. During a CORSIA restart or update, its local model server attempts to update before local chats resume and reloads the same models; Settings shows “Restarting…” while it does. If the update cannot finish, affected chats receive an error with the next steps.
 - Measurement now shows workflow runs, their version trends, failed steps and the agents that ran them; a run opens in its plan.
 - Measurement pages load faster, and leaving a page no longer makes the next one wait behind it.
+- Measurement's Workflows section now loads much faster on a long history; before, it could take minutes.
+- An agent that keeps a workflow is now told to split it when it has grown too long to read in one pass: a part other work also needs, or a different kind of work, becomes its own workflow that a step runs.
 - Workflow version comparisons now count a run once it ends, and group each run by the model of the agent that ran it. Earlier, runs made of several tasks never counted.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
@@ -65,6 +71,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a phone, one tap on a highlighted word opens its comment, and its New sign goes once you open it; before, a tap that landed short of the word opened nothing.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
+- On a phone, tapping a comment's Reply field in the comments sheet keeps the whole card on screen, its author and quoted text included.
 - On a phone, typing while a comment you tapped in the text is open closes its sheet and puts what you type in the document.
 - On a touch screen with a wide window, such as a tablet, the message box no longer covers Won’t do on a task for you.
 - On macOS, when an update stops before CORSIA restarts (for example, a safety check fails or CORSIA does not shut down), agents now resume work without waiting for a manual restart.
@@ -82,6 +89,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Text inside a comment highlight can be edited again; a comment's card no longer takes focus or reopens on each keystroke, and on a phone only a tap opens it.
 - The CORSIA agent now does your work itself by default, including email and messages on accounts connected outside projects. It suggests a separate agent from the start only for an area of your life with its own contacts and responsibilities, and for other work only when you say so, or once it keeps taking more of your time per finished task, getting fewer tasks right the first time, or costing more.
 - The image viewer keeps keyboard focus on its Comment control after Send, even when the send takes a moment to finish.
+- The "This write is still settling" notice now appears only if a write stays unsettled for 2 seconds; before, it appeared at every save and pushed the document down and back up while you typed.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - In version history, Restore on a read-only file is unavailable, and the version you open says the file is read-only, instead of failing when you press it.
 - When an agent brings you something to judge, it now opens by restating the goal in its own words, with everything you need to decide at the top and the detail below for when you want it.
