@@ -20,9 +20,7 @@ type Draft = { text: string; inputId?: string; error?: string };
 const replyKey = (commentId: string) => `reply:${commentId}`;
 const rootKey = (threadId: string, messageId: string, anchor: Pick<ChatCommentAnchor, 'from_off' | 'to_off'>) => `root:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
 const drafts = $state<Record<string, Draft>>({});
-// What each input still waiting for the server carried, so its stored row can name the comment it targets.
-const sent = new Map<string, { threadId: string; comment: ReplyComment }>();
-// The server's rows of comment-only inputs, every thread's.
+// Every thread's comment-only inputs: this device's own from the moment they are sent (no delivery state until the server answers), and the server's rows.
 let stored = $state.raw<Message[]>([]);
 
 function absorb(rows: Message[]): void {
@@ -39,11 +37,11 @@ function absorb(rows: Message[]): void {
 /** The server answered this input: stored (null), so its row owns the text from here, or refused with a cause, which the draft keeps with the text. */
 function settle(inputId: string, refusal: string | null): void {
 	const key = Object.keys(drafts).find(item => drafts[item].inputId === inputId);
-	const noun = sent.get(inputId)?.comment.root_cid || key?.startsWith('reply:') ? 'reply' : 'comment';
-	sent.delete(inputId);
+	// A refused input was never stored, so its own row goes; its text stays in the draft.
+	if (refusal !== null) stored = stored.filter(row => row.delivery_state || row.metadata?.input_id !== inputId);
 	if (!key) return;
 	if (refusal === null) delete drafts[key];
-	else drafts[key] = { ...drafts[key], inputId: undefined, error: refusal || unknownSendFailure(noun) };
+	else drafts[key] = { ...drafts[key], inputId: undefined, error: refusal || unknownSendFailure(key.startsWith('reply:') ? 'reply' : 'comment') };
 }
 
 // The server stored this input (or changed its delivery): this socket hears it only by these frames, never by the row's broadcast.
@@ -51,14 +49,11 @@ function storedRow(frame: any, deliveryState: string): void {
 	const inputId = frame?.input_id;
 	if (typeof inputId !== 'string') return;
 	const prior = stored.find(row => row.metadata?.input_id === inputId);
-	const posted = sent.get(inputId);
-	const threadId = posted?.threadId ?? prior?.thread_id;
-	if (!threadId || frame.thread_id !== threadId) return;
+	if (!prior || frame.thread_id !== prior.thread_id) return;
 	absorb([{
-		id: typeof frame.message_id === 'string' && frame.message_id ? frame.message_id : prior?.id ?? inputId,
-		thread_id: threadId, role: 'user', content: '',
-		created_at: prior?.created_at ?? (typeof frame.created_at === 'string' ? frame.created_at : new Date().toISOString()),
-		metadata: prior?.metadata ?? { input_id: inputId, reply_context: { comments: [posted!.comment] } },
+		...prior,
+		...(typeof frame.message_id === 'string' && frame.message_id ? { id: frame.message_id } : {}),
+		...(typeof frame.created_at === 'string' && !prior.delivery_state ? { created_at: frame.created_at } : {}),
 		delivery_state: deliveryState as Message['delivery_state'],
 		delivery_error: deliveryState === 'queued' || deliveryState === 'delivered' ? null
 			: typeof frame.delivery_error === 'string' && frame.delivery_error ? frame.delivery_error : plainErrorText(frame.message, 'Not delivered'),
@@ -89,13 +84,13 @@ export const chatCommentInputs = {
 	rows(threadId: string | null | undefined): Message[] { return stored.filter(row => row.thread_id === threadId); },
 	/** The comments an input of this chat carried, whether it is still on its way or stored. */
 	comments(threadId: string, inputId?: string, messageId?: string): ReplyComment[] {
-		const posted = inputId ? sent.get(inputId) : undefined;
-		if (posted?.threadId === threadId) return [posted.comment];
 		const row = stored.find(item => item.thread_id === threadId && (item.id === messageId || (!!inputId && item.metadata?.input_id === inputId)));
 		return row?.metadata?.reply_context?.comments ?? [];
 	},
 	/** The composer sent this comment as `inputId`; the server's answer to that input settles it here. */
-	sending(inputId: string, threadId: string, comment: ReplyComment): void { sent.set(inputId, { threadId, comment }); },
+	sending(inputId: string, threadId: string, comment: ReplyComment): void {
+		stored = [...stored, { id: inputId, thread_id: threadId, role: 'user', content: '', created_at: new Date().toISOString(), metadata: { input_id: inputId, reply_context: { comments: [comment] } } }];
+	},
 	/** Whether a box's post is still waiting for the server. */
 	posting(inputId: string): boolean { return Object.values(drafts).some(draft => draft.inputId === inputId); },
 	get(commentId: string): string { return drafts[replyKey(commentId)]?.text ?? ''; },
