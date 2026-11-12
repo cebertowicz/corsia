@@ -1597,3 +1597,225 @@ async def test_a_period_mixing_pick_one_and_pick_any_sums_to_the_answered_count(
     assert row["answered"] == 7
     assert (row["recommendation"], row["other"], row["neither"]) == (2, 2, 3)
     assert row["recommendation"] + row["other"] + row["neither"] == row["answered"]
+
+
+# ---------------------------------------------------------------------------
+# The workflow share: the page's own accepted tasks, split by whether a run ran them.
+# ---------------------------------------------------------------------------
+
+_WORKFLOW = "month-end-close"  # a workflow reference, as ``plans.workflow_fields`` records one
+
+
+def _seed_share_tasks(db, plan_id: str, day: str, *, under: int, outside: int) -> None:
+    """Accepted tasks settled on one local day: ``under`` of them under a run, ``outside`` under none.
+
+    The run is the phase that carries the workflow, with its steps beneath it, as the plan tables
+    hold a run; the plain tasks are accepted tasks with no run above them.
+    """
+    run_id = f"run-{plan_id}-{day}"
+    settled = f"{day}T12:00:00Z"
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,size,"
+            "workflow_ref,workflow_version,commitment_id,requirements_revision,revision,created_at,updated_at) "
+            "VALUES (?, ?, NULL, 1, 'phase', 'Run recorded', 'Run recorded', 'accepted', 'M', ?, 'v1', ?, 1, 1, 't', 't')",
+            (run_id, plan_id, _WORKFLOW, run_id),
+        )
+        for index in range(under):
+            node_id = f"{run_id}-step-{index}"
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+                "workflow_ref,workflow_version,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                "VALUES (?, ?, ?, ?, 'task', 'Measured task', 'done', 'accepted', ?, 'v1', ?, 1, 1, 't', 't')",
+                (node_id, plan_id, run_id, index, _WORKFLOW, node_id),
+            )
+            db.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES (?, ?, 'test', 'accepted', 'active', 'accepted', ?)", (f"event-{node_id}", node_id, settled))
+    for index in range(outside):
+        _seed_task(db, plan_id, f"{run_id}-plain-{index}", settled=settled)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("grain_name,expected", [
+    ("weeks", {"2026-09-14": (20, 14 / 20), "2026-09-21": (24, 18 / 24)}),
+    ("days", {"2026-09-16": (20, 14 / 20), "2026-09-21": (24, 18 / 24)}),
+])
+async def test_the_workflow_share_is_one_figure_per_completed_period(isolated_db, measurement_clock, grain_name,
+                                                                     expected):
+    """Every accepted task counts, and the figure is the share that ran under a run.
+
+    The task set is the page's own, so a period's denominator is what ``outcomes`` serves for it, and the
+    periods are the page's own: the Wednesday seeded on 09-16 is counted in the week that starts 09-14.
+    The period still in progress is not served, because no per-outcome rate shows a partial period.
+    """
+    from api.measurement import measurement_series
+    from core.measurement_scope import resolve_grain
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        _seed_share_tasks(db, "plan-root", "2026-09-16", under=14, outside=6)
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=18, outside=6)
+        _seed_task(db, "plan-root", "in-progress", settled="2026-09-29T09:00:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    body = await measurement_series("under_workflow_pct", project="all", agent="none", grain=grain_name,
+                                    timezone_name="UTC", user=USER)
+    rows = {row["period"]: row for row in body["rows"] if row["series"] == "under_workflow_pct"}
+    assert sorted(period for period, row in rows.items() if row["n"]) == sorted(expected)
+    for period, (outcomes, share) in expected.items():
+        assert (rows[period]["n"], rows[period]["value"]) == (outcomes, pytest.approx(share)), period
+    grain = resolve_grain(grain_name, "UTC")
+    assert grain.current not in rows, "the period in progress is served as a row"
+    assert not any(row["partial"] for row in rows.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("grain_name", ["weeks", "days"])
+async def test_the_workflow_share_counts_the_same_tasks_as_the_outcome_series(isolated_db, measurement_clock, grain_name):
+    """One task set: the share's denominator is the outcome count for the same period, always."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        _seed_share_tasks(db, "plan-root", "2026-09-16", under=14, outside=6)
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=3, outside=4)
+        _seed_task(db, "plan-root", "in-progress", settled="2026-09-29T09:00:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    body = await measurement_series("outcomes,under_workflow_pct", project="all", agent="none", grain=grain_name,
+                                    timezone_name="UTC", user=USER)
+    outcomes = {row["period"]: row for row in body["rows"]
+                if row["series"] == "outcomes" and not row["partial"]}
+    share = {row["period"]: row for row in body["rows"]
+             if row["series"] == "under_workflow_pct" and not row["partial"]}
+    assert share.keys() == outcomes.keys()
+    assert all(share[period]["n"] == outcomes[period]["value"] for period in outcomes)
+
+
+@pytest.mark.asyncio
+async def test_the_workflow_share_withholds_a_thin_period_and_keeps_its_raw_value(isolated_db, measurement_clock):
+    """A period with too few accepted tasks to carry a share keeps the counts and serves no value."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=3, outside=2)
+        db.commit()
+    finally:
+        db.close()
+
+    body = await measurement_series("under_workflow_pct", project="all", agent="none", grain="days",
+                                    timezone_name="UTC", user=USER)
+    assert body["minimum_n"]["under_workflow_pct"] == 20
+    row = next(row for row in body["rows"] if row["period"] == "2026-09-21")
+    assert (row["n"], row["value"], row["raw_value"]) == (5, None, pytest.approx(3 / 5))
+
+
+@pytest.mark.asyncio
+async def test_a_selected_agent_sees_only_its_own_tasks_in_the_workflow_share(isolated_db, measurement_clock):
+    """An agent scope shares its denominator with every other panel: only its own tasks count."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        for agent_id in ("alpha", "beta"):
+            _seed_thread(db, agent_id, agent=True)
+            _seed_plan(db, f"plan-{agent_id}", agent_id)
+        _seed_share_tasks(db, "plan-alpha", "2026-09-21", under=16, outside=4)
+        _seed_share_tasks(db, "plan-beta", "2026-09-21", under=12, outside=20)
+        db.commit()
+    finally:
+        db.close()
+
+    async def figure(agent: str) -> tuple[int, float]:
+        body = await measurement_series("under_workflow_pct", project="all", agent=agent, grain="weeks",
+                                        timezone_name="UTC", user=USER)
+        row = next(row for row in body["rows"] if row["period"] == "2026-09-21")
+        return (row["n"], row["value"])
+
+    assert await figure("beta") == (32, pytest.approx(12 / 32))
+    assert await figure("none") == (52, pytest.approx(28 / 52))
+
+
+@pytest.mark.asyncio
+async def test_the_workflow_share_series_reads_no_priced_run_history(isolated_db, measurement_clock, monkeypatch):
+    """The share is a count of tasks, so it is served without the run history the Workflows route reads.
+
+    Both priced reads are replaced with failures, and a real run is seeded so that history would be
+    read had this series gone through that route.
+    """
+    from api.measurement import measurement_series
+    from core import workflow_verdict_read
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=3, outside=2)
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(workflow_verdict_read, "read_snapshot",
+                        lambda *args, **kwargs: pytest.fail("the share reads run history"))
+    monkeypatch.setattr(workflow_verdict_read, "price_snapshot",
+                        lambda *args, **kwargs: pytest.fail("the share prices a run"))
+    body = await measurement_series("under_workflow_pct", project="all", agent="none", grain="weeks",
+                                    timezone_name="UTC", user=USER)
+    row = next(row for row in body["rows"] if row["period"] == "2026-09-21")
+    assert (row["n"], row["raw_value"]) == (5, pytest.approx(3 / 5))
+
+
+@pytest.mark.asyncio
+async def test_the_workflow_share_series_adds_two_statements_at_most(isolated_db, measurement_clock, monkeypatch):
+    """Reading the share costs the two statements behind it, and nothing else.
+
+    The counting approach is the one the Measurement tests already use (``set_trace_callback``), put on
+    the connection this route opens; a third statement would mean the scope or the task set was read twice.
+    """
+    from api import measurement
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=2, outside=1)
+        db.commit()
+    finally:
+        db.close()
+
+    seen: list[str] = []
+    real_get_db = measurement.get_db
+
+    def traced_get_db():
+        connection = real_get_db()
+        connection.set_trace_callback(seen.append)
+        return connection
+
+    monkeypatch.setattr(measurement, "get_db", traced_get_db)
+    counts: dict[str, int] = {}
+    for ids in ("outcomes", "outcomes,under_workflow_pct"):
+        seen.clear()
+        body = await measurement.measurement_series(ids, project="all", agent="none", grain="weeks",
+                                                    timezone_name="UTC", user=USER)
+        counts[ids] = len(seen)
+        assert body["rows"], ids
+
+    assert counts["outcomes,under_workflow_pct"] - counts["outcomes"] <= 2

@@ -639,3 +639,35 @@ def test_the_route_answers_for_the_page_parameters_and_the_live_window(db) -> No
     (entry,) = body["workflows"]
     assert [run["run_id"] for run in entry["runs"]] == ["clock-run-in"]
     assert entry["ref"] == CLOSE and entry["owner"] is None
+
+
+def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, monkeypatch) -> None:
+    """The headline and the ``under_workflow_pct`` series are one read of one rule.
+
+    The series is asked through its own route, on the same page grain and scope, and its rows for
+    the window's periods add up to the section's own ``coverage``, so a correction to what counts as
+    running under a workflow can only ever move the two together.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import measurement
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: NOW)
+    seed()
+    section = read()
+
+    app = FastAPI()
+    app.include_router(measurement.router)
+    app.dependency_overrides[measurement.require_user] = lambda: {"id": "steve"}
+    body = TestClient(app).get(
+        "/api/measurement/series?ids=under_workflow_pct&project=all&agent=none&grain=weeks&timezone=UTC"
+    ).json()
+
+    window = resolve_grain("weeks", "UTC", now=NOW).latest
+    rows = {row["period"]: row for row in body["rows"] if row["period"] in window.periods}
+    assert section["coverage"] == {"under_workflow": 8, "all_tasks": 10}
+    assert sorted(period for period, row in rows.items() if row["n"]) == ["2026-10-05", "2026-10-12"]
+    assert sum(row["n"] for row in rows.values()) == section["coverage"]["all_tasks"]
+    assert sum((row["raw_value"] or 0) * row["n"] for row in rows.values()) == pytest.approx(
+        section["coverage"]["under_workflow"])

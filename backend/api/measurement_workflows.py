@@ -6,8 +6,8 @@ Every field is read from the module that owns the fact, so a correction to one r
 |---|---|
 | which nodes are runs | ``core.workflow_builtin_operands.scoped_runs`` and ``core.workflow_verdict_read.run_roots`` |
 | the run, its version, state, corrections, cost and model group | ``core.workflow_verdict_read.read_snapshot`` and ``price_snapshot`` (``Measurement``'s own price chain) |
-| which run a task belongs to | ``core.correction_attribution.workflow_run_of`` |
-| what a task is, and the window it is counted in | ``api.measurement_queries.outcome_ctes`` with the page grain |
+| the coverage headline, and every task it counts | ``api.measurement_workflow_share.workflow_share_family``, whose per-period rows ``under_workflow_pct`` serves as its own series |
+| which run a task belongs to, and what a task is | ``core.correction_attribution.workflow_run_of``, over the tasks ``api.measurement_queries.outcome_ctes`` counts with the page grain |
 | a run's end, its steps and their rounds | ``plans.run_end.records`` (the ``workflow_run_ended`` record) |
 | working time | ``plans.node_cost_scoped.project``, the plan-node cost rollup's own ``execution.seconds`` |
 | a step's title, an agent's label | the plan node's ``title``, the thread's ``title`` (as ``/agents`` labels it) |
@@ -41,16 +41,14 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 
-from api.measurement_queries import outcome_ctes
 from api.measurement_workflow_copy import summary as _summary
 from api.measurement_workflow_threads import agents as _agents, labels as _labels, plan_targets as _plan_targets
 from api.measurement_scope import resolve_grain, validate_scope
-from core.correction_attribution import NOT_IN_WORKFLOW, UNATTRIBUTED, workflow_run_of
 from core.corrections_recording import (
     SOURCE_KIND_CHAT_COMMENT, SOURCE_KIND_DECISION_ANSWER, SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE, SOURCE_KIND_SENT_BACK,
 )
-from core.measurement_scope import Grain, MeasurementScope, Window, parse_zone, query_params, scope_cte
+from core.measurement_scope import Grain, MeasurementScope, Window, parse_zone
 from core.workflow_builtin_operands import scoped_runs
 from core.workflow_verdict_rules import compute
 from core.workflow_verdict_types import Snapshot, WorkflowHistory, subject_of
@@ -61,6 +59,7 @@ from infra.db_async import run_bulk
 from plans.public import node_cost_project, run_end_records
 from tools.workflow_task_fields import version_short_hash
 from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
+from api.measurement_workflow_share import workflow_share_family
 
 router = APIRouter()
 
@@ -156,16 +155,13 @@ def _coverage(db: sqlite3.Connection, params: dict[str, Any], grain: Grain, wind
               parents: Mapping[str, str | None], root_ids: frozenset[str]) -> dict[str, int]:
     """Tasks in the window that ran under a workflow, beside every task in the window.
 
-    The task set is Measurement's own accepted-task read, so this headline counts the same tasks the
-    page's other panels count; membership in a run is ``workflow_run_of``'s rule, not a second one.
+    The headline is the ``workflows`` family summed over the window's periods, so it and the
+    ``under_workflow_pct`` series are one read of one rule. The scope's runs are the ones this route
+    already loaded for the whole section, so the headline reads no scope a second time.
     """
-    rows = db.execute(scope_cte() + outcome_ctes(grain) + """
-        SELECT id FROM outcome_rows WHERE period IN (SELECT value FROM json_each(:periods))
-    """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))}).fetchall()
-    tasks = [str(row["id"]) for row in rows]
-    under = [task for task in tasks
-             if workflow_run_of(task, parents, root_ids) not in (NOT_IN_WORKFLOW, UNATTRIBUTED)]
-    return {"under_workflow": len(under), "all_tasks": len(tasks)}
+    rows = workflow_share_family(db, params, grain, window.periods, parents=parents, root_ids=root_ids)
+    return {"under_workflow": sum(row["under_workflow"] for row in rows),
+            "all_tasks": sum(row["outcomes"] for row in rows)}
 
 
 def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: Grain,
