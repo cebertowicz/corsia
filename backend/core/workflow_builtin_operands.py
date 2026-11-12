@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 import sqlite3
-from typing import Any, NamedTuple
+from typing import Any, Iterable, NamedTuple
 
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.cost_identity import IdentityResolver
@@ -45,15 +45,44 @@ class Prepared(NamedTuple):
     pricing: tuple[Any, Any] | None  # (identity resolver, endpoint listings) when cost_usd is read
 
 
-def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -> tuple:
-    """Load scoped nodes and shared workflow roots."""
+#: Every column of a ``scoped_runs`` row that names another plan node. The read selects them and
+#: the bounded read closes over them, so a link added here reaches both at once.
+_NODE_LINKS = ("parent_id", "follow_up_of")
+
+#: ``:above`` (a JSON list of node ids) and every node reachable from it along ``_NODE_LINKS``.
+_REACHABLE = f"""
+        , reachable(id) AS (
+          SELECT value FROM json_each(:above)
+          UNION
+          SELECT link.value FROM reachable r JOIN plan_nodes n ON n.id=r.id,
+            json_each(json_array({",".join(f"n.{link}" for link in _NODE_LINKS)})) link
+          WHERE link.value IS NOT NULL
+        )
+"""
+
+
+def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope, *,
+                above: Iterable[str] | None = None) -> tuple:
+    """Load scoped nodes and shared workflow roots.
+
+    ``above`` bounds the read to those nodes and every scoped node reachable from them along the
+    links a row carries (``_NODE_LINKS``), however many steps away. A rule that decides a node from
+    the rows it can reach from that node therefore answers for every returned row exactly as it
+    does on the whole scope, whichever links it follows and in whatever order. A reader of some
+    tasks' runs passes them, so its read grows with those tasks, their depth and their follow-up
+    history, never with every node the scope has ever had.
+    """
     from core.workflow_verdict_read import run_roots  # imports api.*, which imports this module
 
-    rows = db.execute(scope_cte() + """
-        SELECT n.id,n.parent_id,n.follow_up_of,n.workflow_ref,n.workflow_version,n.created_at
+    chains, bound, params = "", "", scope.params(user_id)
+    if above is not None:
+        chains, bound = _REACHABLE, " AND n.id IN (SELECT id FROM reachable)"
+        params = {**params, "above": json.dumps(sorted(set(above)))}
+    rows = db.execute(scope_cte() + chains + f"""
+        SELECT n.id,{",".join(f"n.{link}" for link in _NODE_LINKS)},n.workflow_ref,n.workflow_version,n.created_at
         FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
         WHERE p.owner_kind='thread' AND p.owner_id IN (SELECT id FROM scope_threads)
-    """, scope.params(user_id)).fetchall()
+    """ + bound, params).fetchall()
     return rows, run_roots(rows)
 
 
