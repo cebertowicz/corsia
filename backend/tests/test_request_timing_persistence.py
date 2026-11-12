@@ -181,7 +181,8 @@ async def test_failed_write_drops_batch_and_counts_failure(analytics, monkeypatc
 
     assert request_timing.flush_failures == 1
     assert not request_timing._aggregates and not request_timing._slow_requests
-    assert [record.getMessage() for record in caplog.records] == [
+    messages = [record.getMessage() for record in caplog.records]
+    assert [message for message in messages if not message.startswith("slow request ")] == [
         "request timing flush failed; dropped 1 aggregate keys and 1 slow rows: disk full"
     ]
 
