@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from fastapi import HTTPException
+
+if TYPE_CHECKING:
+    from infra.update_status import UpdateStatus
+
+logger = logging.getLogger(__name__)
+
+
+async def fresh_update_target() -> UpdateStatus:
+    """Probe the feed fresh and return the newer build an Update will install.
+
+    The installer reads the feed fresh when it stages, so a cached probe can
+    name a build that is no longer the newest. With no build to name,
+    verification could only fail and roll a good build back, so refuse.
+    """
+    from infra.update_status import update_status
+
+    fresh = await asyncio.to_thread(update_status, True)
+    if fresh.available is not True:
+        logger.warning(
+            "update refused before acquire: available=%s error=%s", fresh.available, fresh.error
+        )
+        if fresh.error:
+            raise HTTPException(503, "update_check_failed")
+        raise HTTPException(409, "update_not_available")
+    return fresh
 
 
 def _check_update_backup_room() -> None:

@@ -227,7 +227,7 @@ def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
 
 
 def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
-    isolated_db, monkeypatch, tmp_path
+    isolated_db, monkeypatch, tmp_path, newer_build_available
 ):
     import asyncio
     from unittest.mock import AsyncMock
@@ -602,7 +602,7 @@ def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, m
 
 
 @pytest.mark.asyncio
-async def test_lost_tonight_claim_creates_no_row_or_launch(isolated_db, monkeypatch):
+async def test_lost_tonight_claim_creates_no_row_or_launch(isolated_db, monkeypatch, newer_build_available):
     from pathlib import Path
     from unittest.mock import AsyncMock
 
@@ -707,6 +707,8 @@ def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
         "update_status",
         lambda _refresh: SimpleNamespace(
             to_dict=lambda: {"available": True, "target_version": "1.2.3"},
+            available=True,
+            error=None,
             target_version="1.2.3",
             changes=None,
         ),

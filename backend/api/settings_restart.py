@@ -18,6 +18,7 @@ from api.restart_compensation import (
 )
 from api.restart_shell import spawn_restart_lifecycle
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
+from api.update_preflight import fresh_update_target
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -138,11 +139,8 @@ async def _acquire_settings_restart(
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
-    from infra.update_status import update_status
 
-    # Stamp the build the installer will fetch: it reads the feed fresh when it
-    # stages, so a cached probe can name a build that is no longer the newest.
-    fresh = await asyncio.to_thread(update_status, True) if mode == "update" else None
+    fresh = await fresh_update_target() if mode == "update" else None
 
     def _try_acquire() -> str | None:
         version = fresh.target_version if fresh is not None else None

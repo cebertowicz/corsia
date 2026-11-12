@@ -8,6 +8,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 
 def _git(cwd: Path, *args: str, env: dict | None = None) -> str:
     result = subprocess.run(
@@ -236,8 +238,14 @@ def test_settings_update_acquire_stamps_a_fresh_probe_not_the_cache(monkeypatch)
     def probe(force=False):
         probes.append(force)
         if not force:
-            return SimpleNamespace(target_version="0.4.3-dev.1311", changes={"kind": "changelog", "items": ["old"]})
-        return SimpleNamespace(target_version="0.4.3-dev.1312", changes={"kind": "changelog", "items": ["new"]})
+            return SimpleNamespace(
+                available=True, error=None, target_version="0.4.3-dev.1311",
+                changes={"kind": "changelog", "items": ["old"]},
+            )
+        return SimpleNamespace(
+            available=True, error=None, target_version="0.4.3-dev.1312",
+            changes={"kind": "changelog", "items": ["new"]},
+        )
 
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
     monkeypatch.setattr(self_restart, "try_acquire", acquire)
@@ -251,6 +259,44 @@ def test_settings_update_acquire_stamps_a_fresh_probe_not_the_cache(monkeypatch)
     assert probes == [True]
     assert captured[-1]["target_version"] is None
     assert captured[-1]["changes"] is None
+
+
+@pytest.mark.parametrize(
+    ("available", "error", "status", "detail"),
+    [
+        (None, "Could not reach the remote: timed out", 503, "update_check_failed"),
+        (False, None, 409, "update_not_available"),
+    ],
+)
+def test_update_acquire_refuses_when_the_fresh_probe_names_no_build(
+    monkeypatch, available, error, status, detail
+):
+    """A probe that cannot name a newer build must not start an Update.
+
+    Acquiring anyway stamps no target, so verification of whatever the shell
+    installs could only fail as unverified and roll a good build back.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from api.settings_restart import _acquire_settings_restart
+    from automation import self_restart
+    from infra import update_status
+
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda force=False: SimpleNamespace(available=available, error=error, target_version=None, changes=None),
+    )
+    monkeypatch.setattr(self_restart, "try_acquire", lambda *a, **k: pytest.fail("must not acquire"))
+    acquired: list[str] = []
+
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(_acquire_settings_restart({"id": "user"}, "update", acquired))
+
+    assert (refused.value.status_code, refused.value.detail) == (status, detail)
+    assert acquired == []
 
 
 def test_drain_wait_matches_the_lifecycle_script_default():
