@@ -179,7 +179,16 @@ export async function editorInCell(page: Page, target: Locator) {
 	const read = await page.evaluate(async ([content, td]) => {
 		await new Promise((done) => requestAnimationFrame(done));
 		const selection = document.getSelection();
-		const rect = selection?.rangeCount ? (selection.getRangeAt(0).getClientRects()[0] ?? selection.getRangeAt(0).getBoundingClientRect()) : null;
+		let rect: { left: number; top: number; height: number } | null = selection?.rangeCount ? (selection.getRangeAt(0).getClientRects()[0] ?? selection.getRangeAt(0).getBoundingClientRect()) : null;
+		// An empty cell's line holds no text, so a range there has no box; the caret is drawn at the start of that line's content.
+		if (rect && rect.left === 0 && rect.top === 0 && rect.height === 0 && selection!.isCollapsed) {
+			const node = selection!.focusNode!, line = (node instanceof Element ? node : node.parentElement)!.closest('.cm-line');
+			if (line && content!.contains(line) && !line.textContent) {
+				const box = line.getBoundingClientRect(), style = getComputedStyle(line);
+				const pad = parseFloat(style.paddingTop), lineHeight = parseFloat(style.lineHeight) || box.height - pad - parseFloat(style.paddingBottom);
+				rect = { left: box.left + parseFloat(style.paddingLeft), top: box.top + pad, height: lineHeight };
+			}
+		}
 		// The editor's text is drawn where the cell draws it: the same first character at the same place, on as many lines.
 		// The place is both ways: a cell in a row made tall by another is drawn at its vertical alignment, not at the top.
 		const drawn = (el: Element) => {
