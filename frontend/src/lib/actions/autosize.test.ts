@@ -286,6 +286,15 @@ describe('autosize', () => {
 		expect(replies.style.maxHeight).toBe('');
 		action.destroy();
 	});
+	it('ignores an ancestor max-height that is a percentage rather than reading it as pixels', () => {
+		const wrap = document.createElement('div'); wrap.style.maxHeight = '100%'; Object.defineProperty(wrap, 'offsetHeight', { get: () => 500, configurable: true }); document.body.append(wrap);
+		const { original, replies, action } = openedCard('400px');
+		wrap.append(original.closest('[data-autosize-room]')!.parentElement!);
+		action.update({ value: '', fit: true });
+		expect(original.style.maxHeight).toBe('');
+		expect(replies.style.maxHeight).toBe('');
+		action.destroy();
+	});
 	it('scrolls the discussion inside a card taller than its panel may grow', () => {
 		const { original, replies, action } = openedCard('180px');
 		expect(Number.parseFloat(replies.style.maxHeight)).toBeLessThan(110);

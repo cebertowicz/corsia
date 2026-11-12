@@ -4,7 +4,9 @@ import { scroller } from './keepInView';
 function headroom(node: HTMLElement): number {
 	let room = Number.POSITIVE_INFINITY;
 	for (let parent: HTMLElement | null = node; parent && parent !== document.body; parent = parent.parentElement) {
-		const cap = Number.parseFloat(getComputedStyle(parent).maxHeight);
+		const value = getComputedStyle(parent).maxHeight;
+		// Only a pixel length is a cap here: a percentage, `none` or a calc() has no height of its own to measure against.
+		const cap = value.endsWith('px') ? Number.parseFloat(value) : Number.NaN;
 		if (Number.isFinite(cap)) room = Math.min(room, Math.max(0, cap - parent.offsetHeight));
 	}
 	return Number.isFinite(room) ? room : 0;
