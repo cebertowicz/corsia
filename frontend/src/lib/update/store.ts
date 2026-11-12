@@ -117,7 +117,7 @@ function showTerminal(operation: UpdateOperation): void {
 		return;
 	}
 	if (isFailedOperation(operation)) {
-		const copy = failureCopy(failureFromOperation(operation));
+		const copy = failureCopy(failureFromOperation(operation), get(updateStatus)?.current_version ?? null);
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
 			action: { label: 'Details', run: openUpdates },
@@ -150,7 +150,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		shownOutcomes.add(operation.operation_id);
 		void markOutcomeSeen(operation.operation_id);
 		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
-		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdates } });
+		toasts.pin('update', { type: 'error', message: 'Update failed', action: { label: 'Details', run: openUpdates } });
 	} finally {
 		terminalCheckRunning = false;
 	}

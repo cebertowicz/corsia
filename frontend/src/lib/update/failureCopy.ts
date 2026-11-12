@@ -52,8 +52,10 @@ export interface FailureCopy {
 const RAN_ON = 'CORSIA kept running and nothing was changed.';
 // A failed pull can update Git's tracking refs, but not the checked-out code.
 const CODE_UNCHANGED = "CORSIA kept running and your code wasn't changed.";
-// The checkout may already hold the new version, so this claims only what is certain.
-const KEPT_VERSION = 'CORSIA is still running the version it had.';
+// The checkout may already hold the new version, so without a live reading this claims only what is certain.
+function stillOn(version: string | null | undefined): string {
+	return version ? `CORSIA is still on ${version}.` : 'CORSIA is still on the version it had.';
+}
 
 function refusal(headline: string, body: string, retryLabel: string | null): FailureCopy {
 	return { title: "Update didn't start", headline, body, toastLine: null, retryLabel };
@@ -81,10 +83,10 @@ function diskCopy(detail: string | null): FailureCopy {
 }
 
 /** One plain sentence per failure code; the stored summary when there is no code. */
-export function failureCopy(failure: UpdateFailure): FailureCopy {
+export function failureCopy(failure: UpdateFailure, runningVersion?: string | null): FailureCopy {
 	if (failure.client?.kind === 'version_mismatch') {
 		return {
-			title: "The update didn't finish",
+			title: 'Update failed',
 			headline: 'The update finished, but CORSIA still shows the old version.',
 			body: failure.client.message,
 			toastLine: null,
@@ -115,47 +117,47 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: "Update didn't start",
 				headline: "Couldn't build the update.",
-				body: KEPT_VERSION,
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'update_refused':
 			return {
-				title: "Update didn't finish",
-				headline: "Update didn't finish",
-				body: parseDetail(failure.detail).backend_healthy === true ? KEPT_VERSION : '',
+				title: 'Update failed',
+				headline: parseDetail(failure.detail).backend_healthy === true ? stillOn(runningVersion) : 'The update stopped before it finished.',
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'launch_failed':
 			return {
-				title: "Update didn't finish",
+				title: 'Update failed',
 				headline: "Couldn't start the restart.",
-				body: 'CORSIA is still running.',
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'version_unverified':
 			return {
-				title: "Update didn't finish",
+				title: 'Update failed',
 				headline: "Couldn't confirm the new version.",
-				body: "The update's last check didn't pass, so CORSIA can't tell which version is running.",
+				body: runningVersion ? `CORSIA is on ${runningVersion}.` : "The update's last check didn't pass, so CORSIA can't tell which version is running.",
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'wrong_version_running':
 			return {
-				title: "Update didn't finish",
-				headline: 'CORSIA started a different version.',
-				body: "It isn't the version this update was for.",
+				title: 'Update failed',
+				headline: stillOn(runningVersion),
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'rolled_back':
 			return {
-				title: "Update didn't finish",
-				headline: "Couldn't start the new version.",
-				body: KEPT_VERSION,
+				title: 'Update failed',
+				headline: "The new version didn't start.",
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
@@ -163,16 +165,16 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: 'Update cancelled',
 				headline: 'The update was cancelled before CORSIA restarted.',
-				body: KEPT_VERSION,
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'drain_failed':
-			return stopped("Your agents didn't reach a safe stopping point in time.", KEPT_VERSION);
+			return stopped("Your agents didn't reach a safe stopping point in time.", stillOn(runningVersion));
 		case 'update_timed_out':
-			return stopped('The update took too long to download and build.', KEPT_VERSION);
+			return stopped('The update took too long to download and build.', stillOn(runningVersion));
 		case 'prepare_failed':
-			return stopped("Couldn't prepare the update.", KEPT_VERSION);
+			return stopped("Couldn't prepare the update.", stillOn(runningVersion));
 		case 'index_locked':
 			return refusal(
 				"Another program is using CORSIA's files.",
@@ -188,11 +190,11 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 		case 'checkout_diverged':
 			return refusal(`${branchLabel(failure)} and the branch it tracks have both changed.`, `Ask the CORSIA agent to combine their changes, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
 		case 'restart_pending':
-			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
+			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${stillOn(runningVersion)}`, 'Restart now'), retryAction: 'restart' };
 		default:
 			// A terminal row carries no phase, so nothing here can say how far the update got.
 			return {
-				title: "Update didn't finish",
+				title: 'Update failed',
 				headline: 'The update stopped before it finished.',
 				body: '',
 				toastLine: null,

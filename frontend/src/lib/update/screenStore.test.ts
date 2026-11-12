@@ -429,6 +429,19 @@ describe('update screen store', () => {
 			expect(get(updateScreenView)).toMatchObject({ mode: 'longer', percent: before.percent });
 		});
 
+		it.each([
+			[false, 'CORSIA is still on 2026.10.12.'],
+			[true, 'CORSIA is still on the version it had.'],
+		])('words a failure from the live version only while the service answers (down=%s)', (down, body) => {
+			updateStatus.set(status(inFlight()));
+			tickUpdateScreen(1_000);
+			// The service is already down when the last status read it answered with is stale.
+			updateUnreachable.set(down);
+			updateStatus.set(status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }));
+			tickUpdateScreen(1_001);
+			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { title: 'Update failed', body } });
+		});
+
 		it('keeps a latched launch failure across the shell handoff', () => {
 			updateStatus.set(status(inFlight()));
 			tickUpdateScreen(1_000);
@@ -439,7 +452,7 @@ describe('update screen store', () => {
 
 			freshPage(true);
 			continueHandedOverScreen(handoff!, true);
-			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { title: "Update didn't finish" }, serviceDown: true });
+			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { title: 'Update failed' }, serviceDown: true });
 		});
 
 		it('continues back on the service page only for the same operation, then confirms and leaves', async () => {

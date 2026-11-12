@@ -90,6 +90,18 @@ describe('UpdateScreen percentage', () => {
 		expect(percentText()).toBe('100%');
 	});
 
+	it.each(['failed', 'start_failed'] as const)('shows no percentage and no bar once the update has failed (%s)', (mode) => {
+		const failure = { title: 'Update failed', headline: 'CORSIA is still on 0.4.3-dev.1288.', body: '', toastLine: null, retryLabel: 'Retry' };
+		show({ ...base, mode, percent: 0, fromVersion: '0.4.3-dev.1288', toVersion: '0.4.3-dev.1311', failure: mode === 'failed' ? failure : null });
+		expect(document.body.querySelector('.percent')).toBeNull();
+		expect(document.body.querySelector('.bar')).toBeNull();
+		expect(document.body.querySelector('[role="progressbar"]')).toBeNull();
+		expect(document.body.textContent).toContain('0.4.3-dev.1288 → 0.4.3-dev.1311');
+		show({ ...base, percent: 40 });
+		expect(percentText()).toBe('40%');
+		expect(document.body.querySelector('[role="progressbar"]')).not.toBeNull();
+	});
+
 	it('steps straight to the value under reduced motion', () => {
 		reduced.current = true;
 		component && unmount(component);
