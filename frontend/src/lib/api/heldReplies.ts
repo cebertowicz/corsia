@@ -1,3 +1,4 @@
+import { apiFetch } from './request';
 /** The person's decision on a held reply: send its stored text once, or send nothing. */
 
 export type HeldVerb = 'approve' | 'decline';
@@ -12,12 +13,11 @@ export type HeldOutcome =
 	/** Delivery failed; the server keeps the reply held and names the failure when it can. */
 	| { status: 'error'; line: string | null; reference?: string };
 
-export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb): Promise<HeldOutcome> {
+export async function decideHeldReply(id: string, verb: HeldVerb): Promise<HeldOutcome> {
 	let res: Response;
 	try {
-		res = await fetch(`/api/held-replies/${encodeURIComponent(id)}/${verb}`, {
+		res = await apiFetch(`/api/held-replies/${encodeURIComponent(id)}/${verb}`, {
 			method: 'POST',
-			headers: { Authorization: `Bearer ${bearer}` },
 		});
 	} catch {
 		return { status: 'error', line: null };

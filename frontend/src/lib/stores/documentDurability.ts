@@ -15,6 +15,9 @@ export class DocumentDurability {
 	/** A local transaction no landed flush has written yet: the only work a flush from this tab has to do. */
 	get unwritten(): boolean { return this.writtenGeneration < this.localGeneration; }
 
+	/** Every local transaction is acked and a landed flush wrote it. Acked alone is only server memory, so a save waits for this. */
+	get saved(): boolean { return this.clean && !this.unwritten; }
+
 	/** A flush that started at this local generation landed, so every transaction up to it is in the file. */
 	written(generation: number): void { this.writtenGeneration = Math.max(this.writtenGeneration, generation); }
 

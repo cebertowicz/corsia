@@ -1,4 +1,5 @@
 import type { ContextUsage } from './contextUsageTypes';
+import { apiFetch } from '$lib/api/request';
 
 /**
  * Read the next-turn context preview for one thread.
@@ -9,14 +10,12 @@ import type { ContextUsage } from './contextUsageTypes';
  */
 export async function fetchNextTurnPreview(
 	threadId: string,
-	authToken: string,
 	modelId: string | null,
 ): Promise<ContextUsage | null> {
-	const params = new URLSearchParams();
-	params.set('token', authToken);
-	if (modelId) params.set('model', modelId);
-	const res = await fetch(
-		`/api/threads/${threadId}/context-snapshot/next-turn?${params.toString()}`,
+	const query = modelId ? `?model=${encodeURIComponent(modelId)}` : '';
+	const res = await apiFetch(
+		`/api/threads/${threadId}/context-snapshot/next-turn${query}`,
+		{ sessionInAddress: true },
 	);
 	if (!res.ok) throw new Error(`Context preview failed (${res.status})`);
 	const body = await res.json();

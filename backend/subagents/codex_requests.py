@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from infra.db_async import run_in_db
 from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.vendor_write_admission import require_session_write
 
@@ -44,6 +45,15 @@ async def notify(session, method: str, params: dict) -> None:
         await bounded_drain(session, REQUEST_TIMEOUT, method)
 
 
+def _steer_deferred(session, method) -> bool:
+    """Refuse a write the session can no longer take; True defers a steer unwritten."""
+    if method == "turn/steer" and not session._dynamic_tool_requests_idle.is_set():
+        return True
+    if session._closing and method in {"thread/inject_items", "turn/start", "turn/steer"}:
+        raise RuntimeError("Codex app-server terminated before provider write")
+    return False
+
+
 async def request(session, method, params=None, *, on_write_observed=None, on_drain_confirmed=None):
     """Give lock admission, own drain and response separate method budgets."""
     from subagents.codex_app_server import REQUEST_TIMEOUT, STEER_REQUEST_TIMEOUT, _STEER_NOT_WRITTEN
@@ -66,12 +76,16 @@ async def request(session, method, params=None, *, on_write_observed=None, on_dr
         async with admission:
             await session._write_lock.acquire()
         try:
-            if method == "turn/steer" and not session._dynamic_tool_requests_idle.is_set():
+            if _steer_deferred(session, method):
                 return _STEER_NOT_WRITTEN
-            if session._closing and method in {"thread/inject_items", "turn/start", "turn/steer"}:
-                raise RuntimeError("Codex app-server terminated before provider write")
             if method in {"turn/start", "turn/steer"}:
-                require_session_write(session, "codex")
+                # Admission writes the account projection: a SQLite write
+                # transaction, which the loop thread may not open.
+                await run_in_db(require_session_write, session, "codex")
+                # Close and dynamic tool admission don't take the write lock, so
+                # either may have begun during the DB hop: check again before writing.
+                if _steer_deferred(session, method):
+                    return _STEER_NOT_WRITTEN
             session.request_log.append({"id": msg_id, "method": method, "params": params or {}})
             session._proc.stdin.write((json.dumps(payload) + "\n").encode())
             if on_write_observed is not None:

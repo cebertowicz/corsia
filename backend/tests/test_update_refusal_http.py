@@ -22,7 +22,7 @@ from automation.self_restart import record_update_log
     ("missing", True, True, "There is no staged update"),
     ("identity", True, True, "Backend is healthy, but its pre-restart identity could not be read"),
 ])
-async def test_packaged_pre_stop_refusal_reports_over_http(isolated_db, tmp_path, monkeypatch, case, healthy, claimed_healthy, reason):
+async def test_packaged_pre_stop_refusal_settles_from_record(isolated_db, tmp_path, monkeypatch, case, healthy, claimed_healthy, reason):
     from api.drain import router
     from api.restart_shell import spawn_restart_lifecycle
     from automation import self_restart
@@ -85,6 +85,8 @@ BACKEND_PORT={port}
                 **os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port),
             }, operation_id, out, caller_credential=OWNER_TOKEN)
             assert await asyncio.to_thread(child.wait, 10) != 0
+            from api.system_admin import _monitor_restart_process
+            await _monitor_restart_process(child, operation_id)
     finally:
         server.should_exit = True
         await serving
@@ -134,11 +136,12 @@ app_mode_swap_staged_update /disposable/staged
     curl = tmp_path / "curl"
     curl.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$TRACE"\n')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     log = tmp_path / "update.log"
     with log.open("w") as out:
         child = spawn_restart_lifecycle(script, ["restart-prepared"], {
             **os.environ, "CORSIA_RESTART_BACKEND_PORT": "4111", "TRACE": str(trace),
         }, "a" * 32, out, caller_credential=OWNER_TOKEN)
         assert child.wait(timeout=5) != 0
-    assert "failure_code=update_refused" not in trace.read_text()
+    assert not trace.exists()
+    assert "refusal_reason=\n" in child.lifecycle_result_path.read_text()

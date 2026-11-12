@@ -68,7 +68,6 @@
 			await requestDeliveryAction('cancel', {
 				threadId,
 				messageId: msg.id,
-				authToken,
 				failureText: 'Could not take this message out of the queue. Try again.',
 			});
 		} finally {

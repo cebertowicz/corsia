@@ -218,6 +218,13 @@ async def test_cloud_discovery_http_reports_only_committed_rows(
     key_store_providers.set_provider_key("anthropic", "snapshot-test-value-1")
     models = _models("anthropic")
     monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: models)
+    # Discovery writes on the DB lane; run that lane on this thread so the authorizer below,
+    # set on this thread's connection, governs its COMMIT.
+    from delegation_fixtures import _InlineExecutor
+    from infra import db_async
+
+    for pool in ("_pool", "_read_pool", "_bulk_pool"):
+        monkeypatch.setattr(db_async, pool, _InlineExecutor())
     db = database.get_db()
     if fail_commit:
         db.set_authorizer(lambda action, arg, *_:
@@ -267,3 +274,34 @@ async def test_cloud_discovery_broadcasts_only_when_the_stored_models_changed(is
     models[0] = {**models[0], "display_name": "Renamed"}
     await catalog_cloud.discover_cloud_models("anthropic", "k")
     assert notify.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cloud_discovery_reads_and_writes_off_the_event_loop(isolated_db, monkeypatch):
+    """The write waits for the lock, which boot recovery can hold for seconds; the loop must not."""
+    import threading
+
+    loop_thread = threading.current_thread()
+    seen: list[threading.Thread] = []
+    real_rows, real_persist = catalog_cloud._provider_rows, catalog_cloud._persist_cloud_models
+
+    def rows(provider):
+        seen.append(threading.current_thread())
+        return real_rows(provider)
+
+    def persist(provider, discovered, now):
+        seen.append(threading.current_thread())
+        return real_persist(provider, discovered, now)
+
+    async def refreshed():
+        return None
+
+    monkeypatch.setattr("llm.live_cost_map.wait_for_refresh", refreshed)
+    monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: [])
+    monkeypatch.setattr(catalog_cloud, "_provider_rows", rows)
+    monkeypatch.setattr(catalog_cloud, "_persist_cloud_models", persist)
+
+    result = await catalog_cloud.discover_cloud_models("anthropic", "unused")
+
+    assert result["ok"] is True
+    assert len(seen) == 3 and loop_thread not in seen

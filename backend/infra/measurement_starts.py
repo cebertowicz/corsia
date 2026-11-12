@@ -32,7 +32,7 @@ def source_group(metric: str) -> str:
 
 _FIRST_ROW_SQL = {
     "accepted_outcomes": """
-        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_plan_node_events_created
+        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_measurement_accepted_time
         JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
         ORDER BY e.created_at LIMIT 1
@@ -47,7 +47,7 @@ _FIRST_ROW_SQL = {
     """,
     "presence": "SELECT MIN(v.entered_at) FROM presence_visits v",
     "accepted_size_ratings": f"""
-        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_plan_node_events_created
+        SELECT e.created_at FROM plan_node_events e INDEXED BY idx_measurement_accepted_time
         JOIN plan_nodes n ON n.id=e.node_id
         WHERE n.kind='task' AND e.new_state IN ('accepted','accepted_with_followup')
           AND (n.size IS NOT NULL AND n.size != 'unknown' OR EXISTS (
@@ -74,6 +74,9 @@ _LIVE_SOURCE = {
     "first_try": "accepted_outcomes",
     "rejections_per_outcome": "accepted_outcomes",
     "asks_per_outcome": "accepted_outcomes",
+    # The workflow share is a fraction of that same task set: a task either ran under a run or it did
+    # not, and both answers exist from the first accepted outcome, so an early period is a measured zero.
+    "under_workflow_pct": "accepted_outcomes",
     # Corrections are measured from the earliest classified source (message, comment or decision answer): an earlier period had no classifier, so it is not a zero.
     "corrections_per_outcome": "classified_corrections",
     "asks_plus_corrections_per_outcome": "classified_corrections",

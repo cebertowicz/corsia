@@ -53,7 +53,7 @@
 	async function refreshDrain(): Promise<void> {
 		if (!$token) return;
 		try {
-			await refreshDrainStatus($token);
+			await refreshDrainStatus();
 		} catch (error) {
 			console.warn('[drain] status refresh failed', error);
 		}
@@ -81,7 +81,7 @@
 			{#if $securityAlert.errors > 0}+ {$securityAlert.errors} error{$securityAlert.errors === 1 ? '' : 's'}{/if}
 			found — review <code>{$securityAlert.report}</code>
 		</span>
-		<button class="dismiss-btn" onclick={() => $token && dismissSecurityAlert($token)}>Dismiss</button>
+		<button class="dismiss-btn" onclick={() => $token && dismissSecurityAlert()}>Dismiss</button>
 	</div>
 {/if}
 

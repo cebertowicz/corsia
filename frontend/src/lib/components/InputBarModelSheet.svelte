@@ -125,11 +125,11 @@
 			const t = $token;
 			if (!t) throw new Error('Not authenticated');
 			if (previousId === null && target === $corsiaAgentId) awaitFirstRunOpening(target);
-			const result = await saveThreadModel(target, dispatchId, t);
+			const result = await saveThreadModel(target, dispatchId);
 			if (result.kind === 'pending') {
 				cancelFirstRunOpening(target);
 				if (result.checkpointRequired) {
-					void loadCheckpoints(target, t).catch(() => {
+					void loadCheckpoints(target).catch(() => {
 						toasts.show('Checkpoint status will refresh on the next update.', 'info');
 					});
 				}

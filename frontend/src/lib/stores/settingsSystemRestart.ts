@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import type { UpdatePhase } from '../update/model';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
+import { apiFetch } from '$lib/api/request';
 
 const BASE = '';
 
@@ -9,8 +10,8 @@ export async function restartSystem(
 	mode: 'restart' | 'update' = 'restart',
 ): Promise<{ ok: true; operation_id: string; message?: string } | { ok: false; message?: string }> {
 	try {
-		const t = get(token);
-		const res = await fetch(`${BASE}/api/system/restart?token=${t}&mode=${mode}`, {
+		const res = await apiFetch(`${BASE}/api/system/restart?mode=${mode}`, {
+			sessionInAddress: true,
 			method: 'POST',
 		});
 		const data = await res.json().catch(() => ({}));
@@ -40,7 +41,7 @@ export interface SystemVersionSnapshot {
 
 export async function readSystemVersion(signal?: AbortSignal): Promise<SystemVersionSnapshot | null> {
 	try {
-		const res = await fetch('/api/version', { cache: 'no-store', signal });
+		const res = await apiFetch('/api/version', { cache: 'no-store', signal });
 		if (!res.ok) return null;
 		return await res.json();
 	} catch {
@@ -60,9 +61,9 @@ export async function readSystemRestartStatus(operationId: string, signal?: Abor
 	try {
 		const t = get(token);
 		if (!t) return null;
-		const res = await fetch(
-			`${BASE}/api/system/drain?token=${encodeURIComponent(t)}&operation_id=${encodeURIComponent(operationId)}`,
-			{ cache: 'no-store', signal },
+		const res = await apiFetch(
+			`${BASE}/api/system/drain?operation_id=${encodeURIComponent(operationId)}`,
+			{ sessionInAddress: true, cache: 'no-store', signal },
 		);
 		if (res.status === 404) return 'Restart operation not found.';
 		if (!res.ok) return null;

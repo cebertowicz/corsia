@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
+from doc_feedback_helpers import add_comment, add_person_comment, batches, feedback_nodes, seed_document, seed_thread
 from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches, feedback_delivery
 from infra.database import get_db, write_transaction
-from plans import holds, service
+from plans import holds, mutations, service
 from plans.feedback_nodes import create_feedback_node
 from prompts.plan_wakes import INTENT_INPUT_ANSWER_REPLY
 
@@ -23,22 +23,13 @@ def _person_reply(db, artifact_id: str, root_id: str, body: str = "Also the seco
     return row
 
 
-def _feedback_nodes(db, thread_id: str) -> list:
-    plan = service.ensure_plan("thread", thread_id, db=db)
-    return db.execute(
-        """SELECT DISTINCT n.* FROM plan_nodes n JOIN plan_node_artifact_links l ON l.node_id=n.id
-           WHERE n.plan_id=? AND l.provenance='document.feedback_batch' ORDER BY n.created_at,n.id""",
-        (plan.id,),
-    ).fetchall()
-
-
 def _queued_thread(db) -> tuple[str, dict, object]:
     """A document whose owner is busy with one comment's task while a second comment's task waits."""
     seed_thread(db, "owner")
     artifact_id = seed_document(db, "owner")
     add_person_comment(db, artifact_id)
     root, _ = add_person_comment(db, artifact_id)
-    busy, first = _feedback_nodes(db, "owner")
+    busy, first = feedback_nodes(db, "owner")
     selected = "SELECT 1 FROM plan_node_attempts WHERE node_id=?"
     assert db.execute(selected, (busy["id"],)).fetchone() is not None
     assert db.execute(selected, (first["id"],)).fetchone() is None
@@ -52,7 +43,7 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
 
         reply = _person_reply(db, artifact_id, root["id"])
 
-        nodes = _feedback_nodes(db, "owner")
+        nodes = feedback_nodes(db, "owner")
         assert [node["id"] for node in nodes][1:] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
         assert "1 comment on" in first["title"]
@@ -98,12 +89,12 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         root, _ = add_person_comment(db, artifact_id)
-        (first,) = _feedback_nodes(db, "owner")
+        (first,) = feedback_nodes(db, "owner")
         attempts = db.execute("SELECT id FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchall()
 
         reply = _person_reply(db, artifact_id, root["id"], "Also the second point. " + "detail " * 300)
 
-        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"]]
+        assert [node["id"] for node in feedback_nodes(db, "owner")] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
         assert joined.description.startswith(first["description"])
         assert f"Comment {reply['id']}" in joined.description
@@ -175,14 +166,14 @@ def test_multiple_tagged_reply_contexts_name_each_root_when_cut(isolated_db):
         for _ in range(2):
             root, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Person")
             db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("prior " * 140, root["id"]))
+            db.commit()
             roots.append(root)
-        db.commit()
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
         for root in roots:
             reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
                                           author="Person", parent_id=root["id"])
             comment_recipients.save_tags(db, reply, ["owner"])
-        db.commit()
+            db.commit()
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
         wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
         context = json.loads(wake[0].split("\n", 1)[1])["thread_context"]
@@ -201,13 +192,13 @@ def test_person_reply_to_a_task_handed_then_released_gets_its_own_task(isolated_
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         root, _ = add_person_comment(db, artifact_id)
-        (first,) = _feedback_nodes(db, "owner")
+        (first,) = feedback_nodes(db, "owner")
         admission.release(first["id"], "set_aside", db=db)
         db.commit()
 
         _person_reply(db, artifact_id, root["id"])
 
-        assert len(_feedback_nodes(db, "owner")) == 2
+        assert len(feedback_nodes(db, "owner")) == 2
         assert db.execute(
             "SELECT COUNT(*) FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'",
         ).fetchone()[0] == 0
@@ -224,11 +215,11 @@ def test_agent_reply_to_a_task_its_owner_is_working_gets_its_own_task_and_the_ne
         artifact_id = seed_document(db, "owner")
         root = _agent_batch(db, artifact_id)
         _agent_batch(db, artifact_id, parent_id=root["id"])
-        first, queued = _feedback_nodes(db, "owner")
+        first, queued = feedback_nodes(db, "owner")
 
         later = _agent_batch(db, artifact_id, parent_id=root["id"])
 
-        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"], queued["id"]]
+        assert [node["id"] for node in feedback_nodes(db, "owner")] == [first["id"], queued["id"]]
         assert f"Comment {later['id']}" in service.get_node(queued["id"], db=db).description
         assert service.get_node(first["id"], db=db).description == first["description"]
     finally:
@@ -244,7 +235,7 @@ def test_reply_after_the_task_finished_gets_its_own_task(isolated_db):
 
         _person_reply(db, artifact_id, root["id"])
 
-        nodes = _feedback_nodes(db, "owner")
+        nodes = feedback_nodes(db, "owner")
         assert len(nodes) == 3 and nodes[2]["id"] != first["id"]
     finally:
         db.close()
@@ -263,7 +254,23 @@ def test_reply_to_a_parked_task_gets_its_own_task(isolated_db):
 
         _person_reply(db, artifact_id, root["id"])
 
-        assert len(_feedback_nodes(db, "owner")) == 3
+        assert len(feedback_nodes(db, "owner")) == 3
+    finally:
+        db.close()
+
+
+
+def test_reply_to_a_task_set_aside_in_later_gets_its_own_task(isolated_db):
+    """A task in Later is never picked up, so a reply is not hidden in it."""
+    db = get_db()
+    try:
+        artifact_id, root, first = _queued_thread(db)
+        mutations.edit_node(first["id"], later=True, reason="test", provenance="test", db=db)
+        db.commit()
+
+        _person_reply(db, artifact_id, root["id"])
+
+        assert len(feedback_nodes(db, "owner")) == 3
     finally:
         db.close()
 
@@ -283,10 +290,10 @@ def test_agent_task_holding_a_joined_reply_settles_only_once_the_reply_is_settle
         artifact_id = seed_document(db, "owner")
         _agent_batch(db, artifact_id)
         root = _agent_batch(db, artifact_id, replacement="New")
-        busy, first = _feedback_nodes(db, "owner")
+        busy, first = feedback_nodes(db, "owner")
         assert db.execute("SELECT 1 FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchone() is None
         reply = _agent_batch(db, artifact_id, parent_id=root["id"])
-        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [busy["id"], first["id"]]
+        assert [node["id"] for node in feedback_nodes(db, "owner")] == [busy["id"], first["id"]]
         assert "left 1 comment and 1 suggestion on" in service.get_node(first["id"], db=db).title
 
         with write_transaction(db, scope="test_reply_join_settlement") as connection:
@@ -321,7 +328,7 @@ def test_reply_batch_made_first_but_delivered_last_still_settles_the_task_it_joi
             early = _agent_batch(db, artifact_id, parent_id=root["id"])
         (late_batch,) = [row for row in batches(db) if row["state"] == "undelivered"]
         later = _agent_batch(db, artifact_id, parent_id=root["id"])
-        _, task = _feedback_nodes(db, "owner")
+        _, task = feedback_nodes(db, "owner")
 
         feedback_batches.retry_batch(db, late_batch["id"])
 
@@ -351,24 +358,11 @@ def test_joined_title_still_counts_an_edit_the_first_batch_carried(isolated_db):
         )
         db.commit()
         feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
-        _, first = _feedback_nodes(db, "owner")
+        _, first = feedback_nodes(db, "owner")
         assert "edited" in first["title"] and "1 comment" in first["title"]
 
         _agent_batch(db, artifact_id, parent_id=root["id"])
 
         assert service.get_node(first["id"], db=db).title == first["title"].replace("1 comment", "2 comments")
-    finally:
-        db.close()
-
-
-def test_new_top_level_comment_still_gets_its_own_task(isolated_db):
-    db = get_db()
-    try:
-        seed_thread(db, "owner")
-        artifact_id = seed_document(db, "owner")
-        add_person_comment(db, artifact_id)
-        add_person_comment(db, artifact_id)
-
-        assert len(_feedback_nodes(db, "owner")) == 2
     finally:
         db.close()

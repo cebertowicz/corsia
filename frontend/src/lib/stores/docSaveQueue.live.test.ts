@@ -126,6 +126,25 @@ it('re-saves while the tab holds an unacknowledged local transaction, and ends o
 	expect(flushes()).toHaveLength(2);
 	expect(existingDraft(target)).toMatchObject({ status: 'saved' });
 });
+it('an explicit save that joins an in-flight flush ends only once the keystrokes typed during it are written', async () => {
+	setup(); edit();
+	const debounced = flushDraft(target); // stands in for the debounce save already in flight
+	await vi.waitFor(() => expect(flushes()).toHaveLength(1));
+	session.text.insert(0, 'MK'); setDraftText(target, 'MK');
+	ack(frames); // the lane acks the deletion and 'MK' while the first flush is still writing
+	const save = flushDraft(target); // Ctrl+S
+	session.handle({ type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', request_id: flushes()[0].request_id,
+		server_saved: true, digest: await textDigest(''), pending: false, held: null });
+	// The first flush wrote the file as it stood when it began, without 'MK'.
+	await vi.waitFor(() => expect(flushes()).toHaveLength(2));
+	expect(await within(save)).toBe('still open');
+	expect(existingDraft(target)?.status).not.toBe('saved');
+	await complete();
+	expect(await within(save)).toBe(true);
+	expect(await within(debounced)).toBe(true);
+	expect(flushes()).toHaveLength(2);
+	expect(existingDraft(target)).toMatchObject({ editText: 'MK', savedText: 'MK', status: 'saved' });
+});
 it('keeps re-saving when a flush lands before the lane acks the edit, and closes only once the ack arrives', async () => {
 	setup(); session.sync(); ack(frames); edit();
 	const onClose = vi.fn();

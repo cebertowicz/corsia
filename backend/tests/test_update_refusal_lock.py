@@ -22,7 +22,7 @@ def test_refusal_releases_update_lock_before_failed_cleanup(tmp_path, monkeypatc
 exit 7
 ''')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     script = tmp_path / "corsia"
     script.write_text(f'''#!/bin/bash
 source "{root / 'scripts/corsia.d/app_mode.sh'}"
@@ -49,6 +49,10 @@ app_mode_restart_prepared
     with log.open("w") as output:
         child = spawn_restart_lifecycle(script, ["restart-prepared"], env, "a" * 32, output, caller_credential="test-token")
         assert child.wait(timeout=10) != 0
-    assert trace.read_text() == "released"
+    import fcntl
+
+    with (state / "update.lock").open("r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert not trace.exists()
     assert "current backend is not healthy" in log.read_text()
-    assert "cleanup curl exit 7" in log.read_text()
+    assert "refusal_reason=" in child.lifecycle_result_path.read_text()

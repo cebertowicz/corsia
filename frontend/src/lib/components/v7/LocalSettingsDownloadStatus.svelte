@@ -18,7 +18,7 @@
 		const t = get(token);
 		if (!t) return;
 		try {
-			download = (await fetchSources(t)).find((source) => source.source === 'omlx')?.settings_download ?? null;
+			download = (await fetchSources()).find((source) => source.source === 'omlx')?.settings_download ?? null;
 			onStatusChange(download !== null);
 		} catch { /* preserve the last visible download state */ }
 	}
@@ -29,7 +29,7 @@
 		if (!repository || !t || busy) return;
 		busy = true; error = '';
 		try {
-			await startLocalModelDownload(t, repository);
+			await startLocalModelDownload(repository);
 		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't retry the local model download. Try again."; }
 		finally { busy = false; await refresh(); }
 	}
@@ -38,7 +38,7 @@
 		const t = get(token);
 		if (!t || busy) return;
 		busy = true; error = '';
-		try { await cancelLocalDownload(t); }
+		try { await cancelLocalDownload(); }
 		catch { error = "Couldn't cancel the local model download. Try again."; }
 		finally { busy = false; await refresh(); }
 	}
@@ -48,7 +48,7 @@
 		const t = get(token);
 		if (!repository || !t || busy) return;
 		busy = true; error = '';
-		try { await deleteLocalModelDownload(t, repository); }
+		try { await deleteLocalModelDownload(repository); }
 		catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't delete the local model download. Try again."; }
 		finally { busy = false; await refresh(); }
 	}

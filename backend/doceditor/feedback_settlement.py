@@ -4,9 +4,12 @@ The owner's task for another agent's batch asks for judgment on each item. A
 suggestion the person accepted or rejected, or a comment resolved, has had it,
 so the last such item settles the task with the outcomes as its evidence.
 Acknowledged or replied-to comments are still owed judgment and never count,
-and a batch that carried an edit item is never settled here. A reply batch can
-join an earlier batch's task (``plans.feedback_join``), so a task settles only
-once every batch delivered into it is settled.
+and a batch that carried an edit item is never settled here. A batch can join
+an earlier batch's task (``plans.feedback_join``), so a task settles only once
+every batch delivered into it is settled. Only a task whose batches are all an
+agent's settles here: the person resolves their own comments, so a task holding
+any person's batch stays with its owner to close, the same as a task of only the
+person's comments, whichever kind of batch joined it first.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ def _batch_evidence(db, batch) -> list[str] | None:
 
 
 def settle_batches_of(db, comment_id: str) -> None:
-    """Settle each agent feedback task holding ``comment_id`` whose batches are now all settled."""
+    """Settle each feedback task holding ``comment_id`` whose batches are all an agent's and now all settled."""
     from plans import public
 
     tasks = db.execute(
@@ -49,10 +52,12 @@ def settle_batches_of(db, comment_id: str) -> None:
     ).fetchall()
     for task in tasks:
         batches = db.execute(
-            """SELECT id,item_count FROM doc_feedback_batches
+            """SELECT id,item_count,author_kind FROM doc_feedback_batches
                WHERE delivered_node_id=? AND recipient_id=? ORDER BY created_at,id""",
             (task["delivered_node_id"], task["recipient_id"]),
         ).fetchall()
+        if not all(batch["author_kind"] == "agent" for batch in batches):
+            continue
         evidence = [_batch_evidence(db, batch) for batch in batches]
         if None in evidence:
             continue

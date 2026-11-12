@@ -80,10 +80,15 @@
 		const offs = [on('artifacts_changed', refresh), on('plans_changed', refresh)];
 		return () => { clearTimeout(refreshTimer); offs.forEach((off) => off?.()); };
 	});
-	// The note grows with its text: a line on a wide canvas, up to four in the phone capsule (the CSS caps the height).
+	// The note grows with its text to the CSS cap, then keeps an ending caret visible while it scrolls.
 	$effect(() => {
 		void bar.note;
-		void tick().then(() => { if (!noteInput) return; noteInput.style.height = 'auto'; noteInput.style.height = `${noteInput.scrollHeight}px`; });
+		void tick().then(() => {
+			if (!noteInput) return;
+			noteInput.style.height = 'auto';
+			noteInput.style.height = `${noteInput.scrollHeight}px`;
+			if (document.activeElement === noteInput && noteInput.selectionEnd === noteInput.value.length) noteInput.scrollTop = noteInput.scrollHeight;
+		});
 	});
 
 	function blocked(): boolean {

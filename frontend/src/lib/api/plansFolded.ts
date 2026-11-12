@@ -93,35 +93,30 @@ export function decodeFoldedPath(v: unknown): FoldedPath | null {
 export const FOLDED_ROOT = 'root';
 
 /** One page of the folded rows directly beneath `parent` (a node id or `root`), after `cursor`. */
-export async function readFoldedPage(
-	bearerValue: string, planId: string, parent: string, cursor: string | null,
+export async function readFoldedPage(planId: string, parent: string, cursor: string | null,
 ): Promise<FoldedReadOutcome<FoldedPage>> {
 	const query = new URLSearchParams({ parent });
 	if (cursor) query.set('cursor', cursor);
 	const outcome = await readPlan(
-		`/api/plans/${encodeURIComponent(planId)}/folded?${query}`, bearerValue, null, decodeFoldedPage,
+		`/api/plans/${encodeURIComponent(planId)}/folded?${query}`, null, decodeFoldedPage,
 	);
 	return outcome as FoldedReadOutcome<FoldedPage>;
 }
 
 /** A node's ancestors and, when folded, where it sits among its level's folded rows. */
-export async function readFoldedPath(
-	bearerValue: string, planId: string, nodeId: string,
+export async function readFoldedPath(planId: string, nodeId: string,
 ): Promise<FoldedReadOutcome<FoldedPath>> {
 	const outcome = await readPlan(
-		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}/path`,
-		bearerValue, null, decodeFoldedPath,
+		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}/path`, null, decodeFoldedPath,
 	);
 	return outcome as FoldedReadOutcome<FoldedPath>;
 }
 
 /** One node in full, as the pane lists a row: the details a history row does not carry. */
-export async function readFoldedNode(
-	bearerValue: string, planId: string, nodeId: string,
+export async function readFoldedNode(planId: string, nodeId: string,
 ): Promise<FoldedReadOutcome<OperatorNode>> {
 	const outcome = await readPlan(
-		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}`,
-		bearerValue, null, decodeOperatorNode,
+		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}`, null, decodeOperatorNode,
 	);
 	return outcome as FoldedReadOutcome<OperatorNode>;
 }

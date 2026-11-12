@@ -42,7 +42,7 @@ export function handleAuthOk(
 	applyDrainStatus({ active: false });
 	const authToken = get(token);
 	if (authToken) {
-		void refreshDrainStatus(authToken, isCurrentOwner).catch((error) => {
+		void refreshDrainStatus(isCurrentOwner).catch((error) => {
 			console.warn('[drain] initial status refresh failed', error);
 		});
 	}

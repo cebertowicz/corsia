@@ -292,9 +292,7 @@ describe('BrowserLeaf opening lifecycle', () => {
 	});
 
 	async function expectOpen(url: string) {
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/browser/thread/open?url=${encodeURIComponent(url)}`, {
-			method: 'POST', headers: { Authorization: 'Bearer ' }
-		}));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/browser/thread/open?url=${encodeURIComponent(url)}`, { method: 'POST' }));
 	}
 
 	function submit(url: string) {

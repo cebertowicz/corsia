@@ -6,6 +6,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from loguru import logger
 
 from infra.auth import authenticate
 
@@ -88,10 +89,23 @@ async def cancel_drain(
 ):
     """Release only the exact active operation, recording a pre-stop refusal."""
     _require_user(token)
+    released = await settle_drain_exit(operation_id, failure_code, reason, backend_healthy)
+    if not released:
+        raise HTTPException(409, "restart operation changed before cancellation")
+    return {"ok": True, "active": False, "operation_id": operation_id}
+
+
+async def settle_drain_exit(
+    operation_id: str, failure_code: str | None = None,
+    reason: str | None = None, backend_healthy: bool | None = None,
+    *, before_resume: bool = False,
+) -> bool:
+    """Release the operation using the drain cancellation semantics."""
     from automation.restart import abort_restart_control
 
+    guard = {"before_resume": True} if before_resume else {}
     if failure_code is None:
-        released = await abort_restart_control(operation_id, cancelled=True)
+        released = await abort_restart_control(operation_id, cancelled=True, **guard)
     else:
         if failure_code != "update_refused" or not reason or len(reason) > 500:
             raise HTTPException(400, "invalid update refusal")
@@ -102,14 +116,70 @@ async def cancel_drain(
         reason = terminal_update_summary(reason, None)
         operation = await run_in_db(self_restart.operation_by_id, operation_id)
         if not operation or operation.get("kind") != "update":
-            raise HTTPException(409, "update operation changed before refusal")
+            return False
         released = await abort_restart_control(
             operation_id, error=reason, failure_code=failure_code,
             failure_detail=json.dumps({"reason": reason, "backend_healthy": backend_healthy}),
+            **guard,
         )
-    if not released:
-        raise HTTPException(409, "restart operation changed before cancellation")
-    return {"ok": True, "active": False, "operation_id": operation_id}
+    return released
+
+
+def log_restart_exit_failure(operation_id: str):
+    """Retrieve and report a detached settlement failure for this operation."""
+    def finished(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("restart exit settlement failed for operation {}", operation_id)
+
+    return finished
+
+
+async def settle_restart_exit(process, operation_id: str, returncode: int) -> None:
+    """Settle a child exit from its atomically published lifecycle result."""
+    from pathlib import Path
+    from automation.restart import abort_restart_control
+
+    if returncode == 0:
+        return
+    path = None
+    try:
+        path = Path(process.lifecycle_result_path)
+        lines = path.read_text(encoding="utf-8").removesuffix("\n").split("\n")
+        fields = dict(line.split("=", 1) for line in lines)
+        if (any(fields[key] not in {"true", "false"} for key in
+                ("is_update", "unconfirmed_bootout", "backend_healthy")) or
+            len(fields["refusal_reason"]) > 500):
+            raise ValueError("invalid lifecycle result")
+        if fields["status"] == "pending" and fields["unconfirmed_bootout"] == "true":
+            return
+        if int(fields["status"]) != returncode:
+            raise ValueError("invalid lifecycle result")
+    except (AttributeError, OSError, UnicodeError, ValueError, KeyError):
+        await abort_restart_control(
+            operation_id, error=f"restart script exited before restart: {returncode}",
+            failure_code="launch_failed", failure_detail=f'{{"exit_code": {returncode}}}',
+            before_resume=True,
+        )
+        return
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    # This backend is reading its child's exit, so teardown did not take it
+    # down: releasing is safe unless launchd may still be tearing it down.
+    if fields["unconfirmed_bootout"] == "true":
+        return
+    reason = fields["refusal_reason"] or None
+    await settle_drain_exit(
+        operation_id, "update_refused" if reason else None, reason,
+        fields["backend_healthy"] == "true", before_resume=True,
+    )
 
 
 @router.post("/drain/update")
@@ -146,13 +216,14 @@ async def drain_ready(token: str, body: dict):
     """Advance one quiescent exact operation to process-restart ownership."""
     _require_user(token)
     from automation.restart import advance_restart_readiness, mark_restarting
+    from infra.db_async import run_in_db
 
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    if not advance_restart_readiness(operation_id):
+    if not await run_in_db(advance_restart_readiness, operation_id):
         raise HTTPException(409, "restart operation is not quiescent")
-    if not mark_restarting(operation_id):
+    if not await run_in_db(mark_restarting, operation_id):
         raise HTTPException(409, "restart operation could not enter restarting")
     return {"ok": True, "operation_id": operation_id, "phase": "restarting"}
 
@@ -162,6 +233,7 @@ async def drain_hard_cap(token: str, body: dict):
     """Persist recovery and terminalize exact remaining Turns before force-stop."""
     _require_user(token)
     from automation.restart import enforce_restart_hard_cap, mark_restarting
+    from infra.db_async import run_in_db
 
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
@@ -170,6 +242,6 @@ async def drain_hard_cap(token: str, body: dict):
         outcome = await enforce_restart_hard_cap(operation_id)
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    if outcome["force_stop_ready"] and not mark_restarting(operation_id):
+    if outcome["force_stop_ready"] and not await run_in_db(mark_restarting, operation_id):
         raise HTTPException(409, "restart operation could not enter restarting")
     return {"ok": outcome["force_stop_ready"], "operation_id": operation_id, **outcome}

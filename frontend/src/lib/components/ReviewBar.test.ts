@@ -143,7 +143,7 @@ describe('ReviewBar', () => {
 		await render(true, onAnswered);
 		button('Done')!.click();
 		await vi.waitFor(() => expect(planApi.mutateUserTask).toHaveBeenCalledWith(
-			'user-token', 'plan-1', 'mark_done', 'step-1', 3, 'mark_done:step-1:3',
+			'plan-1', 'mark_done', 'step-1', 3, 'mark_done:step-1:3',
 		));
 		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('Done'));
 		expect(onAnswered).toHaveBeenCalledOnce();

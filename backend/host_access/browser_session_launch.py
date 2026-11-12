@@ -106,11 +106,8 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
         await asyncio.to_thread(close_orphans, runtime.record.profile, owned)
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
-        headless=not runtime.record.show_window, ua=owner._user_agent)
-    # A crash between spawn and this record can leak Chrome, but cannot signal an unrelated process.
-    from host_access.browser_owner_lock import record_launched_chrome
-    await asyncio.to_thread(record_launched_chrome, owner.socket_dir, runtime.record.session,
-                            runtime.chrome, runtime.record.profile)
+        headless=not runtime.record.show_window, ua=owner._user_agent,
+        record=(owner.socket_dir, runtime.record.session))
     runtime.chrome.release_stream()
     if runtime.record.profile:
         await apply_kept_signins(runtime)

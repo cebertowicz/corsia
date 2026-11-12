@@ -244,7 +244,6 @@ describe("pick any — what is sent", () => {
 
   it("a pick-one answer still sends option_id and no option_ids", async () => {
     await answerDecision(
-      "test-bearer",
       "decision-1",
       { optionId: "A", otherText: "", expectedRevision: 3 },
       "m-1",

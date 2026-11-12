@@ -41,7 +41,7 @@
 			reasoning_shape: reasoningConfig?.type ?? null,
 		});
 		if (sid && t) {
-			void saveReasoningEffort(sid, level, t).then((failure) => {
+			void saveReasoningEffort(sid, level).then((failure) => {
 				if (failure) toasts.show(failure, 'error');
 			});
 		} else if (sel.isOpen) reasoningEffort.set(level);

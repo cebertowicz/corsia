@@ -6,6 +6,7 @@ import uuid
 
 from doceditor import comments, feedback_batches
 from infra.database import write_transaction
+from plans import service
 from registry import models as registry_models
 
 MODEL = "openai/test-checkpoint"
@@ -72,7 +73,6 @@ def add_comment(
             to_off=None if parent_id else 13,
             replacement=replacement,
             client_id=client_id or str(uuid.uuid4())[:12],
-            announce=author_kind != "user",
             db=connection,
         )
         feedback = feedback_batches.record_comment(
@@ -103,8 +103,18 @@ def linked_comment_ids(db, batch_id: str) -> list[str]:
     ]
 
 
+def feedback_nodes(db, thread_id: str) -> list:
+    """The thread's document-feedback plan nodes, oldest first."""
+    plan = service.ensure_plan("thread", thread_id, db=db)
+    return db.execute(
+        """SELECT DISTINCT n.* FROM plan_nodes n JOIN plan_node_artifact_links l ON l.node_id=n.id
+           WHERE n.plan_id=? AND l.provenance='document.feedback_batch' ORDER BY n.created_at,n.id""",
+        (plan.id,),
+    ).fetchall()
+
+
 def add_person_comment(db, artifact_id: str, *, client_id: str | None = None) -> tuple[dict, dict]:
-    """Create and immediately deliver a person's comment as the post-response task does."""
+    """Create a person's comment and deliver its batches now, as the due sweep does at their deadline."""
     row, feedback = add_comment(
         db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id=client_id,
     )

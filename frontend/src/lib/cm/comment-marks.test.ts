@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { MAX_SCROLL_PASSES, scrollToRange } from './comment-marks';
+import { highlightAtPress, pickHighlight, MAX_SCROLL_PASSES, scrollToRange, type CommentRange } from './comment-marks';
 import { widgetTarget } from './widget-scroll';
 
 vi.mock('./widget-scroll', () => ({ widgetTarget: vi.fn(() => null) }));
@@ -244,5 +244,54 @@ describe('a jump whose frame moves after it lands', () => {
 		expect(observers).toHaveLength(2);
 		expect(observers[0].disconnected).toBe(true);
 		expect(observers[1].disconnected).toBe(false);
+	});
+});
+
+describe('the highlight a press is in', () => {
+	// A stand-in editor that puts every press at `at` and knows no line edges, so the press counts wherever it is inside a range.
+	const pressAt = (at: number, ranges: CommentRange[], tapOpensSuggestion = true) => highlightAtPress({ posAtCoords: () => at, coordsAtPos: () => null } as unknown as EditorView, { clientX: 0, clientY: 0 }, ranges, tapOpensSuggestion);
+	const suggestion = { quote: 'the reviewer signs', insert: 'a reviewer signs', color: 'red', inline: true };
+
+	it('is the one-word comment inside a longer suggestion, not the suggestion that starts before it', () => {
+		const ranges: CommentRange[] = [{ id: 'sugg', from: 3, to: 21, suggestion }, { id: 'word', from: 7, to: 15 }];
+		expect(pressAt(10, ranges)?.id).toBe('word');
+		expect(pressAt(4, ranges)?.id).toBe('sugg');
+	});
+
+	it('is the innermost on desktop when a suggestion is inside a longer comment', () => {
+		const ranges: CommentRange[] = [{ id: 'long', from: 3, to: 21 }, { id: 'sugg', from: 7, to: 15, suggestion }];
+		expect(pressAt(10, ranges)?.id).toBe('sugg');
+		expect(pressAt(4, ranges)?.id).toBe('long');
+	});
+
+	it('is the comment, in either nesting, where a tap opens no suggestion card (the phone sheet)', () => {
+		const inside: CommentRange[] = [{ id: 'long', from: 3, to: 21 }, { id: 'sugg', from: 7, to: 15, suggestion }];
+		const around: CommentRange[] = [{ id: 'sugg', from: 3, to: 21, suggestion }, { id: 'word', from: 7, to: 15 }];
+		expect(pressAt(10, inside, false)?.id).toBe('long');
+		expect(pressAt(10, around, false)?.id).toBe('word');
+		expect(pressAt(4, around, false)?.id).toBe('sugg');
+	});
+
+	it('is the earlier of two highlights covering the same text', () => {
+		expect(pressAt(5, [{ id: 'first', from: 3, to: 9 }, { id: 'second', from: 3, to: 9 }])?.id).toBe('first');
+	});
+
+	it('is nothing when the press is in no highlight, or only in a point', () => {
+		expect(pressAt(30, [{ id: 'a', from: 3, to: 9 }])).toBeUndefined();
+		expect(pressAt(5, [{ id: 'p', from: 5, to: 5, point: true }])).toBeUndefined();
+	});
+});
+
+describe('the highlight a caret arrives in', () => {
+	const suggestion = { quote: 'the reviewer signs', insert: 'a reviewer signs', color: 'red', inline: true };
+
+	it('follows the press rule: the innermost highlight, whichever order they are listed in', () => {
+		const long = { id: 'long', from: 3, to: 21 };
+		const word = { id: 'word', from: 7, to: 15 };
+		expect(pickHighlight([long, word], true)?.id).toBe('word');
+		expect(pickHighlight([word, long], true)?.id).toBe('word');
+		expect(pickHighlight([{ ...long, suggestion }, word], false)?.id).toBe('word');
+		expect(pickHighlight([long, { ...word, suggestion }], false)?.id).toBe('long');
+		expect(pickHighlight([], true)).toBeUndefined();
 	});
 });

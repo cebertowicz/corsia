@@ -9,6 +9,7 @@ import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from './messageHistory';
 import type { RunLoad, RunStub } from './focusRuns';
+import { apiFetch } from '$lib/api/request';
 
 export interface RunLoaderDeps {
 	pageSize: number;
@@ -33,9 +34,9 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 		limit: String(deps.pageSize), from_id: stub.firstId, to_id: stub.lastId,
 	});
 	if (base.oldestId) params.set('before', base.oldestId);
-	params.set('token', bearer);
 	try {
-		const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
+		// The messages route declares the session as a required query parameter.
+		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
 		if (get(activeThreadId) !== threadId) return;
 		if (!res.ok) return fail();
 		const page = await res.json();

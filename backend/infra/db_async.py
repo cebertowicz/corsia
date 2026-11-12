@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
 
@@ -93,6 +95,41 @@ async def run_bulk(fn, *args, **kwargs):
     return await _run_shielded(_bulk_pool, "bulk", fn, *args, **kwargs)
 
 
+@asynccontextmanager
+async def use_db_context(context, /):
+    """Enter and exit one sync context manager on the DB pool, off the event loop.
+
+    A ``with`` body whose manager opens or closes a SQLite write transaction cannot
+    stay on the loop, and lifting the whole body into a worker function is not
+    always possible. ``with`` treats a failed ``__enter__`` as no exit to run, so a
+    failed enter calls no ``__exit__`` either. A caller cancelled while the enter job
+    runs still waits for it (``_run_shielded``); if it entered, it is exited with that
+    cancellation before it propagates. The caller's in-flight exception is read here,
+    on the loop, before the exit job is submitted; a true exit result suppresses it
+    and a failure inside the manager's own exit replaces it, as an inline ``with`` does.
+    """
+    entered = []
+
+    def enter():
+        value = context.__enter__()
+        entered.append(True)
+        return value
+
+    try:
+        value = await run_in_db(enter)
+    except asyncio.CancelledError:
+        if entered:
+            await run_in_db(context.__exit__, *sys.exc_info())
+        raise
+    try:
+        yield value
+    except BaseException:
+        if not await run_in_db(context.__exit__, *sys.exc_info()):
+            raise
+    else:
+        await run_in_db(context.__exit__, None, None, None)
+
+
 async def run_in_db_unless_owned(owned_db, fn, /, *args, **kwargs):
     """Run a sync SQLite job on the DB pool, or inline when the caller passed the connection it owns.
 
@@ -119,13 +156,24 @@ async def _run_shielded(executor, lane, fn, /, *args, **kwargs):
     shutdown/restart isolation: the old process can mutate newly recovered
     delivery state after its task registry is empty. Shield the worker future,
     join it on cancellation, consume its result, then propagate cancellation.
+
+    On the read-only lanes a job still waiting in the queue when its caller is
+    cancelled is dropped instead: it has touched nothing, its result has no
+    reader, and running it would only hold a lane worker that later reads queue
+    behind. A job that writes always runs once queued, as before.
     """
     loop = asyncio.get_running_loop()
     scope = getattr(fn, "__qualname__", type(fn).__name__)
     if args or kwargs:
         fn = partial(fn, *args, **kwargs)
     submitted_at = time.perf_counter()
-    future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope)
+    queued = None
+    if lane is None:
+        future = loop.run_in_executor(executor, _run_timed_db_job, fn, scope)
+    else:
+        # What run_in_executor does, keeping the pool's future so an unstarted job can be withdrawn.
+        queued = executor.submit(_run_timed_db_job, fn, scope)
+        future = asyncio.wrap_future(queued, loop=loop)
     try:
         timed = await asyncio.shield(future)
         from infra.request_timing import add_db_timing
@@ -144,6 +192,8 @@ async def _run_shielded(executor, lane, fn, /, *args, **kwargs):
         if not isinstance(error, asyncio.CancelledError):
             raise
         cancelled = error
+        if queued is not None:
+            queued.cancel()  # succeeds only if no worker has started it
         while not future.done():
             try:
                 await asyncio.shield(future)

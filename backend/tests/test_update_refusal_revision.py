@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+pytestmark = pytest.mark.usefixtures("newer_build_available")
+
 
 @pytest.mark.asyncio
 async def test_disk_space_failure_does_not_link_a_log_that_was_never_created(isolated_db, tmp_path, monkeypatch):
@@ -60,7 +62,7 @@ async def test_lifecycle_open_records_log_after_preparation_write_fails(isolated
 
 
 @pytest.mark.parametrize("reachable", [True, False])
-def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, reachable):
+def test_explicit_refusal_records_result_without_cleanup_request(tmp_path, monkeypatch, reachable):
     import os
     from api.restart_shell import spawn_restart_lifecycle
 
@@ -68,7 +70,7 @@ def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, re
     curl = tmp_path / "curl"
     curl.write_text('#!/bin/bash\nprintf "call\\n" >> "$CALLS"\nexit ' + ('0' if reachable else '7') + '\n')
     curl.chmod(0o755)
-    monkeypatch.setattr("api.restart_shell.shutil.which", lambda *_args, **_kwargs: str(curl))
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     script = tmp_path / "corsia"
     from pathlib import Path
     corsia_text = (Path(__file__).resolve().parents[2] / "scripts/corsia").read_text()
@@ -81,6 +83,6 @@ def test_explicit_refusal_attempts_exactly_one_cleanup(tmp_path, monkeypatch, re
             **os.environ, "CORSIA_RESTART_BACKEND_PORT": "4111", "CALLS": str(calls),
         }, "a" * 32, out, caller_credential="test-credential")
         assert child.wait(timeout=5) != 0
-    assert calls.read_text().splitlines() == ["call"]
+    assert not calls.exists()
     assert "The staged update is missing" in log.read_text()
-    assert ("cleanup curl exit 7" in log.read_text()) is (not reachable)
+    assert "refusal_reason=The staged update is missing" in child.lifecycle_result_path.read_text()

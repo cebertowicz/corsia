@@ -129,7 +129,7 @@
 			return;
 		}
 		try {
-			await saveThreadTitle(id, title, authToken);
+			await saveThreadTitle(id, title);
 		} catch {
 			toasts.show("Couldn't rename conversation", 'error');
 		}

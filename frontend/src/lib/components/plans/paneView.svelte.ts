@@ -100,7 +100,7 @@ export function createPaneView(input: PaneViewInput) {
 		released.set(thread, now);
 		const bearer = get(token);
 		if (!bearer) return;
-		void recordThreadPlanSeen(bearer, thread, mark).then((landed) => {
+		void recordThreadPlanSeen(thread, mark).then((landed) => {
 			// A report that did not land leaves the server's mark for the next view.
 			if (landed || released.get(thread) !== now) return;
 			if (previous) released.set(thread, previous); else released.delete(thread);

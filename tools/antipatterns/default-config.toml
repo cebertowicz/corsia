@@ -134,3 +134,13 @@ allow_files = [
     "frontend/src/lib/components/SetupScreen.svelte",
 ]
 # server_read_pattern = ''
+
+[rules.raw-api-request]
+enabled = true
+severity = "error"
+include_globs = ["frontend/src/**/*.ts", "frontend/src/**/*.svelte"]
+# Reviewed exemption, not debt: the shared request function is the one place
+# that calls `fetch` for `/api` and attaches the session.
+allow_files = [
+    "frontend/src/lib/api/request.ts",
+]

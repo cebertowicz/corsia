@@ -294,18 +294,6 @@ def update_status(force: bool = False) -> UpdateStatus:
     return status
 
 
-def cached_target_version() -> str | None:
-    """Return the cached target version without probing the remote."""
-    cached = _cache["data"]
-    return cached.target_version if cached is not None else None
-
-
-def cached_changes() -> dict | None:
-    """Return the change list the cached probe offered, without probing the remote."""
-    cached = _cache["data"]
-    return cached.changes if cached is not None else None
-
-
 def invalidate_cache() -> None:
     """Drop the cached answer so the next read re-probes the remote."""
     with _cache_condition:
