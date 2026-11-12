@@ -51,6 +51,6 @@ it('says why a reply on a comment that left the chat is refused, and keeps the d
 	flushSync();
 	document.querySelector<HTMLButtonElement>('[role="dialog"] [data-send-reply]')!.click();
 	await tick();
-	expect(get(toasts).map(toast => toast.message)).toContain('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	expect(get(toasts).map(toast => toast.message)).toContain('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('keep this draft');
 });

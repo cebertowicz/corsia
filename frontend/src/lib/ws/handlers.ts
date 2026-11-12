@@ -169,11 +169,11 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 				recoverInput(data.thread_id, inputId);
 			}
 			if (data.queue_kind === 'messages' && inputId && typeof data.thread_id === 'string' && typeof data.message_id === 'string') {
-				const failure = data.delivery_state && !['queued', 'delivered'].includes(data.delivery_state)
-					? (data.delivery_error || 'Couldn’t post this comment. Try again.') : undefined;
-				const draft = chatReplyDrafts.settle(data.thread_id, inputId, failure);
-				if (draft && failure) emit('chat_comment_draft_error', draft);
-				else if (draft) data.chat_comment_target_id = draft.targetMessageId;
+				// A stored input that failed carries its own failure and Retry in its comment's thread, so that thread opens.
+				const failed = !!data.delivery_state && !['queued', 'delivered'].includes(data.delivery_state);
+				const draft = chatReplyDrafts.settle(data.thread_id, inputId, failed ? 'stored_failed' : 'queued');
+				if (draft) data.chat_comment_target_id = draft.targetMessageId;
+				if (draft && failed) emit('chat_comment_draft_error', { threadId: draft.threadId, targetMessageId: draft.targetMessageId, commentId: draft.commentId ?? draft.postedId });
 				reconcileQueuedInputReceipt(data);
 			}
 			emit('input_queued', data);

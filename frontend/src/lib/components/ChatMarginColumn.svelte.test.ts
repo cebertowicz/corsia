@@ -40,7 +40,7 @@ function thread() {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
-	chatReplyDrafts.settle('thread', 'test-input');
+	chatReplyDrafts.settle('thread', 'test-input', 'accepted');
 	chatReplyDrafts.set('kept', '');
 	chatReplyDrafts.set('lost', '');
 	messages.set([]);
@@ -157,7 +157,7 @@ it('says why a card\'s reply is refused when its message has no place in history
 	await tick();
 	flushSync();
 	expect(sent).toHaveLength(0);
-	expect(get(toasts).map(toast => toast.message)).toContain('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	expect(get(toasts).map(toast => toast.message)).toContain('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Please change it');
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	chatReplyDrafts.set('kept', '');

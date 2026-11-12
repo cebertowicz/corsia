@@ -3,7 +3,7 @@ import type { ChatComment, Message } from '$lib/stores/threads';
 /** The comment a reply send answers, as one key: its root message and comment id. */
 const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
 
-/** Comment-only inputs live in their comment threads, regardless of target loading or delivery state. */
+/** Comment-only inputs live in their comment threads, regardless of target loading or delivery state; a failed one shows its failure there. */
 export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
 	return new Set(rows.filter(row => row.thread_id === threadId && row.role === 'user'
 		&& !row.content.trim() && !row.metadata?.attachments?.length
@@ -29,7 +29,7 @@ const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, ro
 export type ChatReplyIndex = {
 	/** Sends still awaiting delivery to this thread of this comment. */
 	pending(comment: ChatComment): Message[];
-	/** Failed sends addressed to this thread of this comment, with no later send already replacing them. */
+	/** Failed sends of this comment or addressed to its thread, with no later send already replacing them. */
 	failed(comment: ChatComment): Message[];
 };
 
@@ -53,7 +53,8 @@ export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyInde
 		if (!sending && !broken) continue;
 		for (const reply of targets) {
 			const key = replyKey(reply.root_user_message_id, reply.root_cid);
-			if (!key) continue;
+			// A root comment that failed after it was stored has its failure and Retry in its own thread.
+			if (!key) { if (broken) addTo(failedByKey, replyKey(row.id, reply.cid), failedSeen, row); continue; }
 			if (sending) addTo(pendingByKey, key, pendingSeen, row);
 			if (broken) addTo(failedByKey, key, failedSeen, row);
 		}

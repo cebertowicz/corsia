@@ -10,6 +10,14 @@ export interface ChatComment extends ChatCommentAnchor {
 	root_cid?: string;
 }
 
+/** A comment or reply send refused before it left this device; its message is the sentence the person reads, also shown as a toast. */
+export class CommentSendRefused extends Error {}
+
+/** The sentence a comment's or reply's box shows for a send that threw: the refusal's own cause, or the generic one when the cause is unknown. */
+export function refusalText(error: unknown, noun: 'comment' | 'reply'): string {
+	return error instanceof CommentSendRefused ? error.message : `Couldn’t send this ${noun}. Try again.`;
+}
+
 export interface ChatCommentAnchor {
 	from_off: number;
 	to_off: number;
@@ -25,8 +33,9 @@ export interface ChatCommentAnchor {
  */
 export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => string | void): string | void {
 	if (!message || !comment || typeof message.seq !== 'number') {
-		toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
-		throw new Error('Comment is unavailable');
+		const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';
+		toasts.show(sentence, 'error');
+		throw new CommentSendRefused(sentence);
 	}
 	return send({
 		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,

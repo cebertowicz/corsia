@@ -98,7 +98,7 @@ export function handleInputAccepted(data: any): void {
 		!threadId || typeof inputId !== 'string' || typeof messageId !== 'string'
 		|| typeof createdAt !== 'string' || !identity
 	) return;
-	const draft = chatReplyDrafts.settle(threadId, inputId);
+	const draft = chatReplyDrafts.settle(threadId, inputId, 'accepted');
 	if (draft) data.chat_comment_target_id = draft.targetMessageId;
 	const transition = acceptInput(threadId, inputId, identity);
 	reconcileOptimisticRow(threadId, inputId, messageId, createdAt, {

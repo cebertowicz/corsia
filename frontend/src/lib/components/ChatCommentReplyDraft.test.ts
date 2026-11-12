@@ -30,6 +30,6 @@ it('keeps a rejected reply across a thread switch, then clears it on accepted re
 	expect(host.querySelector('[role="alert"]')?.textContent).toContain('Please try again');
 	host.querySelector<HTMLButtonElement>('[data-send-reply]')!.click(); await tick(); flushSync();
 	expect(chatReplyDrafts.reply('root')?.inputId).toBe('two');
-	chatReplyDrafts.settle('thread', 'two'); await tick(); flushSync();
+	chatReplyDrafts.settle('thread', 'two', 'accepted'); await tick(); flushSync();
 	expect(chatReplyDrafts.get('root')).toBe('');
 });

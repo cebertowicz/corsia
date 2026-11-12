@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
+	import { refusalText } from '$lib/chatCommentAnchors';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -22,9 +23,10 @@
 
 	function postReply(comment: ChatComment, text: string): void {
 		let inputId: string | null = null;
+		let error = '';
 		try { inputId = onReply?.(text) ?? null; }
-		catch { /* Keep the reply and show the failure in its field. */ }
-		chatReplyDrafts.postReply(threadId, messageId, comment.id, text, inputId);
+		catch (failure) { error = refusalText(failure, 'reply'); /* Keep the reply and show the failure in its field. */ }
+		chatReplyDrafts.postReply(threadId, messageId, comment.id, text, inputId, error);
 	}
 
 	function answerId(answer: ChatComment['answers'][number]): string {
@@ -75,8 +77,8 @@
 						{#each failed.metadata.reply_context.comments.filter((reply: { root_user_message_id?: string; root_cid?: string }) => reply.root_user_message_id === comment.user_message_id && reply.root_cid === comment.cid) as reply}
 							<CommentReplyList replies={[{ id: failed.id, author: 'user', authorKind: 'user', text: reply.note, at: formatTime(failed.created_at) }]} />
 						{/each}
-						<span>Not delivered</span>
-						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, failureText: 'Couldn’t retry this reply. Try again.' })}>Retry</button>
+						<span>{failed.id === comment.user_message_id ? 'Comment not delivered' : 'Not delivered'}</span>
+						<button class="ct-link" onclick={() => requestDeliveryAction('retry', { threadId, messageId: failed.id, failureText: `Couldn’t retry this ${failed.id === comment.user_message_id ? 'comment' : 'reply'}. Try again.` })}>Retry</button>
 					</div>
 				{/each}
 				{/snippet}

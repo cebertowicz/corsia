@@ -21,6 +21,15 @@ describe('failed comment replies', () => {
 		const failedRetry = { ...retry, delivery_state: 'failed' } as Message;
 		expect(chatReplyIndex([failed, failedRetry], 'thread').failed(root)).toEqual([failedRetry]);
 	});
+
+	it('gives a root comment whose own send failed after it was stored its failure in its own thread', () => {
+		const own = (id: string, state: string) => ({ id, thread_id: 'thread', role: 'user', content: '', created_at: 'now', delivery_state: state,
+			metadata: { reply_context: { comments: [{ id: 'root', cid: 'c1', note: 'my comment' }] } } }) as Message;
+		expect(chatReplyIndex([own('author', 'failed')], 'thread').failed(root).map(message => message.id)).toEqual(['author']);
+		expect(chatReplyIndex([own('author', 'queued')], 'thread').failed(root)).toEqual([]);
+		expect(chatReplyIndex([own('author', 'queued')], 'thread').pending(root)).toEqual([]);
+		expect(chatReplyIndex([own('other', 'failed')], 'thread').failed(root)).toEqual([]);
+	});
 });
 
 describe('pending comment replies', () => {

@@ -38,16 +38,16 @@ beforeEach(() => {
 });
 
 describe('resending what a dropped socket never confirmed', () => {
-	it('resends a comment without a transcript row and clears its draft on a queued receipt', () => {
+	it('resends a comment without a transcript row and takes its draft out of the box on a queued receipt', () => {
 		const anchor = { from_off: 0, to_off: 1, quote: 'q', anchor_prefix: '', anchor_suffix: '' };
 		const inputId = sendMessage(THREAD, '', undefined, undefined, undefined, 'apply_now', [{ id: 'c', seq: 1, ...anchor, note: 'keep' }])!;
-		chatReplyDrafts.postRoot(THREAD, 'target', 'keep', inputId, anchor, 1);
+		chatReplyDrafts.postRoot(THREAD, 'target', 'keep', inputId, anchor, 1, 'c');
 		expect(get(messages)).toEqual([]);
 		const { socket, sent } = newSocket();
 		resendUnconfirmedFrames(socket);
 		expect(sent).toEqual([JSON.parse(frames[0])]);
 		handleMessage({ type: 'input_queued', queue_kind: 'messages', thread_id: THREAD, input_id: inputId, message_id: inputId, delivery_state: 'queued' }, () => {});
-		expect(chatReplyDrafts.root(THREAD, 'target')).toBeUndefined();
+		expect(chatReplyDrafts.root(THREAD, 'target', anchor)).toBeUndefined();
 		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
 	});
 

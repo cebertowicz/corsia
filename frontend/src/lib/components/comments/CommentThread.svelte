@@ -263,7 +263,7 @@
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
 			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && (replyPosting || replyPending)} onSend={postReply} />
-			{#if chatSurface && replyError}<p role="alert">{replyError} Retry by sending again.</p>{/if}
+			{#if chatSurface && replyError}<p role="alert">{replyError}</p>{/if}
 		{/if}
 	</div>
 {/if}

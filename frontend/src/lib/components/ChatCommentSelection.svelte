@@ -3,7 +3,7 @@
 	import { messages } from '$lib/stores/threads';
 	import { on } from '$lib/ws';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
-	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+	import { clipChatSelection, refusalText, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
@@ -40,11 +40,12 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
-	let awaitingRoot = $state<string | null>(null);
-	const rootDraft = $derived(threadId && draft ? chatReplyDrafts.root(threadId, draft.messageId) : undefined);
+	// The passage whose post this box waits on; the box closes only when that passage's post is stored.
+	let awaitingRoot = $state.raw<Pick | null>(null);
+	const rootDraft = $derived(threadId && draft ? chatReplyDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
 	$effect(() => {
-		if (rootDraft?.inputId) awaitingRoot = rootDraft.inputId;
-		else if (rootDraft?.error) awaitingRoot = null;
+		if (rootDraft?.inputId) awaitingRoot = draft;
+		else if (rootDraft?.error || awaitingRoot !== draft) awaitingRoot = null;
 		else if (awaitingRoot && !rootDraft) { awaitingRoot = null; requestClose(); }
 	});
 	let buttonWidth = $state(0);
@@ -95,6 +96,8 @@
 		if (focus) void tick().then(() => focus.focus());
 	}
 	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
+	/** Cancel lets the passage's typed text and any failure go, so they never come back on the next comment. */
+	function cancel() { if (draft && threadId) chatReplyDrafts.dropRoot(threadId, draft.messageId, draft.anchor); requestClose(); }
 	function closed() { const finish = afterClose; afterClose = null; finish?.(); closing = false; }
 	function readSelection() {
 		if (open) return;
@@ -260,6 +263,8 @@
 					draft = { messageId: item.targetMessageId, seq: item.seq, anchor: item.anchor, rect: row.getBoundingClientRect() };
 				}
 			};
+			// This box's own post was stored and failed: the box closes and the comment's thread opens on its failure.
+			if (open && awaitingRoot && item.commentId) requestClose();
 			if (closing) { const finish = afterClose; afterClose = () => { finish?.(); show(); }; }
 			else if (!open && !viewing) show();
 		});
@@ -329,9 +334,11 @@
 		const currentDraft = draft; const currentEditing = editing;
 		if (currentDraft && threadId) {
 			let inputId: string | null = null;
-			try { inputId = onSendReply({ id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }) ?? null; }
-			catch { /* Keep the draft and show the failure in its box. */ }
-			chatReplyDrafts.postRoot(threadId, currentDraft.messageId, note, inputId, currentDraft.anchor, currentDraft.seq);
+			let error = '';
+			const id = crypto.randomUUID();
+			try { inputId = onSendReply({ id, messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }) ?? null; }
+			catch (failure) { error = refusalText(failure, 'comment'); /* Keep the draft and show the failure in its box. */ }
+			chatReplyDrafts.postRoot(threadId, currentDraft.messageId, note, inputId, currentDraft.anchor, currentDraft.seq, id, error);
 			return;
 		}
 		if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));
@@ -365,7 +372,7 @@
 	{/if}
 {/if}
 {#snippet composerBody()}
-	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatReplyDrafts.setRoot(threadId, draft.messageId, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.inputId} error={rootDraft?.error ?? ''} retainText={!!draft} onSubmit={submit} onCancel={requestClose} />
+	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatReplyDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.inputId} error={rootDraft?.error ?? ''} retainText={!!draft} onSubmit={submit} onCancel={cancel} />
 {/snippet}
 {#snippet marginBody()}
 	{#key target}<div role="dialog" aria-label={heading}>{@render composerBody()}</div>{/key}

@@ -151,8 +151,7 @@ export function handleWsError(data: any) {
 	}
 	const identity = frameIdentity(data);
 	if (typeof data?.input_id === 'string' && identity === null) {
-		const draft = chatReplyDrafts.settle(data.thread_id, data.input_id,
-			plainErrorText(data.message, 'Couldn’t post this comment. Try again.'));
+		const draft = chatReplyDrafts.settle(data.thread_id, data.input_id, { error: plainErrorText(data.message, '') });
 		handleInputRejected(data);
 		if (draft) emit('chat_comment_draft_error', draft);
 		else appendVisibleError(data);
