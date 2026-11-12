@@ -62,15 +62,15 @@ test('@flow:doc-comment-sheet keeps the whole card visible when its reply field 
 	await expect(card.getByPlaceholder('Reply…')).toBeVisible();
 	await settled(page);
 	const opened = await geometry(page);
-	expect(opened.card.height, 'the card is small enough to fit the sheet scroller').toBeLessThanOrEqual(opened.scroller.clientHeight);
+	expect(opened.card.height + 6, 'the card and its 3px focus ring fit the sheet scroller').toBeLessThanOrEqual(opened.scroller.clientHeight);
 
 	// Tapping the Reply field keeps it in view, and the card that holds it stays visible whole.
 	await card.getByPlaceholder('Reply…').tap();
 	await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA');
 	await settled(page);
 	const after = await geometry(page);
-	expect(after.card.height, 'the card still fits the sheet scroller after the sheet makes room').toBeLessThanOrEqual(after.scroller.clientHeight);
-	expect(after.card.top, `the card's top was scrolled ${after.scroller.top - after.card.top}px above the scroller`).toBeGreaterThanOrEqual(after.scroller.top - 1);
-	expect(after.card.bottom, `the card's bottom was scrolled ${after.card.bottom - after.scroller.bottom}px below the scroller`).toBeLessThanOrEqual(after.scroller.bottom + 1);
+	expect(after.card.height + 6, 'the card and its focus ring still fit the sheet scroller after the sheet makes room').toBeLessThanOrEqual(after.scroller.clientHeight);
+	expect(after.card.top - 3, `the card's 3px focus ring was scrolled ${after.scroller.top - (after.card.top - 3)}px above the scroller`).toBeGreaterThanOrEqual(after.scroller.top - 1);
+	expect(after.card.bottom + 3, `the card's 3px focus ring was scrolled ${after.card.bottom + 3 - after.scroller.bottom}px below the scroller`).toBeLessThanOrEqual(after.scroller.bottom + 1);
 	expect(after.focusInCard, 'the Reply field of that card takes focus').toBe(true);
 });
