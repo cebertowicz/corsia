@@ -88,7 +88,7 @@
 <style>
 	.failed-reply > .delivery-status { color: var(--text-secondary); font-size: var(--text-footnote); font-style: italic; margin-left: var(--space-1); }
 	.failed-reply > .delivery-status.terminal { color: var(--red); }
-	.delivery-failed-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: var(--space-3); border-radius: var(--radius-circle, 50%); background: var(--red); color: white; font-size: var(--text-caption); font-weight: 700; }
+	.delivery-failed-mark { display: inline-flex; align-items: center; justify-content: center; width: var(--space-4); height: var(--space-4); margin-left: var(--space-3); border-radius: var(--radius-circle, 50%); background: var(--red); color: white; font-size: var(--text-caption); font-weight: 700; }
 	/* Retry is the one way back for a failed comment, so on touch it is a full target. */
 	@media (pointer: coarse) { .failed-reply > .ct-link { min-width: var(--touch-target); min-height: var(--touch-target); padding-inline: var(--space-2); } }
 	.chat-comment-threads { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border); }
