@@ -130,7 +130,18 @@
 	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
-	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)));
+	// Opening a card or the list reads its threads at once; their highlights keep the unread look until the surface closes, so the sign the reader came to see stays (as the list keeps its unread cards, `retainUnreadList`). The header count stays the real one.
+	let heldUnread = $state(new Map<string, 'comment' | 'reply'>());
+	$effect.pre(() => {
+		if (!commentUI.state) { if (untrack(() => heldUnread.size)) heldUnread = new Map(); return; }
+		const next = new Map(untrack(() => heldUnread));
+		for (const comment of listedComments) {
+			const kind = comment.newReplyIds?.length ? 'reply' : comment.newComment ? 'comment' : undefined;
+			if (kind && !next.has(comment.id)) next.set(comment.id, kind);
+		}
+		if (next.size !== untrack(() => heldUnread.size)) heldUnread = next;
+	});
+	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map((range) => (range.unread || !heldUnread.has(range.id) ? range : { ...range, unread: heldUnread.get(range.id) })));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	const openCards = createCommentOpeners(commentUI, scroll);

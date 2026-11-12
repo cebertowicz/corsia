@@ -39,10 +39,12 @@
 	const viewedComment = $derived(viewedMessage?.chat_comments?.find(comment => comment.id === viewing?.commentId));
 	const listedComments = $derived(viewing?.listed ? (viewing.list ?? []).flatMap(id => viewedMessage?.chat_comments?.find(comment => comment.id === id) ?? []) : []);
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
-	// The list's title and the sheet's name: how many threads the list holds. A thread opened from the list says Back in the header's leading slot.
+	// The list's title and the sheet's name: how many comments the list holds; one comment's sheet is titled Comment. A thread opened from the list says Back in the header's leading slot.
 	const listing = $derived(!!viewing?.listed);
 	const fromList = $derived(!!viewing?.list && !viewing.listed);
-	const sheetName = $derived(listing ? `${viewing?.list?.length ?? 0} threads` : 'Comment thread');
+	const sheetName = $derived(listing ? `${viewing?.list?.length ?? 0} comments` : 'Comment thread');
+	/** The sheet's visible title: the list's name, or Comment for one comment. The dialog keeps its name "Comment thread" (existing specs find it by it). */
+	const sheetTitle = $derived(listing ? sheetName : 'Comment');
 	// Moving between the list and one of its threads keeps focus in the sheet: into a thread it lands on Back, back to the list it returns to that thread's Reply.
 	let shownMode: 'list' | 'thread' | null = null;
 	$effect(() => {
@@ -179,6 +181,13 @@
 		chatCommentPlacement.record(messageId, left.filter(comment => !placedIds.has(comment.id)).map(comment => comment.id));
 		if (!recorded.includes(messageId)) recorded.push(messageId);
 	}
+	const unreadNow = (comment: { answers: Array<{ author_kind?: string; unread?: boolean }> }) => comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
+	// Opening a thread reads it at once; its highlight keeps the unread look until the sheet or card is closed, so the sign the reader came to see does not vanish under them.
+	const heldUnread = new Set<string>();
+	$effect(() => {
+		if (!viewing) { if (heldUnread.size) { heldUnread.clear(); untrack(schedule); } return; }
+		for (const comment of viewedMessage?.chat_comments ?? []) if (unreadNow(comment)) heldUnread.add(comment.id);
+	});
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
@@ -251,7 +260,7 @@
 			for (const comment of sent) {
 				const failed = !!replies?.failed(comment).length;
 				const sending = !!replies?.pending(comment).length;
-				const unread = comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
+				const unread = unreadNow(comment) || heldUnread.has(comment.id);
 				if (!failed && !sending && !unread) continue;
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
@@ -395,14 +404,14 @@
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}
-{#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of threads" onclick={() => { if (viewing) viewing = { ...viewing, listed: true }; }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}
+{#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of comments" onclick={() => { if (viewing) viewing = { ...viewing, listed: true }; }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}
 {#snippet threadsBody(keep: boolean)}
 	{#if viewing?.listed}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={listedComments} />
 	{:else if viewing && viewedComment}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible={keep} />{/if}
 {/snippet}
 {#if viewing && (viewing.listed ? listedComments.length > 0 : viewedComment) && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer bind:panel={sheetPanel} ariaLabel={sheetName} heading={listing ? sheetName : null} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+		<AdaptiveDrawer bind:panel={sheetPanel} ariaLabel={sheetName} heading={sheetTitle} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 			{@render threadsBody(true)}
 		</AdaptiveDrawer>
 	{:else}

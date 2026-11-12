@@ -122,6 +122,9 @@ export const docTheme = EditorView.theme({
 	'.cm-image-pin.selected .disc::after': { opacity: '1' },
 	// A deleted passage's sign (900 and 393, where no card shows): the dashed amber edge its margin card has, on the page colour.
 	'.cm-image-pin.removed .disc': { background: 'var(--bg-primary)', border: '1.5px dashed var(--amber)', boxShadow: 'none' },
+	// Unread: the unread highlight's two marks on the disc, a ring in the text colour past the halo and the accent wash beyond it. Tokens only; nothing is added to the disc, so nothing moves.
+	'.cm-image-pin[data-unread] .disc': { boxShadow: '0 0 0 1.5px var(--image-region-halo), 0 0 0 3px var(--text-primary), 0 0 0 5.5px color-mix(in srgb, var(--accent) 22%, transparent)' },
+	'.cm-image-pin.removed[data-unread] .disc': { boxShadow: '0 0 0 1.5px var(--text-primary), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent)' },
 	'.cm-image-pin:focus-visible': { outline: 'none' },
 	'.cm-image-pin:focus-visible .disc': { outline: '2px solid var(--accent)', outlineOffset: '3px' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on
@@ -129,6 +132,8 @@ export const docTheme = EditorView.theme({
 	// the layout until the next frame. CodeMirror measures in the same task it
 	// writes in; it would record the old geometry and place clicks by it.
 	'@media (prefers-reduced-motion: reduce)': { '.cm-scroller, .cm-scroller *': { transitionProperty: 'none !important' } },
+	// Forced colours drop shadows and washes: an unread pin is the system highlight colours as a fill, a read one keeps its own.
+	'@media (forced-colors: active)': { '.cm-image-pin[data-unread] .disc, .cm-image-pin.removed[data-unread] .disc': { forcedColorAdjust: 'none', background: 'Highlight', color: 'HighlightText', border: '1.5px solid HighlightText', boxShadow: '0 0 0 2px Highlight' } },
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
