@@ -431,7 +431,7 @@ describe('update screen store', () => {
 
 		it.each([
 			[false, 'CORSIA is still on 2026.10.12.'],
-			[true, "CORSIA's version didn't change."],
+			[true, "CORSIA’s version didn’t change."],
 		])('words a failure from the running version only while the service answers (down=%s)', (down, body) => {
 			updateStatus.set(status(inFlight()));
 			tickUpdateScreen(1_000);
@@ -448,7 +448,7 @@ describe('update screen store', () => {
 			tickUpdateScreen(1_000);
 			updateStatus.set({ ...status({ ...inFlight(), status: 'failed', failure_code: 'launch_failed', settled_at: '2026-10-13T00:00:00Z' }), current_version: '2026.10.13', running_version: null });
 			tickUpdateScreen(1_001);
-			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { body: "CORSIA's version didn't change." } });
+			expect(get(updateScreenView)).toMatchObject({ mode: 'failed', failure: { body: "CORSIA’s version didn’t change." } });
 		});
 
 		it('keeps a latched launch failure across the shell handoff', () => {

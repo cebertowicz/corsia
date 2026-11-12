@@ -37,6 +37,8 @@
 
 	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
 	const longer = $derived(view?.mode === 'longer');
+	// CORSIA has stopped: no step is running, so no step label.
+	const serviceDownTerminal = $derived(view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
 	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
 	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
 	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
@@ -194,12 +196,12 @@
 	>
 		<div class="column">
 			<div class="mark"><LivingMark entry="none" /></div>
-			<h2 id="update-screen-title">{view.mode === 'done' ? `Updated to ${view.toVersion ?? ''}`.trim() : view.mode === 'failed' && view.failure ? view.failure.title : 'Updating CORSIA'}</h2>
+			<h2 id="update-screen-title">{view.mode === 'done' ? `Updated to ${view.toVersion ?? ''}`.trim() : view.mode === 'failed' && view.failure ? view.failure.title : view.mode === 'start_failed' ? 'CORSIA didn’t restart' : 'Updating CORSIA'}</h2>
 			<div class="step" role="status" aria-live="polite" aria-atomic="true">
 				{#if view.mode === 'failed' && !view.serviceDown && view.failure}
 					<p class="failure-headline">{view.failure.headline}</p>
 					<p class="detail">{view.failure.body}</p>
-				{:else if view.mode !== 'done'}
+				{:else if view.mode !== 'done' && !serviceDownTerminal}
 					<p class="step-label">{view.label}</p>
 					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
 				{/if}
@@ -233,7 +235,7 @@
 							<p class="detail" role="alert">Couldn’t start CORSIA. Quit CORSIA with ⌘Q and open it again.</p>
 						{:else if recoveryFailure === 'manual'}
 							<p class="detail" role="alert">It still didn’t start. Click Start CORSIA to try again, or quit CORSIA with ⌘Q and open it again.</p>
-						{:else if recoveryFailure === 'automatic'}
+						{:else if recoveryFailure === 'automatic' && view.mode !== 'start_failed'}
 							<p class="detail">It didn’t start on its own.</p>
 						{/if}
 						{#if hasStartAction && !view.startupProgressUnavailable}

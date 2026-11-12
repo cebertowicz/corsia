@@ -153,7 +153,7 @@ describe('SettingsUpdate', () => {
 		flushSync();
 
 		expect(host.textContent).toContain('Last update');
-		expect(host.textContent).toContain("Couldn't download the update.");
+		expect(host.textContent).toContain("Couldn’t download the update.");
 		expect(host.textContent).toContain('CORSIA kept running and nothing was changed.');
 		expect(host.textContent).toContain('The CORSIA agent has been told.');
 		expect(host.textContent).not.toContain('\u234c');
@@ -172,7 +172,7 @@ describe('SettingsUpdate', () => {
 		flushSync();
 
 		expect(host.textContent).toContain('A restart is already in flight.');
-		expect(host.textContent).not.toContain("Couldn't download the update.");
+		expect(host.textContent).not.toContain("Couldn’t download the update.");
 	});
 
 	it('offers the update with its changes, one cost sentence, Update now and Tonight', () => {
@@ -284,7 +284,7 @@ describe('SettingsUpdate', () => {
 		updateStatus.set(status({ current_version: '1.1.0', operation: { ...failed } }));
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
-		expect(host.textContent).toContain("CORSIA's version didn't change.");
+		expect(host.textContent).toContain("CORSIA’s version didn’t change.");
 		expect(host.textContent).not.toContain('still on 1.1.0');
 	});
 
@@ -294,7 +294,7 @@ describe('SettingsUpdate', () => {
 		updateUnreachable.set(true);
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
-		expect(host.textContent).toContain("CORSIA's version didn't change.");
+		expect(host.textContent).toContain("CORSIA’s version didn’t change.");
 		expect(host.textContent).not.toContain('1.0.0.');
 	});
 
