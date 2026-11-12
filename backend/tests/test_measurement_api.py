@@ -1726,6 +1726,35 @@ async def test_the_workflow_share_withholds_a_thin_period_and_keeps_its_raw_valu
 
 
 @pytest.mark.asyncio
+async def test_a_period_before_any_workflow_run_serves_a_measured_zero_share(isolated_db, measurement_clock):
+    """The share starts at the first accepted task, not the first run.
+
+    A task accepted before any workflow existed could not have run under one, so a period that holds
+    enough tasks and no run is a share of zero, never an unmeasured period. Moving the start to the
+    first run would hide the movement from zero that the series exists to show.
+    """
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        _seed_plan(db, "plan-root", "root")
+        for index in range(20):
+            _seed_task(db, "plan-root", f"before-any-run-{index}", settled="2026-09-16T12:00:00Z")
+        _seed_share_tasks(db, "plan-root", "2026-09-21", under=18, outside=6)
+        db.commit()
+    finally:
+        db.close()
+
+    body = await measurement_series("under_workflow_pct", project="all", agent="none", grain="days",
+                                    timezone_name="UTC", user=USER)
+    rows = {row["period"]: row for row in body["rows"] if row["series"] == "under_workflow_pct"}
+    assert (rows["2026-09-16"]["n"], rows["2026-09-16"]["value"]) == (20, 0.0)
+    assert (rows["2026-09-21"]["n"], rows["2026-09-21"]["value"]) == (24, pytest.approx(18 / 24))
+
+
+@pytest.mark.asyncio
 async def test_a_selected_agent_sees_only_its_own_tasks_in_the_workflow_share(isolated_db, measurement_clock):
     """An agent scope shares its denominator with every other panel: only its own tasks count."""
     from api.measurement import measurement_series
