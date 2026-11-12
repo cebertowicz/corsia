@@ -50,7 +50,7 @@
 		onOpenImage,
 		saveError,
 		pendingSel,
-		commentSheetOpen = false,
+		listOverText = false,
 		cardMode,
 		onTyping,
 		onStartComment,
@@ -81,8 +81,8 @@
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
 		pendingSel: PendingSelection | null;
-		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
-		commentSheetOpen?: boolean;
+		/** The comment list is over the text (the sheet, whose closing scrim stays modal until its outro ends, or the list popover). */
+		listOverText?: boolean;
 		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
 		cardMode?: CardMode;
 		onTyping?: () => void;
@@ -185,9 +185,9 @@
 	{/if}
 </div>
 
-{#if pendingSel && !commentSheetOpen}
+{#if pendingSel && !listOverText}
 	<button class="sel-comment" class:above={place?.above} class:below={!place?.above} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
-		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
+		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
 	</button>
