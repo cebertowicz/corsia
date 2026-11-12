@@ -47,12 +47,14 @@ describe('(a) a trailing backslash never escapes the closing pipe', () => {
 		expect(gfmRow(r, head, 1), 'GFM').toEqual(['Login\\', 'Done']);
 	});
 
-	it('in a padded row, deleting the pad after a trailing backslash leaves the row its cells', () => {
+	it('in a padded row, a space typed after a trailing backslash and deleted again leaves the row its cells', () => {
 		const head = '| Feature | Status |';
 		const r = track(build(docWith(head, ['| Login | Done |'])));
 		clicked(r);
-		typed(r, 6, '\\');
-		deleted(r, 7, 8);
+		typed(r, 5, '\\');
+		typed(r, 6, ' ');
+		deleted(r, 6, 7);
+		expect(cellText(r), 'setup: the cell holds the backslash last').toBe('Login\\');
 		expect(rowCells(r, head, 1)).toEqual(['Login\\', 'Done']);
 		expect(gfmRow(r, head, 1)).toEqual(['Login\\', 'Done']);
 	});
@@ -64,7 +66,7 @@ describe('(b) the drawn table follows the source cells a row loses', () => {
 		const r = track(build(docWith(head, ['| Login |'])));
 		clicked(r, cellEl(r, 1, 2));
 		typed(r, 0, 'Z');
-		expect(r.view.state.doc.toString(), 'setup: the row gained its cells').toContain('| Login | | Z |');
+		expect(r.view.state.doc.toString(), 'setup: the row gained its cells').toContain('| Login |  | Z |');
 		expect(table(r)!.rows[1].cells[2].textContent).toBe('Z');
 		key(r, 'z');
 		expect(r.view.state.doc.toString(), 'setup: undo took the cells out').toContain('| Login |\n');
@@ -95,7 +97,7 @@ describe('(c) the open cell is its row and its column', () => {
 		r.edit(AUTHOR, (text) => text.insert(text.toString().indexOf('| Login |'), '| New | x | y |\n'));
 		expect(r.view.state.field(openCellState), 'the same cell, one row down').toMatchObject({ row: 2, col: 2, padded: true });
 		typed(r, 0, 'Z');
-		expect(r.view.state.doc.toString(), 'the text lands in the third column').toContain('| Login | | Z |');
-		expect(cellText(r)).toBe(' Z ');
+		expect(r.view.state.doc.toString(), 'the text lands in the third column').toContain('| Login |  | Z |');
+		expect(cellText(r)).toBe('Z');
 	});
 });

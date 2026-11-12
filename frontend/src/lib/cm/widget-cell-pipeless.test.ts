@@ -20,7 +20,7 @@ const doc = (row: string) => `# Plan\n\n${HEAD}\n${row}\n\nafter\n`;
 const bodyRow = (r: Rig) => r.view.state.doc.toString().split('\n')[4];
 
 describe('a cell at a row edge that has no pipe', () => {
-	for (const [row, col, typedRow, cell] of [['Login | a |', 0, '|ZLogin | a |', 'ZLogin '], ['| Login |a', 1, '| Login |Za|', 'Za']] as const) {
+	for (const [row, col, typedRow, cell] of [['Login | a |', 0, '| ZLogin | a |', 'ZLogin'], ['| Login |a', 1, '| Login | Za |', 'Za']] as const) {
 		it(`is not padded, and a character typed at its start stays in it, in "${row}"`, () => {
 			const r = track(build(doc(row)));
 			expect(table(r)!.rows[1].cells, 'setup: the row is drawn with both of its cells').toHaveLength(2);

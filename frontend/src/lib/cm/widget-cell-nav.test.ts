@@ -30,8 +30,8 @@ describe('Tab and Enter move through the table', () => {
 		press(r, 'Tab');
 		expect(openIn(r, 1, 1), 'the cell to the right is open now').toBe(true);
 		expect(mountedEditor(r), 'the same editor travelled with the reader, over the new cell').toBe(editor);
-		typed(r, 5, '!');
-		expect(cellText(r)).toBe(' Done! ');
+		typed(r, 4, '!');
+		expect(cellText(r)).toBe('Done!');
 		expect(r.view.state.doc.toString()).toContain('| Login | Done! | first |');
 	});
 
@@ -63,7 +63,7 @@ describe('Tab and Enter move through the table', () => {
 		clicked(r, cellEl(r, 1, 1));
 		press(r, 'Enter');
 		expect(openIn(r, 2, 1)).toBe(true);
-		typed(r, 5, '!');
+		typed(r, 4, '!');
 		expect(r.view.state.doc.toString()).toContain('| Sync | Open! | last |');
 	});
 
@@ -77,7 +77,7 @@ describe('Tab and Enter move through the table', () => {
 
 	it('the cell that was left shows its text again, rendered', () => {
 		const r = openTable();
-		typed(r, 6, '!');
+		typed(r, 5, '!');
 		press(r, 'Tab');
 		expect(editingCell(r), 'the editor moved on to the next cell').toBe(cellEl(r, 1, 1));
 		expect(cellEl(r, 1, 0).textContent, 'the cell behind shows what was typed, unseen under nothing').toBe('Login!');
@@ -96,7 +96,7 @@ describe('a row with more cells than the header', () => {
 		expect(openIn(r, 2, 0), 'the next row first drawn cell').toBe(true);
 		press(r, 'Tab', true);
 		expect(openIn(r, 1, 1), 'back on the last drawn cell, past the undrawn one').toBe(true);
-		expect(cellText(r)).toBe(' 2 ');
+		expect(cellText(r)).toBe('2');
 	});
 
 	it('leaves the reader a caret in an open cell: nothing opens on a cell that is not drawn', () => {
@@ -143,7 +143,7 @@ describe('the open cell is named for its place in the table', () => {
 describe('Escape leaves the table', () => {
 	it('closes the cell and puts the caret after the table', () => {
 		const r = openTable();
-		typed(r, 6, '!');
+		typed(r, 5, '!');
 		press(r, 'Escape');
 		expect(mountedEditor(r)).toBeNull();
 		expect(cellEl(r, 1, 0).textContent, 'the cell is rendered text again').toBe('Login!');
@@ -155,29 +155,23 @@ describe('Escape leaves the table', () => {
 describe('the ordinary caret keys work in a cell', () => {
 	it('arrows move and select as they do in prose', () => {
 		const r = openTable();
-		caretAt(r, 1);
+		caretAt(r, 0);
 		press(r, 'ArrowRight');
 		press(r, 'ArrowRight');
-		expect(cellCaret(r), 'the arrows moved it two characters').toBe(3);
+		expect(cellCaret(r), 'the arrows moved it two characters').toBe(2);
 		press(r, 'ArrowRight', true);
 		const { from, to } = cellEditor(r)!.state.selection.main;
-		expect([from, to], 'and a shifted arrow selects from the caret, which is how a word gets commented').toEqual([3, 4]);
+		expect([from, to], 'and a shifted arrow selects from the caret, which is how a word gets commented').toEqual([2, 3]);
 		// Home and End need a laid-out line, which jsdom does not provide; the browser spec presses them in a real cell.
 	});
 
-	it('keeps the caret on the drawn text, never in the spaces padding it from its pipes', () => {
+	it('holds the cell as it is drawn, so the caret at either end of it is at the drawn text\'s ends', () => {
 		const r = openTable();
-		const text = cellText(r);
-		const first = text.length - text.trimStart().length, last = text.trimEnd().length;
-		expect(first, 'the cell is padded on both sides').toBeGreaterThan(0);
+		expect(cellText(r), 'no pads to step into').toBe('Login');
 		caretAt(r, 0);
-		expect(cellCaret(r), 'a caret before the text goes to its first character').toBe(first);
-		caretAt(r, text.length);
-		expect(cellCaret(r), 'a caret after the text goes to its last').toBe(last);
-		press(r, 'ArrowRight');
-		expect(cellCaret(r), 'and an arrow does not take it into the padding').toBe(last);
-		press(r, 'ArrowLeft', true);
-		const { anchor, head } = cellEditor(r)!.state.selection.main;
-		expect([anchor, head], 'a selection is kept to the text the same way').toEqual([last, last - 1]);
+		typed(r, 0, 'A');
+		caretAt(r, cellText(r).length);
+		typed(r, cellText(r).length, 'Z');
+		expect(r.view.state.doc.toString(), 'text typed at either end lands beside the drawn text, inside the pads').toContain('| ALoginZ | Done | first |');
 	});
 });

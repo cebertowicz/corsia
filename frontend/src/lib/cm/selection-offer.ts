@@ -21,7 +21,7 @@ export function selectionOffer(
 	const inCell = openCellText(v, r.from, r.to), coords = inCell ? inCell.inner.coordsAtPos(inCell.at(r.to)) : v.coordsAtPos(r.to);
 	return {
 		from: r.from, to: r.to, text,
-		...(coords ? offerPlace(v, r.from, coords) : { top: 0, left: 0 }),
+		...(coords ? offerPlace(v, inCell ? r.from : null, coords) : { top: 0, left: 0 }),
 		anchor: anchorFor(v, r.from, r.to),
 		label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
 	};

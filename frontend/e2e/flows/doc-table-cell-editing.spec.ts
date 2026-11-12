@@ -121,16 +121,16 @@ for (const layout of LAYOUTS) {
 			await page.keyboard.type(' a|b');
 			expect(await row().count(), 'a typed pipe stays inside the cell').toBe(3);
 			expect(await cell(page, 2, 1).innerText(), 'and shows as a pipe, its escape hidden').toBe('Plain words in a cell. a|b');
-			// The cell holds its text as drawn: a backslash typed in front of a pipe stays a visible backslash, and the pipe is
-			// still escaped; a pasted pipe is escaped like a typed one.
+			// A backslash typed in front of a pipe is that pipe's escape, as in markdown, so the pipe shows alone; a pasted pipe
+			// is escaped like a typed one.
 			await page.keyboard.type(' c\\');
 			await page.keyboard.type('|d');
 			await paste(page, ' e|f');
 			expect(await row().count(), 'the row still has three columns').toBe(3);
 			await frame(page, `03-typed-pipe-${at}`);
 			await page.keyboard.press('Escape');
-			expect(await cell(page, 2, 1).innerText(), 'the typed backslash shows, each pipe shows as a pipe').toBe('Plain words in a cell. a|b c\\|d e|f');
-			await savedContaining(page, seeded, '| Plain words in a cell. a\\|b c\\\\\\|d e\\|f | open |');
+			expect(await cell(page, 2, 1).innerText(), 'each pipe shows as a pipe').toBe('Plain words in a cell. a|b c|d e|f');
+			await savedContaining(page, seeded, '| Plain words in a cell. a\\|b c\\|d e\\|f | open |');
 
 			await cell(page, 3, 1).click();
 			await editorInCell(page, cell(page, 3, 1));

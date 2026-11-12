@@ -45,33 +45,34 @@ describe('nothing typed or pasted breaks the table', () => {
 	it('stores a typed pipe escaped, so the row keeps its columns', () => {
 		const r = track(open());
 		clicked(r);
-		typed(r, 6, '|no');
+		typed(r, 5, '|no');
 		const text = r.view.state.doc.toString();
 		expect(text).toContain('Login\\|no');
 		expect(text).not.toContain('Login|no');
 		expect(table(r)!.rows[1].cells).toHaveLength(2);
-		expect(cellText(r), 'the cell editor holds the content, the pipe as typed').toBe(' Login|no ');
-		expect(cellCaret(r), 'the caret is after what went in, so the next key lands after it').toBe(9);
+		expect(cellText(r), 'the cell editor holds the content, the pipe as typed').toBe('Login|no');
+		expect(cellCaret(r), 'the caret is after what went in, so the next key lands after it').toBe(8);
 		typed(r, cellCaret(r), '!');
-		expect(cellText(r)).toBe(' Login|no! ');
+		expect(cellText(r)).toBe('Login|no!');
 	});
 
-	it('keeps a backslash typed a keystroke before a pipe as text in front of the pipe', () => {
+	it('takes a backslash typed a keystroke before a pipe as that pipe\'s escape, as markdown does', () => {
 		const r = track(open());
 		clicked(r);
-		typed(r, 6, '\\');
-		typed(r, 7, '|');
-		expect(cellText(r), 'the backslash stays, drawn, in front of the pipe').toBe(' Login\\\\| ');
-		expect(savedRow(r), 'the saved row is still two cells, the pipe escaped').toEqual(['Login\\\\\\|', 'Done']);
+		typed(r, 5, '\\');
+		typed(r, 6, '|');
+		expect(cellText(r), 'the pipe is text, its escape not drawn').toBe('Login|');
+		expect(cellCaret(r), 'the caret is after the pipe').toBe(6);
+		expect(savedRow(r), 'the saved row is still two cells, the pipe escaped once').toEqual(['Login\\|', 'Done']);
 		expect(table(r)!.rows[1].cells, 'the row is still two columns').toHaveLength(2);
 	});
 
 	it('keeps a pasted block of lines inside the cell', () => {
 		const r = track(open());
 		clicked(r);
-		pasted(r, 6, 'two\nlines');
-		expect(cellText(r), 'the break became a space where it was pasted').toBe(' Logintwo lines ');
-		expect(cellCaret(r), 'the caret is at the end of the paste').toBe(15);
+		pasted(r, 5, 'two\nlines');
+		expect(cellText(r), 'the break became a space where it was pasted').toBe('Logintwo lines');
+		expect(cellCaret(r), 'the caret is at the end of the paste').toBe(14);
 		const text = r.view.state.doc.toString();
 		expect(text).toContain('| Logintwo lines | Done |');
 		expect(text.split('\n'), 'nothing was added to or taken from the table\'s lines').toHaveLength(DOC.split('\n').length);
@@ -80,76 +81,64 @@ describe('nothing typed or pasted breaks the table', () => {
 	it('has nowhere for a line break to go', () => {
 		const r = track(open());
 		clicked(r);
-		typed(r, 6, '\n');
+		typed(r, 5, '\n');
 		expect(r.view.state.doc.toString()).toBe(DOC);
-		expect(cellText(r)).toBe(' Login ');
+		expect(cellText(r)).toBe('Login');
 	});
 
 	it('deletes an escaped pipe whole, its escape with it', () => {
 		const r = track(open());
 		clicked(r);
-		typed(r, 6, '|');
+		typed(r, 5, '|');
 		expect(r.view.state.doc.toString()).toContain('Login\\|');
-		deleted(r, 6, 7);
+		deleted(r, 5, 6);
 		expect(r.view.state.doc.toString()).toBe(DOC);
-		expect(cellCaret(r), 'the caret is where the pipe was').toBe(6);
+		expect(cellCaret(r), 'the caret is where the pipe was').toBe(5);
 		expect(table(r)!.rows[1].cells).toHaveLength(2);
 	});
 });
 
 describe('an escaped pipe the cell already holds stays escaped', () => {
-	it('keeps a backslash typed just before the pipe as a literal backslash in front of it', () => {
+	it('opens with the pipe as drawn, its table escape taken out', () => {
 		const r = track(build(PIPED));
 		clicked(r);
-		expect(cellText(r), 'setup: the cell holds the pipe, its table escape taken out').toBe(' a|b ');
-		typed(r, 2, '\\');
-		expect(cellText(r), 'a literal backslash, then the pipe').toBe(' a\\\\|b ');
-		expect(savedRow(r), 'the saved row splits into the same two cells').toEqual(['a\\\\\\|b', 'Done']);
-		expect(table(r)!.rows[1].cells).toHaveLength(2);
-		typed(r, cellCaret(r), 'c');
-		expect(cellText(r), 'the next key lands after the backslash, before the pipe').toBe(' a\\\\c|b ');
-		expect(savedRow(r)).toEqual(['a\\\\c\\|b', 'Done']);
+		expect(cellText(r)).toBe('a|b');
+		typed(r, 3, 'c');
+		expect(savedRow(r), 'text typed after it keeps the pipe escaped').toEqual(['a\\|bc', 'Done']);
 	});
 
-	it('keeps the pipe escaped when a deletion joins a backslash to it', () => {
+	it('takes a backslash typed just before the pipe as the pipe\'s escape, so the pipe stays text and the row unchanged', () => {
+		const r = track(build(PIPED));
+		clicked(r);
+		typed(r, 1, '\\');
+		expect(cellText(r), 'the pipe is still a drawn pipe').toBe('a|b');
+		expect(cellCaret(r), 'the caret is in front of the pipe').toBe(1);
+		expect(r.view.state.doc.toString(), 'the row is as it was').toBe(PIPED);
+	});
+
+	it('takes a backslash a deletion joins to the pipe as its escape', () => {
 		const r = track(build(PIPED.replace('a\\|b', 'a\\x\\|b')));
 		clicked(r);
-		expect(cellText(r), 'setup').toBe(' a\\x|b ');
-		deleted(r, 3, 4);
-		expect(cellText(r), 'the remaining backslash is literal, in front of the pipe').toBe(' a\\\\|b ');
-		expect(savedRow(r)).toEqual(['a\\\\\\|b', 'Done']);
+		expect(cellText(r), 'setup').toBe('a\\x|b');
+		deleted(r, 2, 3);
+		expect(cellText(r)).toBe('a|b');
+		expect(savedRow(r)).toEqual(['a\\|b', 'Done']);
 	});
 
-	it('removes a literal backslash in front of an escaped pipe with Backspace or Delete, the pipe staying a pipe', () => {
-		const literal = PIPED.replace('a\\|b', 'a\\\\\\|b');
-		for (const [name, from, to] of [['Backspace after it', 3, 4], ['Delete before it', 2, 3]] as const) {
-			const r = track(build(literal));
-			clicked(r);
-			expect(cellText(r), 'setup: a literal backslash, then the pipe').toBe(' a\\\\|b ');
-			deleted(r, from, to);
-			expect(cellText(r), `${name}: the backslash is gone and the pipe is still a pipe`).toBe(' a|b ');
-			expect(cellCaret(r), `${name}: the caret is where the backslash was`).toBe(2);
-			expect(savedRow(r)).toEqual(['a\\|b', 'Done']);
-		}
-	});
-
-	it('removes the drawn backslash with Backspace whichever way the caret got right after it', () => {
-		// Drawn `a\|b`: content ` a`, a markdown escape (hidden), the drawn backslash, the pipe. Right after the drawn
-		// backslash is content offset 4.
+	it('removes the drawn backslash in front of an escaped pipe with Backspace or Delete, the pipe staying a pipe', () => {
+		// `a\\\|b` draws `a\|b`: content `a\\|b`, whose first backslash is a markdown escape the editor hides.
 		const literal = PIPED.replace('a\\|b', 'a\\\\\\|b');
 		const routes: [string, (r: Rig) => void][] = [
-			['a click right after it', (r) => caretAt(r, 4)],
-			['End then ArrowLeft', (r) => { press(r, 'End'); press(r, 'ArrowLeft'); press(r, 'ArrowLeft'); }],
-			['ArrowRight from the start', (r) => { press(r, 'Home'); for (let i = 0; i < 3; i++) press(r, 'ArrowRight'); }]
+			['Backspace after it', (r) => { caretAt(r, 3); press(r, 'Backspace'); }],
+			['Delete before it', (r) => deleted(r, 1, 2)]
 		];
-		for (const [name, place] of routes) {
+		for (const [name, remove] of routes) {
 			const r = track(build(literal));
 			clicked(r);
-			expect(cellText(r), 'setup: a literal backslash, then the pipe').toBe(' a\\\\|b ');
-			place(r);
-			expect(cellCaret(r), `${name}: the caret is right after the drawn backslash`).toBe(4);
-			press(r, 'Backspace');
-			expect(cellText(r), `${name}: the drawn backslash is gone and the pipe is still a pipe`).toBe(' a|b ');
+			expect(cellText(r), 'setup: an escaped backslash, then the pipe').toBe('a\\\\|b');
+			expect(cellEditor(r)!.contentDOM.textContent, 'setup: drawn as one backslash').toBe('a\\|b');
+			remove(r);
+			expect(cellText(r), `${name}: the backslash is gone and the pipe is still a pipe`).toBe('a|b');
 			expect(savedRow(r), `${name}: the saved row`).toEqual(['a\\|b', 'Done']);
 			expect(table(r)!.rows[1].cells).toHaveLength(2);
 		}
@@ -158,9 +147,9 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 	it('still removes an escaped pipe whole with Delete in front of it', () => {
 		const r = track(build(PIPED));
 		clicked(r);
-		caretAt(r, 2);
+		caretAt(r, 1);
 		press(r, 'Delete');
-		expect(cellText(r)).toBe(' ab ');
+		expect(cellText(r)).toBe('ab');
 		expect(savedRow(r)).toEqual(['ab', 'Done']);
 	});
 
@@ -172,7 +161,7 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 	function keepsRow(content: string, edited: { from: number; to: number }) {
 		const written = writeCellEdit(BASE, 0, content, edited).row;
 		const cells = tableCells(written);
-		return cells.length === 2 && allPipesEscaped(written.slice(cells[0].rawFrom, cells[0].rawTo)) && readCell(written, 1) === ' Done ';
+		return cells.length === 2 && allPipesEscaped(written.slice(cells[0].rawFrom, cells[0].rawTo)) && readCell(written, 1) === 'Done';
 	}
 
 	it('keeps every pipe escaped whatever is typed at any place in the cell', () => {
@@ -202,16 +191,16 @@ describe('a pipe inside inline code in a cell', () => {
 		const r = track(build(CODE));
 		expect(table(r)!.rows[1].cells[0].textContent, 'setup: the closed cell draws the pipe alone').toBe('a|b');
 		clicked(r);
-		expect(cellText(r), 'the cell holds the code span with the pipe alone').toBe(' `a|b` ');
-		expect(drawn(r)).toBe(' a|b ');
+		expect(cellText(r), 'the cell holds the code span with the pipe alone').toBe('`a|b`');
+		expect(drawn(r)).toBe('a|b');
 	});
 
 	it('shows no backslash for a pipe typed there either', () => {
 		const r = track(build(PIPED.replace('a\\|b', '`ab`')));
 		clicked(r);
-		typed(r, 3, '|');
-		expect(cellText(r)).toBe(' `a|b` ');
-		expect(drawn(r)).toBe(' a|b ');
+		typed(r, 2, '|');
+		expect(cellText(r)).toBe('`a|b`');
+		expect(drawn(r)).toBe('a|b');
 		expect(savedRow(r)).toEqual(['`a\\|b`', 'Done']);
 	});
 
@@ -223,18 +212,18 @@ describe('a pipe inside inline code in a cell', () => {
 	it('deletes the character before the pipe on Backspace there, the pipe staying escaped', () => {
 		const r = track(build(CODE));
 		clicked(r);
-		caretAt(r, 3);
+		caretAt(r, 2);
 		press(r, 'Backspace');
-		expect(cellText(r), 'the "a" went').toBe(' `|b` ');
+		expect(cellText(r), 'the "a" went').toBe('`|b`');
 		expect(savedRow(r)).toEqual(['`\\|b`', 'Done']);
 	});
 
 	it('deletes the pipe, with its escape, on Backspace after it', () => {
 		const r = track(build(CODE));
 		clicked(r);
-		caretAt(r, 4);
+		caretAt(r, 3);
 		press(r, 'Backspace');
-		expect(cellText(r)).toBe(' `ab` ');
+		expect(cellText(r)).toBe('`ab`');
 		expect(savedRow(r)).toEqual(['`ab`', 'Done']);
 	});
 });

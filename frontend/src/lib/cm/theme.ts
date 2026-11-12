@@ -110,8 +110,7 @@ export const docTheme = EditorView.theme({
 	// (`widget-cell-layer.ts` copies it): the prose line height, the prose line's side padding and the prose wrapping would
 	// each wrap the editor's lines at other words than the cell's and make it taller than the row it sits in.
 	'.cm-md-cell-layer .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit' },
-	// `pre-wrap` lets the spaces padding the text from the trailing pipe hang past the line end, as the cell, which does not
-	// draw them, never wraps on them (`widget-cell-text.ts` pulls back the leading ones).
+	// `pre-wrap`, as the drawn cell wraps: a space at a line's end hangs past it, so the editor wraps at the cell's words.
 	'.cm-md-cell-layer .cm-content': {
 		padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'pre-wrap', overflowWrap: 'inherit', wordBreak: 'inherit'
 	},

@@ -5,6 +5,7 @@ import { widgetComments, type WidgetSelection } from './widget-comments';
 import { cellTextRows, emptyCellSelection, openCellText } from './widget-cell-comment';
 import { selectionOffer } from './selection-offer';
 import { offerPlace } from './offer-place';
+import { openCellState } from './widget-cell-state';
 import { type Rig } from './typed-reveal-rig';
 import { build, cellEditor, cellEl, cleanup, clicked, deleted, typed } from './widget-cell-rig';
 
@@ -43,9 +44,9 @@ describe('the Comment offer on an empty cell being edited', () => {
 		const offer = emptyCellSelection(r.view);
 		expect(offer, 'the whole cell is offered').toEqual(wholeEmptyCell());
 		expect(offer!.from >= rowFrom && offer!.to <= rowTo, 'anchored on that cell, in its own row').toBe(true);
-		typed(r, 1, 'x');
+		typed(r, 0, 'x');
 		vi.advanceTimersByTime(50);
-		deleted(r, 1, 2);
+		deleted(r, 0, 1);
 		vi.advanceTimersByTime(50);
 		expect(raised, 'the editor\'s own selection flow is the one writer').toEqual([]);
 	});
@@ -67,9 +68,9 @@ describe('the Comment offer on an empty cell being edited', () => {
 
 	it('is none once the cell has text, and none for a cell opened with text', () => {
 		const r = openCell(1);
-		typed(r, 1, 'x');
+		typed(r, 0, 'x');
 		expect(emptyCellSelection(r.view), 'a cell with text has no whole-cell offer').toBeNull();
-		deleted(r, 1, 2);
+		deleted(r, 0, 1);
 		expect(emptyCellSelection(r.view), 'emptied, it has one again').toEqual(wholeEmptyCell());
 		expect(emptyCellSelection(openCell(0).view)).toBeNull();
 	});
@@ -121,7 +122,7 @@ describe('text selected in an open cell', () => {
 		vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 120, 320, 90));
 		vi.spyOn(r.view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 700, 900));
 		const words = { top: 138, bottom: 154, right: 302 };
-		expect(offerPlace(r.view, 2, words), 'prose: beside the end of the words').toEqual({ top: 138, left: 302 });
+		expect(offerPlace(r.view, null, words), 'prose: beside the end of the words').toEqual({ top: 138, left: 302 });
 		expect(offerPlace(r.view, logFrom, words), 'a cell: the same rule, the margin beside the table').toEqual({ exact: true, top: 146, left: 362 });
 		r.view.dispatch({ selection: { anchor: logFrom, head: logTo } });
 		const { inner, at } = openCellText(r.view, logFrom, logTo)!;
@@ -129,7 +130,30 @@ describe('text selected in an open cell', () => {
 		expect(selectionOffer(r.view, () => () => null), 'the open cell\'s offer is that place').toMatchObject(offerPlace(r.view, logFrom, words));
 		r.view.dispatch({ selection: { anchor: 2, head: 6 } });
 		vi.spyOn(r.view, 'coordsAtPos').mockReturnValue({ left: 90, right: 90, top: 20, bottom: 36 });
-		expect(selectionOffer(r.view, () => () => null), 'and prose\'s offer is its place').toMatchObject(offerPlace(r.view, 2, { top: 20, bottom: 36, right: 90 }));
+		expect(selectionOffer(r.view, () => () => null), 'and prose\'s offer is its place').toMatchObject(offerPlace(r.view, null, { top: 20, bottom: 36, right: 90 }));
+	});
+
+	it('places the offer for a selection running from a table into prose at the selection\'s end, as prose\'s', () => {
+		// Select All in a document that opens with a table, and Shift+Up from the line below a table, each start or end the
+		// selection inside the table with no cell open; the words end in prose, so the offer goes beside where they end.
+		const opensWithTable = `| Feature | Status |\n| --- | --- |\n${ROW}\n\nafter\n`;
+		const below = DOC.indexOf('after');
+		const cases: [string, string, (r: Rig) => void][] = [
+			['Select All', opensWithTable, (r) => r.view.dispatch({ selection: { anchor: 0, head: r.view.state.doc.length } })],
+			['Shift+Up from below the table', DOC, (r) => r.view.dispatch({ selection: { anchor: below + 3, head: rowFrom + 4 } })],
+		];
+		for (const [name, source, select] of cases) {
+			const r = build(source, [commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() })]);
+			rigs.push(r);
+			select(r);
+			expect(r.view.state.field(openCellState, false) ?? null, `${name}: setup: no cell is open`).toBeNull();
+			vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 120, 320, 90));
+			vi.spyOn(r.view.scrollDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 700, 900));
+			const end = r.view.state.selection.main.to;
+			vi.spyOn(r.view, 'coordsAtPos').mockImplementation((pos) => pos === end ? { left: 90, right: 90, top: 240, bottom: 256 } : null);
+			expect(selectionOffer(r.view, () => () => null), `${name}: beside where the selection ends, not the table's margin`).toMatchObject({ top: 240, left: 90 });
+			expect(selectionOffer(r.view, () => () => null)?.exact, `${name}: not the table's place`).toBeUndefined();
+		}
 	});
 
 	it('measures text after an escaped pipe at its place in the cell\'s content, which has no escape', () => {
@@ -139,7 +163,7 @@ describe('text selected in an open cell', () => {
 		clicked(r, cellEl(r, 1, 0));
 		const from = piped.indexOf('Login'), to = from + 3;
 		const open = openCellText(r.view, from, to)!;
-		expect(open.inner.state.doc.toString(), 'the editor holds the content').toBe(' a|Login ');
+		expect(open.inner.state.doc.toString(), 'the editor holds the content').toBe('a|Login');
 		expect(open.inner.state.sliceDoc(open.at(from), open.at(to))).toBe('Log');
 	});
 

@@ -33,14 +33,14 @@ describe('undo and redo in a cell of a document that is not live', () => {
 	it('run the document\'s own history: undo takes the cell edit out, redo puts it back, and the cell stays open', () => {
 		const r = localDocument();
 		clicked(r);
-		typed(r, 6, 'XY');
+		typed(r, 5, 'XY');
 		expect(r.view.state.doc.toString(), 'setup: the edit reached the document').toContain('LoginXY');
 		key(r, 'z');
 		expect(r.view.state.doc.toString(), 'undo takes it out of the document').toBe(DOC);
-		expect(cellText(r), 'and the cell follows').toBe(' Login ');
+		expect(cellText(r), 'and the cell follows').toBe('Login');
 		expect(mountedEditor(r), 'the cell stays open').not.toBeNull();
 		key(r, 'y');
 		expect(r.view.state.doc.toString(), 'redo puts it back').toContain('LoginXY');
-		expect(cellText(r)).toBe(' LoginXY ');
+		expect(cellText(r)).toBe('LoginXY');
 	});
 });

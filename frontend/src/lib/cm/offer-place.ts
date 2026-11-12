@@ -14,10 +14,11 @@ export type OfferPlace = { top: number; left: number; exact?: true; below?: true
  * The one rule for where the Comment offer for selected words goes, in prose and in an open table cell alike: beside where
  * the words end, so it covers no text. In a table the place beside the words is the cell's own text or the next cell's, so
  * there the free space beside them is the margin beside the table, level with the words' line, or, where the table leaves
- * no margin, directly below it. `from` is where the words start in the document; `words` is the box of their last line.
+ * no margin, directly below it. `cellTable` is where the table starts when the words are in its open cell, and null for any
+ * other selection, one that runs from a table into prose included; `words` is the box of their last line.
  */
-export function offerPlace(view: EditorView, from: number, words: Words): OfferPlace {
-	const widget = drawnTableAt(view, from);
+export function offerPlace(view: EditorView, cellTable: number | null, words: Words): OfferPlace {
+	const widget = cellTable === null ? null : drawnTableAt(view, cellTable);
 	if (!widget) return { top: words.top, left: words.right };
 	// The table's own box: the widget around it carries padding the offer must not sit in, with the text below.
 	const table = (widget.querySelector('table') ?? widget).getBoundingClientRect(), column = view.scrollDOM.getBoundingClientRect();

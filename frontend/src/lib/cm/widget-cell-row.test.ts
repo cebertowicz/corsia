@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Lexer, type Tokens } from 'marked';
 import { tableCells } from './widget-cells';
-import { contentOffset, normalizeContent, readCell, sourceOffset, unescapeCell, writeCell, writeCellEdit } from './widget-cell-row';
+import { cellText, contentOffset, heldText, heldToSource, readCell, serializeCell, sourceOffset, sourceToHeld, unescapeCell, writeCell, writeCellEdit } from './widget-cell-row';
 
 /**
  * The row mapping, checked against the repo's own table parser (`tableCells`) and against GFM as `marked` (the app's renderer)
@@ -20,15 +20,16 @@ function random(seed: number) {
 const ALPHABET = ['a', 'b', ' ', '\\', '\\', '|', '`', '*', 'x', '\n'] as const;
 const text = (g: ReturnType<typeof random>, max: number) => Array.from({ length: g.int(max + 1) }, () => g.pick(ALPHABET)).join('');
 
-/** A content a cell can hold (what reading a cell gives): no line break, every pipe after an even backslash run, no trailing odd run. */
-const content = (g: ReturnType<typeof random>, max = 6) => normalizeContent('', text(g, max).replace(/\n/g, '')).text;
+/** A content a cell can hold (what reading a cell gives): trimmed, no line break, every pipe after an even backslash run. */
+const content = (g: ReturnType<typeof random>, max = 6) => cellText(serializeCell(text(g, max)).source);
 
 type Style = { lead: boolean; trail: boolean; pad: boolean };
 /** A row of `cells` contents in one of the written styles: compact or padded, with or without its outer pipes. */
 function rowOf(cells: string[], style: Style) {
 	const parts = cells.map((cell) => {
 		const source = cell.replaceAll('|', '\\|');
-		return style.pad ? ` ${source} ` : source;
+		// A content ending in a backslash is always padded: compact, the backslash would escape the pipe after it.
+		return style.pad || source.endsWith('\\') ? ` ${source} ` : source;
 	});
 	return `${style.lead ? '|' : ''}${parts.join('|')}${style.trail ? '|' : ''}`;
 }
@@ -63,19 +64,17 @@ describe('writeCell against tableCells and GFM', () => {
 			if (!before) continue; // the generator made something GFM does not read as one row (a block start without a pipe)
 			const col = g.int(columns);
 			const typed = text(g, 8);
-			const old = readCell(row, col);
 			ran++;
 			if (col >= real) padded++;
 			if (/\\(\||$)/.test(typed)) escaped++;
 			const written = writeCell(row, col, typed);
 			const name = `seed ${seed}: ${JSON.stringify(typed)} into column ${col} of ${JSON.stringify(row)} gives ${JSON.stringify(written)}`;
 			expect(written.includes('\n'), name).toBe(false);
-			const stored = normalizeContent(old, typed).text;
+			const stored = serializeCell(typed).text;
 			const expectedCells = Math.max(real, stored ? col + 1 : real);
 			expect(tableCells(written).length, `${name}: the repo parser's cell count`).toBe(expectedCells);
 			const read = readCell(written, col);
-			if (col < real || stored) expect(read.trim(), `${name}: the cell reads back as stored`).toBe(stored.trim());
-			if (col < real) expect(read, `${name}: byte for byte`).toBe(stored);
+			if (col < real || stored) expect(read, `${name}: the cell reads back as stored, its pads trimmed`).toBe(stored.trim());
 			const repo = repoCells(written);
 			for (let other = 0; other < real; other++) {
 				if (other !== col) expect(repo[other], `${name}: column ${other} is untouched`).toBe(cells[other].trim());
@@ -83,8 +82,8 @@ describe('writeCell against tableCells and GFM', () => {
 			const gfm = gfmCells(written, columns);
 			expect(gfm, `${name}: GFM still reads one row`).not.toBeNull();
 			for (let at = 0; at < columns; at++) expect(gfm![at], `${name}: GFM agrees on column ${at}`).toBe(repo[at] ?? '');
-			// Writing back what was read changes nothing.
-			expect(writeCell(written, col, read), `${name}: idempotent`).toBe(written);
+			// Writing back what was stored changes nothing.
+			expect(writeCell(written, col, stored), `${name}: idempotent`).toBe(written);
 		}
 		// The cases the generator is for are actually run: padded columns, and backslashes before a pipe or at the end.
 		expect(ran).toBeGreaterThan(3000);
@@ -107,39 +106,43 @@ describe('writeCell against tableCells and GFM', () => {
 	});
 });
 
-describe('normalizing what a cell cannot hold as typed', () => {
-	it('escapes a typed pipe, and keeps a pipe behind a typed backslash a pipe, with that backslash drawn', () => {
-		expect(writeCell('| Login | Done |', 0, ' Login|no ')).toBe('| Login\\|no | Done |');
-		// A backslash typed in front of a pipe: the content `a\|b` would draw `a|b`, so it is kept as a literal backslash.
-		expect(normalizeContent('a|b', 'a\\|b').text).toBe('a\\\\|b');
-		expect(writeCell('| a\\|b |', 0, 'a\\|b')).toBe('|a\\\\\\|b|');
+describe('the one serializer', () => {
+	it('writes the content between one space each side, an empty cell included', () => {
+		expect(serializeCell('Login').source).toBe(' Login ');
+		expect(serializeCell('').source).toBe('  ');
+		expect(writeCell('|Login|Done|', 0, 'Logins')).toBe('| Logins |Done|');
 	});
 
-	it('removes a literal backslash in front of a pipe when it is deleted, instead of putting it back', () => {
-		expect(normalizeContent(' a\\\\|b ', ' a\\|b ').text, 'Backspace or Delete of either source backslash').toBe(' a|b ');
-		expect(writeCell('| a\\\\\\|b | Done |', 0, ' a\\|b ')).toBe('| a\\|b | Done |');
+	it('escapes a typed pipe, and takes a backslash typed in front of a pipe as its escape, as markdown does', () => {
+		expect(writeCell('| Login | Done |', 0, 'Login|no')).toBe('| Login\\|no | Done |');
+		expect(serializeCell('a\\|b').text, 'reads back as a plain pipe').toBe('a|b');
+		expect(writeCell('| a\\|b |', 0, 'a\\|b'), 'the cell already held that').toBe('| a\\|b |');
+		expect(writeCell('| x |', 0, 'a\\\\|b'), 'an even run before a pipe is a backslash, kept').toBe('| a\\\\\\|b |');
 	});
 
-	it('keeps a trailing backslash off the closing pipe, in a compact row and once a pad is deleted', () => {
-		expect(writeCell('|Login|Done|', 0, 'Login\\')).toBe('|Login\\ |Done|');
-		expect(writeCell('| Login\\ | Done |', 0, ' Login\\')).toBe('| Login\\ | Done |');
-		expect(writeCell('|Login|Done|', 0, 'Login\\\\'), 'an even run escapes nothing').toBe('|Login\\\\|Done|');
+	it('removes a backslash in front of a pipe when it is deleted', () => {
+		expect(writeCell('| a\\\\\\|b | Done |', 0, 'a\\|b')).toBe('| a\\|b | Done |');
+	});
+
+	it('keeps a trailing backslash off the closing pipe with the pad', () => {
+		expect(writeCell('|Login|Done|', 0, 'Login\\')).toBe('| Login\\ |Done|');
+		expect(writeCell('|Login|Done|', 0, 'Login\\\\'), 'an even run too').toBe('| Login\\\\ |Done|');
 	});
 
 	it('turns line breaks into a space between words, and into nothing beside a space', () => {
-		expect(normalizeContent(' Login ', ' Logintwo\nlines ').text).toBe(' Logintwo lines ');
-		expect(normalizeContent(' Login ', ' Login\n ').text).toBe(' Login ');
-		expect(normalizeContent('', '\n').text).toBe('');
+		expect(serializeCell('Logintwo\nlines').text).toBe('Logintwo lines');
+		expect(serializeCell('Login\n ').text).toBe('Login ');
+		expect(serializeCell('\n').text).toBe('');
 	});
 
 	it('gives a row without outer pipes the pipe its edge cell needs', () => {
-		expect(writeCell('a | b', 0, '')).toBe('|| b');
-		expect(writeCell('a | b', 1, ' ')).toBe('a | |');
-		expect(writeCell('a | b', 0, '# x ')).toBe('|# x | b');
+		expect(writeCell('a | b', 0, '')).toBe('|  | b');
+		expect(writeCell('a | b', 1, '')).toBe('a |  |');
+		expect(writeCell('a | b', 0, '# x')).toBe('| # x | b');
 	});
 
 	it('opens a column the row lacks with the empty cells before it', () => {
-		expect(writeCell('| Login |', 2, 'Z')).toBe('| Login | | Z |');
+		expect(writeCell('| Login |', 2, 'Z')).toBe('| Login |  | Z |');
 		expect(writeCell('| Login', 1, 'Z')).toBe('| Login | Z |');
 		expect(writeCell('| Login |', 2, ''), 'nothing typed opens nothing').toBe('| Login |');
 	});
@@ -154,15 +157,26 @@ describe('where places in a cell sit', () => {
 		expect(contentOffset(source, 3), 'between an escape and its pipe is before the pipe').toBe(2);
 	});
 
-	it('keeps the caret where the reader typed through what normalizing adds or takes away', () => {
-		expect(normalizeContent('a|b', 'a\\|b').at(2), 'after the typed backslash, before the pipe').toBe(3);
-		expect(normalizeContent('Login', 'Login\\').at(6), 'before the space a trailing backslash gains').toBe(6);
-		expect(normalizeContent(' a\\\\|b ', ' a\\|b ').at(3), 'where the deleted backslash was').toBe(2);
-		expect(writeCellEdit('| Login |', 1, 'Z').at(1), 'after the typed character, inside the new pads').toBe(2);
+	it('holds the cell trimmed, and keeps a space typed at its edge while the source still reads the same', () => {
+		expect(heldText('  Log\\|in  ')).toEqual({ text: 'Log|in', base: 2 });
+		expect(heldText(' Login  ', 'Login ')).toEqual({ text: 'Login ', base: 1 });
+		expect(heldText(' Logins ', 'Login '), 'the source changed under it').toEqual({ text: 'Logins', base: 1 });
+		expect(heldText('   ')).toEqual({ text: '', base: 1 });
+		expect(heldText('')).toEqual({ text: '', base: 0 });
+		const source = '  Log\\|in  ', held = heldText(source);
+		for (let at = 0; at <= held.text.length; at++) expect(sourceToHeld(source, held, heldToSource(held, at)), `held ${at}`).toBe(at);
+		expect(sourceToHeld(source, held, 0), 'a pad before the text is its start').toBe(0);
+		expect(sourceToHeld(source, held, source.length), 'a pad after it is its end').toBe(held.text.length);
+	});
+
+	it('keeps the caret where the reader typed', () => {
+		expect(serializeCell('a\\|b').at(2), 'after the typed backslash is before the pipe').toBe(1);
+		expect(serializeCell('Login\\').at(6)).toBe(6);
+		expect(writeCellEdit('| Login |', 1, 'Z').at(1), 'after the typed character').toBe(1);
 	});
 
 	it('sends the edit itself when its text matches what is beside it', () => {
-		const { changes } = writeCellEdit('| aa |', 0, ' aaa ', { from: 2, to: 2 });
-		expect(changes, 'after the first `a` (offset 2 of the cell), not after the second').toEqual([{ from: 3, to: 3, insert: 'a' }]);
+		const { changes } = writeCellEdit('| aa |', 0, 'aaa', { from: 2, to: 2 });
+		expect(changes, 'after the first `a` (offset 2 of the cell source), not after the second').toEqual([{ from: 3, to: 3, insert: 'a' }]);
 	});
 });

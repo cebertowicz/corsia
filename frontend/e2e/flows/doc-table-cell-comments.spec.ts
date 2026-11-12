@@ -143,6 +143,26 @@ for (const layout of LAYOUTS) {
 			await frame(page, `05-selection-composer-${at}`);
 		});
 
+		test('a selection from below a table up into it is offered Comment where it ends, as prose\'s is', async ({ page }) => {
+			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			const line = page.locator('.cm-line', { hasText: 'Paragraph below the first table.' });
+			await line.scrollIntoViewIfNeeded();
+			await line.click();
+			await page.keyboard.press('Home');
+			await page.keyboard.press('Shift+ArrowUp');
+			await page.keyboard.press('Shift+ArrowUp');
+			const offer = page.locator('.sel-comment');
+			await expect(offer, 'the selection running into the table is offered Comment').toBeVisible();
+			await expect(page.locator('.cm-md-cell-editor'), 'setup: no cell opened').toHaveCount(0);
+			const shown = await boxOf(offer), prose = await boxOf(line), table = await boxOf(page.locator('.cm-md-table table').first());
+			expect(await offer.evaluate((el) => el.classList.contains('below')), 'not the table\'s place below it').toBe(false);
+			expect(shown.x < table.right && Math.abs(shown.y - prose.y) <= 24,
+				`beside where the selection ends, on the prose line, not in the table's margin (${JSON.stringify({ shown, prose, table })})`).toBe(true);
+			await frame(page, `05-selection-into-table-${at}`);
+		});
+
 		test('a click on a comment covering a whole cell opens the comment and the cell, and the comment stays open', async ({ page }) => {
 			test.setTimeout(120_000);
 			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });

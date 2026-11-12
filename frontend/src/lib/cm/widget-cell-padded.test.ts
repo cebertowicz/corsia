@@ -10,7 +10,7 @@ import { build, cellCaret, cellText, cleanup, clicked, table, typed } from './wi
 
 /**
  * A row shorter than its header is drawn with empty cells padded in at its end, none of which has source of its own. Each
- * one opens in its own column and takes what is typed there, gaining the delimiters of every padded cell before it; none
+ * one opens in its own column and takes what is typed there, gaining every padded cell before it, written empty; none
  * takes a comment until it has text, since every padded cell of the row sits at the same offset (the row's end).
  */
 
@@ -36,9 +36,9 @@ describe('the padded cells of a short row', () => {
 				expect(opened(r)?.col, `the editor opens over the clicked cell, column ${col}`).toBe(col);
 				expect(cellText(r)).toBe('');
 				typed(r, 0, 'Z');
-				const expected = `${row}${' |'.repeat(col - real)} Z |`;
+				const expected = `${row}${'  |'.repeat(col - real)} Z |`;
 				expect(bodyRow(r), `the text lands in column ${col}, with the cells before it delimited empty`).toBe(expected);
-				expect(cellText(r)).toBe(' Z ');
+				expect(cellText(r)).toBe('Z');
 				expect(opened(r)?.col, 'the editor stays over that cell').toBe(col);
 				expect([...table(r)!.rows[1].cells].map((cell) => cell.textContent), 'drawn in that column').toEqual(
 					[...row.split('|').slice(1, -1).map((text) => text.trim()), ...Array(4 - real).fill('')].map((text, at) => at === col ? 'Z' : text));
@@ -73,7 +73,7 @@ describe('the padded cells of a short row', () => {
 				clicked(r, table(r)!.rows[1].cells[col]);
 				expect(opened(r)?.col, `setup: the cell opened is column ${col}`).toBe(col);
 				typed(r, 0, 'Z');
-				expect(bodyRow(r), `row ${JSON.stringify(row)}: no pipe is written twice`).toBe(`${row}${' |'.repeat(col - real)} Z |`);
+				expect(bodyRow(r), `row ${JSON.stringify(row)}: no pipe is written twice`).toBe(`${row}${'  |'.repeat(col - real)} Z |`);
 				expect([...table(r)!.rows[1].cells].map((cell) => cell.textContent), 'the text is drawn in the column typed in')
 					.toEqual(Array.from({ length: 4 }, (_, at) => at === col ? 'Z' : at < real ? row.split('|')[at + 1].trim() : ''));
 			}
@@ -95,8 +95,8 @@ describe('the padded cells of a short row', () => {
 		clicked(r, table(r)!.rows[1].cells[1]);
 		for (const char of 'world') typed(r, cellCaret(r), char);
 		expect(bodyRow(r)).toBe('| Login | world |');
-		expect(cellText(r)).toBe(' world ');
-		expect(cellCaret(r), 'the caret is after the last letter, before the trailing pad').toBe(6);
+		expect(cellText(r)).toBe('world');
+		expect(cellCaret(r), 'the caret is after the last letter').toBe(5);
 	});
 
 	it('leaves a real empty cell its whole-cell Comment offer', () => {

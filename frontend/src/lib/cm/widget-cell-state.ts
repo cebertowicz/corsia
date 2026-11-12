@@ -1,7 +1,6 @@
 import { StateEffect, StateField, type ChangeDesc, type EditorState, type Text } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
 import { tableGrid, type CellSpan } from './widget-cells';
-import { unescapeCell } from './widget-cell-row';
 
 /**
  * Which table cell is being edited, and where its text lives in the document.
@@ -29,9 +28,6 @@ export const closeCell = StateEffect.define<null>();
 
 /** The cell's whole source between its two pipes, padding included. */
 export const cellSource = (state: EditorState, cell: OpenCell) => state.sliceDoc(cell.from, cell.to);
-
-/** The cell's content, which is what its editor holds: its source with the table's own `\|` escapes out (`widget-cell-row.ts`). */
-export const cellContent = (state: EditorState, cell: OpenCell) => unescapeCell(cellSource(state, cell));
 
 /**
  * The cell the source span describes. Whether it is padded is the span's own flag, set by `tableGrid` where it pads a short

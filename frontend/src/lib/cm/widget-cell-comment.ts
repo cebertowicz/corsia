@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
 import { tableCells } from './widget-cells';
-import { contentOffset } from './widget-cell-row';
+import { heldText, sourceToHeld } from './widget-cell-row';
 import { OFFER_GAP, OFFER_ROOM, offerPlace } from './offer-place';
 import { selectionIn } from './widget-selection';
 import { acrossColumn } from './comment-anchor-geometry';
@@ -65,8 +65,9 @@ export function openCellText(view: EditorView, from: number, to: number): { inne
 	if (!cell || from < cell.from || to > cell.to) return null;
 	const el = view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
 	const inner = el && EditorView.findFromDOM(el);
-	const source = cellSource(view.state, cell);
-	return inner ? { inner, at: (pos) => contentOffset(source, pos - cell.from) } : null;
+	if (!inner) return null;
+	const source = cellSource(view.state, cell), held = heldText(source, inner.state.doc.toString());
+	return { inner, at: (pos) => sourceToHeld(source, held, pos - cell.from) };
 }
 
 type Extent = { top: number; bottom: number };

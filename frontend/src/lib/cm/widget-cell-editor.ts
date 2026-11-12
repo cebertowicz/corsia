@@ -1,14 +1,13 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { GFM } from '@lezer/markdown';
+import { Autolink, Strikethrough } from '@lezer/markdown';
 import { emitProductEvent } from '$lib/product_events';
 import { cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import {
-	CELL_SYNC, cellContent, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
+	CELL_SYNC, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
-import { caretOnCellText, cellDifference, cellPaddingFlush } from './widget-cell-text';
-import { contentOffset, sourceOffset, writeCellEdit } from './widget-cell-row';
+import { heldText, heldToSource, runDifference, sourceToHeld, writeCellEdit } from './widget-cell-row';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
 import { CellPresses } from './widget-cell-presses';
@@ -20,9 +19,10 @@ import { cellHighlight } from './theme';
 /**
  * Editing the text of a rendered table cell where it is read.
  *
- * Clicking a drawn cell opens a small editor over that cell's own `<td>`, holding that cell's content: its source between
- * its pipes with the table's own `\|` escapes out (`widget-cell-row.ts`). Each keystroke writes that content back into the
- * row through the one row mapping, `writeCellEdit`, as one transaction of the minimal changes to the row, so the document
+ * Clicking a drawn cell opens a small editor over that cell's own `<td>`, holding that cell's content as GFM reads it: its
+ * source between its pipes with the table's own `\|` escapes out and its pads trimmed (`widget-cell-row.ts`). Each keystroke
+ * writes that content back into the row through the one serializer, `writeCellEdit`, as one transaction of the minimal
+ * changes to the row, so the document
  * keeps its single Yjs binding, its single undo manager and its single markdown parse: the nested editor holds no document
  * state of its own and is rewritten from the document whenever the two disagree, which is also how a live edit from
  * another client reaches the cell. Formatting renders while you type because the cell runs the document's own hide-syntax pass, handed
@@ -37,6 +37,17 @@ import { cellHighlight } from './theme';
 /** The extensions a cell's own editor runs over its source. `markdown-live.ts` supplies the document's hide-syntax pass. */
 export const cellEditorExtensions = Facet.define<Extension, readonly Extension[]>({ combine: (values) => values });
 
+/**
+ * A cell holds inline content only, as GFM parses a cell: no block construct is parsed, so `-`, `# x`, `---`, `> q` or `1. x`
+ * are the literal text the table draws, and no markdown key (Enter continuing a list) outranks the cell's own keys.
+ */
+const INLINE_MARKDOWN = markdown({
+	addKeymap: false,
+	extensions: [Strikethrough, Autolink, {
+		remove: ['Blockquote', 'BulletList', 'OrderedList', 'ATXHeading', 'SetextHeading', 'HorizontalRule', 'FencedCode', 'IndentedCode', 'HTMLBlock', 'LinkReference']
+	}]
+});
+
 type Change = { from: number; to: number; insert: string };
 
 /** The cell's editor, and the cell it is held over, for as long as one cell is open. */
@@ -45,7 +56,9 @@ class CellEditors {
 	private left: OpenCell | null = null;
 	private fresh = false;
 	// Where the reader's own edit leaves their selection in the content the document now holds, for the write back into the editor.
-	private written: { anchor: number; head: number } | null = null;
+	private written: { text: string; anchor: number; head: number } | null = null;
+	// Where the editor's text starts in the cell's source.
+	private base = 0;
 	// Whether the reader has typed in the open cell, and the text it held when it opened: leaving it with other text is an edit.
 	private edited = false;
 	private opened = '';
@@ -132,11 +145,13 @@ class CellEditors {
 	 * where that edit left it in the content as stored (`written`); for anything else it maps through the change.
 	 */
 	private syncEditor(state: EditorState, cell: OpenCell, editor: EditorView) {
-		const text = cellContent(state, cell), current = editor.state.doc.toString(), written = this.written;
+		const current = editor.state.doc.toString(), written = this.written;
 		this.written = null;
+		const { text, base } = heldText(cellSource(state, cell), written?.text ?? current);
+		this.base = base;
 		if (current === text && !written) return;
-		const selection = written && written.anchor <= text.length && written.head <= text.length ? written : undefined;
-		editor.dispatch({ changes: current === text ? [] : cellDifference(current, text), selection, userEvent: CELL_SYNC });
+		const selection = written && written.text === text ? { anchor: written.anchor, head: written.head } : undefined;
+		editor.dispatch({ changes: current === text ? [] : runDifference(current, text), selection, userEvent: CELL_SYNC });
 	}
 
 	/** The caret where the click landed, as a click in prose puts it. */
@@ -154,8 +169,8 @@ class CellEditors {
 	 * selection inside a cell as the same kind of selection they already handle in prose.
 	 */
 	private mirrorToDocument(cell: OpenCell, editor: EditorView) {
-		const content = editor.state.doc.toString(), main = editor.state.selection.main;
-		const anchor = cell.from + sourceOffset(content, main.anchor), head = cell.from + sourceOffset(content, main.head);
+		const held = { text: editor.state.doc.toString(), base: this.base }, main = editor.state.selection.main;
+		const anchor = cell.from + heldToSource(held, main.anchor), head = cell.from + heldToSource(held, main.head);
 		const selection = this.host.state.selection.main;
 		if (selection.anchor === anchor && selection.head === head) return;
 		this.host.dispatch({ selection: { anchor, head }, userEvent: CELL_SYNC });
@@ -183,17 +198,19 @@ class CellEditors {
 		if (!next) { this.leave(); return; }
 		this.left = this.cell;
 		this.host.dispatch({ effects: openCellAt.of(next) });
-		// The caret goes to the end of the next cell's text: the end of its slice, which the caret filter keeps on the text.
+		// The caret goes to the end of the next cell's text.
 		this.editor?.dispatch({ selection: { anchor: this.editor.state.doc.length } });
 		this.editor?.focus();
 	}
 
-	/** The cell's own editor: the document's markdown parse and hide-syntax pass, and no history of its own. */
+	/** The cell's own editor: an inline markdown parse, the document's hide-syntax pass, and no history of its own. */
 	private attach(cell: OpenCell) {
 		const host = this.host;
+		const source = cellSource(host.state, cell), held = heldText(source);
+		this.base = held.base;
 		// The caret goes where the click landed: the document's selection is the click's position, mapped into the cell.
 		const clicked = host.state.selection.main;
-		const at = clicked.from >= cell.from && clicked.from <= cell.to ? contentOffset(cellSource(host.state, cell), clicked.from - cell.from) : 0;
+		const at = clicked.from >= cell.from && clicked.from <= cell.to ? sourceToHeld(source, held, clicked.from - cell.from) : 0;
 		// The element a cell's editor is recognised by: the comment flows and the paint pass leave it alone.
 		const wrap = document.createElement('div');
 		wrap.className = 'cm-md-cell-editor';
@@ -202,15 +219,13 @@ class CellEditors {
 		this.editor = new EditorView({
 			parent: wrap,
 			state: EditorState.create({
-				doc: cellContent(host.state, cell),
+				doc: held.text,
 				selection: { anchor: at, head: at },
 				extensions: [
-					markdown({ extensions: GFM }),
+					INLINE_MARKDOWN,
 					...host.state.facet(cellEditorExtensions),
 					cellHighlight,
 					EditorView.lineWrapping,
-					cellPaddingFlush,
-					EditorState.transactionFilter.of((tr) => (tr.isUserEvent(CELL_SYNC) || tr.docChanged ? tr : caretOnCellText(tr))),
 					EditorView.updateListener.of(this.fromCell),
 					cellKeys(host, {
 						leave: () => this.leave(),
@@ -233,15 +248,17 @@ class CellEditors {
 			// change sent to the document the edit itself.
 			let from = Infinity, to = -Infinity;
 			update.changes.iterChangedRanges((fromA, toA) => { from = Math.min(from, fromA); to = Math.max(to, toA); });
+			const before = { text: update.startState.doc.toString(), base: this.base };
 			const line = this.host.state.doc.lineAt(cell.rowStart);
-			const write = writeCellEdit(line.text, cell.col, update.state.doc.toString(), { from, to });
+			const edited = { from: heldToSource(before, from), to: heldToSource(before, to) };
+			const write = writeCellEdit(line.text, cell.col, update.state.doc.toString(), edited);
 			const { anchor, head } = update.state.selection.main;
-			this.written = { anchor: write.at(anchor), head: write.at(head) };
+			this.written = { text: write.text, anchor: write.at(anchor), head: write.at(head) };
 			this.edited = true;
 			const changes: Change[] = write.changes.map((change) => ({ ...change, from: line.from + change.from, to: line.from + change.to }));
 			const event = update.transactions[update.transactions.length - 1]?.annotation(Transaction.userEvent);
-			// An edit the row already holds (the pad after a trailing backslash deleted and written back) changes no document,
-			// so the editor is put back to the content as stored here.
+			// An edit the row already holds (a backslash typed in front of a pipe, which was already its escape) changes no
+			// document, so the editor is put back to the content as stored here.
 			if (changes.length) this.host.dispatch(event ? { changes, userEvent: event } : { changes });
 			else this.syncEditor(this.host.state, cell, editor);
 		}

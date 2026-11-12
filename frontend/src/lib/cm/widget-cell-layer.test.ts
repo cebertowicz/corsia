@@ -92,8 +92,8 @@ describe('the layer a cell editor lives in', () => {
 	it('leaves the cell\'s own live text under the editor, so the row grows with what is typed', () => {
 		const r = track(open());
 		clicked(r);
-		typed(r, 6, ' and a great many words after them');
-		expect(cellText(r), 'the editor holds the cell\'s source').toBe(' Login and a great many words after them ');
+		typed(r, 5, ' and a great many words after them');
+		expect(cellText(r), 'the editor holds the cell\'s content').toBe('Login and a great many words after them');
 		expect(editingCell(r)!.textContent, 'the cell underneath shows the same text, unseen').toBe('Login and a great many words after them');
 	});
 
