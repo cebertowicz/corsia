@@ -131,6 +131,38 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
 });
 
+test('@flow:doc-margin-cards after a new comment is cancelled and the column closed, typing lands at the selection, never at the top', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	const text = page.locator('.cm-content');
+	const before = (await text.textContent())!;
+	// Select a stretch of a line no comment is on, and start a comment on it: the composer opens in the column beside it.
+	const target = 'Paragraph 6 of the plan';
+	await page.locator('.cm-line', { hasText: target }).first().click({ position: { x: 4, y: 4 } });
+	await page.keyboard.press('Home');
+	for (let i = 0; i < target.length; i++) await page.keyboard.press('Shift+ArrowRight');
+	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toBe(target);
+	await page.locator('.sel-comment').click();
+	const composer = page.locator('.canvas-comment-drawer.margin .margin-composer');
+	await expect(composer.getByPlaceholder('Comment, or @ to tag an agent')).toBeFocused();
+	await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
+	await expect(composer).toHaveCount(0);
+	await expect(card(page, doc, FIRST), 'cancelling the draft keeps the column').toBeVisible();
+	// The comments control closes the column; focus goes back to the text, not to the control.
+	await pill(page).click();
+	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+	await expect(text).toBeFocused();
+	await page.keyboard.type('Z');
+	const after = (await text.textContent())!;
+	let at = 0;
+	while (at < before.length && before[at] === after[at]) at++;
+	const from = before.indexOf(target), to = from + target.length;
+	expect(after[at], 'the typed character is in the text').toBe('Z');
+	expect(at, 'it lands inside or at an end of the commented selection, not above it').toBeGreaterThanOrEqual(from);
+	expect(at, 'it lands inside or at an end of the commented selection, not below it').toBeLessThanOrEqual(to);
+});
+
 test('@flow:doc-margin-cards each suggestion is its own card with Accept and Reject', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
 	test.setTimeout(120_000);

@@ -70,8 +70,7 @@
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let chatCanvas = $state<HTMLDivElement | undefined>(undefined);
 	/** Whether this canvas has room for the comment margin beside its transcript, and which card is picked. */
-	const commentMargin = createChatCommentMargin(() => chatCanvas ?? null, () => $activeThreadId,
-		() => $messages.some(message => message.thread_id === $activeThreadId && !!message.chat_comments?.length), () => artifactPaneOpen);
+	const commentMargin = createChatCommentMargin(() => chatCanvas ?? null, () => artifactPaneOpen);
 	let userIsNearBottom = $state(true);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
