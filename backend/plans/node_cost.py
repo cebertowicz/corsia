@@ -168,21 +168,30 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
 
 def own_many_timed(
     node_ids, *, db=None, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
+    working_only: bool = False,
 ) -> tuple[dict[str, dict], dict[str, node_time.Span]]:
     """``own_many`` plus each node's own time intervals, from the same reads.
 
     ``dollars`` is these nodes' ``usage_cost.usage_dollars`` when the caller already priced them;
     None prices them here.
+
+    ``working_only`` reads only the Turns: ``execution`` and the working spans are the real
+    figures; tokens, cost, recording failures and waiting stay at their empty values. Only a
+    caller reading nothing but rolled working seconds passes it (``node_cost_scoped.working_seconds``).
     """
     ids = sorted({str(value) for value in node_ids})
     if not ids:
         return {}, {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
-        usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
-        failures = _own_failures(connection, ids)
-        execution, working = _own_execution(connection, ids, clock)
-        waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
+        if working_only:
+            usage, failures, waiting = {}, {}, {}
+            execution, working = _own_execution(connection, ids, clock)
+        else:
+            usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
+            failures = _own_failures(connection, ids)
+            execution, working = _own_execution(connection, ids, clock)
+            waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
     result: dict[str, dict] = {}
     spans: dict[str, node_time.Span] = {}
     for node_id in ids:

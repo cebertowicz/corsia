@@ -86,6 +86,53 @@ def test_a_scoped_initiative_under_a_phase_equals_the_full_plan_figure(db):
     assert scoped[member.id]["cost"]["tokens"]["known"] == 110
 
 
+def test_working_seconds_equals_the_scoped_rolled_execution_seconds_per_node(db):
+    """``working_seconds`` skips the ledger, failure, waiting and initiative reads; the seconds are ``project``'s.
+
+    The roll carries overlapping Turns (merged, not added), a Turn still running (counted to the
+    clock), a Turn that ended before it started (unknown, no seconds), an attached child plan,
+    and a node that also has usage rows and a wait, which the lean read leaves out.
+    """
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _phase(db, plan.id)
+    first = _task(db, plan.id, "First", parent_id=phase.id)
+    second = _task(db, plan.id, "Second", parent_id=phase.id)
+    idle = _task(db, plan.id, "Idle", parent_id=phase.id)
+    delegate = _task(db, plan.id, "Delegate", parent_id=phase.id, spawn_kind="claude-code")
+    service.transition_node(delegate.id, "active", db=db)
+    service.ensure_plan("thread", "child", db=db)
+    mutations.attach_spawned_thread(delegate.id, "child", db=db)
+    child_plan = db.execute("SELECT * FROM plans WHERE owner_kind='thread' AND owner_id='child'").fetchone()
+    inner = _phase(db, child_plan["id"], "Inner")
+    one = _task(db, child_plan["id"], "One", parent_id=inner.id)
+    two = _task(db, child_plan["id"], "Two", parent_id=inner.id)
+    _watch(db, first, 0, 60)
+    _usage_tokens(db, first, 500)
+    _turn(db, first, 70, 80)  # 10 min
+    _turn(db, second, 75, 90)  # 15 min, overlaps the first by 5
+    _turn(db, one, 10, 30, thread_id="child")  # 20 min
+    _turn(db, two, 20, 40, thread_id="child")  # 20 min, overlaps `one` by 10
+    _turn(db, idle, 50, 40)  # ended before it started: unknown, adds nothing
+    db.execute(
+        """INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,
+               plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role)
+           VALUES ('running-turn','owner',0,'test-model','running',?,'boot',?,?,'attempt-run',?,'execution')""",
+        ((T0 + timedelta(minutes=100)).strftime("%Y-%m-%dT%H:%M:%SZ"), plan.id, idle.id, idle.commitment_id),
+    )
+    db.commit()
+
+    now = T0 + timedelta(minutes=110)
+    nodes = [phase.id, first.id, second.id, idle.id, delegate.id]
+    lean = node_cost_scoped.working_seconds(nodes, db=db, now=now)
+    full = node_cost_scoped.project([], nodes, (), db=db, now=now)[1]
+    assert lean == {node_id: full[node_id]["execution"]["seconds"] for node_id in nodes}
+    assert lean[first.id] == 10 * 60
+    assert lean[second.id] == 15 * 60
+    assert lean[idle.id] == 10 * 60  # the running Turn, 100 to 110 min; the unknown Turn adds none
+    assert lean[delegate.id] == 30 * 60  # union of 10-30 and 20-40 in the child plan
+    assert lean[phase.id] == 20 * 60 + 30 * 60 + 10 * 60  # 70-90 merged, the child's 30, the running 10
+
+
 def test_a_scoped_initiative_with_a_same_plan_split_sibling_equals_the_full_plan_figure(db):
     """A commitment sharer in the member's own plan, outside the members' subtrees."""
     from plans import followups
