@@ -28,7 +28,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await openLiveDocument(writer, document);
 			await openLiveDocument(reader, document);
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
-			await openComments(reader);
+			await openComments(reader, /^3 threads\b/);
 			const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await expect(comments).toBeVisible();
 			const jump = comments.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).first();
@@ -68,7 +68,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			if (width <= 768) await reader.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await reader.getByText(document.title, { exact: true }).first().click();
 			await expect(reader.locator('.cm-content')).toContainText(quote);
-			await openComments(reader);
+			await openComments(reader, /^3 threads\b/);
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reader.getByText(`First ${stamp}`, { exact: true })).toBeVisible();
 			await expect(reader.getByText(`Second ${stamp}`, { exact: true })).toBeVisible();

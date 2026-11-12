@@ -19,7 +19,7 @@ for (const host of ['comment', 'reply'] as const) {
 				: route.fulfill({ json: { reviews: [], reviewers: agents, taggable_agents: agents } }));
 			await open(page, doc, info.project.name.includes('mobile') ? 'phone' : 'closed', 'light');
 			if (host === 'comment') await beginComment(page, 'Step 1: the rollout proceeds to the next ring.');
-			else await openComments(page);
+			else await openComments(page, /^1 thread\b/);
 			const input = host === 'comment'
 				? page.locator('textarea[placeholder="Comment, or @ to tag an agent"]:not([inert] *)')
 				: page.locator('.ct:not([inert] *)').filter({ hasText: 'Existing thread' }).first().locator('textarea');

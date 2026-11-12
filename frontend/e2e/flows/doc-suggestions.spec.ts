@@ -17,7 +17,7 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	const [loose, fine, stale] = seeded.ids;
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
-		await openCommentsPill(page);
+		await openCommentsPill(page, /^3 threads\b/);
 		await expect(seeded.drawer).toBeVisible();
 		await showAllThreads(seeded.drawer);
 	};

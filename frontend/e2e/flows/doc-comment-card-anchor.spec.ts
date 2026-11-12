@@ -164,7 +164,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
-	await openComments(page);
+	await openComments(page, /^\d+ (open )?threads?/i);
 	await expectMarginColumnUp(page);
 }
 

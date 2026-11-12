@@ -315,7 +315,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		// Measure the re-open from the reader's place, whatever the Resolve above did to it.
 		await placeTarget();
 		const caretBeforeDrawer = await caretBeforeFocusLeft();
-		await openComments(page);
+		await openComments(page, /0 threads/);
 		const drawer = page.locator('[data-doc-comments-drawer]');
 		await expect(drawer).toBeVisible();
 		await openResolved(drawer);

@@ -53,7 +53,7 @@ for (const width of [1440, 393]) {
 		const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.sel-comment') !== null, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
 		expect(hit, 'the button is the element under its own centre').toBe(true);
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
-		await openComments(page);
+		await openComments(page, /^1 thread\b/);
 		await expect(comments).toBeVisible();
 		await expect(button).toHaveCount(0);
 		await closeComments(comments);

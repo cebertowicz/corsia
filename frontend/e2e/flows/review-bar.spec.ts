@@ -388,7 +388,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
 	// The pill names its threads, then any unsent messages: "2 threads, 2 messages not sent yet".
-	await openComments(page);
+	await openComments(page, /^2 threads\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
@@ -414,7 +414,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await openComments(page);
+	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
 	await expect(approve).toBeVisible();
@@ -441,7 +441,7 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await openComments(page);
+		await openComments(page, /^\d+ threads?\b/);
 		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
@@ -457,7 +457,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	await open(page, doc, mode, theme);
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
-	await openComments(page);
+	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
@@ -481,7 +481,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await sent;
-	await openComments(page);
+	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByText('Sending your review…')).toBeVisible();
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
@@ -540,7 +540,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await openComments(page);
+	await openComments(page, /^6 threads, 6 messages not sent yet$/);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expect(drawer).toBeVisible();
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);

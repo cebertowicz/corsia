@@ -130,7 +130,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('[data-doc-activity-pill]')).toHaveCount(0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	const paneLabel = await page.locator('.pane-scope').textContent();
-	await openComments(page);
+	await openComments(page, /^1 thread\b/);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await expect(drawer).toBeVisible();
 	const viewportBefore = await page.evaluate(() => window.visualViewport?.height ?? window.innerHeight);

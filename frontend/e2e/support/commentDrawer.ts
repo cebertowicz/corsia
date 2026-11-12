@@ -34,10 +34,12 @@ function commentsPill(scope: Page | Locator): Locator {
 /**
  * Opens the comments as a person does, and ends with them open. The control toggles, and a canvas wide enough for the margin
  * column opens the column by itself once the document's comments load, so a click made after that would close it: press the
- * control only when it does not already report them open.
+ * control only when it does not already report them open. `name` is the control's accessible name (its thread count and unsent
+ * messages), checked before the press, so a spec that expects a count still fails when the control names a different one.
  */
-export async function openComments(scope: Page | Locator): Promise<void> {
+export async function openComments(scope: Page | Locator, name?: RegExp): Promise<void> {
 	const pill = commentsPill(scope);
+	if (name) await expect(pill).toHaveAccessibleName(name);
 	if ((await pill.getAttribute('aria-expanded')) !== 'true') await pill.click();
 	await expect(pill).toHaveAttribute('aria-expanded', 'true');
 }
