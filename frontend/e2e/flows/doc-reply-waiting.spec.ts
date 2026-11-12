@@ -868,8 +868,10 @@ for (const theme of ['light', 'dark'] as const) {
 			await documentReady(page);
 			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
 			// Arriving opened the first thread, so it reads; the other two stay new until opened, though the second is on screen.
+			// The opened thread still marks the reply it opened with while it stays open, so all three show New.
 			await expect(page.getByRole('button', { name: '3 comments, 2 unread', exact: true })).toBeVisible();
-			await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(2);
+			await expect(page.locator(`[data-doc-comments-drawer] [data-comment-id="${scenario.roots[0]}"] .ct-new`)).toHaveCount(1);
+			await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(3);
 			// The remaining New reply must be wholly below the sheet viewport, not merely clipped at its edge.
 			const unreadCard = page.locator(`[data-comment-id="${scenario.roots[2]}"]`);
 			// The reader context keeps this agent reply beyond the viewport without changing the unread-thread count.
@@ -1258,7 +1260,10 @@ for (const theme of ['light', 'dark'] as const) {
 				await card.scrollIntoViewIfNeeded();
 				await card.locator('.ct-reply-count').click();
 			}
-			await expect(page.locator('.ct-new')).toHaveCount(0);
+			// Both stamps landed: the document counts nothing unread. At both widths the comments show as a list (popover or
+			// sheet), and a list row keeps the New marks it opened with until the list remounts.
+			await expect(page.getByRole('button', { name: '3 comments', exact: true })).toBeVisible();
+			for (const root of [scenario.roots[1], scenario.roots[2]]) await expect(page.locator(`[data-comment-id="${root}"] .ct-new`).first()).toBeVisible();
 			await showSurface('chat');
 			await reloadQueue();
 			await expect(notice).toHaveCount(0);

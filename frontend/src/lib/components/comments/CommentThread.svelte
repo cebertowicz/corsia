@@ -26,7 +26,7 @@
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
-	import { createThreadOpen } from './threadOpen';
+	import { createOpenedReplies, createThreadOpen } from './threadOpen';
 	import { observeArrivedThread } from './arrivedThread.svelte';
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
@@ -124,13 +124,10 @@
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
 	const stampedReplies = new Set<string>();
-	// Keep the collapse point stable while this thread is mounted, even as the server clears New marks.
-	// Otherwise replies would disappear from under the reader when the viewed stamp lands.
-	const seenForCollapse = new Set<string>();
-	const collapseReplyIds = $derived.by(() => {
-		for (const id of comment.newReplyIds ?? []) seenForCollapse.add(id);
-		return new Set(seenForCollapse);
-	});
+	// The collapse point, and a document thread's per-reply New marks, stay as the thread opened until it rests again, though the
+	// viewed stamp clears them on the server; otherwise replies and their marks would vanish from under the reader as it lands.
+	const openedReplies = createOpenedReplies();
+	const collapseReplyIds = $derived(openedReplies(comment.newReplyIds, preview));
 	// Chat answers retain their visible dwell; document threads stamp when the person opens the card.
 	const VIEWED_DWELL_MS = 1_500;
 	const dwellTimers = new Map<string, number>();
@@ -286,7 +283,7 @@
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
-			{#if comment.newComment || (preview && comment.newReplyIds?.length)}<NewMarker />{/if}
+			{#if (preview && collapseReplyIds.size) || comment.newComment}<NewMarker />{/if}
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
 			{/if}
@@ -323,7 +320,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving && !preview}
-			<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
+			<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={chatSurface ? new Set(comment.newReplyIds ?? []) : collapseReplyIds} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
 		{/if}
 
 		{@render failure?.()}

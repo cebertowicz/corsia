@@ -258,7 +258,12 @@ journey('the server names the new replies, a long thread keeps only them and the
 	if (mode === 'closed') {
 		// At rest the card carries one New mark for its unread replies; picked, each new reply carries its own.
 		await expect(drawer.locator('.ct-new')).toHaveCount(1);
+		// Picking the card opens the thread, which stamps it viewed. Once that answer is in and painted, the picked card
+		// still marks the replies it opened with.
+		const stamped = page.waitForResponse((response) => response.url().includes('/viewed') && response.request().method() === 'POST');
 		await showReplies(drawer);
+		await stamped;
+		await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 		await expect(drawer.locator('.ct-new'), 'both agent replies are new; the person\'s own is not').toHaveCount(2);
 		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
 		await shot(page, 'rs-23a-new-replies-marked', info);
