@@ -149,10 +149,13 @@ test('@flow:doc-margin-cards after a new comment is cancelled and the column clo
 	await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
 	await expect(composer).toHaveCount(0);
 	await expect(card(page, doc, FIRST), 'cancelling the draft keeps the column').toBeVisible();
-	// The comments control closes the column; focus goes back to the text, not to the control.
+	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
 	await pill(page).click();
 	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+	await expect(pill(page)).toBeFocused();
+	for (let i = 0; i < 12 && !(await text.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab');
 	await expect(text).toBeFocused();
+	expect(await text.textContent(), 'reaching the text typed nothing into it').toBe(before);
 	await page.keyboard.type('Z');
 	const after = (await text.textContent())!;
 	let at = 0;
