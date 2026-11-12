@@ -135,6 +135,47 @@ def test_missing_source_arrival_time_stays_unattributed(db) -> None:
     )
 
 
+_SUBQUERY_ORACLE = correction_attribution._SOURCES_SQL + """
+    SELECT s.source_id,
+      (SELECT t.plan_node_id FROM active_turns t
+        WHERE t.thread_id=s.thread_id AND t.id IS NOT s.active_turn_id
+          AND replace(t.started_at,'T',' ') < replace(s.source_at,'T',' ')
+        ORDER BY replace(t.started_at,'T',' ') DESC,t.turn_order DESC LIMIT 1) AS node_id
+    FROM sources s
+"""
+"""The per-source subquery the turn search replaced, kept as the reference it must agree with."""
+
+
+def test_turn_search_matches_the_subquery_it_replaced_on_ties_separators_and_own_turns(db) -> None:
+    import random
+
+    rng = random.Random(20261112)
+    stamps = [f"2026-10-0{day}{sep}0{hour}:00:00{zone}"
+              for day in (1, 2, 3) for hour in (0, 5) for sep in ("T", " ") for zone in ("", "Z")]
+    turn_ids: dict[str, list[str]] = {}
+    for index in range(400):
+        thread = rng.choice(("t0", "t1", "t2", "t3"))
+        turn_id = f"turn-{index}"
+        turn_ids.setdefault(thread, []).append(turn_id)
+        node = rng.choice(("earlier", "own", "attempt", None))
+        if node is None:
+            db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+                       "VALUES (?,?,0,'m','completed',?,'boot')", (turn_id, thread, rng.choice(stamps)))
+        else:
+            turn(db, turn_id, thread, node, rng.choice(stamps))
+    for index in range(300):
+        thread = rng.choice(("t0", "t1", "t2", "t3", "t4"))  # t4 has no turns
+        own = rng.choice([None, *turn_ids.get(thread, [])])
+        message(db, f"m{index}", thread, rng.choice(stamps), own_turn=own)
+        legacy_fact(db, f"m{index}")
+    legacy_fact(db, "missing-source")
+
+    expected = {row["source_id"]: row["node_id"] for row in db.execute(_SUBQUERY_ORACLE)}
+    found = {fact.source_id: fact.node_id for fact in attributed_facts(db)}
+    assert found == expected
+    assert sum(node is not None for node in found.values()) > 100  # the fixture exercises real matches
+
+
 def test_a_node_maps_to_its_nearest_run_or_says_why_not() -> None:
     parents = {"step": "run", "run": "root", "root": None, "loose": None}
     assert workflow_run_of("step", parents, ["run"]) == "run"

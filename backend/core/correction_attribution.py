@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -97,13 +98,51 @@ _SOURCES_SQL = f"""
 """
 
 _ATTRIBUTED_SQL = _SOURCES_SQL + f"""
-    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,
-      (SELECT t.plan_node_id FROM active_turns t
-        WHERE t.thread_id=s.thread_id AND t.id IS NOT s.active_turn_id
-          AND {_ts('t.started_at')} < {_ts('s.source_at')}
-        ORDER BY {_ts('t.started_at')} DESC,t.turn_order DESC LIMIT 1) AS node_id
+    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,s.thread_id,s.active_turn_id,
+      {_ts('s.source_at')} AS arrived
     FROM sources s
 """
+"""Each source and what finds its turn; the turn itself is found by :class:`_ThreadTurns`.
+
+The search per source used to be a subquery here, which scanned and sorted every turn of the thread
+once per source: minutes on a production Measurement read.
+"""
+
+_TURN_BATCH = 500
+"""Threads per turn read, under SQLite's bound-variable limit."""
+
+
+class _ThreadTurns:
+    """Every turn of the given threads, each thread's in (start, turn order), read once."""
+
+    def __init__(self, db: sqlite3.Connection, thread_ids: Iterable[str]) -> None:
+        by_thread: dict[str, list[tuple[str, int, str, str | None]]] = {}
+        ids = sorted(set(thread_ids))
+        for at in range(0, len(ids), _TURN_BATCH):
+            batch = ids[at:at + _TURN_BATCH]
+            for row in db.execute(
+                f"SELECT thread_id,{_ts('started_at')} AS started,turn_order,id,plan_node_id FROM active_turns "
+                f"WHERE thread_id IN ({','.join('?' * len(batch))})", batch,
+            ):
+                by_thread.setdefault(row['thread_id'], []).append(
+                    (row['started'], row['turn_order'], row['id'], row['plan_node_id']))
+        for turns in by_thread.values():
+            turns.sort(key=lambda turn: (turn[0], turn[1]))
+        self._turns = by_thread
+        self._starts = {thread: [turn[0] for turn in turns] for thread, turns in by_thread.items()}
+
+    def node_before(self, thread_id: str | None, arrived: str | None, own_turn: str | None) -> str | None:
+        """The task of the latest turn in the thread that started before ``arrived``, never ``own_turn``.
+
+        Latest is by start, then turn order, both unique together, so exactly one turn answers.
+        """
+        if thread_id is None or arrived is None or thread_id not in self._turns:
+            return None
+        turns = self._turns[thread_id]
+        for index in range(bisect_left(self._starts[thread_id], arrived) - 1, -1, -1):
+            if turns[index][2] != own_turn:  # a turn id is unique, so this skips at most one
+                return turns[index][3]
+        return None
 
 
 _ACTIVE_VERSION_ONLY = f"""{version_key_sql('s.attributes')}=(
@@ -155,14 +194,15 @@ def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
 
 def _measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     """Latest facts of Measurement's activated classifier, retaining task attribution."""
-    rows = db.execute(_ATTRIBUTED_SQL + f" WHERE {_ACTIVE_VERSION_ONLY}").fetchall()
+    rows = _latest_classifications(db.execute(_ATTRIBUTED_SQL + f" WHERE {_ACTIVE_VERSION_ONLY}").fetchall())
+    turns = _ThreadTurns(db, (row['thread_id'] for row in rows if row['thread_id'] is not None))
     facts = []
-    for row in _latest_classifications(rows):
+    for row in rows:
         attributes = json.loads(row['attributes'])
         facts.append(AttributedFact(
             str(row['source_kind']), str(row['source_id']), row['source_at'],
             str(attributes.get('asset_version')), attributes.get('label') == LABEL_CORRECTION,
-            row['node_id']))
+            turns.node_before(row['thread_id'], row['arrived'], row['active_turn_id'])))
     return facts
 
 
