@@ -4,62 +4,72 @@ workflow:
   steps:
     - id: scope
       title: Always-loaded set named with owners
+      instruction: "## Scope"
       required: true
       check: every always-loaded source in scope listed once, each with its layer, its owner and whether you may edit it; this run's trigger named (horizon due, roster or objective change, an addition that would exceed the budget, or a request to cut instruction size)
       difficulty: {default: standard}
     - id: measure
-      title: Size counted, budget recorded with headroom
+      title: Size counted against a fixed budget
+      instruction: "## Measure"
       required: true
-      check: the count for the set and for each file, each named with its unit; a recorded budget leaving the owner's headroom above today's set count, a quarter by default, and more than this run's addition; the review horizon recorded where a later run reads it
+      check: the count for the set and for each file, each named with its unit; the budget read back unchanged from the last run, or recorded on the first run with the owner's headroom above that count (a quarter by default), or raised by exactly the size of an addition the person asked for, with that ask cited; the review horizon recorded where a later run reads it
       after: [scope]
       difficulty: {default: routine, hard_if: "no budget exists yet, or no unit was recorded before"}
     - id: inventory
       title: Every line listed verbatim
+      instruction: "## Inventory"
       required: true
       check: one numbered entry per line or bullet of every in-scope file, quoted as written, and the entry count per file equals that file's own count, with no disposition given before the list is complete
       after: [measure]
       difficulty: {default: routine, hard_if: "a file in scope is too long to hold whole while you count"}
     - id: verdicts
       title: Every line given one disposition
+      instruction: "## Verdicts"
       required: true
       check: each entry carries exactly one disposition from keep, narrow, condition, widen, delete, with a one-line reason; each narrow, condition or widen names the destination and the moment it reaches each agent that needs it, earlier than the moment it is needed; each delete names one task whose behavior changes without it and confirms no other source says it
       after: [inventory]
       difficulty: {default: standard, hard_if: "an entry is an invariant, an authority limit, or the person's own words"}
     - id: authority
       title: Changes split by who applies them
+      instruction: "## Authority"
       required: true
       check: every planned change marked apply-here or to-owner; each to-owner item carries the exact current text, the exact replacement text and its owner; no change targets a file you do not own
       after: [verdicts]
       difficulty: {default: routine}
     - id: apply
       title: Own edits made and moves landed
+      instruction: "## Apply"
       required: true
-      check: each applied change matches its recorded disposition; every moved or narrowed line quoted at its destination; nothing you do not own edited
+      check: a scenario comparison as context-stewardship's Prove it describes recorded before any move or delete was applied; each applied change matches its recorded disposition; every moved or narrowed line quoted at its destination; nothing you do not own edited
       after: [authority]
       difficulty: {default: standard}
     - id: reread
       title: Changed files re-read whole as a first reader
+      instruction: "## Reread"
       required: true
       check: each changed file re-read from its first line; no sentence depends on removed text; no rule stated twice; every skill or destination cited exists; the surviving set still carries every rule an agent needs before its first move
       after: [apply]
       difficulty: {default: standard}
     - id: whole-result
       title: Whole result checked against what went in
+      instruction: "## Whole result"
       required: true
-      check: entries, dispositions and changes reconciled with no entry unaccounted for; the set measured again inside budget with headroom above today's count; what happens to any change that fails stated; no new tool, checker or gate introduced
+      check: entries, dispositions and changes reconciled with no entry unaccounted for; the set measured again at or under the recorded budget; what happens to any change that fails stated; no new tool, checker or gate introduced
       after: [reread]
       difficulty: {default: standard, hard_if: "the review moved or removed an invariant or an authority limit"}
       quality:
         - {name: nothing-needed-lost, good: "no correction, blocked first move, or agent question traceable to a line this review moved or removed, within 30 days", observed: signal, when: "lagging:30"}
-        - {name: headroom-kept, good: "at the next review the recorded budget still sits above the measured set count by real headroom", observed: signal, when: "lagging:7"}
+        - {name: set-not-growing, good: "at the next review the set count is at or below this run's, apart from additions the person asked for", observed: signal, when: "lagging:7"}
     - id: cadence
       title: Next review armed to wake itself
+      instruction: "## Cadence"
       required: true
       check: the next review armed to wake itself at the recorded horizon, weekly unless the person set another, naming what wakes it; where nothing here can arm a wake, that gap recorded for this run's report instead of a horizon promised
       after: [whole-result]
       difficulty: {default: routine}
     - id: report
       title: Person told what changed
+      instruction: "## Report"
       required: true
       check: when the set changed, something needs the person, or one of their choices is still unanswered, one message sent in this run giving the set count before and after with headroom, what moved and where, what waits on another owner, what wakes the next review or that nothing here can, any choice still unanswered, and at most one ask; otherwise no message, and the result recorded on this run's phase
       after: [cadence]

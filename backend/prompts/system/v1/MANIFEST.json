@@ -340,16 +340,16 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 6296,
+      "bytes": 7317,
       "kind": "skill",
       "path": "skills/instruction-review/SKILL.md",
-      "sha256": "7a6a9a345627f580ab63f7643edcfc3a6939decce6ce69a3e038c04fdb664e92"
+      "sha256": "c0bc094ed6fb54784662a0b14a598a15d6a3e3477958f3232cd9b7784850909f"
     },
     {
-      "bytes": 4792,
+      "bytes": 5319,
       "kind": "skill",
       "path": "skills/instruction-review/corsia.yaml",
-      "sha256": "2898a94c8e2b8e5f0b5e760183a7024aa04a201ac4037e1514bbffbacc975afe"
+      "sha256": "143d12f931007f255b7e3a437854b8de7fb721ecfd99fd08e15297f0c5451874"
     },
     {
       "bytes": 3634,

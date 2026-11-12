@@ -14,23 +14,52 @@ Improve agent behavior, not prose volume, and diagnose before you cut, per skill
 
 **Always-loaded** means a source an agent carries before it has read the task: the scope's project instructions, each agent's own responsibility context, and whatever this install injects every turn. A skill or a workflow step is the opposite: it arrives only when triggered, so a rule put there must be reachable at the moment it is first needed. **Budget** is one recorded number for the always-loaded set; **headroom** is what that number leaves above today's count.
 
-## What each step needs
+Each step's section below reaches you when that step starts.
 
-- **scope** — Find the set the way `context-stewardship` says: the effective-context view if you have one, else the always-loaded files layer by layer. Context belonging to an agent that no longer exists is dead; a set nobody owns is unowned. List both as what they are instead of guessing. If no agent owns the set, review the part you may edit and say plainly which part has no owner.
-- **measure** — Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. A budget set at today's count plus the edit in front of you is not a budget: the set then freezes at its current size, and every later addition — including the one the person just asked for — costs a removal. Set or raise the number before you judge any line.
-- **inventory** — Quote each line as written; the quote is what the disposition and any before-and-after are built from, and a paraphrase cannot be applied by its owner. One file at a time: do not hold two always-loaded files open at once.
-- **verdicts** — The keep test is one question: does every agent that loads this need it before it can make its first correct move? Yes, keep. Only some agents need it: narrow it into the always-loaded context of the agents that do, where it still arrives in time. It is needed at a recognizable moment: condition it into a skill or workflow step whose trigger fires at that moment — a rule needed mid-task cannot live behind a trigger that only fires once the task is chosen. Nearly every agent needs it and one file happens to hold it: widen it. Delete only what no task needs. With a single agent, narrowing has nowhere to go, so the choices are keep, condition, widen or delete.
-- **authority** — Decide first whose words you may change. An invariant, an authority limit, or text the person wrote themselves goes to them as an exact before and after unless they have said you may edit it directly (see **Choices the owner sets**). A file another agent holds, and text that shipped with the product, always go to their owner as an exact before and after; you never edit them.
-- **apply** — One coherent change per file. Write the destination first, then remove the original, so no rule exists nowhere partway through the run. A move that creates a skill or a workflow step follows `skill-creator`: the narrowest scope that triggers it, and a local copy named like a shipped skill has no effect.
-- **reread** — Read the file as its first reader, on a fresh look, not as its editor. Knowing what you changed makes a dangling reference invisible; reading from the first line makes it visible.
-- **whole-result** — Reconcile against your inventory, not your memory. Then ask what a careful auditor would notice that these checks miss, and answer that before you call the run done. A cut that shrinks the set but worsens behavior is reverted, as `context-stewardship` requires; the lagging checks on this step are how you find out, so record the review date where you will meet them again.
-- **cadence** — Arm the wake yourself; a horizon written only in a message wakes nothing. If nothing here can arm one, record that gap so the report can say it, instead of naming a date no one will meet.
-- **report** — Only when the set changed, something needs the person, or one of their choices is still unanswered: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
+## Scope
+
+Find the set the way `context-stewardship` says: the effective-context view if you have one, else the always-loaded files layer by layer. Context belonging to an agent that no longer exists is dead; a set nobody owns is unowned. List both as what they are instead of guessing. If no agent owns the set, review the part you may edit and say plainly which part has no owner.
+
+## Measure
+
+Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. Record the budget once, on the first run: the person's headroom above that count, a quarter by default. From then on it stays fixed, so the set can only come back under it. Only an addition the person asked for raises it, by exactly that addition's size, and a headroom the person sets replaces it. Never re-base it on today's count: a budget that moves with the set never limits it, and one recorded at the exact count freezes the set so that even the person's own ask costs a removal.
+
+## Inventory
+
+Quote each line as written; the quote is what the disposition and any before-and-after are built from, and a paraphrase cannot be applied by its owner. One file at a time: do not hold two always-loaded files open at once.
+
+## Verdicts
+
+Test each line with the questions in `context-stewardship`'s **Make each source earn its cost**; a line every recipient needs every turn stays. Only some agents need it: narrow it into the always-loaded context of the agents that do, where it still arrives in time. It is needed at a recognizable moment: condition it into a skill or workflow step whose trigger fires at that moment — a rule needed mid-task cannot live behind a trigger that only fires once the task is chosen. Prefer a workflow step when the moment falls inside work a workflow runs: the step names a section of that workflow's own skill, so the section arrives when the step starts, to whoever does it, no other agent carries it, and one workflow can replace several skills. That skill still loads by its description when an agent does the work without starting the workflow, so its description must name the moment, or the rule is lost off the run. An authority, safety or invariant line moves to a step only if that step is required. A rule several workflows need goes in one shared workflow each names as a step, never a copy in each. Nearly every agent needs it and one file happens to hold it: widen it. Delete only what no task needs; history someone still uses moves to a reference. With a single agent, narrowing has nowhere to go, so the choices are keep, condition, widen or delete. Keep an authority, safety or invariant line even when it is costly — move it, never drop it to save room (`context-stewardship`).
+
+## Authority
+
+Decide first whose words you may change. An invariant, an authority limit, or text the person wrote themselves goes to them as an exact before and after unless they have said you may edit it directly (see **Choices the owner sets**). A file another agent holds, and text that shipped with the product, always go to their owner as an exact before and after; you never edit them.
+
+## Apply
+
+Before applying any move or delete, prove the run's changes once as `context-stewardship`'s **Prove it** says. One coherent change per file. Write the destination first, then remove the original, so no rule exists nowhere partway through the run. A move that creates a skill or a workflow step follows `skill-creator`: the narrowest scope that triggers it, and a local copy named like a shipped skill has no effect. One home per rule: search the delivered layers first and amend the canonical source instead of adding a second copy (`context-stewardship`, `memory-placement`).
+
+## Reread
+
+Read the file as its first reader, on a fresh look, not as its editor. Knowing what you changed makes a dangling reference invisible; reading from the first line makes it visible.
+
+## Whole result
+
+Reconcile against your inventory, not your memory. Then ask what a careful auditor would notice that these checks miss, and answer that before you call the run done. A cut that shrinks the set but worsens behavior is reverted, as `context-stewardship` requires; the lagging checks on this step are how you find out, so record the review date where you will meet them again.
+
+## Cadence
+
+Arm the wake yourself; a horizon written only in a message wakes nothing. If nothing here can arm one, record that gap so the report can say it, instead of naming a date no one will meet.
+
+## Report
+
+Only when the set changed, something needs the person, or one of their choices is still unanswered: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
 
 ## Choices the owner sets
 
-Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the headroom the budget must leave above today's count [a quarter above it]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. Each open choice appears in that run's report; their answer replaces the default and is recorded.
+Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the headroom the budget is first recorded with [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. Each open choice appears in that run's report; their answer replaces the default and is recorded.
 
 ## Never
 
-No new checker, gate, tool or background job: every action here is a read, an edit, a message, or a plan operation you already have. Keep an authority, safety or invariant line even when it is costly — move it, never drop it to save room (`context-stewardship`). One home per rule: search the delivered layers first and amend the canonical source instead of adding a second copy (`context-stewardship`, `memory-placement`).
+No new checker, gate, tool or background job: every action here is a read, an edit, a message, or a plan operation you already have.
