@@ -268,7 +268,7 @@
 	h2 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.step { min-height: calc(var(--text-body) * 1.5); margin-top: var(--space-2); }
 	.step.empty { min-height: 0; }
-	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+	.sr-only { position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.step p, .detail { margin: 0; }
 	.step-label, .detail { color: var(--text-secondary); font-size: var(--text-body); }
 	.version { white-space: nowrap; }
