@@ -171,6 +171,11 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
             reason = "empty_quote"
         root_sender = item.get('root_user_message_id') if isinstance(item, dict) else None
         root_cid = item.get('root_cid') if isinstance(item, dict) else None
+        if not reason and root_sender is None and root_cid is None and db.execute(
+            "SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND role='assistant'", (thread_id, item['seq']),
+        ).fetchone() is None:
+            # A comment lives in the thread of the agent message it marks; with none, it has no place to show.
+            reason = 'not_agent_message'
         if not reason and (root_sender is not None or root_cid is not None):
             if not isinstance(root_sender, str) or not root_sender or not isinstance(root_cid, str) or not root_cid:
                 reason = 'invalid_root'

@@ -61,6 +61,21 @@ def test_a_refused_comment_is_not_stored(target, frames, publish_only):
     assert user_rows(frames) == notices(frames) == []
 
 
+def test_a_comment_on_a_person_row_is_refused_not_hidden(target, frames, publish_only):
+    # It would have no thread to show in, so it is refused rather than stored hidden from chat.
+    target.execute(
+        "INSERT INTO messages(id,thread_id,role,content,created_at,seq,delivery_state) "
+        "VALUES ('mine',?,'user','my text','2026-01-01',2,'delivered')", (THREAD,),
+    )
+    target.execute("UPDATE threads SET next_message_seq=3 WHERE id=?", (THREAD,))
+    target.commit()
+    with pytest.raises(HTTPException) as refused:
+        _post(comment={**_comment_metadata()["reply_context"]["comments"][0], "seq": 2})
+    assert refused.value.status_code == 400
+    assert target.execute("SELECT 1 FROM messages WHERE id='box-1'").fetchone() is None
+    assert target.execute("SELECT 1 FROM chat_visible_content WHERE message_id='box-1'").fetchone() is None
+
+
 def test_stored_then_undelivered_answers_with_the_failed_comment(target, frames, publish_only, monkeypatch):
     import infra.send_service as send_service
     from infra.send_types import SendRejected

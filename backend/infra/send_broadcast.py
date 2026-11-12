@@ -193,11 +193,12 @@ def broadcast_input_rows(
     exclude_ws: Any | None = None,
     broadcast: Callable[[str, dict], None] | None = None,
 ) -> None:
-    """Publish one singleton or one atomically ordered multi-row event.
+    """Publish the drawn rows as one singleton or one ordered multi-row event.
 
     A comment-only user input is not a chat row: it lives in its comment thread,
     so chat clients get a `chat_comments_changed` notice naming the commented
-    rows (by seq) instead of the row itself.
+    rows (by seq) instead of the row itself. A batch holding both goes out as
+    two frames: the drawn rows' event, then the notice.
     """
     if broadcast is not None and exclude_ws is not None:
         raise ValueError("custom input broadcast cannot exclude one socket")
