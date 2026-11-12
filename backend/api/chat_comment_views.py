@@ -72,7 +72,7 @@ def _retry_metadata(thread_id: str, message_id: str) -> dict | None:
         metadata = json.loads(row[1] or '{}') if row is not None else None
     except ValueError:
         metadata = None
-    if row is None or row[2] not in _RETRYABLE or not comment_only(row[0], metadata):
+    if row is None or metadata is None or row[2] not in _RETRYABLE or not comment_only(row[0], metadata):
         return None
     reply_context: dict = {'comments': metadata['reply_context']['comments']}
     if row[2] == 'ambiguous':

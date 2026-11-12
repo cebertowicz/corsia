@@ -206,6 +206,14 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
     return comments
 
 
+def _possible_duplicate(value: Any, dropped: list[dict]) -> bool:
+    """A Retry of comments whose delivery is uncertain: the agent may already have them."""
+    if value is True:
+        return True
+    dropped.append(_dropped("possible_duplicate", "not_true"))
+    return False
+
+
 def validate_reply_context(
     db: sqlite3.Connection, thread_id: str, raw: object, *, dropped: list[dict] | None = None,
 ) -> dict | None:
@@ -238,8 +246,7 @@ def validate_reply_context(
             ("comments", lambda value: _comments(db, thread_id, value, newest, int(db.execute(
                 "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
             ).fetchone()[0]), dropped)),
-            # A Retry of comments whose delivery is uncertain: the agent may already have them.
-            ("possible_duplicate", lambda value: value is True or dropped.append(_dropped("possible_duplicate", "not_true"))),
+            ("possible_duplicate", lambda value: _possible_duplicate(value, dropped)),
         )
         for field, build in builders:
             if raw.get(field) is None:
