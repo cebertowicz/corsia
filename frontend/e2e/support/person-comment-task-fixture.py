@@ -55,6 +55,19 @@ try:
                 suggestion_ids.append(row['id'])
             person_comment_task.reconcile(connection, artifact_id)
         print('FIXTURE_RESULT=' + json.dumps({'replies': reply_ids, 'suggestions': suggestion_ids}))
+    elif mode == 'long':
+        # From '1 comment, 1 suggestion' to the long count '12 comments, 3 suggestions': 11 more tagged agent
+        # comments and 2 more suggestions, each delivered to the person as the recipients writer delivers them.
+        user_id = db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0]
+        with write_transaction(db, scope='seed_long_count') as connection:
+            for index in range(13):
+                row, created = comments.create_with_status(
+                    artifact_id, body=f'Note {index}', author='Reviewer', author_kind='agent',
+                    author_thread_id=thread_id, anchor_text='Launch plan', from_off=0, to_off=11,
+                    replacement=f'Long plan {index}' if index >= 11 else None, tagged_user_id=user_id, db=connection)
+                feedback_batches.record_comment(connection, row, created=created,
+                                               delivery_policy=feedback_batches.IMMEDIATE)
+            person_comment_task.reconcile(connection, artifact_id)
     else:
         raise ValueError(mode)
 finally:
