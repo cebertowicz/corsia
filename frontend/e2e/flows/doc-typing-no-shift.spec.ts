@@ -7,8 +7,8 @@ import { layouts } from '../support/liveConcurrency';
 
 /**
  * Typing in a document never moves it. Each stretch of typing is saved a moment after it stops, and while that write
- * is unsettled the live session reports it; the "still settling" notice used to mount in the header for that time
- * and push the whole document down and back. The notice now shows only once a write has stayed unsettled for 2 s.
+ * is unsettled the live session reports it; the "still settling" notice shows only once a write has stayed unsettled
+ * for 2 s, so ordinary saves never mount it.
  * The proof is the position of the first paragraph, the table and the header, sampled in the page every 50 ms
  * through the typing, the save after it and the settling, and again across a write held for less than the wait.
  * A write that is truly stuck still shows the notice, and the text moves once.
@@ -22,7 +22,7 @@ const RENDERED = ['# Typing never moves this', INTRO, 'Paragraph below the table
 const TYPING_MS = 2500;
 /** Long enough after the last keystroke for the save's 700 ms wait, the write itself and its settling. */
 const AFTER_TYPING_MS = 2500;
-/** The wait the status component allows an unsettled write before it says so; the held-write case runs past it. */
+/** The wait the status component allows an unsettled write before it says so (SETTLING_NOTICE_AFTER_MS in DocLiveStatus.svelte, which a spec cannot import); the held-write case runs past it. */
 const NOTICE_AFTER_MS = 2000;
 /** How long the held-write case watches before the wait ends, leaving room for a slow screenshot or a loaded host. */
 const WATCH_MS = NOTICE_AFTER_MS - 1000;
@@ -93,7 +93,6 @@ async function typeAndSample(page: Page, type: () => Promise<void>): Promise<Sam
 }
 
 for (const [width, height, project] of layouts) {
-	const phone = width <= 768;
 	test.describe(`@flow:doc-typing-no-shift @surface:documents ${width}`, () => {
 		test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.'); });
 
@@ -106,19 +105,6 @@ for (const [width, height, project] of layouts) {
 			await page.keyboard.press('End');
 			expectStill(await typeAndSample(page, () => page.keyboard.type(' typed here', { delay: 40 })), 'typing in a paragraph');
 			await expect.poll(() => serverText(request, document), { message: 'the typed text was saved' }).toContain(`${INTRO} typed here`);
-			expect(unsettled.count(), 'the save reported an unsettled write while the document was sampled').toBeGreaterThan(0);
-		});
-
-		// Enabled once #2462's cell editor merges: until then a press or tap in a rendered cell places no caret.
-		test.fixme(`typing in a table cell moves neither the paragraph nor the table at ${width}`, async ({ page, request }) => {
-			test.setTimeout(120_000);
-			await page.setViewportSize({ width, height });
-			const unsettled = watchUnsettled(page);
-			const document = await open(page, request, width);
-			const cell = page.locator('.cm-md-table td', { hasText: CELL });
-			if (phone) await cell.tap(); else await cell.click();
-			expectStill(await typeAndSample(page, () => page.keyboard.type('QQQ', { delay: 40 })), 'typing in a table cell');
-			await expect.poll(() => serverText(request, document), { message: 'the typed text was saved' }).toContain('QQQ');
 			expect(unsettled.count(), 'the save reported an unsettled write while the document was sampled').toBeGreaterThan(0);
 		});
 

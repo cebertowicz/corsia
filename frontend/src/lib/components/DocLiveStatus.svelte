@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** How long a write stays unsettled before the notice shows. */
+	export const SETTLING_NOTICE_AFTER_MS = 2000;
+</script>
+
 <script lang="ts">
 	import { Button } from './ui';
 	import Popover from './ui/Popover.svelte';
@@ -9,9 +14,6 @@
 	import { LIVE_UNAVAILABLE_NOTICE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
 	import type { HeldDocument } from '$lib/stores/documentWire';
 	import type { DeviceRecovery } from '$lib/stores/deviceRecovery';
-
-	/** How long a write stays unsettled before the notice shows. */
-	const SETTLING_NOTICE_AFTER_MS = 2000;
 
 	let { session = null, openRefusal = null, liveUnavailable = null, tabText = '', onReopen, onRead, connectionStatusId }: {
 		session?: LiveDocumentSession | null;
@@ -130,7 +132,7 @@
 {#if actionError}<div class="live-block" role="alert">{actionError}</div>{/if}
 
 {#snippet details()}
-	{#if view?.pending}
+	{#if settling}
 		<p>Read the document before writing again.</p>
 		<Button size="sm" variant="ghost" onclick={() => copy(view!.text)}>Copy text</Button>
 		<Button size="sm" variant="ghost" onclick={onRead}>Reload</Button>

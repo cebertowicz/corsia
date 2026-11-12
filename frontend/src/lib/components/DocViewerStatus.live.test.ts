@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import * as Y from 'yjs';
 import DocViewerStatus from './DocViewerStatus.svelte';
+import { SETTLING_NOTICE_AFTER_MS } from './DocLiveStatus.svelte';
 import { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 
 let component: ReturnType<typeof mount> | null;
@@ -49,7 +50,7 @@ function passTime(ms: number) { vi.advanceTimersByTime(ms); flushSync(); }
 
 it('says nothing at 1.9 s of an unsettled write, shows the notice at 2.1 s, and drops it once the write settles', () => {
 	vi.useFakeTimers(); setup(); session.pending = true; render();
-	passTime(1900); expect(host.textContent).not.toContain('still settling'); expect(button('Details')).toBeUndefined();
+	passTime(SETTLING_NOTICE_AFTER_MS - 100); expect(host.textContent).not.toContain('still settling'); expect(button('Details')).toBeUndefined();
 	passTime(200); expect(host.textContent).toContain(SETTLING); expect(button('Details')).toBeDefined();
 	session.handle({ type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', pending: false }); flushSync();
 	expect(host.textContent).not.toContain('still settling'); expect(button('Details')).toBeUndefined();
@@ -65,8 +66,18 @@ it('restarts the wait when a settled write is followed by another, so a run of s
 });
 it('keeps counting a stuck write through unrelated updates to the session', () => {
 	vi.useFakeTimers(); setup(); session.pending = true; render();
-	passTime(1500); expect(host.textContent).not.toContain('still settling'); session.reconnecting(); flushSync();
+	passTime(SETTLING_NOTICE_AFTER_MS - 500); expect(host.textContent).not.toContain('still settling'); session.reconnecting(); flushSync();
 	passTime(600); expect(host.textContent).toContain(SETTLING);
+});
+it('opens Details for a held write without the settling guidance until the wait has passed', () => {
+	vi.useFakeTimers(); setup(); session.pending = true;
+	session.held = { corsia_text: 'kept CORSIA', file_text: 'outside file', candidate_text: 'candidate', choice_pending: false };
+	render(); passTime(SETTLING_NOTICE_AFTER_MS - 100);
+	expect(host.textContent).not.toContain('still settling');
+	button('Details').click(); flushSync();
+	expect(document.body.textContent).toContain('outside file'); expect(document.body.textContent).not.toContain('Read the document before writing again.');
+	passTime(200);
+	expect(document.body.textContent).toContain('Read the document before writing again.');
 });
 it('shows the approved settling row and offers reading and copying without a second write', async () => {
 	vi.useFakeTimers(); setup(); session.pending = true;
