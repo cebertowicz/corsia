@@ -5,7 +5,7 @@ export { updateToastSuppressed } from './noticeSuppression';
 import { toasts } from '$lib/stores/toast';
 import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
-import { failureCopy, failureFromOperation } from './failureCopy';
+import { failureCopy, failureFromOperation, runningVersionOf } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
@@ -117,7 +117,7 @@ function showTerminal(operation: UpdateOperation): void {
 		return;
 	}
 	if (isFailedOperation(operation)) {
-		const copy = failureCopy(failureFromOperation(operation));
+		const copy = failureCopy(failureFromOperation(operation), runningVersionOf(get(updateStatus)));
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
 			action: { label: 'Details', run: openUpdates },
@@ -150,7 +150,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		shownOutcomes.add(operation.operation_id);
 		void markOutcomeSeen(operation.operation_id);
 		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
-		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdates } });
+		toasts.pin('update', { type: 'error', message: 'Update failed', action: { label: 'Details', run: openUpdates } });
 	} finally {
 		terminalCheckRunning = false;
 	}
@@ -205,6 +205,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 			checked_at: current?.checked_at ?? null,
 			error: error instanceof Error ? error.message : 'Update check failed.',
 			current_version: current?.current_version ?? null,
+			running_version: current?.running_version ?? null,
 			target_version: current?.target_version ?? null,
 			changes: current?.changes ?? null,
 			drain_cap_seconds: current?.drain_cap_seconds ?? null,
@@ -265,9 +266,9 @@ export async function startUpdate(): Promise<void> {
 		const latest = get(updateStatus)?.operation;
 		// A new in-flight operation proves it started; a new failed row surfaces itself through the poll.
 		if (latest?.operation_id !== previousOperationId && (isInFlight(latest) || isFailedOperation(latest))) return;
-		const message = result.message ?? "Update didn't start.";
+		const message = result.message ?? "Couldn’t start the update.";
 		updateFailureVerdict.set({ kind: 'refused', message });
-		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdates } });
+		toasts.pin('update', { type: 'error', message: "Couldn’t start the update", detail: message, action: { label: 'Details', run: openUpdates } });
 		return;
 	}
 	await loadUpdateStatus(true);
