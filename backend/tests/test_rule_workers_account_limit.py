@@ -17,11 +17,13 @@ PROVIDER, MODEL = "claude-code", "claude-code/sonnet"
 LIMIT = dict(reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update")
 
 
-def _accounts(world, monkeypatch, *, rollover: bool, sibling: str, scope_model: str | None = None):
-    """The Default (limited, for ``scope_model`` alone when given) and one added account in the
-    owner's project.
+def _accounts(world, monkeypatch, *, rollover: bool, sibling: str, scope_model: str | None = None,
+              first: str = "limited"):
+    """The Default, first in the order, and one added account in the owner's project.
 
-    ``sibling`` is ``unread`` (discovered, usage never read) or ``limited``.
+    ``first`` is ``limited`` (for ``scope_model`` alone when given) or ``signed_out`` (not
+    limited; rollover moves off it too). ``sibling`` is ``unread`` (discovered, usage never
+    read) or ``limited``.
     """
     from connections import harness_usage
     from connections.account_evidence import mark_discovery
@@ -40,8 +42,11 @@ def _accounts(world, monkeypatch, *, rollover: bool, sibling: str, scope_model: 
     db.commit()
     if sibling == "limited":
         harness_usage.record_limited(provider=PROVIDER, db=db, receipt=receipt, **LIMIT)
-    harness_usage.record_limited(provider=PROVIDER, receipt=default_receipt(PROVIDER, db=db), db=db,
-                                 **({"scope_model": scope_model} if scope_model else {}), **LIMIT)
+    if first == "signed_out":
+        default = set_account_state(default["id"], "signed_out", expected_revision=default["revision"])
+    else:
+        harness_usage.record_limited(provider=PROVIDER, receipt=default_receipt(PROVIDER, db=db), db=db,
+                                     **({"scope_model": scope_model} if scope_model else {}), **LIMIT)
     set_policy(world["project"], PROVIDER, rollover=rollover, order=[default["id"], added["id"]],
                disabled=[], expected_revision=0, db=db)
     checks = []
@@ -73,17 +78,22 @@ def _waiting_quietly(rule: str) -> None:
     assert _workers() == [] and owner_wakes() == [] and worker_events() == []
 
 
+FIRST = pytest.mark.parametrize("first", ["limited", "signed_out"])
+
+
 @pytest.mark.asyncio
-async def test_an_unread_sibling_waits_for_its_usage_read_then_starts_on_it(world, monkeypatch):
-    """The selected account is limited and a sibling is ready with its usage unread: the start
-    goes back to the queue (no worker, no slot, no refusal) and a usage read is asked of the
-    sibling; once that read says allowed, the next pass starts the worker on the sibling."""
+@FIRST
+async def test_an_unread_sibling_waits_for_its_usage_read_then_starts_on_it(world, monkeypatch, first):
+    """The first account is limited, or signed out, and a sibling is ready with its usage unread:
+    rollover would move off the first account but never onto unread usage, so the start goes
+    back to the queue (no worker, no slot, no refusal) and a usage read is asked of the sibling;
+    once that read says allowed, the next pass starts the worker on the sibling."""
     from automation import worker_runner
     from connections import harness_usage
     from connections.account_policy import chosen_account_id
     from infra.database import get_db
 
-    _default, added, receipt, checks = _accounts(world, monkeypatch, rollover=True, sibling="unread")
+    _default, added, receipt, checks = _accounts(world, monkeypatch, rollover=True, sibling="unread", first=first)
     rule = await make_rule()
     await request()
     assert await worker_runner.drive() == 0
@@ -101,13 +111,14 @@ async def test_an_unread_sibling_waits_for_its_usage_read_then_starts_on_it(worl
 
 
 @pytest.mark.asyncio
-async def test_a_sibling_read_as_limited_ends_the_wait_with_todays_refusal(world, monkeypatch):
+@FIRST
+async def test_a_sibling_read_as_limited_ends_the_wait_with_todays_refusal(world, monkeypatch, first):
     from automation import worker_runner
     from connections import harness_usage
     from infra.database import get_db
     from tests.rule_worker_helpers import owner_wakes
 
-    _default, _added, receipt, _checks = _accounts(world, monkeypatch, rollover=True, sibling="unread")
+    _default, _added, receipt, _checks = _accounts(world, monkeypatch, rollover=True, sibling="unread", first=first)
     rule = await make_rule()
     await request()
     assert await worker_runner.drive() == 0
@@ -153,6 +164,28 @@ async def test_with_rollover_off_an_unread_sibling_is_refused_at_once(world, mon
     [(outcome, reason, _identity, worker)] = starts(rule)
     assert outcome == "refused" and worker is None and _refused_plainly(reason)
     assert checks == [] and worker_start_wait._waiting == {}
+
+
+@pytest.mark.asyncio
+async def test_a_model_with_no_vendor_account_that_is_not_ready_is_refused_at_once(world, monkeypatch):
+    """A cloud model run through its provider, not Claude Code or Codex, has no account to roll
+    over to: not ready means today's refusal, word for word, and no wait."""
+    from automation import worker_runner
+    from infra.database import write_transaction
+    from tests.rule_worker_helpers import owner_wakes
+
+    native = "anthropic/claude-sonnet-4-6"
+    with write_transaction(None, scope="rule_worker_native") as conn:
+        conn.execute("UPDATE threads SET model=? WHERE id=?", (native, OWNER))
+    row = {"id": native, "litellm_model": native, "display_name": "Sonnet 4.6", "connection": "anthropic",
+           "is_local": False, "status": "unavailable", "status_reason": "missing_context_window"}
+    monkeypatch.setattr("llm.model_status.scoped_status_rows", lambda **_scope: [row])
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _identity, worker)] = starts(rule)
+    assert outcome == "refused" and worker is None and _refused_plainly(reason)
+    assert reason in owner_wakes()[0] and worker_start_wait._waiting == {}
 
 
 OTHER = "rw-other-owner"

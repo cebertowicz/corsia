@@ -1,9 +1,10 @@
 """Whether a rule-started worker's model runs now, and the one refusal that waits first.
 
 Whether it runs is ``effective_status`` on the account its next turn runs on, the one start
-decision. The only refusal that waits is a Claude Code or Codex account at its usage limit
-in a project that rolls that vendor over, with another account ready whose usage is not read
-yet: rollover never moves onto unread usage, and reading it (one read per account per
+decision. The only refusal that waits is one rollover would move off (a Claude Code or Codex
+account at its usage limit, or signed out, in a project that rolls that vendor over) with
+another account ready whose usage is not read yet: rollover never moves onto unread usage,
+and reading it (one read per account per
 ``harness_usage_check.RECHECK_SECONDS``, scheduled by that same rollover check) may make that
 account the turn's. The runner puts such a start back in the queue at its place, where it
 takes no slot and is decided again on the next pass, and claims a younger start in its slot.
@@ -49,9 +50,12 @@ def _usage_unread(row: Mapping[str, Any], project: str | None, db: sqlite3.Conne
     Never whether the start runs; the next pass asks ``effective_status`` again."""
     from connections.account_policy import turn_account
     from connections.account_rollover import awaits_usage_read
+    from connections.vendor_accounts import VENDORS
     from llm.model_status import harness_base_row
 
-    provider = str(row["connection"])
+    provider = str(row.get("connection"))
+    if provider not in VENDORS:
+        return False  # no vendor account to roll over to
     source, _reason = turn_account(provider, project_id=project, db=db)  # no model: before any move
     return awaits_usage_read(provider, source, harness_base_row(str(row["litellm_model"]), db=db), project, db=db)
 
