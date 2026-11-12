@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
 import { demoteAgent } from '../support/sharedLiveDocument';
+import { openComments } from '../support/commentDrawer';
 import { installWorkspace, isolatedDb, openThread, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel } from '../support/heldComments';
 
 const auth = () => ({ Authorization: `Bearer ${TEST_TOKEN}` });
@@ -59,7 +60,7 @@ test('@flow:document-comments tagging an agent in a reply delivers only to parti
 		const rootId = (await root.json()).comment.id as string;
 		await installWorkspace(page, owner, [doc]);
 		await openThread(page, owner, title);
-		await page.locator('.comment-status').click();
+		await openComments(page);
 		const card = page.locator(`[data-comment-id="${rootId}"]`).first();
 		await expect(card).toBeVisible();
 		const reply = card.getByPlaceholder('Reply…');

@@ -8,6 +8,7 @@ import {
 	saveEvidenceScreenshot,
 	TEST_TOKEN,
 } from '../support/corsia';
+import { openComments } from '../support/commentDrawer';
 
 const MISSING_TOAST = "Couldn't find the linked workspace document";
 const WEB_LINK = 'https://example.invalid/guide/start';
@@ -231,7 +232,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await loginByUrl(page);
 				if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 				await page.getByText(title).first().click();
-				await page.getByRole('button', { name: /^1 thread\b/ }).click();
+				await openComments(page, /^1 thread\b/);
 				const drawer = page.locator('[data-doc-comments-drawer]');
 				await drawer.getByRole('link', { name: 'Open sibling' }).click();
 				await expect(page.getByText('The decisions record body.')).toBeVisible();

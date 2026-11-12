@@ -2,6 +2,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { openComments } from '../support/commentDrawer';
 import { waitForPanelsToSettle } from '../support/sidebar';
 import { expectMarginColumnUp } from '../support/marginCards';
 import { readPainted } from '../support/paintedFrames';
@@ -163,7 +164,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
-	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first().click();
+	await openComments(page, /^\d+ (open )?threads?/i);
 	await expectMarginColumnUp(page);
 }
 
