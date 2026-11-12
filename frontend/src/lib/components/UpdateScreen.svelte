@@ -42,7 +42,7 @@
 	const headlineNamesTarget = $derived(view?.mode === 'failed' && !view.serviceDown && Boolean(view.toVersion) && Boolean(view.failure?.headline.includes(`, not ${view.toVersion}.`)));
 	// CORSIA has stopped: no step is running, so no step label.
 	const serviceDownTerminal = $derived(view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
-	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
+	const recovery = $derived(longer || view?.startupProgressUnavailable === true || serviceDownTerminal);
 	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
 	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
 	let shown = $state(0);
@@ -85,7 +85,7 @@
 			pending = null;
 			return;
 		}
-		if ((view.mode === 'start_failed' || (view.mode === 'failed' && view.serviceDown)) && recoveryFailure === null && !starting && !deferred) recoveryFailure = 'automatic';
+		if (serviceDownTerminal && recoveryFailure === null && !starting && !deferred) recoveryFailure = 'automatic';
 		if (!onShell && localDesktop && (longer || hasStartAction)) {
 			handOver();
 			return;
