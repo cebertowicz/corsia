@@ -60,7 +60,7 @@ workflow:
 _FAKE = textwrap.dedent(
     '''\
     #!{python}
-    import sys, json
+    import os, sys, json
     def emit(o):
         sys.stdout.write(json.dumps(o) + "\\n"); sys.stdout.flush()
     open({reply!r} + ".argv", "w").write(json.dumps(sys.argv))
@@ -68,6 +68,7 @@ _FAKE = textwrap.dedent(
     for line in sys.stdin:
         if not line.strip():
             continue
+        open({reply!r} + ".turns", "a").write(os.environ.get("CLAUDE_CONFIG_DIR", "") + "\\n")
         reply = open({reply!r}).read()
         if reply == "HANG":
             continue
