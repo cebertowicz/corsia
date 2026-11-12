@@ -2,12 +2,14 @@
 
 The catalog rows, account selection, rollover and held-input gate are the real ones. Only the
 vendor's usage verdicts are recorded (as its limit events would) and the worker's model call is
-stubbed. The owner runs a Codex model: a Claude Code worker's first turn cannot be held yet.
+stubbed. The owner runs a Codex model; the Claude Code cases are in
+``test_rule_workers_account_limit_cc.py``.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -106,7 +108,9 @@ async def test_an_unread_sibling_holds_the_workers_first_turn_then_releases_it_o
     [(outcome, reason, _identity, worker)] = starts(rule)
     assert outcome == "started" and reason is None and worker is not None
     assert _workers() == [worker]
-    assert (await _status(worker))["held"] == "Held: account limit on codex, resets Dec 31, 2098 at 4:00 PM PST."
+    reset = datetime.fromisoformat(LIMIT["resets_at"]).astimezone()
+    expected = f"Held: account limit on codex, resets {reset:%b} {reset.day}, {reset:%Y at %-I:%M %p %Z}."
+    assert (await _status(worker))["held"] == expected
     assert chosen_account_id(worker, PROVIDER, db=get_db()) == default["id"]
     assert {(PROVIDER, added["id"])} == set(checks)
     assert _spawned_models() == {MODEL}
