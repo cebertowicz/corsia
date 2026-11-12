@@ -61,6 +61,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Measurement now shows workflow runs, their version trends, failed steps and the agents that ran them; a run opens in its plan.
 - Measurement pages load faster, and leaving a page no longer makes the next one wait behind it.
 - Measurement's Workflows section now loads much faster on a long history; before, it could take minutes.
+- An agent that keeps a workflow is now told to split it when it has grown too long to read in one pass: a part other work also needs, or a different kind of work, becomes its own workflow that a step runs.
 - Workflow version comparisons now count a run once it ends, and group each run by the model of the agent that ran it. Earlier, runs made of several tasks never counted.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
