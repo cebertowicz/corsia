@@ -76,44 +76,28 @@ afterEach(() => {
 	coreSettings.set(null);
 });
 
+// The server never hands chat a comment-only send (backend/tests/test_chat_comment_not_in_chat.py): only the seq it used is missing.
 describe('comment-only sends across server stubs', () => {
-	it.each(['optimistic', 'queued', 'failed'] as const)('hides a %s reply when its target is in collapsed work', (state) => {
-		const target = { ...work('target', 1, '10:00:00'), thread_id: A, chat_comments: [{
-			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'Target', note: 'note', from_off: 0, to_off: 6,
-			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z', answers: [],
-		}] };
-		const send = { ...human('send', 2, '10:01:00', 't1', '10:01:00'), thread_id: A, content: '', active_turn_id: null, delivery_state: state === 'optimistic' ? 'queued' : state, _optimistic: state === 'optimistic',
-			metadata: { reply_context: { comments: [{ id: 'c', seq: 1, quote: 'Target', note: 'reply', root_user_message_id: 'root-message', root_cid: 'root' }] } } };
-		token.set('test-token');
-		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ cards: [], has_more: false, divider: null }))));
-		messages.set([target, send] as Message[]);
-		renderList({ historyComplete: true });
-		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
-	});
-	it('places a reply whose loaded target is inside collapsed work', () => {
+	it('shows a commented target inside collapsed work once its run opens', () => {
 		const target = { ...work('target', 1, '10:00:00'), thread_id: A, content: 'Target', chat_comments: [{
 			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'Target', note: 'note', from_off: 0, to_off: 6,
 			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z',
 			answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'answer', text: 'reply', created_at: '2026-10-02T10:01:00Z', unread: false }],
 		}] };
-		const send = { ...human('send', 2, '10:01:00', 't1', '10:01:00'), thread_id: A, content: '', metadata: { reply_context: { comments: [{ id: 'c', cid: 'answer' }] } } };
-		messages.set([target, send, { ...work('step', 3, '10:02:00'), thread_id: A }, { ...said('last', 4, '10:03:00'), thread_id: A }] as Message[]);
+		messages.set([target, { ...work('step', 3, '10:02:00'), thread_id: A }, { ...said('last', 4, '10:03:00'), thread_id: A }] as Message[]);
 		renderList({ historyComplete: true });
 		expect(toggles()).toHaveLength(1);
-		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
 		toggles()[0].click(); flushSync();
 		expect(host.querySelector('[data-message-id="target"]')).not.toBeNull();
-		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
 	});
-	it('opens the combined range once without repeating its pieces or drawing placed sends', () => {
+	it('opens the range around a send once without repeating its pieces', () => {
 		const first = { ...said('target', 1, '10:00:00'), thread_id: A, chat_comments: [{
 			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'target', note: 'note', from_off: 0, to_off: 6,
 			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z',
 			answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'answer', text: 'reply', created_at: '2026-10-02T10:00:00Z', unread: false }],
 		}] };
-		const envelope = { ...human('send', 3, '10:01:00', 't1', '10:01:00'), thread_id: A, content: '', metadata: { reply_context: { comments: [{ id: 'c', cid: 'answer' }] } } };
 		const last = { ...said('last', 5, '10:03:00'), thread_id: A };
-		const rows = [first, envelope, last] as Message[];
+		const rows = [first, last] as Message[];
 		const part = (id: string, seq: number) => ({ firstId: id, lastId: id, firstSeq: seq, lastSeq: seq, count: 1, weight: 1, turnIds: [], kinds: ['steps'], continuesOlder: false });
 		const onLoadRun = vi.fn();
 		messages.set(rows);
@@ -121,10 +105,9 @@ describe('comment-only sends across server stubs', () => {
 		expect(toggles()).toHaveLength(1);
 		toggles()[0].click(); flushSync();
 		expect(onLoadRun).toHaveBeenCalledWith(expect.objectContaining({ firstId: 'a', lastId: 'b' }));
-		messages.set([first, { ...work('a', 2, '10:00:30'), thread_id: A }, envelope, { ...work('b', 4, '10:02:00'), thread_id: A }, last] as Message[]);
+		messages.set([first, { ...work('a', 2, '10:00:30'), thread_id: A }, { ...work('b', 4, '10:02:00'), thread_id: A }, last] as Message[]);
 		props.runLoads = { b: { oldestId: 'a', coveredFirstId: 'a', hasMore: false, loading: false, error: false } };
 		flushSync();
-		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
 		expect(host.querySelectorAll('[data-message-id="a"]')).toHaveLength(1);
 		expect(host.querySelectorAll('[data-message-id="b"]')).toHaveLength(1);
 		expect(toggles()).toHaveLength(1);
