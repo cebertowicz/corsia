@@ -191,7 +191,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
     from infra.database import get_db
     from infra.queries import get_thread
     from events.rule_actions import reachable_workflows
-    from llm.account_catalog import effective_status
+    from llm.account_catalog import startable_status
     from llm.delegation_model import dispatch_scope
     from llm.locality import locality_refusal
     from llm.model_status import scoped_status_rows
@@ -219,11 +219,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
                                   "cloud model. Choose a local model, or allow cloud models for this project.")
     if status_row is None:
         raise inputs.StartRefused("refused: this model can't be found. Choose another model for this chat.")
-    # The catalog's runnable answer: ready, or usage-limited with a permitted ready sibling,
-    # whose first turn then rolls over or is held like any thread's. A row without one is its own.
-    runnable = status_row.get("runnable")
-    status = runnable["status"] if isinstance(runnable, dict) else effective_status(status_row)[0]
-    if status != "ready":
+    if startable_status(status_row, project)[0] != "ready":
         if status_row.get("is_local"):
             raise inputs.StartRefused(f"refused: your model {name} is not loaded. "
                                       "Load it, or choose a local model that is loaded.")
