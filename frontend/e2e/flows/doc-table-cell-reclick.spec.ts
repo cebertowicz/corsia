@@ -54,9 +54,7 @@ for (const layout of LAYOUTS) {
 			await page.keyboard.type('Q');
 			const failures: string[] = [];
 			for (let i = 0; i < REPEATS; i++) {
-				// The document header shows "This write is still settling" for about half a second after typing, moving everything
-				// below it 78px down and back up. A click aimed during that lands a row off, in prose as in a cell, so each one
-				// is aimed once the write has settled, which is the cell editor's own part of the sequence.
+				// Wait out the header's "write is still settling" notice: it shifts the document 78px for ~0.5s after typing, so a click aimed then lands a row off, in prose too.
 				await page.waitForTimeout(2000);
 				await expect(page.locator('.live-block')).toHaveCount(0);
 				const before = await wordAt(page, 1 + (i % 4));
