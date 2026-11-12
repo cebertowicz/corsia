@@ -255,7 +255,9 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			await line.dblclick({ position: { x: 12, y: 8 } });
 			await page.locator('.sel-comment').click();
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
-			// CodeMirror draws only the lines near the viewport and re-measures them after a double-click, which on a busy host moves the canvas by hundreds of px (tracked as its own item, not this spec's subject). The line is placed again here, once that measurement pass is done, so nothing below depends on where the double-click left it.
+			// Playwright's locator.dblclick scrolls the target into view when its stability check fails, and that check fails because
+			// CodeMirror refines its estimated line heights a couple of px after the jump that first draws them. A reader's own
+			// double-click never moves the line. Placing it again here keeps that retry's scroll out of the measurements below.
 			await placeTarget(page, 0.5);
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-${tag}`, { fullPage: false });

@@ -1,3 +1,17 @@
+/** The nearest ancestor that scrolls on its own, or null when the page itself is the scroller. */
+export function scroller(node: HTMLElement): HTMLElement | null {
+	for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+		if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
+	}
+	return null;
+}
+
+/** The block's own scroll margins: `scrollIntoView` leaves them clear, so they spend from the scroller's room. */
+function scrollMargins(element: HTMLElement): number {
+	const style = getComputedStyle(element);
+	return (parseFloat(style.scrollMarginTop) || 0) + (parseFloat(style.scrollMarginBottom) || 0);
+}
+
 /**
  * Keeps `node` scrolled into its nearest scrolling ancestor while `enabled`:
  * once on mount and again whenever the visual viewport or that scroller
@@ -12,19 +26,6 @@
  * around that block; a block too tall for the scroller keeps the node-into-view
  * behaviour.
  */
-export function scroller(node: HTMLElement): HTMLElement | null {
-	for (let parent = node.parentElement; parent; parent = parent.parentElement) {
-		if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
-	}
-	return null;
-}
-
-/** The block's own scroll margins: `scrollIntoView` leaves them clear, so they spend from the scroller's room. */
-function scrollMargins(element: HTMLElement): number {
-	const style = getComputedStyle(element);
-	return (parseFloat(style.scrollMarginTop) || 0) + (parseFloat(style.scrollMarginBottom) || 0);
-}
-
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
 	let frame = 0;
