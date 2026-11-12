@@ -25,6 +25,12 @@ import subprocess
 from infra.backend_git import git_argv
 
 GIT_TIMEOUT_SECONDS = 30.0
+# Removing a worktree deletes its whole tree, dependencies and build caches
+# included; the owner measured 27-55 s on this Mac's real worktrees on Nov 12, so
+# the default git timeout cut removals off mid-delete and stranded the entries.
+# It stays bounded -- one hung child must not stall the nightly pass -- and
+# whatever this timeout still cuts off, the next pass finishes: sweep_quarantine.
+WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
 
@@ -41,6 +47,23 @@ DISPOSABLE_FILES = frozenset({
     "frontend/static/build-info.json", "frontend/src/lib/build-info.json",
 })
 DISPOSABLE_NON_DIRECTORY_NAMES = frozenset({"node_modules", ".venv"})
+# Generated trees that .gitignore ignores at exactly this repository-relative
+# path, each named by the script that writes it: frontend/.qa is the e2e scratch
+# workspace and state; desktop/bundle and desktop/.build-macos are the macOS
+# bundle's BUNDLE_ROOT and BUILD_ROOT, which that script deletes and rebuilds on
+# every run; desktop/.rust-toolchain holds the RUSTUP_HOME and CARGO_HOME the
+# toolchain installer downloads; desktop/src-tauri/gen holds the context and
+# schemas `tauri build` generates. These are matched on the whole path, never on
+# one directory name: a `bundle`, `gen` or `target` directory anywhere else is
+# somebody's work, and the top-level `.qa/` that salvage must still copy is not
+# frontend/.qa.
+DISPOSABLE_DIRECTORY_PATHS = frozenset({
+    "frontend/.qa",
+    "desktop/bundle",
+    "desktop/.build-macos",
+    "desktop/.rust-toolchain",
+    "desktop/src-tauri/gen",
+})
 
 
 class ReaperGitError(RuntimeError):
@@ -223,6 +246,19 @@ def _is_disposable(ignored: str) -> bool:
         or any(
             part in DISPOSABLE_DIRS or part.endswith(".egg-info") for part in directories
         )
+        or _inside_disposable_path(directories)
+    )
+
+
+def _inside_disposable_path(directories: list[str]) -> bool:
+    """True when a named generated tree is this path or one of its parents.
+
+    Git reports an ignored directory whole, so the entry is normally the tree
+    itself; a path below it shows up where only its contents are ignored.
+    """
+    return any(
+        "/".join(directories[:depth]) in DISPOSABLE_DIRECTORY_PATHS
+        for depth in range(1, len(directories) + 1)
     )
 
 

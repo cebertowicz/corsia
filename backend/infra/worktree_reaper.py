@@ -178,6 +178,8 @@ def _remove_candidate(
         report.skip(candidate.name, owner, "salvage_failed", idle_days, str(exc)[:240])
         return True
     except (OSError, ReaperGitError) as exc:
+        # The text is the point: a timeout and a refusal need different fixes.
+        logger.warning("worktree_reaper: {} remove_error: {}", candidate.name, exc)
         report.skip(candidate.name, owner, "remove_error", idle_days, str(exc)[:240])
         return True
     finally:
@@ -223,6 +225,98 @@ def _reap_orphans(
         report.skip(orphan.name, None, "orphan_kept", idle_days, reason)
 
 
+@dataclass
+class _Queued:
+    """One candidate the checks cleared for removal, waiting its turn in this pass."""
+
+    candidate: Candidate
+    idle_days: float
+    expected_head: str | None
+    merged: bool
+
+
+def _skip_unchecked(
+    report: RepoReport, rest: list[Candidate], now: float, reason: str,
+) -> None:
+    for candidate in rest:
+        report.skip(candidate.name, candidate.owner_thread, reason,
+                    _idle_days(candidate.idle_since, now))
+
+
+def _skip_queued(report: RepoReport, rest: list[_Queued], reason: str) -> None:
+    for queued in rest:
+        report.skip(queued.candidate.name, queued.candidate.owner_thread, reason, queued.idle_days)
+
+
+def _walk_candidates(
+    repo: Path, report: RepoReport, ctx: CheckContext, budget: RunBudget, mode: str,
+    pr_sha: str | None, deferred: dict[str, str], selected: list[Candidate],
+) -> tuple[list[_Queued], bool]:
+    """Judge and remove candidates in idle order, cheapest reclaim first.
+
+    Returns the salvage queue and whether the repository lock stopped the walk;
+    candidates this walk did not reach are reported here. The order decides which
+    candidates a budget-cut pass reaches, never what may be removed: each removal
+    still rechecks under the lock.
+    """
+    queue: list[_Queued] = []
+    unchecked = list(selected)
+    while unchecked and not budget.exhausted():
+        candidate = unchecked.pop(0)
+        idle_days = _idle_days(candidate.idle_since, ctx.now)
+        head = candidate.entry.head if candidate.entry else None
+        recorded_head = deferred.get(str(candidate.path))
+        if mode == "idle" and recorded_head is not None and recorded_head != head:
+            forget_pr_terminal(candidate.path)
+            deferred.pop(str(candidate.path))
+        merged = mode == "pr_terminal" or (head is not None and recorded_head == head)
+        expected_head = pr_sha if mode == "pr_terminal" else deferred.get(str(candidate.path))
+        verdict = candidate_verdict(
+            ctx, candidate, IDLE_THRESHOLD_SECONDS, merged=merged,
+            short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
+        )
+        if isinstance(verdict, str) and mode == "pr_terminal" and head is not None:
+            # Blocked at merge time (a live process, a Git lock, uncommitted
+            # edits): the nightly pass retries it under the same merged rules.
+            remember_pr_terminal(candidate.path, head)
+        if isinstance(verdict, str):
+            report.skip(candidate.name, candidate.owner_thread, verdict, idle_days)
+            continue
+        if verdict is RemovalVerdict.SALVAGE:
+            queue.append(_Queued(candidate, idle_days, expected_head, merged))
+            continue
+        removed_before = report.removed
+        if not _remove_candidate(repo, report, ctx, candidate, idle_days, expected_head, merged):
+            _skip_unchecked(report, unchecked, ctx.now, "repo_busy")
+            return queue, True
+        budget.removals_left -= report.removed - removed_before
+    _skip_unchecked(report, unchecked, ctx.now, "cap_reached")
+    return queue, False
+
+
+def _drain_salvage_queue(
+    repo: Path, report: RepoReport, ctx: CheckContext, budget: RunBudget, queue: list[_Queued],
+) -> None:
+    """Spend what is left of the budget on the candidates that need a copy-out.
+
+    Their verdicts were computed in the walk, so the wait changes only the order.
+    """
+    for index, queued in enumerate(queue):
+        if budget.exhausted():
+            _skip_queued(report, queue[index:], "cap_reached")
+            return
+        # Re-read open PRs here, not under the repo lock the recheck holds.
+        ctx.open_pr_branches(fresh=True)
+        removed_before = report.removed
+        if not _remove_candidate(
+            repo, report, ctx, queued.candidate, queued.idle_days,
+            queued.expected_head, queued.merged,
+        ):
+            _skip_queued(report, queue[index + 1:], "repo_busy")
+            return
+        budget.removals_left -= report.removed - removed_before
+
+
 def reap(
     policy: RepoPolicy,
     *,
@@ -254,43 +348,13 @@ def reap(
     selected.sort(key=lambda item: item.idle_since)
     report.scanned = len(selected)
     deferred = pr_terminal_heads()
-    for index, candidate in enumerate(selected):
-        idle_days = _idle_days(candidate.idle_since, ctx.now)
-        if budget.exhausted():
-            for rest in selected[index:]:
-                report.skip(rest.name, rest.owner_thread, "cap_reached",
-                            _idle_days(rest.idle_since, ctx.now))
-            break
-        head = candidate.entry.head if candidate.entry else None
-        recorded_head = deferred.get(str(candidate.path))
-        if mode == "idle" and recorded_head is not None and recorded_head != head:
-            forget_pr_terminal(candidate.path)
-            deferred.pop(str(candidate.path))
-        merged = mode == "pr_terminal" or (head is not None and recorded_head == head)
-        expected_head = pr_sha if mode == "pr_terminal" else deferred.get(str(candidate.path))
-        verdict = candidate_verdict(
-            ctx, candidate, IDLE_THRESHOLD_SECONDS, merged=merged,
-            short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
-        )
-        if isinstance(verdict, str) and mode == "pr_terminal" and head is not None:
-            # Blocked at merge time (a live process, a Git lock, uncommitted
-            # edits): the nightly pass retries it under the same merged rules.
-            remember_pr_terminal(candidate.path, head)
-        if isinstance(verdict, str):
-            report.skip(candidate.name, candidate.owner_thread, verdict, idle_days)
-            continue
-        if verdict is RemovalVerdict.SALVAGE:
-            # Re-read open PRs here, not under the repo lock the recheck holds.
-            ctx.open_pr_branches(fresh=True)
-        removed_before = report.removed
-        if not _remove_candidate(
-            repo, report, ctx, candidate, idle_days, expected_head, merged,
-        ):
-            for rest in selected[index + 1:]:
-                report.skip(rest.name, rest.owner_thread, "repo_busy",
-                            _idle_days(rest.idle_since, ctx.now))
-            break
-        budget.removals_left -= report.removed - removed_before
+    salvage_queue, halted = _walk_candidates(
+        repo, report, ctx, budget, mode, pr_sha, deferred, selected)
+    if halted:
+        # The repository lock is held elsewhere; nothing else can be removed.
+        _skip_queued(report, salvage_queue, "repo_busy")
+    else:
+        _drain_salvage_queue(repo, report, ctx, budget, salvage_queue)
     if mode == "idle":
         _reap_orphans(repo, report, ctx, orphans, budget)
     report.quarantine_entries = quarantine_entries(repo)
