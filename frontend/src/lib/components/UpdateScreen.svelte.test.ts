@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import UpdateScreen from './UpdateScreen.svelte';
 import { updateScreenView } from '$lib/update/screenStore';
+import { failureCopy } from '$lib/update/failureCopy';
 import { updateStatus, type UpdateStatus } from '$lib/update/store';
 
 let component: Record<string, unknown> | null = null;
@@ -107,11 +108,14 @@ describe('UpdateScreen stopped and failed states', () => {
 
 	it('says what happened in the live region for a failed update with the service down', () => {
 		showLocal({ ...base, mode: 'failed', failure: failed('x'), serviceDown: true });
-		expect(region()).toBe('Update failed. It didn’t start on its own.');
+		expect(region()).toBe('Update failed.');
 	});
 
 	it('hides the versions line only when the headline already names the target', () => {
-		showLocal({ ...base, mode: 'failed', failure: failed('CORSIA is on 0.4.3-dev.1288, not 0.4.3-dev.1311.'), serviceDown: false });
+		// The headline comes from failureCopy itself, so a wording change there fails here instead of bringing the line back silently.
+		const wrong = failureCopy({ code: 'wrong_version_running', detail: JSON.stringify({ target_version: '0.4.3-dev.1311' }), summary: null, conductorTold: false, log: null }, '0.4.3-dev.1288');
+		expect(wrong.headline).toContain('0.4.3-dev.1311');
+		showLocal({ ...base, mode: 'failed', failure: wrong, serviceDown: false });
 		expect(versionsLine()).toBeNull();
 	});
 

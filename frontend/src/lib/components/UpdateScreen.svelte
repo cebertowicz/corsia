@@ -205,7 +205,7 @@
 					<p class="failure-headline">{#each headlineParts(view.failure.headline) as part}{#if part.version}<span class="version">{part.text}</span>{:else}{part.text}{/if}{/each}</p>
 					<p class="detail">{view.failure.body}</p>
 				{:else if serviceDownTerminal}
-					<span class="sr-only">{view.mode === 'start_failed' ? 'CORSIA didn’t restart.' : `${view.failure?.title ?? 'Update failed'}. It didn’t start on its own.`}</span>
+					<span class="sr-only">{view.mode === 'start_failed' ? 'CORSIA didn’t restart.' : `${view.failure?.title ?? 'Update failed'}.`}</span>
 				{:else if view.mode !== 'done'}
 					<p class="step-label">{view.label}</p>
 					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
