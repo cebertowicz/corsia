@@ -1840,11 +1840,16 @@ async def test_the_workflow_share_series_adds_two_statements_at_most(isolated_db
 
     monkeypatch.setattr(measurement, "get_db", traced_get_db)
     counts: dict[str, int] = {}
-    for ids in ("outcomes", "outcomes,under_workflow_pct"):
+    settles: dict[str, int] = {}
+    for ids in ("outcomes", "under_workflow_pct", "outcomes,under_workflow_pct"):
         seen.clear()
         body = await measurement.measurement_series(ids, project="all", agent="none", grain="weeks",
                                                     timezone_name="UTC", user=USER)
         counts[ids] = len(seen)
+        settles[ids] = sum("settle AS" in statement for statement in seen)
         assert body["rows"], ids
 
     assert counts["outcomes,under_workflow_pct"] - counts["outcomes"] <= 2
+    # The share reads the accepted tasks the request already settled; it never settles the scope again.
+    assert settles["outcomes"] >= 1
+    assert settles["under_workflow_pct"] == settles["outcomes,under_workflow_pct"] == settles["outcomes"]

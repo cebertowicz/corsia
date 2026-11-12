@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 import sqlite3
-from typing import Any, NamedTuple
+from typing import Any, Iterable, NamedTuple
 
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.cost_identity import IdentityResolver
@@ -45,15 +45,41 @@ class Prepared(NamedTuple):
     pricing: tuple[Any, Any] | None  # (identity resolver, endpoint listings) when cost_usd is read
 
 
-def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope) -> tuple:
-    """Load scoped nodes and shared workflow roots."""
+#: The chains above ``:above`` (a JSON list of node ids), plus the node each chain node follows up.
+_CHAINS_ABOVE = """
+        , chain(id) AS (
+          SELECT value FROM json_each(:above)
+          UNION
+          SELECT n.parent_id FROM plan_nodes n JOIN chain c ON c.id=n.id WHERE n.parent_id IS NOT NULL
+        ), needed(id) AS (
+          SELECT id FROM chain
+          UNION
+          SELECT n.follow_up_of FROM plan_nodes n JOIN chain c ON c.id=n.id WHERE n.follow_up_of IS NOT NULL
+        )
+"""
+
+
+def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope, *,
+                above: Iterable[str] | None = None) -> tuple:
+    """Load scoped nodes and shared workflow roots.
+
+    ``above`` bounds the read to what deciding those nodes' runs takes: the nodes themselves, every
+    node above them, and the node each of those follows up (``run_roots`` reads nothing else about a
+    chain). A reader of some tasks' runs passes them, so its read grows with those tasks and their
+    depth, never with every node the scope has ever had. Only the nodes on those chains then carry a
+    root verdict to rely on; ask about no other node.
+    """
     from core.workflow_verdict_read import run_roots  # imports api.*, which imports this module
 
-    rows = db.execute(scope_cte() + """
+    chains, bound, params = "", "", scope.params(user_id)
+    if above is not None:
+        chains, bound = _CHAINS_ABOVE, " AND n.id IN (SELECT id FROM needed)"
+        params = {**params, "above": json.dumps(sorted(set(above)))}
+    rows = db.execute(scope_cte() + chains + """
         SELECT n.id,n.parent_id,n.follow_up_of,n.workflow_ref,n.workflow_version,n.created_at
         FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
         WHERE p.owner_kind='thread' AND p.owner_id IN (SELECT id FROM scope_threads)
-    """, scope.params(user_id)).fetchall()
+    """ + bound, params).fetchall()
     return rows, run_roots(rows)
 
 

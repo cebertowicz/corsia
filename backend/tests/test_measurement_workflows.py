@@ -671,3 +671,48 @@ def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, mo
     assert sum(row["n"] for row in rows.values()) == section["coverage"]["all_tasks"]
     assert sum((row["raw_value"] or 0) * row["n"] for row in rows.values()) == pytest.approx(
         section["coverage"]["under_workflow"])
+
+
+def test_the_runs_above_some_tasks_are_read_without_the_rest_of_the_scope(db) -> None:
+    """``scoped_runs(above=...)`` reads only the chains above the named tasks and decides them alike.
+
+    Each task gets the run the whole-scope read gives it, and the read holds those tasks, the nodes
+    above them and the nodes those follow up, so it does not grow with the scope's other history.
+    The continued phase is the case only the follow-up read decides: it carries the workflow of the
+    run it follows, which sits on no chain above its step, so it must not be taken for a run.
+    """
+    from core.correction_attribution import NOT_IN_WORKFLOW, workflow_run_of
+    from core.workflow_builtin_operands import scoped_runs
+    from infra.database import get_db
+
+    seed()
+    connection = get_db()
+    try:
+        phase(connection, "close-v3-a-continued", "plan-root", created="2026-10-08T09:00:00Z")
+        with raw_plan_seed(connection):
+            connection.execute("UPDATE plan_nodes SET follow_up_of='close-v3-a' WHERE id='close-v3-a-continued'")
+        step(connection, "cont-gather", "plan-root", "close-v3-a-continued", "gather", title="Gather statements",
+             created="2026-10-08T09:10:00Z", ended="2026-10-08T09:30:00Z")
+        connection.commit()
+        tasks = ["a-gather", "c-reconcile-2", "cont-gather", "plain-1"]
+        scope = MeasurementScope("all", None)
+
+        def runs(read: tuple) -> dict[str, str]:
+            nodes, roots = read
+            parents = {str(row["id"]): row["parent_id"] for row in nodes}
+            return {node: workflow_run_of(node, parents, frozenset(str(row["id"]) for row in roots))
+                    for node in tasks}
+
+        whole = scoped_runs(connection, "steve", scope)
+        above = scoped_runs(connection, "steve", scope, above=tasks)
+    finally:
+        connection.close()
+
+    assert runs(above) == runs(whole)
+    assert runs(whole)["a-gather"] == "close-v3-a" and runs(whole)["c-reconcile-2"] == "close-v4-c"
+    assert runs(whole)["plain-1"] == NOT_IN_WORKFLOW
+    assert runs(whole)["cont-gather"] != "close-v3-a-continued"
+    assert {str(row["id"]) for row in above[0]} == {
+        "a-gather", "close-v3-a", "c-reconcile-2", "c-reconcile", "close-v4-c",
+        "cont-gather", "close-v3-a-continued", "plain-1"}
+    assert len(whole[0]) > len(above[0])
