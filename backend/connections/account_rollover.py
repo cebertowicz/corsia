@@ -96,7 +96,7 @@ def _scan(provider, source_id, base, project, *, db) -> tuple[str | None, list[s
         candidates = [identity for identity in order if identity != source_id]
     else:
         candidates = order
-    unread = []
+    unread: list[str] = []
     for identity in candidates:
         decision = _decision(get_account(identity, db=db), base, project, db=db)
         if decision is None or decision['status'] != 'ready':
