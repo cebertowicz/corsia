@@ -27,7 +27,7 @@ Use `project_create`, not hand-made directories; it creates `context/`, `skills/
 
 ## 2. Interview, then write the charter
 
-Check published coordination models first (step 3); a fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` from the answers.
+Check published coordination models first: only the read under "Published coordination models" in step 3; that step's question and the drafting come after the interview. A fitting one shapes what you ask. Work that already lives somewhere (a folder, documents, a tracker): read it first with `references/project-import.md`. Ask the minimum; do not ask what you can read. Write `context/PROJECT.md` from the answers.
 
 | Ask | Becomes |
 |---|---|

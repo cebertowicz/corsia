@@ -17,7 +17,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
 1. **Read the project.** Read only the README, AGENTS.md/CLAUDE.md, the docs index, recent history and remotes, and change nothing in the folder (git history: `git log --since=90.days`, areas and authors, counts only). For a described project with no folder, skip to step 2. Other repositories or systems you see mentioned are listed as candidate sources, unread.
 
-2. **Learn how they work.** First check for a published coordination model that fits (SKILL step 3). Then post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
+2. **Learn how they work.** First check for a published coordination model that fits: only the read under "Published coordination models" in SKILL step 3; the rest of that step comes later. Then post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
    1. What is this project for, and what would make the next few months a success?
    2. How does the work get done today: the steps from an idea or request to something finished, and who's involved?
    3. Where does the work live: repositories, documents, trackers, chat, email, other tools?
@@ -33,6 +33,8 @@ Add these as your own plan tasks before you start, so the person can watch them:
    - **Roles and recurring tasks:** each kind of work and who does it today. Each recurring task gets its steps, who does each, and where the person is asked (skill `workflow-design`).
    - **Sources:** each place the work lives (step 2, question 3). For each: how fresh its data is and how CORSIA can read it (a connected tool, an event, a scheduled read, or not at all), and what is lost when it can't.
    - **How it could go wrong:** where coordination is likely to fail (a handoff, a stale source, a decision nobody owns, work nobody checks), each with how the project will catch or prevent it.
+
+   The Sources and How-it-could-go-wrong tables are drafts of the charter's canonical-sources table, input inventory and standing risks (SKILL step 2): once the person agrees, write each row there once and keep no second copy.
 
 5. **Calibrate delegation.** From steps 2–4, write down three things: what agents do without asking, what they bring to the person first, and what they never do. Add the signals that should move that line later: for example, ten clean results in a row widen it; a correction or an escaped defect narrows it. These become the standing grants and approval gates in the coordination model.
 
