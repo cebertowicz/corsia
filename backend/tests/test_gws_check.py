@@ -31,9 +31,59 @@ def test_allowed_calls_run_unchanged(name):
     assert gws_check.decide(preview(name)) == gws_check.Decision()
 
 
-@pytest.mark.parametrize("name", ["gmail_send_helper", "gmail_messages_send", "gmail_messages_list"])
+@pytest.mark.parametrize("name", [
+    "gmail_send_helper", "gmail_messages_send", "gmail_messages_list", "gmail_messages_trash",
+    "gmail_threads_modify", "gmail_modify_add_label", "gmail_modify_other_label",
+])
 def test_anything_to_gmails_address_is_refused(name):
     assert gws_check.decide(preview(name)).refusal == gws_messages.MAIL
+
+
+@pytest.mark.parametrize("name", ["gmail_modify_archive", "gmail_batch_modify_archive_read"])
+def test_archiving_or_marking_mail_read_runs_unchanged(name):
+    assert gws_check.decide(preview(name)) == gws_check.Decision()
+
+
+@pytest.mark.parametrize("body", [
+    {"removeLabelIds": []},
+    {"removeLabelIds": ["UNREAD"], "addLabelIds": ["STARRED"]},
+    {"removeLabelIds": ["INBOX", "IMPORTANT"]},
+    {"removeLabelIds": ["inbox"]},
+    {"removeLabelIds": "INBOX"},
+    {"removeLabelIds": ["INBOX"], "ids": ["M2"]},
+    {"removeLabelIds": ["INBOX"], "somethingGoogleAddsLater": True},
+    None,
+])
+def test_a_single_modify_may_only_remove_inbox_or_unread(body):
+    request = preview("gmail_modify_archive")
+    request["body"] = body
+    assert gws_check.decide(request).refusal == gws_messages.MAIL
+
+
+def test_a_modify_with_an_empty_add_list_still_only_removes():
+    request = preview("gmail_modify_archive")
+    request["body"]["addLabelIds"] = []
+    assert gws_check.decide(request) == gws_check.Decision()
+
+
+@pytest.mark.parametrize("url", [
+    "https://gmail.googleapis.com/gmail/v1/users/someone@example.com/messages/M1/modify",
+    "https://gmail.googleapis.com/gmail/v1/users/me/messages/M1/modify/extra",
+    "https://gmail.googleapis.com/gmail/v1/users/me/drafts/D1/modify",
+    "https://www.googleapis.com/upload/gmail/v1/users/me/messages/batchModify",
+])
+def test_only_the_persons_own_messages_modify_path_is_allowed(url):
+    request = preview("gmail_modify_archive")
+    request["url"] = url
+    assert gws_check.decide(request).refusal == gws_messages.MAIL
+
+
+def test_archive_under_the_shared_google_host_is_allowed_too():
+    request = preview("gmail_batch_modify_archive_read")
+    request["url"] = "https://www.googleapis.com/gmail/v1/users/me/messages/batchModify"
+    assert gws_check.decide(request) == gws_check.Decision()
+    request["method"] = "PUT"
+    assert gws_check.decide(request).refusal == gws_messages.MAIL
 
 
 def test_gmail_under_the_shared_google_host_is_refused_too():
@@ -149,7 +199,7 @@ def test_a_recorded_preview_parses():
 def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named(tmp_path):
     tool = GoogleWorkspaceTool(tmp_path)
     assert tool.name == "google_workspace" and tool.description == gws_messages.DESCRIPTION
-    assert len(gws_messages.DESCRIPTION.split()) == 225
+    assert len(gws_messages.DESCRIPTION.split()) == 242
     assert set(tool.parameters["properties"]) == {"account", "args", "params", "body", "upload", "output"}
     assert TOOL_CATALOG["google_workspace"].account_bound
     assert pack_members()["google_workspace"] == ("google_workspace",)
