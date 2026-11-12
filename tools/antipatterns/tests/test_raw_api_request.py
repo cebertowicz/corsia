@@ -160,5 +160,52 @@ def test_paths_outside_the_frontend_are_skipped(run_engine):
     assert _run(run_engine, src, "desktop/scripts/example.ts") == []
 
 
+def test_session_set_on_query_params_by_hand_fires(run_engine):
+    """The second owner the shared function exists to remove, even when apiFetch sends it."""
+    src = (
+        "import { apiFetch } from '$lib/api/request';\n"
+        "export function load(session: string) {\n"
+        "\tconst params = new URLSearchParams({ limit: '5' });\n"
+        "\tparams.set('token', session);\n"
+        "\treturn apiFetch(`/api/things?${params}`);\n"
+        "}\n"
+    )
+    findings = _run(run_engine, src)
+    assert [f.line for f in findings] == [4]
+    assert "sessionInAddress" in (findings[0].fix_hint or "")
+
+
+def test_session_appended_in_a_helper_without_a_request_fires(run_engine):
+    """A shared query builder adding the session is caught where it is built."""
+    src = (
+        "export function scopeParams(session: string): URLSearchParams {\n"
+        "\tconst params = new URLSearchParams({ grain: 'days' });\n"
+        "\tparams.append(\"token\", session);\n"
+        "\treturn params;\n"
+        "}\n"
+    )
+    assert [f.line for f in _run(run_engine, src)] == [3]
+
+
+def test_session_written_into_an_apifetch_address_fires(run_engine):
+    src = (
+        "import { apiFetch } from '$lib/api/request';\n"
+        "export const load = (s: string) => apiFetch(`/api/things?token=${s}&limit=5`);\n"
+    )
+    assert [f.line for f in _run(run_engine, src)] == [2]
+
+
+def test_session_in_address_option_and_image_helper_are_not_flagged(run_engine):
+    src = (
+        "import { apiFetch } from '$lib/api/request';\n"
+        "export const load = () => apiFetch('/api/threads/t/messages?limit=5', { sessionInAddress: true });\n"
+        "export const image = (token: string, path: string) =>\n"
+        "\t`/api/files/content?${new URLSearchParams({ token, path, raw: 'true' })}`;\n"
+        "// params.set('token', session) was removed\n"
+        "export const unrelated = (p: URLSearchParams) => p.set('tokens', '5');\n"
+    )
+    assert _run(run_engine, src) == []
+
+
 def test_python_files_are_skipped(run_engine):
     assert _run(run_engine, "fetch('/api/x')\n", "frontend/src/lib/example.py") == []
