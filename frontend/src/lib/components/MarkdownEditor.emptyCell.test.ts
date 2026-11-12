@@ -65,9 +65,9 @@ describe('the Comment offer on an empty cell being edited', () => {
 
 	it('goes when the first character is typed, and comes back when everything in the cell is deleted', async () => {
 		const { onSelect, edit } = await openCell(1);
-		edit(1, 1, 'x');
+		edit(0, 0, 'x');
 		expect(last(onSelect), 'typing takes the offer away').toBeNull();
-		edit(1, 2, '');
+		edit(0, 1, '');
 		expect(last(onSelect), 'the cell is empty again, so the offer is back').toEqual(wholeEmptyCell());
 	});
 
