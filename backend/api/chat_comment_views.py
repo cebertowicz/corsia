@@ -66,6 +66,18 @@ def _is_comment_input(thread_id: str, message_id: str) -> bool:
         return False
 
 
+def _settled(thread_id: str, message_id: str) -> bool:
+    """Whether this input's delivery settled with no Retry to offer: it was delivered or cancelled."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT delivery_state FROM messages WHERE id=? AND thread_id=?", (message_id, thread_id),
+        ).fetchone()
+    finally:
+        db.close()
+    return row is not None and row[0] in ('delivered', 'cancelled')
+
+
 def _owned_thread(user_id: str, thread_id: str):
     db = get_db()
     try:
@@ -155,7 +167,9 @@ async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
     try:
         retried = await retry_thread_delivery_now(thread_id, message_id, user_id)
     except HTTPException as exc:
-        if exc.status_code != 409:
+        # Only a comment that settled stands; any other refusal, such as a chat that can't take
+        # input now, is the Retry's failure and says why.
+        if exc.status_code != 409 or not await run_read(lambda: _settled(thread_id, message_id)):
             raise
         retried = {}
     # A queued comment is driven in place, an ended one gets its copy, and a delivered or cancelled one stands.

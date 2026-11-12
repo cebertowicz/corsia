@@ -180,6 +180,23 @@ def test_retry_of_a_comment_already_delivered_or_cancelled_answers_with_it_as_it
     assert target.execute("SELECT COUNT(*) FROM messages WHERE role='user'").fetchone()[0] == 1
 
 
+def test_a_retry_the_chat_refuses_says_why_rather_than_standing(target, frames, publish_only, monkeypatch):
+    # The comment is still failed, so a refusal is the Retry's own failure, never a silent 200.
+    import infra.send_service as send_service
+    from infra.send_types import SendRejected
+
+    _post()
+    _end("failed")
+
+    async def refuse(*_args, **_kwargs):
+        raise SendRejected(409, "Thread can't be continued as a Claude Code session.")
+
+    monkeypatch.setattr(send_service, "send_thread_input", refuse)
+    with pytest.raises(HTTPException) as refused:
+        _retry()
+    assert (refused.value.status_code, refused.value.detail) == (409, "Thread can't be continued as a Claude Code session.")
+
+
 def _reply_under(root="box-1"):
     db = get_db()
     root_cid = db.execute("SELECT cid FROM chat_comments WHERE user_message_id=?", (root,)).fetchone()[0]
