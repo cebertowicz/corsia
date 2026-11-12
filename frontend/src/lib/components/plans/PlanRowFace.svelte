@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
+	import { feedbackLine } from '$lib/api/messageCards';
 	import CommentCountLine from '$lib/components/comments/CommentCountLine.svelte';
 	import { activeToolsByThread } from '$lib/stores/threads';
 	import { minuteClock } from '$lib/time';
@@ -73,7 +74,7 @@
 		{#if branchProgress}<span class="branch-progress">{branchProgress}<span class="sr-only">{' done'}</span></span>{/if}
 		<span class="row-status sr-only">{label}</span>
 	</span>
-	{#if attention && !countFollows}
+	{#if attention && !countFollows && feedbackLine(attention)}
 		<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot={attention.system_task || node.requires_user_action} /></span>
 	{/if}
 	{#if !attention?.system_task && liveStep}

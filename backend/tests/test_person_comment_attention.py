@@ -8,7 +8,7 @@ from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from doceditor import comment_actions, feedback_comments, person_comment_attention
 from doceditor.feedback_state import annotate_thread_attention, mark_thread_viewed
 from infra.database import get_db, write_transaction
-from plans import artifact_links, decision_writes, operator_display_state, person_comment_task, public, service
+from plans import artifact_links, person_comment_task, public, service
 from plans.boundary import PlanActor
 
 
@@ -49,282 +49,268 @@ def test_one_task_per_document_closes_and_can_reopen(isolated_db):
         db.close()
 
 
-@pytest.mark.parametrize('feedback_first', [True, False])
-@pytest.mark.parametrize('moving', [True, False])
-def test_feedback_covers_person_task_until_settled(isolated_db, feedback_first, moving):
-    from doceditor.person_comment_projection import annotate
-    from plans import operator_chat_state
+def _person():
+    return PlanActor(None, 'owner-token', None, kind='user')
 
+
+def _waiting_document(db, owner='owner'):
+    """A document whose owner replied to the person, so one comment waits on them."""
+    artifact = seed_document(db, owner)
+    root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+    reply, _ = add_comment(db, artifact, author_id=owner, parent_id=root['id'])
+    return artifact, root, reply
+
+
+def _ask_node(connection, thread_id, title='Review'):
+    plan = service.ensure_plan('thread', thread_id, db=connection)
+    return service.add_node(plan.id, kind='task', title=title, acceptance_criteria='Done',
+                            actor_id=None, provenance='test', db=connection)
+
+
+def _raise(connection, node_id, artifact, thread_id):
+    node = service._node_row(connection, node_id)
+    public.mutate(node['plan_id'], 'block_node', {
+        'node_id': node_id, 'expected_revision': node['revision'], 'owner_kind': 'user',
+        'ask_artifact_id': artifact, 'reason_key': 'review', 'reason': 'Please review',
+    }, actor=PlanActor(thread_id, 'owner-token', None), provenance='test',
+        mutation_id=uuid.uuid4().hex, db=connection)
+    return connection.execute(
+        'SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL ORDER BY created_at DESC, id DESC',
+        (node_id,),
+    ).fetchone()['id']
+
+
+def _end(connection, node_id, hold_id, thread_id):
+    node = service._node_row(connection, node_id)
+    public.mutate(node['plan_id'], 'resolve_blocker', {
+        'node_id': node_id, 'expected_revision': node['revision'], 'hold_id': hold_id,
+    }, actor=PlanActor(thread_id, 'owner-token', None), provenance='test',
+        mutation_id=uuid.uuid4().hex, db=connection)
+
+
+def _tasks(db, artifact):
+    return [tuple(row) for row in db.execute(
+        'SELECT n.id, n.state FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id'
+        ' WHERE l.provenance=? AND l.artifact_id=? ORDER BY n.created_at, n.id',
+        (person_comment_task.PROVENANCE, artifact),
+    )]
+
+
+def _reason(db, node_id):
+    return db.execute(
+        "SELECT json_extract(payload_json,'$.reason') FROM plan_node_events"
+        " WHERE node_id=? AND json_extract(payload_json,'$.reason') IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+        (node_id,),
+    ).fetchone()[0]
+
+
+def _open_tasks(db, artifact):
+    return [node_id for node_id, state in _tasks(db, artifact) if state not in public.TERMINAL_STATES]
+
+
+def test_an_open_comment_task_alone_never_covers(isolated_db):
     db = get_db()
     try:
         seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        with write_transaction(db, scope='test_feedback_plan') as connection:
-            plan = service.ensure_plan('thread', 'owner', db=connection)
-
-        def add_feedback(connection):
-            node = service.add_node(plan.id, kind='task', title='Agent feedback',
-                                    acceptance_criteria='Done', actor_id=None,
-                                    provenance='document.feedback_batch', db=connection)
-            artifact_links.link(node.id, artifact, 'input', actor_id=None,
-                                provenance='document.feedback_batch', db=connection)
-            if moving:
-                service.transition_node(node.id, 'active', actor_id='owner', db=connection)
-            return node
-
-        if feedback_first:
-            with write_transaction(db, scope='test_feedback_first') as connection:
-                feedback = add_feedback(connection)
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        with write_transaction(db, scope='test_comment_coverage') as connection:
-            person_task = person_comment_task.reconcile(connection, artifact)
-            if not feedback_first:
-                feedback = add_feedback(connection)
-            actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
-
-            def nodes():
-                envelope = public.read_operator_thread('owner', actor=actor, db=connection)
-                return {n['id']: n for n in annotate(connection, envelope, 'owner-token')['plans'][0]['nodes']}
-
-            def attention():
-                return operator_chat_state.read_thread_states(['owner'], actor=actor, db=connection)['states']['owner']['attention_items']
-
-            assert operator_display_state.covered_nodes([feedback.id, person_task], db=connection) == {person_task}
-            shown = nodes()
-            assert person_task not in shown
-            assert shown[feedback.id]['comment_attention']['comments'] == 1
-            assert len(attention()) == 1
-            ask = service.add_node(plan.id, kind='task', title='Review', acceptance_criteria='Done',
-                                   assignee='user', actor_id=None, provenance='test', db=connection)
-            artifact_links.link(ask.id, artifact, 'input', actor_id=None, provenance='test', db=connection)
-            shown = nodes()
-            assert shown[ask.id]['comment_attention']['comments'] == 1
-            assert 'comment_attention' not in shown[feedback.id]
-            assert len(attention()) == 1
-            service.transition_node(ask.id, 'closed', actor_id=None, provenance='test', db=connection)
-            service.transition_node(feedback.id, 'closed', actor_id=None, provenance='test', db=connection)
-            shown = nodes()
-            assert shown[person_task]['comment_attention']['comments'] == 1
-            assert len(attention()) == 1
+        artifact, _, _ = _waiting_document(db)
+        assert len(_open_tasks(db, artifact)) == 1
+        assert not person_comment_task.is_covered(db, artifact, 'owner-token')
     finally:
         db.close()
 
 
-def test_covered_comment_task_leaves_every_plan_count_unchanged(isolated_db):
-    """Hiding happens in the plans projection, so the pane and chat list read the same counts."""
-    from doceditor.person_comment_projection import annotate
-    from plans import operator_chat_state
-
+def test_feedback_task_never_covers(isolated_db):
     db = get_db()
     try:
         seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
-        with write_transaction(db, scope='test_count_parity') as connection:
+        artifact, _, _ = _waiting_document(db)
+        with write_transaction(db, scope='test_feedback_task') as connection:
             plan = service.ensure_plan('thread', 'owner', db=connection)
-            feedback = service.add_node(plan.id, kind='task', title='Agent feedback',
-                                        acceptance_criteria='Done', actor_id=None,
-                                        provenance='document.feedback_batch', db=connection)
+            feedback = service.add_node(plan.id, kind='task', title='Agent feedback', acceptance_criteria='Done',
+                                        actor_id=None, provenance='document.feedback_batch', db=connection)
             artifact_links.link(feedback.id, artifact, 'input', actor_id=None,
                                 provenance='document.feedback_batch', db=connection)
-            service.transition_node(feedback.id, 'active', actor_id='owner', db=connection)
-
-            def counts():
-                envelope = public.read_operator_thread('owner', actor=actor, db=connection)
-                raw = dict(envelope['plans'][0]['progress'])
-                annotated = annotate(connection, envelope, 'owner-token')['plans'][0]['progress']
-                assert annotated == raw
-                state = operator_chat_state.read_thread_states(['owner'], actor=actor, db=connection)
-                return raw, state['states']['owner']['label_key']
-
-            before = counts()
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        with write_transaction(db, scope='test_count_parity_after') as connection:
-            person_task = person_comment_task.reconcile(connection, artifact)
-            assert operator_display_state.covered_nodes([person_task], db=connection) == {person_task}
-            assert counts() == before
+            assert not person_comment_task.is_covered(connection, artifact, 'owner-token')
+            assert person_comment_task.reconcile(connection, artifact) in _open_tasks(connection, artifact)
     finally:
         db.close()
 
 
-def test_other_agents_feedback_does_not_cover_owner_comment_task(isolated_db):
+def test_an_ask_closes_the_task_and_its_end_brings_it_back(isolated_db):
+    asker = 'owner'
     db = get_db()
     try:
         seed_thread(db, 'owner')
-        seed_thread(db, 'reviewer')
-        artifact = seed_document(db, 'owner')
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        with write_transaction(db, scope='test_other_feedback') as connection:
-            person_task = person_comment_task.reconcile(connection, artifact)
-            plan = service.ensure_plan('thread', 'reviewer', db=connection)
-            node = service.add_node(plan.id, kind='task', title='Other feedback',
-                                    acceptance_criteria='Done', actor_id=None,
-                                    provenance='document.feedback_batch', db=connection)
-            artifact_links.link(node.id, artifact, 'input', actor_id=None,
-                                provenance='document.feedback_batch', db=connection)
-            assert not operator_display_state.covered_nodes([person_task], db=connection)
+        seed_thread(db, 'other')
+        artifact, root, _ = _waiting_document(db)
+        add_comment(db, artifact, author_id='owner', parent_id=root['id'], replacement='better words')
+        [task] = _open_tasks(db, artifact)
+        before = person_comment_attention.counts(db, artifact, 'owner-token')
+        with write_transaction(db, scope='test_ask_opens') as connection:
+            ask = _ask_node(connection, asker)
+            hold = _raise(connection, ask.id, artifact, asker)
+        # Closed, not accepted: nothing was read or decided, and the comments are as they were.
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.COVERED
+        assert person_comment_attention.counts(db, artifact, 'owner-token') == before == (1, 1)
+        assert db.execute('SELECT COUNT(*) FROM doc_comment_thread_views').fetchone()[0] == 0
+        assert db.execute('SELECT COUNT(*) FROM doc_comments WHERE decision IS NOT NULL').fetchone()[0] == 0
+        with write_transaction(db, scope='test_ask_ends') as connection:
+            _end(connection, ask.id, hold, asker)
+        [again] = _open_tasks(db, artifact)
+        assert again != task
     finally:
         db.close()
 
 
-def test_feedback_parent_with_unlisted_settled_child_keeps_projected_progress(isolated_db):
+def test_an_ask_ending_with_nothing_waiting_brings_nothing_back(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, reply = _waiting_document(db)
+        with write_transaction(db, scope='test_ask_opens') as connection:
+            ask = _ask_node(connection, 'owner')
+            hold = _raise(connection, ask.id, artifact, 'owner')
+        with write_transaction(db, scope='test_read') as connection:
+            mark_thread_viewed(connection, 'owner-token', artifact, root['id'], reply['id'])
+        with write_transaction(db, scope='test_ask_ends') as connection:
+            _end(connection, ask.id, hold, 'owner')
+        assert _open_tasks(db, artifact) == []
+    finally:
+        db.close()
+
+
+def test_a_re_raise_in_one_transaction_adds_no_task(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        with write_transaction(db, scope='test_ask_node') as connection:
+            ask = _ask_node(connection, 'owner')
+        nodes = db.execute('SELECT COUNT(*) FROM plan_nodes').fetchone()[0]
+        with write_transaction(db, scope='test_re_raise') as connection:
+            hold = _raise(connection, ask.id, artifact, 'owner')
+            _end(connection, ask.id, hold, 'owner')
+            _raise(connection, ask.id, artifact, 'owner')
+        assert db.execute('SELECT COUNT(*) FROM plan_nodes').fetchone()[0] == nodes
+        assert _open_tasks(db, artifact) == []
+    finally:
+        db.close()
+
+
+def test_a_paused_owner_plan_keeps_the_task_until_it_resumes(isolated_db):
+    from plans import lifecycle
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        seed_thread(db, 'other')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        plan_id = service._node_row(db, task)['plan_id']
+        with write_transaction(db, scope='test_pause') as connection:
+            lifecycle.transition(plan_id, 'paused', expected_revision=service._plan_row(connection, plan_id)['revision'],
+                                 actor_id=None, provenance='test', db=connection)
+        with write_transaction(db, scope='test_ask_opens') as connection:
+            ask = _ask_node(connection, 'owner')
+            _raise(connection, ask.id, artifact, 'owner')
+        assert _tasks(db, artifact) == [(task, 'pending')]
+        with write_transaction(db, scope='test_resume') as connection:
+            lifecycle.transition(plan_id, 'active', expected_revision=service._plan_row(connection, plan_id)['revision'],
+                                 actor_id=None, provenance='test', db=connection)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+    finally:
+        db.close()
+
+
+def test_a_missing_document_closes_its_task(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_orphan') as connection:
+            connection.execute('PRAGMA defer_foreign_keys=ON')
+            connection.execute('DELETE FROM artifact_registrations WHERE artifact_id=?', (artifact,))
+            assert person_comment_task.reconcile(connection, artifact) is None
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == 'The document is gone.'
+    finally:
+        db.close()
+
+
+def test_two_asks_put_the_counts_on_the_earliest_only(isolated_db):
     from doceditor.person_comment_projection import annotate
-    from datetime import UTC, datetime
-    from plans import mutations, pane_views
 
     db = get_db()
     try:
         seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        with write_transaction(db, scope='test_nested_coverage') as connection:
-            plan = service.ensure_plan('thread', 'owner', db=connection)
-            parent = service.add_node(plan.id, kind='phase', title='Feedback', acceptance_criteria='Done',
-                                      provenance='document.feedback_batch', db=connection)
-            artifact_links.link(parent.id, artifact, 'input', actor_id=None,
-                                provenance='document.feedback_batch', db=connection)
-            child = service.add_node(plan.id, kind='task', title='Completed child', acceptance_criteria='Done',
-                                     parent_id=parent.id, db=connection)
-            service.transition_node(child.id, 'active', db=connection)
-            mutations.request_review(child.id, evidence='Done', actor_id='owner', db=connection)
-            service.transition_node(child.id, 'accepted', verification_result='passed', verified_by='owner', db=connection)
-            service.transition_node(parent.id, 'active', db=connection)
-            ask = service.add_node(plan.id, kind='task', title='Review', acceptance_criteria='Done',
-                                   assignee='user', provenance='test', db=connection)
-            artifact_links.link(ask.id, artifact, 'input', actor_id=None, provenance='test', db=connection)
-            actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
-            pane_views.record(connection, user_id='owner-token', thread_id='owner',
-                              seen_through=datetime.now(UTC).isoformat())
-            envelope = public.read_operator_thread('owner', actor=actor, db=connection)
-            projected = envelope['plans'][0]
-            nodes = {node['id']: node for node in projected['nodes']}
-            assert parent.id in nodes and child.id not in nodes
-            assert nodes[parent.id]['branch_progress'] is not None
-            assert not nodes[parent.id]['comment_task_covered']
-            before = dict(projected['progress'])
-            annotated = annotate(connection, envelope, 'owner-token')['plans'][0]
-            assert annotated['progress'] == before
-    finally:
-        db.close()
-
-
-def test_two_document_steps_cover_only_the_comment_task(isolated_db):
-    db = get_db()
-    try:
-        seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        with write_transaction(db, scope='test_comment_coverage') as connection:
-            comment_task = person_comment_task.reconcile(connection, artifact)
-            plan = service.ensure_plan('thread', 'owner', db=connection)
-            asks = []
-            for title in ('First ask', 'Second ask'):
-                node = service.add_node(
-                    plan.id, kind='task', title=title, acceptance_criteria='Done',
-                    assignee='user', actor_id=None, provenance='test', db=connection,
-                )
-                artifact_links.link(node.id, artifact, 'input', actor_id=None,
-                                    provenance='test', db=connection)
-                asks.append(node.id)
-            found = public.open_asks_for_artifact(artifact, db=connection)
-            assert {row['node_id'] for row in found} == {comment_task, *asks}
-            assert operator_display_state.covered_nodes([comment_task, *asks], db=connection) == {comment_task}
-            actor = PlanActor(thread_id=None, user_id='owner-token', project_id=None, kind='user')
-            envelope = public.read_operator_thread('owner', actor=actor, db=connection)
-            nodes = {node['id']: node for plan in envelope['plans'] for node in plan['nodes']}
-            assert comment_task not in nodes
-            assert all(nodes[node_id]['requires_user_action'] for node_id in asks)
-            assert connection.execute(
-                f"SELECT {operator_display_state.ask_deferred_sql('n.id', plan_state_sql='p.state')} "
-                'FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE n.id=?', (comment_task,),
-            ).fetchone()[0] == 1
-            deferred = operator_display_state.ask_deferred_sql('?', plan_state_sql='?')
-            assert connection.execute(f'SELECT {deferred}', ('active', comment_task)).fetchone()[0] == 1
-            for node_id in asks:
-                service.transition_node(node_id, 'closed', actor_id=None, provenance='test', db=connection)
-            assert not operator_display_state.covered_nodes([comment_task], db=connection)
-            envelope = public.read_operator_thread('owner', actor=actor, db=connection)
-            nodes = {node['id']: node for plan in envelope['plans'] for node in plan['nodes']}
-            assert nodes[comment_task]['requires_user_action']
-    finally:
-        db.close()
-
-
-def test_decision_without_a_document_link_does_not_cover_comments(isolated_db):
-    db = get_db()
-    try:
-        seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        with write_transaction(db, scope='test_unlinked_decision') as connection:
-            comment_task = person_comment_task.reconcile(connection, artifact)
-            plan = service.ensure_plan('thread', 'owner', db=connection)
-            source = service.add_node(plan.id, kind='task', title='Source',
-                                      acceptance_criteria='Done', actor_id=None,
-                                      provenance='test', db=connection)
-            artifact_links.link(source.id, artifact, 'input', actor_id=None,
-                                provenance='test', db=connection)
-            decision_writes.create_raised(connection, plan.id, source.id, {
-                'title': 'Choose', 'context': 'Context', 'tradeoff': 'Tradeoff',
-                'recommendation': 'A', 'rationale': 'Reason', 'other_enabled': True,
-                'options': [{'id': 'A', 'label': 'A'}, {'id': 'B', 'label': 'B'}],
-            }, 'test')
-            assert not operator_display_state.covered_nodes([comment_task], db=connection)
-    finally:
-        db.close()
-
-
-@pytest.mark.parametrize('ask_kind', ['person_step', 'review_hold'])
-@pytest.mark.parametrize('ask_first', [True, False])
-def test_comment_task_returns_when_document_ask_closes(isolated_db, ask_kind, ask_first):
-    db = get_db()
-    try:
-        seed_thread(db, 'owner')
-        artifact = seed_document(db, 'owner')
-        root, _ = add_comment(db, artifact, author_kind='user', author_id=None)
-        add_comment(db, artifact, author_id='owner', parent_id=root['id'])
-        actor = PlanActor('owner', 'owner-token', None)
-        person = PlanActor(None, 'owner-token', None, kind='user')
-        with write_transaction(db, scope='test_ask_order') as connection:
-            plan = service.ensure_plan('thread', 'owner', db=connection)
-            comment_task = None if ask_first else person_comment_task.reconcile(connection, artifact)
-            node = service.add_node(
-                plan.id, kind='task', title='Review', acceptance_criteria='Done',
-                assignee='user' if ask_kind == 'person_step' else None,
-                actor_id=None, provenance='test', db=connection,
+        artifact, _, _ = _waiting_document(db)
+        with write_transaction(db, scope='test_two_asks') as connection:
+            first = _ask_node(connection, 'owner', 'First ask')
+            second = _ask_node(connection, 'owner', 'Second ask')
+            hold = _raise(connection, first.id, artifact, 'owner')
+            # One open request per document is the product rule (one_open_ask); a second
+            # open one is seeded here, raised earlier, to prove which of them carries the counts.
+            row = dict(connection.execute('SELECT * FROM plan_node_holds WHERE id=?', (hold,)).fetchone())
+            row.update(id='0-earlier-hold', node_id=second.id, created_at='2000-01-01T00:00:00+00:00')
+            connection.execute(
+                f"INSERT INTO plan_node_holds ({','.join(row)}) VALUES ({','.join('?' * len(row))})",
+                tuple(row.values()),
             )
-            if ask_kind == 'person_step':
-                artifact_links.link(node.id, artifact, 'input', actor_id=None,
-                                    provenance='test', db=connection)
-                hold_id = None
-            else:
-                public.mutate(plan.id, 'block_node', {
-                    'node_id': node.id, 'expected_revision': node.revision,
-                    'owner_kind': 'user', 'ask_artifact_id': artifact,
-                    'reason_key': 'review', 'reason': 'Please review',
-                }, actor=actor, provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
-                hold_id = connection.execute(
-                    'SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL',
-                    (node.id,),
-                ).fetchone()['id']
-            if comment_task is None:
-                comment_task = person_comment_task.reconcile(connection, artifact)
-            assert operator_display_state.covered_nodes([comment_task], db=connection) == {comment_task}
-            if hold_id:
-                public.mutate(plan.id, 'resolve_blocker', {
-                    'node_id': node.id, 'expected_revision': service._node_row(connection, node.id)['revision'],
-                    'hold_id': hold_id,
-                }, actor=actor, provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
-            else:
-                service.transition_node(node.id, 'closed', actor_id=None, provenance='test', db=connection)
-            assert not operator_display_state.covered_nodes([comment_task], db=connection)
-            envelope = public.read_operator_thread('owner', actor=person, db=connection)
-            nodes = {item['id']: item for item in envelope['plans'][0]['nodes']}
-            assert nodes[comment_task]['requires_user_action']
+            artifact_links.link(second.id, artifact, 'attention', actor_id=None, provenance='test', db=connection)
+        assert person_comment_task.covering_asks(db, [artifact], 'owner-token')[artifact] == [second.id, first.id]
+        envelope = public.read_operator_thread('owner', actor=_person(), db=db)
+        nodes = {node['id']: node for node in annotate(db, envelope, 'owner-token')['plans'][0]['nodes']}
+        assert nodes[second.id]['comment_attention'] == {
+            'artifact_id': artifact, 'comments': 1, 'suggestions': 0, 'system_task': False,
+        }
+        assert 'comment_attention' not in nodes[first.id]
+    finally:
+        db.close()
+
+
+def test_the_task_coming_and_going_does_not_reenter_asks_changed(isolated_db, monkeypatch):
+    from plans import user_ask
+
+    calls = []
+    monkeypatch.setattr(user_ask, 'asks_changed', lambda db, ids: calls.append(list(ids)))
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, reply = _waiting_document(db)
+        assert len(_open_tasks(db, artifact)) == 1
+        with write_transaction(db, scope='test_read') as connection:
+            mark_thread_viewed(connection, 'owner-token', artifact, root['id'], reply['id'])
+            person_comment_task.reconcile(connection, artifact)
+        assert _open_tasks(db, artifact) == []
+        assert calls == []
+    finally:
+        db.close()
+
+
+def test_comment_task_is_marked_whatever_its_count(isolated_db):
+    from doceditor.person_comment_projection import annotate
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, root, reply = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        plan_id = service._node_row(db, task)['plan_id']
+        from plans import lifecycle
+
+        with write_transaction(db, scope='test_pause') as connection:
+            lifecycle.transition(plan_id, 'paused', expected_revision=service._plan_row(connection, plan_id)['revision'],
+                                 actor_id=None, provenance='test', db=connection)
+            # A paused plan keeps the task open when its count reaches zero (S26).
+            mark_thread_viewed(connection, 'owner-token', artifact, root['id'], reply['id'])
+            person_comment_task.reconcile(connection, artifact)
+        envelope = public.read_operator_thread('owner', actor=_person(), db=db)
+        nodes = {node['id']: node for node in annotate(db, envelope, 'owner-token')['plans'][0]['nodes']}
+        assert nodes[task]['comment_attention'] == {
+            'artifact_id': artifact, 'comments': 0, 'suggestions': 0, 'system_task': True,
+        }
     finally:
         db.close()
 
@@ -389,9 +375,9 @@ def test_projection_batches_fifty_documents_with_twenty_threads_each(isolated_db
             artifact = seed_document(db, 'owner', name=f'scale-{i}.md')
             node = service.add_node(plan.id, kind='task', title=f'scale-{i}.md',
                                     acceptance_criteria='Read', assignee='user',
-                                    actor_id=None, provenance='test', db=db)
+                                    actor_id=None, provenance=person_comment_task.PROVENANCE, db=db)
             artifact_links.link(node.id, artifact, 'input', actor_id=None,
-                                provenance='test', db=db)
+                                provenance=person_comment_task.PROVENANCE, db=db)
             node_ids.append(node.id)
             batch = f'scale-batch-{i}'
             db.execute("""INSERT INTO doc_feedback_batches

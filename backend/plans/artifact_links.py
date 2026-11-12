@@ -65,45 +65,6 @@ def raised_attention_nodes(node_ids, *, db) -> set[str]:
     }
 
 
-def open_ask_link_sql(link: str, identity: str, node: str, plan: str) -> str:
-    """One actionable document ask predicate for link reads and task coverage."""
-    raised = ask_attention_state_sql(f'{link}.artifact_id', node_id_sql=f'{link}.node_id')
-    return f"""({node_states.open_sql(node)}
-        AND NOT {operator_display_state.pause_deferred_sql(f'{node}.id', plan_state_sql=f'{plan}.state')}
-        AND (({link}.role='input' AND {node}.kind='task' AND {node}.assignee='user')
-             OR ({link}.role='attention' AND {askable_sql(identity)} AND {raised}='raised')))"""
-
-
-def open_asks_for_artifacts(artifact_ids, *, db) -> list[dict]:
-    """Open asks directly linked to any of the supplied artifacts, in one read."""
-    import json
-
-    if not artifact_ids:
-        return []
-    rows = db.execute(
-        f"""SELECT DISTINCT l.artifact_id, n.id AS node_id,
-                   CASE WHEN l.role='input' THEN 'person_step'
-                        ELSE 'review_hold' END AS kind,
-                   p.owner_id AS owner_thread_id, t.user_id AS owner_user_id,
-                   l.provenance
-              FROM plan_node_artifact_links l
-              JOIN artifact_identities i ON i.id=l.artifact_id
-              JOIN plan_nodes n ON n.id=l.node_id
-              JOIN plans p ON p.id=n.plan_id
-              LEFT JOIN threads t ON t.id=p.owner_id AND p.owner_kind='thread'
-             WHERE l.artifact_id IN (SELECT value FROM json_each(?))
-               AND {open_ask_link_sql('l', 'i', 'n', 'p')}
-             ORDER BY n.id""",
-        (json.dumps(list(artifact_ids)),),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def open_asks_for_artifact(artifact_id: str, *, db) -> list[dict]:
-    """Open person steps and raised attention linked directly to this artifact."""
-    return open_asks_for_artifacts([artifact_id], db=db)
-
-
 def _attention_owner(connection, node) -> str:
     """Resolve the owning surface for a genuine plan attention artifact."""
 

@@ -139,6 +139,11 @@ def _move(
         db, plan_id, "state_transition", actor_id=actor_id, provenance=provenance,
         prior_state=plan["state"], new_state=target_state, payload=payload,
     )
+    if target_state == "active":
+        from plans import person_comment_task
+
+        # A pause left its comment tasks as they were (S26); settle them against now.
+        person_comment_task.plan_resumed(db, plan_id)
     if target_state == "active" and not quiet:
         admission.reconcile_plan(
             plan_id, actor_id=actor_id, provenance=provenance,

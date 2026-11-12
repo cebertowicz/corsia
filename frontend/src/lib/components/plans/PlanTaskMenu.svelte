@@ -44,18 +44,21 @@
 		if (busy) return;
 		busy = true;
 		error = null;
+		const failure = action === 'dismiss_comments' && node.comment_attention
+			? await dismiss(node.comment_attention.artifact_id)
+			: await onAction(action as OperatorUserAction);
+		busy = false;
+		if (failure) error = failure;
+		else onClose();
+	}
+
+	/** Dismiss all has its own failure copy; Done and Won't do keep the one their action returns. */
+	async function dismiss(artifactId: string): Promise<string | null> {
 		try {
-			if (action === 'dismiss_comments' && node.comment_attention) {
-				await dismissCommentAttention(node.comment_attention.artifact_id);
-			} else {
-				const failure = await onAction(action as OperatorUserAction);
-				if (failure) { error = failure; return; }
-			}
-			onClose();
+			await dismissCommentAttention(artifactId);
+			return null;
 		} catch {
-			error = 'Couldn’t dismiss comments. Try again.';
-		} finally {
-			busy = false;
+			return 'Couldn’t dismiss comments. Try again.';
 		}
 	}
 </script>

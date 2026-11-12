@@ -13,8 +13,11 @@ user clears that ask, the holds it placed clear and the agent is told
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
+from infra import write_effects
+from infra.database import TransactionOwnershipError, write_transaction
 import plans.ask_endings as ask_endings
 import plans.operator_display_state as operator_display_state
 import plans.service as service
@@ -52,6 +55,8 @@ _ENDS_ASK = {
 ASK_ENDINGS = ask_endings.ASK_ENDINGS
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
+_ASKS_CHANGED = "person_comment_task_reconcile"
+log = logging.getLogger(__name__)
 
 
 def askable_sql(alias: str) -> str:
@@ -148,7 +153,7 @@ def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = N
             SELECT 1 FROM ({asks}) ask
             LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
             WHERE {where} AND deferred.hold_id IS NULL
-              AND NOT {operator_display_state.pause_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
+              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
         ) THEN 'raised'
         WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
         ELSE 'cleared'
@@ -291,6 +296,42 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
+
+
+def asks_changed(db, artifact_ids) -> None:
+    """Reconcile each document's comment task once this write commits, once per document.
+
+    An ask opening or ending on a document decides whether the person's comment task on
+    it exists (``person_comment_task.reconcile``). A write inside a transaction nobody
+    here owns has no commit to wait for, so it reconciles in place, under that lock.
+    """
+    ids = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
+    if not ids:
+        return
+    try:
+        write_effects.after_commit_merged(db, _ASKS_CHANGED, ids, lambda owed: _reconcile_comment_tasks(db, owed))
+    except TransactionOwnershipError:
+        _reconcile_comment_tasks(db, ids)
+
+
+def hold_cleared(db, hold) -> None:
+    """After ``holds.clear_write``: an ended ask on a document may bring its comment task back."""
+    if hold["kind"] == "blocked" and hold["owner_kind"] == "user" and hold["owner_id"] and db.execute(
+        "SELECT 1 FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=? AND role='attention'",
+        (hold["node_id"], hold["owner_id"]),
+    ).fetchone():
+        asks_changed(db, [hold["owner_id"]])
+
+
+def _reconcile_comment_tasks(db, artifact_ids) -> None:
+    from plans import person_comment_task
+
+    for artifact_id in artifact_ids:
+        try:
+            with write_transaction(db, scope=_ASKS_CHANGED) as connection:
+                person_comment_task.reconcile(connection, artifact_id)
+        except Exception:
+            log.exception("comment task reconcile failed for document %s", artifact_id)
 
 
 def withdraw_node_asks(

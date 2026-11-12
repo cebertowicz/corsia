@@ -148,7 +148,7 @@ def read(
             continue
         causes = node["execution"]["causes"]
         has_child_running = has_child_running or child_running(causes)
-        if bucket == "pending_ready" and node["id"] in users and not node.get("comment_task_covered", False):
+        if bucket == "pending_ready" and node["id"] in users:
             user_ready += 1
         if bucket == "blocked" and user_blocker(causes):
             user_blocked += 1

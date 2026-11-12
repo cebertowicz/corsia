@@ -143,8 +143,6 @@ def _plan_attention_items(presented: dict) -> list[dict]:
         else:
             kind = "decision" if review["kind"] == "human_decision" else "review"
         items.append({"kind": kind, "title": node["title"], "node_id": node["id"]})
-    items.extend({"kind": "hold", "title": carrier["title"], "node_id": carrier["person_node_id"]}
-                 for carrier in presented.get('_comment_carriers', []) if carrier['owed'])
     return items
 
 

@@ -97,7 +97,6 @@ def _reduce_plan(
     leaves = node_states.leaves(rows)
     user_ready = sum(
         reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user"
-        and not row.get("covered", False)
         for row in leaves
     )
     user_blocked = sum(

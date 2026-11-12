@@ -65,9 +65,9 @@ def node_paused(execution: dict) -> bool:
     return pause is not None and user_steering.is_user_pause(pause)
 
 
-def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False, covered: bool = False) -> bool:
+def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> bool:
     """The one rule for suppressing a plan-owned ask's attention until resume."""
-    return plan_paused or node_paused or covered
+    return plan_paused or node_paused
 
 
 def review_deferred(
@@ -89,68 +89,9 @@ def node_paused_sql(node_id_sql: str) -> str:
     )"""
 
 
-def _coverage_matches_sql(node_filter_sql: str) -> str:
-    """The live asks and owner feedback nodes covering person comment tasks."""
-    from plans import artifact_links, node_states
-
-    return f"""SELECT comment_link.node_id AS person_node_id, other_node.id AS carrier_id,
-                      comment_link.artifact_id,
-                      CASE WHEN {artifact_links.open_ask_link_sql('other_link', 'other_artifact', 'other_node', 'other_plan')}
-                           THEN 'ask' ELSE 'feedback' END AS carrier_kind
-        FROM plan_node_artifact_links comment_link
-        JOIN plan_nodes comment_node ON comment_node.id=comment_link.node_id
-        JOIN plans comment_plan ON comment_plan.id=comment_node.plan_id
-        JOIN threads comment_owner ON comment_owner.id=comment_plan.owner_id
-        JOIN plan_node_artifact_links other_link ON other_link.artifact_id=comment_link.artifact_id
-        JOIN artifact_identities other_artifact ON other_artifact.id=other_link.artifact_id
-        JOIN plan_nodes other_node ON other_node.id=other_link.node_id
-        JOIN plans other_plan ON other_plan.id=other_node.plan_id
-        JOIN threads other_owner ON other_owner.id=other_plan.owner_id
-        WHERE {node_filter_sql}
-          AND comment_link.provenance='document.person_comment_task'
-          AND other_link.node_id<>comment_link.node_id
-          AND COALESCE(other_link.provenance,'')<>'document.person_comment_task'
-          AND {node_states.open_sql('comment_node')}
-          AND comment_owner.user_id=other_owner.user_id
-          AND ({artifact_links.open_ask_link_sql('other_link', 'other_artifact', 'other_node', 'other_plan')}
-               OR (other_link.provenance='document.feedback_batch'
-                   AND other_node.plan_id=comment_node.plan_id
-                   AND {node_states.open_sql('other_node')}
-                   AND EXISTS (SELECT 1 FROM artifact_registrations owner_registration
-                               WHERE owner_registration.artifact_id=comment_link.artifact_id
-                                 AND owner_registration.parent_thread_id=comment_plan.owner_id
-                                 AND owner_registration.relationship_state IN ('owner-pinned','owner-active'))))"""
-
-
-def covered_sql(node_id_sql: str) -> str:
-    """Whether a person comment task has a live covering row."""
-    return f"EXISTS ({_coverage_matches_sql(f'comment_link.node_id={node_id_sql}')})"
-
-
-def coverage_matches(node_ids, *, db) -> list[dict]:
-    """Read all covering rows for the projected nodes in one set-based query."""
-    import json
-
-    ids = list(node_ids)
-    if not ids:
-        return []
-    query = _coverage_matches_sql('comment_link.node_id IN (SELECT value FROM json_each(?))')
-    return [dict(row) for row in db.execute(query, (json.dumps(ids),))]
-
-
-def covered_nodes(node_ids, *, db) -> set[str]:
-    return {str(row['person_node_id']) for row in coverage_matches(node_ids, db=db)}
-
-
-def pause_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
-    """Whether a user ask is deferred by a plan or node pause."""
-    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
-
-
 def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
     """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
-    return (f"({plan_state_sql}='paused' OR EXISTS (SELECT 1 FROM (SELECT {node_id_sql} AS id) target"
-            f" WHERE {node_paused_sql('target.id')} OR {covered_sql('target.id')}))")
+    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
 
 
 def asks_user_from_facts(

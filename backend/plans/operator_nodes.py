@@ -9,11 +9,9 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 
-import plans.operator_artifact_fields as artifact_fields
 import plans.operator_display_state as display_state
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
-import plans.operator_projection_facts as projection_facts
 import plans.operator_scheduled as scheduled_work
 import plans.rollup as rollup
 import plans.service as service
@@ -21,6 +19,20 @@ import plans.user_steering as user_steering
 import plans.wait_summary as wait_summary
 from plans import open_tree
 from plans.node_states import folded_ids, is_container, parent_ids, work_ids
+
+
+def _artifact_fields(link: dict) -> dict:
+    return {
+        "id": link["artifact_id"],
+        "role": link["role"],
+        "integration": link["integration"],
+        "type": link["type"],
+        "external_id": link["external_id"],
+        "title": link.get("title"),
+        "path": link.get("path"),
+        "state": link["state"],
+        "attention_state": link.get("attention_state"),
+    }
 
 
 def _child_summary(
@@ -83,7 +95,6 @@ def _present_node(
         "updated_at": node["updated_at"],
         "last_transition_at": state["last_transition_at"],
         "requires_user_action": state["requires_user_action"],
-        "comment_task_covered": state["comment_task_covered"],
         "executor": state["executor"],
         "execution": execution,
         "display": state["display"],
@@ -107,7 +118,7 @@ def _present_node(
         ),
         "discussion_artifact_id": discussion,
         "artifacts": [
-            artifact_fields.present(link) for link in links if link["role"] != "discussion"
+            _artifact_fields(link) for link in links if link["role"] != "discussion"
         ],
     }
 
@@ -346,17 +357,13 @@ def present_plan(
     """
     if owner is None or projected.plan["state"] == "archived":
         return None
-    # Hide covered person-comment tasks before deriving every count and header,
-    # so the pane and the chat list read the same totals.
-    visible, comment_carriers = projection_facts.split_covered(projected.nodes, states)
-    hidden = len(projected.nodes) - len(visible)
     nodes = [
         _present_node(
             node, review_targets, states[node["id"]], projected.plan["state"],
         )
-        for node in visible
+        for node in projected.nodes
     ]
-    counts = _apply_branches(nodes, visible, tree)
+    counts = _apply_branches(nodes, projected.nodes, tree)
     leaf_ids = _leaf_ids(nodes, tree)
     # A delegated step whose child plan is moving reads Working without running
     # itself; it is current work all the same, so its path stays open.
@@ -372,8 +379,6 @@ def present_plan(
     below_cut = frozenset(str(node["id"]) for node in projected.nodes if node.get("later"))
     next_ids = node_state.next_node_ids([n for n in nodes if n["id"] not in users | below_cut])
     progress = {**projected.progress, "distribution": counts}
-    progress['open'] -= hidden
-    progress['total'] -= hidden
     display = plan_header.plan_display(projected.plan, counts, nodes, users, below_cut)
     # Each outside-wait row reads the same value as the sidebar and chip (EW11).
     for node in nodes:
@@ -391,6 +396,5 @@ def present_plan(
         "oversize": oversize(nodes),
         "current_node_ids": current,
         "next_node_ids": next_ids,
-        "_comment_carriers": comment_carriers,
         "nodes": nodes,
     }

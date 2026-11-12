@@ -104,7 +104,7 @@ def reduce_node(
         causes=causes,
     )
     needs_user = asks_user and not operator_display_state.ask_deferred(
-        plan_paused=paused, node_paused=node_paused, covered=bool(row.get('covered')),
+        plan_paused=paused, node_paused=node_paused,
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,

@@ -6,69 +6,42 @@ import json
 from doceditor import person_comment_attention
 from plans import public
 
-PROVENANCE = 'document.person_comment_task'
-
-
-def _linked_tasks(db, node_ids: list[str]) -> dict[str, str]:
-    if not node_ids:
-        return {}
-    rows = db.execute(
-        """SELECT node_id,artifact_id FROM plan_node_artifact_links
-            WHERE provenance=? AND node_id IN (SELECT value FROM json_each(?))""",
-        (PROVENANCE, json.dumps(node_ids)),
-    ).fetchall()
-    return {str(row['node_id']): str(row['artifact_id']) for row in rows}
-
 
 def person_step_attention(db, node_id: str, artifact_id: str, user_id: str) -> dict | None:
     """The counts a document's comment task carries in its review bar, as its plan row shows them."""
-    if artifact_id not in _linked_tasks(db, [node_id]).values():
+    if public.comment_tasks(db, [node_id]).get(node_id) != artifact_id:
         return None
     comments, suggestions = person_comment_attention.counts(db, artifact_id, user_id)
     return {'artifact_id': artifact_id, 'comments': comments, 'suggestions': suggestions, 'system_task': True}
 
 
 def annotate(db, envelope: dict, user_id: str) -> dict:
-    """Attach counts and hide the comment task while a document ask is open."""
-    nodes = [node for plan in envelope.get('plans', []) for node in plan.get('nodes', [])]
-    linked = _linked_tasks(db, [str(node['id']) for node in nodes])
-    documents = set(linked.values())
-    documents.update(carrier['artifact_id'] for plan in envelope.get('plans', [])
-                     for carrier in plan.get('_comment_carriers', []))
+    """Attach the waiting counts to each open comment task and to the ask that carries them.
+
+    A comment task is marked from its provenance whatever its count. An ask raised to the
+    person on a document carries that document's counts; with several open, only the
+    earliest raised does (``public.covering_asks``).
+    """
+    nodes = [node for plan in envelope.get('plans', []) for node in plan.get('nodes', [])
+             if node.get('state') not in public.TERMINAL_STATES]
+    tasks = public.comment_tasks(db, [str(node['id']) for node in nodes])
+    documents = set(tasks.values())
     for node in nodes:
         documents.update(str(link['id']) for link in node.get('artifacts', [])
-                         if link.get('type') == 'document' and link.get('role') in ('input', 'attention'))
+                         if link.get('type') == 'document' and link.get('role') == 'attention')
     counts_by_document = person_comment_attention.counts_many(db, documents, user_id)
-    asks_by_document: dict[str, set[str]] = {artifact_id: set() for artifact_id in documents}
-    for row in public.open_asks_for_artifacts(documents, db=db):
-        node_id = str(row['node_id'])
-        if (row['owner_user_id'] == user_id and row['provenance'] != PROVENANCE
-                and node_id not in linked):
-            asks_by_document[str(row['artifact_id'])].add(node_id)
-    attention = {artifact_id: (counts_by_document.get(artifact_id, (0, 0)), asks)
-                 for artifact_id, asks in asks_by_document.items()}
-    node_document = {node_id: artifact_id for artifact_id, (_, asks) in attention.items()
-                     for node_id in asks}
-    node_document.update(linked)
-    for plan in envelope.get('plans', []):
-        for carrier in plan.pop('_comment_carriers', []):
-            node_document[carrier['carrier_id']] = carrier['artifact_id']
-        kept = []
-        for node in plan.get('nodes', []):
-            node_id = str(node['id'])
-            artifact_id = linked.get(node_id)
-            document = node_document.get(node_id)
-            # A finished row never carries the count: a settled comment task stays listed as Done while its successor counts.
-            if document and node.get('state') not in public.TERMINAL_STATES:
-                counts = attention[document][0]
-                if sum(counts):
-                    node['comment_attention'] = {
-                        'artifact_id': document, 'comments': counts[0], 'suggestions': counts[1],
-                        'system_task': artifact_id == document,
-                    }
-            kept.append(node)
-        plan['nodes'] = kept
-    fingerprint = [(key, counts, sorted(asks)) for key, (counts, asks) in sorted(attention.items())]
+    covering = public.covering_asks(db, documents, user_id)
+    carriers = {asks[0]: artifact_id for artifact_id, asks in covering.items() if asks}
+    for node in nodes:
+        node_id = str(node['id'])
+        document = tasks.get(node_id) or carriers.get(node_id)
+        counts = counts_by_document.get(document, (0, 0)) if document else (0, 0)
+        if document and (node_id in tasks or sum(counts)):
+            node['comment_attention'] = {
+                'artifact_id': document, 'comments': counts[0], 'suggestions': counts[1],
+                'system_task': node_id in tasks,
+            }
+    fingerprint = [(key, counts_by_document.get(key, (0, 0)), covering[key][:1]) for key in sorted(documents)]
     if fingerprint:
         digest = hashlib.sha256(json.dumps(fingerprint).encode()).hexdigest()
         envelope['revision_token'] = hashlib.sha256(

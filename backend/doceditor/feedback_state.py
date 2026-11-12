@@ -198,6 +198,22 @@ def _eligible_top_level(alias: str) -> str:
                                       AND person.created_at<{alias}.created_at)))"""
 
 
+def directed_sql(alias: str) -> str:
+    """SQL predicate for an agent's comment delivered to its own person; binds the person's author id, then user_id.
+
+    These are the comments the canonical recipients writer sent the person, and a suggestion
+    among them counts only until it is decided.
+    """
+    return f"""({alias}.author_kind='agent'
+               AND ({alias}.replacement IS NULL OR {alias}.decision IS NULL)
+               AND EXISTS (SELECT 1 FROM doc_feedback_batch_items batch_item
+                           JOIN doc_feedback_batches batch ON batch.id=batch_item.batch_id
+                           WHERE batch_item.comment_id={alias}.id AND batch.artifact_id={alias}.artifact_id
+                             AND batch.recipient_id=?)
+               AND EXISTS (SELECT 1 FROM threads author
+                           WHERE author.id={alias}.author_thread_id AND author.user_id=?))"""
+
+
 def may_change_unread_attention(
     author_kind: str, parent_id: str | None, replacement: str | None, review: bool, *, tags_person: bool = False,
 ) -> bool:
@@ -232,7 +248,8 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
              {"AND item.artifact_id=? AND root.artifact_id=?" if scoped else ""}
              AND ((item.parent_id IS NOT NULL
                    AND (root.author_kind='user' OR touched.parent_id IS NOT NULL OR {_person_tagged('item')}))
-                  OR ({_eligible_top_level('item')}))
+                  OR ({_eligible_top_level('item')})
+                  OR {directed_sql('item')})
              AND (
                  item.created_at>COALESCE(thread_view.seen_at, '')
                  OR (
@@ -241,25 +258,22 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
                      AND item.id>thread_view.seen_reply_id
                  )
              )"""
-    # Text order: touched, thread_view, the scope, then the two person-tag tests.
-    return sql, ((artifact_id, user_id, artifact_id, artifact_id, user_id, user_id) if scoped else (user_id, user_id, user_id))
+    # Text order: touched, thread_view, the scope, the two person-tag tests, then the directed set.
+    directed = (USER_AUTHOR_ID, user_id)
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id, user_id, user_id, *directed) if scoped
+                 else (user_id, user_id, user_id, *directed))
 
 
 def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     """One document's unread items as (root id, item id), ordered by time and id.
 
-    The comments delivered to the person join in, so the items that make their plan task
-    actionable get a read stamp when their comment card is read. One statement per list.
+    The comments delivered to the person are among them, so the items that make their plan task
+    actionable get a read stamp when their comment card is read.
     """
-    from doceditor import person_comment_attention
-
     sql, params = unread_comment_rows(user_id, artifact_id)
-    directed, directed_params = person_comment_attention.unread_rows([artifact_id], user_id)
     rows = db.execute(
-        f"SELECT root.id AS root_id, item.id AS item_id, item.created_at AS created_at {sql} "
-        f"UNION SELECT COALESCE(item.parent_id, item.id), item.id, item.created_at {directed} "
-        "ORDER BY created_at, item_id",
-        params + directed_params,
+        f"SELECT root.id AS root_id, item.id AS item_id {sql} ORDER BY item.created_at, item.id",
+        params,
     ).fetchall()
     return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
