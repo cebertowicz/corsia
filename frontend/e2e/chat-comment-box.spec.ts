@@ -145,7 +145,9 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   // Pressing it sends nothing the transcript shows: the server's answer for the comment's row never becomes a chat bubble.
   const retried = page.waitForResponse(response => /\/messages\/[^/]+\/retry$/.test(new URL(response.url()).pathname));
   await retry.click();
-  expect((await retried).ok()).toBeTruthy();
+  const response = await retried;
+  expect(response.ok()).toBeTruthy();
+  await response.finished();
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(failed, 'failed-retry-pressed');
