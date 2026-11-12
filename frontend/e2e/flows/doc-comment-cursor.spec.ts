@@ -328,12 +328,13 @@ for (const motion of MOTIONS) {
 		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expectCommentsShown(list);
-		// The adaptive comments drawer overlays the document at widths where it cannot use a side column. Where it covers
-		// the place a clicked line rests at, the document cannot be clicked until it closes; elsewhere the clicks land.
+		// Where the canvas has no room for the side column, the list sits over the document: a sheet on a phone, a popover from
+		// its control on a desktop. Where it covers the place a clicked line rests at, the document cannot be clicked until it
+		// closes; elsewhere the clicks land.
 		const sheetCovers = await page.evaluate((place) => {
 			const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
 			const hit = document.elementFromPoint(scroller.left + scroller.width / 2, scroller.top + scroller.height * place);
-			return !!hit?.closest('[data-adaptive-drawer]');
+			return !!hit?.closest('[data-adaptive-drawer], [data-popover]');
 		}, PLACE);
 		if (!sheetCovers) {
 			await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
