@@ -15,6 +15,8 @@ const COUNTS = [{ threads: 1, unread: 1 }, { threads: 12, unread: 3 }, { threads
 const CASES = [
 	{ width: 320, scheme: 'light' as const }, { width: 360, scheme: 'light' as const },
 	{ width: 393, scheme: 'light' as const }, { width: 393, scheme: 'dark' as const },
+	// A window under 768 px whose canvas is wider than 600 px: the tablet range where only the switch has a 44 px target and the other tools are 28 px.
+	{ width: 700, scheme: 'light' as const },
 	{ width: 900, scheme: 'light' as const }, { width: 1440, scheme: 'light' as const },
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
@@ -133,10 +135,10 @@ for (const { width, scheme } of CASES) {
  * desktop split at 1440 and 1024, a wide pane (1000 px), and panes that put the header at 720, 760 and 800 px, where the cluster first has to break. The delivery label is the full "Deliver immediately" at every width, the same
  * distance from its switch everywhere, and the cluster breaks only between [Send · count] and the second group.
  */
-const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
+const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393, 700].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
 const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index * 40), 900].sort((a, b) => a - b); // 800..1440, resized within one desktop load
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
-const FRAME_SIZES = [320, 360, 393, 900];
+const FRAME_SIZES = [320, 360, 393, 700, 900];
 // A 1920 window with the pane set so the header's content is this wide (measured, asserted): the range where the cluster first has to break.
 const HEADER_SWEEP = [{ split: 784, header: 720 }, { split: 824, header: 760 }, { split: 864, header: 800 }];
 
@@ -172,6 +174,21 @@ async function measureTools(page: Page) {
 		// A tap on each corner (one pixel in) and the centre of the hit area lands on the switch.
 		const probes: Array<[number, number]> = [[area.left + 1, area.top + 1], [area.right - 1, area.top + 1], [area.left + 1, area.bottom - 1], [area.right - 1, area.bottom - 1], [area.left + area.width / 2, area.top + area.height / 2]];
 		const tapMisses = probes.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest('.tg') !== toggleButton).map((el) => `${el?.tagName}.${el?.className}`);
+		// The hit area is one more control: it overlaps no other control, stays inside the header (never past its bottom padding into the document), and a point just inside each edge of Send and the count lands on that control, not on the switch.
+		const overlapOf = (a: DOMRect, b: DOMRect) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+		const hitOverlaps = [...header.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="switch"]')].filter((control) => control !== toggleButton && !toggleButton.contains(control) && !control.contains(toggleButton) && control.getBoundingClientRect().width > 0 && overlapOf(area, control.getBoundingClientRect())).map((control) => control.getAttribute('aria-label') ?? control.className);
+		const hitOutside = { above: Math.max(0, outer.top - area.top), below: Math.max(0, area.bottom - outer.bottom) };
+		const edgeMisses = (['.sending-now .btn', '.comment-status'] as const).flatMap((selector) => {
+			const control = tools.querySelector<HTMLElement>(selector);
+			if (!control) return [];
+			const r = control.getBoundingClientRect();
+			const points: Array<[number, number]> = [];
+			for (const fraction of [0.25, 0.75]) points.push([r.left + 1, r.top + r.height * fraction], [r.right - 1, r.top + r.height * fraction], [r.left + r.width * fraction, r.top + 1], [r.left + r.width * fraction, r.bottom - 1]);
+			return points.map(([x, y]) => document.elementFromPoint(x, y)).filter((el) => el?.closest(selector) !== control).map((el) => `${selector} edge hit ${el?.tagName}.${el?.className}`);
+		});
+		let canvas: HTMLElement | null = header;
+		while (canvas && !getComputedStyle(canvas).containerName.split(' ').includes('doc-canvas')) canvas = canvas.parentElement;
+		const touchMeant = window.innerWidth <= 768 || (canvas?.getBoundingClientRect().width ?? Infinity) <= 600;
 		const pill = tools.querySelector<HTMLElement>('.comment-status')!;
 		const parts = [...pill.querySelectorAll<HTMLElement>('.count, .count-unit, .unread')].map((part) => {
 			const partStyle = getComputedStyle(part);
@@ -197,7 +214,7 @@ async function measureTools(page: Page) {
 			deliverLabel: label.textContent?.trim() ?? null,
 			names: { send: sendButton?.getAttribute('aria-label') ?? null, count: pill.getAttribute('aria-label') },
 			overlaps, minControlHeight: Math.min(...controls.filter((control) => control.name !== 'deliver').map((control) => control.bottom - control.top)),
-			toggleHit: { button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 }, area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 }, tapMisses },
+			toggleHit: { button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 }, area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 }, tapMisses, hitOverlaps, hitOutside, edgeMisses, touchMeant },
 			headerOverflow: header.scrollWidth - header.clientWidth, pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
 			content, tools: box(tools), controls, parts, headerContentWidth: content.right - content.left, groupWidths, expectedGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chip-inline-padding')),
 			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
@@ -236,6 +253,10 @@ function expectLayout(measured: Measured, label: string) {
 	const { button: toggleBox, area: hitArea, tapMisses } = measured.toggleHit;
 	expect.soft(Math.abs(toggleBox.width - 30) <= 0.5 && Math.abs(toggleBox.height - 17) <= 0.5, `${label}: the switch button is its 30 x 17 track, measured ${toggleBox.width} x ${toggleBox.height}`).toBe(true);
 	expect.soft((Math.abs(hitArea.width - 30) <= 0.5 && Math.abs(hitArea.height - 17) <= 0.5) || (hitArea.width >= 43.5 && hitArea.height >= 43.5), `${label}: the switch hit area is its track or the 44 px touch size, measured ${hitArea.width} x ${hitArea.height}`).toBe(true);
+	expect.soft(measured.toggleHit.touchMeant ? hitArea.width >= 43.5 && hitArea.height >= 43.5 : Math.abs(hitArea.width - 30) <= 0.5 && Math.abs(hitArea.height - 17) <= 0.5, `${label}: the hit area is 44 x 44 where a touch target is meant (a window to 768 px or a canvas to 600 px) and the track elsewhere, measured ${hitArea.width} x ${hitArea.height}`).toBe(true);
+	expect.soft(measured.toggleHit.hitOverlaps, `${label}: the switch's hit area overlaps no other control`).toEqual([]);
+	expect.soft(measured.toggleHit.hitOutside, `${label}: the switch's hit area stays inside the header, none of it above or below`).toEqual({ above: 0, below: 0 });
+	expect.soft(measured.toggleHit.edgeMisses, `${label}: points just inside each edge of Send and the count land on those controls, not the switch`).toEqual([]);
 	expect.soft(tapMisses, `${label}: taps on the four corners and the centre of the switch's hit area land on the switch`).toEqual([]);
 	// The label is the full "Deliver immediately", the normal chip padding from its switch at every width.
 	expect.soft(measured.deliverLabel, `${label}: the delivery label is the full wording`).toBe('Deliver immediately');
@@ -344,6 +365,13 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 		for (const { split, header } of HEADER_SWEEP) {
 			await open(1920, split);
 			await take(1920, split, header);
+		}
+		// The Workspace panel closed and open, at the two desktop widths the merge is reviewed at.
+		for (const viewport of [1440, 900]) {
+			await open(viewport, null);
+			await take(viewport, null, undefined, ' pane closed');
+			await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(false, true); });
+			await take(viewport, null, undefined, ' pane open');
 		}
 		// The phone's dark theme with the same worst content.
 		await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });

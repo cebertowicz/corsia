@@ -332,8 +332,9 @@
 		.history-tool svg { display: block; }
 		.history-tool .label { display: none; }
 	}
+	/* Wherever the switch has its 44px target the switch's row is that tall, so the target sits inside the row and never over Send, the count or the document: a window up to 768px wide can still have a canvas wider than 600px, where the other tools are 28px. */
 	@media (max-width: 768px) {
-		.delivery-toggle { --toggle-hit: var(--touch-target); }
+		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 	}
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
