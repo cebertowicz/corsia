@@ -4,8 +4,7 @@
 	the count wraps onto its own. A ' · ' separates the count from the lead while they share a line; on a line
 	of its own the count starts at the edge, because the separator then sits left of the line and is clipped.
 	`dot` puts the needs-you dot directly against the count; a line whose lead already shows that dot passes
-	none, so a line never carries two. The plan row (PlanRowFace) and the ask card in chat (PersonStepRow) both
-	use this, so the rule lives in one place.
+	none, so a line never carries two. Every plan row (PlanRowFace) uses this, so the rule lives in one place.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';

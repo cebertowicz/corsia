@@ -164,6 +164,16 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(countLineSource).toMatch(/\.comment-dot\s*\{[^}]*background:\s*var\(--amber\)/);
 	});
 
+	it('shows no count line on a file task with nothing left waiting', () => {
+		render([node({
+			id: 'file', title: 'Launch plan.md', requires_user_action: true, assignee: 'user',
+			comment_attention: { artifact_id: 'doc', comments: 0, suggestions: 0, system_task: true },
+		})]);
+
+		expect(row('Launch plan.md').querySelector('.comment-count')).toBeNull();
+		expect(row('Launch plan.md').querySelector('.comment-dot')).toBeNull();
+	});
+
 	it('cuts nothing: the subtext keeps its words and the count wraps below it', () => {
 		render([node({
 			id: 'ask', title: 'Review launch plan', state: 'review_requested', requires_user_action: true,

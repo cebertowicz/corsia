@@ -41,7 +41,7 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		'from infra.database import write_transaction',
 		'from plans import mutations, service',
 		// The person's comments are sent the way the Send button sends them, so the agent holds a feedback task per
-		// document before it replies. The agent finishes Launch plan's task; Second plan's stays open and covers that file.
+		// document before it replies. The agent finishes Launch plan's task; Second plan's stays open beside that file's task.
 		'def send(artifact):',
 		'    root, sent = add_comment(db, artifact, author_kind="user", author_id=None)',
 		'    [batch_id] = sent["batch_ids"]',
@@ -101,7 +101,8 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	const plan = page.getByRole('list', { name: 'Plan steps' });
 	const row = plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' }).first();
 	await expect(row).toContainText('1 comment, 1 suggestion');
-	await expect(plan.getByRole('listitem').filter({ hasText: 'Second plan.md' })).toHaveCount(0);
+	// The agent's own feedback task never stands in for the person's: each file keeps its task.
+	await expect(plan.getByRole('listitem').filter({ hasText: 'Second plan.md' }).first()).toContainText('1 comment');
 	const agentFeedback = plan.getByRole('listitem').filter({ hasText: /left 1 comment on Second plan/ });
 	await expect(agentFeedback).toHaveCount(1);
 	await expect(agentFeedback).toContainText('1 comment');
@@ -148,25 +149,37 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		if (width <= 768) await page.getByRole('button', { name: /^Open plan —/ }).click();
 		else if (width <= 1024) await page.getByRole('button', { name: 'Toggle panel' }).click();
 	};
-	const reopenChat = async () => {
-		await openAppPastLanding(page);
-		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		await sidebarThread(page, title).click();
-	};
 	const countWhole = countFit;
-	const card = page.locator('[data-person-step]').filter({ hasText: 'Review launch plan' }).first();
 	const capture = (name: string, panel = true) => shoot(page, testInfo, `${width}-${name}`, panel);
+	const fixtureResult = (output: string) => {
+		const line = output.split('\n').find((item) => item.startsWith('FIXTURE_RESULT='));
+		if (!line) throw new Error('Missing fixture IDs');
+		return JSON.parse(line.slice('FIXTURE_RESULT='.length));
+	};
+	// A new reply brings the file's task back; then the agent raises a review of the file over it.
+	const back = fixtureResult(seed('reply')) as { root: string; reply: string };
+	await reopenPlan();
+	await expect(row).toContainText('1 comment');
+	await capture('task-before-ask');
 	seed('ask');
 	await reopenPlan();
 	const ask = plan.getByRole('listitem').filter({ hasText: 'Review launch plan' }).first();
 	await expect(ask).toBeVisible();
+	// The review carries the file's comments now, and the file's own task is closed, not done: nothing was read.
+	await expect(ask.locator('.count-text')).toHaveText('1 comment');
+	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
+	console.log(`ask over task ${width}: ${JSON.stringify(await countWhole(ask))}`);
+	await capture('ask-raised-over-task');
+	const read = await request.post(`/api/artifacts/${artifactId}/comments/${back.root}/viewed`, {
+		headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: back.reply },
+	});
+	expect(read.ok(), await read.text()).toBeTruthy();
+	await reopenPlan();
+	await expect(ask.locator('.comment-count')).toHaveCount(0);
 	await capture('ask-before-comments');
 	const askSubtext = (await ask.locator('.row-subline').first().innerText()).trim();
 	console.log(`ask subtext ${width}: ${askSubtext}`);
-	const output = seed('feedback');
-	const resultLine = output.split('\n').find((line) => line.startsWith('FIXTURE_RESULT='));
-	if (!resultLine) throw new Error('Missing feedback fixture IDs');
-	const ids = JSON.parse(resultLine.slice('FIXTURE_RESULT='.length)) as { replies: string[][]; suggestions: string[] };
+	const ids = fixtureResult(seed('feedback')) as { replies: string[][]; suggestions: string[] };
 	await reopenPlan();
 	await expect(ask).toContainText('2 comments, 2 suggestions');
 	// The ask keeps its whole subtext; a drawn ' · ', then the one dot against the accent count.
@@ -186,16 +199,6 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await expect(plan.getByRole('listitem').filter({ hasText: 'Launch plan.md' })).toHaveCount(0);
 	console.log(`ask row ${width}: ${JSON.stringify(await countWhole(ask))}`);
 	await capture('ask-with-comments');
-	// The ask's card in chat is the same ask: its state dot is the line's one dot; ' · ' and the accent count follow.
-	if (width === 393) await reopenChat();
-	await card.scrollIntoViewIfNeeded();
-	await expect(card.locator('.count-text')).toHaveText('2 comments, 2 suggestions');
-	await expect(card.locator('.comment-dot')).toHaveCount(0);
-	await expect(card.locator('.comment-count > .count-sep')).toHaveText(' · ');
-	await contrastBothThemes(page, card, `ask card ${width}`);
-	await expect(card.getByRole('button', { name: /Needs you, 2 comments, 2 suggestions$/ })).toHaveCount(1);
-	console.log(`ask card ${width}: ${JSON.stringify(await countWhole(card))}`);
-	await capture('ask-card', false);
 	const viewed = await request.post(`/api/artifacts/${artifactId}/comments/${ids.replies[0][0]}/viewed`, {
 		headers: { Authorization: `Bearer ${TEST_TOKEN}` }, data: { seen_reply_id: ids.replies[0][1] },
 	});
@@ -212,10 +215,6 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 	await reopenPlan();
 	await expect(ask.locator('.count-text')).toHaveText(longCount);
 	console.log(`long row ${width}: ${JSON.stringify(await countWhole(ask))}`);
-	if (width !== 393) {
-		await expect(card.locator('.count-text')).toHaveText(longCount);
-		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
-	}
 	await capture('long-count');
 	if (width === 1440) {
 		// The desktop Workspace panel has one fixed width; a narrower one is forced here to show the count wrapping.
@@ -227,11 +226,11 @@ for (const width of [1440, 900, 393]) test(`comment task counts and dismissal at
 		expect(narrow.wrapped).toBe(true);
 		await capture('long-count-narrow-panel', false);
 	}
-	if (width === 393) {
-		await reopenChat();
-		await card.scrollIntoViewIfNeeded();
-		await expect(card.locator('.count-text')).toHaveText(longCount);
-		console.log(`long card ${width}: ${JSON.stringify(await countWhole(card))}`);
-		await capture('long-count-card');
-	}
+	// The review ends with comments still waiting: they go back to the file's own task.
+	seed('ask-end');
+	await reopenPlan();
+	await expect(row.locator('.count-text')).toHaveText(longCount);
+	await expect(ask.locator('.comment-count')).toHaveCount(0);
+	console.log(`ask closed ${width}: ${JSON.stringify(await countWhole(row))}`);
+	await capture('ask-closed');
 });

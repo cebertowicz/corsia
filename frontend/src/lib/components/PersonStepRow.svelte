@@ -13,10 +13,8 @@
 	import { slide } from 'svelte/transition';
 	import type { UpdateCard } from '$lib/api/threadUpdates';
 	import { doStep, moreLabel, stepState } from '$lib/personStepChip';
-	import { feedbackLine } from '$lib/api/messageCards';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import CommentCountLine from './comments/CommentCountLine.svelte';
 	import EventChip from './EventChip.svelte';
 	import NeedsYouTile from './NeedsYouTile.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
@@ -33,12 +31,6 @@
 	// The line: the first waiting task's title; with more waiting, "+N more", and the count falls as they settle.
 	const title = $derived((waiting[0] ?? card).title || 'A task for you');
 	const more = $derived(waiting.length > 1 ? moreLabel(waiting.length) : null);
-	// The ask's comments and suggestions waiting for the person, as its plan row shows them.
-	const attention = $derived.by(() => {
-		const first = waiting[0];
-		const counted = first?.node_id ? nodes.get(first.node_id)?.comment_attention : undefined;
-		return counted && !counted.system_task && feedbackLine(counted) ? counted : null;
-	});
 	const single = $derived(members.length === 1);
 	const motion = $derived($prefersReducedMotion ? 0 : 200);
 
@@ -95,14 +87,11 @@
 {#snippet mark()}
 	<span class="lead"><PlanStateIcon state="needs-you" tone="" label="Needs you"><span aria-hidden="true">!</span></PlanStateIcon></span>
 {/snippet}
-{#snippet stateRun()}
+{#snippet stateLine()}
 	<span class="state ask"><span class="dot" aria-hidden="true"></span>Needs you</span>
 	<span class="sep" aria-hidden="true">·</span>
 	<OutcomeTime value={waiting[0]?.created_at ?? card.created_at} compact />
 	{#if more}<span class="sep" aria-hidden="true">·</span><span class="more">{more}</span>{/if}
-{/snippet}
-{#snippet stateLine()}
-	{#if attention}<span class="counted-state"><CommentCountLine counts={attention} lead={stateRun} /></span>{:else}{@render stateRun()}{/if}
 {/snippet}
 {#snippet doMark()}<span class="act" aria-hidden="true">Do →</span>{/snippet}
 {#snippet tile()}
@@ -114,7 +103,7 @@
 		ctx={stateLine}
 		trailing={doMark}
 		data-step-chip
-		aria-label={`Do: ${title}${more ? `, ${waiting.length - 1} more` : ''}, Needs you${attention ? `, ${feedbackLine(attention)}` : ''}`}
+		aria-label={`Do: ${title}${more ? `, ${waiting.length - 1} more` : ''}, Needs you`}
 		onclick={press}
 	/>
 {/snippet}
@@ -163,15 +152,6 @@
 	/* The tile's lead slot is 36 px, as an artifact's type tile; the mark sits centred in it. */
 	.lead { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: var(--artifact-tile-size); height: var(--artifact-tile-size); }
 	.more { flex: 0 0 auto; }
-	/* With a count, the state line is one CommentCountLine: the state, its time and the count all keep their text,
-	   and the count wraps to its own line when they don't fit. The state's own dot is the line's one dot. */
-	.counted-state { flex: 1 1 auto; min-width: 0; white-space: normal; }
-	/* Inside the lead the ctx gap no longer spaces the parts, so the separators carry it. */
-	.counted-state :global(.count-lead > .sep) { padding: 0 var(--space-1); }
-	.counted-state :global(.count-sep) { color: var(--text-tertiary); }
-	/* Inline text, so the lead wraps between words like a sentence. */
-	.counted-state :global(.count-lead time), .counted-state :global(.count-lead .state) { display: inline; }
-	.counted-state :global(.count-lead .dot) { display: inline-block; margin-right: var(--space-1); vertical-align: 0.05em; }
 	.sep { flex: 0 0 auto; color: var(--text-tertiary); }
 	/* Where the tile has a chevron: the step's action, in its own word. */
 	.act { flex: 0 0 auto; padding-right: var(--space-2); color: var(--accent); font-size: var(--text-footnote); font-weight: var(--fw-medium); }

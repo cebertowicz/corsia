@@ -5,6 +5,12 @@ import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
 
+const { dismissCommentAttention } = vi.hoisted(() => ({ dismissCommentAttention: vi.fn() }));
+vi.mock('$lib/api/docs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/docs')>()),
+	dismissCommentAttention,
+}));
+
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -170,6 +176,41 @@ describe('PlanTree task context menu', () => {
 		await settle();
 
 		expect(menu()!.querySelector('[role="alert"]')!.textContent).toContain('only it resumes it');
+	});
+
+	it('keeps a Done refusal’s own words on a row that also carries comments', async () => {
+		const row = mountTree({
+			user_actions: ['mark_done'],
+			comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 0, system_task: false },
+		}, async () => 'The agent set this task aside, and only it resumes it.');
+
+		rightClick(row);
+		await settle();
+		expect(labels()).toEqual(['Mark done', 'Dismiss all']);
+		(menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement).click();
+		await settle();
+
+		expect(menu()!.querySelector('[role="alert"]')!.textContent).toBe('The agent set this task aside, and only it resumes it.');
+	});
+
+	it('says a failed Dismiss all failed to dismiss', async () => {
+		dismissCommentAttention.mockRejectedValueOnce(new Error('offline'));
+		const onAction = vi.fn();
+		const row = mountTree({
+			user_actions: ['mark_done'],
+			comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 0, system_task: true },
+		}, onAction);
+
+		rightClick(row);
+		await settle();
+		expect(labels()).toEqual(['Dismiss all']);
+		(menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement).click();
+		await settle();
+		await settle();
+
+		expect(dismissCommentAttention).toHaveBeenCalledWith('doc');
+		expect(onAction).not.toHaveBeenCalled();
+		expect(menu()!.querySelector('[role="alert"]')!.textContent).toBe('Couldn’t dismiss comments. Try again.');
 	});
 
 	it('stops a long-press from also selecting text on touch screens', () => {

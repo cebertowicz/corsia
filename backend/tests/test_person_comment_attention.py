@@ -155,6 +155,11 @@ def test_an_ask_closes_the_task_and_its_end_brings_it_back(isolated_db):
         assert person_comment_attention.counts(db, artifact, 'owner-token') == before == (1, 1)
         assert db.execute('SELECT COUNT(*) FROM doc_comment_thread_views').fetchone()[0] == 0
         assert db.execute('SELECT COUNT(*) FROM doc_comments WHERE decision IS NOT NULL').fetchone()[0] == 0
+        with write_transaction(db, scope='test_later') as connection:
+            # The person's Later keeps the request open, so it still carries the comments.
+            assert public.defer_asks(connection, artifact) == 1
+            assert person_comment_task.is_covered(connection, artifact, 'owner-token')
+        assert _tasks(db, artifact) == [(task, 'closed')]
         with write_transaction(db, scope='test_ask_ends') as connection:
             _end(connection, ask.id, hold, asker)
         [again] = _open_tasks(db, artifact)

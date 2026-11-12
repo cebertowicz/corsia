@@ -1,25 +1,39 @@
-"""Seed a person ask and directed feedback in the disposable E2E instance."""
+"""Seed a review request and directed feedback in the disposable E2E instance."""
 import json
 import runpy
 import sys
+import uuid
 
 runpy.run_path('frontend/e2e/support/focus-outcomes.py')['assert_disposable_roots']()
 from doc_feedback_helpers import add_comment
 from doceditor import comments, feedback_batches
 from infra.database import get_db, write_transaction
-from plans import artifact_links, mutations, person_comment_task, service
+from plans import mutations, person_comment_task, public, service, user_ask
+from plans.boundary import PlanActor
 
 mode, artifact_id, thread_id = sys.argv[1:]
 db = get_db()
 try:
+    agent = PlanActor(thread_id, db.execute('SELECT user_id FROM threads WHERE id=?', (thread_id,)).fetchone()[0], None)
     if mode == 'ask':
+        # The document's agent asks the person to review it, as block_node with ask_artifact_id does.
         with write_transaction(db, scope='seed_ask') as connection:
             plan = service.ensure_plan('thread', thread_id, db=connection)
             node = service.add_node(plan.id, kind='task', title='Review launch plan',
-                                    acceptance_criteria='Review the document', assignee='user',
-                                    actor_id=None, provenance='test', db=connection)
-            artifact_links.link(node.id, artifact_id, 'input', actor_id=None,
-                                provenance='test', db=connection)
+                                    acceptance_criteria='Review the document', actor_id=None,
+                                    provenance='test', db=connection)
+            public.mutate(plan.id, 'block_node', {
+                'node_id': node.id, 'expected_revision': node.revision, 'owner_kind': 'user',
+                'ask_artifact_id': artifact_id, 'reason_key': 'review', 'reason': 'Please review the launch plan',
+            }, actor=agent, provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
+    elif mode == 'ask-end':
+        # The agent ends its request: the comments it carried go back to the document's own task.
+        with write_transaction(db, scope='seed_ask_end') as connection:
+            for ask in user_ask.raised_asks(connection, artifact_id):
+                node = service._node_row(connection, ask['node_id'])
+                public.mutate(node['plan_id'], 'resolve_blocker', {
+                    'node_id': node['id'], 'expected_revision': node['revision'], 'hold_id': ask['hold_id'],
+                }, actor=agent, provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
     elif mode == 'feedback':
         # The person's comments are sent as the Send button sends them, and the agent finishes the
         # feedback task they make before replying; the delivery sweep never races the capture.
@@ -90,9 +104,10 @@ try:
             "SELECT id FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL AND author_kind='user'"
             " ORDER BY created_at, id LIMIT 1", (artifact_id,),
         ).fetchone()[0]
-        add_comment(db, artifact_id, author_id=thread_id, parent_id=root_id)
+        reply, _ = add_comment(db, artifact_id, author_id=thread_id, parent_id=root_id)
         with write_transaction(db, scope='seed_reply') as connection:
             person_comment_task.reconcile(connection, artifact_id)
+        print('FIXTURE_RESULT=' + json.dumps({'root': root_id, 'reply': reply['id']}))
     elif mode == 'agent-root':
         # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
         # them only through the agent's open ask on that document.
