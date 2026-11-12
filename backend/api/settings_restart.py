@@ -212,9 +212,7 @@ async def _prepare_owned_release(
     )
     try:
         await _await_preparation(task)
-        await restamp_staged_target(
-            operation_id, lambda: _discard_prepared_release(corsia_script, restart_env)
-        )
+        await restamp_staged_target(operation_id)
     except asyncio.CancelledError as error:
         await _compensate_cancelled_acquire(acquired_ids, error)
         raise

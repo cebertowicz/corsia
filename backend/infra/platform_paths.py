@@ -21,6 +21,10 @@ STATE_DIRECTORY = "state"
 # A source install's state on macOS: a child of the app folder that is never
 # the app's own state root.
 SOURCE_STATE_DIRECTORY = "source-state"
+# The bundle the desktop updater unpacks the new build into, beside the installed
+# app whatever that app is called. Held equal to the Rust updater's staged_path
+# and the lifecycle script's app_mode_staged_path by a parity test.
+STAGED_BUNDLE_NAME = "CORSIA.app.staged"
 # The folder the app's state lived in before the move to CORSIA/state. A source
 # install still there is told how to move it; the startup heal repoints account
 # homes stored under it.

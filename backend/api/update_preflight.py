@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import plistlib
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.parsers.expat import ExpatError
@@ -23,16 +22,9 @@ logger = logging.getLogger(__name__)
 _BUNDLE_VERSION_KEY = "CORSIAVersion"
 
 #: What reading one staged bundle's stamped version can fail as: no bundle or an
-#: unreadable file, plist XML that will not parse, a value that is not the plist's
-#: string version, or a version string semver cannot parse.
-_STAGED_VERSION_ERRORS = (ExpatError, OSError, TypeError, ValueError)
-
-# The updater always unpacks the new build under this name beside the installed
-# app, whatever the installed app itself is called: `staged_path`
-# (desktop/src-tauri/src/update_stage.rs) uses `with_file_name`, and
-# `app_mode_staged_path` (scripts/corsia.d/app_mode.sh) uses
-# `$(dirname "$_corsia_app_bundle")/CORSIA.app.staged`.
-_STAGED_BUNDLE_NAME = "CORSIA.app.staged"
+#: unreadable file, plist XML that will not parse, or a version string semver
+#: cannot parse.
+_STAGED_VERSION_ERRORS = (ExpatError, OSError, ValueError)
 
 #: The two causes a packaged Update is refused for before any drain, named once so
 #: the scheduled path can tell a skipped tick from a failed one over the same set
@@ -75,10 +67,12 @@ async def fresh_update_target() -> UpdateStatus:
 def _staged_bundle_target() -> str | None:
     """Return the version the staged bundle carries, or None when it cannot be read.
 
-    The updater unpacks the build it just downloaded at ``CORSIA.app.staged`` beside
-    the installed app, and the swap installs that copy. Its stamped
-    ``CORSIAVersion`` is the same string the frontend stamp reports at runtime, so
-    it is exactly what post-swap verification will see running.
+    The swap installs ``CORSIA.app.staged``, and its stamped ``CORSIAVersion`` is
+    the same string the frontend stamp reports at runtime, so it is exactly what
+    post-swap verification will see running. Staging already refused any bundle
+    whose stamp it could not parse (``ensure_staged_bundle_version``,
+    desktop/src-tauri/src/update_stage.rs, runs on the extracted bundle before it
+    is renamed), so None here means the bundle went missing after staging.
     """
     from infra import platform_paths
     from infra.update_status import normalize_packaged_version
@@ -86,29 +80,26 @@ def _staged_bundle_target() -> str | None:
     bundle = platform_paths.app_bundle_root()
     if bundle is None:
         return None
-    staged = bundle.parent / _STAGED_BUNDLE_NAME
+    staged = bundle.parent / platform_paths.STAGED_BUNDLE_NAME
     try:
         with (staged / "Contents" / "Info.plist").open("rb") as handle:
             payload = plistlib.load(handle)
         version = payload.get(_BUNDLE_VERSION_KEY) if isinstance(payload, dict) else None
-        if not isinstance(version, str):
-            raise TypeError(f"staged bundle omits {_BUNDLE_VERSION_KEY}")
-        return normalize_packaged_version(version)
+        return normalize_packaged_version(version) if isinstance(version, str) else None
     except _STAGED_VERSION_ERRORS as exc:
         logger.warning("staged bundle version could not be read from %s: %s", staged, exc)
         return None
 
 
-async def restamp_staged_target(operation_id: str, discard_staged: Callable[[], None]) -> None:
+async def restamp_staged_target(operation_id: str) -> None:
     """Stamp an acquired Update with the build staging left, before any drain.
 
     Staging reads the feed again and can take minutes, so a build published after
     the pre-drain probe is the one the swap installs; verifying against the probed
-    version would roll that good build back. The staged bundle is the only record
-    of what installs, so an Update that cannot read its version must not reach the
-    swap: the staged build is discarded and preparation fails with its own cause.
-    A source checkout stages no bundle and verifies no version, so its probed stamp
-    stands.
+    version would roll that good build back. A source checkout stages no bundle
+    and verifies no version, so its probed stamp stands, and so does a packaged
+    install's when its staged bundle cannot be read: post-swap verification is the
+    safety net for that, as it is on a source install.
     """
     from automation import self_restart
     from infra import platform_paths
@@ -117,29 +108,18 @@ async def restamp_staged_target(operation_id: str, discard_staged: Callable[[], 
     if platform_paths.app_bundle_root() is None:
         return
     staged = await asyncio.to_thread(_staged_bundle_target)
-    if staged is not None:
-        if await run_in_db(self_restart.restamp_target_version, operation_id, staged):
-            return
-        raise with_failure_code(
-            HTTPException(
-                409,
-                "Couldn’t start the update. CORSIA is still on your current version. "
-                "Try Update again.",
-            ),
-            "update_refused",
-        )
-    try:
-        await asyncio.to_thread(discard_staged)
-    except Exception as discarded:
-        # The cleanup failure belongs in the log, never in what the person reads.
-        logger.warning("staged update could not be removed: %s", discarded)
+    if staged is None:
+        logger.warning("staged build named no version; keeping the probed target")
+        return
+    if await run_in_db(self_restart.restamp_target_version, operation_id, staged):
+        return
     raise with_failure_code(
         HTTPException(
             409,
-            "Couldn’t check the downloaded update, so CORSIA removed it and is still on "
-            "your current version. Try Update again.",
+            "Couldn’t start the update. CORSIA is still on your current version. "
+            "Try Update again.",
         ),
-        "staged_bundle_unverifiable",
+        "update_refused",
     )
 
 
