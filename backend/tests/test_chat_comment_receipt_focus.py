@@ -180,12 +180,44 @@ def test_comment_only_work_rule_matches_its_sql_twin():
         thread.add("s", turn)
         thread.add("c", turn)
         thread.add("c", turn, meta={"type": "error"})
+        digest = thread.add("c", meta={"event_disposition": "passive"})
+        db.execute("UPDATE messages SET input_order=?, active_turn_id=? WHERE id=?", (thread.n, turn, digest))
     thread.add("w")
     thread.add("w", content="x", meta={"turn_id": 7})
     db.execute("UPDATE messages SET metadata='not json' WHERE id=?", (thread.add("w", "comment"),))
     rows = db.execute(
         f"SELECT *, {COMMENT_ONLY_WORK_SQL} AS work FROM messages", {"suppressed": '["comment"]'},
     ).fetchall()
-    assert sum(row["work"] for row in rows) == 3
+    assert sum(row["work"] for row in rows) == 4
     for row in rows:
         assert bool(row["work"]) is is_comment_only_work(dict(row), {"comment"}), row["id"]
+
+
+def _digest_input(db, thread, turn):
+    """A passive context digest consumed by `turn`: it names its Turn only in `active_turn_id`."""
+    digest = thread.add("c", meta={"event_disposition": "passive", "event_type": "context.digest"})
+    db.execute("UPDATE messages SET input_order=?, active_turn_id=? WHERE id=?", (thread.n, turn, digest))
+    return digest
+
+
+def test_digest_that_rode_in_with_a_comment_only_turn_leaves_no_stub():
+    db = _db()
+    db.executescript(CHAT_COMMENT_SCHEMA_SQL)
+    thread = _Thread(db)
+    digest = _digest_input(db, thread, "comment")
+    _comment_turn(db, thread, "comment")
+    assert _walk(db, _SID, None, 20, 100).runs == []
+    rows = [dict(row) for row in db.execute("SELECT * FROM messages WHERE id=?", (digest,))]
+    annotate_comment_only_receipts(db, _SID, rows)
+    assert rows[0]["commentOnlyReceipt"] is True
+
+
+def test_digest_of_an_ordinary_turn_keeps_its_stub():
+    db = _db()
+    db.executescript(CHAT_COMMENT_SCHEMA_SQL)
+    thread = _Thread(db)
+    digest = _digest_input(db, thread, "ordinary")
+    thread.add("w", "ordinary")
+    runs = _walk(db, _SID, None, 20, 100).runs
+    assert len(runs) == 1
+    assert runs[0]["first_id"] == digest

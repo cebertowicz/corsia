@@ -49,9 +49,16 @@ def _metadata(raw: object) -> dict:
 
 
 def row_turn_id(row: dict) -> str | None:
-    """The Turn a message row belongs to, if its metadata names one."""
+    """The Turn a message row belongs to: the one its metadata names, else the Turn that consumed it.
+
+    Only an input row carries `active_turn_id`, so a passive context digest that rode
+    in with a Turn's input belongs to that Turn.
+    """
     turn = _metadata(row.get("metadata")).get("turn_id")
-    return turn if isinstance(turn, str) else None
+    if isinstance(turn, str):
+        return turn
+    consumer = row.get("active_turn_id")
+    return consumer if isinstance(consumer, str) and consumer else None
 
 
 def _system_type(meta: dict) -> str:
@@ -181,7 +188,8 @@ NEVER_DRAWN_FILTER = (
 
 # `is_comment_only_work` in SQL; `:suppressed` is the JSON array of those Turn ids.
 COMMENT_ONLY_WORK_SQL = f"""CASE WHEN role != 'user' AND json_valid(metadata) THEN
-    COALESCE(json_extract(metadata, '$.turn_id') IN (SELECT value FROM json_each(:suppressed))
+    COALESCE(CASE WHEN json_type(metadata, '$.turn_id') = 'text' THEN json_extract(metadata, '$.turn_id')
+        ELSE NULLIF(active_turn_id, '') END IN (SELECT value FROM json_each(:suppressed))
     AND (role = 'assistant' OR (role = 'system' AND ({FOCUS_VISIBLE_SQL}) = 0)), 0)
     ELSE 0 END"""
 

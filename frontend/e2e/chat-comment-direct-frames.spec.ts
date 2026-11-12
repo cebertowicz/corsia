@@ -8,6 +8,8 @@ import { closeCommentThread, commentEditor, commentOnMessage, openCommentThread 
 const directory = process.env.CHAT_COMMENT_DIRECT_FRAMES;
 const backend = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 const WORKED = /^Worked · /;
+// The passive digest that rides in with a comment-only Turn is that Turn's work, so it shows no chip either.
+const CONTEXT_CHIP = 'Context updated';
 test.describe.configure({ timeout: 180_000 });
 test.use({ seedPerTest: true, colorScheme: 'light', video: 'off' });
 
@@ -130,6 +132,7 @@ for (const width of [1440, 900, 393]) test(`direct comment frames ${width}`, asy
   let card = await openThread(row, page, 'Selected phrase');
   await expect(card).toContainText('My direct comment');
   await captureOpenAndClosed(page, card, () => row, `after-post-${width}`);
+  await expect(messages).not.toContainText(CONTEXT_CHIP);
   await release(request, `only-${width}`);
   await turnFinished(page);
   card = await openThread(row, page, 'Selected phrase');
@@ -139,6 +142,7 @@ for (const width of [1440, 900, 393]) test(`direct comment frames ${width}`, asy
   await expect(messages.getByText(WORKED)).toHaveCount(0);
   await captureOpenAndClosed(page, card, () => row, `after-answer-${width}`);
   await expect(messages.getByText(WORKED)).toHaveCount(0);
+  await expect(messages).not.toContainText(CONTEXT_CHIP);
   await expect(messages).not.toContainText('Answer in the comment.');
 
   // Scenario 2, mixed: the same kind of comment, but the agent also writes text for the chat, so its receipt stays.
