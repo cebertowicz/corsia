@@ -6,7 +6,8 @@ import { cellToOpen, openCellState } from './widget-cell-state';
 /**
  * GFM lets a row leave out its leading or trailing pipe, and the cell at that edge is a real cell of the source, not one the
  * renderer pads in. Whether a cell is padded is the one answer `tableGrid` gives (its span's `padded` flag); text typed at the
- * start of such a cell goes into that cell and moves no other.
+ * start of such a cell goes into that cell and moves no other. Writing an edge cell gives the row the pipe on that side, so
+ * a cell left blank or starting with block syntax neither drops out of the row nor ends the table (`writeCellEdit`).
  */
 
 const rigs: Rig[] = [];
@@ -19,7 +20,7 @@ const doc = (row: string) => `# Plan\n\n${HEAD}\n${row}\n\nafter\n`;
 const bodyRow = (r: Rig) => r.view.state.doc.toString().split('\n')[4];
 
 describe('a cell at a row edge that has no pipe', () => {
-	for (const [row, col, typedRow, cell] of [['Login | a |', 0, 'ZLogin | a |', 'ZLogin '], ['| Login |a', 1, '| Login |Za', 'Za']] as const) {
+	for (const [row, col, typedRow, cell] of [['Login | a |', 0, '|ZLogin | a |', 'ZLogin '], ['| Login |a', 1, '| Login |Za|', 'Za']] as const) {
 		it(`is not padded, and a character typed at its start stays in it, in "${row}"`, () => {
 			const r = track(build(doc(row)));
 			expect(table(r)!.rows[1].cells, 'setup: the row is drawn with both of its cells').toHaveLength(2);
@@ -29,7 +30,7 @@ describe('a cell at a row edge that has no pipe', () => {
 			caretAt(r, 0);
 			expect(cellCaret(r), 'the caret is at the start of the cell, as after Home').toBe(0);
 			typed(r, 0, 'Z');
-			expect(bodyRow(r), 'the row keeps its pipes, and its cells their order').toBe(typedRow);
+			expect(bodyRow(r), 'the row keeps its cells in order, and gains the pipe its written edge cell needs').toBe(typedRow);
 			expect(table(r)!.rows[1].cells, 'the row still has two cells').toHaveLength(2);
 			expect(cellText(r), 'the editor holds the cell the character went into').toBe(cell);
 		});

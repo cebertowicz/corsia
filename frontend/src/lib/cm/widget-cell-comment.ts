@@ -3,6 +3,8 @@ import { EditorView } from '@codemirror/view';
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
 import { tableCells } from './widget-cells';
+import { contentOffset } from './widget-cell-row';
+import { OFFER_GAP, OFFER_ROOM, offerPlace } from './offer-place';
 import { selectionIn } from './widget-selection';
 import { acrossColumn } from './comment-anchor-geometry';
 import type { WidgetSelection } from './widget-selection-types';
@@ -49,42 +51,22 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	// cell holds no text for it to cover: it sits inside the cell, at its far end, away from the caret at the start.
 	// A cell too narrow to hold it (a phone's last column) puts it beside or below the table, as the offer for selected text goes.
 	const box = td.getBoundingClientRect();
-	if (box.width < OFFER_ROOM) {
-		const beside = offerBesideTable(view, cell.tableFrom, { top: box.top, bottom: box.bottom });
-		if (beside) return { ...raised, above: false, ...beside };
-	}
+	if (box.width < OFFER_ROOM) return { ...raised, above: false, ...offerPlace(view, cell.tableFrom, box) };
 	return { ...raised, above: false, exact: true, end: true, top: (box.top + box.bottom) / 2, left: box.right - OFFER_GAP };
 }
 
-/** The widest the Comment offer is (on a phone), and the gap kept around it. */
-const OFFER_GAP = 6;
-// Under the table the offer has the table's own bottom margin to fit in, about the offer's height and a few pixels more.
-const BELOW_GAP = 3;
-const OFFER_ROOM = 120 + 2 * OFFER_GAP;
-
 /**
- * Where the Comment offer for text selected in a table cell goes so that it covers no text: in the margin beside the table,
- * level with the selected line, and where the table leaves no margin directly below it.
+ * The open cell's own editor and where a document position in the cell sits in its content, when `from`..`to` lies in that
+ * cell; null otherwise. The table hides the cell's source in the document, so its text is measured in that editor, as prose
+ * is in the document's.
  */
-export function offerBesideTable(view: EditorView, from: number, line: Extent) {
-	const widget = drawnTableAt(view, from);
-	if (!widget) return null;
-	// The table's own box: the widget around it carries padding the offer must not sit in, with the text below.
-	const table = (widget.querySelector('table') ?? widget).getBoundingClientRect(), column = view.scrollDOM.getBoundingClientRect();
-	if (column.right - table.right >= OFFER_ROOM) return { exact: true, top: (line.top + line.bottom) / 2, left: table.right + OFFER_GAP };
-	return { exact: true, below: true, top: table.bottom + BELOW_GAP, left: table.left };
-}
-
-/**
- * The open cell's own editor and where its text starts in the document, when `from`..`to` lies in that cell; null otherwise.
- * The table hides the cell's source in the document, so its text is measured in that editor, as prose is in the document's.
- */
-export function openCellText(view: EditorView, from: number, to: number): { inner: EditorView; base: number } | null {
+export function openCellText(view: EditorView, from: number, to: number): { inner: EditorView; at: (pos: number) => number } | null {
 	const cell = view.state.field(openCellState, false);
 	if (!cell || from < cell.from || to > cell.to) return null;
 	const el = view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
 	const inner = el && EditorView.findFromDOM(el);
-	return inner ? { inner, base: cell.from } : null;
+	const source = cellSource(view.state, cell);
+	return inner ? { inner, at: (pos) => contentOffset(source, pos - cell.from) } : null;
 }
 
 type Extent = { top: number; bottom: number };
@@ -105,7 +87,7 @@ export function cellTextRows(view: EditorView, from: number, to: number): DOMRec
 	const td = cell && cellElement(widget, cell);
 	if (!td) return null;
 	const open = openCellText(view, from, to);
-	const ends = open ? [open.inner.coordsAtPos(from - open.base, 1), open.inner.coordsAtPos(to - open.base, 1)] : [];
+	const ends = open ? [open.inner.coordsAtPos(open.at(from), 1), open.inner.coordsAtPos(open.at(to), 1)] : [];
 	const drawn = [...(td.matches(PENDING) ? [td] : []), ...td.querySelectorAll<HTMLElement>(PENDING)].flatMap((el) => [...el.getClientRects()]);
 	const lines = (ends.every(Boolean) ? extent(ends as Extent[]) : null) ?? extent(drawn) ?? extent([td.getBoundingClientRect()])!;
 	return acrossColumn(view, lines.top, lines.bottom, widget.getBoundingClientRect().right);

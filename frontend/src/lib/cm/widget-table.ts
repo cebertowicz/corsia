@@ -6,7 +6,7 @@ import { imageContext, refreshMarkdownImages, type ImageContext } from './markdo
 import { renderedFragment } from './rendered-images';
 import { blockSource, tableAt } from './widget-blocks';
 import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
-import { tableCells, tableGrid } from './widget-cells';
+import { tableGrid, type CellSpan } from './widget-cells';
 import { CELL_EDITING } from './widget-cell-layer';
 import { type OpenCell } from './widget-cell-state';
 
@@ -61,12 +61,19 @@ function renderTable(src: string, images: ImageContext | null): HTMLElement {
 	return el;
 }
 
-/** The row count and the number of source cells in each: what a cell-by-cell patch can follow, and what a real edit breaks. */
+/**
+ * The row count and the number of drawn cells in each: what a cell-by-cell patch can follow, and what a real edit breaks.
+ * It reads the same drawn cells (`tableGrid`) `transplant` walks, so a row that gains or loses source cells keeps its shape
+ * and has every drawn cell compared, padded ones included.
+ */
 const shape = (src: string) => {
 	const perRow: number[] = [];
 	for (const span of tableGrid(src)) perRow[span.row] = (perRow[span.row] ?? 0) + 1;
 	return `${src.split('\n').length}|${perRow.join(',')}`;
 }
+
+/** A drawn cell's source between its pipes; a padded cell has none, so it reads as empty. */
+const drawnSource = (src: string, span: CellSpan) => src.slice(span.rawFrom, span.rawTo);
 
 /**
  * Re-renders `src` and moves into the drawn table only the cells whose source text differs from `was`, the source the node
@@ -76,15 +83,15 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 	const fresh = renderTable(src, images).querySelector('table');
 	const drawn = el.querySelector('table');
 	if (!fresh || !drawn) return false;
-	const held = tableCells(was);
+	const held = tableGrid(was);
 	// The delimiter row holds each column's alignment and no cell's text, so a change to it alone moves no cell's source:
 	// it is compared as its own line, and every drawn cell takes the new alignment attributes, the empty cells the renderer
 	// pads a short row with included, which have no source cell of their own.
 	const realigned = delimiterRow(src) !== delimiterRow(was);
 	let copied = false;
-	for (const span of tableCells(src)) {
+	for (const span of tableGrid(src)) {
 		const before = held.find((item) => item.row === span.row && item.col === span.col);
-		const unchanged = before && was.slice(before.rawFrom, before.rawTo) === src.slice(span.rawFrom, span.rawTo);
+		const unchanged = before && !before.padded === !span.padded && drawnSource(was, before) === drawnSource(src, span);
 		const forced = force && span.row === force.row && span.col === force.col;
 		const next = fresh.rows[span.row]?.cells[span.col];
 		const now = drawn.rows[span.row]?.cells[span.col];

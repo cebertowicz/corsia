@@ -1,14 +1,14 @@
 import type { EditorView } from '@codemirror/view';
-import { emptyCellSelection, offerBesideTable, openCellText } from './widget-cell-comment';
+import { emptyCellSelection, openCellText } from './widget-cell-comment';
 import { widgetCommentLabel } from './widget-cells';
+import { offerPlace } from './offer-place';
 import type { SelectionOffer } from './widget-selection-types';
 
 export type { SelectionOffer };
 
 /**
- * What the Comment offer is raised for from the editor's own selection: the selected text, placed beside its end, except text
- * in an open table cell, which is placed beside or below the table so the offer covers no cell's text; for a caret in an open
- * empty cell, that whole cell (it has no text to select); null for any other caret.
+ * What the Comment offer is raised for from the editor's own selection: the selected text, placed by the one rule for selected
+ * words (`offerPlace`); for a caret in an open empty cell, that whole cell (it has no text to select); null for any other caret.
  */
 export function selectionOffer(
 	v: EditorView,
@@ -17,15 +17,11 @@ export function selectionOffer(
 	const r = v.state.selection.main;
 	if (r.empty) return emptyCellSelection(v);
 	const text = v.state.sliceDoc(r.from, r.to), { state } = v;
-	// Text selected in the open cell is measured in the cell's own editor (the table hides that source from the document's). Its offer
-	// is the one place that does not follow prose: beside the end of the words it would cover the cell's or the next row's text, so it
-	// goes to the margin beside the table, level with the selected line (`offerBesideTable`).
-	const inCell = openCellText(v, r.from, r.to), coords = inCell ? inCell.inner.coordsAtPos(r.to - inCell.base) : v.coordsAtPos(r.to);
-	const beside = inCell && coords ? offerBesideTable(v, r.from, coords) : null;
+	// Text selected in the open cell is measured in the cell's own editor: the table hides that source from the document's.
+	const inCell = openCellText(v, r.from, r.to), coords = inCell ? inCell.inner.coordsAtPos(inCell.at(r.to)) : v.coordsAtPos(r.to);
 	return {
 		from: r.from, to: r.to, text,
-		top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
-		...beside,
+		...(coords ? offerPlace(v, r.from, coords) : { top: 0, left: 0 }),
 		anchor: anchorFor(v, r.from, r.to),
 		label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
 	};

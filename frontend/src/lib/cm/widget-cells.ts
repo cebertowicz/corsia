@@ -4,7 +4,8 @@ import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
-export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number; padded?: true }
+/** `rowFrom` is where the cell's row starts in the source: with `col`, what names a cell across edits to other rows. */
+export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number; rowFrom: number; padded?: true }
 
 /**
  * The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty
@@ -40,7 +41,7 @@ export function tableCells(src: string): CellSpan[] {
 			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
 			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
-			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
+			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd, rowFrom: start });
 		}
 	});
 	return cells;
@@ -53,19 +54,19 @@ export function tableCells(src: string): CellSpan[] {
  * or walk drawn cells read this; anything that anchors on source reads `tableCells`.
  */
 export function tableGrid(src: string): CellSpan[] {
-	const real = tableCells(src), ends: number[] = [];
+	const real = tableCells(src), lines: { start: number; end: number }[] = [];
 	let lineStart = 0;
 	src.split('\n').forEach((line, index) => {
-		if (index !== 1) ends.push(lineStart + line.length);
+		if (index !== 1) lines.push({ start: lineStart, end: lineStart + line.length });
 		lineStart += line.length + 1;
 	});
 	const columns = real.filter((span) => span.row === 0).length, grid: CellSpan[] = [];
-	ends.forEach((end, row) => {
+	lines.forEach(({ start, end }, row) => {
 		// A row with more cells than the header keeps those spans in the source, and the renderer draws no cell for them.
 		const spans = real.filter((span) => span.row === row && span.col < columns);
 		grid.push(...spans);
 		for (let col = spans.length; col < columns; col++) {
-			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, padded: true });
+			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, rowFrom: start, padded: true });
 		}
 	});
 	return grid;

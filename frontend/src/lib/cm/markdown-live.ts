@@ -9,7 +9,6 @@ import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
 import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
 import { markdownTableDecorations } from './widget-table';
 import { cellEditorExtensions, markdownCellEditing } from './widget-cell-editor';
-import { inTableCell } from './widget-cell-text';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -119,18 +118,11 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 						break;
 					case 'Escape':
 						// A backslash escape shows the character it escapes, not the backslash, like every other mark here.
-						// It is also how a table cell keeps a typed pipe: the cell stores `\|` and the reader reads `|`.
 						hide(node.from, node.from + 1);
 						break;
-					case 'InlineCode': {
+					case 'InlineCode':
 						decos.push(Decoration.mark({ class: 'cm-md-inline-code' }).range(node.from, node.to));
-						// A code span has no escapes, but a table cell's pipe is stored as `\|` there too and drawn as the pipe alone.
-						if (view.state.facet(inTableCell)) {
-							const code = doc.sliceString(node.from, node.to);
-							for (let at = code.indexOf('\\|'); at >= 0; at = code.indexOf('\\|', at + 1)) hide(node.from + at, node.from + at + 1);
-						}
 						break;
-					}
 					case 'ListMark': {
 						const txt = doc.sliceString(node.from, node.to);
 						if (/^[-*+]$/.test(txt) && !node.node.parent?.getChild('Task')) {

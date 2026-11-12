@@ -1,33 +1,37 @@
-import { StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { StateEffect, StateField, type ChangeDesc, type EditorState, type Text } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
-import { intersectsCell, tableCells, tableGrid, type CellSpan } from './widget-cells';
+import { tableGrid, type CellSpan } from './widget-cells';
+import { unescapeCell } from './widget-cell-row';
 
 /**
  * Which table cell is being edited, and where its text lives in the document.
  *
- * The cell is tracked twice over: its range is mapped through every main-document transaction, and on each change that
- * mapped range is re-derived from the editor's own parse (`tableAt` for the table's lines, `tableCells` for the cell's
- * place in them). Mapping alone follows the text; the re-derivation keeps the range on the cell's own pipes when a
- * collaborator's update moves a row or a column, and answers "no cell here" — which closes the editor — when the cell or
- * its table is gone.
+ * A cell is named by its row's line and its column: the line's start is mapped through every main-document transaction,
+ * and everything else (its table, its row index, its source range, whether the row pads it in) is read again from the
+ * editor's own parse (`tableAt`, `tableGrid`) on that line. So an edit to another row moves the line and leaves the column,
+ * and the answer "no such cell" — which closes the editor — comes when the row or its table is gone.
  */
 
-/** The cell under edit: its table's source start, its place in the drawn table, and the source range its editor holds. */
+/** The cell under edit: its row's line start and column, and, read from them, its table, row index and source range. */
 export interface OpenCell {
 	tableFrom: number;
+	rowStart: number;
 	row: number;
 	col: number;
 	from: number;
 	to: number;
-	/** A cell the renderer pads in has no source of its own, so its first character has to open the cell in the source. */
+	/** A cell the renderer pads in has no source of its own: its range is empty, at the row's end. */
 	padded: boolean;
 }
 
 export const openCellAt = StateEffect.define<OpenCell>();
 export const closeCell = StateEffect.define<null>();
 
-/** The cell's whole source between its two pipes, padding included: what the cell editor holds, byte for byte. */
+/** The cell's whole source between its two pipes, padding included. */
 export const cellSource = (state: EditorState, cell: OpenCell) => state.sliceDoc(cell.from, cell.to);
+
+/** The cell's content, which is what its editor holds: its source with the table's own `\|` escapes out (`widget-cell-row.ts`). */
+export const cellContent = (state: EditorState, cell: OpenCell) => unescapeCell(cellSource(state, cell));
 
 /**
  * The cell the source span describes. Whether it is padded is the span's own flag, set by `tableGrid` where it pads a short
@@ -35,6 +39,7 @@ export const cellSource = (state: EditorState, cell: OpenCell) => state.sliceDoc
  */
 export const cellAtSpan = (block: number, span: CellSpan): OpenCell => ({
 	tableFrom: block,
+	rowStart: block + span.rowFrom,
 	row: span.row,
 	col: span.col,
 	from: block + span.rawFrom,
@@ -42,29 +47,36 @@ export const cellAtSpan = (block: number, span: CellSpan): OpenCell => ({
 	padded: span.padded === true,
 });
 
-/**
- * The cell the mapped range best covers, from the editor's own parse. Raw spans (the pipes' inner edges) rather than the
- * trimmed content ones are what the editor can hold: a space typed at the edge of a cell has to land somewhere. An empty
- * cell has no width to overlap, so a range that has collapsed onto its source anchor is still that cell's.
- */
-export function resolveCell(state: EditorState, cell: OpenCell): OpenCell | null {
-	const block = tableAt(state, cell.from, Math.max(cell.from, cell.to));
+/** The drawn cell in column `col` of the table row on the line starting at `rowStart`, from the editor's own parse; null when there is none. */
+export function cellAt(state: EditorState, rowStart: number, col: number): OpenCell | null {
+	const block = tableAt(state, rowStart, rowStart);
 	if (!block) return null;
-	const text = state.sliceDoc(block.from, block.to), spans = tableCells(text), grid = tableGrid(text);
-	const from = cell.from - block.from, to = Math.max(from, cell.to - block.from);
-	let best: { span: CellSpan; over: number } | null = null;
-	for (const span of spans) {
-		const over = Math.min(span.rawTo, to) - Math.max(span.rawFrom, from);
-		if (over > 0 && (!best || over > best.over)) best = { span, over };
-	}
-	const span = best?.span
-		?? spans.find((item) => intersectsCell(item, from, to))
-		// A zero-width range inside the cell's own span: an empty cell the reader has just opened. The padded cells of a short
-		// row all sit at its end, so the one in the cell's own column is the one opened.
-		?? grid.find((item) => item.row === cell.row && item.col === cell.col && item.rawFrom <= from && to <= item.rawTo)
-		?? grid.find((item) => item.rawFrom <= from && to <= item.rawTo);
-	if (!span) return null;
-	return cellAtSpan(block.from, span);
+	const span = tableGrid(state.sliceDoc(block.from, block.to)).find((item) => block.from + item.rowFrom === rowStart && item.col === col);
+	return span ? cellAtSpan(block.from, span) : null;
+}
+
+/**
+ * Where a row's line starts after `changes`: text inserted at its start (a row added above, or the pipe a row without one
+ * gains) is before it, so the start moves past it and back to the line's own start.
+ */
+export const mapRowStart = (changes: ChangeDesc, doc: Text, rowStart: number) => doc.lineAt(changes.mapPos(rowStart, 1)).from;
+
+/**
+ * Whether `changes` replaced text across one of the row's ends: the row was deleted, joined with a neighbour or rewritten
+ * along with the rows around it. Nothing is left to say which cell was open then, so it closes; what was typed is already
+ * in the document.
+ */
+function rowReplaced(changes: ChangeDesc, doc: Text, rowStart: number) {
+	const end = doc.lineAt(rowStart).to;
+	let replaced = false;
+	changes.iterChangedRanges((fromA, toA) => {
+		if ((fromA < rowStart && rowStart < toA) || (fromA < end && end < toA)) replaced = true;
+		// A deletion that ends at the row's start from inside the line above, or starts at its end and stops inside the line
+		// below, joins the two lines into one.
+		else if (fromA < rowStart && toA === rowStart && doc.lineAt(fromA).from !== fromA) replaced = true;
+		else if (fromA === end && toA > end && doc.lineAt(toA).to !== toA) replaced = true;
+	});
+	return replaced;
 }
 
 /** The cell to open from a click on the drawn cell at `row`/`col` of the table that starts at `tableFrom`. */
@@ -72,8 +84,7 @@ export function cellToOpen(state: EditorState, tableFrom: number, row: number, c
 	const block = tableAt(state, tableFrom, tableFrom);
 	if (!block) return null;
 	const span = tableGrid(state.sliceDoc(block.from, block.to)).find((item) => item.row === row && item.col === col);
-	if (!span) return null;
-	return resolveCell(state, cellAtSpan(block.from, span));
+	return span ? cellAtSpan(block.from, span) : null;
 }
 
 export const openCellState = StateField.define<OpenCell | null>({
@@ -85,42 +96,10 @@ export const openCellState = StateField.define<OpenCell | null>({
 		}
 		if (!value || !transaction.docChanged) return value;
 		const { changes } = transaction;
-		// A change that replaces text across the cell's edge (a rewrite of the region around it, or of the whole document)
-		// leaves nothing to say which cell is the open one: mapped outward the range would cover its neighbours, and the
-		// widest of them would be taken for it. The editor closes instead of moving to another cell; what was typed is
-		// already in the document.
-		let replaced = false;
-		changes.iterChangedRanges((fromA, toA) => {
-			if (fromA < toA && fromA < value.to && toA > value.from && (fromA < value.from || toA > value.to)) replaced = true;
-		});
-		if (replaced) return null;
-		// Outward at both ends: text inserted at a cell's own edge — typed at its start, or the delimiters materialised
-		// around a cell the source did not have yet — belongs to that cell, so the range grows instead of stepping past it.
-		return resolveCell(transaction.state, {
-			...value,
-			tableFrom: changes.mapPos(value.tableFrom, 1),
-			from: changes.mapPos(value.from, -1),
-			to: changes.mapPos(value.to, 1)
-		});
+		if (rowReplaced(changes, transaction.startState.doc, value.rowStart)) return null;
+		return cellAt(transaction.state, mapRowStart(changes, transaction.newDoc, value.rowStart), value.col);
 	}
 });
-
-/**
- * A cell the renderer pads in has no delimiters of its own yet, so the text typed into it opens the cell in the
- * source: the row gains the pipes of every padded cell before it, empty, and then this cell's, with the text between
- * them, inside the one transaction the reader made, so the text lands in the column it was typed in.
- */
-export function openCellInSource(state: EditorState, changes: { from: number; insert: string }[], cell: OpenCell) {
-	const first = changes.find((change) => change.insert && change.from === cell.from);
-	const block = tableAt(state, cell.from, cell.from);
-	if (!first || !block) return;
-	const real = tableCells(state.sliceDoc(block.from, block.to)).filter((span) => span.row === cell.row).length;
-	// Whether the row's last pipe closes it is read past any whitespace after it (the padded cells sit at the line's end, not
-	// at its last pipe), and a pipe an odd run of backslashes escapes closes nothing.
-	const line = state.doc.lineAt(cell.from), before = line.text.slice(0, cell.from - line.from).trimEnd();
-	const closed = before.endsWith('|') && /(?:^|[^\\])(?:\\\\)*\|$/.test(before) ? '' : ' |';
-	first.insert = `${closed}${' |'.repeat(Math.max(0, cell.col - real))} ${first.insert} |`;
-}
 
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */
 export const CELL_SYNC = 'table-cell-sync';

@@ -158,6 +158,37 @@ for (const layout of LAYOUTS) {
 			await expect(editorIn(page), 'the cell is still open').toBeVisible();
 		});
 
+		for (const card of [false, true]) {
+			const name = card ? 'with a comment card open, a click or tap in a cell types where it landed' : 'a click or tap on a wrapped line of a cell types where it landed';
+			test(name, async ({ page }) => {
+				test.skip(at === 900, 'proven at the desktop and phone widths');
+				// On a phone the card is a modal sheet: a tap outside it lands on its backdrop, which closes it and reaches no cell.
+				test.fixme(card && layout.project === 'chromium-mobile', 'a tap through the open card\'s backdrop is not settled');
+				test.setTimeout(120_000);
+				const seeded = await openTableDocument(page, layout);
+				if (card) {
+					await page.locator(`[data-comment-ids*="${seeded.commentId}"]`).first().click({ delay: 80 });
+					await expect(page.getByText('Which way does it point now?').first(), 'setup: the comment card is open').toBeVisible();
+				}
+				await settled(page);
+				// Inside the long cell, clear of the card wherever it opens: just inside the start of "few", in the middle of its
+				// line, so the caret goes in front of it and nowhere else. The cell wraps over several lines, so its editor has to
+				// wrap them at the same words for the click to land on the word that was drawn there.
+				const target = cell(page, 3, 1);
+				const word = await wordsIn(target, 'few');
+				const point = { x: word.x + 1, y: (word.y + word.bottom) / 2 };
+				const tag = `${card ? 'card-open' : 'wrapped'}-${at}`;
+				await frame(page, `05-${tag}-before`);
+				if (layout.project === 'chromium-mobile') await page.touchscreen.tap(point.x, point.y);
+				else await page.mouse.click(point.x, point.y, { delay: 80 });
+				await editorInCell(page, target);
+				await expect(cellContent(page), 'focus is inside the cell editor').toBeFocused();
+				await page.keyboard.type('ZZ');
+				await savedContaining(page, seeded, 'and a ZZfew more after those. | open |');
+				await frame(page, `05-${tag}-typed`);
+			});
+		}
+
 		test('a read-only document never opens a cell editor', async ({ page }) => {
 			test.setTimeout(120_000);
 			const seeded = await openTableDocument(page, layout, { readOnly: true });

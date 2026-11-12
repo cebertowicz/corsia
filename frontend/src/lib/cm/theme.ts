@@ -84,6 +84,10 @@ export const docTheme = EditorView.theme({
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
+	// A cell wraps as its editor does (`pre-wrap`, below): a space at a line's end hangs past it. The document's own wrapping
+	// (`break-spaces`) would make it take room, so a cell would end a line one word sooner than its editor and a click on
+	// the drawn word would put the caret on another.
+	'.cm-md-table td, .cm-md-table th': { whiteSpace: 'pre-wrap' },
 	// A cell's editor cannot sit in the cell it edits: Chromium places no caret in a contenteditable element inside
 	// CodeMirror's editing host, and a drawn cell is inside it. So the editor is held in a layer that shares the document's
 	// fonts and theme but sits outside that host, pinned over the cell (`widget-cell-layer.ts`), and the cell keeps its own
