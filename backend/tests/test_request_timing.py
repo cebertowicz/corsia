@@ -84,6 +84,30 @@ def test_real_app_records_route_template_and_unhandled_errors():
 
 
 @pytest.mark.asyncio
+async def test_cancelled_request_is_recorded_as_client_closed():
+    """A caller that stops waiting cancels the handler; that request still counts, with its time so far."""
+    started = asyncio.Event()
+
+    async def app(scope, receive, send):
+        started.set()
+        await asyncio.sleep(3600)
+
+    async def send(message):
+        raise AssertionError("nothing is sent")
+
+    task = asyncio.create_task(request_timing.RequestTimingMiddleware(app)(
+        {"type": "http", "method": "GET", "route": SimpleNamespace(path="/slow")}, None, send))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert {key[1:] for key in request_timing._aggregates} == {("GET", "/slow", "4xx")}
+    aggregate = next(iter(request_timing._aggregates.values()))
+    assert aggregate.count == 1 and aggregate.sum_bytes is None
+
+
+@pytest.mark.asyncio
 async def test_websocket_passthrough():
     seen = []
 
