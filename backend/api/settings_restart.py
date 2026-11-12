@@ -18,6 +18,7 @@ from api.restart_compensation import (
 )
 from api.restart_shell import spawn_restart_lifecycle
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
+from api.update_preflight import fresh_update_target
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -133,17 +134,17 @@ async def _acquire_settings_restart(
     acquired_ids: list[str],
     *,
     trigger: str | None = None,
-    target_version: str | None = None,
     claim: Callable[[object], bool] | None = None,
 ) -> str | None:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
-    from infra.update_status import cached_changes, cached_target_version
+
+    fresh = await fresh_update_target() if mode == "update" else None
 
     def _try_acquire() -> str | None:
-        version = (target_version or cached_target_version()) if mode == "update" else None
-        changes = cached_changes() if mode == "update" else None
+        version = fresh.target_version if fresh is not None else None
+        changes = fresh.changes if fresh is not None else None
         requested_id = uuid.uuid4().hex if mode == "update" else None
         operation_id = self_restart.try_acquire(
             None,
@@ -329,7 +330,6 @@ async def prelaunch_settings_restart(
     *,
     caller_token: str | None,
     trigger: str | None = "manual",
-    target_version: str | None = None,
     claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Hand Settings restart ownership from acquisition through child launch."""
@@ -344,7 +344,6 @@ async def prelaunch_settings_restart(
                 mode,
                 acquired_ids,
                 trigger=trigger,
-                target_version=target_version,
                 claim=claim,
             )
         except asyncio.CancelledError as error:

@@ -9,6 +9,8 @@ from fastapi import HTTPException
 
 from automation.self_restart import record_update_log
 
+pytestmark = pytest.mark.usefixtures("newer_build_available")
+
 
 @pytest.mark.asyncio
 async def test_refusal_delete_settles_failed_with_reason(monkeypatch):
