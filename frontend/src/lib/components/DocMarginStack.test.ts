@@ -62,7 +62,7 @@ describe('DocMarginStack', () => {
 		expect(document.activeElement).toBe(writing.querySelector('textarea'));
 	});
 
-	it('draws its head as the column\'s first card: at rest no card goes under it; a card picked level with text above its foot keeps its line and the head steps up', () => {
+	it('draws its head as the column\'s first card, always at the top: no card goes under it, and a card picked on text above its foot sits just under it', () => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 		const scroller = document.createElement('div');
 		const column = document.createElement('div');
@@ -85,7 +85,7 @@ describe('DocMarginStack', () => {
 		};
 
 		expect(place(null)).toEqual({ head: '0px', card: '48px' });
-		expect(place('a')).toEqual({ head: '-38px', card: '10px' });
+		expect(place('a')).toEqual({ head: '0px', card: '48px' });
 		vi.restoreAllMocks();
 	});
 

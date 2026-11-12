@@ -47,11 +47,10 @@ describe('placeCards: soft-pinned margin cards', () => {
 		expect(placeCards(items, null)).toEqual({ head: 0, a: 50, b: 50 + 100 + GAP, c: 50 + 2 * (100 + GAP) });
 	});
 
-	it('keeps a picked card at its line even when the cards above it would not fit between it and the column top: they step up past the top, the head with them', () => {
+	it('never lifts a card above the column top: when the cards above a pick do not fit between the top and its line, they stack down from the top and the pick follows them', () => {
 		const items = [card('head', 0, 42), card('a', 20), card('b', 30), card('c', 40)];
 		const tops = placeCards(items, 'c');
-		expect(tops.c).toBe(40);
-		expect(tops).toEqual({ head: 40 - 2 * (100 + GAP) - GAP - 42, a: 40 - 2 * (100 + GAP), b: 40 - 100 - GAP, c: 40 });
+		expect(tops).toEqual({ head: 0, a: 50, b: 50 + 100 + GAP, c: 50 + 2 * (100 + GAP) });
 		expect(overlaps(items, tops)).toBe(false);
 	});
 
@@ -61,13 +60,20 @@ describe('placeCards: soft-pinned margin cards', () => {
 		expect(placeCards([card('head', 0, 42), card('a', 20), card('b', 400), card('c', 410)], 'c')).toEqual({ head: 0, a: 50, b: 410 - GAP - 100, c: 410 });
 	});
 
-	it('keeps a picked card at its line however tall the cluster above it is', () => {
+	it('keeps a picked card at its line whenever the cards above it fit, keeps the head at the top, and puts no card above it', () => {
 		const items = [card('head', 0, 42), ...Array.from({ length: 6 }, (_, i) => card(`t${i}`, 540 + 10 * i, 120))];
-		for (const item of items.slice(1)) {
+		for (const [i, item] of items.entries()) {
+			if (i === 0) continue;
 			const tops = placeCards(items, item.id);
-			expect(tops[item.id]).toBe(item.y);
+			const above = items.slice(0, i).reduce((sum, it) => sum + it.h + GAP, 0);
+			expect(tops[item.id]).toBe(Math.max(item.y, above));
+			expect(tops.head).toBe(0);
+			expect(Math.min(...Object.values(tops))).toBe(0);
 			expect(overlaps(items, tops)).toBe(false);
 		}
+		// The first five picks have room above them and keep their lines; the sixth has not, and sits under the five.
+		expect(items.slice(1, 6).map((item) => placeCards(items, item.id)[item.id])).toEqual(items.slice(1, 6).map((item) => item.y));
+		expect(placeCards(items, 't5').t5).toBe(42 + GAP + 5 * (120 + GAP));
 	});
 
 	it('gives every card a top, and an unknown selection changes nothing', () => {

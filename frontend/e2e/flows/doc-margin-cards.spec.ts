@@ -83,6 +83,13 @@ test('@flow:doc-margin-cards a picked card keeps its own line, the cards around 
 	await page.locator('.cm-comment-anchor', { hasText: 'Paragraph 1 of the plan' }).first().click();
 	await expect(card(page, doc, FIRST).locator('.ct.focused')).toHaveCount(1);
 	await expect(page.locator('[data-popover]')).toHaveCount(0);
+	// Whichever card is picked, none is lifted above the column's top, where nothing could scroll to it.
+	for (let i = 0; i < doc.ids.length; i++) {
+		await card(page, doc, i).locator('.ct-head').click({ position: { x: 14, y: 10 } });
+		await expect(card(page, doc, i).locator('.ct.focused')).toHaveCount(1);
+		await expect.poll(() => page.evaluate(() => Math.min(...[...document.querySelectorAll<HTMLElement>('[data-margin-card], [data-margin-head]')].map((el) => parseFloat(el.style.top)))),
+			{ message: `card ${i} picked: no card above the column's top` }).toBeGreaterThanOrEqual(0);
+	}
 });
 
 test('@flow:doc-margin-cards focusing a card below the visible column does not slide the cards off their lines', async ({ page, request }, info) => {

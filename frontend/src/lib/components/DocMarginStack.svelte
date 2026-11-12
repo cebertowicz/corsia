@@ -8,7 +8,7 @@
 	 * The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. A composer (a new
 	 * comment, or an unsent one being edited) is a card too, level with the text it is written on: it keeps its line as a
 	 * picked card does, and the cards around it make room. A `head` (the column's Accept all) is the column's first card, at its
-	 * top, so a change in its height moves the cards with a fresh placement, never under it; it steps up with the cards above a pick.
+	 * top, so a change in its height moves the cards with a fresh placement, never under it. No card goes above it, a pick included.
 	 */
 	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null } = $props();
 	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
