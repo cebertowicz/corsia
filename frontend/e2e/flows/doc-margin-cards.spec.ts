@@ -131,13 +131,8 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
 });
 
-test('@flow:doc-margin-cards after a new comment is cancelled and the column closed, typing lands at the selection, never at the top', async ({ page, request }, info) => {
-	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
-	test.setTimeout(120_000);
-	const doc = await open(page, request);
-	const text = page.locator('.cm-content');
-	const before = (await text.textContent())!;
-	// Select a stretch of a line no comment is on, and start a comment on it: the composer opens in the column beside it.
+/** Selects a stretch of a line no comment is on, starts a comment on it (the composer opens in the column beside it), and cancels it. */
+async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open>>) {
 	const target = 'Paragraph 6 of the plan';
 	await page.locator('.cm-line', { hasText: target }).first().click({ position: { x: 4, y: 4 } });
 	await page.keyboard.press('Home');
@@ -149,12 +144,12 @@ test('@flow:doc-margin-cards after a new comment is cancelled and the column clo
 	await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
 	await expect(composer).toHaveCount(0);
 	await expect(card(page, doc, FIRST), 'cancelling the draft keeps the column').toBeVisible();
-	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
-	await pill(page).click();
-	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
-	await expect(pill(page)).toBeFocused();
-	for (let i = 0; i < 12 && !(await text.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab');
-	await expect(text).toBeFocused();
+	return target;
+}
+
+/** Types one character with focus in the text and checks it lands inside or at an end of the commented selection, not at the top. */
+async function expectTypingAtSelection(page: Page, before: string, target: string) {
+	const text = page.locator('.cm-content');
 	expect(await text.textContent(), 'reaching the text typed nothing into it').toBe(before);
 	await page.keyboard.type('Z');
 	const after = (await text.textContent())!;
@@ -164,6 +159,37 @@ test('@flow:doc-margin-cards after a new comment is cancelled and the column clo
 	expect(after[at], 'the typed character is in the text').toBe('Z');
 	expect(at, 'it lands inside or at an end of the commented selection, not above it').toBeGreaterThanOrEqual(from);
 	expect(at, 'it lands inside or at an end of the commented selection, not below it').toBeLessThanOrEqual(to);
+}
+
+test('@flow:doc-margin-cards after a new comment is cancelled and the column closed, typing lands at the selection, never at the top', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	const text = page.locator('.cm-content');
+	const before = (await text.textContent())!;
+	const target = await cancelDraftOnLine(page, doc);
+	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
+	await pill(page).click();
+	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+	await expect(pill(page)).toBeFocused();
+	for (let i = 0; i < 12 && !(await text.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+	await expect(text).toBeFocused();
+	await expectTypingAtSelection(page, before, target);
+});
+
+test('@flow:doc-margin-cards after a new comment is cancelled, Escape in the column hands focus to the caret and typing lands at the selection', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	const text = page.locator('.cm-content');
+	const before = (await text.textContent())!;
+	const target = await cancelDraftOnLine(page, doc);
+	// Focus in a card in the column, as Tab from the text reaches it; Escape there gives focus back to the caret, and the column stays.
+	await card(page, doc, FIRST).getByRole('button').first().focus();
+	await page.keyboard.press('Escape');
+	await expect(text).toBeFocused();
+	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
+	await expectTypingAtSelection(page, before, target);
 });
 
 test('@flow:doc-margin-cards each suggestion is its own card with Accept and Reject', async ({ page, request }, info) => {
