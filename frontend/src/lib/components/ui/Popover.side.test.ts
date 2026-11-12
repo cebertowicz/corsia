@@ -85,6 +85,18 @@ it('keeps the side a click-opened card chose while it grows, and does not flip a
 	} finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); }
 });
 
+it('opens a click-opened thread card below the line when it fits there, even with more room above', async () => {
+	const host = document.createElement('div'); document.body.appendChild(host);
+	const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+	const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
+	const line = new DOMRect(200, window.innerHeight - 268, 0, 20);
+	const card = mount(Popover, { target: host, props: { anchor: line, open: true, onClose: vi.fn(), placement: 'pointer', clearAnchor: true, children: (() => {}) as any } });
+	flushSync();
+	try {
+		await vi.waitFor(() => expect(document.body.querySelector<HTMLElement>('.popover')!.style.top).toBe(`${line.bottom + 8}px`));
+	} finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); }
+});
+
 it('clamps into the screen when its own content grows, with no other signal', async () => {
 	let height = 100;
 	const grown: (() => void)[] = [];

@@ -16,6 +16,9 @@ _RULE_ID = "raw-api-request"
 _FETCH_CALL = re.compile(r"(?<![\w$.])(?:(?:window|globalThis|self)\.)?fetch\s*\(")
 _EVENT_SOURCE = re.compile(r"\bnew\s+EventSource\s*\(")
 _XHR_OPEN = re.compile(r"\.open\s*\(")
+_API_FETCH = re.compile(r"(?<![\w$.])apiFetch\s*\(")
+_SESSION_PARAM_SET = re.compile(r"\.(?:set|append)\s*\(\s*['\"]token['\"]")
+_SESSION_IN_ADDRESS = re.compile(r"[?&]token=")
 _IDENT = re.compile(r"^[A-Za-z_$][\w$]*$")
 _CALL = re.compile(r"^([A-Za-z_$][\w$]*)\s*\(")
 
@@ -90,8 +93,39 @@ def _targets_api(argument: str, source: str) -> bool:
     return False
 
 
+def _hand_built_sessions(ctx: RuleContext, text: str) -> list[int]:
+    """Offsets where code names the session as a query parameter itself.
+
+    Two forms: a `URLSearchParams` `.set('token', ...)` / `.append('token', ...)`
+    outside comments and strings, and a `token=` written into an `apiFetch`
+    address. Image and download links build theirs with the
+    `URLSearchParams({ token })` constructor in a helper, which is not matched.
+    """
+    offsets = [
+        m.start() for m in _SESSION_PARAM_SET.finditer(ctx.source)
+        if text[m.start()] == "."
+    ]
+    for m in _API_FETCH.finditer(text):
+        start, end = _argument(text, m.end() - 1, 0)
+        if end and _SESSION_IN_ADDRESS.search(ctx.source[start:end]):
+            offsets.append(m.start())
+    return sorted(offsets)
+
+
+def _finding(ctx: RuleContext, text: str, start: int, message: str, fix_hint: str) -> Finding:
+    line = text.count("\n", 0, start) + 1
+    col = start - (text.rfind("\n", 0, start) + 1) + 1
+    snippet = ctx.lines[line - 1] if 0 < line <= len(ctx.lines) else ""
+    return Finding(
+        rule_id=_RULE_ID, severity="error", file=ctx.file_path, line=line, col=col,
+        snippet=snippet, message=message, fix_hint=fix_hint,
+    )
+
+
 def _check(ctx: RuleContext) -> Iterable[Finding]:
-    """Yield a finding for each `/api` request made without `apiFetch`.
+    """Yield a finding for each `/api` request made without `apiFetch`, and each
+    session query parameter built by hand.
+
 
     Comments and string contents are blanked to find the calls (offsets are
     preserved), and the address is then read from the original text. Flags
@@ -123,16 +157,8 @@ def _check(ctx: RuleContext) -> Iterable[Finding]:
     for kind, start, argument in sorted(calls, key=lambda item: item[1]):
         if not _targets_api(argument, ctx.source):
             continue
-        line = text.count("\n", 0, start) + 1
-        col = start - (text.rfind("\n", 0, start) + 1) + 1
-        snippet = ctx.lines[line - 1] if 0 < line <= len(ctx.lines) else ""
-        yield Finding(
-            rule_id=_RULE_ID,
-            severity="error",
-            file=ctx.file_path,
-            line=line,
-            col=col,
-            snippet=snippet,
+        yield _finding(
+            ctx, text, start,
             message=(
                 f"`{kind}` reaches `/api` without the shared request function. "
                 "Only that function signs every call the same way, with the "
@@ -147,6 +173,21 @@ def _check(ctx: RuleContext) -> Iterable[Finding]:
                 "true` and let `apiFetch` add it; never build that parameter "
                 "yourself. For an `<img src>` or download link, which cannot set "
                 "a header, build the URL in a helper like `artifactImage.ts`."
+            ),
+        )
+    for start in _hand_built_sessions(ctx, text):
+        yield _finding(
+            ctx, text, start,
+            message=(
+                "The session is added to a request address by hand. `apiFetch` "
+                "owns the session on every request, so a second copy built "
+                "elsewhere is a second owner that can drift from the header."
+            ),
+            fix_hint=(
+                "Drop the `token` parameter: `apiFetch` sends the session in the "
+                "header. If the route declares the session as a required query "
+                "parameter, pass `sessionInAddress: true` instead. An `<img src>` "
+                "or download link builds its URL in a helper like `artifactImage.ts`."
             ),
         )
 
@@ -181,6 +222,9 @@ RULE = Rule(
     check=_check,
     calibration_note=(
         "Residual, known: an address built in another file and passed in as a "
-        "parameter, or `const f = fetch` aliasing, is not seen."
+        "parameter, or `const f = fetch` aliasing, is not seen. A hand-built "
+        "session is seen only as `.set|append('token', ...)` or `token=` inside "
+        "an `apiFetch` address; a `URLSearchParams({ token })` constructor is "
+        "left alone because image and download link helpers need it."
     ),
 )

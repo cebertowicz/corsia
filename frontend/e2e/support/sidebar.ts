@@ -14,3 +14,15 @@ export async function waitForMainSlideToSettle(page: Page): Promise<void> {
 			&& animation.transitionProperty === 'transform'
 			&& animation.playState === 'running'));
 }
+
+/**
+ * Wait until the side panels have finished sliding open or shut on a desktop. The canvas keeps narrowing or widening,
+ * and its text rewrapping, until their width transition ends, so a line placed or measured before then keeps moving
+ * (and a click on it finds it unstable and scrolls it into view). Polled for the same reason as above.
+ */
+export async function waitForPanelsToSettle(page: Page): Promise<void> {
+	await page.waitForFunction(() => !document.getAnimations()
+		.some((animation) => animation instanceof CSSTransition
+			&& animation.transitionProperty === 'width'
+			&& animation.playState === 'running'));
+}
