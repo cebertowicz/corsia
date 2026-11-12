@@ -204,8 +204,10 @@ journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, 
 	await personStep(page, request, 'Person with a very long agent name', mode, theme);
 	const who = bar(page).locator('.rb-who');
 	if (mode === 'default') {
-		const wrapped = await who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize));
-		expect(wrapped, 'the long name wraps in the narrow header').toBe(true);
+		// The split keeps re-laying out for a few hundred ms after the resize to 1280, starting after `settled` has looked for
+		// running animations, so the header reaches its narrow width a little later: wait for the wrap rather than read it once.
+		await expect.poll(() => who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize)),
+			{ message: 'the long name wraps in the narrow header' }).toBe(true);
 		// Wrapped as one text run: the name's last characters follow its head instead of sitting beside its first line.
 		const tailBelowFirstLine = await who.evaluate((el) => {
 			const tail = el.querySelector('.name-tail');
