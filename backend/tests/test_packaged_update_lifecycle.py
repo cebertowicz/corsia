@@ -441,6 +441,7 @@ async def test_failure_report_releases_before_bundle_rollback(isolated_db, monke
 
 @pytest.mark.parametrize("running,status,code", [
     ("0.4.2", "complete", None),
+    ("0.4.3", "complete", None),
     ("0.4.0", "failed", "wrong_version_running"),
 ])
 async def test_unconfirmed_update_settles_after_timeout(
@@ -520,6 +521,33 @@ async def test_startup_drive_settles_unconfirmed_update_even_when_drive_fails(is
     with pytest.raises(RuntimeError, match="drive failed"):
         await restart_startup.run_startup_drive(no_harness(), None, (), None, logger)
     assert self_restart.operation_by_id(operation_id)["status"] == "complete"
+    if restart._RESUME_TASKS:
+        await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
+@pytest.mark.parametrize("running,status,code", [
+    # The feed published 1312 between the stamp (1311) and the shell's staging fetch.
+    ("0.4.3-dev.1312", "complete", None),
+    ("0.4.3-dev.1311", "complete", None),
+    ("0.4.3-dev.1310", "failed", "wrong_version_running"),
+    ("0.4.3-dev.1288", "failed", "rolled_back"),
+])
+async def test_confirm_accepts_build_newer_than_stamped_target(
+    isolated_db, monkeypatch, running, status, code,
+):
+    from automation.update_verification import confirm_packaged_update
+
+    operation_id = await run_in_db(operation_in, previous="0.4.3-dev.1288")
+    with get_db() as db:
+        db.execute(
+            "UPDATE self_restart_requests SET target_version=? WHERE id=?", ("0.4.3-dev.1311", operation_id),
+        )
+    monkeypatch.setattr("infra.build_info.app_version", lambda: running)
+    monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
+    row = await confirm_packaged_update(operation_id, healthy=True)
+    assert row["status"] == status
+    assert row["failure_code"] == code
+    assert json.loads(row["failure_detail"])["running_version"] == running
     if restart._RESUME_TASKS:
         await asyncio.gather(*tuple(restart._RESUME_TASKS))
 
