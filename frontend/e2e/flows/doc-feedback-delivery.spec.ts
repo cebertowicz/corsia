@@ -118,7 +118,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	await page.locator('.cm-scroller').evaluate((scroller) => { scroller.scrollTop = scroller.scrollHeight; });
 	await expect(page.locator('.cm-comment-anchor')).toBeVisible();
 	// The held batch waits for the header's Send, which goes once the batch is delivered.
-	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expectHeaderSendFits(headerSend(page));
 	await captureDeliveryFrame(page, 'header-send');
 	await page.evaluate(() => {
@@ -230,7 +230,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
 	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
 	else {
-		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await headerSend(page).click();
 	}
 	await expect.poll(() => deliveredOwnerTask(artifactId), { timeout: 20_000 }).toMatchObject({

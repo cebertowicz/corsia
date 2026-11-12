@@ -489,7 +489,7 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
 		if (state !== 'undelivered') {
 			// The held comment waits for the header's Send, whole inside the screen beside the review control.
-			await expect(headerSend(page)).toHaveText('Send 1 comment');
+			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 			await expect(page.locator('[data-drawer-unsent]')).toHaveCount(0);
 			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);

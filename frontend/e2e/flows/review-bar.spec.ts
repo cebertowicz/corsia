@@ -279,7 +279,7 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expectLayout(page, mode);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	// One primary on screen: the bar's Approve. The held pair has the header's Send, a secondary beside it, and its pill marks the unsent pair.
-	await expect(headerSend(page)).toHaveText('Send 2 comments');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
 	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 messages not sent yet$/);
@@ -505,7 +505,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	// The header carries the held comments' one Send beside the pill's unsent dot; the drawer has no footer.
 	await expect(page.locator('.comment-status .unsent-dot')).toBeVisible();
 	const send = headerSend(page);
-	await expect(send).toHaveText('Send 6 comments');
+	await expect(send.locator('.send-full')).toHaveText('Send 6 comments');
 	await expectSenders(page, ['header: Send 6 comments']);
 	await settled(page);
 	await expect(send).toBeInViewport({ ratio: 1 });

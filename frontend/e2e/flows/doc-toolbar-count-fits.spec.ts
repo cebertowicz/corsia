@@ -18,13 +18,15 @@ const CASES = [
 	// A window under 768 px whose canvas is wider than 600 px: the tablet range where only the switch has a 44 px target and the other tools are 28 px.
 	{ width: 700, scheme: 'light' as const },
 	{ width: 900, scheme: 'light' as const }, { width: 1440, scheme: 'light' as const },
+	// The receipt state: every comment sent and three of them resolved, so the first group holds the count and "Resolved · 3" and no Send.
+	{ width: 320, scheme: 'light' as const, resolved: 3 },
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
 // The rows the ordinary counts make at each width, for worst-sweep.json (the desktop project runs these before the worst-content test).
 const ordinaryRows: Array<Record<string, unknown>> = [];
 
-for (const { width, scheme } of CASES) {
-	test(`@flow:doc-toolbar-count-fits @surface:documents ${width}px ${scheme}: the thread and unread count shows whole`, async ({ page }, info) => {
+for (const { width, scheme, resolved } of CASES) {
+	test(`@flow:doc-toolbar-count-fits @surface:documents ${width}px ${scheme}${resolved ? ' with Resolved' : ''}: the thread and unread count shows whole`, async ({ page }, info) => {
 		const mobile = info.project.name.includes('mobile');
 		test.skip(mobile !== (width === 393), 'a touch pointer runs the phone width; a fine pointer runs the desktop widths');
 		test.setTimeout(90_000);
@@ -55,13 +57,13 @@ for (const { width, scheme } of CASES) {
 				} }, splitWidth: null,
 			}));
 		}, { threadId, docPath, fileName, artifactId, scheme });
-		const shown = { threads: 1, unread: 0 };
+		const shown = { threads: 1, unread: 0, resolved: 0 };
 		await page.route(new RegExp(`/api/artifacts/${artifactId}/comments(\\?|$)`), async (route) => {
 			if (route.request().method() !== 'GET') return route.fallback();
 			const response = await route.fetch();
 			const body = await response.json();
 			const [row] = body.comments;
-			body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: index === 0 ? row.id : `${row.id}-copy-${index}`, new_comment: index < shown.unread }));
+			body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: index === 0 ? row.id : `${row.id}-copy-${index}`, new_comment: index < shown.unread, resolved: index < shown.resolved }));
 			await route.fulfill({ response, json: body });
 		});
 		await loginByUrl(page, { waitForComposer: true });
@@ -71,6 +73,25 @@ for (const { width, scheme } of CASES) {
 		await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeEnabled();
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
+		if (resolved) {
+			// Three resolved threads, nothing held: the first group is the count pill and "Resolved · 3", which wraps under the break rule and must stay whole, inside the header and clear of every other control.
+			shown.threads = resolved; shown.unread = 0; shown.resolved = resolved;
+			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
+			const entry = page.locator('.document-header .resolved-tool');
+			await expect(entry).toHaveText(`Resolved · ${resolved}`);
+			await expect(page.locator('.document-header .sending-now')).toHaveCount(0);
+			await page.waitForTimeout(800);
+			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+			const layout = await measureTools(page);
+			const label = `Resolved · ${resolved} at ${width} ${scheme}`;
+			expectLayout(layout, label);
+			expect.soft(layout.controls.map((control) => control.name), `${label}: the count, Resolved and the second group are all in the header`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver']));
+			expect.soft(await entry.evaluate((element) => element.scrollWidth <= element.clientWidth), `${label}: Resolved is not clipped`).toBe(true);
+			if (FRAMES) await page.screenshot({ path: path.join(FRAMES, `${width}-${scheme}-resolved-${resolved}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, layout.tools.bottom + 60) } });
+			await info.attach('resolved-receipt', { body: JSON.stringify(layout.rowContents), contentType: 'application/json' });
+			await page.unrouteAll({ behavior: 'ignoreErrors' });
+			return;
+		}
 		for (const { threads, unread } of COUNTS) {
 			// The server's own answer, with the one real thread copied `threads` times, the first `unread` of them unread; the viewer loads it as it would any list.
 			shown.threads = threads; shown.unread = unread;
@@ -138,7 +159,7 @@ for (const { width, scheme } of CASES) {
 const PHONE_SWEEP = [...Array.from({ length: 12 }, (_, index) => 320 + index * 40), 393, 700].sort((a, b) => a - b); // 320..760, a fresh load each: the phone layout is chosen at load
 const DESKTOP_SWEEP = [...Array.from({ length: 17 }, (_, index) => 800 + index * 40), 900].sort((a, b) => a - b); // 800..1440, resized within one desktop load
 const SPLITS = [{ viewport: 1440, split: 360 }, { viewport: 1024, split: 360 }, { viewport: 1920, split: 1000 }];
-const FRAME_SIZES = [320, 360, 393, 700, 900];
+const FRAME_SIZES = [320, 360, 393, 560, 700, 900];
 // A 1920 window with the pane set so the header's content is this wide (measured, asserted): the range where the cluster first has to break.
 const HEADER_SWEEP = [{ split: 784, header: 720 }, { split: 824, header: 760 }, { split: 864, header: 800 }];
 
@@ -218,7 +239,7 @@ async function measureTools(page: Page) {
 			headerOverflow: header.scrollWidth - header.clientWidth, pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
 			content, tools: box(tools), controls, parts, headerContentWidth: content.right - content.left, groupWidths, expectedGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chip-inline-padding')),
 			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
-			sendText: tools.querySelector<HTMLElement>('.sending-now .btn')?.textContent?.trim() ?? null,
+			sendText: tools.querySelector<HTMLElement>('.sending-now .btn')?.innerText.trim() ?? null,
 			reviewerMore: tools.querySelector('.reviewer-group .more')?.textContent ?? null,
 		};
 	});
@@ -270,7 +291,7 @@ function expectLayout(measured: Measured, label: string) {
 }
 
 function expectWholeInsideOneRow(measured: Measured, label: string) {
-	expect.soft(measured.sendText, `${label}: Send 99+ is in the row`).toMatch(/^Send 10\d comments?$/);
+	expect.soft(measured.sendText, `${label}: Send's visible label is in the row, whole`).toMatch(/^Send (?:10\d comments?|99\+)$/);
 	expect.soft(measured.names.send, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
 	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 threads, 45 unread/);
 	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');

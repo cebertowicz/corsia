@@ -44,7 +44,7 @@ test('@surface:doc-send-on-close sends an unsent user batch exactly once before 
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
 	// The open document's header is the one sender; a held comment waits for it, with no drawer footer and no Send now.
-	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expectSenders(page, ['header: Send 1 comment']);
 	expect(heldIn(document.artifactId, 'document-held')).toBe(1);
 	expect(sends.document, 'looking at the header sends nothing').toHaveLength(0);
@@ -67,7 +67,7 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await openThread(page, threadId, title);
 	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^1 thread, 1 message not sent yet$/ })).toBeVisible();
-	await expect(headerSend(page)).toHaveText('Send 1 comment');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
 
 	// Request review shares a row with the comment count and the header Send, whatever the owner's name.
@@ -104,7 +104,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	await turnOffDocumentComments(page);
 	await expect(page.getByRole('button', { name: /^2 threads, 2 messages not sent yet$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(headerSend(page)).toHaveText('Send 2 comments');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 	await expectSenders(page, ['header: Send 2 comments']);
 
