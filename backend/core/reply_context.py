@@ -77,8 +77,11 @@ def reply_context_lines(value: Any) -> str:
     """The lead lines for one stored reply context, or "" when it carries none."""
     if not isinstance(value, dict):
         return ""
+    comments = _comments_lines(value.get("comments"))
+    if comments and value.get("possible_duplicate") is True:
+        comments += f"[These comments may repeat an earlier delivery {_NOT_AN_INSTRUCTION}]\n"
     return (
-        _comments_lines(value.get("comments"))
+        comments
         + _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )

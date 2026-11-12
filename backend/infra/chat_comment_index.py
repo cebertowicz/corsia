@@ -12,12 +12,15 @@ def comment_only(content: str | None, metadata: dict | None) -> bool:
     """A user input that carries chat comments and nothing else: no text, no attachments.
 
     Its comments are its whole content, so chat draws nothing for it; it lives in
-    its comment thread only.
+    its comment thread only. The 189 -> 190 data step reads the same rule in SQL:
+    comments are a non-empty list, and attachments are absent, null or an empty list.
     """
     metadata = metadata if isinstance(metadata, dict) else {}
     reply_context = metadata.get('reply_context')
     comments = reply_context.get('comments') if isinstance(reply_context, dict) else None
-    return bool(comments) and not metadata.get('attachments') and not (content or '').strip()
+    attachments = metadata.get('attachments')
+    return (isinstance(comments, list) and bool(comments) and attachments in (None, [])
+            and not (content or '').strip())
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,

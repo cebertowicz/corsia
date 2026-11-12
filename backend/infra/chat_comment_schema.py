@@ -1,6 +1,8 @@
 """Read stamps and the write-time index of chat-comment answers."""
 
-# The chat text of a message that answered comments, decided when the message was saved.
+# What chat draws for a message, decided when it was saved: the chat text of an agent message
+# that answered comments, or '' for a person's comment-only input, which chat never draws
+# (chat_comment_index.place_comments; focus_rows.NEVER_DRAWN_FILTER reads it).
 CHAT_VISIBLE_CONTENT_SQL = """CREATE TABLE IF NOT EXISTS chat_visible_content (
     message_id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL,

@@ -1,12 +1,15 @@
 """Post chat comments, read their threads, and record when a person has seen an answer."""
 
+import json
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import owns_thread, require_user_header_only
 from infra.chat_comment_answers import has_comment_cid
-from infra.chat_comment_index import attach_comments
+from infra.chat_comment_index import attach_comments, comment_only
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.queries import get_thread_for_user
@@ -40,10 +43,41 @@ async def chat_comment_threads(thread_id: str, body: ThreadsRequest, user: dict 
 
 
 class PostRequest(BaseModel):
-    input_id: str
-    comment: dict
+    input_id: str = ''
+    comment: dict | None = None
     viewing_document: dict | None = None
     reasoning_effort: str | None = None
+    # The comment input whose delivery ended; its comments are posted again in its place.
+    retry_of: str | None = None
+
+
+# The delivery outcomes chat offers Retry for (UserMessageBubble); a cancelled one is posted again instead.
+_RETRYABLE = ('failed', 'ambiguous')
+
+
+def _retry_metadata(thread_id: str, message_id: str) -> dict | None:
+    """What a Retry of this ended comment input posts: its own comments, in its place.
+
+    An uncertain delivery may still have reached the agent, so the agent is told this may repeat it.
+    """
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT content,metadata,delivery_state FROM messages WHERE id=? AND thread_id=? AND role='user'",
+            (message_id, thread_id),
+        ).fetchone()
+    finally:
+        db.close()
+    try:
+        metadata = json.loads(row[1] or '{}') if row is not None else None
+    except ValueError:
+        metadata = None
+    if row is None or row[2] not in _RETRYABLE or not comment_only(row[0], metadata):
+        return None
+    reply_context: dict = {'comments': metadata['reply_context']['comments']}
+    if row[2] == 'ambiguous':
+        reply_context['possible_duplicate'] = True
+    return {'reply_context': reply_context, 'retried_from_message_id': message_id}
 
 
 def _owned_thread(user_id: str, thread_id: str):
@@ -84,19 +118,26 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
     notice (infra/send_broadcast.py), and chat never draws its row. The response is the
     box's whole answer. A subagent pane posts to the child thread the same way.
     """
-    input_id = body.input_id.strip()
-    if not input_id:
-        raise HTTPException(400, 'Missing input_id')
     thread_row = await run_in_db(_owned_thread, user['id'], thread_id)
     if thread_row is None:
-        raise HTTPException(404, 'Thread not found')
+        raise HTTPException(404, 'chat_not_found')
     from infra.execution_class import is_subagent
     from infra.send_service import SendRejected, send_thread_input
 
     subagent = is_subagent(thread_row)
-    metadata: dict = {'reply_context': {'comments': [body.comment]}}
-    if body.viewing_document is not None:
-        metadata['viewing_document'] = body.viewing_document
+    if body.retry_of:
+        # One id per ended input, so a second press or a press after a lost response is the same input.
+        input_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'corsia:chat-comment-retry:{body.retry_of}'))
+        metadata = await run_read(lambda: _retry_metadata(thread_id, body.retry_of))
+        if metadata is None:
+            raise HTTPException(409, 'comment_not_retryable')
+    else:
+        input_id = body.input_id.strip()
+        if not input_id or body.comment is None:
+            raise HTTPException(400, 'comment_missing')
+        metadata = {'reply_context': {'comments': [body.comment]}}
+        if body.viewing_document is not None:
+            metadata['viewing_document'] = body.viewing_document
     try:
         await send_thread_input(
             thread_id, thread_row, '',
@@ -112,14 +153,9 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
         if not stored:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return stored
-    except ValueError:
-        # This input id is already stored: a second press, or a press after a lost response.
-        # Its row answers, whatever has become of it since.
-        if await run_read(lambda: _posted(user['id'], thread_id, input_id)) is None:
-            raise
     result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
     if result is None:
-        raise HTTPException(500, 'The comment was not stored')
+        raise HTTPException(500, 'comment_not_stored')
     return result
 
 

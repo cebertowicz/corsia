@@ -31,3 +31,24 @@ def test_marks_only_comment_only_inputs_and_rewrites_nothing():
         migrate_189_to_190(db)
         rows = db.execute("SELECT message_id,content FROM chat_visible_content ORDER BY message_id").fetchall()
         assert rows == [('blank-text', ''), ('comment-only', ''), ('saved', 'kept text')]
+
+
+def test_reads_malformed_rows_as_comment_only_does():
+    from infra.chat_comment_index import comment_only
+
+    cases = {
+        'null-files': {**COMMENTS, 'attachments': None},
+        'empty-files': {**COMMENTS, 'attachments': []},
+        'string-files': {**COMMENTS, 'attachments': 'a.png'},
+        'object-files': {**COMMENTS, 'attachments': {'name': 'a.png'}},
+        'object-comments': {'reply_context': {'comments': {'cid': 'c1.1'}}},
+        'string-comments': {'reply_context': {'comments': 'c1.1'}},
+    }
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        for message_id, metadata in cases.items():
+            _message(db, message_id, 'user', '', metadata)
+        migrate_189_to_190(db)
+        marked = {row[0] for row in db.execute("SELECT message_id FROM chat_visible_content")}
+    assert marked == {message_id for message_id, metadata in cases.items() if comment_only('', metadata)}
+    assert marked == {'null-files', 'empty-files'}

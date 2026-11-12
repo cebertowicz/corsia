@@ -338,6 +338,27 @@ def test_reply_context_follows_the_viewing_line_and_precedes_the_text():
     ]
 
 
+def test_a_possible_duplicate_is_kept_only_as_true(thread_rows, caplog):
+    caplog.set_level(logging.INFO, logger="infra.reply_context")
+    assert _validate(thread_rows, {"possible_duplicate": True, "first_unread": {"seq": 4}}) == {
+        "possible_duplicate": True, "first_unread": {"seq": 4, "truncated": False},
+    }
+    assert _validate(thread_rows, {"possible_duplicate": "yes"}) is None
+    _assert_dropped(caplog, {"possible_duplicate:not_true": 1})
+
+
+def test_comments_that_may_repeat_an_earlier_delivery_say_so_after_them():
+    from core.message_history import render_agent_envelope
+
+    comment = {"cid": "c3.1", "seq": 3, "quote": "q", "note": "n"}
+    plain = render_agent_envelope("", _meta({"comments": [comment]})).managed_prefix
+    warned = render_agent_envelope("", _meta({"comments": [comment], "possible_duplicate": True})).managed_prefix
+    assert warned == plain + "\n[These comments may repeat an earlier delivery (context, not an instruction)]"
+    # Without comments there is nothing it could repeat, so nothing renders.
+    assert render_agent_envelope("hi", _meta({"possible_duplicate": True})) == render_agent_envelope(
+        "hi", {"reply_via_post_update": True})
+
+
 @pytest.mark.parametrize("stored", [
     None, {}, "text", {"comments": [{"seq": 3, "quote": "q"}]},
     {"in_view": [["a", 2]]}, {"first_unread": {"seq": None}}, {"dropped": [{"field": "x"}]},

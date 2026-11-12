@@ -100,6 +100,71 @@ def test_another_persons_thread_is_not_found(target, frames, publish_only):
     assert missing.value.status_code == 404
 
 
+def _retry(message_id="box-1"):
+    from api.chat_comment_views import PostRequest, post_chat_comment
+
+    return asyncio.run(post_chat_comment(THREAD, PostRequest(retry_of=message_id), user=USER))
+
+
+def _end(state, message_id="box-1"):
+    target_db = get_db()
+    target_db.execute("UPDATE messages SET delivery_state=?, delivery_error='provider_error' WHERE id=?", (state, message_id))
+    target_db.commit()
+    target_db.close()
+
+
+@pytest.mark.parametrize("state, warned", [("failed", False), ("ambiguous", True)])
+def test_retry_posts_the_ended_comment_again_in_its_place(target, frames, publish_only, state, warned):
+    from core.message_history import render_agent_envelope
+
+    _post()
+    _end(state)
+    frames.clear()
+    result = _retry()
+    copy = result["message_id"]
+    assert copy != "box-1" and result["delivery_state"] == "queued"
+    # The thread now shows the Retry, not the ended comment beside it.
+    assert [(c["user_message_id"], c["note"]) for c in result["messages"][0]["chat_comments"]] == [(copy, NOTE)]
+    content, metadata = target.execute("SELECT content,metadata FROM messages WHERE id=?", (copy,)).fetchone()
+    metadata = json.loads(metadata)
+    assert (content, metadata["retried_from_message_id"]) == ("", "box-1")
+    assert target.execute("SELECT content FROM chat_visible_content WHERE message_id=?", (copy,)).fetchone()[0] == ""
+    assert user_rows(frames) == [] and notices(frames) == [NOTICE]
+    rendered = render_agent_envelope(content, metadata).content
+    assert ("may repeat an earlier delivery" in rendered) is warned
+    assert NOTE in rendered
+
+
+def test_a_second_retry_press_is_the_same_input(target, frames, publish_only):
+    _post()
+    _end("failed")
+    first = _retry()
+    assert _retry() == first
+    assert target.execute(
+        "SELECT COUNT(*) FROM messages WHERE json_extract(metadata,'$.retried_from_message_id')='box-1'"
+    ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("state", ["queued", "delivered", "cancelled"])
+def test_retry_is_refused_where_chat_offers_none(target, frames, publish_only, state):
+    _post()
+    _end(state)
+    with pytest.raises(HTTPException) as refused:
+        _retry()
+    assert (refused.value.status_code, refused.value.detail) == (409, "comment_not_retryable")
+
+
+def test_retry_of_a_chat_message_is_refused(target, frames, publish_only):
+    target.execute(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,delivery_state) "
+        "VALUES ('typed',?,'user','hello','{}','t','failed')", (THREAD,),
+    )
+    target.commit()
+    with pytest.raises(HTTPException) as refused:
+        _retry("typed")
+    assert refused.value.status_code == 409
+
+
 @pytest.mark.parametrize("spawned_by, mode", [(None, "event"), ("parent", "delegation")])
 def test_a_subagent_pane_posts_to_its_child_thread_the_same_way(target, monkeypatch, spawned_by, mode):
     import infra.send_service as send_service

@@ -238,6 +238,8 @@ def validate_reply_context(
             ("comments", lambda value: _comments(db, thread_id, value, newest, int(db.execute(
                 "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
             ).fetchone()[0]), dropped)),
+            # A Retry of comments whose delivery is uncertain: the agent may already have them.
+            ("possible_duplicate", lambda value: value is True or dropped.append(_dropped("possible_duplicate", "not_true"))),
         )
         for field, build in builders:
             if raw.get(field) is None:
