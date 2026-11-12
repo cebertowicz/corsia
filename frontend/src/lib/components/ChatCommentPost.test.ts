@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { afterEach, expect, it, vi } from 'vitest';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-import { postChatComment } from './composerSend';
+import { postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
@@ -192,4 +192,35 @@ it('sends the same request again when the first press got no answer, so the serv
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 	const [first, again] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)));
 	expect(again).toEqual(first);
+});
+
+// Known refusal codes: only a deleted chat has its own sentence; a malformed post keeps the generic one.
+it.each([
+	['chat_not_found', 'This chat is deleted, so this comment can’t be sent.'],
+	['comment_missing', 'Couldn’t send this comment. Try again.'],
+])('keeps the text with the sentence for %s', async (detail, sentence) => {
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail }) })));
+	setup(reply => postChatComment(reply, 'thread', false, true));
+	await openBox(); await post();
+	expect(host.querySelector('[role="alert"]')?.textContent).toBe(sentence);
+	expect(box()?.value).toBe('Keep my comment');
+});
+
+it.each([
+	['chat_not_found', 'reply', 'This chat is deleted, so this reply can’t be sent.'],
+	['comment_not_retryable', 'comment', 'Couldn’t retry this comment. Try again.'],
+] as const)('says why a Retry refused with %s did not send the %s', async (detail, noun, sentence) => {
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail }) })));
+	await retryChatComment('thread', 'input-row', noun);
+	expect(get(toasts).map(toast => toast.message)).toEqual([sentence]);
+});
+
+// A comment another device already cancelled is no failure: the Retry's answer re-renders it in that state.
+it('shows a Retry answered with a cancelled comment in that state, with no error', async () => {
+	const cancelled = { id: 'c1', cid: 'cid-1', user_message_id: 'input-row', quote: 'text', note: 'Keep my comment', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: ' more', created_at: '2026-11-12T00:00:00Z', delivery_state: 'cancelled', delivery_error: null, answers: [] };
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [] }] as never);
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ message_id: 'input-row', delivery_state: 'cancelled', delivery_error: null, messages: [{ id: 'm1', role: 'assistant', chat_comments: [cancelled] }] }) })));
+	await retryChatComment('thread', 'input-row', 'comment');
+	expect(get(toasts)).toEqual([]);
+	expect(get(messages)[0].chat_comments).toEqual([cancelled]);
 });

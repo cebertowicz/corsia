@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
+from infra.delivery_retry import newest_attempt_delivery
 
 
 def comment_only(content: str | None, metadata: dict | None) -> bool:
@@ -104,8 +105,11 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         (thread_id, json.dumps(sender_ids)),
     ).fetchall()
     comments = {}
-    # A comment is its input: it shows that input's delivery, so a failure stays in its thread with Retry.
+    # A comment is its input: it shows the delivery of that input's newest Retry copy, so a failure stays in
+    # its thread with Retry until a copy is delivered, including where the copy got a thread of its own.
     for sender_id, metadata, delivery_state, delivery_error in senders:
+        if delivery_state in ('failed', 'ambiguous'):
+            delivery_state, delivery_error = newest_attempt_delivery(db, thread_id, sender_id, delivery_state, delivery_error)
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
             comments[(sender_id, comment['cid'])] = {
                 **comment, 'delivery_state': delivery_state, 'delivery_error': delivery_error,

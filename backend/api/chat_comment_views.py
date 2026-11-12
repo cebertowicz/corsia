@@ -144,7 +144,9 @@ async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
     """Retry an ended comment through chat's own Retry, and answer with the comment in its place.
 
     Chat's Retry owns the copy's id, follows earlier copies and handles a double press, so a
-    comment and a chat message retry the same way; a comment's copy stays out of chat.
+    comment and a chat message retry the same way; a comment's copy stays out of chat. A comment
+    already delivered or cancelled, say from another device, is no failure: the answer is the
+    comment as it stands, and its thread shows that state.
     """
     from api.thread_inbox_actions import retry_thread_delivery_now
 
@@ -153,10 +155,10 @@ async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
     try:
         retried = await retry_thread_delivery_now(thread_id, message_id, user_id)
     except HTTPException as exc:
-        if exc.status_code == 409:
-            raise HTTPException(409, 'comment_not_retryable') from exc
-        raise
-    # A queued comment is driven in place; an ended one gets its copy.
+        if exc.status_code != 409:
+            raise
+        retried = {}
+    # A queued comment is driven in place, an ended one gets its copy, and a delivered or cancelled one stands.
     copy = retried.get('revived_message_id') or message_id
     result = await run_read(lambda: _posted(user_id, thread_id, copy))
     if result is None:

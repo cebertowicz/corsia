@@ -112,7 +112,15 @@ def test_another_persons_thread_is_not_found(target, frames, publish_only):
     target.commit()
     with pytest.raises(HTTPException) as missing:
         _post()
-    assert missing.value.status_code == 404
+    assert (missing.value.status_code, missing.value.detail) == (404, "chat_not_found")
+
+
+def test_a_post_without_its_comment_is_refused_as_malformed(target, frames, publish_only):
+    from api.chat_comment_views import PostRequest, post_chat_comment
+
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(post_chat_comment(THREAD, PostRequest(input_id="box-1"), user=USER))
+    assert (refused.value.status_code, refused.value.detail) == (400, "comment_missing")
 
 
 def _retry(message_id="box-1"):
@@ -162,12 +170,50 @@ def test_a_second_retry_press_is_the_same_input(target, frames, publish_only):
 
 
 @pytest.mark.parametrize("state", ["delivered", "cancelled"])
-def test_retry_is_refused_where_chat_offers_none(target, frames, publish_only, state):
+def test_retry_of_a_comment_already_delivered_or_cancelled_answers_with_it_as_it_stands(target, frames, publish_only, state):
+    # Say another device settled it between the render and the press: no error, and no copy sent.
     _post()
     _end(state)
-    with pytest.raises(HTTPException) as refused:
-        _retry()
-    assert (refused.value.status_code, refused.value.detail) == (409, "comment_not_retryable")
+    result = _retry()
+    assert (result["message_id"], result["delivery_state"]) == ("box-1", state)
+    assert result["messages"][0]["chat_comments"][0]["delivery_state"] == state
+    assert target.execute("SELECT COUNT(*) FROM messages WHERE role='user'").fetchone()[0] == 1
+
+
+def _reply_under(root="box-1"):
+    db = get_db()
+    root_cid = db.execute("SELECT cid FROM chat_comments WHERE user_message_id=?", (root,)).fetchone()[0]
+    db.close()
+    reply = {**_comment_metadata()["reply_context"]["comments"][0], "id": "key-2",
+             "note": "my reply", "root_user_message_id": root, "root_cid": root_cid}
+    _post("reply-1", comment=reply)
+
+
+def _thread_states():
+    from api.chat_comment_views import _threads
+
+    comments = _threads(OWNER_USER, THREAD, ["target"])["messages"][0]["chat_comments"]
+    return {c["user_message_id"]: c["delivery_state"] for c in comments}
+
+
+def test_a_retried_comment_with_a_reply_shows_its_copys_delivery(target, frames, publish_only):
+    # The reply keeps the original's thread beside the copy's, so the original shows the copy's state:
+    # its failure clears once the copy is delivered, and comes back with Retry if the copy ends too.
+    _post()
+    _end("failed")
+    _reply_under()
+    copy = _retry()["message_id"]
+    assert _thread_states() == {"box-1": "queued", copy: "queued"}
+    _end("delivered", copy)
+    assert _thread_states() == {"box-1": "delivered", copy: "delivered"}
+    _end("failed", copy)
+    assert _thread_states() == {"box-1": "failed", copy: "failed"}
+    # Its Retry then sends the copy again, as chat's Retry does.
+    again = _retry()["message_id"]
+    assert again not in ("box-1", copy)
+    assert json.loads(target.execute("SELECT metadata FROM messages WHERE id=?", (again,)).fetchone()[0])[
+        "retried_from_message_id"] == copy
+    assert _thread_states()["box-1"] == "queued"
 
 
 def test_retry_of_a_queued_comment_drives_it_in_place_as_chat_does(target, frames, publish_only):
@@ -201,7 +247,7 @@ def test_retry_of_a_chat_message_is_refused(target, frames, publish_only):
     target.commit()
     with pytest.raises(HTTPException) as refused:
         _retry("typed")
-    assert refused.value.status_code == 409
+    assert (refused.value.status_code, refused.value.detail) == (409, "comment_not_retryable")
 
 
 @pytest.mark.parametrize("spawned_by, mode", [(None, "event"), ("parent", "delegation")])

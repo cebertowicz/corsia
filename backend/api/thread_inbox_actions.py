@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 
 from fastapi import HTTPException
 
@@ -11,6 +10,7 @@ from api.thread_message_rows import public_delivery_message
 from core.reply_context import DELIVERY_WARNING
 from infra.chat_comment_index import comment_only
 from infra.database import get_db
+from infra.delivery_retry import retry_id as _retry_id
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from infra.queued_input_settlement import cancel_queued_input
@@ -103,10 +103,6 @@ async def run_inbox_message_action(
 
 
 _ENDED_ATTEMPT_STATES = frozenset({"failed", "ambiguous", "cancelled"})
-
-
-def _retry_id(message_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:retry:{message_id}"))
 
 
 def _latest_attempt(thread_id: str, message: dict) -> dict:

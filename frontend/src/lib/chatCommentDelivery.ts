@@ -30,8 +30,8 @@ function ended(messageId: string, note: string, createdAt: string, root: boolean
 /**
  * What of this comment's thread was not delivered, read from the server's delivery state on the comment and
  * on each reply the person wrote in it. Each keeps its text in the thread with chat's label for its state,
- * and chat's Retry where chat offers one. A Retry takes the ended comment's place on the server, so a
- * failure it superseded is no longer on the comment.
+ * and chat's Retry where chat offers one. The server reports each send's newest Retry copy, so a failure a
+ * Retry superseded leaves the comment once that copy is delivered, and comes back with Retry if the copy ends.
  */
 export function endedSends(comment: ChatComment): EndedSend[] {
 	const sends = [ended(comment.user_message_id, comment.note, comment.created_at, true, comment.delivery_state, comment.delivery_error)];

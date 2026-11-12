@@ -50,6 +50,7 @@ const unsettledPosts = new Map<string, string>();
 /** Read the post's answer: the commented rows' threads as they now stand, or the sentence the box shows. */
 async function adoptPosted(response: Response, threadId: string, noun: 'comment' | 'reply'): Promise<void> {
 	const result = await response.json().catch(() => null);
+	if (!response.ok && result?.detail === 'chat_not_found') throw new CommentSendRefused(`This chat is deleted, so this ${noun} can’t be sent.`);
 	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
