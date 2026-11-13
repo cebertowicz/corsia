@@ -127,11 +127,14 @@ def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
             "rule_id": row["rule_id"], "event_id": row["event_id"],
             "event_type": f"{row['connector']}.{row['event_type']}", "item": row["artifact_external_id"],
         }.items() if v is not None} for row in rows]
-        summary = ("A restart stopped a script run your event rule started. It is not replayed."
+        # A row left running with no task says the run stopped, never why: a restart is one
+        # way there, a runner task that died in this process is another. Name no cause.
+        summary = ("A script run started by your event rule stopped before it finished. It is not replayed."
                    if len(runs) == 1 else
-                   f"A restart stopped {len(runs)} script runs your event rules started. They are not replayed.")
-        chip = ("Script run stopped when CORSIA restarted" if len(runs) == 1
-                else f"{len(runs)} script runs stopped when CORSIA restarted")
+                   f"{len(runs)} script runs started by your event rules stopped before they finished. "
+                   "They are not replayed.")
+        chip = ("Script run stopped before it finished" if len(runs) == 1
+                else f"{len(runs)} script runs stopped before they finished")
         details = {"runs": runs, "next": _INTERRUPTED_NEXT}
         key = ",".join(str(row["id"]) for row in rows)
         if not wake_owner(
