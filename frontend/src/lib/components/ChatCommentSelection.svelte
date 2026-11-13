@@ -34,7 +34,8 @@
 	let draft = $state<Pick | null>(null);
 	let editingId = $state<string | null>(null);
 	let viewing = $state<{ messageId: string; commentId: string } | null>(null);
-	const viewedComment = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId)?.chat_comments?.find(comment => comment.id === viewing?.commentId));
+	const viewedMessage = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId));
+	const viewedComment = $derived(viewedMessage?.chat_comments?.find(comment => comment.id === viewing?.commentId));
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
@@ -135,6 +136,13 @@
 		chatCommentPlacement.record(messageId, left.filter(comment => !placedIds.has(comment.id)).map(comment => comment.id));
 		if (!recorded.includes(messageId)) recorded.push(messageId);
 	}
+	const unreadNow = (comment: { answers: Array<{ author_kind?: string; unread?: boolean }> }) => comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
+	// Opening a thread reads it at once; its highlight keeps the unread look until the sheet or card is closed, so the sign the reader came to see does not vanish under them.
+	const heldUnread = new Set<string>();
+	$effect(() => {
+		if (!viewing) { if (heldUnread.size) { heldUnread.clear(); untrack(schedule); } return; }
+		for (const comment of viewedMessage?.chat_comments ?? []) if (unreadNow(comment)) heldUnread.add(comment.id);
+	});
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
@@ -202,13 +210,16 @@
 					current.wraps[0].tabIndex = 0; current.wraps[0].setAttribute('role', 'button'); current.wraps[0].setAttribute('aria-haspopup', 'dialog');
 				}
 			}
+			// An unread thread's highlight is its sign: every wrap of it is drawn unread, and only while it is unread.
+			for (const el of body.querySelectorAll('[data-unread]')) el.removeAttribute('data-unread');
 			for (const comment of sent) {
 				const failed = !!replies?.failed(comment).length;
 				const sending = !!replies?.pending(comment).length;
-				const unread = comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
+				const unread = unreadNow(comment) || heldUnread.has(comment.id);
 				if (!failed && !sending && !unread) continue;
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
+				if (unread) for (const wrap of wraps) wrap.dataset.unread = '';
 				if (anchor) {
 					const quote = quoteLabel(comment.quote);
 					wraps[0].setAttribute('aria-label', failed ? `Your reply on ${quote} wasn’t delivered.` : sending ? `Your reply on ${quote} is sending.` : `The comment on ${quote} has a new reply.`);

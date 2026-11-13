@@ -26,8 +26,9 @@ from infra.worktree_reaper_checks import (
     candidate_verdict,
     orphan_skip_reason,
     recheck_before_removal,
+    status_at,
 )
-from infra.worktree_reaper_probe import ProcessProbe, ReaperGitError
+from infra.worktree_reaper_probe import ProcessProbe, ReaperGitError, generated_trees
 from infra.worktree_reaper_remove import (
     quarantine_entries,
     remove_orphan,
@@ -162,15 +163,17 @@ def _remove_candidate(
             )
             salvage = verdict is RemovalVerdict.SALVAGE
 
-            def copy_out(quarantined: Path) -> None:
+            def clear(quarantined: Path) -> str | None:
+                if not salvage:
+                    return status_at(ctx, candidate, quarantined, merged)
                 copies.append(salvage_worktree(
-                    repo, quarantined, candidate.admin, candidate.name, ctx.now, candidate.path,
+                    repo, quarantined, candidate.admin, candidate.name, ctx.now,
+                    candidate.path, ctx.generated,
                 ))
+                return None
 
             outcome = verdict if isinstance(verdict, str) else remove_worktree(
-                repo, candidate.path, candidate.name, force=merged or salvage,
-                salvage=copy_out if salvage else None,
-            )
+                repo, candidate.path, candidate.name, clear)
     except RepoBusyError:
         report.skip(candidate.name, owner, "repo_busy", idle_days)
         return False
@@ -178,6 +181,8 @@ def _remove_candidate(
         report.skip(candidate.name, owner, "salvage_failed", idle_days, str(exc)[:240])
         return True
     except (OSError, ReaperGitError) as exc:
+        # The text is the point: a timeout and a refusal need different fixes.
+        logger.warning("worktree_reaper: {} remove_error: {}", candidate.name, exc)
         report.skip(candidate.name, owner, "remove_error", idle_days, str(exc)[:240])
         return True
     finally:
@@ -223,44 +228,43 @@ def _reap_orphans(
         report.skip(orphan.name, None, "orphan_kept", idle_days, reason)
 
 
-def reap(
-    policy: RepoPolicy,
-    *,
-    mode: str,
-    candidates: list[Path] | None = None,
-    budget: RunBudget | None = None,
-    probe: ProcessProbe | None = None,
-    pr_sha: str | None = None,
-) -> RepoReport:
-    """Reap one repository. ``mode`` is ``idle`` or ``pr_terminal``.
+@dataclass
+class _Queued:
+    """One candidate the checks cleared for removal, waiting its turn in this pass."""
 
-    ``candidates`` restricts the pass to those worktree paths (the PR hook's
-    mapped worktree), and ``pr_sha`` is the merged head that the worktree's
-    HEAD must still be contained in at removal time. The idle pass also
-    sweeps quarantine and orphans. Every report lists what is still quarantined.
+    candidate: Candidate
+    idle_days: float
+    expected_head: str | None
+    merged: bool
+
+
+def _skip_unchecked(report: RepoReport, rest: list[Candidate], now: float, reason: str) -> None:
+    for candidate in rest:
+        report.skip(candidate.name, candidate.owner_thread, reason,
+                    _idle_days(candidate.idle_since, now))
+
+
+def _skip_queued(report: RepoReport, rest: list[_Queued], reason: str) -> None:
+    for queued in rest:
+        report.skip(queued.candidate.name, queued.candidate.owner_thread, reason, queued.idle_days)
+
+
+def _walk_candidates(
+    repo: Path, report: RepoReport, ctx: CheckContext, budget: RunBudget, mode: str,
+    pr_sha: str | None, deferred: dict[str, str], selected: list[Candidate],
+) -> tuple[list[_Queued], bool]:
+    """Judge and remove candidates in idle order, cheapest reclaim first.
+
+    Returns the salvage queue and whether the repository lock stopped the walk;
+    candidates this walk did not reach are reported here. The order decides which
+    candidates a budget-cut pass reaches, never what may be removed: each removal
+    still rechecks under the lock.
     """
-    repo = policy.path.resolve(strict=False)
-    report = RepoReport(repo=str(repo), trigger=mode)
-    budget = budget or RunBudget()
-    ctx = CheckContext(repo=repo, probe=probe or ProcessProbe(), now=time.time())
-    if (repo / ".git").is_symlink() or not (repo / ".git").is_dir():
-        report.skip(repo.name, None, "repo_layout")
-        return report
-    found, orphans, _registrations = scan_repo(repo)
-    if mode == "idle":
-        report.quarantine_removed = sweep_quarantine(repo)
-    wanted = {path.resolve(strict=False) for path in candidates or []}
-    selected = [item for item in found if candidates is None or item.path in wanted]
-    selected.sort(key=lambda item: item.idle_since)
-    report.scanned = len(selected)
-    deferred = pr_terminal_heads()
-    for index, candidate in enumerate(selected):
+    queue: list[_Queued] = []
+    unchecked = list(selected)
+    while unchecked and not budget.exhausted():
+        candidate = unchecked.pop(0)
         idle_days = _idle_days(candidate.idle_since, ctx.now)
-        if budget.exhausted():
-            for rest in selected[index:]:
-                report.skip(rest.name, rest.owner_thread, "cap_reached",
-                            _idle_days(rest.idle_since, ctx.now))
-            break
         head = candidate.entry.head if candidate.entry else None
         recorded_head = deferred.get(str(candidate.path))
         if mode == "idle" and recorded_head is not None and recorded_head != head:
@@ -280,17 +284,77 @@ def reap(
             report.skip(candidate.name, candidate.owner_thread, verdict, idle_days)
             continue
         if verdict is RemovalVerdict.SALVAGE:
-            # Re-read open PRs here, not under the repo lock the recheck holds.
-            ctx.open_pr_branches(fresh=True)
+            queue.append(_Queued(candidate, idle_days, expected_head, merged))
+            continue
+        removed_before = report.removed
+        if not _remove_candidate(repo, report, ctx, candidate, idle_days, expected_head, merged):
+            _skip_unchecked(report, unchecked, ctx.now, "repo_busy")
+            return queue, True
+        budget.removals_left -= report.removed - removed_before
+    _skip_unchecked(report, unchecked, ctx.now, "cap_reached")
+    return queue, False
+
+
+def _drain_salvage_queue(
+    repo: Path, report: RepoReport, ctx: CheckContext, budget: RunBudget, queue: list[_Queued],
+) -> None:
+    """Spend what is left of the budget on the candidates that need a copy-out.
+
+    Their verdicts were computed in the walk, so the wait changes only the order.
+    """
+    for index, queued in enumerate(queue):
+        if budget.exhausted():
+            _skip_queued(report, queue[index:], "cap_reached")
+            return
+        # Re-read open PRs here, not under the repo lock the recheck holds.
+        ctx.open_pr_branches(fresh=True)
         removed_before = report.removed
         if not _remove_candidate(
-            repo, report, ctx, candidate, idle_days, expected_head, merged,
+            repo, report, ctx, queued.candidate, queued.idle_days,
+            queued.expected_head, queued.merged,
         ):
-            for rest in selected[index + 1:]:
-                report.skip(rest.name, rest.owner_thread, "repo_busy",
-                            _idle_days(rest.idle_since, ctx.now))
-            break
+            _skip_queued(report, queue[index + 1:], "repo_busy")
+            return
         budget.removals_left -= report.removed - removed_before
+
+
+def reap(
+    policy: RepoPolicy,
+    *,
+    mode: str,
+    candidates: list[Path] | None = None,
+    budget: RunBudget | None = None,
+    probe: ProcessProbe | None = None,
+    pr_sha: str | None = None,
+) -> RepoReport:
+    """Reap one repository. ``mode`` is ``idle`` or ``pr_terminal``.
+
+    ``candidates`` restricts the pass to those worktree paths (the PR hook's
+    mapped worktree), and ``pr_sha`` is the merged head that the worktree's
+    HEAD must still be contained in at removal time. The idle pass also
+    sweeps quarantine and orphans. Every report lists what is still quarantined.
+    """
+    repo = policy.path.resolve(strict=False)
+    report = RepoReport(repo=str(repo), trigger=mode)
+    budget = budget or RunBudget()
+    if (repo / ".git").is_symlink() or not (repo / ".git").is_dir():
+        report.skip(repo.name, None, "repo_layout")
+        return report
+    ctx = CheckContext(repo, probe or ProcessProbe(), time.time(), generated_trees(repo))
+    found, orphans, _registrations = scan_repo(repo)
+    wanted = {path.resolve(strict=False) for path in candidates or []}
+    selected = [item for item in found if candidates is None or item.path in wanted]
+    selected.sort(key=lambda item: item.idle_since)
+    report.scanned = len(selected)
+    deferred = pr_terminal_heads()
+    salvage_queue, halted = _walk_candidates(
+        repo, report, ctx, budget, mode, pr_sha, deferred, selected)
+    if mode == "idle":  # after the cheap removals, before the slow copies
+        report.quarantine_removed = sweep_quarantine(repo, budget)
+    if halted:  # the repository lock is held elsewhere; nothing else can be removed
+        _skip_queued(report, salvage_queue, "repo_busy")
+    else:
+        _drain_salvage_queue(repo, report, ctx, budget, salvage_queue)
     if mode == "idle":
         _reap_orphans(repo, report, ctx, orphans, budget)
     report.quarantine_entries = quarantine_entries(repo)

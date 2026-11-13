@@ -159,7 +159,8 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
 			// The status row is the tools row, so a button reached through both is one control, never two.
 			controls: [...new Set([...tools.querySelectorAll('button'), ...row.querySelectorAll('button')])].map((button) => {
-				const rect = button.getBoundingClientRect();
+				// A Toggle's target is the hit area inside its button.
+				const rect = (button.querySelector('.hit') ?? button).getBoundingClientRect();
 				// Toolbar controls and phone actions are 44px; desktop Toggle and small Button keep their own sizes.
 				const minimum = window.innerWidth <= 768 || button.matches('.doc-tool') ? 44 : button.matches('.tg') ? 17 : 28;
 				return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height, minimum };
@@ -206,15 +207,17 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		// A narrow canvas, whatever the screen, gives the delivery Toggle its 44px target; a wide one keeps the desktop Toggle.
 		if (expectedNarrow) {
 			const toggle = page.getByRole('button', { name: 'Deliver comments immediately', exact: true });
-			const targetBox = (await toggle.boundingBox())!;
+			// The button is the 30 x 17 track; its hit area, inside it, is the 44px target.
+			const hit = toggle.locator('.hit');
+			const targetBox = (await hit.boundingBox())!;
 			const track = await toggle.evaluate((element) => { const style = getComputedStyle(element, '::before'); return { width: parseFloat(style.width), height: parseFloat(style.height) }; });
 			await info.attach('delivery-hit-target', { body: JSON.stringify({ targetBox, track }), contentType: 'application/json' });
 			console.info('Delivery button bounds:', JSON.stringify({ targetBox, track }));
 			expect(track).toEqual({ width: 30, height: 17 });
-			expect(targetBox.height, 'actual delivery button target').toBe(44);
+			expect(targetBox.height, 'actual delivery hit area').toBe(44);
 			expect(targetBox.width).toBe(44);
-			// The button's padding outside the painted track activates the same single control.
-			const pressPadding = () => info.project.name === 'chromium-mobile' ? toggle.tap({ position: { x: 4, y: 22 } }) : toggle.click({ position: { x: 4, y: 22 } });
+			// The hit area outside the painted track activates the same single control.
+			const pressPadding = () => info.project.name === 'chromium-mobile' ? hit.tap({ position: { x: 4, y: 22 } }) : hit.click({ position: { x: 4, y: 22 } });
 			await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 			await pressPadding(); await expect(toggle).toHaveAttribute('aria-pressed', 'true');
@@ -486,7 +489,7 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] a
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
 		if (state !== 'undelivered') {
 			// The held comment waits for the header's Send, whole inside the screen beside the review control.
-			await expect(headerSend(page)).toHaveText('Send 1 comment');
+			await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 			await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 			await expect(page.locator('[data-drawer-unsent]')).toHaveCount(0);
 			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);

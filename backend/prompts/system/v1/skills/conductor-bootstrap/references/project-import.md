@@ -13,11 +13,11 @@ The objective is a project that runs the way this person actually works and gets
 
 ## If you are the new project's conductor
 
-Add these as your own plan tasks before you start, so the person can watch them: `Read the project`, `Learn how you work`, `Research how this work is done well`, `Propose how the project runs`, `Set up the team`.
+Add these as your own plan tasks before you start, so the person can watch them: `Read the project`, `Learn how you work`, `Research how this work is done well`, `Break the work down`, `Propose how the project runs`, `Set up the team`.
 
 1. **Read the project.** Read only the README, AGENTS.md/CLAUDE.md, the docs index, recent history and remotes, and change nothing in the folder (git history: `git log --since=90.days`, areas and authors, counts only). For a described project with no folder, skip to step 2. Other repositories or systems you see mentioned are listed as candidate sources, unread.
 
-2. **Learn how they work.** Post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
+2. **Learn how they work.** First check for a published coordination model that fits: only the read under "Published coordination models" in SKILL step 3; the rest of that step comes later. Then post one message with these questions, numbered, and add their task `Answer [project]'s setup questions`. Ask only what you couldn't read:
    1. What is this project for, and what would make the next few months a success?
    2. How does the work get done today: the steps from an idea or request to something finished, and who's involved?
    3. Where does the work live: repositories, documents, trackers, chat, email, other tools?
@@ -27,16 +27,23 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
    Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the CORSIA agent the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
 
-3. **Research how this work is done well.** For this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
+3. **Research how this work is done well.** Build on the published model step 2 found, if any; then, for this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
 
-4. **Calibrate delegation.** From steps 2 and 3, write down three things: what agents do without asking, what they bring to the person first, and what they never do. Add the signals that should move that line later: for example, ten clean results in a row widen it; a correction or an escaped defect narrows it. These become the standing grants and approval gates in the coordination model.
+4. **Break the work down.** From steps 1–3, write three short tables. Mark a row that doesn't apply to this project as not applicable; never fill it in to complete the table.
+   - **Roles and recurring tasks:** each kind of work and who does it today. Each recurring task gets its steps, who does each, and where the person is asked.
+   - **Sources:** each place the work lives (step 2, question 3). For each: how fresh its data is and how CORSIA can read it (a connected app, an event, a scheduled read, or not at all), and what is lost when it can't.
+   - **How it could go wrong:** where coordination is likely to fail (a handoff, a stale source, a decision nobody owns, work nobody checks), each with how the project will catch or prevent it.
 
-5. **Propose.** Write a registered draft document in your thread's working folder with two parts:
-   - **What I found and what I suggest:** the charter facts (each with its source, `file@commit`, or the person's answer, or marked `ASSUMED:`), how the work should flow and why, what the research suggests, the delegation line and what moves it, and zero to four agents, each with its outcome, how it's measured, and a model that is ready now.
+   The Sources and How-it-could-go-wrong tables are drafts of the charter's canonical-sources table, input inventory and standing risks (SKILL step 2): once the person agrees, write each row there once and keep no second copy.
+
+5. **Calibrate delegation.** From steps 2–4, write down three things: what agents do without asking, what they bring to the person first, and what they never do. Add the signals that should move that line later: for example, ten clean results in a row widen it; a correction or an escaped defect narrows it. These become the standing grants and approval gates in the coordination model.
+
+6. **Propose.** Write a registered draft document in your thread's working folder with two parts:
+   - **What I found and what I suggest:** the charter facts (each with its source, `file@commit`, or the person's answer, or marked `ASSUMED:`), how the work should flow and why, what the research suggests, the three tables from step 4, the delegation line and what moves it, and zero to four agents, only for roles the breakdown named, each with its outcome, how it's measured, and a model that is ready now.
    - **Defaults for you to confirm:** anything you assumed rather than found.
 
    Raise `How should [project] run?` linking the draft. Options: A `Set it up this way`, B `Change something`, C `Just the charter for now, no agents yet`. On B, revise from the person's text and ask again. On C, write the charter only.
 
-6. **Set up the team** (SKILL steps 2, 3 and 5), then finish with one message: `[project] is set up. Here's what each agent will do first:` and one line per agent. If a read fails part-way, report what you read and ask one thing.
+7. **Set up the team** (SKILL steps 2, 3 and 5). A workflow or skill for an agreed recurring task is saved here, never before the person's answer in step 6, and asks them nothing the agreed tables already answer. Then finish with one message: `[project] is set up. Here's what each agent will do first:` and one line per agent. If a read fails part-way, report what you read and ask one thing.
 
 Never copy the repository's conventions or commands into CORSIA files; give its `AGENTS.md` one canonical-sources row instead: `[repo] conventions and commands | [repo path]/AGENTS.md (read before changing code in [repo]) | when the file changes`.

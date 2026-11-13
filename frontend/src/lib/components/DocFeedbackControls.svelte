@@ -44,7 +44,7 @@
 				Sent
 			</span>
 		{:else}
-			<Button size="sm" onclick={() => void send()} loading={feedback.sendingLane === lane} ariaLabel={feedback.sendLabel(lane)} title={feedback.sendText(lane)} dataShort={`Send ${held > 99 ? '99+' : held}`}>{feedback.sendText(lane)}</Button>
+			<Button size="sm" onclick={() => void send()} loading={feedback.sendingLane === lane} ariaLabel={feedback.sendLabel(lane)} title={feedback.sendText(lane)}><span class="send-full">{feedback.sendText(lane)}</span><span class="send-short" class:sending={feedback.sendingLane === lane} aria-hidden="true">Send {held > 99 ? '99+' : held}</span></Button>
 		{/if}
 	</span>
 {/if}
@@ -83,19 +83,21 @@
 	.sending-now > :global(.btn) { flex: none; min-width: max-content; width: max-content; }
 	/* The press shrink would pull the touch padding's last pixels off the button before the tap lands. */
 	.sending-now > :global(.btn:not(:disabled):active) { transform: none; background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text, var(--accent)); }
+	/* Send holds its wording as real text: the full label, and the short "Send 99+" one shown in its place where the row is tight, so the button's box is sized by the words it shows. The accessible name is the button's aria-label either way. */
+	.send-short { display: none; }
 	/* The document header and image bar each provide the size container for their compact Send label. */
 	@container (max-width: 32.5rem) {
-		.sending-now > :global(.btn) { font-size: 0; }
-		.sending-now > :global(.btn)::before { content: attr(data-short); font-size: var(--text-footnote); }
+		.send-full { display: none; }
+		.send-short { display: inline; }
 		/* Sending swaps the count for the spinner in place, so the tight row never gains width mid-send and never wraps or moves the document. */
-		.sending-now > :global(.btn.loading)::before { opacity: 0; }
+		.send-short.sending { opacity: 0; }
 		.sending-now > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
 	}
 	/* The image viewer's bar is no `doc-header`: its narrow Send takes the same short wording on a phone, so the count and Send share one row. */
 	@media (max-width: 48rem) {
-		.sending-now.compact > :global(.btn) { font-size: 0; }
-		.sending-now.compact > :global(.btn)::before { content: attr(data-short); font-size: var(--text-footnote); }
-		.sending-now.compact > :global(.btn.loading)::before { opacity: 0; }
+		.sending-now.compact .send-full { display: none; }
+		.sending-now.compact .send-short { display: inline; }
+		.send-short.sending { opacity: 0; }
 		.sending-now.compact > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
 	}
 	.sent {

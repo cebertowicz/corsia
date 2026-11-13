@@ -175,7 +175,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		flushSync();
 		expect(feedback.documentHeld).toBe(1);
 		expect(feedback.imageHeld).toBe(0);
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment');
+		expect(sendIn(doc.target)!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 1 comment');
 		expect(sendIn(doc.target)!.disabled).toBe(false);
 		expect(refresh).toHaveBeenCalledOnce();
 		mocks.send.mockResolvedValueOnce(sentAll(pending(0), 1));
@@ -198,7 +198,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.textContent!.trim()).toBe('Send 2 comments');
+		expect(send.querySelector('.send-full')!.textContent!.trim()).toBe('Send 2 comments');
 		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
 		send.click();
 		await settle();
@@ -270,10 +270,10 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		// Both stand in the bar together: the count is never swapped out for the Send.
 		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
 		const send = sendIn(bar)!;
-		expect(send.getAttribute('data-short')).toBe('Send 2');
+		expect(send.querySelector('.send-short')?.textContent).toBe('Send 2');
 		// The short wording is the narrow bar's own rule (a phone width), not the document header's container; the count and Send are no longer one or the other.
 		const controls = readFileSync('src/lib/components/DocFeedbackControls.svelte', 'utf8');
-		expect(controls).toContain('.sending-now.compact > :global(.btn)::before { content: attr(data-short);');
+		expect(controls).toContain('.sending-now.compact .send-short { display: inline; }');
 		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).not.toContain('data-image-comments-pill');
 		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).toContain('min-width: var(--touch-target)');
 	});
@@ -370,7 +370,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		});
 		const shown = await imageTab();
 		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.textContent!.trim()).toBe('Send 1 comment');
+		expect(send.querySelector('.send-full')!.textContent!.trim()).toBe('Send 1 comment');
 		await openDrawer(shown.target);
 		expect(footerIn(shown.target)).toBeNull();
 		send.click();
@@ -419,7 +419,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1, { image: 1 }) });
 		mocks.send.mockResolvedValue(sentAll(pending(0), 1));
 		const shown = await imageTab();
-		expect(sendIn(shown.target)!.textContent!.trim()).toBe('Send 1 comment');
+		expect(sendIn(shown.target)!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 1 comment');
 
 		mocks.fetchRevision.mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-2', media_type: 'image/png', artifact_id: 'art-img' });
 		shown.component.reload();
@@ -427,7 +427,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 
 		// The reload remounts the lightbox, not the tab: it is not leaving, and the batch is still held.
 		expect(mocks.send).not.toHaveBeenCalled();
-		expect(sendIn(shown.target)!.textContent!.trim()).toBe('Send 1 comment');
+		expect(sendIn(shown.target)!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 1 comment');
 		unmount(shown.component as unknown as Record<string, unknown>);
 		mounted = mounted.filter((component) => component !== (shown.component as unknown));
 		await settle();

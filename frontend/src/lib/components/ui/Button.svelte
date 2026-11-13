@@ -13,8 +13,6 @@
 		disabled?: boolean;
 		loading?: boolean;
 		ariaLabel?: string;
-		/** A compact visual label for a caller's narrow layout; the accessible name remains ariaLabel. */
-		dataShort?: string;
 		title?: string;
 		/** Extra help a screen reader reads after the name (`aria-description`). */
 		description?: string;
@@ -30,7 +28,7 @@
 	let {
 		variant = 'secondary', size = 'md', type = 'button',
 		disabled = false, loading = false,
-		ariaLabel, dataShort, title, description, ariaDisabled = false, describedby, el = $bindable(),
+		ariaLabel, title, description, ariaDisabled = false, describedby, el = $bindable(),
 		onclick, children,
 	}: Props = $props();
 
@@ -43,7 +41,6 @@
 	class:loading
 	disabled={isDisabled}
 	aria-label={ariaLabel}
-	data-short={dataShort}
 	{...(description ? { 'aria-description': description } : {})}
 	aria-disabled={ariaDisabled ? 'true' : undefined}
 	aria-describedby={describedby}

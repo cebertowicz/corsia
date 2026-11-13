@@ -151,7 +151,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(tag(page, 2)).toBeFocused();
 
 			// The viewer bar sends the held image batch by keyboard; focus returns to its durable Comment control.
-			await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+			await expect(imageBarSend(page).locator('.send-full')).toHaveText(/^\s*Send \d+ comments?\s*$/);
 			await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
 			// All three regions reach one task carrying each region and one marked-up copy.
 			let delivered: { title: string; description: string } | null = null;
@@ -244,7 +244,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 
 			// The viewer bar's one Send is keyboard-operated; focus returns to Comment after it disappears.
 			await page.keyboard.press('Escape');
-			await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+			await expect(imageBarSend(page).locator('.send-full')).toHaveText(/^\s*Send \d+ comments?\s*$/);
 			await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
 			await shoot(page, testInfo, '1440-15-bar-sent', true);
 		} finally {
@@ -306,7 +306,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			if (process.env.CORSIA_E2E_MOCK === '1') {
 				await page.keyboard.press('Escape');
 				await expect(sheet(page)).toHaveCount(0);
-				await expect(imageBarSend(page)).toHaveText(/^\s*Send \d+ comments?\s*$/);
+				await expect(imageBarSend(page).locator('.send-full')).toHaveText(/^\s*Send \d+ comments?\s*$/);
 				await sendByKeyboard(page, imageBarSend(page), undefined, commentButton(page));
 				await shoot(page, testInfo, '393-06-bar-sent', true);
 			}

@@ -306,6 +306,35 @@ def test_installed_source_bytes_stay_out_of_published_metadata(parity):
             assert "ALPHA" not in json.dumps(published)
 
 
+def test_each_new_checkpoint_drops_the_last_receipts_bytes_through_the_index(parity):
+    """Receipt to receipt is the long-thread case; the drop reads only indexed rows."""
+    from core.installed_context import INSTALLED_SOURCES, _superseded_sources_drop_sql
+    from infra.learning_schema import INSTALLED_BOUNDARY_INDEX
+
+    model = HARNESS_MODELS["native"]
+    _dispatch("native", model)
+    _install_checkpoint("cp-1", model)
+    _dispatch("native", model)
+    _install_checkpoint("cp-2", model)
+    _dispatch("native", model)
+    db = _db()
+    try:
+        carrying = [
+            row["id"] for row in db.execute(
+                "SELECT id,metadata FROM messages WHERE thread_id=? ORDER BY id", (THREAD,),
+            )
+            if INSTALLED_SOURCES in json.loads(row["metadata"] or "{}")
+        ]
+        plan = [str(row[3]) for row in db.execute(
+            "EXPLAIN QUERY PLAN " + _superseded_sources_drop_sql(),
+            ("$.x", THREAD, "checkpoint-receipt:cp-2"),
+        )]
+    finally:
+        db.close()
+    assert carrying == ["checkpoint-receipt:cp-2"]
+    assert any(INSTALLED_BOUNDARY_INDEX in step for step in plan), plan
+
+
 def _boundary_rows():
     db = _db()
     try:
