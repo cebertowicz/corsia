@@ -238,7 +238,7 @@ def latest_by_thread_with_attention(
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
                  WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
-                   -- A step stamped `chat_drawn: false` draws nothing in chat, so its update shows no preview.
+                   -- A step stamped `chat_drawn: false` draws nothing in chat, so the sidebar shows no preview for it.
                    AND NOT (source_kind = 'message' AND EXISTS (
                        SELECT 1 FROM messages x WHERE x.id = source_id AND {chat_not_drawn_sql('x.metadata')}))
                  GROUP BY thread_id
