@@ -19,6 +19,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
+- A passage you comment on in a chat's last message now stays in view above the comment sheet on a phone, after a refused send and when you open a failed comment; before, the sheet could cover it.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
 - A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
