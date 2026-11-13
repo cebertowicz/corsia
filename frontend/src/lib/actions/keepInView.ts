@@ -43,11 +43,17 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * behaviour, and a node itself taller than the scroller shows its end.
  *
  * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: while the node is revealed alone the
- * scroller carries that row's height as scroll padding, so the browser's own caret reveal after each typed character leaves it clear too, not only
- * this action's scroll. A revealed block holds that row at its own end, so it needs none.
+ * scroller carries that row's height as scroll padding, so the browser's own caret reveal after each typed character leaves it clear too, and
+ * a reveal that still ends under the row (the browser does not always honour the padding for a field taller than the room above the row)
+ * scrolls the scroller by what is left. A revealed block holds that row at its own end, so it needs none.
  *
  * A resize brings the node back only while its end was in view: a reader who scrolled away from the field (up to
- * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size.
+ * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size. The scroll a
+ * reveal makes is not the reader's: a sheet still shrinking can leave the field below its end by the time that scroll's
+ * event arrives.
+ *
+ * Typing at the end of a field brings its end back as growing does: the browser's own caret reveal stops at the caret
+ * line, leaving the field's padding and the Send beside it past the scroller's end when the text did not wrap.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
@@ -57,20 +63,18 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	let endShown = true;
 	/** The bottom scroll padding this action added to the scroller for a pinned row. */
 	let held = 0;
-	/** When this action last scrolled, and how many times in a row a scroll right after one has been put back. */
-	let revealedAt = -Infinity, repairs = 0;
+	/** Where this action's own last reveal left the scroller. */
+	let revealedTop: number | null = null;
+	const topOf = () => owner?.scrollTop ?? window.scrollY;
 	const readShown = () => {
+		if (topOf() === revealedTop) return;
+		revealedTop = null;
 		const end = node.getBoundingClientRect().bottom;
 		const view = owner?.getBoundingClientRect() ?? { top: 0, bottom: window.visualViewport?.height ?? window.innerHeight };
 		endShown = end >= view.top && end <= view.bottom - held + 1;
-		// The browser can move the scroller once more right after a reveal (its own caret reveal, settling against the layout that
-		// reveal left), which leaves the end under the pinned row; a scroll that close behind ours is put back, a few times at most.
-		if (endShown) repairs = 0;
-		else if (enabled && node === document.activeElement && performance.now() - revealedAt < 250 && repairs < 3) { repairs++; schedule(); }
 	};
 	const reveal = () => {
 		if (!enabled) return;
-		revealedAt = performance.now();
 		const room = owner ? roomOf(owner) + held : window.visualViewport?.height ?? window.innerHeight;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
 		const target = fits ? whole! : node;
@@ -83,18 +87,23 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
 		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
 		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
-		// A field taller than the room above the pinned row can be left by `scrollIntoView` with its end under that row (the browser does not
-		// always honour the scroll padding for a block taller than the room); the end is then scrolled up to the row's top edge directly.
 		if (owner && pinned && target === node) {
 			const over = node.getBoundingClientRect().bottom - (owner.getBoundingClientRect().bottom - pinned);
 			if (over > 1) owner.scrollTop += over;
 		}
+		endShown = true;
+		revealedTop = topOf();
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(reveal);
 	};
 	const resized = () => { if (endShown) schedule(); };
+	const typed = () => {
+		if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
+			if (node.selectionEnd === node.value.length) schedule();
+		}
+	};
 	const viewport = window.visualViewport;
 	viewport?.addEventListener('resize', resized);
 	// The node growing is the person typing into it; the scroller or viewport changing size is not.
@@ -102,6 +111,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	const ownerResized = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
 	if (owner) ownerResized?.observe(owner);
 	grown?.observe(node);
+	node.addEventListener('input', typed);
 	(owner ?? window).addEventListener('scroll', readShown, { passive: true });
 	queueMicrotask(reveal);
 
@@ -114,6 +124,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			cancelAnimationFrame(frame);
 			if (owner && held) owner.style.scrollPaddingBottom = '';
 			viewport?.removeEventListener('resize', resized);
+			node.removeEventListener('input', typed);
 			(owner ?? window).removeEventListener('scroll', readShown);
 			grown?.disconnect();
 			ownerResized?.disconnect();

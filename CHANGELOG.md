@@ -23,6 +23,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A passage you comment on in a chat's last message now stays in view above the comment sheet on a phone, after a refused send and when you open a failed comment; before, the sheet could cover it.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
+- A pull request that is closed and then reopened is followed again: it returns to Files in its agent's chat, the agent is told it was reopened, and the agent's event rules fire on it again. Before, nothing about it reached the agent after the reopen.
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - A one-time reminder an agent sets for a time in another time zone now goes off at that time; before, it could go off hours early or late.
 - When an event rule starts an agent and its owner's Claude Code or Codex account has hit its limit or is signed out, the agent now waits up to eight minutes while CORSIA checks the usage of the project's next account, and starts there if that account isn't limited. Before, it was refused at once. It's still refused if that account is limited too, if the check doesn't finish in time, or if the project doesn't move chats to other accounts.
@@ -69,6 +70,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Measurement now shows workflow runs, their version trends, failed steps and the agents that ran them; a run opens in its plan.
 - Measurement pages load faster, and leaving a page no longer makes the next one wait behind it.
 - Measurement's Workflows section now loads much faster on a long history; before, it could take minutes.
+- Measurement's Workflows section now stays quick on a long history while your agents are busy; before, it could still take a minute.
 - An agent that keeps a workflow is now told to split it when it has grown too long to read in one pass: a part other work also needs, or a different kind of work, becomes its own workflow that a step runs.
 - Workflow version comparisons now count a run once it ends, and group each run by the model of the agent that ran it. Earlier, runs made of several tasks never counted.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
@@ -104,6 +106,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - Turning on Deliver immediately now always sends the open document's held comments; before, whether it did depended on timing.
 - In version history, Restore on a read-only file is unavailable, and the version you open says the file is read-only, instead of failing when you press it.
+- When a script that an event rule started stops before it finishes, as happens when CORSIA restarts, the rule's agent is now told which runs were lost, so it can do their work itself. Before, the run ended and nobody was told. The run is still not started again.
 - When an agent brings you something to judge, it now opens by restating the goal in its own words, with everything you need to decide at the top and the detail below for when you want it.
 - When you click into a document while the comments drawer is closing, your typing stays in the document; a space no longer reopens the drawer.
 - When you set up a project, its conductor now first checks for a ready-made way of working, then maps who does what, where your work lives and how it could go wrong, and suggests agents only for roles found in that map. Nothing is set up until you agree.

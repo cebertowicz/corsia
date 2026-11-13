@@ -82,8 +82,9 @@
 
 <style>
 	.ct-compose { margin-top: var(--space-1); }
-	/* The field grows with its text and never scrolls itself. */
-	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
+	/* The field grows with its text and never scrolls itself. Revealing its end leaves a gap below it, so a scroll offset
+	   rounded to a whole pixel never clips the Send that sits flush with its foot. */
+	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; scroll-margin-block-end: var(--space-1); }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }
 	/* In progress, not unavailable: the ring takes the send button's own ink, and the button keeps its fill. */

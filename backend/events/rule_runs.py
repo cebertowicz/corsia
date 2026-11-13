@@ -7,7 +7,7 @@ or ``skipped: queue full`` once its rule already has ``QUEUE_CAP`` runs waiting;
 the script runner claims it (``running``, input cleared) and settles it
 (``ran`` or ``failed``, the failure's text as the reason). ``explain`` and
 ``list`` read that same row. A run the backend lost before it settled ends
-``failed`` and is never replayed. A run that can't start (a paused writer, a
+``failed``, is never replayed, and its claim wakes the rule's owner with it. A run that can't start (a paused writer, a
 rule turned off, a script or owner gone) is ``skipped`` with the reason when it
 would start, and nothing replays on resume.
 
@@ -135,8 +135,13 @@ def finish(db: sqlite3.Connection, decision_id: int, *, failed: str | None = Non
     )
 
 
-def interrupt(db: sqlite3.Connection, live: set[int]) -> None:
-    """End each run its row says is in flight but no task of this process holds."""
-    for row in db.execute("SELECT id FROM event_route_decisions WHERE outcome=?", (RUNNING,)).fetchall():
-        if row["id"] not in live:
-            finish(db, row["id"], failed=INTERRUPTED)
+def interrupt(db: sqlite3.Connection, live: set[int]) -> list[sqlite3.Row]:
+    """End each run its row says is in flight but no task of this process holds, and
+    return those rows: the run's rule, owner, event and item, for whoever tells the owner."""
+    ended = [row for row in db.execute(
+        "SELECT id, rule_id, thread_id, event_id, connector, event_type, artifact_external_id "
+        "FROM event_route_decisions WHERE outcome=? ORDER BY id", (RUNNING,),
+    ).fetchall() if row["id"] not in live]
+    for row in ended:
+        finish(db, row["id"], failed=INTERRUPTED)
+    return ended

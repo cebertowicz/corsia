@@ -340,6 +340,22 @@ for (const { label, view } of CASES) {
 						else if (!(await page.locator(`${DRAWER} [data-comment-id]`).nth(3).count())) fail('escape: the list did not come back');
 					}
 				}
+			} else if (!column) {
+				// The list popover opens a long thread in its place too; Escape there goes back to the list, as Back does.
+				const row = card(page, doc.longThreads[0]).getByRole('button', { name: /16 replies/ });
+				await row.scrollIntoViewIfNeeded();
+				await press(row);
+				await settled(page);
+				const back = page.locator(DRAWER).getByRole('button', { name: /^Back/ });
+				report.threadView = { back: await back.count() };
+				if (!(await back.isVisible())) fail('thread: the replies row did not open the thread view');
+				else {
+					await page.keyboard.press('Escape');
+					await settled(page);
+					if (!(await page.locator(DRAWER).count())) fail('escape: Escape closed the list instead of returning to it');
+					else if (await back.count()) fail('escape: Escape left the thread view open');
+					else if (!(await page.locator(`${DRAWER} [data-comment-id]`).nth(3).count())) fail('escape: the list did not come back');
+				}
 			}
 
 			report.failures = failures;
