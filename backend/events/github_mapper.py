@@ -30,11 +30,17 @@ _LABEL_EVENTS = frozenset(
     for kind in ("pr", "issue") for action in ("labeled", "unlabeled")
 )
 LABEL_RULE_ONLY = "label_rule_only"
+_PR_REOPENED = GITHUB_ROUTED_EVENTS["pr.reopened"]
 
 
 def ends_artifact(internal_event: str) -> bool:
     """Whether this webhook event is its pull request's end (merge or close)."""
     return internal_event in _PR_STATE_BY_EVENT
+
+
+def reopens_artifact(internal_event: str) -> bool:
+    """Whether this webhook event is its pull request's reopen, the one way back from a close."""
+    return internal_event == _PR_REOPENED
 
 
 def pr_terminal_state(
@@ -124,6 +130,8 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
             return GITHUB_ROUTED_EVENTS["pr.synchronize"]
         if action == "ready_for_review":
             return GITHUB_ROUTED_EVENTS["pr.ready_for_review"]
+        if action == "reopened":
+            return _PR_REOPENED
         if action in ("labeled", "unlabeled"):
             return _label_event("pr", action, payload)
         if action == "closed":

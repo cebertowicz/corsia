@@ -58,6 +58,7 @@ from core.workflow_verdicts import Run, parse_ts
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
+from infra.packed_rows import fetch_all
 from plans.public import node_working_seconds, run_end_records
 from tools.workflow_task_fields import version_short_hash
 from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
@@ -164,13 +165,13 @@ def _coverage(db: sqlite3.Connection, params: dict[str, Any], grain: Grain, wind
     stamped on the task's ``node_created`` event (``null`` where none is recorded) and whether it is a
     follow-up of another node. The rows sum to the headline exactly, so the split never disagrees with it.
     """
-    rows = db.execute(scope_cte() + outcome_ctes(grain) + """
+    rows = fetch_all(db, scope_cte() + outcome_ctes(grain) + """
         SELECT o.id AS id, n.follow_up_of IS NOT NULL AS follow_up,
           (SELECT e.provenance FROM plan_node_events e WHERE e.node_id=o.id AND e.event='node_created'
            ORDER BY e.created_at LIMIT 1) AS provenance
         FROM outcome_rows o JOIN plan_nodes n ON n.id=o.id
         WHERE o.period IN (SELECT value FROM json_each(:periods))
-    """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))}).fetchall()
+    """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))})
     origins: dict[tuple[str | None, bool], list[int]] = {}
     for row in rows:
         tally = origins.setdefault((row["provenance"], bool(row["follow_up"])), [0, 0])
@@ -189,11 +190,10 @@ def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: G
     """Which of these runs started inside the window, by the grain's own window test."""
     if not run_ids:
         return frozenset()
-    rows = db.execute(
-        f"SELECT id FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))"
+    rows = fetch_all(
+        db, f"SELECT id FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))"
         f" AND {grain.window_sql('created_at', window)}",
-        {"ids": json.dumps(sorted(run_ids))},
-    ).fetchall()
+        {"ids": json.dumps(sorted(run_ids))})
     return frozenset(str(row["id"]) for row in rows)
 
 
@@ -385,10 +385,9 @@ def _step_titles(db: sqlite3.Connection, node_ids: Iterable[str]) -> dict[str, s
     ids = sorted(set(node_ids))
     if not ids:
         return {}
-    return {str(row["id"]): str(row["title"]) for row in db.execute(
-        "SELECT id,title FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))",
-        {"ids": json.dumps(ids)},
-    ).fetchall()}
+    return {str(row["id"]): str(row["title"]) for row in fetch_all(
+        db, "SELECT id,title FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))",
+        {"ids": json.dumps(ids)})}
 
 
 
