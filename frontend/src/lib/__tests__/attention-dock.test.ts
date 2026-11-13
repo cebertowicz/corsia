@@ -131,45 +131,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("AttentionDock — reply attention refresh", () => {
-  it("keeps chat reply attention out of the dock", async () => {
-    const { chatReplyAttention } = await import('$lib/stores/chatReplyAttention');
-    activeThreadId.set('thread');
-    chatReplyAttention.set({ threadId: 'thread', items: [{ detail: { title: '', unread_count: 1, newest_at: 't', destination: { pane: 'chat-replies', id: 'target', user_message_id: 'sender', cid: 'c1.1', seq: 1 }, source: { thread_id: 'thread' } } }] });
-    body = queueBody(null, 0);
-    component = mount(AttentionDock, { target: host });
-    await settle();
-    expect(host.querySelector('.reply-chip-notice')).toBeNull();
-    chatReplyAttention.set(null);
-  });
-  it("refreshes reply counts on resolution and reopening, but ignores unrelated frames", async () => {
-    const { emit } = await import("$lib/ws/events");
-    const reply = {
-      detail: { title: "brief.md", unread_count: 1, newest_at: "2026-10-27",
-        destination: { pane: "document-replies", id: "doc" }, source: { thread_id: "thread" } },
-    };
-    activeThreadId.set("thread");
-    body = { ...queueBody(null, 0), reply_items: [reply] };
-    component = mount(AttentionDock, { target: host });
-    await settle();
-    expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
-    calls.length = 0;
-    body = { ...queueBody(null, 0), reply_items: [] };
-    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc" });
-    await settle();
-    expect(calls.filter((call) => call.url.includes("/api/attention/queue"))).toHaveLength(0);
-    expect(host.querySelector('.reply-chip-notice')).not.toBeNull();
-    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", unread_attention_changed: true });
-    await settle();
-    expect(host.querySelector('.reply-chip-notice')).toBeNull();
-    body = { ...queueBody(null, 0), reply_items: [reply] };
-    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", unread_attention_changed: true });
-    await settle();
-    expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
-    activeThreadId.set(null);
-  });
-});
-
 describe("AttentionDock — one item at a time", () => {
   it("shows a one-line bar with the head item, its source, and the waiting count", async () => {
     component = mount(AttentionDock, { target: host });

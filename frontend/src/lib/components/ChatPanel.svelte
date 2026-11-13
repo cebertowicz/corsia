@@ -39,7 +39,6 @@
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { createPlanDestinations } from './chatPlanDestinations';
-	import { openDocumentOnReplies } from './chatReplyDestination';
 	import {
 		createPager,
 		adoptFirstPage,
@@ -358,9 +357,8 @@
 			{/if}
 			<AttentionDock
 				suppressed={attentionSuppressed}
-				onOpenDestination={(destination, threadId) => {
+				onOpenDestination={(destination) => {
 					if (destination.pane === 'chat-replies') return void jumpToChatReply(destination);
-					if (destination.pane === 'document-replies') return openDocumentOnReplies(destination, $activeThreadId, threadId);
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>

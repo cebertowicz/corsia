@@ -37,7 +37,7 @@ export function seed(page: Page, request: APIRequestContext) {
 
 /** The canvas with the Workspace panel, and the sidebar too if asked, tucked away: the canvas widths a laptop gives. */
 async function closePanes(page: Page, sidebar: boolean) {
-  if (sidebar) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+  if (sidebar) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
   if (!(await page.locator('.pane').evaluate((element) => element.classList.contains('collapsed')))) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }

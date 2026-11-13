@@ -146,7 +146,7 @@ for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark']
 	const { row } = await commentedMessage(page, request, width);
 	await page.setViewportSize({ width, height: 900 });
 	await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-	await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	const card = page.locator('.chat-margin .chat-margin-card');
 	await expect(card).toHaveCount(1);
