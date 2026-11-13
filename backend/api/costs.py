@@ -186,11 +186,20 @@ def _costs_by_project(db, scope: _UsageScope):
 
 
 def _costs_by_source(db, scope: _UsageScope):
-    """Token and cost totals per call source, most expensive first."""
+    """Token and cost totals per call source, most expensive first.
+
+    The four stored parts say what a kind of call costs by class. ``unknown_token_rows`` counts calls with
+    no total and a missing part, so the row's figures are a lower bound when it is above zero.
+    """
     return db.execute(
         scope.cte + "SELECT u.source as source, "
         "SUM(u.total_tokens) as total_tokens, "
         "SUM(u.cost_usd) as cost_usd, "
+        "SUM(u.prompt_tokens) as prompt_tokens, "
+        "SUM(u.cache_creation_tokens) as cache_creation_tokens, "
+        "SUM(u.cache_read_tokens) as cache_read_tokens, "
+        "SUM(u.completion_tokens) as completion_tokens, "
+        "COALESCE(SUM(u.fresh_unknown_records), 0) as unknown_token_rows, "
         + _COUNTS + f"FROM {scope.usage} u "
         "GROUP BY u.source ORDER BY cost_usd DESC",
         scope.params,

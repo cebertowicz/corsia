@@ -180,6 +180,41 @@ async def test_all_includes_orphaned_usage_while_project_and_agent_scopes_exclud
     assert "missing-thread" not in {row["thread_id"] for row in agent["top_threads"]}
 
 
+@pytest.mark.asyncio
+async def test_each_kind_of_call_carries_its_four_token_classes(scoped_costs):
+    """A checkpoint's tokens are served by class, and a call short of a figure is counted beside them."""
+    from infra.database import get_db
+
+    day = f"{_window_day().isoformat()}T13:00:00Z"
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+            "cache_read_tokens,total_tokens,cost_usd,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("checkpoint-whole", "agent-child", "model-agent", 100, 20, 300, 5000, 5420, 0.5, "checkpoint", day),
+                # No total and no input figure: its recorded parts count, and the row says one call is short.
+                ("checkpoint-short", "agent-child", "model-agent", None, 7, None, 40, None, None, "checkpoint", day),
+            ],
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    summary = await scoped_costs.cost_summary("test-token", project="all", agent="agent", range="12w")
+    rows = {row["source"]: row for row in summary["by_source"]}
+
+    # The seeded checkpoint call (10 in, 5 out, no cache figures) plus the two above.
+    checkpoint = rows["checkpoint"]
+    assert (checkpoint["prompt_tokens"], checkpoint["cache_creation_tokens"]) == (110, 300)
+    assert (checkpoint["cache_read_tokens"], checkpoint["completion_tokens"]) == (5040, 32)
+    assert (checkpoint["total_tokens"], checkpoint["unknown_token_rows"], checkpoint["api_calls"]) == (5435, 1, 3)
+    # The ledger's cache columns default to zero, so a call written without them reads as no cache use.
+    turn = rows["turn"]
+    assert (turn["prompt_tokens"], turn["completion_tokens"], turn["unknown_token_rows"]) == (10, 5, 0)
+    assert (turn["cache_creation_tokens"], turn["cache_read_tokens"]) == (0, 0)
+
+
 def test_spend_and_measurement_share_the_same_completed_twelve_weeks(monkeypatch):
     from api import costs
     from api.measurement_scope import completed_week_bounds, query_params
