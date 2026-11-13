@@ -39,6 +39,7 @@ from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read the
     WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
 )
 from events.rule_runs import OWNER_GONE, queue
+from infra.delegation_scope import WORKSPACE_SCOPE_ID
 from infra.queries import thread_gone_for_good, thread_is_temporary, thread_unavailable_reason
 from registry.retirement_predicate import identity_ended
 
@@ -95,7 +96,7 @@ def lookup(
     in the artifact owner's scope), or, with no thread, in each of ``projects``: the
     one indexed read every event pays."""
     rows = rule_reads.enabled_rules(db, connector, event_type, PROJECT_PREFIX, thread,
-                                    [project_scope(project) for project in projects])
+                                    [rule_scope(project) for project in projects])
     return [from_row(row) for row in rows]
 
 
@@ -143,8 +144,8 @@ def thread_target(to: str) -> str | None:
     return to.removeprefix(THREAD_PREFIX) if to.startswith(THREAD_PREFIX) else None
 
 
-def project_scope(project_id: str) -> str:
-    return PROJECT_PREFIX + project_id
+def rule_scope(project_id: str | None) -> str:
+    return PROJECT_PREFIX + project_id if project_id is not None else WORKSPACE_SCOPE_ID
 
 
 def routed(

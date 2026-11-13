@@ -187,7 +187,7 @@ def create(
                           "Ask the agent that started you.")
     if not project_id:
         raise RuleRefused("Rules cover a project's events; this chat is in no project.")
-    own_scope = rules.project_scope(project_id)
+    own_scope = rules.rule_scope(project_id)
     if scope is not None and scope != own_scope:
         raise RuleRefused(
             f"You can only write rules about events you can already read: those in your own "
@@ -251,7 +251,7 @@ def disable(
     """Turn one rule off: its writer, its recipient or the project's conductor may."""
     row = db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()
     if row is None or not project_id or row["scope"] not in (
-            rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE):
+            rules.rule_scope(project_id), observe_rules.SHIPPED_SCOPE):
         raise RuleRefused(f"no rule {rule_id!r} in this project")
     if row["kind"] == observe_rules.OBSERVE:
         observe_rule = observe_rules.from_row(row)
@@ -327,7 +327,7 @@ def explain(
         return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
     # A shipped rule set's rule is global: its outcomes show here only for this project's chats.
     where = [OUTCOME_SCOPE]
-    args: list[Any] = [rules.project_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
+    args: list[Any] = [rules.rule_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
     if event_id:
         where.append("d.event_id=?")
         args.append(event_id)
