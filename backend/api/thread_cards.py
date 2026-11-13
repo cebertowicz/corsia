@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 
 from api.files_roots import scope_roots
+from infra.chat_comment_answers import chat_not_drawn_sql
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
 from registry.path_access import FileLookup
@@ -90,11 +91,11 @@ def _page_updates(db, thread_id: str, rows: list[dict]) -> list:
 
 
 def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
-    """The latest assistant step of a Turn that existed when a hold was placed."""
+    """The latest assistant step of a Turn that existed when a hold was placed and that chat draws."""
     row = db.execute(
         "SELECT id FROM messages WHERE thread_id=? AND role='assistant'"
         " AND json_extract(metadata, '$.turn_id')=? AND julianday(created_at)<=julianday(?)"
-        " ORDER BY seq DESC LIMIT 1",
+        f" AND NOT {chat_not_drawn_sql()} ORDER BY seq DESC LIMIT 1",
         (thread_id, turn_id, placed_at),
     ).fetchone()
     return row["id"] if row else None

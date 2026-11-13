@@ -1,13 +1,13 @@
 """The sidebar's last-message preview, shared by the thread list and live updates."""
 
-from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, strip_answer_tags
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, chat_not_drawn_sql, strip_answer_tags
 from infra.database import get_db
 
 # The first 100 characters of thread ``s``'s newest user or assistant message, as chat shows it.
-# An answer-only message shows nothing in chat (its saved chat text is empty), so it is skipped.
+# An answer-only message (empty saved chat text) and a step stamped `chat_drawn: false` show nothing in chat, so both are skipped.
 # Callers strip the tags of sections that were not placed.
 LAST_MESSAGE_PREVIEW = f"""(SELECT substr({VISIBLE_CONTENT}, 1, 100) FROM messages m {VISIBLE_CONTENT_JOIN}
-    WHERE m.thread_id=s.id AND m.role IN ('user','assistant') AND (cv.content IS NULL OR cv.content != '')
+    WHERE m.thread_id=s.id AND m.role IN ('user','assistant') AND (cv.content IS NULL OR cv.content != '') AND NOT {chat_not_drawn_sql('m.metadata')}
     ORDER BY m.created_at DESC LIMIT 1)"""
 
 

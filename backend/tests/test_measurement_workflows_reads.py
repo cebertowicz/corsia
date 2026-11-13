@@ -54,7 +54,7 @@ def test_the_route_answers_the_same_through_packed_and_plain_reads(db, monkeypat
     assert json.loads(packed)["workflows"], "the seed has runs in every scope, so an empty answer proves nothing"
 
 
-def test_every_reader_of_the_route_takes_one_step_per_read(db, monkeypatch) -> None:  # noqa: F811
+def test_every_listed_module_reads_through_fetch_all(db, monkeypatch) -> None:  # noqa: F811
     """Each module of the route reads through ``fetch_all``: with it stubbed out, the route sees its rows."""
     seed()
     seen: list[str] = []

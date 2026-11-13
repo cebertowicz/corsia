@@ -15,3 +15,13 @@ describe('an added message', () => {
 		expect(message).not.toHaveProperty('chat_visible_content');
 	});
 });
+
+describe('an added message stamped as drawing nothing', () => {
+	it('keeps the stamp in its metadata, where every reader looks for it', () => {
+		const message = addedMessage({ ...payload, chat_answer_cids: ['c1.1'], chat_visible_content: '', chat_drawn: false }, 'thread');
+		expect(message?.metadata).toEqual({ for_user: true, chat_drawn: false });
+	});
+	it('carries no stamp when the server sent none', () => {
+		expect(addedMessage(payload, 'thread')?.metadata).toEqual({ for_user: true });
+	});
+});
