@@ -24,3 +24,17 @@
 .sel-comment:hover { filter: brightness(1.08); }
 @keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 @media (max-width: 768px) { .sel-comment { padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3); font-size: var(--text-subhead); gap: var(--space-2); } .sel-comment svg { width: var(--space-4); height: var(--space-4); } }
+
+/* While a thread is unread its highlight is the sign. A stronger accent wash and a medium underline in the text colour replace the read highlight's amber ones. The underline is the text colour, never the accent, so it is not read as a link (a link is accent-coloured text); nothing is added to the line, so nothing can overlap or crowd. */
+.cm-comment-anchor[data-unread] { background-color: color-mix(in srgb, var(--accent) 22%, transparent); border-bottom: medium solid var(--text-primary); }
+.cm-content .cm-md-table td.cm-comment-anchor[data-unread], .cm-content .cm-md-table th.cm-comment-anchor[data-unread] { --unread-rule: inset 0 calc(var(--space-1) * -0.75) 0 var(--text-primary); background-color: color-mix(in srgb, var(--accent) 22%, transparent); border-bottom-width: 1px; box-shadow: var(--unread-rule); }
+/* A stack of threads on the same text is nested highlights, and the innermost paints over the ones around it. While any thread in the stack is unread, the read highlights around or inside it draw nothing of their own, so the unread wash and underline show whole, in their own colours, at any depth. */
+.cm-comment-anchor[data-unread] .cm-comment-anchor:not([data-unread]),
+.cm-comment-anchor:not([data-unread]):has(.cm-comment-anchor[data-unread]) { background-color: transparent; border-bottom-style: none; }
+/* A stack of read threads is nested read highlights whose washes and rules add up to a saturated block that looks louder than any unread one. The outermost read highlight paints the wash once, the same amber as a single read thread; read highlights nested inside it draw nothing of their own, unless one is the focused or landed thread, which keeps its stronger mark. */
+.cm-comment-anchor:not([data-unread]) .cm-comment-anchor:not([data-unread], .cm-comment-focused, .chat-reply-mark-landed) { background-color: transparent; border-bottom-style: none; }
+/* Forced colours drop the wash, the shadow and the border colours: a thick double rule in the system highlight colour plus an outline keep an unread highlight different from a read one (a thin plain rule). */
+@media (forced-colors: active) {
+	.cm-comment-anchor[data-unread] { border-bottom: var(--space-1) double Highlight; outline: 1px solid Highlight; outline-offset: -1px; }
+	.cm-content .cm-md-table td.cm-comment-anchor[data-unread], .cm-content .cm-md-table th.cm-comment-anchor[data-unread] { border-bottom: var(--space-1) double Highlight; box-shadow: none; }
+}
