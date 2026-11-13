@@ -271,8 +271,8 @@ def disable(
         (rule.id, caller),
     ).fetchone() is not None
     if (caller not in (rule.created_by, rules.thread_target(rule.to))
-            and not delivered_to_caller and (project_id is None or _conductor(db, project_id) != caller)):
-        if project_id is None:
+            and not delivered_to_caller and (not project_id or _conductor(db, project_id) != caller)):
+        if not project_id:
             raise RuleRefused("Only the rule's writer, its named recipient or a recipient it has delivered to can turn it off.")
         raise RuleRefused(
             "Only the rule's writer, its named recipient, a recipient it has delivered to or "
