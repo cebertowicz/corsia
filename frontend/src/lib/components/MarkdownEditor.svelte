@@ -167,9 +167,9 @@
 	 * it covered text the reader had in view); a reader's own scroll away from the draft is never undone.
 	 */
 	let bandBefore: { top: number; bottom: number } | null = null;
-	export function draftCovered(from: number, opening: boolean, oneLineClear = false): boolean {
+	export function draftCovered(from: number, opening: boolean, clear = false, to = from): boolean {
 		if (!view) return opening;
-		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore, oneLineClear);
+		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore, clear, to);
 		bandBefore = band;
 		return opening || covered;
 	}

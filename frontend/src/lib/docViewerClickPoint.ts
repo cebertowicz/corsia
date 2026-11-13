@@ -45,8 +45,12 @@ export function createCommentOpeners(ui: ReturnType<typeof createCommentSurfaceS
 export function clickAnchor(click: MouseEvent | undefined, live: () => DOMRect | null): (() => DOMRect | null) | null {
 	if (!click || click.detail === 0 || !(click.target instanceof Node)) return null;
 	const line = clickedLine(click.target, click.clientY);
-	const rect = new DOMRect(click.clientX, line?.top ?? click.clientY, 0, line ? line.bottom - line.top : 0);
 	const from = live();
+	// A highlight of up to three lines is one thing to keep clear: the card sits against all of it, not only the pressed line (as the phone sheet keeps up to three lines above itself).
+	const whole = line && from && !(click.target instanceof Element && click.target.closest('.cm-comment-marker')) && from.top <= line.bottom && from.bottom >= line.top && from.height <= 3 * (line.bottom - line.top) ? from : null;
+	const top = whole ? Math.min(line!.top, whole.top) : line?.top ?? click.clientY;
+	const bottom = whole ? Math.max(line!.bottom, whole.bottom) : line?.bottom ?? click.clientY;
+	const rect = new DOMRect(click.clientX, top, 0, bottom - top);
 	if (!from) return () => rect;
 	return () => {
 		const now = live();

@@ -12,6 +12,8 @@
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+	import { capSheetAboveText, SHEET_GAP } from '$lib/sheetClearance';
+	import { restingTop } from '$lib/cm/visible-region';
 	import type { MarginComposer } from '$lib/docMarginSource';
 	import './commentAnchors.css';
 
@@ -58,7 +60,7 @@
 	let sheetPanel = $state<HTMLElement | null>(null);
 	/** The line the person pressed, kept so a sheet that opens over the transcript can lift it clear. */
 	let press: { el: HTMLElement; line: number } | null = null;
-	// A sheet over the transcript covers its lower part: the pressed line is lifted above it, with scroll room added below when the transcript ends under the sheet. Opening and any later resize of the sheet only ever lift a line it newly covers.
+	// A sheet over the transcript covers its lower part. It rises only as far as leaves the pressed highlight above it (up to three lines of it, else the pressed line), and the transcript is lifted to put that text there, with scroll room added below when it ends under the sheet. Opening and any later resize of the sheet only ever lift text it newly covers.
 	$effect(() => {
 		const panel = sheetPanel, root = messageRoot();
 		if (!panel || !root) return;
@@ -66,12 +68,17 @@
 		const lift = () => {
 			const el = press?.el;
 			if (!el?.isConnected || !panel.isConnected) return;
-			const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
-			const top = backdrop ? backdrop.getBoundingClientRect().bottom - panel.offsetHeight : panel.getBoundingClientRect().top;
 			const rects = [...el.getClientRects()];
-			const line = rects[Math.min(press!.line, rects.length - 1)];
-			if (!line || line.top >= top + panel.offsetHeight) return;
-			const over = line.bottom + 24 - top;
+			const pressed = rects[Math.min(press!.line, rects.length - 1)];
+			if (!pressed) return;
+			const first = rects[0], last = rects[rects.length - 1];
+			const whole = last.bottom - first.top <= 3 * pressed.height;
+			const text = whole ? { top: first.top, bottom: last.bottom } : { top: pressed.top, bottom: pressed.bottom };
+			const regionTop = root.getBoundingClientRect().top;
+			capSheetAboveText(panel, { height: text.bottom - text.top, regionTop });
+			const top = restingTop(panel) ?? panel.getBoundingClientRect().top;
+			if (text.top >= top + panel.offsetHeight) return;
+			const over = text.bottom + SHEET_GAP - top;
 			if (over <= 0) return;
 			const room = root.scrollHeight - root.clientHeight - root.scrollTop;
 			if (room < over) root.style.paddingBottom = `calc(${getComputedStyle(root).paddingBottom} + ${Math.ceil(over - room)}px)`;

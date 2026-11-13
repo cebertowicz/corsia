@@ -137,7 +137,7 @@
 	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
-	export function draftCovered(from: number, opening: boolean, oneLineClear = false) { return editor?.draftCovered(from, opening, oneLineClear); }
+	export function draftCovered(from: number, opening: boolean, clear = false, to = from) { return editor?.draftCovered(from, opening, clear, to); }
 	export function editorView() { return editor?.editorView(); }
 
 	// The button follows the selection's end but never leaves the visible document column.

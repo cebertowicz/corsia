@@ -95,7 +95,7 @@
 		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
 		onRevealDraft?: (opening: boolean) => void;
 		/** Asks the editor to keep the text a phone's thread sheet was opened from clear of it, now and whenever the sheet moves. */
-		onRevealCard?: (opening: boolean) => void;
+		onRevealCard?: (opening: boolean, panel: HTMLElement | null) => void;
 		/** Resolved threads at every width (zero on an image's drawer), for the header control that opens their drawer. */
 		resolvedCount?: number;
 		/** A new comment is being written over the margin column: the column stays, its cards where they were, with the composer beside the text. */
@@ -171,7 +171,7 @@
 	$effect(() => observeSheetTyping(listSheet ?? draftSheet, (value) => typing = value));
 	$effect(() => trackOverlaySheet(bounds, () => covered || !sheet.open ? null : sheet.state?.kind === 'list' && sheetDrawer ? listSheet : draftSheet));
 	// The draft sheet exists only at phone width; a narrow canvas's composer is a popover, with no sheet to keep the subject above.
-	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : surfaceState?.kind === 'thread' && cardMode() === 'sheet' ? draftSheet : null, surfaceState?.kind === 'draft' ? onRevealDraft : onRevealCard));
+	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : surfaceState?.kind === 'thread' && cardMode() === 'sheet' ? draftSheet : null, surfaceState?.kind === 'draft' ? onRevealDraft : onRevealCard && ((opening) => onRevealCard(opening, draftSheet))));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
