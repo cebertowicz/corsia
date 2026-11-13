@@ -110,8 +110,9 @@
 
 	async function changeImmediateDelivery(value: boolean): Promise<void> {
 		if (!(await setDeliverCommentsImmediately(value))) return;
-		const held = feedbackStatus?.controller();
-		if (value && held && held.documentHeld > 0) void held.sendDocument();
+		// Another client may have held a comment this one has not synced yet, so turning delivery on always asks the
+		// server to send the open document's held lane. An empty lane delivers nothing and shows nothing.
+		if (value) void feedbackStatus?.controller().sendDocument();
 	}
 
 	async function markVerified(): Promise<void> {

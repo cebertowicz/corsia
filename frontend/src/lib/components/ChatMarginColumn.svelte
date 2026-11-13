@@ -20,7 +20,7 @@
 		scroller: HTMLElement | null;
 		selectedId: string | null;
 		onSelect: (id: string) => void;
-		onSendReply: (reply: ReplyDraft) => void;
+		onSendReply: (reply: ReplyDraft) => Promise<void>;
 		/** A comment being written or edited on the transcript, drawn as a card level with its text. */
 		composer?: MarginComposer | null;
 	} = $props();

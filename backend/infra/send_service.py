@@ -338,7 +338,8 @@ async def send_thread_input(
             continuation=continuation,
         )
     except RejectedComments as exc:
-        raise SendRejected(400, str(exc)) from exc
+        cause = {"cause": exc.cause, **({"reference": exc.reference} if exc.reference else {})}
+        raise SendRejected(400, str(exc), metadata=cause) from exc
     from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(

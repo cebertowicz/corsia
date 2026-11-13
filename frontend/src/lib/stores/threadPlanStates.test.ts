@@ -16,6 +16,7 @@ vi.mock('$lib/ws', () => ({
 
 import { token } from './auth';
 import {
+	listedNeedsYou,
 	reloadThreadPlanStates,
 	resetThreadPlanStatesForTests,
 	stopThreadPlanStates,
@@ -237,5 +238,26 @@ describe('threadPlanStates', () => {
 		await settle();
 		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['a']]);
 		expect(get(threadPlanStates).a?.has_update).toBe(true);
+	});
+});
+
+describe('listedNeedsYou', () => {
+	it('is true only while a listed thread owes the person, and clears when none does', async () => {
+		mocks.read.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, {
+			state: id === 'b' ? 'blocked_on_you' : 'idle', label_key: null, paused: false, attention_items: [],
+		}])));
+		watchThreadPlanStates(['a', 'b']);
+		await settle();
+		expect(get(listedNeedsYou)).toBe(true);
+
+		// A thread off the menu (another scope) keeps its last reading but no longer counts.
+		watchThreadPlanStates(['a']);
+		expect(get(listedNeedsYou)).toBe(false);
+
+		watchThreadPlanStates(['a', 'b']);
+		await settle();
+		expect(get(listedNeedsYou)).toBe(true);
+		threadPlanStates.update((states) => ({ ...states, b: { ...states.b, state: 'idle' } }));
+		expect(get(listedNeedsYou)).toBe(false);
 	});
 });

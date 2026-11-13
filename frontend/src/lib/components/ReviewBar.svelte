@@ -82,7 +82,11 @@
 			clearTimeout(refreshTimer);
 			refreshTimer = setTimeout(() => void bar.load(), 150);
 		};
-		const offs = [on('artifacts_changed', refresh), on('plans_changed', refresh)];
+		// A comment read or decided changes the counts a comment task's bar reads out.
+		const commentChanged = (message: unknown) => {
+			if (message && typeof message === 'object' && 'artifact_id' in message && message.artifact_id === bar.artifactId) refresh();
+		};
+		const offs = [on('artifacts_changed', refresh), on('plans_changed', refresh), on('doc_comment_changed', commentChanged)];
 		return () => { clearTimeout(refreshTimer); offs.forEach((off) => off?.()); };
 	});
 	// The note grows with its text to the CSS cap, then keeps an ending caret visible while it scrolls.
@@ -166,7 +170,7 @@
 </script>
 
 {#if personStep || personReceipt}
-	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} />
+	<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {suppressed} bind:capsuleClearance {onAnswered} onConflict={() => void bar.load()} onDismissed={() => void bar.load()} />
 {:else if bar.visible}
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}

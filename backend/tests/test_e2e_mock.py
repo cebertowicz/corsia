@@ -377,3 +377,48 @@ async def test_inject_message_binds_a_fixture_assistant_row_to_no_turn(
         "SELECT metadata FROM messages WHERE id=?", (result["message_id"],)
     ).fetchone()
     assert json.loads(row["metadata"]) == {"turn_unbound_reason": "legacy_import"}
+
+
+@pytest.mark.asyncio
+async def test_fail_queued_input_ends_an_unclaimed_input_as_production_does(deleg_db, monkeypatch):
+    from fastapi import HTTPException
+
+    from e2e_mock import fail_queued_input
+    from infra import auth
+    import infra.failed_wake_surface as failed_wake_surface
+    import infra.send_broadcast as send_broadcast
+
+    broadcast: list[tuple[str, tuple[str, ...]]] = []
+    driven: list[tuple[str, ...]] = []
+
+    async def record_broadcast(thread_id, message_ids, **_kwargs):
+        broadcast.append((thread_id, tuple(message_ids)))
+
+    async def record_driven(message_ids):
+        driven.append(tuple(message_ids))
+
+    monkeypatch.setattr(auth, "authenticate", lambda _arg: {"id": "u-test"})
+    monkeypatch.setattr(send_broadcast, "broadcast_message_rows", record_broadcast)
+    monkeypatch.setattr(failed_wake_surface, "drive_failed_wake_owners", record_driven)
+    deleg_db.execute(
+        "INSERT INTO threads (id,user_id,model,title,created_at,updated_at) "
+        "VALUES ('fail-1','u-test','claude-code/opus','T','t','t')"
+    )
+    deleg_db.execute(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,delivery_state) "
+        "VALUES ('queued-1','fail-1','user','','{}','t','queued')"
+    )
+    deleg_db.commit()
+    body = {"thread_id": "fail-1", "message_id": "queued-1", "error": "Not delivered in this test."}
+
+    assert await fail_queued_input("x", body) == {"ok": True, "message_ids": ["queued-1"]}
+
+    row = deleg_db.execute(
+        "SELECT delivery_state,delivery_error,write_outcome FROM messages WHERE id='queued-1'"
+    ).fetchone()
+    assert tuple(row) == ("failed", "Not delivered in this test.", "proved_no_write")
+    assert broadcast == [("fail-1", ("queued-1",))]
+    assert driven == [("queued-1",)]
+    with pytest.raises(HTTPException) as refused:
+        await fail_queued_input("x", body)
+    assert refused.value.status_code == 409

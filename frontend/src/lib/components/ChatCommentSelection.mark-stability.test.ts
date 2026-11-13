@@ -14,7 +14,7 @@ it('keeps a mark when messages or another anchor change, while updating its own 
 	const first = { id: 'first', from_off: 0, to_off: 4, quote: 'text', answers: [], user_message_id: 'u', cid: 'c1' };
 	const row = { id: 'm', thread_id: 'thread', role: 'assistant', chat_comments: [first] };
 	messages.set([row as never]);
-	const component = mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply: vi.fn() } });
+	const component = mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', onSendReply: vi.fn() } });
 	const body = host.querySelector('.long-message-body')!;
 	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="first"]')).not.toBeNull());
 	const original = body.querySelector('[data-comment-ids="first"]');

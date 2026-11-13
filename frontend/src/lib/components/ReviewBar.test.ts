@@ -11,6 +11,8 @@ import { token } from '$lib/stores/auth';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 const planApi = vi.hoisted(() => ({ mutateUserTask: vi.fn() }));
+const docsApi = vi.hoisted(() => ({ dismissCommentAttention: vi.fn() }));
+vi.mock('$lib/api/docs', async (importOriginal) => ({ ...(await importOriginal<object>()), ...docsApi }));
 const ws = vi.hoisted(() => ({ on: vi.fn((_event: string, _handler: () => void) => () => {}) }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/api/plans', async (importOriginal) => ({ ...(await importOriginal<object>()), ...planApi }));
@@ -127,6 +129,43 @@ describe('ReviewBar', () => {
 		expect(button('Won’t do')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(button('Send back')).toBeUndefined();
+	});
+
+	it('a document\'s comment task says what waits and offers only Dismiss all, which re-reads the bar', async () => {
+		const step = {
+			node_id: 'task-1', node_title: 'Launch plan.md', node_revision: 1, plan_id: 'plan-1',
+			owner_thread_id: 'agent-1', owner_name: 'Docs agent',
+			comment_attention: { artifact_id: 'doc-1', comments: 2, suggestions: 1, system_task: true },
+		};
+		docsApi.dismissCommentAttention.mockReset().mockResolvedValue(undefined);
+		api.fetchReviewBar.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: step })
+			.mockResolvedValue({ ...read(0), ask_raised: false });
+		await render();
+		expect(host.querySelector('.rb-ask-full')?.textContent).toBe('2 comments, 1 suggestion to review');
+		expect(button('Done')).toBeUndefined();
+		expect(button('Won’t do')).toBeUndefined();
+		button('Dismiss all')!.click();
+		await vi.waitFor(() => expect(docsApi.dismissCommentAttention).toHaveBeenCalledWith('doc-1'));
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+		expect(planApi.mutateUserTask).not.toHaveBeenCalled();
+	});
+
+	it('re-reads the bar when a comment on this document changes, and not for another document', async () => {
+		vi.useFakeTimers();
+		try {
+			api.fetchReviewBar.mockResolvedValue(read(0));
+			await render();
+			const handler = ws.on.mock.calls.find(([event]) => event === 'doc_comment_changed')![1] as (message: unknown) => void;
+			const before = api.fetchReviewBar.mock.calls.length;
+			handler({ artifact_id: 'other-doc' });
+			await vi.advanceTimersByTimeAsync(200);
+			expect(api.fetchReviewBar.mock.calls.length).toBe(before);
+			handler({ artifact_id: 'doc-1' });
+			await vi.advanceTimersByTimeAsync(200);
+			expect(api.fetchReviewBar.mock.calls.length).toBe(before + 1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('settles the person step through its existing Done action without waiting on comments', async () => {
