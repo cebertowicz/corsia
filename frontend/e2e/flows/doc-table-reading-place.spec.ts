@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { createComment, openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { installPaintedFrames, readPainted, type EachPaintedFrame } from '../support/paintedFrames';
 import { expectMarginColumnUp, pill, widen, type Doc } from '../support/marginCards';
+import { closeComments } from '../support/commentDrawer';
 
 /**
  * A table-heavy document stays still under the reader: a status page of wide tables whose rows wrap onto several lines.
@@ -191,9 +192,18 @@ interface Placement { scrollTop: number; rowTop: number; rowBottom: number; rowX
  * as the next painted frame shows them: as the text narrows, a read in a task can see the row before the editor holds it.
  */
 async function placement(page: Page, key: string): Promise<Placement> {
-	return readPainted(page.locator('.cm-scroller'), (scroller, key) => {
+	// The document's scroller: a click on a cell opens that cell's own editor, which has one too.
+	return readPainted(page.locator('.cm-scroller:not(.cm-md-cell-editor .cm-scroller)'), (scroller, key) => {
 		const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`))!;
-		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = tr.querySelector('strong')!.getBoundingClientRect();
+		// The title's own words, drawn or in the open cell's editor (which styles them without a <strong>): the first text in
+		// the row that holds the key is the title cell's.
+		const words = document.createTreeWalker(tr, NodeFilter.SHOW_TEXT);
+		let range: Range | null = null;
+		for (let node = words.nextNode(); node && !range; node = words.nextNode()) {
+			const at = node.textContent!.indexOf(key);
+			if (at >= 0) { range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + key.length); }
+		}
+		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = range!.getBoundingClientRect();
 		// At phone width the comments come up as a sheet over the text; beside a wide canvas they sit in the margin.
 		const sheet = window.innerWidth <= 768 ? document.querySelector<HTMLElement>('[data-doc-comments-drawer]') : null;
 		const bottom = sheet ? Math.min(box.bottom, sheet.getBoundingClientRect().top) : box.bottom;
@@ -223,8 +233,7 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 			if (cards === 'margin' || cards === 'opens') {
 				await widen(page, document as unknown as Doc);
 				if (cards === 'opens') {
-					// On the canvas the column has no heading or close button: the comments control closes it.
-					await pill(page).click();
+					await closeComments(page);
 					await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 				}
 				// The column opening holds the top line until the reader takes over; a reader scrolls with the wheel, which ends it.
@@ -269,7 +278,7 @@ test('@surface:live-document the column opening with a row cut off at the top ke
 		const page = await context.newPage();
 		await openLiveDocument(page, document, '# Briefing');
 		await widen(page, document as unknown as Doc);
-		await pill(page).click();
+		await closeComments(page);
 		await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 		await page.locator('.cm-scroller').hover();
 		await page.mouse.wheel(0, 40);

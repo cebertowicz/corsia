@@ -9,7 +9,8 @@ import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
 import { imageOpener } from './markdown-image';
 import { markOpenable } from './widget-open';
-import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
+import { selectionIn } from './widget-selection';
+import { widgetComments, type WidgetSelection } from './widget-comments';
 
 const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
 const DOC = `intro\n\n${TABLE}\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
@@ -152,6 +153,29 @@ describe('a selection raised inside a rendered table', () => {
 		expect(document.getSelection()!.toString()).toBe('lph');
 		expect(raised.at(-1)).toMatchObject({ text: 'lph', inWidget: true });
 	});
+
+	it('marks a comment on a whole cell on the cell text, inside the editor’s non-editable table widget', () => {
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+		// jsdom does not reflect `contentEditable` to the attribute as browsers do, and CodeMirror marks its widgets through that property.
+		const native = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'contentEditable');
+		Object.defineProperty(HTMLElement.prototype, 'contentEditable', { configurable: true, get() { return this.getAttribute('contenteditable') ?? 'inherit'; }, set(value: string) { this.setAttribute('contenteditable', value); } });
+		let table: HTMLElement;
+		try {
+			const view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() })] }), parent: document.body }));
+			const eli = TABLE_FROM + TABLE.indexOf('Eli');
+			view.dispatch({ effects: setCommentRanges.of([{ id: 'a', from: eli, to: eli + 3 }]) });
+			vi.advanceTimersByTime(100);
+			table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		} finally {
+			if (native) Object.defineProperty(HTMLElement.prototype, 'contentEditable', native);
+			else delete (HTMLElement.prototype as Partial<HTMLElement>).contentEditable;
+		}
+		expect(table.closest('[contenteditable="false"]'), 'setup: the editor draws the table as a non-editable widget').toBeTruthy();
+		const td = table.querySelector('table')!.rows[2].cells[1];
+		expect(td.textContent, 'setup: the cell holds Eli').toBe('Eli');
+		expect(td.classList.contains('cm-comment-anchor')).toBe(false);
+		expect([...td.querySelectorAll<HTMLElement>('.cm-comment-wrap.cm-comment-anchor')].map((wrap) => [wrap.textContent, wrap.dataset.commentIds])).toEqual([['Eli', 'a']]);
+	});
 });
 
 describe('a press inside a rendered table or diagram', () => {
@@ -257,7 +281,8 @@ describe('a press inside a rendered table or diagram', () => {
 		touch('pointerdown', cellEl, 10);
 		cellEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, clientX: 5, clientY: 10 }));
 		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Eli'));
-		expect(events).toEqual(['select.pointer']);
+		// With the cell editor on, the tap opens the cell and the cell's own sync puts the caret where the pointer move would have.
+		expect(events).toEqual(['table-cell-sync']);
 	});
 
 	it('leaves the caret alone for a press outside the widgets or with another button', () => {

@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { renderMentions, type TaggedAgent } from './mentionMarkup';
+	import './comment-link.css';
 	import type { MentionOccurrence } from './mentionSelection';
 	import { isLongMessageText } from '$lib/messageCollapse';
 
-	let { text, unread = false, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; unread?: boolean; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
+	let { text, unread = false, preview = false, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; unread?: boolean; preview?: boolean; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
 	// Chat's one rule for a long message decides; an unread body always shows whole. `unread` is the thread's held
 	// state (CommentThread), which stays set while the thread is mounted, so nothing collapses under the person reading it.
-	const collapsible = $derived(!unread && isLongMessageText(text));
+	// A resting margin card's preview is not being read: it clamps at its short height until the card is picked.
+	const collapsible = $derived(preview || (!unread && isLongMessageText(text)));
 	let open = $state(false);
 	let clamped = $state(false);
 	let reveal: HTMLDivElement;
@@ -25,6 +27,9 @@
 		}
 		const observer = new ResizeObserver(measure);
 		observer.observe(node);
+		// Its clamp changes with the card (a margin card's preview clamps sooner than the card opened), so whether it clips is measured again.
+		// The reveal box is the parent; `reveal` is not bound yet while this child mounts.
+		if (node.parentElement) observer.observe(node.parentElement);
 		requestAnimationFrame(measure);
 		return { update: measure, destroy: () => observer.disconnect() };
 	}
@@ -41,7 +46,7 @@
 {#if clamped}<button class="ct-more" onclick={(e) => { e.stopPropagation(); toggle(); }}>{open ? 'Show less' : 'Show more'}</button>{/if}
 
 <style>
-	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: 4lh; max-height: 4lh; overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
+	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: calc(var(--ct-body-lines, 4) * 1lh); max-height: calc(var(--ct-body-lines, 4) * 1lh); overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
 	.ct-markdown-reveal.clamped { -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); }
 	.ct-markdown-reveal.open { max-height: var(--ct-expanded-height); }
 	.ct-markdown-reveal.whole { max-height: none; }

@@ -20,7 +20,7 @@
 	let pendingMeasure: number | null = null;
 	const identity = (frame: DocActivityFrame) => JSON.stringify([frame.artifact_id, frame.thread_id, frame.kind, frame.at, frame.comment_id, frame.revision]);
 	function editor() {
-		const element = root?.querySelector<HTMLElement>('.cm-content');
+		const element = root?.querySelector<HTMLElement>('.cm-editor');
 		return element ? EditorView.findFromDOM(element) : null;
 	}
 	function locate(from: number, to: number) {
@@ -57,6 +57,13 @@
 	$effect(() => {
 		artifactId; threadId;
 		unseen.clear(); eligible.clear(); pill = null;
+	});
+	// A below pill stands over the text's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).
+	$effect(() => {
+		const canvas = root;
+		if (!canvas || !viewing || pill?.direction !== 'below') return;
+		canvas.setAttribute('data-notice-below', '');
+		return () => canvas.removeAttribute('data-notice-below');
 	});
 	$effect(() => {
 		viewing;

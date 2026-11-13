@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from '../support/test';
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { openComments, openResolved, resolvedEntry } from '../support/commentDrawer';
 import { isolatedDb } from '../support/imageRegionComments';
@@ -16,11 +16,14 @@ const FINE_AND_PHONE: readonly Case[] = [['1440 light pane closed', 'closed', 'l
 /** The drawer's states share one database; each case leaves it as it found it, so a late case never runs against earlier cases' threads. */
 test.afterEach(({ request }) => deleteSeededThreads(request));
 const drawerOf = (page: Page) => page.locator('[data-doc-comments-drawer]');
+/** The list is showing its threads. Read from a thread, not the list: the margin column's own box is 0 px tall, its cards placed beside their lines. */
+const listShown = (drawer: Locator) => expect(drawer.locator('[data-comment-id]').first()).toBeVisible();
 const pill = (page: Page) => page.locator('.comment-status');
-/** The margin column beside the text: its section and list are 0px boxes holding absolutely placed cards. */
-const inMargin = (page: Page) => drawerOf(page).evaluate((el) => el.classList.contains('margin'));
-/** The comments are showing: a thread card is on screen. In the margin column the section itself has no height, so the card is what a person sees. */
-const expectShown = (page: Page) => expect(drawerOf(page).getByRole('region', { name: /^(Comment|Resolved comment|Suggestion)/ }).first()).toBeVisible();
+/** A margin card at rest is a short preview that counts its replies; picking it (by its header: its jump button lies under it) shows them. A list row or a sheet shows them already. */
+async function showReplies(drawer: Locator) {
+	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
+	if (await card.evaluate((el) => el.classList.contains('preview'))) await card.locator('.ct-head').click({ position: { x: 14, y: 10 } });
+}
 
 async function reply(request: APIRequestContext, doc: Doc, parentId: string, body: string): Promise<string> {
 	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN }, data: { body, parent_id: parentId, delivery_policy: 'immediate' } });
@@ -67,12 +70,11 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await open(page, doc, mode, theme);
 	await openComments(page);
 	const drawer = drawerOf(page);
-	await expectShown(page);
+	await listShown(drawer);
 	await settled(page);
-	// The list forms head their threads with a count; the margin column sets each open thread beside its text instead.
-	if (await inMargin(page)) await expect(drawer.getByRole('region', { name: /^Comment by / })).toHaveCount(2);
-	else await expect(drawer.locator('.drawer-heading h2')).toContainText('2 open');
+	if (mode === 'phone') await expect(drawer.locator('.drawer-heading h2')).toHaveText('Comments 2');
 	await expect(drawer.locator('.ct-reply-count')).toContainText('2 replies');
+	await showReplies(drawer);
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await shot(page, 'rs-13a-thread-replies-visible', info);
 	await settled(page);
@@ -104,14 +106,12 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	} else await openResolved(drawer);
 	await expect(resolvedRegion).toHaveCount(1);
 	await shot(page, 'rs-14-resolved-entry-open', info);
-	// The resolved list closes from the same entry. It is a modal sheet in the document column at every width, so the tap lands on its backdrop and closes it.
-	await tap();
-	await expect(resolvedRegion).toHaveCount(0);
 	if (mode === 'phone') {
+		await page.getByRole('dialog', { name: 'Resolved comments' }).getByRole('button', { name: 'Close', exact: true }).click();
 		await openComments(page);
-		await expect(drawer).toBeVisible();
-		await settled(page);
-	}
+		await listShown(drawer);
+	} else await resolved.click();
+	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
 
 	// A writable open thread shows its reply field in place; a margin card beside the text shows it only once picked.
@@ -128,15 +128,15 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await last.click(mode === 'phone' ? undefined : { position: { x: 14, y: 10 } });
 	await settled(page);
 	await expect(page.locator('.cm-content')).toContainText('Step 12:');
-	await expectShown(page);
+	await listShown(drawer);
 	// The sheet keeps every writable open thread's reply field; the margin column only the picked card's. The picked thread stays in view.
 	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(mode === 'phone' ? 2 : 1);
-	// The drawer owns scrolling, so the reply must be fully contained in its scrollport;
-	// browser-viewport containment is unrelated once the document has scrolled underneath it.
+	// The sheet owns scrolling, so the reply must be fully contained in its scrollport; a margin card is drawn on the
+	// document and scrolls with it, so there the document's scrollport holds it. Browser-viewport containment is unrelated
+	// once the document has scrolled underneath it.
 	const replyField = drawer.locator('.ct-input').last();
-	if (await inMargin(page)) await expect(replyField).toBeInViewport({ ratio: 1 });
-	else await expect.poll(() => replyField.evaluate((input) => {
-		const list = input.closest<HTMLElement>('.drawer-comments')!;
+	await expect.poll(() => replyField.evaluate((input) => {
+		const list = input.closest<HTMLElement>('.cm-scroller') ?? input.closest<HTMLElement>('.drawer-comments')!;
 		const replyRect = input.getBoundingClientRect();
 		const listRect = list.getBoundingClientRect();
 		return replyRect.top >= listRect.top - 1 && replyRect.bottom <= listRect.bottom + 1;
@@ -199,6 +199,7 @@ journey('a read-only document lists comments without writing controls', [['1440 
 	await openComments(page);
 	const drawer = drawerOf(page);
 	await expect(drawer.locator('.ct-reply-count')).toContainText('1 reply');
+	await showReplies(drawer);
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await expect(drawer.locator('.ct-act:visible'), 'no reply, agree or resolve control').toHaveCount(0);
 	await expect(drawer.locator('.ct-compose:visible')).toHaveCount(0);
@@ -212,7 +213,7 @@ journey('a failed refresh offers Retry, and Retry reads as Loading', [['1440 lig
 	await open(page, doc, mode, theme);
 	await openComments(page);
 	const drawer = drawerOf(page);
-	await expectShown(page);
+	await listShown(drawer);
 	// Refreshes of comments already shown stay quiet; only a failed read followed by Retry reads as Loading.
 	let reads: 'pass' | 'fail' | 'hold' = 'pass';
 	let release!: () => void;
@@ -265,10 +266,17 @@ journey('the server names the new replies, a long thread keeps only them and the
 	await open(page, doc, mode, theme);
 	await openComments(page);
 	const drawer = drawerOf(page);
-	// At 1440 the comments open as the sheet or the margin column depending on when the pane's width transition ends; a card shows in both.
-	await expectShown(page);
+	await listShown(drawer);
 	await settled(page);
 	if (mode === 'closed') {
+		// At rest the card carries one New mark for its unread replies; picked, each new reply carries its own.
+		await expect(drawer.locator('.ct-new')).toHaveCount(1);
+		// Picking the card opens the thread, which stamps it viewed. Once that answer is in and painted, the picked card
+		// still marks the replies it opened with.
+		const stamped = page.waitForResponse((response) => response.url().includes('/viewed') && response.request().method() === 'POST');
+		await showReplies(drawer);
+		await stamped;
+		await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 		await expect(drawer.locator('.ct-new'), 'both agent replies are new; the person\'s own is not').toHaveCount(2);
 		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
 		await shot(page, 'rs-23a-new-replies-marked', info);
@@ -303,6 +311,9 @@ journey('new replies clear once the thread is opened, and the person\'s own neve
 	await stamped;
 	await open(page, doc, mode, theme);
 	await openComments(page);
+	await listShown(drawerOf(page));
+	await expect(drawerOf(page).locator('.ct-new'), 'no New mark at rest once the replies were seen').toHaveCount(0);
+	await showReplies(drawerOf(page));
 	await expect(drawerOf(page).getByText('My own newest reply.')).toBeVisible();
 	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(0);
 });
@@ -315,7 +326,7 @@ journey('a reply being typed survives someone else resolving the thread', [['144
 	await settled(page);
 	await openComments(page);
 	const drawer = drawerOf(page);
-	await expectShown(page);
+	await listShown(drawer);
 	// A margin card shows its reply field only once picked, and whether the pill click or the column opening on load got there first varies, so pick the card by its header.
 	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
 	await expect(card).toBeVisible();
