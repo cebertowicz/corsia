@@ -36,7 +36,8 @@ for (const author of ['person', 'agent'] as const) {
 			// A phone's sheet leaves the pressed text visible above it, in prose and in a cell at the end of the document alike.
 			if (phone) {
 				await expect.poll(async () => {
-					const box = await target.boundingBox(), sheet = await page.locator('[data-adaptive-drawer] .drawer-panel').first().boundingBox();
+					const pressedText = label === 'Cell' ? page.locator('td', { hasText: CELL }).first() : target; // a pressed cell turns into its editor, so measure the cell
+					const box = await pressedText.boundingBox(), sheet = await page.locator('[data-adaptive-drawer] .drawer-panel').first().boundingBox();
 					return !!box && !!sheet && box.y >= 0 && box.y + box.height <= sheet.y;
 				}, { message: `the pressed ${label} text is above the sheet` }).toBe(true);
 			}
