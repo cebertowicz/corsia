@@ -69,7 +69,7 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	}) : null;
 	if (owner) observer?.observe(owner);
 	return {
-		update: () => resize(),
+		update: (_next?: string) => resize(),
 		destroy: () => {
 			cancelAnimationFrame(frame); observer?.disconnect();
 			node.removeEventListener('scroll', hold);

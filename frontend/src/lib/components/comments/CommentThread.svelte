@@ -4,8 +4,8 @@
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
-	import { lineDiff } from '$lib/diff';
-	import ToolDiff from '$lib/components/ToolDiff.svelte';
+	import SuggestedEdit from './SuggestedEdit.svelte';
+	import { openAtNewestReply } from './openAtNewestReply';
 	import { changedLabel } from '$lib/docImageComments';
 	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
@@ -68,9 +68,8 @@
 		autoFocusSelection?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
-		/** How the replies show: `recent` from the earliest unread (or the last two) with Show earlier; `all` every one (a thread opened on its own); `summary` a row saying how many, then only the newest (a row in the drawer's list). */
+		/** How the replies show (CommentReplyList's `view`: `all` for a thread opened on its own, `summary` for a row in the drawer's list); a summary row's replies row calls `onOpenThread`. */
 		replyView?: 'recent' | 'all' | 'summary';
-		/** A summarised row's replies row opens the whole thread. */
 		onOpenThread?: (commentId: string) => void;
 		onReply?: (commentId: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve?: (commentId: string, resolved: boolean) => void;
@@ -109,19 +108,7 @@
 	const hasBody = $derived(!!(comment.text || comment.taggedPerson || comment.taggedAgents?.length));
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
 	const decidedOpen = $derived(isDecidedOpen(comment));
-	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
-	/** A long suggested edit shows its first lines and says there is more; the card never scrolls it on its own. */
-	let diffOpen = $state(false);
-	let diffClamped = $state(false);
-	function trackDiff(node: HTMLElement) {
-		const measure = () => { if (!diffOpen) diffClamped = node.scrollHeight > node.clientHeight + 1; };
-		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-		observer?.observe(node);
-		if (node.firstElementChild) observer?.observe(node.firstElementChild);
-		requestAnimationFrame(measure);
-		return { destroy: () => observer?.disconnect() };
-	}
 	/** A deleted text's quote is read in full unless it is long; then it is clamped with the Show more control chat comments use. */
 	let quoteOpen = $state(false);
 	let resolvedOpen = $state(untrack(() => !chatSurface && (!!comment.newComment || !!comment.newReplyIds?.length)));
@@ -159,25 +146,7 @@
 
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	/**
-	 * A thread opened on its own (a popover, the sheet's thread) opens at its newest reply: what scrolls it starts at the card's
-	 * end, so the reply field shows under the newest reply when both fit, and never past the newest reply's first line.
-	 */
-	let openedAtNewest = false;
-	$effect(() => {
-		if (!flat || inMargin || openedAtNewest || !newestReply || !el) return;
-		openedAtNewest = true;
-		const reply = newestReply, card = el;
-		// Two frames: a popover takes its place and height in the frame after it opens.
-		requestAnimationFrame(() => requestAnimationFrame(() => {
-			let port = card.parentElement;
-			while (port && port !== document.body && !(/(auto|scroll)/.test(getComputedStyle(port).overflowY) && port.scrollHeight > port.clientHeight + 1)) port = port.parentElement;
-			if (!port || port === document.body || !reply.isConnected) return;
-			const toEnd = port.scrollHeight - port.clientHeight - port.scrollTop;
-			const toReply = reply.getBoundingClientRect().top - port.getBoundingClientRect().top - (Number.parseFloat(getComputedStyle(port).paddingTop) || 0);
-			port.scrollTop += Math.max(0, Math.min(toEnd, toReply));
-		}));
-	});
+	$effect(() => { if (flat && !inMargin && newestReply && el) openAtNewestReply(el, newestReply); });
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		if (!onViewed || document.visibilityState !== 'visible' || (!comment.newComment && !comment.newReplyIds?.length)) return;
@@ -265,13 +234,6 @@
 
 <svelte:window onvisibilitychange={onVisibilityChange} />
 
-{#snippet suggestedEdit()}
-	{#if suggestionDiff}
-		<div class="ct-diff" class:clamped={diffClamped && !diffOpen} class:open={diffOpen} use:trackDiff><ToolDiff file="Suggested edit" lines={suggestionDiff} words fill /></div>
-		{#if diffClamped}<button class="ct-show-all" onclick={(e) => { e.stopPropagation(); diffOpen = !diffOpen; }}>{diffOpen ? 'Show less' : 'Show all'}</button>{/if}
-	{/if}
-{/snippet}
-
 {#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
 	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 		<svg class="ct-{mark}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={mark === 'check' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>
@@ -289,7 +251,7 @@
 		{@render resolvedHead(comment.decision === 'accepted' ? 'check' : 'cross', `Suggested by ${author.name} · ${comment.decision === 'accepted' ? 'Accepted' : 'Rejected'} by ${comment.decidedBy ?? 'you'}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
-				{@render suggestedEdit()}
+				{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
 				{#if hasBody}<CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
@@ -345,7 +307,7 @@
 			<!-- A decided card's only action is Resolve, so its card error is a refused resolve. -->
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else if isSuggestion}
-			{@render suggestedEdit()}
+			{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
 			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
 			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
 			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
@@ -395,13 +357,6 @@
 	.ct.removed { border-style: dashed; }
 
 	.ct-head { display: flex; align-items: center; gap: 7px; }
-	/* Its first lines, with the rest faded and Show all under it, like a long comment's Show more. */
-	.ct-diff { flex-shrink: 0; max-height: 10lh; overflow: hidden; }
-	.ct-diff.clamped { mask-image: linear-gradient(to bottom, black calc(100% - 2lh), transparent); }
-	.ct-diff.open { max-height: none; }
-	.ct-show-all { align-self: flex-start; min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
-	.ct-show-all:hover { text-decoration: underline; }
-	@media (pointer: coarse) { .ct-show-all { min-height: var(--touch-target); } }
 	/* One row at every width: a long name shortens in the middle (CommentMeta), so the time and actions never drop below it. */
 	.ct-reply-count { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* Avatar owns the shared initials presentation. */
