@@ -750,7 +750,7 @@ async def test_the_rule_events_artifact_is_the_one_routing_resolved(
         isolated_db, sent, monkeypatch, internal_event, payload):
     from events import webhook_rules
 
-    monkeypatch.setattr("events.pr_lookup.get_prs_for_sha", lambda *_args: [
+    monkeypatch.setattr("events.connectors.github_pr_lookup.get_prs_for_sha", lambda *_args: [
         {"number": 7, "state": "open", "base_ref": "dev", "head_ref": "f", "head_sha": "sha-s"}])
 
     _project(P)

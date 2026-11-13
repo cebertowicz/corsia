@@ -166,7 +166,7 @@ def check_suite_pr_metadata_from_event(payload: dict[str, Any]) -> dict[str, Any
     if not repo or not head_sha:
         return selected
 
-    from events.pr_lookup import get_prs_for_sha
+    from events.connectors.github_pr_lookup import get_prs_for_sha
 
     prs = get_prs_for_sha(repo, head_sha)
     if selected is not None:

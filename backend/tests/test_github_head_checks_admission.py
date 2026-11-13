@@ -39,7 +39,7 @@ async def test_admission_routes_only_new_completed_suites(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancelled_suite_uses_payload_pr_without_lookup(monkeypatch):
-    from events import pr_lookup
+    from events.connectors import github_pr_lookup as pr_lookup
 
     def forbidden(*_args):
         pytest.fail("unexpected GitHub lookup")
