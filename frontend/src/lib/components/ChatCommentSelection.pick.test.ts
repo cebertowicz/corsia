@@ -2,7 +2,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import ChatCommentSelectionPickHost from './ChatCommentSelectionPickHost.test.svelte';
 import { messages } from '$lib/stores/threads';
-import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 
 // Where the column is up, the transcript's highlight is the control that picks its card, so the picked id
 // has to reach the caller that shares it with the column. This walks the real surface through the same
@@ -77,8 +77,8 @@ it('hands a thread open in its popover to its card when the column comes up, kee
 	flushSync();
 	expect(document.querySelector('[role="dialog"]')).toBeNull();
 	expect(picked()).toBe('one');
-	expect(chatReplyDrafts.get('one')).toBe('keep this draft');
-	chatReplyDrafts.set('one', '');
+	expect(chatCommentDrafts.get('one')).toBe('keep this draft');
+	chatCommentDrafts.set('one', '');
 });
 
 it('writes a new comment in the column, as a card level with its text, while the column is up', async () => {

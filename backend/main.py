@@ -163,8 +163,8 @@ def _emit_error_reference(
 
 @app.exception_handler(StarletteHTTPException)
 async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
-    """Attach a reference to server-side HTTP errors only."""
-    if exc.status_code < 500:
+    """Attach a reference to server-side HTTP errors, and to any error minted with one."""
+    if exc.status_code < 500 and not isinstance(exc, ReferencedHTTPException):
         return await http_exception_handler(request, exc)
 
     reference = _emit_error_reference(

@@ -1,5 +1,5 @@
 import { expect, test } from '../support/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { setDebugVersionOverlay } from '../support/heldComments';
 
@@ -55,12 +55,11 @@ for (const [width, height, project] of [[1440, 900, 'chromium-desktop'], [900, 9
   }).toBe(true);
   await page.screenshot({ path: info.outputPath('long-chat-comment.png'), animations: 'disabled' });
 
-  await button.click();
-  await expect(page.locator('.comment-chip')).toBeVisible();
+  // A chat comment posts from its own box: it stays on its highlight and never becomes a chat message.
   await seedMockResponses(request, [{ content: 'Received comment' }]);
-  await chatComposer(page).fill('Please address this');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await button.click();
   await expect(row.locator('.cm-comment-anchor').filter({ hasText: 'selected phrase' })).toBeVisible();
+  await expect(page.locator('.messages .message.user')).toHaveCount(0);
 
  });
 }

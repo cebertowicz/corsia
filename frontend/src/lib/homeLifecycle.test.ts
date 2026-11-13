@@ -97,6 +97,21 @@ describe('keyboard inset focus ordering', () => {
 		vi.runAllTimers();
 		expect(inset()).toBe('60px');
 	});
+
+	it('keeps the transcript header clearance while an editor in a sheet has focus', () => {
+		const lead = () => document.documentElement.style.getPropertyValue('--messages-pad-top');
+		const sheet = document.createElement('div');
+		sheet.setAttribute('data-adaptive-drawer', '');
+		const sheetEditor = document.createElement('textarea');
+		sheet.append(sheetEditor);
+		document.body.append(sheet);
+		input.focus();
+		expect(lead()).not.toBe('');
+		sheetEditor.focus();
+		expect(lead()).toBe('');
+		expect(inset()).toBe('60px');
+		sheet.remove();
+	});
 });
 
 describe('registerHomeLifecycle polling', () => {

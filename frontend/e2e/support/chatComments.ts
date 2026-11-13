@@ -7,6 +7,17 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * transcript while the previous surface is still closing.
  */
 
+/**
+ * Every comment the person posted, and every reply they wrote in a comment thread, as the server's page read
+ * carries them: on the commented rows' threads, since a comment's own input row never reaches chat.
+ * Each has the server's `cid` and the `user_message_id` of the input that carried it.
+ */
+export function postedComments(rows: any[]): { cid: string; user_message_id: string; note?: string; text?: string }[] {
+	return rows.flatMap((row) => (row.chat_comments ?? []).flatMap((comment: any) => [
+		comment, ...(comment.answers ?? []).filter((answer: any) => answer.author_kind === 'user'),
+	]));
+}
+
 /** The editor for a comment or reply, open on screen. */
 export function commentEditor(page: Page, kind: 'Comment' | 'Reply' = 'Comment') {
 	return page.getByPlaceholder(`${kind}…`);
@@ -17,15 +28,33 @@ export async function commentEditorClosed(page: Page, kind: 'Comment' | 'Reply' 
 	await expect(commentEditor(page, kind)).toHaveCount(0);
 }
 
-/** The comment shows on the message as an unsent highlight carrying its quote. */
-export async function commentPendingOnMessage(row: Locator, quote: string): Promise<void> {
-	await expect(row.locator('.cm-comment-pending').filter({ hasText: quote })).toBeVisible();
-}
-
-/** The sent comment shows on the message as its highlight, and nothing is left unsent. */
+/** The posted comment shows on the message as its highlight, and nothing is left unposted. */
 export async function commentOnMessage(row: Locator, quote: string): Promise<void> {
 	await expect(row.locator('.cm-comment-anchor').filter({ hasText: quote })).toBeVisible();
 	await expect(row.locator('.cm-comment-pending')).toHaveCount(0);
+}
+
+/**
+ * Wait until a highlight can take a click: it has stopped moving on both axes, is hit at its centre, and sits
+ * above the composer. Opening a chat scrolls its transcript to the latest message, and a side pane closing
+ * slides it sideways, so a click aimed at the highlight before then lands on the moved transcript instead.
+ * A covered highlight is scrolled back to the middle of the transcript and read again.
+ */
+export async function settleHighlight(page: Page, mark: Locator): Promise<void> {
+	const read = () => mark.evaluate((anchor) => {
+		const box = anchor.getBoundingClientRect();
+		const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
+		const hits = anchor.getClientRects().length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
+		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
+		if (!clear) anchor.scrollIntoView({ block: 'center' });
+		return clear ? `settled:${Math.round(box.x)},${Math.round(box.y)}` : 'covered';
+	});
+	await expect.poll(async () => {
+		const before = await read();
+		await page.waitForTimeout(80);
+		const after = await read();
+		return before === after ? before : `moved:${before}>${after}`;
+	}, { message: 'the highlight stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+,-?\d+$/);
 }
 
 /**
@@ -37,6 +66,7 @@ export async function openCommentThread(row: Locator, page: Page, quote: string)
 	const narrow = (page.viewportSize()?.width ?? 0) <= 768;
 	const mark = row.locator('.cm-comment-anchor').filter({ hasText: quote });
 	await expect(mark).toBeVisible();
+	await settleHighlight(page, mark);
 	await mark.click();
 	if (narrow) {
 		const drawer = page.getByRole('dialog', { name: 'Comment thread' });
