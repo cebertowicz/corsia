@@ -6,9 +6,11 @@
 /* The comment margin column (`--margin-column`: 280px of cards plus gutter), at any desktop width, is drawn on the canvas inside the editor's
    scroller: the editor keeps that room right of its text (and the grid gap the column used to leave), so the cards scroll with the page. The
    room opens over the spring duration and closes the same way as the column leaves, so the text narrows and widens in one smooth step.
-   A Workspace panel shown over the canvas covers its inline end (`--pane-overlay-inset`), so the room starts left of it. */
-.doc .cm-scroller { transition: padding-right var(--dur-spring) var(--ease-material); }
-.doc.margin-room .cm-scroller { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
+   A Workspace panel shown over the canvas covers its inline end (`--pane-overlay-inset`), so the room starts left of it.
+   Only the document's own scroller: an open table cell's editor (`.cm-md-cell-editor`) has one too, and that room in a cell would
+   widen its column past the table's box. */
+.doc .cm-scroller:not(.cm-md-cell-editor .cm-scroller) { transition: padding-right var(--dur-spring) var(--ease-material); }
+.doc.margin-room .cm-scroller:not(.cm-md-cell-editor .cm-scroller) { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
 .doc:has(.canvas-comment-drawer:not(.margin)):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
@@ -40,7 +42,7 @@
 .doc-body.email-scroll .ed-wrap { height: auto; }
 .doc-body.email-scroll .cm-editor { height: auto; }
 .doc-body.email-scroll .cm-scroller { overflow: visible; }
-.doc-body.email-scroll .cm-content { padding-bottom: var(--space-3); }
+.doc-body.email-scroll .cm-content:not(.cm-md-cell-editor .cm-content) { padding-bottom: var(--space-3); }
 /* An email draft's notes: the loud ones are EmailNotes.svelte, the quiet ones cm/email-header.ts. */
 .ed-wrap .cm-scroller { overscroll-behavior: contain; }
 .readonly-note { padding: 6px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-tertiary); font-size: var(--text-footnote); }

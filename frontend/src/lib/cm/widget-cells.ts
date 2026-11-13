@@ -4,9 +4,18 @@ import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
-export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number }
+/** `rowFrom` is where the cell's row starts in the source: with `col`, what names a cell across edits to other rows. */
+export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number; rowFrom: number; padded?: true }
 
-/** The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty cells; the delimiter row is skipped. */
+/**
+ * The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty
+ * cells; the delimiter row is skipped. `rawFrom`/`rawTo` are the same cell between its two pipes, padding included — the
+ * only span that can hold a space the reader types at either edge of the cell.
+ *
+ * Only cells the source has: GFM draws a short row padded with empty cells to the header's width (`tableGrid`), and those
+ * have no span here, so none takes a comment until typing gives it source. A row with more cells than the header keeps its
+ * extra spans, and the render has no cell for them, so callers that look cells up in the DOM skip them.
+ */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
 	let lineStart = 0;
@@ -32,10 +41,56 @@ export function tableCells(src: string): CellSpan[] {
 			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
 			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
-			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo });
+			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd, rowFrom: start });
 		}
 	});
 	return cells;
+}
+
+/**
+ * Every cell the table is drawn with, in drawn order: the source cells (`tableCells`) up to the header's width plus, for a row shorter than the
+ * header, the empty cells the renderer pads it with. A padded cell has no source of its own, so its span is zero-width at
+ * the row's end, where the source would gain it; every padded cell of a row sits at that offset. Only the paths that open
+ * or walk drawn cells read this; anything that anchors on source reads `tableCells`.
+ *
+ * One keystroke in an open cell reads the grid of the same source several times (the open cell's lookup, the widget's
+ * shape check, the patch), so the last few grids are kept by source and shared: callers read them and never change them.
+ */
+export function tableGrid(src: string): CellSpan[] {
+	const kept = grids.get(src);
+	if (kept) return kept;
+	const grid = buildGrid(src);
+	grids.set(src, grid);
+	if (grids.size > KEPT_GRIDS) grids.delete(grids.keys().next().value!);
+	return grid;
+}
+
+const KEPT_GRIDS = 4;
+const grids = new Map<string, CellSpan[]>();
+
+/** One pass over the source cells, which `tableCells` gives row by row: linear in the table's size. */
+function buildGrid(src: string): CellSpan[] {
+	const real = tableCells(src), lines: { start: number; end: number }[] = [];
+	let lineStart = 0;
+	for (const [index, line] of src.split('\n').entries()) {
+		if (index !== 1) lines.push({ start: lineStart, end: lineStart + line.length });
+		lineStart += line.length + 1;
+	}
+	let columns = 0;
+	while (real[columns]?.row === 0) columns++;
+	const grid: CellSpan[] = [];
+	let next = 0;
+	lines.forEach(({ start, end }, row) => {
+		let drawn = 0;
+		for (; next < real.length && real[next].row === row; next++) {
+			// A row with more cells than the header keeps those spans in the source, and the renderer draws no cell for them.
+			if (real[next].col < columns) { grid.push(real[next]); drawn++; }
+		}
+		for (let col = drawn; col < columns; col++) {
+			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, rowFrom: start, padded: true });
+		}
+	});
+	return grid;
 }
 
 export const snippet = (value: string) => value.length > SNIPPET ? `${value.slice(0, SNIPPET)}…` : value;
