@@ -1,11 +1,14 @@
 """What a rule-started worker reads, and the brief it starts with (design §8.1).
 
 A worker reads two things only: one directory in its rule owner's staging folder, where
-the workflow that started it puts what it reviews, and the start's own empty directory,
-``<owner thread root>/workers/<decision id>``. Both are read paths of the worker, never its
-working directory or an ancestor of it, so a ``.claude/``, ``CLAUDE.md`` or hooks inside
-them are never loaded. The start's directory is removed when the start settles. Anything
-else refuses the start with :class:`StartRefused`, whose text the owner reads.
+the workflow that started it puts what it works from (a request may carry none), and the start's
+own directory, ``<owner thread root>/workers/<decision id>``. The start's directory is always
+there and always empty: ``untrusted`` confinement needs at least one read path
+(``tools/delegate_task.py``), so a worker started without staging, such as the movement digest
+worker, still has one and reads nothing. Both are read paths of the worker, never its working
+directory or an ancestor of it, so a ``.claude/``, ``CLAUDE.md`` or hooks inside them are never
+loaded. The start's directory is removed when the start settles. A staging directory outside the
+staging folder refuses the start with :class:`StartRefused`, whose text the owner reads.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ def owner_root(owner: str, project_id: str | None, db: sqlite3.Connection) -> Pa
 
 
 def start_dir(root: Path, decision_id: int) -> Path:
+    """The start's empty directory: the read path of a worker that has no staging."""
     return root / "workers" / str(decision_id)
 
 

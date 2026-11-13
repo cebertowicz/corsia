@@ -26,7 +26,12 @@ For a PR from a fork, the **CLA** check asks each contributor to accept the [Con
 
 ## Read the review
 
-CORSIA does not run pull request reviews itself and posts no review status on a PR. A review comes from a review workflow installed from CORSIA's community, which reads GitHub on its own.
+CORSIA itself runs no pull request review. A project that installs the review workflow from CORSIA's community gets the review from that workflow, which reads GitHub on its own and posts two commit statuses on the PR's head:
+
+- `qa/llm-reviewer` is the verdict. It is `pending` while the review waits (for checks, a maintainer or a conflict to clear) or is requested, `success` when nothing blocks or a maintainer skipped the review, `failure` when it found something that must be fixed, and `error` when the review could not finish and will retry.
+- A second status, named like the first with a `-present` suffix, is `success` once a review for that head is published.
+
+Without the workflow installed, neither status appears.
 
 - A finding is evidence, not authority: verify it against the current code, then fix it or explain why it does not apply.
 

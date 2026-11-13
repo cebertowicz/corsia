@@ -19,8 +19,9 @@ from typing import Any
 
 from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT, STATUS_PRESENCE_CONTEXT
 
-#: ``-present`` states that end the reviewer's work on a head: ``success`` once it was
-#: reviewed, ``failure`` once ``qa/override-reviewer`` skipped it.
+#: ``-present`` states that end the reviewer's work on a head. The review workflow posts
+#: ``success`` ("Review published") once its review is published; it never posts ``failure``,
+#: and a head holding one is counted as done too.
 REVIEWER_DONE = frozenset({"success", "failure"})
 
 CI_EVENT_MISSING = "ci_event_missing"
@@ -31,7 +32,7 @@ CI_CANCELLED = "ci_cancelled"
 #: A check-suite webhook arrives within seconds; 10 min is the grace for one.
 #: It is also how long a cancelled run may wait for a rerun or a successor.
 CI_EVENT_GRACE = timedelta(minutes=10)
-#: Measured CI-done to reviewer-verdict maximum is 39 min (design §1.3).
+#: How long after CI completes a review may take before it counts as missing.
 REVIEW_GRACE = timedelta(minutes=45)
 CI_START_GRACE = timedelta(minutes=30)
 #: Allowance for comparing GitHub's clock with this host's when judging a

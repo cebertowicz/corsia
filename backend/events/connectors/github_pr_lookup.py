@@ -7,7 +7,7 @@ import logging
 import subprocess
 from typing import Any
 
-from reviewer.gh_api import run_gh
+from connections.github_run import run_gh
 
 log = logging.getLogger(__name__)
 

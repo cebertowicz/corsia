@@ -7,7 +7,6 @@ Through the real tool, intake, evaluation, runner, spawn and Claude Code runtime
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -100,43 +99,17 @@ async def test_a_staging_path_outside_the_folder_is_refused_and_the_owner_told(w
     assert [row[0] for row in starts(rule)] == ["refused", "returned"]
 
 
-def _repo(tmp: Path) -> tuple[Path, str]:
-    repo = tmp / "repo"
-    (repo / ".claude").mkdir(parents=True)
-    (repo / ".claude" / "settings.json").write_text("{}\n")
-    (repo / "app.py").write_text("x = 1\n")
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-           "GIT_COMMITTER_EMAIL": "t@t", "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
-    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "c"]):
-        subprocess.run(["git", *args], cwd=repo, env=env, check=True)
-    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True,
-                         check=True).stdout.strip()
-    return repo, sha
-
-
-def _register(world, repo: Path) -> None:
-    from infra.database import write_transaction
-    from infra.project_repo_policy import register_repo_policy
-
-    with write_transaction(None, scope="rule_worker_repo") as db:
-        register_repo_policy(world["project"], "app", repo, pinned_branch=None,
-                             protect_base_checkout=False, db=db)
-
-
-# 1 (head) -- a head_repo fact is data the worker sees: its read paths are its staging directory and
-# the start's own (empty) folder, and neither is its cwd or an ancestor of it.
+# 1 (read paths) -- a worker reads its staging directory and its start's empty directory, and its
+# working directory is neither of them, an ancestor of either, or inside either.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sha", ["real", "0" * 40, None])
-async def test_a_head_repo_fact_is_data_and_the_worker_reads_only_staging_and_its_start_folder(world, tmp_path, sha):
+async def test_the_worker_reads_only_its_staging_and_start_directories_and_never_runs_in_them(world):
     from automation import worker_runner
     from infra.database import get_db
     from infra.thread_confinement import read_dirs
 
-    repo, real = _repo(tmp_path)
-    _register(world, repo)
     world["reply"].write_text("HANG")
     rule = await make_rule()
-    await request(head_repo="app", head_sha=real if sha == "real" else sha)
+    await request()
     assert await worker_runner.drive() == 1
     [(outcome, _reason, _identity, worker)] = starts(rule)
     assert outcome == "started"
@@ -147,7 +120,7 @@ async def test_a_head_repo_fact_is_data_and_the_worker_reads_only_staging_and_it
     cwd = Path(_launch(worker)["working_dir"])
     assert cwd.name == "confined" and cwd.is_dir()
     for read in (staging, start):
-        assert read not in cwd.parents and cwd != read and cwd not in read.parents
+        assert cwd != read and cwd not in read.parents and read not in cwd.parents
 
 
 # 10 -- a paused owner's start is skipped, not replayed; a fresh request after resume starts.

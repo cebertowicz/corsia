@@ -1,6 +1,7 @@
-"""Schema 191: the removed PR reviewer's receipt tables are gone from fresh and upgraded databases alike."""
+"""Schema 191: the removed PR reviewer's receipt tables and settings defaults are gone from fresh and upgraded databases alike."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 
@@ -68,3 +69,45 @@ def test_the_runner_takes_a_190_database_to_current_and_stays_there() -> None:
         assert (result.migrated, result.from_version, result.to_version) == (True, 190, SCHEMA_VERSION)
         assert not GATE_TABLES & _tables(db)
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
+def _agents(db: sqlite3.Connection, value: str | None) -> None:
+    db.execute("DELETE FROM settings WHERE key='agents'")
+    if value is not None:
+        db.execute("INSERT INTO settings (key, value, updated_at) VALUES ('agents', ?, 't')", (value,))
+
+
+def _stored(db: sqlite3.Connection) -> str | None:
+    row = db.execute("SELECT value FROM settings WHERE key='agents'").fetchone()
+    return row[0] if row else None
+
+
+def test_the_step_removes_the_two_reviewer_model_defaults_and_keeps_every_other_key() -> None:
+    kept = {"host_access_reviewer_model": "claude-code/haiku", "host_access_auto_approve": True}
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        _agents(db, json.dumps({"other": 1, "defaults": {
+            "reviewer_model": "claude-code/sonnet", "reviewer_fallback_model": "codex/x", **kept}}))
+        migrate_190_to_191(db)
+        assert json.loads(_stored(db) or "") == {"other": 1, "defaults": kept}
+        again = _stored(db)
+        migrate_190_to_191(db)
+        assert _stored(db) == again
+
+
+def test_the_step_removes_one_of_the_two_when_only_one_is_stored() -> None:
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        _agents(db, json.dumps({"defaults": {"reviewer_fallback_model": "codex/x", "a": 1}}))
+        migrate_190_to_191(db)
+        assert json.loads(_stored(db) or "") == {"defaults": {"a": 1}}
+
+
+def test_the_step_leaves_settings_it_does_not_own_byte_for_byte() -> None:
+    untouched = [None, "{not json", "[1, 2]", '{"defaults": "x"}', '{ "defaults": { "a": 1 } }', "null"]
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        for value in untouched:
+            _agents(db, value)
+            migrate_190_to_191(db)
+            assert _stored(db) == value

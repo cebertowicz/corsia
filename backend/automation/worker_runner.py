@@ -261,7 +261,9 @@ async def _enforce_limit(row: Mapping[str, Any]) -> None:
 
 
 def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, Any]) -> tuple[list[str], str]:
-    """The worker's read paths (its staging directory and its start's empty one) and brief."""
+    """The worker's read paths and brief. Its staging directory (when the request has one) and its
+    start's empty directory, which is always present so a worker started without staging still has the
+    read path ``untrusted`` confinement requires (``tools/delegate_task.py``) and so reads nothing."""
     dest = inputs.start_dir(found["root"], decision_id)
     dest.mkdir(parents=True, exist_ok=True)
     read_paths = [path for path in (found["staging"], str(dest)) if path]

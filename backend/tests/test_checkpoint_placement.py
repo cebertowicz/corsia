@@ -588,7 +588,7 @@ def test_file_issue_is_idempotent_and_prefixes_workspace(monkeypatch) -> None:
             return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
         return subprocess.CompletedProcess(args, 0, "https://x/2\n", "")
 
-    monkeypatch.setattr("reviewer.gh_api.run_gh", fake_gh)
+    monkeypatch.setattr("connections.github_run.run_gh", fake_gh)
     kwargs = dict(repo="o/r", label="lane:conductor", thread_id="t1", entry_id=4,
                   revision=9, q1="everywhere", q2="task_start",
                   rule="Rule.", rationale="Why.")

@@ -19,7 +19,7 @@ backend/
 ├── scripts/             # Shell-facing CLIs (delegate, doc)
 ├── subagents/           # Provider runtime continuity for CC/Codex/child sessions; not a product manager surface
 ├── tools/               # Tool registry + filesystem/shell/browser/web/knowledge/project/MCP tools
-├── reviewer/           # Shared helpers kept for host access and the PR quiet watch: failure text, GitHub reads, account choice, status categories
+├── reviewer/           # What host access and the PR quiet watch still import: failure text (CCUnavailableError), reviewer account choice, review status and label names
 └── ws/                  # WebSocket auth, receiver/processor/heartbeat, native/CC/Codex send ingress
 ```
 
@@ -36,7 +36,7 @@ subagents/*                  ← provider runtime continuity; may call infra/run
 registry/*                   ← observes canonical messages/tools and projects registry rows into artifact/document views
 memory/*                     ← infra DB + llm helpers; jobs call into memory, not the reverse
 tools/*                      ← tools.base/registry + infra config/sandbox as needed
-reviewer/*                  ← host-access lease reviewer, plus the gh call helper that core/ and events/connectors/ also use
+reviewer/*                  ← host-access lease reviewer and the PR quiet watch; no GitHub calls (they run through connections/github_run.run_gh)
 ```
 
 ## External MCP tools
