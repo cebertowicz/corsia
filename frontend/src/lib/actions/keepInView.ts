@@ -64,8 +64,8 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	viewport?.addEventListener('resize', resized);
 	// The node growing is the person typing into it; the scroller or viewport changing size is not.
 	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
-	const room = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
-	if (owner) room?.observe(owner);
+	const ownerResized = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
+	if (owner) ownerResized?.observe(owner);
 	grown?.observe(node);
 	(owner ?? window).addEventListener('scroll', readShown, { passive: true });
 	queueMicrotask(reveal);
@@ -80,7 +80,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			viewport?.removeEventListener('resize', resized);
 			(owner ?? window).removeEventListener('scroll', readShown);
 			grown?.disconnect();
-			room?.disconnect();
+			ownerResized?.disconnect();
 		},
 	};
 }

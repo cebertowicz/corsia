@@ -11,18 +11,24 @@ import { scroller } from './keepInView';
  */
 export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	let current = node.offsetHeight;
+	const owner = scroller(node);
 	const resize = () => {
 		const style = getComputedStyle(node);
 		const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
 		const border = (Number.parseFloat(style.borderTopWidth) || 0) + (Number.parseFloat(style.borderBottomWidth) || 0);
 		const borderBox = style.boxSizing === 'border-box';
 		// Measure with the transition off and the height collapsed, then put the old height back before easing to the new one.
+		// The collapse shortens what holds the field for that one layout, which clamps its scroll offset (to the top when the
+		// rest fits), and a refit to the same height gives no resize for anything to reveal from, so the offset is put back.
+		const port = owner ?? document.scrollingElement;
+		const top = port?.scrollTop ?? 0;
 		node.style.transition = 'none';
 		node.style.height = '0px';
 		const wanted = node.scrollHeight + (borderBox ? border : -padding);
 		const cap = Number.parseFloat(style.maxHeight);
 		node.style.height = `${current}px`;
 		void node.offsetHeight;
+		if (port && port.scrollTop !== top) port.scrollTop = top;
 		node.style.transition = '';
 		// scrollHeight is a rounded integer and a cap of five `lh` is fractional (125.953px for a 126px five-line field), so a field
 		// holding exactly its cap's worth of text reads a subpixel over it. A pixel of tolerance keeps that field "fitting", so it
@@ -43,7 +49,6 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	// Refit when the field's width changes (a drawer resized around a keyboard or a drag rewraps its text). A refit
 	// measures with the transition off, which cancels a growth ease still running on the field, so it waits for the
 	// ease instead of aborting it mid-flight.
-	const owner = scroller(node);
 	let width = owner?.clientWidth, height = owner?.clientHeight, frame = 0;
 	const refit = () => {
 		cancelAnimationFrame(frame);

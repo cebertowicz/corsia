@@ -2,7 +2,7 @@ import { expect, test } from './support/test';
 import type { Locator, Page } from '@playwright/test';
 import { openCommentThread, settleHighlight } from './support/chatComments';
 import { commentedMessage, QUOTE } from './support/chatCommentedMessage';
-import { expectDiscussionReachableByScroll, expectFieldAndSendUsable, expectNoCardScroller, expectReachableByOuterScroll } from './support/discussionVisible';
+import { expectDiscussionReachableByScroll, expectFieldAndSendUsable, expectNoCardScroller, expectReachableByOuterScroll, expectRefitKeepsScroll } from './support/discussionVisible';
 
 
 /**
@@ -258,6 +258,7 @@ for (const height of [852, 420] as const) for (const theme of ['light', 'dark'] 
 	// card scrolls, and the comment and the earlier reply are reached by scrolling the drawer.
 	await expectNoCardScroller(thread.locator('.ct').first());
 	await expectFieldAndSendUsable(thread, input);
+	await expectRefitKeepsScroll(input);
 	await expectDiscussionReachableByScroll(thread, 'A note on the phrase');
 	await expectDiscussionReachableByScroll(thread, 'typed reply 0');
 	await send.click();

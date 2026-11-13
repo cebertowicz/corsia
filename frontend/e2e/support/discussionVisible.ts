@@ -81,6 +81,29 @@ export async function expectNoCardScroller(card: Locator) {
 }
 
 /**
+ * A text change that leaves the field's height as it was (a word added to the last line, a draft put back) refits the
+ * field without moving what holds it: the refit's measurement must not leave the sheet scrolled somewhere else.
+ */
+export async function expectRefitKeepsScroll(field: Locator) {
+	const moves = await field.evaluate(async (el) => {
+		const input = el as HTMLTextAreaElement;
+		let port: HTMLElement | null = input.parentElement;
+		while (port && !/auto|scroll/.test(getComputedStyle(port).overflowY)) port = port.parentElement;
+		const holder = port ?? document.scrollingElement as HTMLElement;
+		const text = input.value, seen: number[] = [];
+		for (const value of [`${text} x`, text]) {
+			const before = holder.scrollTop;
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+			seen.push(holder.scrollTop - before);
+		}
+		return seen;
+	});
+	expect(moves).toEqual([0, 0]);
+}
+
+/**
  * The field grows with its text and never scrolls itself; its end (the caret line) stays on screen and unclipped, and
  * its Send takes the click where it lands. A field taller than the screen is read by scrolling what holds the card.
  */
