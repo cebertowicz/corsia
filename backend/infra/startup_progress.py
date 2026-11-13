@@ -31,9 +31,9 @@ process named by ``pid`` is still making progress. The other fields:
 Heartbeats come from SQLite: every connection opened while startup publishes
 (and the migration's own) runs ``sqlite_beat`` from its progress handler, so any
 startup step doing database work keeps ``seq`` moving, in every phase. During
-startup transactions, a scoped observer also beats on changed database/WAL
-mtime or size: COMMIT's autocheckpoint writes pages without VM callbacks. It
-never beats for unchanged files and is joined when the transaction exits.
+startup transactions and post-commit checkpoints, a scoped observer also beats
+on changed database/WAL mtime or size: checkpoint I/O has no VM callbacks. It
+never beats for unchanged files and is joined when the observed work exits.
 Work that never touches the database between two marks does not beat.
 
 Writes are no-ops until ``begin`` and after ``finish`` or ``fail``, so code
@@ -123,11 +123,10 @@ def watch(conn: sqlite3.Connection) -> None:
 
 @contextmanager
 def transaction_writes(conn: sqlite3.Connection) -> Iterator[None]:
-    """Observe actual DB/WAL writes through a startup transaction and its commit.
+    """Observe actual DB/WAL writes through startup work, including checkpoints.
 
-    The transaction already holds the write lock when this starts. Observe
-    only this connection's files, never logs or a timer alone. No SQLite calls
-    run in the observer, which is joined as soon as the transaction exits.
+    Observe only this connection's files, never logs or a timer alone. No
+    SQLite calls run in the observer, which is joined as soon as the work exits.
     """
     if _state is None:
         yield

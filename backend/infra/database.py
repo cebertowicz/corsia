@@ -12,6 +12,7 @@ import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
 from infra import write_effects
 from infra.db_loop_guard import guard_write_off_event_loop
+from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
 from infra.db_connection import (
     _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close, refuse_lane_write,
@@ -82,6 +83,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={CONNECTION_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, faster than FULL
+        setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn, path))
         conn.commit()
         apply_thread_lane(conn)
         startup_progress.watch(conn)
@@ -239,7 +241,10 @@ def write_transaction(
             write_admission.release(admission)  # before effects, which may write
             if owns_connection:
                 connection.close()
-        write_effects.run(committed)
+        try:
+            write_effects.run(committed)
+        finally:
+            checkpoint_after_write(connection)
     except BaseException as error:
         _log_database_lock(scope, error)
         raise
