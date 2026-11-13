@@ -120,7 +120,7 @@ export const docTheme = EditorView.theme({
 	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
 	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
 	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
-	// A mark on a whole table cell: the text highlight's amber underline, drawn inside the cell so its own border stays as it is.
+	// A mark on an empty table cell, which has no text to highlight: the text highlight's amber underline, drawn inside the cell so its own border stays as it is.
 	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { boxShadow: 'inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent)' },
 	'.cm-md-table td.cm-comment-focused, .cm-md-table th.cm-comment-focused, .cm-md-table td.cm-comment-pending, .cm-md-table th.cm-comment-pending': { boxShadow: 'inset 0 -2px 0 var(--amber)' },
 	// The rail is a positioned layer holding one empty element per commented line, which the margin cards read their line from;
@@ -160,6 +160,14 @@ export const docTheme = EditorView.theme({
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
+// A line the editor scrolls into view stops above the notices floating over a document's foot. The room is the scroller's own
+// scroll-padding-bottom, which DocViewer.css sets from the canvas's notice flags, so native and CodeMirror scrolls stop at the same
+// line from one rule. Outside a document canvas, nothing.
+export const docScrollMargin = EditorView.scrollMargins.of((view) => {
+	if (!view.dom.closest('.doc')) return null;
+	return { bottom: parseFloat(getComputedStyle(view.scrollDOM).scrollPaddingBottom) || 0 };
+});
+
 /**
  * The marks a rendered table cell draws as `strong`, `em` and `del` elements, for the cell's own editor, whose highlighting
  * draws classed spans that `app.css`'s element rules cannot reach. A link is coloured by `.cm-md-cell-editor .cm-md-link`.
@@ -189,3 +197,6 @@ export const docHighlight = syntaxHighlighting(
 		{ tag: t.list, color: 'var(--text-primary)' }
 	])
 );
+
+/** The document editor's look: its theme, where scrolled-to lines stop, and its syntax colours. */
+export const docEditorLook = [docTheme, docScrollMargin, docHighlight];

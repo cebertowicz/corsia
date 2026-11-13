@@ -285,6 +285,7 @@ class DocumentLane:
             self.live.pending_changed()
         except StoreRefused:
             server_saved = False
+            self.live.pending_changed()
         if server_saved and cleared:
             self.retry.cleared(generation)
         if server_saved:

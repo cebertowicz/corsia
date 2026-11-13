@@ -156,7 +156,8 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(feedback.documentHeld).toBe(0);
 		expect(sendIn(doc.target)).toBeNull();
 	});
-	for (const syncFirst of [true, false]) it(`keeps the reopened document header actionable when its sync lands ${syncFirst ? 'before' : 'after'} an image send result`, async () => {
+	for (const syncFirst of [true, false]) it(`says Sent in the reopened document header after an image send, then keeps its Send actionable, when its sync lands ${syncFirst ? 'before' : 'after'} the result`, async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		const refresh = vi.fn();
 		const doc = documentStatus('document-held', refresh);
 		const feedback = doc.component.controller();
@@ -175,6 +176,13 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		flushSync();
 		expect(feedback.documentHeld).toBe(1);
 		expect(feedback.imageHeld).toBe(0);
+		// The document has no canvas notice: its header says the image's comments went, in Send's slot, for a moment.
+		expect(doc.target.querySelector('.sent')?.textContent?.trim()).toBe('Sent');
+		expect(sendIn(doc.target)).toBeNull();
+		vi.advanceTimersByTime(SENT_HOLD_MS);
+		flushSync();
+		vi.useRealTimers();
+		expect(doc.target.querySelector('.sent')).toBeNull();
 		expect(sendIn(doc.target)!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 1 comment');
 		expect(sendIn(doc.target)!.disabled).toBe(false);
 		expect(refresh).toHaveBeenCalledOnce();
@@ -381,30 +389,30 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 	});
 
 	it('marks the pill while the image artifact\'s own batch has messages not sent yet, with the drawer closed', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), { ...onImage('done', 2), resolved: true }], feedback: pending(3) });
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), { ...onImage('done', 2), resolved: true }], feedback: pending(3, { image: 3 }) });
 		const shown = await imageTab();
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
 		// The image viewer's list opens on All, so its pill counts the resolved thread too.
-		expect(pill.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('threads');
+		expect(pill.getAttribute('aria-label')).toBe('2 comments, 3 waiting for Send');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('comments');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 	});
 
 	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s threads', async () => {
-		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2) });
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2, { image: 2 }) });
 		const doc = documentStatus();
-		doc.component.sync('art-doc', pending(2));
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
 		const shown = await viewer({
 			src: SRC, alt: 'Mock', artifactId: 'art-doc',
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
-		expect(pill.getAttribute('aria-label')).toBe('3 threads, 2 messages not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('3 comments, 2 waiting for Send');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		doc.component.sync('art-doc', pending(0));
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('3 threads');
+		expect(pill.getAttribute('aria-label')).toBe('3 comments');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 
@@ -451,6 +459,6 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(footerIn(shown.target)).toBeNull();
 		expect(bar.querySelector('[data-image-comment]')).not.toBeNull();
 		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
-		expect([...bar.querySelectorAll('button')].map((button) => button.textContent!.trim())).toEqual(expect.arrayContaining(['Back', 'Fit']));
+		expect([...bar.querySelectorAll('button')].map((button) => button.getAttribute('aria-label') ?? button.textContent!.trim())).toEqual(expect.arrayContaining(['Back to notes.md', 'Fit']));
 	});
 });
