@@ -13,11 +13,10 @@ function render(props: Record<string, unknown>) {
 const button = () => host.querySelector('button') as HTMLButtonElement;
 
 describe('RecipientLine', () => {
-	it('names who gets it, with the comma on the name before it', () => {
+	it('names who gets it as one run of text, with the comma on the name before it', () => {
 		render({ names: ['Docs lane', 'Agent Substrate', 'Release lane'] });
-		// Each name is one item with its own comma; "and" is a word of its own before the last name.
-		expect(Array.from(host.querySelectorAll('.rl-item'), (item) => item.textContent?.trim())).toEqual(['Docs lane,', 'Agent Substrate', 'Release lane']);
-		expect(Array.from(host.querySelectorAll('.rl-who > .rl-text'), (text) => text.textContent)).toEqual(['Goes to', 'and']);
+		expect(host.querySelector('.rl-who')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Goes to Docs lane, Agent Substrate and Release lane');
+		expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Agent Substrate', 'Release lane']);
 	});
 
 	it('says nobody gets it in its own sentence', () => {
