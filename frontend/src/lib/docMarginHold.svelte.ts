@@ -9,6 +9,10 @@ import { commentRanges } from '$lib/cm/comment-marks';
 /** The reader's own input, which ends a hold. */
 const TAKE_OVER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
+/** Whether a width transition is still moving the shell. */
+const shellMoving = () => typeof CSSTransition !== 'undefined' && (document.getAnimations?.() ?? [])
+	.some((animation) => animation instanceof CSSTransition && animation.transitionProperty === 'width' && animation.playState === 'running');
+
 /**
  * Keeps the reader's line where it is while the margin column and the shell change the text width.
  * Call it while a component initialises; it ends with the component.
@@ -28,6 +32,7 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const now = margin(), pane = collapsed.current;
 		if (now === wasMargin && pane === wasPane) return;
 		const returning = pane && !wasPane && now === wasMargin;
+		const paneMoved = pane !== wasPane;
 		if (!returning) panelPlace = null;
 		wasPane = pane;
 		wasMargin = now;
@@ -109,10 +114,18 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 				return;
 			}
 			hold(rowTop());
+			if (paneMoved && !shellMoving()) settle();
 		});
 		observer.observe(view.contentDOM);
 		observer.observe(scroller);
 		const timer = setTimeout(() => observer.disconnect(), 1500);
+		// A hold the panel started lasts as long as the panel's move: after it, a scroll made by code (an app jump) is not
+		// pulled back. The frame the move ends is still held (its resize comes after transitionend), then the next frame lets go.
+		let settling = 0;
+		const settle = () => { settling ||= requestAnimationFrame(() => observer.disconnect()); };
+		const moveEnded = (event: Event) => { if (paneMoved && (event as TransitionEvent).propertyName === 'width' && !shellMoving()) settle(); };
+		document.addEventListener('transitionend', moveEnded, true);
+		document.addEventListener('transitioncancel', moveEnded, true);
 		// Keep the opening anchor for the return unless the reader acts elsewhere in the meantime.
 		const takeOver = (event: Event) => {
 			// The panel's own control and its shortcut (its modifier goes down first) are the trip, not the reader acting elsewhere.
@@ -123,7 +136,9 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		};
 		for (const kind of TAKE_OVER) document.addEventListener(kind, takeOver, { capture: true, passive: true });
 		stopHold = () => {
-			observer.disconnect(); clearTimeout(timer); stopHold = null;
+			observer.disconnect(); clearTimeout(timer); cancelAnimationFrame(settling); stopHold = null;
+			document.removeEventListener('transitionend', moveEnded, true);
+			document.removeEventListener('transitioncancel', moveEnded, true);
 			for (const kind of TAKE_OVER) document.removeEventListener(kind, takeOver, { capture: true });
 		};
 	});
