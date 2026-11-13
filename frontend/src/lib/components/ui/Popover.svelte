@@ -118,11 +118,11 @@
 			rememberedSide ??= (placement === 'pointer' && height <= below) || below >= above ? 'below' : 'above';
 			const room = rememberedSide === 'above' ? above : below;
 			// A composer being typed in keeps its own height: the anchor can move while the person types, and a band
-			// below the card's own minimum clips the field and Send out of the card. The discussion regions are
-			// already at their minimums, so what the composer sits on plus the composer is that floor; take the
-			// tallest band the canvas has, bottom-pinned, and the discussion scrolls inside it.
+			// shorter than the composer clips the field and Send out of the card. The discussion above it scrolls with
+			// the card, so the composer alone is that floor; only when the band by the anchor is shorter does the card
+			// take the tallest band the canvas has, bottom-pinned.
 			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]') : null;
-			const need = pinned ? pinned.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + gap : 0;
+			const need = pinned ? pinned.getBoundingClientRect().height + gap : 0;
 			const band = area.bottom - area.top - 2 * gap;
 			if (pinned && need > room && band > need) {
 				const cap = Math.max(need, height);

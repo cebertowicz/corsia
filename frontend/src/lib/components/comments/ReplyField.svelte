@@ -23,6 +23,8 @@
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
+	/** While the person types, the field stays in view in whatever scrolls the thread (a keyboard rising, the text growing). */
+	let typing = $state(false);
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
@@ -68,7 +70,7 @@
 <div class="ct-compose open" data-autosize-sticky>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={{ enabled: keepVisible, whole: wholeCard }} bind:value use:autosize={{ value, fit: true }} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} onfocus={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
@@ -79,11 +81,6 @@
 
 <style>
 	.ct-compose { margin-top: var(--space-1); }
-	/* A thread popover or drawer scrolls its discussion behind the reply instead of hiding its field below the fold. */
-	/* The pinned reply takes its surface's own fill: the popover card is elevated, the comment drawers are opaque secondary sheets. */
-	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-elevated); position: sticky; bottom: 0; z-index: 1; background: var(--compose-fill); }
-	:global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-secondary); }
-	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--space-3); background: var(--compose-fill); pointer-events: none; }
 	/* Replies grow until their available scroller is full, then scroll inside. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }

@@ -1,8 +1,7 @@
 import { expect, test } from './support/test';
-import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage, seedMockResponses, waitForThreadReply } from './support/mock';
-import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import type { Locator, Page } from '@playwright/test';
+import { openCommentThread } from './support/chatComments';
+import { commentedMessage, QUOTE } from './support/chatCommentedMessage';
 import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
 
 
@@ -12,48 +11,6 @@ import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectField
  * column, a popover at the highlight when it is not, and the phone drawer on a phone. The column and its
  * threshold are the document's, so these flows are the chat half of that rule.
  */
-
-const QUOTE = 'selected phrase';
-
-/** Opens a chat of the given canvas width holding one commented message, and returns its row. */
-async function commentedMessage(page: Page, request: APIRequestContext, width: number) {
-	const title = `Margin comments ${width} ${crypto.randomUUID()}`;
-	const thread = await createSession(request, title);
-	await injectMessage(request, thread, { role: 'assistant', content: 'Earlier context.\n\n'.repeat(24), metadata: { for_user: true } }, TEST_TOKEN);
-	const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
-	await openAppPastLanding(page);
-	await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
-	await page.setViewportSize({ width: width <= 768 ? 393 : width, height: width <= 768 ? 852 : 1000 });
-	const narrow = width <= 768;
-	if (narrow) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await sidebarThread(page, title).click();
-	await waitForWsConnected(page);
-	const row = page.locator(`[data-message-id="${id}"]`);
-	await expect(row).toBeVisible();
-	// Comment on the phrase the way a person does: select its text, then write on the selection menu.
-	await row.evaluate((el) => {
-		const body = el.querySelector('.long-message-body')!;
-		const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-		let node = walker.nextNode() as Text | null;
-		while (node && !node.data.includes('selected phrase')) node = walker.nextNode() as Text | null;
-		if (!node) throw new Error('Selected text was not rendered');
-		const start = node.data.indexOf('selected phrase');
-		const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + 'selected phrase'.length);
-		const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
-	});
-	await page.locator('.sel-comment').click();
-	await commentEditor(page).fill('A note on the phrase');
-	await page.getByRole('button', { name: 'Comment', exact: true }).click();
-	await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
-	await commentEditorClosed(page);
-	// The comment belongs to the message only once the message carrying it is delivered.
-	await seedMockResponses(request, [{ content: 'Received comment' }]);
-	await chatComposer(page).fill('Please address this');
-	await page.getByRole('button', { name: 'Send message' }).click();
-	await commentOnMessage(row, QUOTE);
-	await waitForThreadReply(request, thread, 'Received comment');
-	return { row, narrow };
-}
 
 /**
  * Puts a row mid-transcript and waits until its highlighted line has stopped moving and stands clear of the

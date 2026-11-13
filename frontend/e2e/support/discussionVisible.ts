@@ -23,6 +23,60 @@ export async function expectDiscussionVisible(thread: Locator, text: string) {
 	}, text)).toBe(true);
 }
 
+/** An idle draft field is one line with its whole placeholder showing and a target at least 24px tall that takes a click at its centre. */
+export async function expectIdleFieldUsable(field: Locator) {
+	await expect.poll(() => field.evaluate(el => {
+		const input = el as HTMLTextAreaElement;
+		const style = getComputedStyle(input);
+		const box = input.getBoundingClientRect();
+		if (box.height < 24) return `field is ${box.height.toFixed(1)}px tall, under the 24px target`;
+		const inner = box.height - (Number.parseFloat(style.paddingTop) || 0) - (Number.parseFloat(style.paddingBottom) || 0) - (Number.parseFloat(style.borderTopWidth) || 0) - (Number.parseFloat(style.borderBottomWidth) || 0);
+		const line = Number.parseFloat(style.lineHeight) || 0;
+		if (input.value || inner > line * 1.5 + 1) return `field is not one empty line: ${inner.toFixed(1)}px of ${line}px lines`;
+		const canvas = document.createElement('canvas').getContext('2d')!;
+		canvas.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+		const width = canvas.measureText(input.placeholder).width;
+		const room = input.clientWidth - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0);
+		if (width > room) return `placeholder "${input.placeholder}" is ${width.toFixed(1)}px in ${room.toFixed(1)}px: it would clip`;
+		const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+		return hit === input ? true : `the field's centre takes the click on ${(hit as HTMLElement | null)?.className || hit?.tagName}`;
+	})).toBe(true);
+}
+
+/** The newest reply is whole where the thread opened: every line box of it is on screen and inside every box that clips it. */
+export async function expectNewestReplyWhole(card: Locator) {
+	await expect.poll(() => card.evaluate(root => {
+		const newest = root.querySelector<HTMLElement>('[data-discussion-replies] .ct-reply:last-child');
+		if (!newest) return 'no newest reply';
+		const walker = document.createTreeWalker(newest, NodeFilter.SHOW_TEXT);
+		let lines = 0;
+		for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+			if (!node.data.trim()) continue;
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			for (const rect of range.getClientRects()) {
+				if (!rect.height) continue;
+				lines++;
+				const line = `newest reply line ${rect.top.toFixed(1)}-${rect.bottom.toFixed(1)} ("${node.data.trim().slice(0, 24)}")`;
+				if (rect.top < -1 || rect.bottom > innerHeight + 1) return `${line} is off screen (viewport ${innerHeight})`;
+				for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+					if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
+					const box = parent.getBoundingClientRect();
+					if (rect.top < box.top - 1 || rect.bottom > box.bottom + 1) return `${line} is clipped by ${parent.className || parent.tagName} ${box.top.toFixed(1)}-${box.bottom.toFixed(1)}`;
+				}
+			}
+		}
+		return lines > 0 ? true : 'newest reply has no line boxes';
+	})).toBe(true);
+}
+
+/** A comment card never scrolls inside itself, its reply field included: only the sheet, popover or column holding it scrolls. */
+export async function expectNoCardScroller(card: Locator) {
+	await expect.poll(() => card.evaluate(root => [root, ...root.querySelectorAll<HTMLElement>('*')]
+		.filter(el => /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1)
+		.map(el => `${el.tagName.toLowerCase()}.${[...el.classList].join('.')}`))).toEqual([]);
+}
+
 /** The field stays on screen and unclipped, and its Send takes the click where it lands. */
 export async function expectFieldAndSendUsable(card: Locator, field: Locator) {
 	const send = card.getByRole('button', { name: 'Send reply' });

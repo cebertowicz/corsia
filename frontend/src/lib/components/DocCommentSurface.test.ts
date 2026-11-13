@@ -624,7 +624,7 @@ describe('DocCommentSurface suggestions', () => {
 			state: { kind: 'list' },
 			comments: [suggestion, secondSuggestion],
 		});
-		const button = Array.from(document.body.querySelectorAll(narrow ? 'button' : '.margin-accept-all button')).find(
+		const button = Array.from(document.body.querySelectorAll(narrow ? 'button' : '.list-accept-all button')).find(
 			(candidate) => candidate.textContent === 'Accept all from agent-1',
 		) as HTMLButtonElement;
 		button.click();
@@ -643,7 +643,7 @@ describe('DocCommentSurface suggestions', () => {
 		mocks.decideSuggestion.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
 		mocks.loadComments.mockResolvedValue(undefined);
 		render({ narrow, state: { kind: 'list' }, comments: [suggestion, secondSuggestion] });
-		const acceptAll = () => document.body.querySelector<HTMLButtonElement>(`${narrow ? '' : '.margin-accept-all '}.suggestion-status button`)!;
+		const acceptAll = () => document.body.querySelector<HTMLButtonElement>(`${narrow ? '' : '.list-accept-all '}.suggestion-status button`)!;
 		expect(acceptAll().textContent).toBe('Accept all from agent-1');
 		acceptAll().click(); acceptAll().click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());

@@ -233,7 +233,8 @@ journey('the server names the new replies, a long thread keeps only them and the
 		// Up to five replies show whole, so the collapse needs a longer thread.
 		for (const text of ['First reply.', 'Second reply.', 'Third reply.', 'Fourth reply.', 'Fifth reply.', 'Sixth reply.']) earlier.push(await agentReply(request, doc, parent, text));
 		await agentReply(request, doc, parent, 'Newest reply, not seen yet.');
-		await markViewed(request, doc, parent, earlier[5]);
+		// Read through the fourth: the fifth, sixth and newest are unread.
+		await markViewed(request, doc, parent, earlier[3]);
 	}
 	await open(page, doc, mode, theme);
 	await pill(page).click();
@@ -245,11 +246,13 @@ journey('the server names the new replies, a long thread keeps only them and the
 		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
 		await shot(page, 'rs-23a-new-replies-marked', info);
 	} else {
-		await expect(drawer.getByRole('button', { name: 'Show 5 earlier replies' })).toBeVisible();
-		await expect(drawer.locator('.ct-new')).toHaveCount(1);
-		await expect(drawer.getByText('Newest reply, not seen yet.')).toBeVisible();
-		await expect(drawer.getByText('Sixth reply.')).toBeVisible();
-		await expect(drawer.getByText('First reply.')).toBeHidden();
+		// The list sums a long thread up: a row counting its replies and the new ones, then every unread reply in full;
+		// only read replies sit behind the row.
+		await expect(drawer.getByRole('button', { name: '7 replies · 3 new' })).toBeVisible();
+		await expect(drawer.locator('.ct-new')).toHaveCount(3);
+		for (const text of ['Fifth reply.', 'Sixth reply.', 'Newest reply, not seen yet.']) await expect(drawer.getByText(text)).toBeVisible();
+		await expect(drawer.locator('.ct-reply .ct-markdown').getByRole('button', { name: 'Show more' })).toHaveCount(0);
+		for (const text of ['First reply.', 'Fourth reply.']) await expect(drawer.getByText(text)).toBeHidden();
 		await shot(page, 'rs-23b-earlier-replies-collapsed', info);
 	}
 });

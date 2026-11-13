@@ -22,6 +22,7 @@
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: calc(var(--space-3) / 2); align-items: center; }
 	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
+	@media (pointer: coarse) { .suggestion-status button { min-height: var(--touch-target); } }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
 	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: calc(var(--space-1) / 2) calc(var(--space-3) / 2); margin: calc(var(--space-1) / -2) calc(var(--space-3) / -2); opacity: 1; }
 	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }

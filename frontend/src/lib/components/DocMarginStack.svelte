@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { GAP, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
@@ -35,15 +35,11 @@
 		};
 		let frame = 0;
 		const read = () => {
-			// Fit the reply inside the same view and bottom gap used by reveal, including any floating chrome.
-			const view = source.view?.();
-			const room = `${(view ? view.bottom - view.top : scroller.clientHeight) - GAP}px`;
 			const columnTop = column.getBoundingClientRect().top;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {
 				const at = id === writing?.id ? writing.anchor()?.top : source.anchor(id)?.getBoundingClientRect().top;
 				const card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
-				card?.style.setProperty('--autosize-room', room);
 				if (at !== undefined && card) {
 					items.push({ id, y: Math.max(0, at - columnTop), h: card.offsetHeight });
 				} else if (card) loose.push({ id, y: 0, h: card.offsetHeight });

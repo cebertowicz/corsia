@@ -1,18 +1,26 @@
 <script lang="ts">
 	import { renderMentions, type TaggedAgent } from './mentionMarkup';
 	import type { MentionOccurrence } from './mentionSelection';
+	import { untrack } from 'svelte';
+	import { isLongMessageText } from '$lib/messageCollapse';
 
-	let { text, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
+	let { text, unread = false, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; unread?: boolean; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
+	// Chat's one rule for a long message decides; an unread body always shows whole, and one seen unread while mounted stays whole
+	// when its New mark clears, so nothing collapses under the person reading it.
+	let seenUnread = $state(untrack(() => unread));
+	$effect(() => { if (unread) seenUnread = true; });
+	const collapsible = $derived(!seenUnread && isLongMessageText(text));
 	let open = $state(false);
 	let clamped = $state(false);
 	let reveal: HTMLDivElement;
 	let expandedHeight = $state(0);
 
-	function trackClamp(node: HTMLElement) {
+	// The parameter is the collapsible flag, passed only so the action re-measures when it changes.
+	function trackClamp(node: HTMLElement, _collapsible: boolean) {
 		const measure = () => {
 			if (!reveal) return;
 			if (open) expandedHeight = node.scrollHeight;
-			else clamped = node.scrollHeight > reveal.clientHeight;
+			else clamped = collapsible && node.scrollHeight > reveal.clientHeight;
 		};
 		if (typeof ResizeObserver === 'undefined') {
 			requestAnimationFrame(measure);
@@ -30,8 +38,8 @@
 	}
 </script>
 
-<div bind:this={reveal} class:open class:clamped={clamped && !open} class="ct-markdown-reveal" style:--ct-expanded-height="{expandedHeight}px">
-	<div class="ct-markdown md-content" use:trackClamp>{@html renderMentions(text, taggedAgents, mentions, taggedPerson)}</div>
+<div bind:this={reveal} class:open class:clamped={clamped && !open} class:whole={!collapsible} class="ct-markdown-reveal" style:--ct-expanded-height="{expandedHeight}px">
+	<div class="ct-markdown md-content" use:trackClamp={collapsible}>{@html renderMentions(text, taggedAgents, mentions, taggedPerson)}</div>
 </div>
 {#if clamped}<button class="ct-more" onclick={(e) => { e.stopPropagation(); toggle(); }}>{open ? 'Show less' : 'Show more'}</button>{/if}
 
@@ -39,12 +47,14 @@
 	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: 4lh; max-height: 4lh; overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
 	.ct-markdown-reveal.clamped { -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); }
 	.ct-markdown-reveal.open { max-height: var(--ct-expanded-height); }
-	.ct-markdown { font-size: var(--text-subhead); line-height: var(--lh-snug); color: var(--text-primary); }
+	.ct-markdown-reveal.whole { max-height: none; }
+	.ct-markdown { overflow-wrap: anywhere; font-size: var(--text-subhead); line-height: var(--lh-snug); color: var(--text-primary); }
 	.ct-markdown :global(:is(h1, h2, h3, h4, h5, h6)) { font: inherit; font-weight: var(--fw-semibold); margin: 0; }
 	.ct-markdown :global(p:first-child) { margin-top: 0; }
 	.ct-markdown :global(p:last-child) { margin-bottom: 0; }
 	.ct-markdown :global(.comment-mention) { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	.ct-more { align-self: flex-start; min-height: var(--space-6); margin-top: calc(var(--space-1) * -1); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
 	.ct-more:hover { text-decoration: underline; }
+	@media (pointer: coarse) { .ct-more { min-height: var(--touch-target); } }
 	@media (prefers-reduced-motion: reduce) { .ct-markdown-reveal { transition: none; } }
 </style>
