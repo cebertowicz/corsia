@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { agentComment, reviewerSession, suggest } from '../support/liveConcurrency';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { setDebugVersionOverlay } from '../support/heldComments';
-import { expectCaretLineVisible, expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../support/discussionVisible';
+import { expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../support/discussionVisible';
 
 const quote = 'target line for a reply';
 const text = Array.from({ length: 45 }, (_, i) => i === 25 ? quote : `document line ${i}`).join('\n\n');
@@ -59,11 +59,10 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 	// A suggestion's reply scrolls with its card, so it is typed a line at a time: after each line the field is inside the popover's visible box and shows its last line, and Accept and Reject still take a tap.
 	if (state === 'suggestion') for (let line = 1; line <= second.length; line++) {
 		await input.fill(second.slice(0, line).join('\n'));
-		await expectCaretLineVisible(card, input);
+		await expectFieldAndSendUsable(card, input);
 	} else await input.fill(second.join('\n'));
 	await expectFieldAndSendUsable(card, input);
 	if (state === 'resolved') {
-		await expectCaretLineVisible(card, input);
 		await expectDiscussionReachableByScroll(card, 'Existing thread');
 		await expectDiscussionReachableByScroll(card, 'first reply 0');
 		await page.evaluate(() => document.querySelector('.drawer-panel')?.getAnimations({ subtree: true }).forEach((animation) => animation.play()));

@@ -29,7 +29,7 @@
 	}
 </script>
 
-<!-- In a popover or a one-thread sheet that scrolls, this row is what stays in view at the bottom, and the reply field scrolls with the card (`ReplyField` `pinned`): nothing sits over Accept and Reject, however short the surface. In a list of cards it is the last row of its own card and covers nothing. A failed decision shows in the same row. -->
+<!-- In a popover or a one-thread sheet that scrolls, this row is what stays in view at the bottom, and the reply field above it scrolls with the card (`keepInView` leaves this row's height clear): nothing sits over Accept and Reject, however short the surface. In a list of cards it is the last row of its own card and covers nothing. A failed decision shows in the same row. -->
 <div class="ct-suggestion-pin" data-pin-bottom>
 {#if !readOnly}
 	<!-- The same icon button the comment list's Close uses (`ui/IconButton`), with its name beside the icon: a touch screen has no tooltip. The accessible name adds which suggestion it decides. While a decision is in flight the pair is disabled and the pressed one shows a spinner and "Accepting…" or "Rejecting…". On a touch screen each is a 44 px target with room between them. -->
@@ -52,8 +52,8 @@
 <style>
 	.ct-suggestion-pin { display: flex; flex-direction: column; gap: var(--space-1); }
 	/* Pinned only where the card is the whole surface: a popover, or the sheet holding one thread (a flat card). A card in a list sits in the list's own scroller, where a pinned row would lie over the next card, so there it follows the card's content like any other row. */
-	:global([data-popover]) .ct-suggestion-pin, :global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { --pin-fill: var(--card-fill, var(--bg-elevated)); position: sticky; bottom: 0; z-index: 1; padding-block: var(--space-1); background: var(--pin-fill); }
-	:global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { --pin-fill: var(--card-fill, var(--bg-secondary)); }
+	:global([data-popover]) .ct-suggestion-pin, :global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { position: sticky; bottom: 0; z-index: 1; padding-block: var(--space-1); background: var(--bg-elevated); }
+	:global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { background: var(--bg-secondary); }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: var(--space-2); margin-top: 2px; }
 	/* IconButton transitions every property; the focus ring, and the colours when the theme changes, must be final the moment they land (the plain text buttons these replace did not animate). The name sits beside the icon, so the button grows from its square to fit it. */
 	.ct-suggestion-actions :global(.ico-btn.lg) { width: auto; min-width: 36px; padding-inline: var(--space-3); gap: var(--space-2); border-radius: var(--radius-sm); font-size: var(--text-footnote); font-weight: var(--fw-semibold); white-space: nowrap; transition: none; }

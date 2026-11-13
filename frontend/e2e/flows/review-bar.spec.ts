@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeComments, openComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -74,13 +74,16 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		const geometry = await page.locator('.document-header').evaluate((header) => {
 			const who = header.querySelector('.rb-who')!, range = document.createRange(); range.selectNodeContents(who);
 			const text = range.getBoundingClientRect(), box = header.getBoundingClientRect(), style = getComputedStyle(header);
-			return { text: text.toJSON(), contentRight: box.right - parseFloat(style.paddingRight),
+			// The tool row's own box is clamped to the header; its buttons are what can run past the left edge.
+			const toolsLeft = Math.min(...[...header.querySelectorAll('.document-tools button')].map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0).map((rect) => rect.left));
+			return { text: text.toJSON(), contentLeft: box.left + parseFloat(style.paddingLeft), contentRight: box.right - parseFloat(style.paddingRight), toolsLeft,
 				name: who.textContent, tools: header.querySelector('.document-tools')!.getBoundingClientRect().toJSON(),
 				paneOverlay: !!document.querySelector('.pane.overlay') };
 		});
 		console.info('Delivery header geometry:', JSON.stringify({ width, theme, ...geometry }));
 		expect(geometry.name).toBe(`${doc.title}:`);
 		expect(geometry.text.right, 'full name stays before the pane').toBeLessThanOrEqual(geometry.contentRight + 0.5);
+		expect(geometry.toolsLeft, 'every header tool starts inside the header').toBeGreaterThanOrEqual(geometry.contentLeft - 0.5);
 		for (const button of await page.locator('.document-header button:visible').all()) expect(await hitAtCentre(button), await button.getAttribute('aria-label') ?? await button.innerText()).toBe(true);
 		expect(await hitAtCentre(bar(page).getByRole('button', { name: 'Done', exact: true }))).toBe(true);
 		if (width === 1280) expect(geometry.paneOverlay).toBe(true);
@@ -206,8 +209,10 @@ journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, 
 	await personStep(page, doc, mode, theme);
 	const who = bar(page).locator('.rb-who');
 	if (mode === 'default') {
-		const wrapped = await who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize));
-		expect(wrapped, 'the long name wraps in the narrow header').toBe(true);
+		// The split keeps re-laying out for a few hundred ms after the resize to 1280, starting after `settled` has looked for
+		// running animations, so the header reaches its narrow width a little later: wait for the wrap rather than read it once.
+		await expect.poll(() => who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize)),
+			{ message: 'the long name wraps in the narrow header' }).toBe(true);
 		// Wrapped as one text run: the name's last characters follow its head instead of sitting beside its first line.
 		const tailBelowFirstLine = await who.evaluate((el) => {
 			const tail = el.querySelector('.name-tail');
@@ -287,13 +292,13 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
-	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 messages not sent yet$/);
+	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 waiting for Send$/);
 	await expect(approve).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
 	await approve.click();
 	await expect(bar(page).locator('.rb-receipt')).toContainText('Approved with changes');
 	await expect(bar(page).locator('.rb-receipt')).not.toContainText('comments');
-	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
+	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /waiting for Send/);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	await shot(page, 'receipt-with-changes', info);
 });
@@ -392,11 +397,11 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its threads first ("2 threads, …"); openComments checks that name, then opens the comments.
-	await openComments(page, /^2 threads\b/);
+	// The pill names its comments, then what waits for Send: "2 comments, 2 waiting for Send".
+	await openComments(page, /^2 comments\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
-	await expect(drawer).toBeVisible();
-	const close = drawer.getByRole('button', { name: 'Close', exact: true });
+	await expectCommentsShown(drawer);
+	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
 	const jump = drawer.locator('[data-comment-jump]').first();
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	await settled(page);
@@ -404,7 +409,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	// A real tap on a quote jump leaves every drawer control reachable.
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	// A quote jump moves the phone sheet to its half detent. Wait for that finite transition before measuring the close control.
 	await settled(page);
 	await expect(hitAtCentre(close)).resolves.toBe(true);
@@ -419,7 +424,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await openComments(page, /^1 thread\b/);
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	// No verdict button is on screen while the sheet is up, in it or behind it; closing the sheet brings the bar back.
 	const approve = page.getByRole('button', { name: 'Approve', exact: true });
@@ -449,7 +454,7 @@ test.describe('375px review sheet', () => {
 		const buttons = page.locator('.review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
-		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		await openComments(page, /^\d+ comments?\b/);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toHaveCount(0);
 		await expect(page.locator('[data-doc-comments-drawer] .review-bar')).toHaveCount(0);
 		await closeComments(page.locator('[data-doc-comments-drawer]'));
@@ -468,7 +473,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	await open(page, doc, mode, theme);
 	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
-	await openComments(page, /^1 thread\b/);
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	// The sheet holds comments only: the review controls leave the screen while it is up, and the note waits in the bar.
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveCount(0);
@@ -493,7 +498,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
 	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	await sent;
-	await openComments(page, /^1 thread\b/);
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	await expect(drawer.getByText('Sending your review…')).toHaveCount(0);
@@ -553,9 +558,9 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await openComments(page, /^6 threads, 6 messages not sent yet$/);
+	await openComments(page, /^6 comments, 6 waiting for Send$/);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
 	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
 	await settled(page);
@@ -583,7 +588,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 		expect(native, 'native touch reaches the padding outside Send’s former 28px box').toEqual({ hit: true, pointerType: 'touch' });
 	} else await send.click();
 	await expect(send).toHaveCount(0);
-	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
+	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /waiting for Send/);
 	if (output && mode === 'phone') {
 		await expect(page.locator('.document-header .sent')).toHaveText('Sent');
 		await settled(page);
@@ -738,7 +743,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'overlay inset').not.toBe('0px');
 
 		const tools = page.locator('.document-tools');
-		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
+		const pill = tools.getByRole('button', { name: /^0 comments\b/ });
 		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
 		const requestChanges = bar(page).getByRole('button', { name: 'Send back', exact: true });

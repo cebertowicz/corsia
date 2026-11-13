@@ -12,10 +12,19 @@ function scrollMargins(element: HTMLElement): number {
 	return (parseFloat(style.scrollMarginTop) || 0) + (parseFloat(style.scrollMarginBottom) || 0);
 }
 
-/** The height a sticky row at the scroller's bottom edge (a suggestion's Accept and Reject in a sheet) covers of whatever scrolls beneath it. */
+/** The scroller's own room: its scroll padding (a band something floats over) is left clear by every scroll into view, the browser's caret reveal included. */
+function roomOf(owner: HTMLElement): number {
+	const style = getComputedStyle(owner);
+	return owner.clientHeight - (parseFloat(style.scrollPaddingTop) || 0) - (parseFloat(style.scrollPaddingBottom) || 0);
+}
+
+/** What sticky `[data-pin-bottom]` rows (a suggestion's Accept and Reject) cover at the scroller's bottom edge: room the scroller has but a revealed field must not land under. */
 function pinnedBottom(owner: HTMLElement | null): number {
+	if (!owner) return 0;
 	let covered = 0;
-	for (const row of owner?.querySelectorAll<HTMLElement>('[data-pin-bottom]') ?? []) if (getComputedStyle(row).position === 'sticky') covered += row.offsetHeight;
+	for (const row of owner.querySelectorAll<HTMLElement>('[data-pin-bottom]')) {
+		if (getComputedStyle(row).position === 'sticky') covered += row.offsetHeight;
+	}
 	return covered;
 }
 
@@ -31,43 +40,51 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * instead of the node, so bringing a field into view never pushes the top of the
  * block it sits at the end of out of sight above and never clips the ring drawn
  * around that block; a block too tall for the scroller keeps the node-into-view
- * behaviour.
+ * behaviour, and a node itself taller than the scroller shows its end.
+ *
+ * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: the node carries its height as a scroll
+ * margin while it is revealed alone. A revealed block holds that row at its own end, so it needs none.
+ *
+ * A resize brings the node back only while its end was in view: a reader who scrolled away from the field (up to
+ * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
 	let frame = 0;
 	const owner = scroller(node);
+	/** Whether the node's end (the caret of a growing field, and its Send) was in view at the last scroll. */
+	let endShown = true;
+	const readShown = () => {
+		const end = node.getBoundingClientRect().bottom;
+		const view = owner?.getBoundingClientRect() ?? { top: 0, bottom: window.visualViewport?.height ?? window.innerHeight };
+		endShown = end >= view.top && end <= view.bottom + 1;
+	};
 	const reveal = () => {
 		if (!enabled) return;
-		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= owner.clientHeight;
-		// A field too tall to bring its whole card along still brings the bordered block it sits in, so its border and Send are not left half under the scroller's edge.
-		const block = node.closest<HTMLElement>('[data-autosize-sticky]');
-		// What a sticky row at the scroller's bottom covers is not room: the field is brought above it, not under it.
-		const covered = pinnedBottom(owner);
-		const blockFits = block !== null && owner !== null && block.getBoundingClientRect().height <= owner.clientHeight - covered;
-		const target = fits ? whole! : blockFits ? block! : node;
-		// A field that scrolls with its card and has grown taller than the card's scroller cannot be shown whole: its bottom edge (the line being typed, the border and Send) is what stays in view, and the card alone scrolls.
-		const tooTall = owner !== null && !fits && !blockFits && block !== null && block.classList.contains('unpinned');
-		const scrolled = tooTall ? block! : target;
-		// Written only when it changes: a write inside the watched subtree is a mutation that schedules the next reveal.
-		const margin = scrolled === whole || !covered ? '' : `${covered}px`;
-		if (scrolled.style.scrollMarginBottom !== margin) scrolled.style.scrollMarginBottom = margin;
-		if (typeof scrolled.scrollIntoView === 'function') scrolled.scrollIntoView({ block: tooTall ? 'end' : 'nearest' });
+		const room = owner ? roomOf(owner) : window.visualViewport?.height ?? window.innerHeight;
+		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
+		const target = fits ? whole! : node;
+		if (!fits) {
+			const margin = `${pinnedBottom(owner)}px`;
+			if (node.style.scrollMarginBottom !== margin) node.style.scrollMarginBottom = margin;
+		}
+		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
+		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room ? 'end' : 'nearest';
+		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(reveal);
 	};
+	const resized = () => { if (endShown) schedule(); };
 	const viewport = window.visualViewport;
-	viewport?.addEventListener('resize', schedule);
-	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
-	if (owner) observer?.observe(owner);
-	observer?.observe(node);
-	// Content above the node that changes height moves it without resizing it: the scroller's own children are watched too, and again whenever the content under the scroller is replaced or restyled (a region above bounded or released), so a region above growing brings the node back into view.
-	const watchChildren = () => { if (owner) for (const child of owner.children) observer?.observe(child); };
-	watchChildren();
-	const mutations = owner && typeof MutationObserver === 'function' ? new MutationObserver(() => { watchChildren(); schedule(); }) : null;
-	mutations?.observe(owner!, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+	viewport?.addEventListener('resize', resized);
+	// The node growing is the person typing into it; the scroller or viewport changing size is not.
+	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+	const ownerResized = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
+	if (owner) ownerResized?.observe(owner);
+	grown?.observe(node);
+	(owner ?? window).addEventListener('scroll', readShown, { passive: true });
 	queueMicrotask(reveal);
 
 	return {
@@ -77,9 +94,10 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		},
 		destroy() {
 			cancelAnimationFrame(frame);
-			viewport?.removeEventListener('resize', schedule);
-			observer?.disconnect();
-			mutations?.disconnect();
+			viewport?.removeEventListener('resize', resized);
+			(owner ?? window).removeEventListener('scroll', readShown);
+			grown?.disconnect();
+			ownerResized?.disconnect();
 		},
 	};
 }

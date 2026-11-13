@@ -158,7 +158,7 @@
 	<!-- ChatPanel stays mounted in compact so its scroll position, composer
 	     draft, and in-flight turn survive flipping to the artifact and back. -->
 	<div class="chat-col" data-drop-default-surface class:offscreen={artifactFullCanvas} onclick={onChatClick} onkeydown={onChatKeydown} oninput={onChatInput}>
-		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} {onOpenDocuments} visibleDocumentArtifactId={visibleDocumentId} />
+		<ChatPanel bind:this={chatPanelRef} {isDraggingOver} {onOpenLightbox} {onAutoCreateThread} {onOpenDocuments} visibleDocumentArtifactId={visibleDocumentId} artifactPaneOpen={leafMode === 'expanded'} />
 	</div>
 	{#if leafMode === 'expanded'}
 		<CanvasSplitDivider {artifactWidth} {canvasWidth} onResize={onDividerResize} />

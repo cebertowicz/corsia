@@ -4,7 +4,7 @@ import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { deleteRenderedLine, openLiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
-import { openComments } from '../support/commentDrawer';
+import { expectCommentsShown, openComments } from '../support/commentDrawer';
 
 async function chooseThread(page: Page, title: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -68,7 +68,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await loginByUrl(page);
 	await chooseThread(page, viewerTitle);
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	await expect(page.getByRole('button', { name: /^0 threads\b/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^0 comments\b/ })).toBeEnabled();
 	if (!mobile) {
 		await expect(page.locator('.leaf:not(.compact)')).toBeVisible();
 		await measurements(page, testInfo, 'canvas-desktop-expanded');
@@ -117,12 +117,13 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(pill).toBeVisible();
 	await pill.focus();
 	await expect(pill).toBeFocused();
-	// The notice never covers document text: the editor ends above it at every width (#1703).
+	// The notice floats over the text: the editor keeps its whole height, running on under the notice to the pane's foot,
+	// so the text the person reads does not move or shrink as a notice comes and goes.
 	await expect.poll(async () => {
 		const editor = await page.locator('.doc .ed-wrap').boundingBox();
 		const notice = await pill.boundingBox();
-		return !!editor && !!notice && editor.y + editor.height <= notice.y + 0.5;
-	}, { message: 'editor text clears the below activity notice' }).toBe(true);
+		return !!editor && !!notice && editor.y + editor.height >= notice.y + notice.height - 0.5;
+	}, { message: 'the editor runs on under the below activity notice' }).toBe(true);
 	await saveEvidenceScreenshot(page, testInfo, 'canvas-offscreen-pill', { fullPage: false });
 	await pill.click();
 	await expect(page.locator('.cm-comment-anchor').filter({ hasText: quote })).toBeInViewport();
@@ -130,9 +131,9 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('[data-doc-activity-pill]')).toHaveCount(0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	const paneLabel = await page.locator('.pane-scope').textContent();
-	await openComments(page, /^1 thread\b/);
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	const viewportBefore = await page.evaluate(() => window.visualViewport?.height ?? window.innerHeight);
 	await drawer.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).click();
 	await expect(page.locator('.cm-comment-focused').filter({ hasText: quote })).toBeInViewport();
@@ -197,7 +198,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await drawer.getByRole('button', { name: 'Close', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
-	await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeFocused();
+	await expect(page.getByRole('button', { name: /^1 comment\b/ })).toBeFocused();
 	await page.locator('.cm-content').focus();
 	await page.keyboard.press('Shift+ArrowRight');
 	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
@@ -229,7 +230,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
 	if (mobile) expect(await page.locator('.comment-status').evaluate((button) => getComputedStyle(button).paddingLeft)).toBe('8px');
 	await openComments(page);
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await drawer.getByRole('button', { name: 'Show comment: text unavailable', exact: true }).click();
 	await expect(drawer).toContainText('This comment has no text to jump to.');
 	for (const theme of ['light', 'dark'] as const) {

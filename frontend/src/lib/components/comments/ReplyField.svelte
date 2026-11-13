@@ -7,15 +7,13 @@
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, pinned = true, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
-		/** Replies grow until their available scroller is full, then scroll inside. */
+	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
+		/** The reply's text. The field grows with it and never scrolls itself; the card's outer scroller keeps the caret in view. */
 		value?: string;
 		selection?: [number, number] | null;
 		keepVisible?: boolean;
 		/** The card this field belongs to: kept whole in view whenever the scroller can hold it, so revealing the field never cuts its author and quote. */
 		wholeCard?: HTMLElement;
-		/** In a popover or sheet the field stays at the bottom while the card scrolls behind it. A card with its own pinned row (a suggestion's Accept and Reject) lets it scroll with the card instead, so it never covers that row. */
-		pinned?: boolean;
 		posting?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
@@ -25,7 +23,8 @@
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
-	/** A field that scrolls with its card (not pinned) is kept in view while it is being typed in, so a growing field never goes below the card's visible edge; opening on it moves nothing. */
+	/** Once the person taps the field or types, it stays in view in whatever scrolls the thread (a keyboard rising, the text
+	 * growing). Focus alone doesn't: a card focused by picking its tag is already being scrolled to smoothly. */
 	let typing = $state(false);
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
 	export function clearTags() { selectedTags.clear(); }
@@ -69,10 +68,10 @@
 	}
 </script>
 
-<div class="ct-compose open" class:unpinned={!pinned} data-autosize-sticky>
+<div class="ct-compose open" data-reply-composer>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || (!pinned && typing), whole: wholeCard }} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
@@ -83,21 +82,7 @@
 
 <style>
 	.ct-compose { margin-top: var(--space-1); }
-	/* A thread popover or drawer scrolls its discussion behind the reply instead of hiding its field below the fold. */
-	/* The pinned reply takes its surface's own fill: the popover card is elevated, the comment drawers are opaque secondary sheets. */
-	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--card-fill, var(--bg-elevated)); position: sticky; bottom: 0; z-index: 1; background: var(--compose-fill); }
-	:global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--card-fill, var(--bg-secondary)); }
-	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--space-3); background: var(--compose-fill); pointer-events: none; }
-	/* The pinned row and the reply field take the card's own fill, so no band shows inside a tinted card. */
-	:global([data-popover]) .ct:not(.flat) { --card-fill: color-mix(in srgb, var(--text-primary) 4%, var(--bg-elevated)); }
-	:global([data-adaptive-drawer]) .ct:not(.flat) { --card-fill: color-mix(in srgb, var(--text-primary) 4%, var(--bg-secondary)); }
-	:global([data-popover]) .ct.linked:not(.focused):not(.flat) { --card-fill: color-mix(in srgb, var(--text-primary) 8%, var(--bg-elevated)); }
-	:global([data-adaptive-drawer]) .ct.linked:not(.focused):not(.flat) { --card-fill: color-mix(in srgb, var(--text-primary) 8%, var(--bg-secondary)); }
-	/* Inside a tinted card the backing stops at the card's own padding, so it never shows below the card. */
-	:global(.ct:not(.flat)) .ct-compose::after { height: var(--space-2); }
-	/* Replies grow until their available scroller is full, then scroll inside. */
-	:global([data-popover]) .ct-compose.unpinned, :global([data-adaptive-drawer]) .ct-compose.unpinned { position: static; }
-	:global([data-popover]) .ct-compose.unpinned::after, :global([data-adaptive-drawer]) .ct-compose.unpinned::after { display: none; }
+	/* The field grows with its text and never scrolls itself. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }

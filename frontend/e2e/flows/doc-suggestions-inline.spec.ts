@@ -1,4 +1,4 @@
-import { closeComments, inResolved, showAllThreads } from '../support/commentDrawer';
+import { closeComments, inResolved, resolvedList, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
@@ -8,11 +8,11 @@ import { layouts } from '../support/liveConcurrency';
 // The editor's inline marks for one suggestion: the struck quote and the drawn insert.
 const strike = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-del[data-suggestion-id="${id}"]`);
 const insert = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-insert[data-suggestion-id="${id}"]`);
-const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ threads?\b/ });
+const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ comments?\b/ });
 
 async function openComments(page: Page, drawer: Locator) {
 	await commentsButton(page).click();
-	await expect(drawer).toBeVisible();
+	await expectCommentsShown(drawer);
 	await showAllThreads(drawer);
 }
 
@@ -105,13 +105,14 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
-			// The list is a modal sheet over the document column (its scrim and grabber included) in both layouts here, since
-			// neither canvas reaches 900 px (RSR-7): an insert under it cannot be pressed until the list closes.
+			// Neither canvas here is wide enough for the margin. On a phone the list is a modal sheet over the document (its
+			// scrim and grabber included), so an insert under it cannot be pressed until the list closes; on a desktop it is a
+			// popover beside its button, and nothing dims or covers the document.
 			const covered = await insert(page, fine).evaluate((element) => {
 				const rect = element.getBoundingClientRect();
 				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-adaptive-drawer]');
 			});
-			expect(covered, 'the insert is under the list sheet and its scrim').toBe(true);
+			expect(covered, 'the insert is under the list sheet and its scrim only on a phone').toBe(project === 'chromium-mobile');
 			await closeComments(page);
 			await expect(drawer).toHaveCount(0);
 			if (project === 'chromium-mobile') await insert(page, fine).tap(); else await insert(page, fine).click();
@@ -130,14 +131,14 @@ for (const [width, height, project] of layouts) {
 			await openComments(page, drawer);
 
 			await accept(loose).click();
-			await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			await inResolved(drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${loose}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			await expect(editor).toContainText('The first line is tight.');
 			await expect(strike(page, loose)).toHaveCount(0);
 			await expect(insert(page, loose)).toHaveCount(0);
 			await expect.poll(storedText).toBe(PROSE.replace('is loose', 'is tight'));
 
 			await reject(fine).click();
-			await inResolved(drawer, () => expect(row(fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
+			await inResolved(drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${fine}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expect(strike(page, fine)).toHaveCount(0);
 			await expect(insert(page, fine)).toHaveCount(0);
 			await expect(editor).toContainText('The second line is fine.');
@@ -198,8 +199,8 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
-			// This canvas is narrower than 900 px, so the list is a modal sheet over the document column (RSR-7): the sheet is
-			// closed before the document is touched, and the card is still listed when it opens again.
+			// Neither canvas here is wide enough for the margin, so the list (a popover, or the phone's sheet) is closed before the
+			// document is touched, and the card is still listed when it opens again.
 			await openComments(page, drawer);
 			await expect(strike(page, loose)).toHaveText('is loose');
 			await closeComments(page);
@@ -209,19 +210,11 @@ for (const [width, height, project] of layouts) {
 			await line.click({ position: { x: (await line.boundingBox())!.width - 4, y: 5 } });
 			await page.keyboard.press('Home');
 			const card = page.getByRole('dialog');
-			if (phone) {
-				// A caret reaching the quote opens no card, so the editor keeps the focus and takes the edit: deleting the quote's
-				// first character. 'The first line ' is 15 characters: the caret stops on the quote's first.
-				for (let step = 0; step < 15; step += 1) await page.keyboard.press('ArrowRight');
-				await expect(card).toHaveCount(0);
-			} else {
-				// At desktop widths a caret reaching the quote focuses its card, so the card closes first and the editor, which keeps
-				// its caret at the quote's start, takes the edit.
-				for (let step = 0; step < 18 && !(await card.isVisible()); step += 1) await page.keyboard.press('ArrowRight');
-				await expect(card).toBeVisible();
-				await page.keyboard.press('Escape');
-				await expect(card).toHaveCount(0);
-			}
+			// Without the margin a card would cover the text, so only a click or tap opens one: a caret reaching the quote opens
+			// none, and the editor keeps the focus and takes the edit, deleting the quote's first character. 'The first line ' is
+			// 15 characters: the caret stops on the quote's first.
+			for (let step = 0; step < 15; step += 1) await page.keyboard.press('ArrowRight');
+			await expect(card).toHaveCount(0);
 			await expect(editor).toBeFocused();
 			await page.keyboard.press('Delete');
 			await expect(editor).not.toContainText('The first line is loose.');
@@ -231,8 +224,7 @@ for (const [width, height, project] of layouts) {
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
-			// The edit moved the caret within the quote, which at desktop widths focuses the card again: close it, then list the comments.
-			if (!phone) await page.keyboard.press('Escape');
+			// The edit moved the caret within the quote, which opens no card either; then list the comments.
 			await expect(page.getByRole('dialog')).toHaveCount(0);
 			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');

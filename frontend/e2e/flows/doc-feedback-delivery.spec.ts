@@ -131,39 +131,11 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	documentReloads = 0;
 	navigations = 0;
 	await headerSend(page).click();
-	const confirmation = page.locator('.document-canvas .delivery-confirmation .toast--success');
-	await expect(confirmation).toContainText('1 comment sent');
-	await captureDeliveryFrame(page, 'canvas-confirmation');
-	// Body text may sit behind this transient notice, but no control, comment card, pin, composer, or scrollbar may.
-	const [confirmationBox, canvasBox] = await Promise.all([
-		confirmation.boundingBox(),
-		page.locator('.document-canvas').boundingBox(),
-	]);
-	expect(confirmationBox).not.toBeNull();
-	expect(canvasBox).not.toBeNull();
-	expect(confirmationBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
-	expect(confirmationBox!.y + confirmationBox!.height).toBeLessThanOrEqual(canvasBox!.y + canvasBox!.height);
-	const overlap = await page.locator('.document-canvas').evaluate((canvas) => {
-		const notice = canvas.querySelector<HTMLElement>('.delivery-confirmation .toast');
-		if (!notice) throw new Error('Expected canvas-local confirmation');
-		const noticeBox = notice.getBoundingClientRect();
-		const intersects = (box: DOMRect) => noticeBox.left < box.right && noticeBox.right > box.left
-			&& noticeBox.top < box.bottom && noticeBox.bottom > box.top;
-		const blocked = Array.from(canvas.querySelectorAll<HTMLElement>('button, [role="button"], [data-margin-card], [data-region-thumb]'))
-			.filter((element) => {
-				const style = getComputedStyle(element);
-				return !notice.contains(element) && style.display !== 'none' && style.visibility !== 'hidden' && intersects(element.getBoundingClientRect());
-			})
-			.map((element) => element.className || element.getAttribute('aria-label') || element.tagName);
-		const scroller = canvas.querySelector<HTMLElement>('.cm-scroller');
-		const gutter = scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
-		const scrollerBox = scroller?.getBoundingClientRect();
-		const scrollbar = gutter > 0 && !!scrollerBox && intersects(new DOMRect(scrollerBox.right - gutter, scrollerBox.top, gutter, scrollerBox.height));
-		return { blocked, anchorCount: canvas.querySelectorAll('.cm-comment-anchor').length, scrollbar };
-	});
-	expect(overlap.anchorCount, 'the lower canvas edge includes the commented text worst case').toBeGreaterThan(0);
-	expect(overlap.blocked, 'canvas confirmation never covers an interactive control or comment card').toEqual([]);
-	expect(overlap.scrollbar, 'canvas confirmation never covers the editor scrollbar').toBe(false);
+	// The header says it went (Sent where Send stood, the count in its spoken status); nothing floats over the text or a card.
+	await expect(page.locator('.document-header .sending-now .sent')).toHaveText('Sent');
+	await expect(page.locator('.document-header .feedback-controls [role="status"]')).toHaveText(/^1 comment sent/);
+	await expect(page.locator('.document-canvas .delivery-confirmation')).toHaveCount(0);
+	await captureDeliveryFrame(page, 'header-sent');
 	expect(await page.evaluate(() => document.querySelector('.toast-container')?.textContent ?? '')).not.toContain('1 comment sent');
 	await expect(headerSend(page)).toHaveCount(0);
 	await expect.poll(() => heldIn(artifactId, 'document-held')).toBe(0);
@@ -213,7 +185,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await openComments(page, /^1 thread\b/);
+	await openComments(page, /^1 comment\b/);
 	await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');

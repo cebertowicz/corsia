@@ -19,7 +19,7 @@ function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn(), props:
 	return onAnchorFocus;
 }
 const comment = (id: string, onMarkerFocus?: CommentRange['onMarkerFocus']): CommentRange => ({ id, from: DANA, to: DANA + 4, onMarkerFocus });
-/** A comment on some of the cell's words, drawn as a mark inside the cell. One on all of them is drawn on the cell itself, and a click there also opens the cell. */
+/** A comment on some of the cell's words, drawn as a mark inside the cell. One on all of them is drawn on all its text, and a click there also opens the cell. */
 const onWords = (id: string, onMarkerFocus?: CommentRange['onMarkerFocus']): CommentRange => ({ ...comment(id, onMarkerFocus), from: DANA + 1, to: DANA + 3 });
 /** The innermost mark drawn on the text, once the editor has painted it: with several comments they nest. */
 const painted = () => vi.waitFor(() => {
@@ -114,7 +114,10 @@ describe('a click on a comment that covers a whole table cell', () => {
 	const cellEditor = () => host.querySelector<HTMLElement>('.cm-md-cell-editor .cm-editor');
 	const markedCell = async () => {
 		const mark = await painted();
-		expect(mark.tagName, 'setup: the mark is drawn on the cell itself').toBe('TD');
+		// A whole-cell comment is drawn on the cell's text, as a text comment is.
+		const cell = mark.closest('td');
+		expect(cell, 'setup: the mark is drawn in the cell').not.toBeNull();
+		expect(mark.textContent, 'setup: the mark covers all of the cell\'s text').toBe(cell!.textContent!.trim());
 		return mark;
 	};
 

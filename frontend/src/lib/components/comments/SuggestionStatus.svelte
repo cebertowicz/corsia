@@ -20,7 +20,8 @@
 
 <style>
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: calc(var(--space-3) / 2); align-items: center; }
-	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
+	/* A text action with a target at least an icon button's (24px) tall, 44px on a touch screen. */
+	.suggestion-status button { min-height: var(--space-6); background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
 	/* The ring every control in a comment sheet draws: Close, Accept, Reject and this. */
 	.suggestion-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }

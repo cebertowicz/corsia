@@ -11,7 +11,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, covered = false, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -40,6 +40,8 @@
 		sideKey?: unknown;
 		/** A related control that can be used without dismissing this surface. */
 		keepOpenOnPointer?: (target: EventTarget | null) => boolean;
+		/** Covered by what it opened (an image viewer): it keeps its place and scroll, out of sight and reach, and leaves that surface's clicks and keys alone until uncovered. */
+		covered?: boolean;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -67,7 +69,7 @@
 	function position(event?: Event) {
 		const rect = anchorRect(anchor);
 		const live = typeof anchor === 'function';
-		if (!surface) return;
+		if (!surface || covered) return;
 		// A scroll inside the card or in another pane left the anchor where it was, so there is nothing to answer.
 		if (event?.type === 'scroll' && event.target !== window.visualViewport && rect?.top === anchorSeen?.top && rect?.left === anchorSeen?.left) return;
 		anchorSeen = rect;
@@ -118,12 +120,11 @@
 			rememberedSide ??= (placement === 'pointer' && height <= below) || below >= above ? 'below' : 'above';
 			const room = rememberedSide === 'above' ? above : below;
 			// A composer being typed in keeps its own height: the anchor can move while the person types, and a band
-			// below the card's own minimum clips the field and Send out of the card. The discussion regions are
-			// already at their minimums, so what the composer sits on plus the composer is that floor; take the
-			// tallest band the canvas has, bottom-pinned, and the discussion scrolls inside it.
-			// A composer that scrolls with its card (an unpinned one) is kept in view by that scroll, so the card stays within its band beside the text.
-			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]:not(.unpinned)') : null;
-			const need = pinned ? pinned.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + gap : 0;
+			// shorter than the composer clips the field and Send out of the card. The discussion above it scrolls with
+			// the card, so the composer alone is that floor; only when the band by the anchor is shorter does the card
+			// take the tallest band the canvas has, bottom-pinned.
+			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-reply-composer]') : null;
+			const need = pinned ? pinned.getBoundingClientRect().height + gap : 0;
 			const band = area.bottom - area.top - 2 * gap;
 			if (pinned && need > room && band > need) {
 				const cap = Math.max(need, height);
@@ -215,20 +216,21 @@
 	$effect(() => {
 		void anchor;
 		void sideKey;
+		void covered;
 		if (open) void tick().then(() => position());
 	});
 	function onScrollInput(event: Event) { if (!(event.target instanceof Node && surface?.contains(event.target))) lastScrollInput = performance.now(); }
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
-	function onPointer(event: PointerEvent) { if (open && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
-	function onKey(event: KeyboardEvent) { if (open && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
+	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
+	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
 </script>
 
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} onwheelcapture={onScrollInput} ontouchmovecapture={onScrollInput} />
 
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
-	     Clipping keeps it measurable without inherited visibility transitions delaying focus. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
+	     Clipping keeps it measurable before it is placed without inherited visibility transitions delaying focus; covered, it is hidden outright. -->
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
 {/if}
 
 <style>

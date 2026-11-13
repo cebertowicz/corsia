@@ -11,25 +11,25 @@
    widen its column past the table's box. */
 .doc .cm-scroller:not(.cm-md-cell-editor .cm-scroller) { transition: padding-right var(--dur-spring) var(--ease-material); }
 .doc.margin-room .cm-scroller:not(.cm-md-cell-editor .cm-scroller) { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
-/* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
-.doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
-.doc:has(.canvas-comment-drawer:not(.margin)):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
-.doc:has(.canvas-history-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
 @container doc-canvas (min-width: 900px) {
   .doc:has(.canvas-comment-drawer:not(.margin)) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
-  .doc:has(.canvas-comment-drawer:not(.margin)):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
 }
 /* Version history: History's side column starts where the text beside it keeps 45 characters a line (HISTORY_BESIDE_CANVAS in imageViewerPane.ts, 666), not at the comments drawer's 900. */
 @container doc-canvas (min-width: 666px) {
   .doc:has(.canvas-history-drawer) .canvas-history-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); }
   .doc:has(.canvas-history-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
-  .doc:has(.canvas-history-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
 }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
-/* The below activity pill is never drawn over text: the editor gives up its bottom edge, which moves no line the reader is on.
-   An above pill reserves nothing, since space at the top would push the text being read down as the pill appears. */
-.doc:has(.activity-pill[data-direction='below']) .doc-main { box-sizing: border-box; padding-bottom: calc(var(--touch-target) + var(--space-1)); }
+/* The bottom notices (the jump control and the below activity pill) float over the text, so the text runs to the pane's foot and
+   never moves or shrinks as one comes or goes; the editor's own bottom padding lets the last line scroll clear of them. Each stands in
+   one notice row (a touch target and a 4px gap) at the foot, the pill a row above the jump control while both show. While one shows
+   (`data-notice-jump`, `data-notice-below`, set on the canvas by the component that shows it) a line brought into view stops above
+   its rows plus air; the editor's scroll margin reads this scroll-padding back (`docScrollMargin`, cm/theme.ts). */
+.doc > .doc-bottom-band[data-doc-bottom-band] { grid-area: editor; align-self: end; position: relative; z-index: 2; padding-bottom: var(--space-1); pointer-events: none; }
+.doc[data-notice-jump] [data-doc-activity-pill][data-direction='below'] { translate: 0 calc(-1 * (var(--touch-target) + var(--space-1))); }
+.doc[data-notice-jump] .cm-scroller, .doc[data-notice-below] .cm-scroller { scroll-padding-bottom: calc(var(--touch-target) + var(--space-1) + var(--space-3)); }
+.doc[data-notice-jump][data-notice-below] .cm-scroller { scroll-padding-bottom: calc(2 * (var(--touch-target) + var(--space-1)) + var(--space-3)); }
 @media (max-width: 600px) {
   /* A touch pointer at phone width keeps the 24px text inset on the right as well as the left. The editor reads this; ArtifactLeaf's page gutter shares the condition. */
   @media (any-pointer: coarse) { .doc { --doc-phone-inset: 24px; } }

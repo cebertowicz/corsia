@@ -79,7 +79,9 @@
 		display: block; position: absolute; z-index: 1; top: 0;
 		left: calc(50% + var(--transcript-max-width) / 2 + var(--space-3)); width: calc(var(--margin-column) - var(--space-3) - var(--space-2));
 	}
-	:global(.messages:has(> .chat-margin.on-canvas)) { position: relative; }
+	/* Every scroll into view, the browser's own caret reveal while a reply is typed included, leaves the floating composer's
+	   band clear, so the caret line and Send never land under the composer (`keepInView` reads this padding as spent room). */
+	:global(.messages:has(> .chat-margin.on-canvas)) { position: relative; scroll-padding-bottom: calc(var(--input-bar-height, 100px) + var(--space-2)); }
 	/* The composer floats over the transcript's end, which the transcript keeps clear with its own bottom padding: a card on
 	   the last message reaches past that end, so it keeps the same room below itself and can always be scrolled into view whole. */
 	.chat-margin :global(.margin-card)::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: calc(var(--input-bar-height, 100px) + var(--space-4)); visibility: hidden; pointer-events: none; }

@@ -175,10 +175,12 @@ for (const layout of LAYOUTS) {
 		test('a click on a comment covering a whole cell opens the comment and the cell, and the comment stays open', async ({ page }) => {
 			test.setTimeout(120_000);
 			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });
-			const whole = page.locator(`td[data-comment-ids*="${seeded.commentId}"]`);
-			await expect(whole, 'the comment is drawn on the whole cell').toBeVisible();
+			// A whole-cell comment is drawn on all of the cell's text, as a text comment is.
+			const mark = page.locator(`td [data-comment-ids*="${seeded.commentId}"]`).first();
+			const whole = page.locator('td', { has: mark });
+			await expect(mark, 'the comment is drawn on all of the cell\'s text').toHaveText('Plain words in a cell.');
 			const phone = layout.project === 'chromium-mobile';
-			if (phone) await whole.tap(); else await whole.click({ delay: 80 });
+			if (phone) await mark.tap(); else await mark.click({ delay: 80 });
 			await expect(page.getByText('Which way does it point now?').first()).toBeVisible();
 			// Whatever would close the comment (the cell editor taking focus, the document reading the press) has run by the next two frames.
 			await settled(page);

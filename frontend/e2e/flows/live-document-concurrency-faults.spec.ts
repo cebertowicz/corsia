@@ -1,7 +1,7 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
-import { inResolved, openComments } from '../support/commentDrawer';
+import { inResolved, resolvedList, openComments } from '../support/commentDrawer';
 import { createComment, openLiveDocument, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import { liveFaultEvidence, liveFaultsEnabled, refuseLiveFaultOnce } from '../support/liveFault';
 import {
@@ -124,7 +124,7 @@ for (const [width, height, project] of layouts) {
 			const reports = watchPlacementReports(reader);
 			const foreignSeen = await countReceived(reader, '"store_id":"foreign-');
 			await expect.poll(() => markTexts(reader)).toEqual([placed]);
-			await openComments(reader, /^1 thread\b/);
+			await openComments(reader, /^1 comment\b/);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			fault.arm();
 			await agentComment(request, document, agent.id, fresh, `Fresh ${stamp}`);
@@ -165,7 +165,7 @@ for (const [width, height, project] of layouts) {
 			const typed = `typed ${stamp}`;
 			await typeAtDocumentEnd(page, typed);
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toContain(typed);
-			await openComments(page, /^1 thread\b/);
+			await openComments(page, /^1 comment\b/);
 			const row = page.getByRole('region', { name: 'Document comments', exact: true }).locator(`[data-comment-id="${loose}"]`);
 			let decisions = 0;
 			page.on('request', outgoing => { if (outgoing.url().includes(`/api/comments/${loose}/decision`)) decisions += 1; });
@@ -193,7 +193,7 @@ for (const [width, height, project] of layouts) {
 
 			// The one refusal is spent: the same Accept now flushes, applies once and keeps the typed text.
 			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
-			await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), () => expect(row.getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), () => expect(resolvedList(page).locator(`[data-comment-id="${loose}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			expect(decisions).toBe(1);
 			await expect.poll(() => renderedCount(page, 'tight line')).toBe(1);
 			expect(await renderedCount(page, typed)).toBe(1);
