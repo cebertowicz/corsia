@@ -312,7 +312,7 @@ async function seedScenario(
 		roots.push((await root.json()).comment.id as string);
 	}
 	// Reader follow-ups supply height before the agent answer. The card deliberately observes its newest reply,
-	// so the unread agent reply must stay newest for the two opened threads to clear after their visible dwell.
+	// so the unread agent reply must stay newest for the two opened threads to clear once they are opened and closed.
 	for (const { rootIndex, body } of options.readerFollowups ?? []) addReaderReply(artifactId, roots[rootIndex], body);
 	for (const index of initialReplyIndexes) {
 		const passage = PASSAGES[index];
@@ -472,7 +472,7 @@ for (const theme of ['light', 'dark'] as const) {
 
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: arriving in an unread document reveals and stamps the first reply`, async ({ page, request }, testInfo) => {
+		test(`${TAG} ${theme} ${width}px: arriving in an unread document reveals the first reply and leaves it unread`, async ({ page, request }, testInfo) => {
 			test.setTimeout(60_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
@@ -489,6 +489,8 @@ for (const theme of ['light', 'dark'] as const) {
 			await shot(page, `00-current-chat-${theme}-${width}`);
 			addAgentReply(scenario.artifactId, scenario.roots[2], threadId, PASSAGES[2].reply);
 			const releaseViewedStamps = await holdViewedStamps(page);
+			let stamps = 0;
+			page.on('request', (req) => { if (req.url().includes('/viewed') && req.method() === 'POST') stamps++; });
 			try {
 				await page.evaluate(async ({ id, path, title }) => {
 					const { openArtifactTab } = await import('/src/lib/stores/artifactWorkspace.ts');
@@ -497,12 +499,13 @@ for (const theme of ['light', 'dark'] as const) {
 				// Arrival skips the first two quiet threads and visibly scrolls to Budget's unread reply.
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
-				// This landing frame is intentionally before the 1.5 s visible dwell: marker and pill still agree.
+				// Landing reads nothing: marker and pill still agree on one unread reply.
 				await expect(page.getByRole('button', { name: '3 comments, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
 				await shotRailClosed(page, `01-document-arrival-${theme}-${width}-rail-closed`, width);
+				expect(stamps, 'landing on the unread reply sends no read stamp').toBe(0);
 			} finally {
 				await releaseViewedStamps();
 			}

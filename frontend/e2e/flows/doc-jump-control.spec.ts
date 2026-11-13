@@ -80,8 +80,8 @@ async function freezeClock(page: Page): Promise<void> {
 		}
 		Object.setPrototypeOf(FrozenDate, RealDate);
 		window.Date = FrozenDate as DateConstructor;
-		// A reply counts read after a 1.5 s dwell. While a frame is being taken the dwell is held, so the frame shows the reply
-		// still marked New however long the capture takes; releasing the hold lets the dwell finish within 100 ms.
+		// While a frame is being taken every 1.5 s timer (the margin hold among them) is held, so the frame shows the state it
+		// was taken for however long the capture takes; releasing the hold lets each one finish within 100 ms.
 		const realSetTimeout = window.setTimeout.bind(window);
 		(window as unknown as { __holdDwell: boolean }).__holdDwell = false;
 		window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
@@ -239,7 +239,7 @@ async function reloadComments(page: Page, artifactId: string): Promise<void> {
 
 // Back, not Escape: Escape first closes the pin's own card in the viewer, and Back leaves the viewer in one step.
 async function backToDocument(page: Page): Promise<void> {
-	// The reply counts read once its thread has been on screen for 1.5 s; leaving sooner leaves it waiting, which is the product's rule.
+	// Opening the thread already counted its reply read; this pause, kept from the old on-screen rule, lets the 1.5 s timers end.
 	await page.waitForTimeout(1700);
 	await putSheetAway(page);
 	await page.getByRole('button', { name: 'Back to walkthrough.md', exact: true }).click();
@@ -252,10 +252,13 @@ const controlBox = (page: Page) => page.locator('[data-doc-jump]');
 /** The request that records a thread's replies as read. */
 const viewedRecorded = (page: Page) => page.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/artifacts\/[^/]+\/comments\/[^/]+\/viewed$/.test(new URL(response.url()).pathname) && response.ok());
 
-/** Arriving on a thread opens it and records its replies read. Its New marks stay until the card closes, so the reader keeps the sign they came to see; the control leaves once the list is put away. */
-async function awaitFocusedRead(page: Page, read: Promise<unknown>): Promise<void> {
+/** The jump control is an explicit pick: its thread opens and is counted read, and its New replies stay marked until it closes. */
+async function jumpAndAwaitRead(page: Page): Promise<void> {
+	const stamped = viewedRecorded(page);
+	await controlButton(page).click();
 	await expect(page.locator('[data-comment-id].focused')).toBeVisible();
-	await read;
+	await stamped;
+	await expect(page.locator('[data-comment-id].focused .ct-reply.new').first()).toBeVisible();
 }
 
 /** The control's face is its touch target: like chat's control, no pseudo-element padding. Measured at rest: mid-arrival
@@ -955,10 +958,8 @@ for (const theme of ['light', 'dark'] as const) {
 			// Tapping through every waiting thread reads them all: the control leaves.
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await controlBox(page).count())) break;
-				const read = viewedRecorded(page);
-				await controlButton(page).click();
-				// The comments list opens over the document and covers the control; stay until the arrival reads it, then put it away to tap again.
-				await awaitFocusedRead(page, read);
+				// The comments list opens over the document and covers the control; stay until the pick is read, then put it away to tap again.
+				await jumpAndAwaitRead(page);
 				await closeComments(page);
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
