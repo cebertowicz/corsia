@@ -71,7 +71,7 @@ class RuleScope:
     """
 
     any_rule: bool = True
-    unrouted_projects: frozenset[str] | None = frozenset()
+    unrouted_projects: frozenset[str | None] | None = frozenset()
     envelope: EventEnvelope | None = None
     reads_head: bool = False
 

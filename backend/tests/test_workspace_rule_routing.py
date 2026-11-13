@@ -117,6 +117,25 @@ def test_anchored_lookup_separates_scopes_and_missing_thread(isolated_db):
         db.close()
 
 
+def test_owned_mail_uses_owners_scope(isolated_db):
+    from connections.google.accounts import thread_key
+    from registry.models import register_artifact
+
+    _project()
+    _agent('outside')
+    _agent('inside', 'p')
+    _rule('outside-rule', 'outside')
+    _rule('inside-rule', 'inside', 'p')
+    account = _account('all')
+    for name, owner in (('outside', 'outside'), ('inside', 'inside')):
+        register_artifact(integration='gmail', type='email-thread',
+                          external_id=thread_key(account, f'thread-{name}'), parent_thread_id=owner)
+        _deliver(account, name)
+    decisions = _rows('SELECT rule_id, thread_id FROM event_route_decisions ORDER BY id')
+    assert [(row['rule_id'], row['thread_id']) for row in decisions] == [
+        ('outside-rule', 'outside'), ('inside-rule', 'inside')]
+
+
 @pytest.mark.parametrize(('initial', 'after'), [(None, 'p'), ('p', None)])
 def test_writer_moving_out_of_scope_disables_old_rule(isolated_db, initial, after):
     _project()

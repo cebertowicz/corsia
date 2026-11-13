@@ -39,6 +39,7 @@ def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
     db.execute('CREATE TRIGGER rule_audit AFTER INSERT ON event_rules '
                'BEGIN INSERT INTO audit VALUES (new.id); END')
     _route(db, 'old', 'project:abc')
+    _observe(db, 'old-observe', 'project:abc')
     original = db.execute('SELECT * FROM event_rules').fetchall()
     objects = db.execute("SELECT type, name, sql FROM sqlite_master WHERE tbl_name='event_rules' "
                          "AND sql IS NOT NULL AND type IN ('index','trigger') ORDER BY type, name").fetchall()
@@ -49,11 +50,12 @@ def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
     _route(db, 'workspace-route', WORKSPACE_SCOPE_ID)
     _observe(db, 'workspace-observe', WORKSPACE_SCOPE_ID)
     assert db.execute('SELECT rule_id FROM audit ORDER BY rowid').fetchall() == [
-        ('old',), ('workspace-route',), ('workspace-observe',)]
+        ('old',), ('old-observe',), ('workspace-route',), ('workspace-observe',)]
     for insert in (_route, _observe):
         with pytest.raises(sqlite3.IntegrityError):
             insert(db, 'invalid', 'unrelated')
     db.close()
+
 
 
 def test_fresh_schema_accepts_workspace_and_rejects_invalid_scope():

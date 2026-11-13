@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from infra.delegation_scope import WORKSPACE_SCOPE_ID
 from infra.migration_170_to_171_worker_profile import _RULES as _RULES_171
 
 _OLD_SCOPE = "scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'"
 _RULES = _RULES_171.replace(
-    _OLD_SCOPE, _OLD_SCOPE + f" OR scope = '{WORKSPACE_SCOPE_ID}'", 1)
+    _OLD_SCOPE, _OLD_SCOPE + " OR scope = 'workspace'", 1)
 assert _RULES != _RULES_171
 
 

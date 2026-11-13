@@ -11,8 +11,6 @@ request identity and its worker until the worker's result settles it.
 """
 from __future__ import annotations
 
-from infra.delegation_scope import WORKSPACE_SCOPE_ID
-
 # Fixed-size checks keep a malformed test out of storage: at most four AND-ed
 # tests, each naming a field and one of the five operators. These literals copy
 # events.rules on purpose: migration 136's DDL must not move when that code does,
@@ -41,7 +39,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
         -- route: act on events. observe: register what a tool result names to its caller.
         kind TEXT NOT NULL DEFAULT 'route' CHECK (kind IN ('route', 'observe')),
         -- Only a shipped rule set's observe row applies to every project, as global.
-        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%' OR scope = '{WORKSPACE_SCOPE_ID}'
+        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%' OR scope = 'workspace'
                                    OR (scope = 'global' AND kind = 'observe' AND origin LIKE 'rule_set:_%')),
         connector TEXT NOT NULL,
         event_type TEXT,
