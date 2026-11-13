@@ -25,9 +25,11 @@ PROVENANCE = 'document.person_comment_task'
 # Close reasons, one per cause; each stays true on the closed node.
 COVERED = "Covered by this document’s review."
 DELETED = 'This document is deleted.'
+MOVED = 'This document is in another place, and its comments are there with it.'
 NO_OWNER = 'This document has no owner.'
 PROMOTED = "This document is in another place, and its comments can’t be shown there. CORSIA keeps them."
-# The retirement causes that end a document's task, each with its reason.
+# The retirement causes that end a document's task, each with its reason. A promoted identity naming a
+# successor had its comments carried there, so its task closes with MOVED and the successor takes it over.
 _RETIRED = {'file_gone': DELETED, 'promoted': PROMOTED}
 
 
@@ -119,7 +121,7 @@ def _close(db, node_id: str, reason: str) -> bool:
 
 def document_retired(db, artifact_id: str, cause: str | None) -> None:
     """Close the open task when the retirement ends its comments' place: the file is gone, or a promote
-    tombstoned it without carrying the comments over (``reconcile`` reads the cause ``retire`` kept)."""
+    tombstoned it (``reconcile`` reads the cause ``retire`` kept, and follows the successor it named)."""
     if cause in _RETIRED:
         reconcile(db, artifact_id)
 
@@ -148,8 +150,12 @@ def reconcile(db, artifact_id: str) -> str | None:
         return None
     ended = _RETIRED.get(registry_models.retired_cause(artifact_id, db=db) or '')
     if ended:
-        # The comments' place is gone. A close a paused plan or held task deferred finishes on its resume.
-        return node_id if node_id and not _close(db, node_id, ended) else None
+        successor = registry_models.successor_id(artifact_id, db=db)
+        # The comments' place is gone, and a promote's successor holds them now. A close a paused plan or
+        # held task deferred finishes on its resume, and hands the task over then, never before.
+        if node_id and not _close(db, node_id, MOVED if successor else ended):
+            return node_id
+        return reconcile(db, successor) if successor else None
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = _owner(db, artifact)
     if not owner or not owner['user_id']:
