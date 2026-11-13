@@ -138,8 +138,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		// focuses its card there.
 		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
-		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
+		// A pick is something the reader opened, even when the column at rest only selects its card.
 		bump();
+		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id, fromText: true };
