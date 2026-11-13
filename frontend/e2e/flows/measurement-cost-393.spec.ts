@@ -27,7 +27,7 @@ async function openCost(page: import('@playwright/test').Page, request: import('
 	const agent = { id: await createAgent(request, `Cost agent ${suffix}`, project.id), name: `Cost agent ${suffix}` };
 	await serveMeasurement(page, project, agent, actual);
 	await loginByUrl(page, { waitForComposer: false });
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	await selectProjectScope(page, project.name);
 	const section = page.locator('section[aria-label="Cost"]');
