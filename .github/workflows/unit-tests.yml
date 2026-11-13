@@ -371,7 +371,11 @@ jobs:
     if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Frontend unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # On the slow hosted-runner kind the vitest step alone takes about 8.5
+    # minutes and the whole job up to 9.9 (2026-11-13), so a cap of 10
+    # cancelled jobs whose tests and build had all passed. The cap is a hang
+    # guard with room for the slow kind.
+    timeout-minutes: 15
     steps:
       - name: Fail when relevance preflight did not succeed
         if: ${{ needs.relevance.result != 'success' }}
