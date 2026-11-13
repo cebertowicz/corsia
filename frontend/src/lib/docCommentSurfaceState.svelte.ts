@@ -8,6 +8,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { arrivedDocComments } from '$lib/stores/docComments';
 import { paneOverlay } from '$lib/stores/artifactCanvas';
 import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
+import { CELL_EDITOR, cellAtPosition, closeCell, openCellAt, openCellState } from '$lib/cm/widget-cell-state';
 
 /** What a card is anchored to; the popover owns the union. */
 export type CommentAnchor = NonNullable<PopoverAnchor>;
@@ -21,12 +22,41 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
  * DOM selection was cleared, as it is when the comment popover's focused control is removed.
  */
 export function focusDocumentEditor(root: HTMLElement | undefined) {
-	const content = root?.querySelector<HTMLElement>('.cm-content');
-	const view = content && EditorView.findFromDOM(content);
+	// Looked up from the outer `.cm-editor`: CodeMirror finds a view from the first `.cm-content` inside what it is given,
+	// which inside the document's own content is an open table cell's editor.
+	const dom = root?.querySelector<HTMLElement>('.cm-editor');
+	const view = dom && EditorView.findFromDOM(dom);
 	if (!view) return;
 	const selection = view.state.selection.main;
 	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
 	view.focus();
+}
+
+/**
+ * Closes the table cell open in the document's editor, and takes the focus out of it, so no caret or keyboard is left under
+ * a modal sheet drawn over it. Answers how to give the caret back, as `focusDocumentEditor` does for prose: the cell at the
+ * document's caret, which is still where the tap left it, opens again with the focus. Null when no cell was open.
+ */
+export function closeDocumentCell(root: HTMLElement | undefined): (() => void) | null {
+	const dom = root?.querySelector<HTMLElement>('.cm-editor');
+	const view = dom && EditorView.findFromDOM(dom);
+	if (!view?.state.field(openCellState, false)) return null;
+	const active = document.activeElement;
+	if (active instanceof HTMLElement && active.closest(CELL_EDITOR)) active.blur();
+	view.dispatch({ effects: closeCell.of(null) });
+	return () => {
+		const cell = view.dom.isConnected ? cellAtPosition(view.state, view.state.selection.main.head) : null;
+		// The cell's editor takes the focus as it opens, so a key still down lands at the tapped place.
+		if (cell) view.dispatch({ effects: openCellAt.of(cell) }); else focusDocumentEditor(root);
+	};
+}
+
+/**
+ * On a phone the card a tap in a table cell opened is a modal sheet: the cell under it closes, leaving no caret beneath it,
+ * and closing the sheet (a key typed, Escape, Close) opens it again at the tapped place, as prose gets its caret back.
+ */
+export function closeCellUnderSheet(commentUI: Pick<ReturnType<typeof createCommentSurfaceState>, 'sheetUp' | 'state' | 'returnFocusTo'>, root: () => HTMLElement | undefined) {
+	$effect(() => { const reopen = commentUI.sheetUp && commentUI.state?.kind === 'thread' && commentUI.state.fromText && closeDocumentCell(root()); if (reopen) commentUI.returnFocusTo(reopen); });
 }
 
 /** The canvas width (px) at which the text keeps at least 45 characters beside the 308 px margin column. */
@@ -53,6 +83,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 			if (button) button.focus({ preventScroll: true }); else restoreEditor();
 		});
 	}
+	/** Where closing the card gives the caret back, when that is not the document's own caret (a table cell the card closed). */
+	function returnFocusTo(restore: () => void) { restoreFocus = restore; }
 	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
 	let hovered = $state<string | null>(null);
 	/** The column was shown on load, so the shell (sidebar, Workspace panel) is left as it is until the reader closes it. */
@@ -159,7 +191,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get quiet() { return quiet; }, get draftOverColumn() { return state?.kind === 'draft' && overColumn; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, closeAll, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
+		close, closeAll, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus, returnFocusTo,
 	};
 }
 

@@ -40,6 +40,17 @@ describe('snappedTableRows', () => {
 	});
 });
 
+describe('snappedTableRows over a short row', () => {
+	it('ends a multi-row range at the last real cell\'s text, not at the row\'s closing delimiter', () => {
+		const src = '| a | b | c |\n|---|---|---|\n| d | e | f |\n| g |';
+		const covered = tableCells(src).filter((span) => span.row >= 1);
+		const snapped = snappedTableRows(src, covered)!;
+		expect(snapped.rows).toBe(2);
+		expect(snapped.cells.map((span) => [span.row, span.col])).toEqual([[1, 0], [1, 1], [1, 2], [2, 0]]);
+		expect(src.slice(snapped.from, snapped.to)).toBe('d | e | f |\n| g');
+	});
+});
+
 describe('tableCellLabel', () => {
 	it('names a cell from its row first cell and column header', () => {
 		expect(tableCellLabel(TABLE, cell(1, 1), 'Yes')).toBe('“Yes” · Delta, Status');
