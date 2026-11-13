@@ -246,22 +246,14 @@ async def decide_suggestion(
     if decision != "accept":
         lock: contextlib.AbstractAsyncContextManager = contextlib.nullcontext()
     else:
-        lock = accept_lock(await run_in_db(_artifact_id_of, comment_id))
+        artifact_id = await run_in_db(store.get_artifact_id_for_comment, comment_id)
+        if artifact_id is None:
+            raise CommentActionError("not_found", "Comment not found")
+        lock = accept_lock(artifact_id)
     async with lock:
         return await _decide_suggestion(
             comment_id, decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id,
             write=write, include_document=include_document, reason=reason)
-
-
-def _artifact_id_of(comment_id: str) -> str:
-    db = get_db()
-    try:
-        comment = store.get_comment(comment_id, db=db)
-    finally:
-        db.close()
-    if comment is None:
-        raise CommentActionError("not_found", "Comment not found")
-    return str(comment["artifact_id"])
 
 
 async def _decide_suggestion(

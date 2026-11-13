@@ -23,7 +23,7 @@
    never moves or shrinks as one comes or goes; the editor's own bottom padding lets the last line scroll clear of them. Each stands in
    one notice row (a touch target and a 4px gap) at the foot, the pill a row above the jump control while both show. While one shows
    (`data-notice-jump`, `data-notice-below`, set on the canvas by the component that shows it) a line brought into view stops above
-   its rows plus air; the editor's scroll margin reads the same two flags (`docScrollMargin`, cm/theme.ts, whose NOTICE_ROW is this row). */
+   its rows plus air; the editor's scroll margin reads this scroll-padding back (`docScrollMargin`, cm/theme.ts). */
 .doc > .doc-bottom-band[data-doc-bottom-band] { grid-area: editor; align-self: end; position: relative; z-index: 2; padding-bottom: var(--space-1); pointer-events: none; }
 .doc[data-notice-jump] [data-doc-activity-pill][data-direction='below'] { translate: 0 calc(-1 * (var(--touch-target) + var(--space-1))); }
 .doc[data-notice-jump] .cm-scroller, .doc[data-notice-below] .cm-scroller { scroll-padding-bottom: calc(var(--touch-target) + var(--space-1) + var(--space-3)); }

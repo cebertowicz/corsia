@@ -67,6 +67,36 @@ async def test_two_accepts_at_once_land_in_order(integration_client, doc, _regis
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_a_single_accept_and_a_batch_accept_at_once_land_in_order(integration_client, doc, _registrable_roots, monkeypatch):
+    import asyncio
+
+    from doceditor import live_suggestions
+
+    owner = _mk_thread(integration_client, _OWNER, title="Owner")
+    moved = doc.parent / ".threads" / owner / doc.name
+    moved.parent.mkdir(parents=True)
+    doc.rename(moved)
+    moved.write_text("Heading\n", encoding="utf-8")
+    await ArtifactRegisterTool().execute(path=str(moved), _thread_id=owner)
+    created = []
+    for replacement in (" one", " two"):
+        result = await DocCommentCreateTool().execute(doc_path=str(moved), quote="Heading", replacement=replacement,
+                                                       insert_after=True, _thread_id=owner)
+        created.append(json.loads(result)["comment"])
+
+    async def slow_legacy(*args, **kwargs):
+        await asyncio.sleep(0.05)  # the batch gets to load its rows and siblings meanwhile, unless it waits its turn
+        return None
+
+    monkeypatch.setattr(live_suggestions, "accept_live", slow_legacy)
+    await asyncio.gather(
+        DocCommentUpdateTool().execute(comment_id=created[0]["id"], decision="accept", _thread_id=owner),
+        DocCommentUpdateTool().execute(comment_id=created[1]["id"], decision="accept", all_from_author=True, _thread_id=owner))
+    assert moved.read_text(encoding="utf-8") == "Heading one two\n"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_reject_does_not_read_accepted_siblings(integration_client, doc, _registrable_roots, monkeypatch):
     from doceditor import comments
 
