@@ -32,5 +32,5 @@
 	.filter-popup button { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); text-align: left; }
 	.filter-check { display: inline-flex; flex: none; width: var(--space-3); height: var(--space-3); }
 	.filter-popup button[aria-checked="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
-	@media (pointer: coarse) { .drawer-heading { padding-bottom: var(--space-2); } .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: var(--touch-target); } .drawer-heading :global(.ico-btn) { min-width: var(--touch-target); } }
+	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: var(--touch-target); } .drawer-heading :global(.ico-btn) { min-width: var(--touch-target); } }
 </style>

@@ -46,37 +46,6 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
-	describe('an open margin card taller than the room beside the text', () => {
-		function mountIn(extra: Record<string, unknown>, content: number) {
-			const owner = document.createElement('div');
-			owner.style.overflowY = 'auto';
-			Object.defineProperty(owner, 'clientHeight', { configurable: true, value: 600 });
-			document.body.appendChild(owner);
-			host = owner;
-			const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
-			Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => content });
-			component = mount(CommentThread, { target: owner, props: { comment: thread(), inMargin: true, focused: true, scrollOnFocus: false, ...extra } });
-			flushSync();
-			return () => { if (original) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original); else delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight; };
-		}
-		it('keeps to the room and scrolls inside itself', () => {
-			const restore = mountIn({}, 2400);
-			const card = host.querySelector<HTMLElement>('.ct')!;
-			expect(card.style.maxHeight).toBe('584px');
-			expect(card.style.overflowY).toBe('auto');
-			restore();
-		});
-		it('is left alone when it fits, or when it is not the open card', () => {
-			let restore = mountIn({}, 300);
-			expect(host.querySelector<HTMLElement>('.ct')!.style.maxHeight).toBe('');
-			restore(); unmount(component!); host.remove();
-			restore = mountIn({ focused: false }, 2400);
-			expect(host.querySelector<HTMLElement>('.ct')!.style.maxHeight).toBe('');
-			restore();
-		});
-	});
-
-
 	describe('the line under the reply field', () => {
 		it('names the agents the reply wakes, and says so when there are none', () => {
 			render(thread({ replyGoesTo: [{ id: 'a1', name: 'Docs lane' }, { id: 'a2', name: 'Release lane' }] }));

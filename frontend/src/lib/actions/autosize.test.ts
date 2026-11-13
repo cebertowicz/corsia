@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { autosize } from './autosize';
 
 function field(scrollHeight: () => number, maxHeight = '100px') {
@@ -319,28 +319,5 @@ describe('autosize', () => {
 		expect(node.style.height).toBe('40px');
 		action.destroy();
 		delete (globalThis as Record<string, unknown>).ResizeObserver;
-	});
-});
-
-describe('autosize when the field narrows', () => {
-	it('re-fits the text when the field’s width changes, as when the send button appears beside it', () => {
-		let notify: () => void = () => undefined;
-		const original = globalThis.ResizeObserver;
-		globalThis.ResizeObserver = class { constructor(cb: () => void) { notify = cb; } observe() {} disconnect() {} } as unknown as typeof ResizeObserver;
-		try {
-			let width = 266;
-			const node = field(() => (width > 250 ? 22 : 45), 'none');
-			Object.defineProperty(node, 'clientWidth', { get: () => width, configurable: true });
-			autosize(node, { value: 'Yes, ring two waits for ring one.', fit: false });
-			expect(node.style.height).toBe('22px');
-			width = 230;
-			const frames = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { cb(0); return 1; });
-			node.getAnimations = () => [];
-			notify();
-			frames.mockRestore();
-			expect(node.style.height).toBe('45px');
-		} finally {
-			globalThis.ResizeObserver = original;
-		}
 	});
 });

@@ -48,7 +48,7 @@ def test_comment_thread_roundtrip(integration_client, artifact_id):
     payload = r3.json()
     threads = payload["comments"]
     assert set(payload["feedback"]) == {
-        "open_count", "document_held_count", "image_held_count", "owner_label", "undelivered_batches", "comment_goes_to",
+        "open_count", "document_held_count", "image_held_count", "owner_label", "undelivered_batches",
     }
     assert len(threads) == 1
     assert threads[0]["body"] == "Tighten this."

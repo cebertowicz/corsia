@@ -3,7 +3,6 @@
 	import { fade, slide } from 'svelte/transition';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
-	import { scroller } from '$lib/actions/keepInView';
 	import { scrollCue } from '$lib/actions/scrollCue';
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
@@ -136,21 +135,6 @@
 
 	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
-	// An open margin card taller than the room beside the text keeps to that room and scrolls inside itself, so reaching its reply field moves neither the page nor the highlighted text.
-	$effect(() => {
-		const card = el;
-		const owner = card && inMargin && focused ? scroller(card) : null;
-		if (!card || !owner) return;
-		const fit = () => {
-			card.style.maxHeight = ''; card.style.overflowY = '';
-			const room = owner.clientHeight - 2 * 8;
-			if (room > 0 && card.scrollHeight > room) { card.style.maxHeight = `${room}px`; card.style.overflowY = 'auto'; }
-		};
-		fit();
-		const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
-		observer?.observe(owner); observer?.observe(card);
-		return () => { observer?.disconnect(); card.style.maxHeight = ''; card.style.overflowY = ''; };
-	});
 	$effect(() => {
 		observeTick;
 		newestReply;
@@ -292,10 +276,6 @@
 		/* Its 3px focus ring must stay revealable at either edge of a drawer's own scroller, bordered or flat. */
 		scroll-margin-block: var(--space-1);
 	}
-	/* A boxed card in a sheet leaves room at its left, and the last one under it, for its own 3px halo, which the sheet's scroller would otherwise cut square. */
-	:global([data-adaptive-drawer]) .ct:not(.flat) { margin-inline-start: var(--space-px-3); }
-	:global([data-adaptive-drawer]) .ct:not(.flat):first-child { margin-top: var(--space-px-3); }
-	:global([data-adaptive-drawer]) .ct:not(.flat):last-child { margin-bottom: var(--space-px-3); }
 	.ct.flat {
 		background: none; border: 0; border-radius: 0; box-shadow: none;
 		padding: 0; gap: var(--space-1);

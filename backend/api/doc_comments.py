@@ -81,7 +81,7 @@ async def list_comments(artifact_id: str, token: str):
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
             feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
             comment_audience.annotate(db, artifact, comments)
-            feedback = {**feedback_batches.user_feedback_for_document(db, artifact_id), "comment_goes_to": comment_audience.for_new_comment(db, artifact)}
+            feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
         finally:
             db.close()

@@ -41,7 +41,7 @@ export const docComments = writable<Record<string, DocComment[]>>({});
 /** Threads brought into view by an explicit unread navigation. */
 export const arrivedDocComments = writable<Set<string>>(new Set());
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
-export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null; goesTo?: { state: 'agent' | 'none'; name?: string } };
+export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
 export const commentLoads = writable<Record<string, CommentLoad>>({});
 const placements = trackPlacements(docComments);
 /** Retry a live row's placement: one new positions request for its document. */
@@ -113,7 +113,7 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 			reloadListeners.forEach((listener) => listener(artifactId, rows.filter((row) => !known.has(row.id))));
 		}
 		placements.show(artifactId, withhold(artifactId, rows));
-		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label, goesTo: feedback.comment_goes_to } }));
+		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
 		return feedback;
 	} catch (error) {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'error', error: error instanceof Error ? error.message : String(error) } }));

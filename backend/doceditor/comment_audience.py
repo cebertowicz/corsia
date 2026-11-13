@@ -1,8 +1,9 @@
-"""The agents a comment box says it goes to: exactly the ones delivery wakes.
+"""The agents a reply box says it goes to: exactly the ones delivery wakes.
 
-Delivery resolves a comment's recipients in ``feedback_comments.recipients``. The box asks the same
-function about a stand-in for the person's next comment or reply, so it cannot name an agent that
-delivery will not reach, and it names no one when delivery has no recipient.
+Delivery resolves a comment's recipients with the rule in ``feedback_comments``. The box asks that
+same rule about the person's next reply on each thread, for every thread in one pass, so it cannot
+name an agent that delivery will not reach and costs a fixed number of reads however many threads
+a document has.
 """
 
 from __future__ import annotations
@@ -12,55 +13,48 @@ from typing import Any
 from doceditor import feedback_comments
 
 
-def _names(db, ids: list[str]) -> list[dict[str, str]]:
-    """The thread titles of recipient ids; an id that is not a thread has no name to show."""
-    named: list[dict[str, str]] = []
-    for thread_id in ids:
-        row = db.execute("SELECT title FROM threads WHERE id=?", (thread_id,)).fetchone()
-        if row is not None:
-            named.append({"id": thread_id, "name": (row["title"] or "").strip() or thread_id})
-    return named
-
-
-def joined_order(db, root_id: str) -> list[str]:
-    """Agents in the order they joined this comment chat: by their first comment or first tag, oldest first."""
-    seen: list[str] = []
+def _joined_orders(db, root_ids: list[str]) -> dict[str, list[str]]:
+    """Per thread, the agents in the order they joined it: by their first comment or first tag, oldest first."""
+    orders: dict[str, list[str]] = {root_id: [] for root_id in root_ids}
+    if not orders:
+        return orders
+    marks = ",".join("?" for _ in orders)
+    ids = tuple(orders)
     rows = db.execute(
-        """SELECT c.author_kind, c.author_thread_id, t.agent_id FROM doc_comments c
-           LEFT JOIN doc_comment_tags t ON t.comment_id=c.id
-           WHERE c.id=? OR c.parent_id=? ORDER BY c.created_at, c.rowid, t.rowid""",
-        (root_id, root_id)).fetchall()
+        f"""SELECT COALESCE(c.parent_id, c.id) AS root_id, c.author_kind, c.author_thread_id, t.agent_id FROM doc_comments c
+            LEFT JOIN doc_comment_tags t ON t.comment_id=c.id
+            WHERE c.id IN ({marks}) OR c.parent_id IN ({marks}) ORDER BY c.created_at, c.rowid, t.rowid""", ids + ids).fetchall()
     for row in rows:
+        seen = orders[row["root_id"]]
         if row["author_kind"] == "agent" and row["author_thread_id"] and row["author_thread_id"] not in seen:
             seen.append(str(row["author_thread_id"]))
         if row["agent_id"] and row["agent_id"] not in seen:
             seen.append(str(row["agent_id"]))
-    return seen
+    return orders
 
 
-def goes_to(db, artifact: dict[str, Any], root: dict[str, Any] | None = None) -> list[dict[str, str]]:
-    """Agents the person's next comment (no `root`) or next reply on `root` wakes, named.
-
-    The document's owner leads, then the others in the order they joined the chat.
-    """
-    stand_in = {"id": "next-comment", "artifact_id": artifact["id"], "parent_id": root["id"] if root else None,
-                "author_kind": "user", "tagged_agent_ids": []}
-    ids = list(feedback_comments.recipients(db, stand_in))
-    joined = joined_order(db, str(root["id"])) if root else []
-    owner = str(artifact.get("parent_thread_id") or "")
-    ids.sort(key=lambda i: (i != owner, joined.index(i) if i in joined else len(joined), i))
-    return _names(db, ids)
-
-
-def for_new_comment(db, artifact: dict[str, Any] | None) -> dict[str, str]:
-    """`{state: 'agent', id, name}` for the agent a new comment on this document goes to, else `{state: 'none'}`."""
-    named = goes_to(db, artifact) if artifact is not None else []
-    return {"state": "agent", **named[0]} if named else {"state": "none"}
+def _names(db, ids: set[str]) -> dict[str, str]:
+    """Thread titles by id; an id that is not a thread has no name to show."""
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    rows = db.execute(f"SELECT id, title FROM threads WHERE id IN ({marks})", tuple(ids)).fetchall()
+    return {str(row["id"]): (row["title"] or "").strip() or str(row["id"]) for row in rows}
 
 
 def annotate(db, artifact: dict[str, Any] | None, roots: list[dict[str, Any]]) -> None:
-    """Give each top-level comment `reply_goes_to`, the agents a reply on it wakes."""
-    if artifact is None:
+    """Give each top-level comment `reply_goes_to`, the agents a reply on it wakes.
+
+    The document's owner leads, then the others in the order they joined the thread.
+    """
+    if artifact is None or not roots:
         return
+    by_root = feedback_comments.recipients_for_replies(db, artifact, roots)
+    joined = _joined_orders(db, list(by_root))
+    names = _names(db, {agent for ids in by_root.values() for agent in ids})
+    owner = str(artifact.get("parent_thread_id") or "")
     for root in roots:
-        root["reply_goes_to"] = goes_to(db, artifact, root)
+        root_id = str(root["id"])
+        order = joined[root_id]
+        ids = sorted(by_root[root_id], key=lambda i: (i != owner, order.index(i) if i in order else len(order), i))
+        root["reply_goes_to"] = [{"id": i, "name": names[i]} for i in ids if i in names]

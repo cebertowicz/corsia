@@ -160,21 +160,3 @@ it('shows a deleted-text card its quote once, in the card, with no quote line ab
 	// A card whose text only changed keeps the line that takes the reader to it.
 	expect(card('b').querySelector('[data-comment-jump]')?.textContent).toContain('Changed words');
 });
-
-it('keeps only the opened margin card’s reply field in view, never an unfocused card that holds a draft', async () => {
-	host = document.createElement('div'); document.body.appendChild(host);
-	const original = HTMLElement.prototype.scrollIntoView;
-	const scrollIntoView = vi.fn();
-	Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
-	try {
-		const comment = (id: string) => ({ id, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
-		component = createClassComponent({ target: host, component: CommentList, props: { comments: [comment('a'), comment('b')], documentOrder: true, restCards: true, inMargin: true, scrollOnFocus: false, focusedId: 'a', showReply: true, keepReplyVisible: true, replyDrafts: { b: 'an unsent draft' } } });
-		flushSync(); await tick(); await tick();
-		const footer = (id: string) => host.querySelector(`[data-comment-id="${id}"] .ct-input`);
-		expect(footer('b')).not.toBeNull();
-		await vi.waitFor(() => expect(scrollIntoView.mock.contexts).toContain(footer('a')));
-		expect(scrollIntoView.mock.contexts).not.toContain(footer('b'));
-	} finally {
-		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
-	}
-});

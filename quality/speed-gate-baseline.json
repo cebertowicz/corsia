@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "The comment box names who a comment goes to: the comments list also asks delivery's recipient resolver once for the document, a constant set of reads per request.",
+  "reason": "The chat-list read omits 19 engine columns no list caller reads (turn, model-switch, compaction, confinement and local-only state); thread detail and the owning routes still serve them.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -37,9 +37,9 @@
       "steps": 223
     },
     "/api/artifacts/{artifact_id}/comments": {
-      "bytes": 256,
-      "statements": 18,
-      "steps": 50704
+      "bytes": 172,
+      "statements": 13,
+      "steps": 38046
     },
     "/api/artifacts/{artifact_id}/reviews": {
       "bytes": 14,

@@ -46,19 +46,10 @@ def _agent_authors(db, root_id: str) -> set[str]:
     )}
 
 
-def _tagged_agents(db, root_id: str, *, delivered_only: bool) -> set[str]:
-    if not delivered_only:
-        return {str(row["agent_id"]) for row in db.execute(
-            """SELECT DISTINCT t.agent_id FROM doc_comment_tags t JOIN doc_comments c ON c.id=t.comment_id
-               WHERE c.id=? OR c.parent_id=?""", (root_id, root_id),
-        )}
+def _tagged_agents(db, root_id: str) -> set[str]:
     return {str(row["agent_id"]) for row in db.execute(
-        """SELECT DISTINCT t.agent_id FROM doc_comment_tags t
-           JOIN doc_comments c ON c.id=t.comment_id
-           JOIN doc_feedback_batch_items i ON i.comment_id=c.id
-           JOIN doc_feedback_batches b ON b.id=i.batch_id AND b.recipient_id=t.agent_id
-           WHERE (c.id=? OR c.parent_id=?) AND b.state='delivered'
-             AND b.delivery_outcome='node'""", (root_id, root_id),
+        """SELECT DISTINCT t.agent_id FROM doc_comment_tags t JOIN doc_comments c ON c.id=t.comment_id
+           WHERE c.id=? OR c.parent_id=?""", (root_id, root_id),
     )}
 
 
@@ -79,7 +70,7 @@ def participants(db, root_id: str) -> set[str]:
         "SELECT author_kind,tagged_user_id FROM doc_comments WHERE id=? OR parent_id=?", (root_id, root_id),
     ).fetchall()
     people = {USER_AUTHOR_ID} if any(row["author_kind"] == "user" or row["tagged_user_id"] for row in rows) else set()
-    agents = (_agent_authors(db, root_id) | _tagged_agents(db, root_id, delivered_only=False)) - _left_agents(db, root_id)
+    agents = (_agent_authors(db, root_id) | _tagged_agents(db, root_id)) - _left_agents(db, root_id)
     return people | agents
 
 
@@ -111,25 +102,67 @@ def recipients(
     owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
     if document_owner_only:
         return (owner,)
-    author = _recipient_for_author(comment)
     root = _root_comment(db, comment)
     root_id = str(root["id"] if root else comment["id"])
+    ask_raised = comment["author_kind"] == "agent" and _ask_raised_to_person(db, comment)
+    return _resolve(owner, comment, root, _thread_facts(db, [root_id])[root_id], ask_raised=ask_raised)
+
+
+def recipients_for_replies(db, artifact: dict[str, Any], roots: list[dict[str, Any]]) -> dict[str, tuple[str, ...]]:
+    """Who the person's next reply on each thread reaches, by the same rule as `recipients`, in a fixed number of reads."""
+    owner = str(artifact.get("parent_thread_id") or "")
+    facts = _thread_facts(db, [str(root["id"]) for root in roots])
+    reply = {"author_kind": "user", "tagged_agent_ids": []}
+    return {str(root["id"]): _resolve(owner, reply, root, facts[str(root["id"])], ask_raised=False) for root in roots}
+
+
+def _thread_facts(db, root_ids: list[str]) -> dict[str, dict[str, set[str]]]:
+    """What the rule reads about each thread (agent authors, delivered tags, agents that left, acknowledgers), in four reads."""
+    facts: dict[str, dict[str, set[str]]] = {root_id: {"authors": set(), "tagged": set(), "left": set(), "acks": set()} for root_id in root_ids}
+    if not facts:
+        return facts
+    ids = tuple(facts)
+    marks = ",".join("?" for _ in ids)
+    for row in db.execute(
+        f"""SELECT COALESCE(parent_id, id) AS root_id, author_thread_id FROM doc_comments
+            WHERE (id IN ({marks}) OR parent_id IN ({marks})) AND author_kind='agent' AND author_thread_id IS NOT NULL""", ids + ids,
+    ):
+        facts[row["root_id"]]["authors"].add(str(row["author_thread_id"]))
+    # A held tag does not make someone a participant until its batch is delivered.
+    for row in db.execute(
+        f"""SELECT COALESCE(c.parent_id, c.id) AS root_id, t.agent_id FROM doc_comment_tags t
+            JOIN doc_comments c ON c.id=t.comment_id
+            JOIN doc_feedback_batch_items i ON i.comment_id=c.id
+            JOIN doc_feedback_batches b ON b.id=i.batch_id AND b.recipient_id=t.agent_id
+            WHERE (c.id IN ({marks}) OR c.parent_id IN ({marks})) AND b.state='delivered'
+              AND b.delivery_outcome='node'""", ids + ids,
+    ):
+        facts[row["root_id"]]["tagged"].add(str(row["agent_id"]))
+    for row in db.execute(
+        f"SELECT root_id, agent_id FROM doc_comment_recipient_state WHERE root_id IN ({marks}) AND left_thread=1", ids,
+    ):
+        facts[row["root_id"]]["left"].add(str(row["agent_id"]))
+    for row in db.execute(f"SELECT root_id, actor_id FROM doc_comment_acks WHERE root_id IN ({marks})", ids):
+        facts[row["root_id"]]["acks"].add(str(row["actor_id"]))
+    return facts
+
+
+def _resolve(
+    owner: str, comment: dict[str, Any], root: dict[str, Any] | None, facts: dict[str, set[str]], *, ask_raised: bool,
+) -> tuple[str, ...]:
+    """The one rule for who a comment or reply reaches, given what is known about its thread."""
     tagged = set(comment.get("tagged_agent_ids") or ())
     resolved = {owner, *tagged}
-    if comment.get("tagged_user_id"):
-        resolved.add(USER_AUTHOR_ID)
-    if comment["author_kind"] == "agent" and _ask_raised_to_person(db, comment):
+    if comment.get("tagged_user_id") or ask_raised:
         resolved.add(USER_AUTHOR_ID)
     if root is not None:
         resolved.add(_recipient_for_author(root))
-        resolved.update(_agent_authors(db, root_id))
-        # A held tag does not make someone a participant until its batch is delivered.
-        resolved.update(_tagged_agents(db, root_id, delivered_only=True))
-    quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
+        resolved.update(facts["authors"] | facts["tagged"])
+    quiet = facts["left"] | (facts["acks"] - {comment_acks.PERSON})
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
         resolved.add(owner)
-    resolved.discard(author)
+    resolved.discard(_recipient_for_author(comment))
     resolved.discard("")
     return tuple(sorted(resolved))
 

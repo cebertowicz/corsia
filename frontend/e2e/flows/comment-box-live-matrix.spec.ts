@@ -107,7 +107,7 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
 					// Posting an agent reply also delivers feedback to the document owner.
 					{ match_thread: doc.threadId, content: 'Saw the reply.', finish_reason: 'stop' },
 				]);
-				if (width === 393) await reader.getByRole('button', { name: 'Close comments', exact: true }).click();
+				if (width === 393) await reader.getByRole('button', { name: 'Close', exact: true }).click();
 				else await reader.keyboard.press('Escape');
 				await expect.poll(async () => {
 					const listed = await request.get(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN } });
