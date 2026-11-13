@@ -4,7 +4,7 @@ import { colourStyle } from './suggestion-marks';
 
 /** An open suggestion drawn inside a table cell: the quote struck through, the insert after it, as in body text. */
 export interface CellSuggestion { insert: string; color: string; busy?: boolean }
-export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; suggestion?: CellSuggestion; region?: boolean }
+export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; suggestion?: CellSuggestion; region?: boolean; /** The thread is unread: its highlight is drawn with the unread look (`commentAnchors.css`). */ unread?: boolean }
 
 const CLASSES = ['cm-suggestion-del', 'cm-suggestion-focus', 'cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
 
@@ -33,6 +33,7 @@ export function unpaint(el: HTMLElement) {
 		marked.classList.remove(...CLASSES);
 		if (marked.classList.length === 0) marked.removeAttribute('class');
 		marked.removeAttribute('data-comment-ids');
+		marked.removeAttribute('data-unread');
 		if (marked.dataset.commentAria) { marked.removeAttribute('aria-label'); marked.removeAttribute('role'); marked.removeAttribute('data-comment-aria'); }
 	}
 	el.normalize();
@@ -95,6 +96,7 @@ export function wrapRange(range: Range, mark: Mark, interactivePending = false) 
 		wrap.className = ['cm-comment-wrap', ...(mark.suggestion ? ['cm-suggestion-del', ...(mark.kind === 'focused' ? ['cm-suggestion-focus'] : [])] : markClasses(mark.kind))].join(' ');
 		if (mark.suggestion) { wrap.setAttribute('style', colourStyle(mark.suggestion.color)); wrap.dataset.suggestionId = mark.id; }
 		addCommentId(wrap, mark);
+		if (mark.unread) wrap.dataset.unread = '';
 		if (interactivePending && mark.kind === 'pending') wrap.dataset.commentIds = mark.id;
 		wrap.dataset.commentAria = 'true';
 		wrap.setAttribute('aria-label', `Commented text: ${clean(part.toString())}`);
@@ -178,7 +180,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 				for (const text of texts) {
 					// Another whole-cell comment already drew this text: it joins that mark, in paint order, as it did on the cell.
 					const drawn = text.parentElement;
-					if (drawn?.classList.contains('cm-comment-wrap') && drawn.childNodes.length === 1 && !drawn.dataset.suggestionId) { drawn.classList.add(...markClasses(mark.kind)); addCommentId(drawn, mark); continue; }
+					if (drawn?.classList.contains('cm-comment-wrap') && drawn.childNodes.length === 1 && !drawn.dataset.suggestionId) { drawn.classList.add(...markClasses(mark.kind)); addCommentId(drawn, mark); if (mark.unread) drawn.dataset.unread = ''; continue; }
 					const range = document.createRange();
 					range.selectNodeContents(text);
 					wrapRange(range, mark);
@@ -187,6 +189,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 			}
 			cell.classList.add(...markClasses(mark.kind));
 			addCommentId(cell, mark);
+			if (mark.unread) cell.dataset.unread = '';
 			cell.dataset.commentAria = 'true';
 			cell.setAttribute('aria-label', `Commented cell: ${clean(cell.textContent ?? '')}`);
 		}

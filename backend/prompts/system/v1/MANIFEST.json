@@ -220,10 +220,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 7207,
+      "bytes": 7206,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/project-import.md",
-      "sha256": "456bbde4e37ff2a28e8036a8b0209461d739579f4faf3b278ed143b544afb1d9"
+      "sha256": "a2c87f88deb6100d69e5da9164010eff28a43cf02494ccd7e5fc79061c15ddb8"
     },
     {
       "bytes": 13679,
@@ -340,16 +340,16 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
-      "bytes": 7573,
+      "bytes": 7425,
       "kind": "skill",
       "path": "skills/instruction-review/SKILL.md",
-      "sha256": "7266e64e274eb692fb19a2220fa0246d3fc3b89eba8d1403f986ea276ab61eaa"
+      "sha256": "64797f154b9c94f2399726fcfdc94e1c132c8e69d3b1d87d26567b4b6bbfe682"
     },
     {
-      "bytes": 5358,
+      "bytes": 5283,
       "kind": "skill",
       "path": "skills/instruction-review/corsia.yaml",
-      "sha256": "343db1c2738e5a36d0c8caf1ac42bf9c5c17ca1426b543b2022ae3e124721946"
+      "sha256": "a6eefd2029dad9a21f57fa0c6ca19e15cf8038edbd14506c3c286570bd01862f"
     },
     {
       "bytes": 3634,

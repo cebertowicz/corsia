@@ -73,6 +73,14 @@ describe('paintTable and unpaint', () => {
 		expect(whole.dataset.commentIds).toBe('a,b');
 		expect(whole.classList.contains('cm-comment-block-pending')).toBe(true);
 	});
+
+	it('draws a cell\'s text unread when any comment on the whole cell is unread, the later one included', () => {
+		const el = widget();
+		paintTable(el, BASE, SRC, [mark('a', 'Eli'), { ...mark('b', 'Eli'), unread: true }]);
+		const wrap = cell(el, 2, 1).querySelector<HTMLElement>('.cm-comment-wrap')!;
+		expect(wrap.dataset.commentIds).toBe('a,b');
+		expect(wrap.hasAttribute('data-unread')).toBe(true);
+	});
 });
 
 describe('commentIdsAt', () => {

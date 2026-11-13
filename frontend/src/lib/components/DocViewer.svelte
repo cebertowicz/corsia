@@ -14,6 +14,7 @@
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createCommentOpeners } from '$lib/docViewerClickPoint';
+	import { createHeldUnread } from '$lib/docHeldUnread.svelte';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
@@ -39,9 +40,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { DocViewerProps } from '$lib/docViewerProps';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
-	import {
-		withDraftArtifactId, existingDraft,
-	} from '$lib/stores/docSaveQueue';
+	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
@@ -58,7 +57,6 @@
 	import { createDocImageCacheKey } from '$lib/docImageCacheKey.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
-
 
 	let {
 		target,
@@ -132,7 +130,8 @@
 	// The list over the text, as the sheet or (below the margin width) the popover: the selection's Comment button waits for it to close.
 	const listOverText = $derived(commentUI.sheetUp || (commentUI.state?.kind === 'list' && commentSurface?.cardMode() === 'popover'));
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', paneDrawer: isPaneDrawer, fits: columnFits, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad, quietList: () => commentUI.state?.kind === 'list' && commentUI.quiet, close: commentUI.closeAll });
-	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)));
+	const heldUnread = createHeldUnread(() => !!commentUI.state, () => listedComments);
+	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	const openCards = createCommentOpeners(commentUI, scroll);
