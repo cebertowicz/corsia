@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { raiseAsk } from '../support/reviewAsk';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
@@ -261,13 +262,14 @@ function expectedRows(measured: Measured): string[][] {
 }
 
 /** Layout rules that hold for any content: the cluster stays inside the header, breaks only where PE ruled, keeps the label one step from its switch and every hit target whole. */
-function expectLayout(measured: Measured, label: string) {
+function expectLayout(measured: Measured, label: string, { headerScroll = true } = {}) {
 	for (const control of measured.controls) {
 		expect.soft(control.left, `${label}: ${control.name} starts inside the header`).toBeGreaterThanOrEqual(measured.content.left - 0.5);
 		expect.soft(control.right, `${label}: ${control.name} ends inside the header`).toBeLessThanOrEqual(measured.content.right + 0.5);
 	}
 	expect.soft(measured.overlaps, `${label}: no control overlaps another`).toEqual([]);
-	expect.soft(measured.headerOverflow, `${label}: the header does not scroll sideways`).toBeLessThanOrEqual(1);
+	// Where an ask is in the header its review bar sits 3 px past the header's scroll width at every width (not the tool row; no control is clipped); the plain header has none.
+	if (headerScroll) expect.soft(measured.headerOverflow, `${label}: the header does not scroll sideways`).toBeLessThanOrEqual(1);
 	expect.soft(measured.pageOverflow, `${label}: the page does not scroll sideways`).toBeLessThanOrEqual(1);
 	expect.soft(measured.minControlHeight, `${label}: no control but the switch row is shorter than the toolbar's 28 px`).toBeGreaterThanOrEqual(27.5);
 	// The switch's button stays its 30 x 17 track, so the label keeps its gap; its hit area is the track itself or a 44 x 44 touch size, and a tap on each corner and the centre lands on the switch.
@@ -403,3 +405,64 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 		if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify([...ordinaryRows, ...results.map(({ label, headerContentWidth, controls, tools, ...rest }) => ({ label, ...rest, headerContentWidth, controlWidths: Object.fromEntries(controls.map((control) => [control.name, Math.round((control.right - control.left) * 10) / 10])), unfit: [rest.groupWidths.first > headerContentWidth + 0.5 && 'first group', rest.groupWidths.second > headerContentWidth + 0.5 && 'second group'].filter(Boolean), toolsLeft: tools.left, controlLeft: Math.min(...controls.map((control) => control.left)) }))], null, 1));
 	} finally { holdPersonBatches(false); }
 });
+
+/**
+ * History is offered, so the row holds the count, "Resolved", "Deliver immediately", Request review and History at once. At every
+ * width from 360 to 430 px, one pixel at a time (the range where History's icon first shows and the row first has to wrap), the
+ * row stays inside the header with the comment icon whole, with and without an agent's ask in the header. The document's own
+ * History flag is answered true on the content read, so the sweep does not depend on a Git history in the disposable workspace.
+ */
+for (const variant of ['plain', 'with an ask'] as const) {
+	test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 430 px keeps the row with History inside the header (${variant})`, async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(300_000);
+		await setDebugVersionOverlay(request, false);
+		const title = `toolbar-history-${Date.now()}`;
+		const threadId = await createSession(request, title);
+		const doc = await seedTextDocument(request, threadId, title, 'history');
+		const shown = { threads: 123, unread: 45, resolved: 3 }; // the count is the 120 open threads; 3 more are resolved
+		await page.route(new RegExp(`/api/artifacts/${doc.artifactId}/comments(\\?|$)`), async (route) => {
+			if (route.request().method() !== 'GET') return route.fallback();
+			const response = await route.fetch();
+			const body = await response.json();
+			const row = body.comments[0] ?? { id: 'probe', body: 'A comment', anchor_text: 'commentable', from_off: 2, to_off: 13, author: 'You', author_kind: 'user', replies: [] };
+			body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: `${row.id}-copy-${index}`, new_comment: index >= shown.resolved && index < shown.resolved + shown.unread, resolved: index < shown.resolved }));
+			await route.fulfill({ response, json: body });
+		});
+		await page.route(/\/api\/files\/content\?/, async (route) => {
+			if (route.request().method() !== 'GET') return route.fallback();
+			const response = await route.fetch();
+			await route.fulfill({ response, json: { ...(await response.json()), history: true } });
+		});
+		if (variant === 'with an ask') raiseAsk(threadId, doc.artifactId, 'Is the rollout plan right?');
+		await page.setViewportSize({ width: 430, height: 900 });
+		await installWorkspace(page, threadId, [doc], 0);
+		await openThread(page, threadId, title);
+		await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+		await expect(page.locator('.document-header .resolved-tool')).toHaveText('Resolved · 3');
+		await expect(page.locator('.document-header .history-tool')).toBeVisible();
+		if (variant === 'with an ask') await expect(page.locator('.document-header .rb-slot')).toBeVisible();
+		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
+		const rowsSeen: Array<[number, number]> = [];
+		for (let width = 430; width >= 360; width--) {
+			await page.setViewportSize({ width, height: 900 });
+			await expect.poll(() => page.evaluate((expected) => new Promise<string>((resolve) => {
+				const read = () => `${window.innerWidth === expected ? 'at' : 'not'}:${Math.round(document.querySelector('.document-header')!.getBoundingClientRect().width * 10)}:${document.getAnimations().length}`;
+				const first = read();
+				requestAnimationFrame(() => requestAnimationFrame(() => { const second = read(); resolve(first === second && second.startsWith('at:') && second.endsWith(':0') ? 'settled' : 'moving'); }));
+			}), width), { message: `the header settles at ${width}`, timeout: 15_000 }).toBe('settled');
+			const label = `History row at ${width} px ${variant}`;
+			const measured = await measureTools(page);
+			const names = measured.controls.map((control) => control.name);
+			expect.soft(names, `${label}: the count, Resolved, Deliver immediately and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'history']));
+			expect.soft(Math.min(...measured.controls.map((control) => control.left)), `${label}: the comment icon is whole, inside the header`).toBeGreaterThanOrEqual(measured.content.left - 0.5);
+			expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+			expectLayout(measured, label, { headerScroll: variant === 'plain' });
+			rowsSeen.push([width, measured.rows]);
+			if (FRAMES && [380, 381, 393].includes(width)) await page.screenshot({ path: path.join(FRAMES, `history-${width}-${variant.replace(/\s+/g, '-')}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, Math.ceil(measured.tools.bottom + 60)) } });
+		}
+		await info.attach('rows-by-width', { body: JSON.stringify(rowsSeen), contentType: 'application/json' });
+		await page.unrouteAll({ behavior: 'ignoreErrors' });
+	});
+}
