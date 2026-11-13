@@ -194,7 +194,7 @@ async def release_artifact(token: str, body: ReleaseBody):
 
 
 class OwnershipBody(BaseModel):
-    """``owner`` is omitted when only the supervisor changes, so one field's picker never touches the other."""
+    """A field left out stays as it is, so one field's picker never touches the other."""
 
     owner: str | None = None
     supervisor_thread_id: str | None = None
@@ -210,7 +210,6 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
     from infra import config
     from registry.document_supervisor import (
         SUPERVISOR_KEY,
-        TAKEN_OVER_KEY,
         is_multi_person,
         may_change,
         owner_kind,
@@ -243,7 +242,9 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
                 return "bad_choice", None
             if taking_over and multi_person:
                 return "multi_person", None
-            supervisor = body.supervisor_thread_id
+            picked = metadata.get(SUPERVISOR_KEY)
+            supervisor = body.supervisor_thread_id if "supervisor_thread_id" in body.model_fields_set else picked
+            # The agent a person takes a document from supervises it, unless they picked one.
             if taking_over and supervisor is None and owner_kind(current) == "agent":
                 supervisor = current
             if new_owner != current:
@@ -252,10 +253,9 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
                     new_owner_thread_id=new_owner, actor_thread_id=None, authority="signed-in-person",
                     reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
                 )
-            updates = {SUPERVISOR_KEY: supervisor if supervisor != new_owner else None}
-            updates[TAKEN_OVER_KEY] = user["id"] if taking_over else metadata.get(TAKEN_OVER_KEY) if new_owner == UI_PRINCIPAL else None
-            if updates != {key: metadata.get(key) for key in updates}:
-                merge_identity_metadata(db, artifact_id, updates)
+            supervisor = supervisor if supervisor != new_owner else None
+            if supervisor != picked:
+                merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
             changed = models.get_artifact(artifact_id, db=db)
             return "ok", (changed, ownership(db, changed, user_id=user["id"], workspace=config.WORKSPACE))
 

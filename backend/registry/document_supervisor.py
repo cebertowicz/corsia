@@ -1,7 +1,7 @@
 """Who owns a registered document, who supervises it, and who may be picked.
 
 The one place that decides both: the document header shows them, comment
-delivery routes to the supervisor the header shows, and the ownership PUT asks
+delivery (new comments and re-opens alike) asks ``comment_recipients``, and the ownership PUT asks
 ``may_change`` before changing either. Who owns it follows the registry owner
 alone, the same reading ``may_edit_document`` makes: a ``ui`` owner is the
 person's, so agents suggest; a ``project:`` owner is no one's.
@@ -19,8 +19,6 @@ from registry.identity_metadata import parse_metadata
 from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_scope
 
 SUPERVISOR_KEY = "supervisor_thread_id"
-# Audit only: which person took a document over. Nothing reads it to decide ownership.
-TAKEN_OVER_KEY = "owner_user_id"
 
 
 def _thread(db, thread_id: str | None):
@@ -92,15 +90,19 @@ def _supervisor(
     return None, "none"
 
 
-def comment_recipient(db, artifact: dict[str, Any], *, workspace: Path) -> str:
-    """The agent that receives a document's comments and suggestions: the supervisor the header shows.
+def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tuple[str, ...]:
+    """Who a person's comments and re-opens on a document go to; the only routing rule for both.
 
-    Without one, the stored owner principal, as before.
+    The supervisor the header shows (without one, the stored owner principal, as
+    before) and, on an agent-owned document, the owning agent, which is the one
+    that can edit it.
     """
     owner = artifact.get("parent_thread_id") or None
     metadata = parse_metadata(artifact.get("metadata"))
     row, _source = _supervisor(db, owner, metadata, lambda: _conductor(db, artifact, workspace))
-    return str(row["id"]) if row is not None else str(owner or "")
+    supervisor = str(row["id"]) if row is not None else str(owner or "")
+    editor = str(owner) if owner_kind(owner) == "agent" else ""
+    return tuple(dict.fromkeys(agent for agent in (supervisor, editor) if agent))
 
 
 def is_multi_person(db) -> bool:

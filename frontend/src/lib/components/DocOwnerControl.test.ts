@@ -96,14 +96,14 @@ describe('DocOwnerControl', () => {
 		expect(item('supervisor').getAttribute('aria-label')).toBe('Supervisor: Research coordinator, paused');
 		expect(item('supervisor').querySelector('.mark')!.textContent).toBe('Paused');
 	});
-	it('saves as soon as a name is picked, keeping a picked supervisor', async () => {
+	it('saves as soon as a name is picked, sending only the owner', async () => {
 		const next = ownership({ owner: { kind: 'person', id: null, name: null } });
 		changed.mockResolvedValue(next);
 		const onChange = vi.fn();
 		await render(ownership(), onChange);
 		item('owner').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
-		expect(changed).toHaveBeenCalledWith('doc', { owner: 'user', supervisor: 'a2' });
+		expect(changed).toHaveBeenCalledWith('doc', { owner: 'user' });
 		expect(onChange).toHaveBeenCalledWith(next);
 		expect(picker()).toBeNull();
 	});

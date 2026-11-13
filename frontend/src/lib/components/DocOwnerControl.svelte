@@ -60,10 +60,8 @@
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;
 		try {
-			// A supervisor the person picked stays through an owner change (the server drops it if it equals the new owner); a default one stays unset.
-			const supervisor = role === 'supervisor' ? choice.id : ownership.supervisor?.source === 'picked' ? ownership.supervisor.id : null;
-			// Only an Owner pick sends an owner; a Supervisor pick leaves the owner as it is.
-			onChange(await changeOwnership(artifactId, role === 'owner' ? { owner: choice.id, supervisor } : { supervisor }));
+			// Each pick sends only its own field; the server keeps the other as it is.
+			onChange(await changeOwnership(artifactId, role === 'owner' ? { owner: choice.id } : { supervisor: choice.id }));
 		} catch (error) {
 			const detail = error instanceof OwnershipChangeError && error.status < 500 ? error.detail : null;
 			failed = { role, message: !navigator.onLine ? `Couldn’t change the ${role} because you’re offline. Reconnect and try again.` : detail ?? `Couldn’t change the ${role}. Try again.` };

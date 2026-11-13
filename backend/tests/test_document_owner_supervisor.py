@@ -189,6 +189,49 @@ def test_a_picked_supervisor_on_an_agent_owned_document_receives_comments_alongs
     assert _comment_recipients(artifact_id) == ("agent-1", "agent-2")
 
 
+def test_a_reopened_comment_reaches_the_same_agents_as_a_new_one(owned_document):
+    """With a picked supervisor, a re-open goes to the supervisor and the owning agent, as a new comment does."""
+    from doc_feedback_helpers import add_comment
+    from doceditor import comments, feedback_batch_edits, feedback_batches
+    from infra.database import get_db, write_transaction
+
+    client, artifact_id = owned_document
+    _add_agent("agent-2", "Research coordinator")
+    _add_agent("author", "Reviewer")
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"}).status_code == 200
+    db = get_db()
+    try:
+        comment, _ = add_comment(db, artifact_id)
+        resolved = comments.update(comment["id"], {"resolved": True}, db=db)
+        with write_transaction(db, scope="test_reopen_recipients") as connection:
+            feedback_batch_edits.record_reopen(
+                connection, resolved, user_id=PERSON["id"], user_display="Person",
+                delivery_policy=feedback_batches.DOCUMENT_HELD,
+            )
+        reached = tuple(row[0] for row in db.execute(
+            """SELECT batch.recipient_id FROM doc_feedback_batches batch
+               JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
+               WHERE item.comment_id=? AND item.event='reopened' ORDER BY batch.recipient_id""",
+            (comment["id"],),
+        ).fetchall())
+    finally:
+        db.close()
+    assert reached == _comment_recipients(artifact_id) == ("agent-1", "agent-2")
+
+
+def test_an_owner_change_keeps_the_picked_supervisor(owned_document):
+    """The server keeps a field the PUT leaves out, so an Owner pick never drops the person's Supervisor pick."""
+    client, artifact_id = owned_document
+    _add_agent("agent-2", "Research coordinator")
+    _add_agent("agent-3", "Release planning")
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"}).status_code == 200
+
+    moved = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-3"})
+    assert moved.status_code == 200, moved.text
+    view = moved.json()["ownership"]
+    assert (view["owner"]["id"], view["supervisor"]["id"], view["supervisor"]["source"]) == ("agent-3", "agent-2", "picked")
+
+
 def _set_owner(artifact_id: str, owner: str) -> None:
     from infra.database import get_db
 

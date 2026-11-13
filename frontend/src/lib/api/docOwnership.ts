@@ -15,10 +15,9 @@ export class OwnershipChangeError extends Error {
 	constructor(readonly status: number, readonly detail: string | null) { super(detail ?? 'Ownership change failed'); }
 }
 
-/** `owner` is left out when only the supervisor changes, so a supervisor pick never touches the owner. */
-export async function changeOwnership(artifactId: string, change: { owner?: string; supervisor: string | null }): Promise<DocOwnership> {
-	const body: Record<string, string | null> = { supervisor_thread_id: change.supervisor };
-	if (change.owner !== undefined) body.owner = change.owner;
+/** Sends only the field being changed; the server keeps the other as it is. */
+export async function changeOwnership(artifactId: string, change: { owner: string } | { supervisor: string }): Promise<DocOwnership> {
+	const body = 'owner' in change ? { owner: change.owner } : { supervisor_thread_id: change.supervisor };
 	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/ownership`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
