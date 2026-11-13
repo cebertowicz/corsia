@@ -14,6 +14,14 @@ The minutes exclude restart and slice interruptions. The first-call generation e
 | Codex | 64 | $3.30 | 38.5 | 4.5 |
 | CORSIA, built-in agent loop | 53 | $3.06 | 48.7 | 4.6 |
 
+## Where an agent's actions go
+
+The sample is one long-running agent on the install that builds CORSIA, over one night in November 2026 (about 7 PM to 6 AM Pacific). Ten groups of twenty records were taken, spread evenly over the night; four of the 200 were not actions (three usage-limit notices or empty records, one text note), leaving 196. An action is one tool call in a turn: running a command, reading a file, updating the plan, sending a message. The groups and the six categories were fixed before any record was read, and each action was assigned to one category by hand.
+
+"Share of text the agent wrote" is each category's share of the characters in the actions' arguments, not counting the agent's prose in the turn. Arguments under about 480 characters were estimated by eye to the nearest 50, so this column is rougher than the action shares. Neither column is a share of tokens or dollars: every action makes the model re-read the agent's context, and actions differ in how much text they bring back. In 40 of the actions, the text each one returned was also measured: a plan action returned 5,200 characters on average and every other action 1,700.
+
+This agent coordinates other agents and keeps an unusually large plan, so its shares say nothing about other agents or other installs. The groups were uneven (plan actions per group ranged from 0 to 5), so each share is good to a few percentage points either way for this agent on this night, no better. No figure per finished task is given, because the sample has no task boundaries. The count will be replaced by readings computed from CORSIA's own usage records once they exist.
+
 ## Operational aggregates
 
 The lease and command figures are historical aggregates for the week ending 2026-10-02 on the install that builds CORSIA. They describe counts, not a general reliability rate or a guarantee for other installs.
