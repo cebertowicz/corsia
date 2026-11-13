@@ -26,7 +26,6 @@
 	const threadBounds = () => transcriptBounds(messageRoot());
 	// On a phone the comment-writing sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
 	let sheet = $state<HTMLElement | null>(null);
-	$effect(() => keepAboveSheet(sheet, messageRoot, writingRect));
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
@@ -39,6 +38,8 @@
 	const fromList = $derived(!!viewing?.list && !viewing.listed);
 	let sheetPanel = $state<HTMLElement | null>(null);
 	const sheetReveal = createChatSheetReveal(() => sheetPanel, messageRoot, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
+	// The same keeping for an opened comment's sheet: the pressed text (after the sheet is capped above it) rises into the space above the sheet.
+	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText()));
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
@@ -259,13 +260,13 @@
 			// One reply behavior: a thread's Reply opens that comment's thread, whose send goes straight through onSendReply, the same as the popover and the drawer. It never routes through the composer.
 			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id, list: viewing?.list }; }
 		};
-		const openHighlight = (ids: string[], source: HTMLElement) => {
+		const openHighlight = (ids: string[], source: HTMLElement, row: number) => {
 			// Two or more threads on the pressed text open as a list of them; a row's Reply opens that thread, and Back returns to the list.
 			if (!marginComments) {
 				for (const message of $messages) {
 					if (message.thread_id !== threadId) continue;
 					const stacked = ids.filter(id => message.chat_comments?.some(item => item.id === id));
-					if (stacked.length > 1) { returnFocus = source; viewing = { messageId: message.id, commentId: stacked[0], list: stacked, listed: true }; return; }
+					if (stacked.length > 1) { sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: stacked[0], list: stacked, listed: true }; return; }
 				}
 			}
 			for (const message of $messages) {
@@ -274,7 +275,7 @@
 				if (!comment) continue;
 				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card in a document.
 				if (marginComments) { selectedCommentId = comment.id; return; }
-				returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
+				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};
 		const click = (event: MouseEvent) => {
@@ -282,17 +283,16 @@
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
-			const rows = [...hit.getClientRects()];
-			sheetReveal.notePress(hit, Math.max(0, rows.findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom)));
+			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
 			const ids: string[] = [];
 			for (let el: HTMLElement | null | undefined = hit; el && root.contains(el); el = el.parentElement?.closest<HTMLElement>('[data-comment-ids]')) for (const id of el.dataset.commentIds?.split(',') ?? []) if (id && !ids.includes(id)) ids.push(id);
 			if (closing) {
 				const finish = afterClose;
-				afterClose = () => { finish?.(); openHighlight(ids, hit); };
+				afterClose = () => { finish?.(); openHighlight(ids, hit, row); };
 				return;
 			}
-			if (!open) openHighlight(ids, hit);
+			if (!open) openHighlight(ids, hit, row);
 		};
 		const keydown = (event: KeyboardEvent) => {
 			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin.

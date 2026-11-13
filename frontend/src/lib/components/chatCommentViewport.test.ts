@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { revealAboveSheet } from './chatCommentViewport';
+import { keepAboveSheet, revealAboveSheet } from './chatCommentViewport';
 
 function setup(sheetHeight: number) {
 	document.body.innerHTML = '<header class="shell-header"></header><div class="messages"></div><div data-adaptive-drawer><div class="drawer-panel"></div></div>';
@@ -37,6 +37,20 @@ describe('revealAboveSheet', () => {
 		expect(scrollBy).not.toHaveBeenCalled();
 		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 20), panel, false);
 		expect(scrollBy).toHaveBeenCalledWith({ top: 610 - 306 });
+	});
+
+	it('adds room below the transcript when the passage cannot rise without it, and gives it back with the stop', () => {
+		const { panel, scroller, scrollBy } = setup(300);
+		Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
+		Object.defineProperty(scroller, 'clientHeight', { value: 700 });
+		scroller.scrollTop = 290;
+		scroller.style.paddingBottom = '4px';
+		const stop = keepAboveSheet(panel, () => scroller, () => new DOMRect(0, 600, 200, 20));
+		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 20), panel, true);
+		// 1000 - 700 - 290 = 10 left; the passage needs 610 - 306 = 304: 294 more.
+		expect(scroller.style.paddingBottom).toBe('298px');
+		stop();
+		expect(scroller.style.paddingBottom).toBe('4px');
 	});
 
 	it('shows a passage taller than the space from its first line', () => {

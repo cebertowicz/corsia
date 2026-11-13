@@ -125,8 +125,8 @@
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
 	let observeTick = $state(0);
-	// What the thread keeps of its New signs once the server clears them: replies keep their collapse point, the thread's own marker stays while the card is open.
-	const held = createHeldNew(() => comment);
+	// What the thread keeps of its New signs once the server clears them: replies keep their collapse point, the thread's own marker stays while the card is open (a sheet or popover card, one or a row of the list; not a margin card, which stays up).
+	const held = createHeldNew(() => comment, () => !inMargin && (flat || stacked));
 	const unreadKey = $derived(JSON.stringify(comment.newReplyIds ?? []));
 	const { stamp, dwellThenStamp, cancelDwell } = createReplyStamps(() => comment, () => chatSurface, () => onViewed);
 	const replyVisibility = createReplyVisibility(dwellThenStamp, (id) => cancelDwell(id), () => cancelDwell());

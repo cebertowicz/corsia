@@ -24,8 +24,8 @@ export function createPressReveal(deps: {
 	let pressedAt = $state<number | null>(null);
 	let pressedRange = $state<Span | null>(null);
 	let pressedTime = 0;
-	// Gives back the room a reveal added below the document once the sheet it was for is gone.
-	$effect(() => { if (deps.sheetUp()) return; const view = deps.view(); if (view) clearRevealRoom(view); });
+	// Once the sheet is gone: gives back the room a reveal added below the document, and forgets the press, so a comment opened another way (a saved draft) is not placed from an old one.
+	$effect(() => { if (deps.sheetUp()) return; pressedAt = null; pressedRange = null; const view = deps.view(); if (view) clearRevealRoom(view); });
 	return {
 		notePress(ids: string[], click?: MouseEvent) {
 			const range = deps.highlights().find((h) => h.id === ids[0]);

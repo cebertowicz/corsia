@@ -18,3 +18,15 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 	const room = backdrop.getBoundingClientRect().bottom - (text.regionTop + SHEET_GAP + text.height + SHEET_GAP);
 	panel.style.setProperty('--drawer-text-cap', `${Math.max(MIN_SHEET, Math.floor(room))}px`);
 }
+
+/**
+ * A line near the end of a scroll area cannot be lifted by `move` without room below it. Adds the missing room to the scroller's bottom
+ * padding and says whether it did, for the caller to give back (with the padding it had) once the sheet it was for is gone. The one
+ * place that adds this room, for the chat transcript and the document alike.
+ */
+export function addRoomBelow(scroller: HTMLElement, move: number): boolean {
+	const missing = move - (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+	if (missing <= 0) return false;
+	scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + Math.ceil(missing)}px`;
+	return true;
+}

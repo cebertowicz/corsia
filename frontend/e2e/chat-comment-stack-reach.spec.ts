@@ -73,7 +73,7 @@ for (const panes of ['open', 'closed'] as const) test(`every comment on one phra
 		}
 		// A row's Reply opens that comment alone, titled as one, with Back to the list.
 		await surface.locator('[data-reply-comment]').first().click();
-		await expect(page.getByRole('dialog', { name: 'Comment thread' })).toBeVisible();
+		await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toBeVisible();
 		await page.getByRole('button', { name: 'Back to the list of comments' }).click();
 		await expect(page.getByRole('dialog', { name: `${NOTES.length} comments` })).toBeVisible();
 	} else {

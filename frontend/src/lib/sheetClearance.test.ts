@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capSheetAboveText, keptWhole, SHEET_GAP } from './sheetClearance';
+import { addRoomBelow, capSheetAboveText, keptWhole, SHEET_GAP } from './sheetClearance';
 
 function sheet(backdropBottom: number): HTMLElement {
 	const backdrop = document.createElement('div');
@@ -36,6 +36,31 @@ describe('capSheetAboveText', () => {
 		const panel = document.createElement('div');
 		capSheetAboveText(panel, { height: 21, regionTop: 125 });
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+});
+
+function scroller(scrollHeight: number, clientHeight: number, scrollTop: number): HTMLElement {
+	const el = document.createElement('div');
+	Object.defineProperty(el, 'scrollHeight', { value: scrollHeight });
+	Object.defineProperty(el, 'clientHeight', { value: clientHeight });
+	el.scrollTop = scrollTop;
+	el.style.paddingBottom = '10px';
+	document.body.append(el);
+	return el;
+}
+
+describe('addRoomBelow', () => {
+	it('adds only the room that is missing below the content, on top of the padding it has', () => {
+		const el = scroller(1000, 600, 380);
+		expect(addRoomBelow(el, 70)).toBe(true);
+		// 1000 - 600 - 380 = 20 left; 70 asked; 50 more.
+		expect(el.style.paddingBottom).toBe('60px');
+	});
+
+	it('changes nothing when the content already has the room', () => {
+		const el = scroller(1000, 600, 100);
+		expect(addRoomBelow(el, 70)).toBe(false);
+		expect(el.style.paddingBottom).toBe('10px');
 	});
 });
 

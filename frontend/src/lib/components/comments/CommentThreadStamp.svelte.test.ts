@@ -39,10 +39,10 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true, extra: Record<string, unknown> = { flat: true }) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface, ...extra } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {
@@ -316,5 +316,14 @@ describe('CommentThread stamping', () => {
 		expect(newMarks()).toBe(2);
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(2);
+	});
+
+	it('shows a margin card only what the server says is new: a card that stays up does not keep a sign the server has cleared', () => {
+		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
+		state.comment = { ...state.comment, replies, newComment: true, newReplyIds: ['r1'] };
+		render(vi.fn().mockResolvedValue(undefined), true, { inMargin: true });
+		expect(newMarks()).toBe(2);
+		arrive({ newComment: false, newReplyIds: [] });
+		expect(newMarks()).toBe(0);
 	});
 });

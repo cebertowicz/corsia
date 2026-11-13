@@ -7,8 +7,8 @@
 
 	/**
 	 * The sheet (phone) or popover (wide) a chat highlight's comment opens in: one thread, or the list of every thread on the pressed text
-	 * (`listed`). A thread opened from that list says Back in the header's leading slot. The dialog keeps its name "Comment thread" for
-	 * one thread (existing specs find it by it); the list is named by its count.
+	 * (`listed`). A thread opened from that list says Back in the header's leading slot. The dialog is named by what its header says:
+	 * "Comment" for one, the count for the list.
 	 */
 	let { messageId, threadId, comments, listed, fromList, closing, narrow, anchor, bounds, panel = $bindable(null), onReply, onBack, onClose, onClosed }: {
 		messageId: string; threadId: string; comments: ChatComment[]; listed: boolean; fromList: boolean; closing: boolean; narrow: boolean;
@@ -16,8 +16,8 @@
 		onReply: (note: string) => Promise<void>; onBack: () => void; onClose: () => void; onClosed: () => void;
 	} = $props();
 
-	const name = $derived(listed ? `${comments.length} comments` : 'Comment thread');
-	const title = $derived(listed ? name : 'Comment');
+	const name = $derived(listed ? `${comments.length} comments` : 'Comment');
+	const title = name;
 </script>
 
 {#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of comments" onclick={onBack}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}

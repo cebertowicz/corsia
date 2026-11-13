@@ -5,7 +5,7 @@ import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
-import { keptWhole, SHEET_GAP } from '$lib/sheetClearance';
+import { addRoomBelow, keptWhole, SHEET_GAP } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -154,10 +154,6 @@ export function coveredByMove(view: EditorView, from: number, before: Box | null
 }
 
 const revealRoom = new WeakMap<EditorView, { scroller: HTMLElement; before: string }>();
-function addRevealRoom(view: EditorView, scroller: HTMLElement, extra: number) {
-	if (!revealRoom.has(view)) revealRoom.set(view, { scroller, before: scroller.style.paddingBottom });
-	scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + extra}px`;
-}
 /** Gives back the room a reveal added below the document once the sheet it was for is gone. */
 export function clearRevealRoom(view: EditorView) {
 	const held = revealRoom.get(view);
@@ -204,8 +200,8 @@ export function scrollToRange(view: EditorView, from: number, to: number, origin
 			const { band, scroller } = visibleRegion(view);
 			const move = box.top - (band.top + band.bottom - (box.bottom - box.top)) / 2;
 			// A line near the end of the document cannot be lifted above the sheet without room below it: the scroller gets that room while the sheet is up.
-			const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
-			if (move > room) addRevealRoom(view, scroller, Math.ceil(move - room));
+			const before = scroller.style.paddingBottom;
+			if (addRoomBelow(scroller, move) && !revealRoom.has(view)) revealRoom.set(view, { scroller, before });
 			scroller.scrollTop += move;
 			releasePlace(view);
 			return;

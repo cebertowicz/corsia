@@ -56,7 +56,7 @@ async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTrans
 	row()!.querySelector<HTMLElement>('[data-reply-comment="one"]')!.click();
 	flushSync();
 	// The thread popover is portaled to document.body, like every other popover.
-	const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Comment thread"]');
+	const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Comment"]');
 	const field = dialog?.querySelector<HTMLTextAreaElement>('.ct-input');
 	expect(field, 'the click opens that comment\u2019s thread with its reply field').toBeTruthy();
 	// jsdom lets a click through a hidden, clipped surface, so check the surface is shown: it has no highlight to sit on.

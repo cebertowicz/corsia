@@ -1,7 +1,7 @@
 /** Where a commented passage can be seen in the transcript: below the shell header, above the chat composer or a comment sheet. */
 import { restingTop } from '$lib/cm/visible-region';
 import { onSheetMoved } from '$lib/docCommentDrawer';
-import { SHEET_GAP as GAP } from '$lib/sheetClearance';
+import { addRoomBelow, SHEET_GAP as GAP } from '$lib/sheetClearance';
 
 /** The part of the transcript a popover may cover: under the header and above the chat composer. */
 export function transcriptBounds(root: HTMLElement | null): DOMRect | null {
@@ -29,10 +29,14 @@ export function revealAboveSheet(scroller: HTMLElement | null, passage: DOMRect 
 	if (!opening && passage.bottom <= bottom) return;
 	// A passage taller than the space shows from its first line; a shorter one is centred in it.
 	const delta = passage.height > room ? passage.top - top : passage.top + passage.height / 2 - (top + room / 2);
+	// A passage near the end of the transcript has no room to rise: the scroller gets it while the sheet is up.
+	if (delta > 0) addRoomBelow(scroller, delta);
 	scroller.scrollBy({ top: delta });
 }
 
-/** Keeps the passage in view while the comment-writing sheet is open over the transcript (an opened thread's sheet is kept by `createChatSheetReveal`). Returns the stop. */
+/** Keeps the passage in view while a sheet (the comment-writing sheet, or an opened comment's) is open over the transcript: the one owner of that for chat. Returns the stop, which gives back any room it added. */
 export function keepAboveSheet(panel: HTMLElement | null, scroller: () => HTMLElement | null, passage: () => DOMRect | null): () => void {
-	return onSheetMoved(panel, opening => { if (panel) revealAboveSheet(scroller(), passage(), panel, opening); });
+	const root = panel ? scroller() : null, padding = root?.style.paddingBottom ?? '';
+	const stop = onSheetMoved(panel, opening => { if (panel) revealAboveSheet(scroller(), passage(), panel, opening); });
+	return () => { stop(); if (root) root.style.paddingBottom = padding; };
 }
