@@ -91,18 +91,18 @@ def _supervisor(
 
 
 def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tuple[str, ...]:
-    """Who a person's comments and re-opens on a document go to; the only routing rule for both.
+    """Who every comment on a document goes to, and exactly who a re-open goes to.
 
-    The supervisor the header shows (without one, the stored owner principal, as
-    before) and, on an agent-owned document, the owning agent, which is the one
-    that can edit it.
+    The supervisor the header shows and the owner it shows, whatever its kind:
+    the owning agent, or the person (``ui``) on a document they own. A released
+    document with neither still reaches the agent that last owned it.
     """
-    owner = artifact.get("parent_thread_id") or None
+    owner = artifact_owner(str(artifact["id"]), db=db)
     metadata = parse_metadata(artifact.get("metadata"))
     row, _source = _supervisor(db, owner, metadata, lambda: _conductor(db, artifact, workspace))
-    supervisor = str(row["id"]) if row is not None else str(owner or "")
-    editor = str(owner) if owner_kind(owner) == "agent" else ""
-    return tuple(dict.fromkeys(agent for agent in (supervisor, editor) if agent))
+    found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, owner) if who))
+    released_owner = artifact.get("parent_thread_id")
+    return found or ((str(released_owner),) if released_owner else ())
 
 
 def is_multi_person(db) -> bool:

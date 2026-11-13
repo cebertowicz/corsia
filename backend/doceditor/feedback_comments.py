@@ -101,7 +101,7 @@ def _ask_raised_to_person(db, comment: dict[str, Any]) -> bool:
 
 
 def document_recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
-    """Who receives a person's comments on this comment's document; a re-open goes to exactly these.
+    """Who receives every comment on this comment's document; a re-open goes to exactly these.
 
     With no one, ``("",)``: a re-open still queues, and stays visible as undelivered with no owner.
     """

@@ -259,6 +259,83 @@ def test_a_ui_owner_reads_as_the_person_and_a_supervisor_pick_keeps_it(owned_doc
     assert _comment_recipients(artifact_id) == ("agent-2",)
 
 
+def _batched_to(artifact_id: str, comment_id: str) -> set[str]:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return {str(row[0]) for row in db.execute(
+            """SELECT batch.recipient_id FROM doc_feedback_batches batch
+               JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
+               WHERE batch.artifact_id=? AND item.comment_id=?""",
+            (artifact_id, comment_id),
+        ).fetchall()}
+    finally:
+        db.close()
+
+
+def test_an_agent_comment_on_the_persons_document_reaches_the_person_and_their_own_does_not(owned_document):
+    """The owner is a recipient whatever its kind; the author is dropped in ``feedback_comments.recipients``."""
+    from doc_feedback_helpers import add_comment
+    from infra.database import get_db
+
+    client, artifact_id = owned_document
+    _one_person_account()
+    _add_agent("agent-2", "Research coordinator")
+    _add_agent("author", "Reviewer")
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"}).status_code == 200
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"}).status_code == 200
+    db = get_db()
+    try:
+        from_agent, _ = add_comment(db, artifact_id)
+        from_person, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Person")
+    finally:
+        db.close()
+    assert _batched_to(artifact_id, from_agent["id"]) == {"agent-2", "ui"}
+    assert _batched_to(artifact_id, from_person["id"]) == {"agent-2"}
+
+
+def test_a_released_document_routes_as_its_header_reads_and_never_to_no_one(owned_document):
+    """Released, the registry has no owner while the artifact row still names the former one.
+
+    With a supervisor the header shows, comments go to it alone; with none, they still
+    reach the agent that last owned the document rather than no one.
+    """
+    from infra.database import get_db
+    from registry import models, ownership
+    from registry.document_supervisor import SUPERVISOR_KEY
+    from registry.identity_metadata import merge_identity_metadata
+    from registry.shared_principals import artifact_owner
+
+    _client, artifact_id = owned_document
+    _add_agent("agent-2", "Research coordinator")
+    db = get_db()
+    try:
+        identity = db.execute(
+            "SELECT integration,type,external_id FROM artifact_identities WHERE id=?", (artifact_id,),
+        ).fetchone()
+        ownership.release_artifact(
+            integration=identity[0], type=identity[1], external_id=identity[2], actor_thread_id="agent-1",
+            authority="current-owner-handoff", reason="test", source_path="test", db=db,
+        )
+        db.commit()
+        assert artifact_owner(artifact_id, db=db) is None
+        assert models.get_artifact(artifact_id, db=db)["parent_thread_id"] == "agent-1"
+    finally:
+        db.close()
+    assert _view(artifact_id)["owner"]["kind"] == "none"
+    assert _comment_recipients(artifact_id) == ("agent-1",)
+
+    db = get_db()
+    try:
+        merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: "agent-2"})
+        db.commit()
+    finally:
+        db.close()
+    assert _view(artifact_id)["supervisor"]["id"] == "agent-2"
+    assert _comment_recipients(artifact_id) == ("agent-2",)
+
+
 @pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
 def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_document, shared_owner):
     """Everyone shares a ``ui`` or ``project:`` document, so with two people neither field changes."""
