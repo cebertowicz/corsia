@@ -100,10 +100,16 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		// view's top edge, and holding it where it was measured kept it under the toolbar.
 		const measured = rowTop();
 		const inView = (top: number | null) => top === null || !picked ? top : Math.min(Math.max(top, box.top), box.bottom - view.defaultLineHeight);
-		const offset = returningPlace?.offset ?? inView(measured);
+		// The row is held at its distance from the view's top edge, not at a point on screen: the header above the view can
+		// rewrap to another row count as the shell's move changes its width, and that moves the view's edge mid-hold.
+		const start = inView(measured);
+		const offset = returningPlace?.offset ?? (start === null ? null : start - box.top);
 		if (offset === null) return;
 		panelPlace = !pane ? { view, pos, offset, table: !!row } : null;
-		const hold = (here: number | null) => { if (here !== null && Math.abs(here - offset) > 0.5) scroller.scrollTop += here - offset; };
+		const hold = (here: number | null) => {
+			const drift = here === null ? 0 : here - scroller.getBoundingClientRect().top - offset;
+			if (Math.abs(drift) > 0.5) scroller.scrollTop += drift;
+		};
 		// A width change leaves the editor's height estimates for the lines it is not drawing stale until its next measure, which would be a frame late: measure first, then hold.
 		const observer = new ResizeObserver(() => {
 			try {
