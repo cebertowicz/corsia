@@ -28,6 +28,7 @@ def _seed(db):
         "VALUES ('question',?,'user','',?,'2026-01-01',1,1)", (THREAD, json.dumps(COMMENT_META)),
     )
     db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) VALUES (?,'target','question','c1.1','2026-01-01')", (THREAD,))
+    db.execute("INSERT INTO chat_visible_content(message_id,thread_id,content) VALUES ('question',?,'')", (THREAD,))
     db.commit()
 
 
@@ -104,14 +105,14 @@ def test_the_page_read_drops_the_stamped_step_and_keeps_the_rest(db):
 
 
 def test_the_focus_page_counts_only_steps_it_lists(db):
-    """#2602: the run's count and weight cover the one step the opened run lists, not the stamped one."""
+    """#2602: the run's count and weight cover the steps the opened run lists (the target and the tool step), not the stamped one."""
     from api.thread_focus_page import read_authorized_focus_page
 
     _worked_turn(db)
     page = read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER)
     assert "answer-only" not in json.dumps(page, default=str)
     stepped = [run for run in page["runs"] if "steps" in run["kinds"]]
-    assert [(run["first_id"], run["count"], run["weight"]) for run in stepped] == [("worked", 1, 1)]
+    assert [(run["first_id"], run["count"], run["weight"]) for run in stepped] == [("target", 2, 1)]
 
 
 def test_a_comment_only_turn_leaves_no_run_for_its_step(db):
