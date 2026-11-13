@@ -95,6 +95,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The "This write is still settling" notice now appears only if a write stays unsettled for 2 seconds; before, it appeared at every save and pushed the document down and back up while you typed.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - In version history, Restore on a read-only file is unavailable, and the version you open says the file is read-only, instead of failing when you press it.
+- When a restart cuts off a script that an event rule started, the rule's agent is now told which runs were lost, so it can do their work itself. Before, the run ended and nobody was told. The run is still not started again.
 - When an agent brings you something to judge, it now opens by restating the goal in its own words, with everything you need to decide at the top and the detail below for when you want it.
 - When you click into a document while the comments drawer is closing, your typing stays in the document; a space no longer reopens the drawer.
 - When you set up a project, its conductor now first checks for a ready-made way of working, then maps who does what, where your work lives and how it could go wrong, and suggests agents only for roles found in that map. Nothing is set up until you agree.
