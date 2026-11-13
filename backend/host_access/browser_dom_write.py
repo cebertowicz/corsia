@@ -17,6 +17,8 @@ DOM_WRITES = frozenset({"click", "fill", "type", "select"})
 _WRITE_REFUSALS = {
     "no_box": "the element has no box on the page",
     "covered": "another element covers it",
+    "moving": "the page kept moving",
+    "off_screen": "it never came into view",
     "page_error": "the page refused the change",
     "rich_text": "it is a rich-text editor, which this path can't fill",
     "not_field": "it isn't a text field or a dropdown",
@@ -24,7 +26,8 @@ _WRITE_REFUSALS = {
     "no_option": "the dropdown has no option with that value or label",
 }
 # A page that is still moving (a smooth scroll that scrollintoview started and did not wait for)
-# is re-read this often, at most this many times (about two seconds), until a hit test holds.
+# is re-read at this interval, for at most this many reads, until a hit test holds. Each read also
+# runs a box command and a hit test, so the wait is longer than reads times interval.
 _SETTLE_INTERVAL = 0.05
 _SETTLE_READS = 40
 
@@ -100,7 +103,7 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         box = await _box(run, selector)
     # The box comes from agent-browser and the hit test from CDP, so the page can move between the two
     # reads. A hit test holds only when the box was in view and the same before and after it.
-    node = None
+    in_view = False
     for _ in range(_SETTLE_READS):
         if box is None:
             return None, "no_box"
@@ -108,10 +111,11 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         node = await _hit(cdp, selector, box) if in_view else None
         after = await _box(run, selector)
         if in_view and after == box:
-            break
+            return node, "covered"
         box = after
         await asyncio.sleep(_SETTLE_INTERVAL)
-    return node, "covered"
+    # The target never held still in view, so no hit test on it can be trusted.
+    return None, "moving" if in_view else "off_screen"
 
 
 async def _hit(cdp: CdpClient, selector: str, box: dict) -> int | None:
@@ -187,6 +191,10 @@ async def _box(run: RunCommand, selector: str) -> dict | None:
     # agent-browser 0.31 exposes box geometry directly in data (older verified builds used data.result).
     box = data.get("result", data) if isinstance(data, dict) else None
     if not isinstance(box, dict) or not all(isinstance(box.get(key), (int, float)) for key in ("x", "y", "width", "height")):
+        return None
+    # agent-browser reports an all-zero box, not an error, for a hidden element and for a ref whose
+    # node the page has replaced since the snapshot; a hit test at its centre would test the corner.
+    if box["width"] <= 0 or box["height"] <= 0:
         return None
     return box
 

@@ -322,6 +322,58 @@ async def test_a_target_that_never_stops_moving_is_read_a_bounded_number_of_time
     monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
     commands = []
     run = _scrolling_run(list(range(500, 0, -7)), commands)
-    with pytest.raises(browser_dom_write.DomWriteRefused):
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="the page kept moving") as refused:
         await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "moving"
     assert commands.count(("get", "box", "@e2")) == browser_dom_write._SETTLE_READS + 1
+
+
+@pytest.mark.asyncio
+async def test_a_hit_on_a_target_that_never_stops_moving_is_not_written(monkeypatch):
+    """A hit test that found the target mid-move doesn't count once the reads run out."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+
+    async def always_the_target(_cdp, _selector, _box):
+        return 7
+
+    monkeypatch.setattr(browser_dom_write, "_hit", always_the_target)
+    run = _scrolling_run(list(range(500, 0, -7)), [])
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "moving"
+    assert "Runtime.callFunctionOn" not in cdp.calls
+
+
+@pytest.mark.asyncio
+async def test_a_target_scrolling_cannot_bring_into_view_is_refused_as_never_in_view(monkeypatch):
+    """A copy of a link parked off the page (a hidden mobile menu) never reaches the viewport."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    commands = []
+    run = _scrolling_run([-9959], commands)
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="it never came into view") as refused:
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "off_screen"
+    assert ("scrollintoview", "@e2") in commands and cdp.hit_tests == []
+
+
+@pytest.mark.asyncio
+async def test_an_all_zero_box_is_no_box_and_is_not_hit_tested(monkeypatch):
+    """agent-browser gives an all-zero box for a ref whose node the page re-rendered since the snapshot."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    commands = []
+
+    async def run(args, timeout):
+        commands.append(tuple(args))
+        if tuple(args[:2]) == ("get", "box"):
+            return CommandResult(0, json.dumps({"data": {"x": 0, "y": 0, "width": 0, "height": 0}}), "")
+        return await _run(args, timeout)
+
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="has no box") as refused:
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "no_box"
+    assert cdp.hit_tests == [] and commands == [("get", "box", "@e2")]
