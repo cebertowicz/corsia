@@ -101,6 +101,16 @@ def identity_state(artifact_id: str, *, db) -> str | None:
     return row["state"] if row else None
 
 
+def retired_cause(artifact_id: str, *, db) -> str | None:
+    """The ``cause`` its latest ``retire()`` was given; read only while the identity is retired."""
+    row = db.execute(
+        "SELECT CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.retired_cause') END AS cause"
+        " FROM artifact_identities WHERE id=?",
+        (artifact_id,),
+    ).fetchone()
+    return row["cause"] if row else None
+
+
 def find_identity_by_external_ids(
     integration: str,
     type: str,
@@ -221,7 +231,8 @@ def retire(
 
     ``cause``: "file_gone" (its file left the disk) or "promoted" (a promote tombstoned it, and its comments
     did not follow) closes its person's comment task with that cause's reason. Other retirements (an ended
-    session) leave that task open.
+    session) leave that task open. The cause is kept on the identity, so a close that a paused plan or a
+    held task defers can finish when it resumes; each retirement replaces it.
     """
     with write_transaction(db, scope="retire_artifact") as _db:
         row = _db.execute(
@@ -240,8 +251,12 @@ def retire(
         state = "tombstone" if tombstone else "archived"
         now = _now()
         _db.execute(
-            "UPDATE artifact_identities SET state=?, updated_at=? WHERE id=?",
-            (state, now, artifact_id),
+            """UPDATE artifact_identities SET state=?, updated_at=?,
+                   metadata=CASE WHEN ? IS NULL
+                       THEN json_remove(COALESCE(NULLIF(metadata, ''), '{}'), '$.retired_cause')
+                       ELSE json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.retired_cause', ?) END
+               WHERE id=?""",
+            (state, now, cause, cause, artifact_id),
         )
         passive_state = "tombstoned" if tombstone else "subscriber-archived"
         _db.execute(
