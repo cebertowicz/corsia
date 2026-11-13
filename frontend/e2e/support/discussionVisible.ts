@@ -23,6 +23,21 @@ export async function expectDiscussionVisible(thread: Locator, text: string) {
 	}, text)).toBe(true);
 }
 
+/** The comment's text and its replies are two boxes in one column: no pixel belongs to both, and a capped comment ends on a whole line, so no half line sits against the replies. */
+export async function expectRegionsApart(card: Locator) {
+	await expect.poll(() => card.evaluate(root => {
+		const text = root.querySelector<HTMLElement>('[data-discussion-original]');
+		const original = text?.getBoundingClientRect();
+		const replies = root.querySelector('[data-discussion-replies]')?.getBoundingClientRect();
+		if (!text || !original || !replies) return true;
+		if (original.bottom > replies.top + 0.5) return `comment text ${original.top.toFixed(1)}-${original.bottom.toFixed(1)} overlaps replies ${replies.top.toFixed(1)}-${replies.bottom.toFixed(1)}`;
+		const line = Number.parseFloat(getComputedStyle(text.querySelector('.ct-markdown') ?? text).lineHeight);
+		const part = text.clientHeight % line;
+		if (text.scrollHeight > text.clientHeight + 1 && line > 0 && part > 1 && line - part > 1) return `comment text is capped at ${text.clientHeight}px, ${part.toFixed(1)}px into a ${line}px line`;
+		return true;
+	})).toBe(true);
+}
+
 /** The field stays on screen and unclipped, and its Send takes the click where it lands. */
 export async function expectFieldAndSendUsable(card: Locator, field: Locator) {
 	const send = card.getByRole('button', { name: 'Send reply' });

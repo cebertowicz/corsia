@@ -91,7 +91,9 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 			const fieldRoom = room >= originalMinimum + replyMinimum + 3 * line + inset ? 3 * line + inset : 2 * line + inset;
 			const budget = room - fieldRoom;
 			if (budget < originalHeight + repliesHeight) {
-				const originalRoom = Math.min(originalHeight, Math.max(originalMinimum, replies ? Math.min(budget / 2, budget - replyMinimum) : budget));
+				// Whole lines: a cap that ends mid-line would leave half a line of the comment's text pressed against the replies, and the replies take what the snap frees.
+				const share = Math.max(originalMinimum, replies ? Math.min(budget / 2, budget - replyMinimum) : budget);
+				const originalRoom = Math.min(originalHeight, originalMinimum > 0 ? Math.max(originalMinimum, Math.floor((share + 0.5) / originalMinimum) * originalMinimum) : share);
 				const replyRoom = Math.min(repliesHeight, Math.max(replyMinimum, budget - originalRoom));
 				original.style.maxHeight = `${originalRoom}px`; if (replies) replies.style.maxHeight = `${replyRoom}px`;
 				for (const [region, bounded] of [[original, originalRoom < originalHeight], [replies, replyRoom < repliesHeight]] as const) {

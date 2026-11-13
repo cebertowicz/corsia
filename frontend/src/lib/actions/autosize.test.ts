@@ -143,6 +143,29 @@ describe('autosize', () => {
 		expect(replies.hasAttribute('tabindex')).toBe(false);
 	});
 
+	it('caps the comment text at whole lines so no half line sits against the replies', () => {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '20px'; original.append(originalText);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply';
+		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '20px'; reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
+		// 253px of room is not a multiple of the 20px line, so half the leftover is 52.5px.
+		Object.defineProperty(owner, 'clientHeight', { get: () => 253 });
+		Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 400 });
+		Object.defineProperty(replies, 'offsetHeight', { get: () => Number.parseFloat(replies.style.maxHeight) || 400 });
+		Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
+		autosize(node, { value: 'a long reply', fit: true });
+		const originalRoom = Number.parseFloat(original.style.maxHeight);
+		expect(originalRoom).toBeGreaterThan(0);
+		expect(originalRoom % 20).toBe(0);
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeGreaterThanOrEqual(20);
+	});
+
 	it('keeps a long original readable while the first reply grows', () => {
 		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
 		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);

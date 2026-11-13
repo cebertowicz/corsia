@@ -49,11 +49,11 @@ const backendCommand = [
 const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 	? [{
 		name: 'webkit-desktop',
-		testMatch: /(document-comment-scroll|doc-table-cell-selection|doc-prose-selection-highlight|live-comment-after-agent-edit|doc-remote-edit-anchor)\.spec\.ts$/,
+		testMatch: /(document-comment-scroll|doc-table-cell-selection|doc-prose-selection-highlight|live-comment-after-agent-edit|doc-remote-edit-anchor|popover-new-reply-visible)\.spec\.ts$/,
 		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
 	}, {
 		name: 'webkit-mobile',
-		testMatch: /(doc-remote-edit-anchor|doc-phone-tap-comment)\.spec\.ts$/,
+		testMatch: /(doc-remote-edit-anchor|doc-phone-tap-comment|popover-new-reply-visible)\.spec\.ts$/,
 		use: { ...devices['iPhone 15'] },
 	}]
 	: [];
