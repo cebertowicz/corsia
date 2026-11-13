@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
+import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
@@ -72,4 +74,29 @@ it('leaves unread answers unread while they are only on screen, and stamps each 
 	expect(fetcher.mock.calls[1][0]).toContain('/messages/second/comments/two/viewed');
 	delete (document as unknown as Record<string, unknown>).visibilityState;
 	vi.useRealTimers();
+});
+
+it('reads an answer that arrived while its margin card stayed picked at the next press on its highlight', async () => {
+	const fetcher = vi.fn().mockResolvedValue({ ok: true });
+	vi.stubGlobal('fetch', fetcher);
+	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+	host = document.createElement('div'); document.body.appendChild(host);
+	const base = { from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', id: 'root', cid: 'root', user_message_id: 'first', quote: 'quote', note: 'note', created_at: '2026-10-27T00:00:00Z' };
+	const read = { author_kind: 'agent' as const, user_message_id: 'first', cid: 'one', assistant_message_id: 'a1', text: 'first answer', created_at: '2026-10-27T00:01:00Z', unread: false };
+	const props = $state({ messageId: 'target', threadId: 'thread', margin: true, picked: true, comments: [{ ...base, answers: [read] }] });
+	component = mount(ChatCommentThreads, { target: host, props });
+	flushSync();
+	// An answer arrives while the card stays picked: arriving reads nothing.
+	props.comments = [{ ...base, answers: [read, { ...read, user_message_id: 'second', cid: 'two', assistant_message_id: 'a2', text: 'second answer', created_at: '2026-10-27T00:02:00Z', unread: true }] }];
+	flushSync();
+	await Promise.resolve();
+	expect(fetcher).not.toHaveBeenCalled();
+	// A press on its highlight (ChatCommentSelection) picks the card again, which reads it, as a document highlight press does.
+	pickedComments.set(new Set([chatPickKey('root')]));
+	flushSync();
+	await Promise.resolve();
+	expect(fetcher).toHaveBeenCalledTimes(1);
+	expect(fetcher.mock.calls[0][0]).toContain('/messages/second/comments/two/viewed');
+	expect(get(pickedComments).size).toBe(0);
+	delete (document as unknown as Record<string, unknown>).visibilityState;
 });

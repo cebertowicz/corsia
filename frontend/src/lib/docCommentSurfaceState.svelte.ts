@@ -5,7 +5,7 @@ import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { pickedDocComments } from '$lib/stores/docComments';
+import { pickedComments } from '$lib/stores/docComments';
 import { paneOverlay } from '$lib/stores/artifactCanvas';
 import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
 import { CELL_EDITOR, cellAtPosition, closeCell, openCellAt, openCellState } from '$lib/cm/widget-cell-state';
@@ -126,7 +126,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		const margin = marginUp?.();
 		// A document canvas with no room for the column shows its list as a popover (a phone's as a sheet): a highlight picked there opens that one thread in its place.
 		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
-		if (pressed) pickedDocComments.set(new Set([id]));
+		if (pressed) pickedComments.set(new Set([id]));
 		return changed;
 	}
 	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean, replacesList = false) {
@@ -156,7 +156,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		anchor = reading ?? opener;
 		atClick = clicked;
 		restoreFocus = () => opener.focus();
-		pickedDocComments.set(new Set(ids));
+		pickedComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {
 		if (state?.kind === 'thread' && state.ids?.includes(id)) state = { ...state, id };

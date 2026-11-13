@@ -12,7 +12,7 @@ vi.mock('$lib/api/commentSuggestions', async (importOriginal) => ({
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedDraft: mocks.seedDraft }));
 vi.mock('$lib/stores/docComments', () => ({
 	docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: mocks.loadComments,
-	pickedDocComments: { set: () => {}, subscribe: (run: (value: Set<string>) => void) => { run(new Set()); return () => {}; } },
+	pickedComments: { set: () => {}, subscribe: (run: (value: Set<string>) => void) => { run(new Set()); return () => {}; } },
 }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';

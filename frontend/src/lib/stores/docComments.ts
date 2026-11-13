@@ -38,8 +38,14 @@ export async function postReconciled(
 
 
 export const docComments = writable<Record<string, DocComment[]>>({});
-/** Threads the person just picked to read (a click or tap on a highlight, a marker, the jump control, an image tag); the card that shows one stamps it read and removes it. */
-export const pickedDocComments = writable<Set<string>>(new Set());
+/**
+ * Threads the person just picked to read (a click or tap on a highlight, a marker, the jump control, an image tag); the
+ * card that shows one stamps it read and removes it. Each press sets a new value, so pressing an already-picked thread
+ * reads what arrived since. A document thread is keyed by its id, a chat margin card by `chatPickKey`.
+ */
+export const pickedComments = writable<Set<string>>(new Set());
+/** A chat comment's key in `pickedComments`, kept apart from document comment ids. */
+export const chatPickKey = (commentId: string) => `chat:${commentId}`;
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
 export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
 export const commentLoads = writable<Record<string, CommentLoad>>({});

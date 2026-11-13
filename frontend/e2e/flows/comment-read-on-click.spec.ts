@@ -46,8 +46,8 @@ async function openChat(page: Page, title: string) {
 	await waitForWsConnected(page);
 }
 
-/** A chat whose one comment has an agent answer waiting, unread, while its thread was never opened. */
-async function chatWithUnreadAnswer(page: Page, request: APIRequestContext, width: number) {
+/** A chat whose one comment has an agent answer on its way, held at `gate` until the caller releases it. */
+async function chatWithHeldAnswer(page: Page, request: APIRequestContext, width: number) {
 	const narrow = width <= 768;
 	await page.setViewportSize({ width, height: narrow ? 852 : 900 });
 	const title = `Read on click ${width} ${crypto.randomUUID()}`;
@@ -67,9 +67,22 @@ async function chatWithUnreadAnswer(page: Page, request: APIRequestContext, widt
 	await page.getByRole('dialog', { name: 'New comment' }).getByRole('button', { name: 'Comment', exact: true }).click();
 	await commentOnMessage(row, QUOTE);
 	await expect.poll(async () => postedComments((await (await request.get(messagesUrl(thread))).json()).messages).map((comment) => comment.cid)).toEqual(['c2.1']);
+	return { row, thread, title, gate };
+}
+
+/** A chat whose one comment has an agent answer waiting, unread, while its thread was never opened. */
+async function chatWithUnreadAnswer(page: Page, request: APIRequestContext, width: number) {
+	const { row, thread, title, gate } = await chatWithHeldAnswer(page, request, width);
 	await releaseMockGate(request, gate);
 	await expect.poll(() => answerUnread(request, thread), { timeout: 30_000 }).toBe(true);
 	return { row, thread, title };
+}
+
+/** The margin column fits at 1440 once the sidebar and the side panel are closed. */
+async function raiseChatMargin(page: Page) {
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
+	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+	await expect(page.locator('.chat-margin .chat-margin-card')).toBeVisible();
 }
 
 for (const width of [1440, 900, 393] as const) {
@@ -83,9 +96,8 @@ for (const width of [1440, 900, 393] as const) {
 		await page.reload();
 		await openChat(page, title);
 		if (width === 1440) {
-			// The margin column fits at 1440 once the sidebar and the side panel are closed; its card shows the answer at rest.
-			await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
-			await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+			// Its card shows the answer at rest.
+			await raiseChatMargin(page);
 			await expect(page.locator('.chat-margin .chat-margin-card')).toContainText('The answer to read.');
 		}
 		await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
@@ -106,6 +118,26 @@ for (const width of [1440, 900, 393] as const) {
 		await expect(again.locator('.ct-new')).toHaveCount(0);
 	});
 }
+
+test('chat margin card at 1440: an answer arriving while the card is picked stays unread, and the next press on its highlight reads it', async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('desktop'));
+	test.setTimeout(150_000);
+	const { row, thread, gate } = await chatWithHeldAnswer(page, request, 1440);
+	await raiseChatMargin(page);
+	const stamps = watchStamps(page);
+	const card = await openCommentThread(row, page, QUOTE);
+	// The answer arrives while its card stays picked: arriving reads nothing.
+	await releaseMockGate(request, gate);
+	await expect.poll(() => answerUnread(request, thread), { timeout: 30_000 }).toBe(true);
+	await expect(card).toContainText('The answer to read.');
+	await page.waitForTimeout(SEEN_FOR_MS);
+	expect(stamps(), 'an answer arriving in a picked card is not read').toEqual([]);
+	expect(await answerUnread(request, thread)).toBe(true);
+	// A press on the highlight of the card already picked reads it, as a press on a document highlight does.
+	const again = await openCommentThread(row, page, QUOTE);
+	await expect.poll(() => answerUnread(request, thread)).toBe(false);
+	await expect(again.locator('.ct-new').first()).toBeVisible();
+});
 
 const docQuote = 'target line for an unread comment';
 const docText = Array.from({ length: 40 }, (_, i) => i === 20 ? docQuote : `document line ${i}`).join('\n\n');

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
+	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
@@ -265,8 +266,9 @@
 				if (message.thread_id !== threadId) continue;
 				const comment = message.chat_comments?.find(item => ids.includes(item.id));
 				if (!comment) continue;
-				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card in a document.
-				if (marginComments) { selectedCommentId = comment.id; return; }
+				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card
+				// in a document, and every press reads it, so an answer that arrived while its card stayed picked is read by the next press.
+				if (marginComments) { selectedCommentId = comment.id; pickedComments.set(new Set([chatPickKey(comment.id)])); return; }
 				returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};

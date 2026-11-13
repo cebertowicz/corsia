@@ -6,7 +6,7 @@ import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSu
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { pickedDocComments } from '$lib/stores/docComments';
+import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
 import { toasts } from '$lib/stores/toast';
 
@@ -147,7 +147,7 @@ export function createImageComments(context: {
 	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
 		listCandidates = null;
 		draftRegion = null;
-		if (ui.state?.kind === 'list') { focusedDocComment.set(id); pickedDocComments.set(new Set([id])); listPicks += 1; return; }
+		if (ui.state?.kind === 'list') { focusedDocComment.set(id); pickedComments.set(new Set([id])); listPicks += 1; return; }
 		ui.focusMarker([id], opener, anchor);
 	}
 	function openList(opener: HTMLElement) {

@@ -26,10 +26,10 @@
 	import CommentReplyList, { WHOLE_REPLIES } from './CommentReplyList.svelte';
 	import { createOpenedReplies, createThreadOpen } from './threadOpen';
 	import { createReplyStamps } from './replyStamps';
-	import { pickedDocComments } from '$lib/stores/docComments';
+	import { pickedComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, flat = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, opened = false, pickKey, flat = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text isn’t in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, replyView = 'recent', onOpenThread, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replyPending = false, replyError = '', replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		failure?: Snippet;
@@ -53,6 +53,8 @@
 		keepReplyVisible?: boolean;
 		/** A chat thread the person opened (picked its margin card, opened its popover or sheet): that reads its unread replies, as picking a document thread does. */
 		opened?: boolean;
+		/** This thread's key in `pickedComments`: a press on its highlight reads it, even while it is already open. A document thread's own id by default; a chat thread has one only as a margin card (`chatPickKey`). */
+		pickKey?: string;
 		/** Document comment surfaces present threads on the sheet rather than as nested cards. */
 		flat?: boolean;
 		/** The chat surface's mode: each answer keeps its own seen stamp, the card never opens on arrival, a typed reply is kept after posting, and Agree/Resolve show only when the caller supplies them. */
@@ -143,14 +145,16 @@
 	$effect(() => { if (flat && !inMargin && newestReply && el) openAtNewestReply(el, newestReply); });
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
-	// Opening reads what is unread at that moment: a chat thread its caller opened, or a document thread the person picked
-	// (a click or tap on its highlight, its marker, the jump control, its image tag), consumed by the card that shows it.
-	// A reply arriving while it stays open waits for the next press.
+	// Opening reads what is unread at that moment: a chat thread its caller opened, or a thread the person picked (a click
+	// or tap on its highlight, its marker, the jump control, its image tag), consumed by the card that shows it.
+	// A reply arriving while it stays open waits for the next press, which reads it the same way on either surface.
 	$effect(() => { if (opened) untrack(openThread); });
+	const pickedAs = $derived(pickKey ?? (chatSurface ? null : comment.id));
 	$effect(() => {
-		if (chatSurface || !onViewed || !$pickedDocComments.has(comment.id)) return;
+		const key = pickedAs;
+		if (!key || !onViewed || !$pickedComments.has(key)) return;
 		untrack(openThread);
-		pickedDocComments.update((ids) => { const remaining = new Set(ids); remaining.delete(comment.id); return remaining; });
+		pickedComments.update((ids) => { const remaining = new Set(ids); remaining.delete(key); return remaining; });
 	});
 
 	async function postReply() {
