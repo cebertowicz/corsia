@@ -305,9 +305,10 @@ for (const { label, view } of CASES) {
 							return problems.join(', ');
 						});
 						if (caretAndSend) fail(`typing: ${caretAndSend}`);
+						await shot(page, info, label, '4b-thread-typing');
 						const cut = await bodyCut(thread.locator('[data-discussion-original]').first());
 						if (cut) fail(`typing: the comment body is cut off while the reply grows (${cut})`);
-						await shot(page, info, label, '4b-thread-typing');
+						await shot(page, info, label, '4c-thread-typing-comment');
 						await page.keyboard.press('Escape').catch(() => {});
 						await page.locator(DRAWER).getByPlaceholder('Reply…').last().blur().catch(() => {});
 						await page.setViewportSize({ width: view.width, height: view.height });
