@@ -385,8 +385,7 @@
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetUp = open}
-		onRevealDraft={revealDraft}
-		onRevealCard={revealCard}
+		onRevealDraft={revealDraft} onRevealCard={revealCard}
 		images={images.groups}
 		{covered}
 		{readStampSuppressed}
