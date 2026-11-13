@@ -24,6 +24,8 @@ from vendor_account_fixtures import accounts, receipt_of, vendors  # noqa: F401
 from vendor_account_fixtures import _accept, set_legacy_policy
 
 _REFUSAL = "You've hit your session limit · resets 1am (America/Los_Angeles)"
+#: Claude Code's wording for the same session limit by 2026-11.
+_FIVE_HOUR_REFUSAL = "You've hit your 5-hour limit · resets 10am (America/Los_Angeles)"
 _PROVIDERS = {"codex": ("destination", "codex/test"), "claude-code": ("cdest", "claude-code/test")}
 
 
@@ -84,14 +86,17 @@ def _running(db, thread):
     return db.execute("SELECT COUNT(*) FROM active_turns WHERE thread_id=? AND status='running'", (thread,)).fetchone()[0]
 
 
-@pytest.mark.parametrize("provider", ["claude-code", "codex"])
-def test_refusal_with_rollover_moves_to_the_next_account_and_continues(accounts, vendors, monkeypatch, provider):
+@pytest.mark.parametrize(("provider", "refusal"), [
+    ("claude-code", _REFUSAL), ("claude-code", _FIVE_HOUR_REFUSAL), ("codex", _REFUSAL),
+])
+def test_refusal_with_rollover_moves_to_the_next_account_and_continues(accounts, vendors, monkeypatch, provider,
+                                                                       refusal):
     from core.stop_causes import VENDOR_LIMIT_REFUSAL_REASON
 
     db, thread, first, second, events = _setup(accounts, vendors, monkeypatch, provider, rollover=True)
     _running_turn(db, thread)
 
-    terminal = _refuse(db)
+    terminal = _refuse(db, error=refusal)
 
     assert isinstance(terminal.successor, ClaimedBatch)
     assert [item.message_id for item in terminal.successor.items] == [continue_message_id("t1")]

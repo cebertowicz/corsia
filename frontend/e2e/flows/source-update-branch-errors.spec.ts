@@ -3,8 +3,8 @@ import { expect } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from '../support/corsia';
 
 for (const [code, diagnostic, headline, body] of [
-	['checkout_no_upstream', 'has no upstream', "The branch my-feature isn't set to track another branch.", "Ask the CORSIA agent to set the branch it should track, then select Retry. CORSIA kept running and your code wasn't changed."],
-	['checkout_diverged', 'and its upstream have diverged', 'The branch my-feature and the branch it tracks have both changed.', "Ask the CORSIA agent to combine their changes, then select Retry. CORSIA kept running and your code wasn't changed."],
+	['checkout_no_upstream', 'has no upstream', "The branch my-feature isn’t set to track another branch.", "Ask the CORSIA agent to set the branch it should track, then select Retry. CORSIA kept running and your code wasn’t changed."],
+	['checkout_diverged', 'and its upstream have diverged', 'The branch my-feature and the branch it tracks have both changed.', "Ask the CORSIA agent to combine their changes, then select Retry. CORSIA kept running and your code wasn’t changed."],
 ] as const) {
 	test(`@source-branch-error ${code} appears in Settings`, async ({ page }) => {
 		await page.route('**/api/system/update-status**', route => route.fulfill({

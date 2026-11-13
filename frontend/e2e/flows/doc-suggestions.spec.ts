@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { inResolved, replyField, resolvedEntry, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, resolvedEntry, showAllThreads, openComments as openCommentsPill } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
@@ -17,7 +17,7 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	const [loose, fine, stale] = seeded.ids;
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^3 threads\b/ }).click();
+		await openCommentsPill(page, /^3 threads\b/);
 		await expect(seeded.drawer).toBeVisible();
 		await showAllThreads(seeded.drawer);
 	};

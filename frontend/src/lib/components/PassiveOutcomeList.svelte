@@ -59,7 +59,7 @@
 		const plans = read.payload?.plans ?? [];
 		let result: Folded = { status: bearer ? 'missing' : 'error' };
 		for (const entry of bearer ? plans : []) {
-			const outcome = await readFoldedNode(bearer!, entry.plan.id, nodeId);
+			const outcome = await readFoldedNode(entry.plan.id, nodeId);
 			if (outcome.status === 'fresh') { result = { status: 'ready', node: outcome.payload }; break; }
 			if (outcome.status !== 'not-found') result = { status: 'error' };
 		}

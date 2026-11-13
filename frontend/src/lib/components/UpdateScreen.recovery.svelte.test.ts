@@ -348,3 +348,14 @@ describe('a ready address on the service’s own page', () => {
 		expect(state.moves.every((move) => move.startsWith('tauri://localhost/update.html#'))).toBe(true);
 	});
 });
+
+describe('start_failed wording', () => {
+	it('says CORSIA did not restart, with no running-step text, and still offers Start CORSIA', () => {
+		show(startFailed);
+		expect(document.querySelector('#update-screen-title')?.textContent).toBe('CORSIA didn’t restart');
+		expect(document.querySelector('.step-label')).toBeNull();
+		expect(text()).not.toContain('Updating CORSIA');
+		expect(text()).not.toContain('Upgrading your data');
+		expect(startButton()).toBeTruthy();
+	});
+});

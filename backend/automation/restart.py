@@ -299,8 +299,9 @@ async def enforce_restart_hard_cap(operation_id: str) -> dict:
     """Persist continuation intent before exact provider cancellation."""
     from automation import self_restart
     from automation.restart_wakes import register_hard_recovery
+    from infra.db_async import run_in_db
 
-    operation = self_restart.in_flight_request()
+    operation = await run_in_db(self_restart.in_flight_request)
     if operation is None or str(operation["id"]) != operation_id:
         raise RuntimeError("hard cap lost the restart operation")
     phase = str(operation.get("phase") or "")
@@ -309,14 +310,14 @@ async def enforce_restart_hard_cap(operation_id: str) -> dict:
     if phase not in {"draining", "ready"}:
         raise RuntimeError(f"hard cap cannot run from {phase}")
     failures = []
-    for turn in _snapshot_active_turns():
-        register_hard_recovery(turn["thread_id"], turn["turn_id"])
+    for turn in await run_in_db(_snapshot_active_turns):
+        await run_in_db(register_hard_recovery, turn["thread_id"], turn["turn_id"])
         try:
             stopped = await _force_stop_turn(turn)
         except Exception:
             logger.exception("restart hard cap could not stop {}", turn["thread_id"])
             stopped = False
-        if not stopped and _turn_is_active(turn):
+        if not stopped and await run_in_db(_turn_is_active, turn):
             failures.append(f"{turn['thread_id']}:stop")
     if failures:
         logger.warning(
@@ -331,7 +332,7 @@ async def enforce_restart_hard_cap(operation_id: str) -> dict:
     # to guarantee. The failures stay in the answer so the caller can report
     # exactly which tasks were force-terminated.
     if phase == "draining":
-        self_restart.transition_operation(
-            operation_id, expected="draining", target="ready",
+        await run_in_db(
+            self_restart.transition_operation, operation_id, expected="draining", target="ready",
         )
     return {"force_stop_ready": True, "failures": failures}

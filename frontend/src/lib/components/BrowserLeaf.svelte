@@ -298,7 +298,7 @@
 		opening = true;
 		status = 'Opening';
 		try {
-			await openBrowserUrl(threadId, targetUrl, get(token) ?? '');
+			await openBrowserUrl(threadId, targetUrl);
 			connect();
 		} catch (error) {
 			status = `Browser could not open this URL: ${error instanceof Error ? error.message : 'request failed'}`;

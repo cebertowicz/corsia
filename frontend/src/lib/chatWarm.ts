@@ -9,9 +9,9 @@
 
 import { get } from 'svelte/store';
 
-import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, findModelById, getModelDispatchId, modelAvailability } from '$lib/stores/models';
+import { apiFetch } from '$lib/api/request';
 
 const warmDedupKeys = new Set<string>();
 const warmAborts = new Map<string, AbortController>();
@@ -53,7 +53,8 @@ export async function warmActiveThread(): Promise<void> {
 	showWarmToast('Loading this chat into the model…');
 	const t0 = performance.now();
 	try {
-		const res = await fetch(`/api/threads/${sid}/warm?token=${get(token)}`, {
+		const res = await apiFetch(`/api/threads/${sid}/warm`, {
+			sessionInAddress: true,
 			method: 'POST',
 			signal: controller.signal,
 		});

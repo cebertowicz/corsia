@@ -60,6 +60,7 @@ afterEach(() => {
 	state.comment = { id: 'c1', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] };
 	delete (document as unknown as Record<string, unknown>).visibilityState;
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('CommentThread stamping', () => {
@@ -85,7 +86,11 @@ describe('CommentThread stamping', () => {
 	it('stamps a tall reply filling a scroller shorter than the viewport, and not one that falls short of it', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => ({ overflowY: element === host ? 'auto' : 'visible' }) as CSSStyleDeclaration);
+		const original = window.getComputedStyle.bind(window);
+		vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+			const style = original(element);
+			return element === host ? new Proxy(style, { get: (target, property) => property === 'overflowY' ? 'auto' : Reflect.get(target, property) }) : style;
+		});
 		render(onViewed);
 		vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 400, height: 300 } as DOMRect);
 		FakeObserver.live()[0].reportTall(200, 800);
@@ -93,7 +98,6 @@ describe('CommentThread stamping', () => {
 		expect(onViewed).not.toHaveBeenCalled();
 		FakeObserver.live()[0].reportTall(300, 800);
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-		style.mockRestore();
 	});
 
 	it('preserves an in-progress dwell across an identical unread projection', async () => {
@@ -117,10 +121,13 @@ describe('CommentThread stamping', () => {
 
 	it('observes against the viewport even inside a scroll container', () => {
 		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => ({ overflowY: element === host ? 'auto' : 'visible' }) as CSSStyleDeclaration);
+		const original = window.getComputedStyle.bind(window);
+		vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+			const style = original(element);
+			return element === host ? new Proxy(style, { get: (target, property) => property === 'overflowY' ? 'auto' : Reflect.get(target, property) }) : style;
+		});
 		render(vi.fn().mockResolvedValue(undefined));
 		expect(FakeObserver.live()[0].root).toBeNull();
-		style.mockRestore();
 	});
 	it('observes each unread reply so a later one cannot clear an unseen earlier reply', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };

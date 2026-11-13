@@ -37,7 +37,6 @@ describe('thread-bound composer uploads', () => {
 
 		const result = await uploadThreadAttachment(
 			file,
-			'auth',
 			() => threadId,
 			ensureThread,
 		);
@@ -58,7 +57,6 @@ describe('thread-bound composer uploads', () => {
 
 		const result = await uploadThreadAttachment(
 			file,
-			'auth',
 			() => null,
 			ensureThread,
 		);

@@ -1,4 +1,6 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
+import { apiFetch } from '$lib/api/request';
+import { token } from '$lib/stores/sessionToken';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -68,15 +70,14 @@ export function applyDrainStatus(data: any): void {
 }
 
 export async function refreshDrainStatus(
-	authToken: string,
 	isCurrent: () => boolean = () => true,
 ): Promise<void> {
 	if (!isCurrent()) return;
 	const requestedGeneration = drainStatusGeneration;
 	const requestId = ++latestDrainRefreshRequest;
-	const response = await fetch(
-		`/api/system/drain?token=${encodeURIComponent(authToken)}`,
-		{ cache: 'no-store' },
+	const response = await apiFetch(
+		`/api/system/drain`,
+		{ sessionInAddress: true, cache: 'no-store' },
 	);
 	if (!isCurrent()) return;
 	if (!response.ok) throw new Error(`drain status request failed: ${response.status}`);
@@ -98,24 +99,22 @@ export type SecurityAlert = {
 
 export const securityAlert = writable<SecurityAlert>(null);
 
-export async function checkSecurityAlert(authToken: string | null = null): Promise<void> {
-	if (!authToken) {
+export async function checkSecurityAlert(): Promise<void> {
+	if (!get(token)) {
 		securityAlert.set(null);
 		return;
 	}
 	try {
-		const res = await fetch('/api/security/alert', {
-			headers: { Authorization: `Bearer ${authToken}` },
-		});
+		const res = await apiFetch('/api/security/alert');
 		if (!res.ok) { securityAlert.set(null); return; }
 		const data = await res.json();
 		securityAlert.set(data?.vulns != null ? data : null);
 	} catch {}
 }
 
-export async function dismissSecurityAlert(token: string): Promise<void> {
+export async function dismissSecurityAlert(): Promise<void> {
 	try {
-		await fetch(`/api/security/alert?token=${token}`, { method: 'DELETE' });
+		await apiFetch(`/api/security/alert`, { sessionInAddress: true, method: 'DELETE' });
 		securityAlert.set(null);
 	} catch {}
 }

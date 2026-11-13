@@ -69,7 +69,7 @@ describe('AppSignInPanel', () => {
 		expect(open).toHaveBeenCalledWith('', '_blank');
 		await vi.waitFor(() => expect(page.location.href).toBe(LINK));
 		expect(page.opener).toBeNull();
-		expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' });
+		expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST', headers: { Authorization: 'Bearer test-token' } });
 		expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending' }) });
 		expect(host.textContent).not.toContain(LINK);
 	});
@@ -124,7 +124,7 @@ describe('AppSignInPanel', () => {
 		expect(button('Open the page again')!.classList.contains('ghost')).toBe(true);
 		expect(button('Cancel')!.classList.contains('ghost')).toBe(true);
 		button('Cancel')!.click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/sign-in'), { method: 'DELETE' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/sign-in'), { method: 'DELETE', headers: { Authorization: 'Bearer test-token' } }));
 		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'idle' }) }));
 	});
 
@@ -175,7 +175,7 @@ describe('AppSignInPanel', () => {
 		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'address_mismatch' } }));
 		expect(button('Retry')).toBeUndefined();
 		button('Sign in')!.click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST', headers: { Authorization: 'Bearer test-token' } }));
 		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending', failure_class: undefined }) }));
 	});
 
@@ -200,7 +200,7 @@ describe('AppSignInPanel', () => {
 		expect(host.textContent).toContain('You can sign in again any time.');
 		expect(fetch).not.toHaveBeenCalled();
 		button('Sign out')!.click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-out'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-out'), { method: 'POST', headers: { Authorization: 'Bearer test-token' } }));
 		await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalled());
 		expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ state: 'needs_sign_in' }));
 		await vi.waitFor(() => expect(host.textContent).toContain("Linear may still list CORSIA as allowed."));

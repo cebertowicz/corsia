@@ -70,10 +70,12 @@ describe('a tab whose document relocated before its draft followed', () => {
 describe('a live reopen that replayed a device copy', () => {
 	const fileText = '# Doc\nfirst';
 	const openWith = async (liveText: string, unwritten: boolean, history?: boolean, onReady = vi.fn()) => {
-		const flush = vi.fn().mockResolvedValue({});
-		const written = vi.fn();
-		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush,
-			durability: { clean: true, unwritten, written, snapshot: () => ({ localGeneration: 3, ackGeneration: 1 }) }, connection: 'connected' };
+		// Like the session's own flush, a landed flush marks every local transaction written.
+		const written = vi.fn(() => { durability.unwritten = false; });
+		const durability = { clean: true, unwritten, written, get saved() { return this.clean && !this.unwritten; },
+			snapshot: () => ({ localGeneration: 3, ackGeneration: 1 }) };
+		const flush = vi.fn(async () => { durability.written(); return {}; });
+		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush, durability, connection: 'connected' };
 		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' }, history });
 		vi.mocked(openLiveDocument).mockResolvedValue(live as never);
 		liveDocumentBindings.set({ [target.instanceId]: live } as never);

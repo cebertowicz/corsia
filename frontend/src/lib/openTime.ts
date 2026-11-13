@@ -60,19 +60,18 @@ export function requestOpenTime(queries: readonly OpenTimeQuery[]): void {
 async function flush(): Promise<void> {
 	const batch = [...pending.values()];
 	pending = new Map();
-	const bearer = get(token);
-	if (!bearer) {
+	if (!get(token)) {
 		for (const query of batch) unsent.set(query.key, query);
 		return;
 	}
 	const chunks = [];
 	for (let start = 0; start < batch.length; start += CHUNK) chunks.push(batch.slice(start, start + CHUNK));
-	await Promise.all(chunks.map((chunk) => read(bearer, chunk, ++seq, 0)));
+	await Promise.all(chunks.map((chunk) => read(chunk, ++seq, 0)));
 }
 
-async function read(bearer: string, chunk: OpenTimeQuery[], mine: number, attempt: number): Promise<void> {
+async function read(chunk: OpenTimeQuery[], mine: number, attempt: number): Promise<void> {
 	for (const query of chunk) requestedSeq.set(query.key, mine);
-	const answers = await readOpenTime(bearer, chunk);
+	const answers = await readOpenTime(chunk);
 	const current = chunk.filter((query) => requestedSeq.get(query.key) === mine);
 	if (answers === null) {
 		if (current.length === 0) return;
@@ -83,7 +82,7 @@ async function read(bearer: string, chunk: OpenTimeQuery[], mine: number, attemp
 		}
 		await new Promise((resolve) => setTimeout(resolve, RETRY_MS[attempt]));
 		const still = current.filter((query) => requestedSeq.get(query.key) === mine);
-		if (still.length > 0) await read(get(token) ?? bearer, still, mine, attempt + 1);
+		if (still.length > 0) await read(still, mine, attempt + 1);
 		return;
 	}
 	for (const query of current) requestedSeq.delete(query.key);

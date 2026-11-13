@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Samples every painted frame until `keep` returns false; installed on the page by `installPaintedFrames`. `measure`
@@ -69,4 +69,32 @@ export async function installPaintedFrames(page: Page): Promise<void> {
 		};
 		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame = eachPaintedFrame;
 	}, { depth: SENTINEL_DEPTH, passes: PASSES });
+}
+
+/**
+ * What the page's next painted frame shows: runs `measure(node, arg)` on `target`'s element inside that frame's rendering,
+ * after the page's last resize observation in it. A read in a task can land between a layout change and the editor's
+ * measure that corrects it before paint: a place no reader ever sees. `measure` is sent to the page as source, so it may
+ * use only its arguments and the page's globals; `arg` and the result must be serializable. A throw in `measure` fails
+ * the read with its message: thrown inside the frame's rendering, it would otherwise leave the read waiting forever.
+ */
+export async function readPainted<A, R>(target: Locator, measure: (node: Element, arg: A) => R, arg: A): Promise<R> {
+	const page = target.page();
+	if (!(await page.evaluate(() => Boolean((window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame)))) await installPaintedFrames(page);
+	return target.evaluate((node, { source, arg }) => new Promise<unknown>((resolve, reject) => {
+		const read = (0, eval)(`(${source})`) as (node: Element, arg: unknown) => unknown;
+		type Sample = { value: unknown } | { error: string };
+		const measureOnce = (): Sample => {
+			try {
+				return { value: read(node, arg) };
+			} catch (e) {
+				return { error: e instanceof Error ? (e.stack ?? e.message) : String(e) };
+			}
+		};
+		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(measureOnce, (sample) => {
+			if ('error' in sample) reject(new Error(`readPainted measure threw: ${sample.error}`));
+			else resolve(sample.value);
+			return false;
+		});
+	}), { source: measure.toString(), arg: arg as unknown }) as Promise<R>;
 }

@@ -73,7 +73,7 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Decline'));
 		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Decline')) as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST', headers: { Authorization: 'Bearer test-token' } }));
 	});
 
 	it('removes the row once Decline deletes a new request, and keeps the others', async () => {
@@ -158,7 +158,7 @@ describe('ConnectedAppsSettings', () => {
 		flushSync();
 		expect([...host.querySelectorAll('.item .details .actions button')].map((button) => button.textContent?.trim())).toEqual(['Dismiss']);
 		(host.querySelector('.item .details .actions button') as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST', headers: { Authorization: 'Bearer test-token' } }));
 	});
 
 	it('shows a pending change on a working app as Approve and Decline, with no place action', async () => {

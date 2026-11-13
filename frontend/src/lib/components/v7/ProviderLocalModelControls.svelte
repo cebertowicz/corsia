@@ -23,7 +23,7 @@
 	async function refresh() {
 		const t = get(token);
 		if (!t) return;
-		try { source = (await fetchSources(t)).find((candidate) => candidate.source === 'omlx'); }
+		try { source = (await fetchSources()).find((candidate) => candidate.source === 'omlx'); }
 		catch { /* Keep the last known eligibility; controls must not invent a fallback. */ }
 	}
 

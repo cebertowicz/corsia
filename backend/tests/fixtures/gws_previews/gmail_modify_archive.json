@@ -1,0 +1,12 @@
+{
+  "body": {
+    "removeLabelIds": [
+      "INBOX"
+    ]
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [],
+  "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/M1/modify"
+}

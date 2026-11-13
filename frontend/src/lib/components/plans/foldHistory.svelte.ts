@@ -69,7 +69,7 @@ export function createFoldHistory(input: FoldHistoryInput) {
 		put(level, { ...before, status: 'loading' });
 		const bearer = get(token);
 		const outcome = bearer
-			? await readFoldedPage(bearer, planId, parentOf(level), before.cursor)
+			? await readFoldedPage(planId, parentOf(level), before.cursor)
 			: ({ status: 'unauthorized' } as const);
 		if (run !== epoch) return;
 		if (outcome.status !== 'fresh') {
@@ -97,7 +97,7 @@ export function createFoldHistory(input: FoldHistoryInput) {
 	async function locate(nodeId: string): Promise<FoldedPath | null> {
 		const bearer = get(token);
 		if (!bearer) return null;
-		const outcome = await readFoldedPath(bearer, input.planId(), nodeId);
+		const outcome = await readFoldedPath(input.planId(), nodeId);
 		return outcome.status === 'fresh' ? outcome.payload : null;
 	}
 

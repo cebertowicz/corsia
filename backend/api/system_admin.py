@@ -34,8 +34,7 @@ def _authenticated_user(request: Request) -> dict | None:
 
 
 async def launch_update(
-    user: dict, caller_token: str | None, trigger: str,
-    target_version: str | None, *, port: int,
+    user: dict, caller_token: str | None, trigger: str, *, port: int,
     claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Launch the one Settings Update lifecycle from any approved trigger."""
@@ -63,7 +62,6 @@ async def launch_update(
         caller_token=caller_token,
         claim=claim,
         trigger=trigger,
-        target_version=target_version,
     )
     if prelaunch is None:
         return None
@@ -108,7 +106,6 @@ async def system_restart(
             user,
             token,
             "manual",
-            None,
             port=port,
         )
     else:
@@ -327,7 +324,7 @@ async def system_update_status(
     from automation import self_restart
     from automation.update_outcome import staged_update_activated
     from core.turn_core import active_turn_count
-    from infra import drain
+    from infra import build_info, drain
     from infra.db_async import run_in_db
     from infra.update_operation import project_update_operation
     from infra.update_status import update_status
@@ -338,6 +335,8 @@ async def system_update_status(
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
     result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()
+    # The running process's version; `current_version` is what is on disk, which changes before the restart.
+    result["running_version"] = build_info.running_app_version()
     from infra.settings import get_update_schedule
 
     result["schedule"] = await run_in_db(get_update_schedule)

@@ -38,7 +38,7 @@
 		if (!threadId || !auth || saving) return;
 		error = '';
 		pending = next;
-		const result = await saveThreadLocalOnly(threadId, next, auth);
+		const result = await saveThreadLocalOnly(threadId, next);
 		pending = null;
 		if (result.ok) await loadModels();
 		else error = result.error;

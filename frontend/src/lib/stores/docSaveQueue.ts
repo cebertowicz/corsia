@@ -169,7 +169,7 @@ async function runSave(key: string): Promise<boolean> {
 	// A live tab writes only its own transactions: once every one is acked and written there is nothing to
 	// save, and any remaining difference is remote edits the server already owns, so the draft rebaselines
 	// on them. An unacked transaction still flushes, so the resave loop below keeps going until clean.
-	if (live && live.durability.clean && !live.durability.unwritten) {
+	if (live && live.durability.saved) {
 		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
 		return true;
 	}
@@ -180,18 +180,19 @@ async function runSave(key: string): Promise<boolean> {
 			const result = live ? await live.flush() : await writeContent(draft.target.path, textAtStart, {
 				projectId: draft.target.projectId, threadId: draft.target.threadId,
 			});
-			// A live flush is settled by 4.1 cleanliness, never by the file's digest: a clean tab's
-			// remaining difference is remote edits the server owns, so only unacked local work re-saves.
-			const clean = !live || live.durability.clean;
-			if (!clean) needsResave.set(key, true);
+			// A live flush is settled by this tab's own transactions, never by the file's digest: the remaining
+			// difference is remote edits the server owns. Local work that is unacked, or was typed after this
+			// flush began and so is not in the file yet, re-saves.
+			const saved = !live || live.durability.saved;
+			if (!saved) needsResave.set(key, true);
 			publishActivity(key);
 			const cur = getDraft(key);
 			if (cur) {
-				const savedText = live ? (clean ? cur.editText : cur.savedText) : textAtStart;
+				const savedText = live ? (saved ? cur.editText : cur.savedText) : textAtStart;
 				patchDraft(key, {
 					savedText,
 					error: '',
-					status: clean && cur.editText === savedText ? 'saved' : 'dirty',
+					status: saved && cur.editText === savedText ? 'saved' : 'dirty',
 					// The tab that wrote this revision rebaselines on it, so only the
 					// same document open elsewhere shows a changed dot.
 					savedRevision: result && 'revision' in result ? result.revision ?? cur.savedRevision : cur.savedRevision,
@@ -243,9 +244,9 @@ export async function flushDraft(target: TargetIdentity): Promise<boolean> {
 		const draft = getDraft(key);
 		if (!draft) return true;
 		if (draft.status === 'error') return false;
-		// Live: clean (an ack names a message after its latest local transaction) and one flush returned.
+		// Live: every local transaction is acked and in the file, not only in the server's memory.
 		const live = get(liveDocumentBindings)[key];
-		if (live ? live.durability.clean || !live.writable : draft.editText === draft.savedText) return true;
+		if (live ? live.durability.saved || !live.writable : draft.editText === draft.savedText) return true;
 	}
 }
 

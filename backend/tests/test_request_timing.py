@@ -84,6 +84,50 @@ def test_real_app_records_route_template_and_unhandled_errors():
 
 
 @pytest.mark.asyncio
+async def test_cancelled_request_is_recorded_as_client_closed():
+    """A caller that stops waiting cancels the handler; that request still counts, with its time so far."""
+    started = asyncio.Event()
+
+    async def app(scope, receive, send):
+        started.set()
+        await asyncio.sleep(3600)
+
+    async def send(message):
+        raise AssertionError("nothing is sent")
+
+    task = asyncio.create_task(request_timing.RequestTimingMiddleware(app)(
+        {"type": "http", "method": "GET", "route": SimpleNamespace(path="/slow")}, None, send))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert {key[1:] for key in request_timing._aggregates} == {("GET", "/slow", "4xx")}
+    aggregate = next(iter(request_timing._aggregates.values()))
+    assert aggregate.count == 1 and aggregate.sum_bytes is None
+
+
+def test_request_over_five_seconds_is_logged_with_its_db_timing(caplog):
+    """The analytics row is unreadable outside the state root, so a request over 5 s is also a log record."""
+    import time
+
+    scope = {"method": "GET", "route": SimpleNamespace(path="/api/items/{item_id}")}
+    timing = request_timing.DbTiming(queue_ms=10, execution_ms=20, read_queue_ms=1, read_execution_ms=2,
+                                     bulk_queue_ms=300, bulk_execution_ms=4_000)
+    with caplog.at_level("WARNING", logger=request_timing.__name__):
+        request_timing.RequestTimingMiddleware._record(scope, time.perf_counter() - 2, 200, timing, 10)
+        request_timing.RequestTimingMiddleware._record(scope, time.perf_counter() - 6, 499, timing, None)
+
+    assert len(request_timing._slow_requests) == 2
+    [record] = [r for r in caplog.records if r.name == request_timing.__name__]
+    message = record.getMessage()
+    assert record.levelname == "WARNING"
+    assert message.startswith("slow request GET /api/items/{item_id} status=499 dur_ms=6")
+    assert ("dbq_ms=10 db_ms=20 dbq_read_ms=1 db_read_ms=2 dbq_bulk_ms=300 db_bulk_ms=4000 "
+            "response_bytes=None") in message
+
+
+@pytest.mark.asyncio
 async def test_websocket_passthrough():
     seen = []
 

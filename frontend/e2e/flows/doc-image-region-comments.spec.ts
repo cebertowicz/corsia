@@ -5,6 +5,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, settled, shoot } from '../support/imageRegionComments';
+import { openComments } from '../support/commentDrawer';
 import { headerSend, holdPersonBatches, leaveUserCommentsUnsent, sendByKeyboard, watchSendRequests, turnOffDocumentComments } from '../support/heldComments';
 import { beginComment, submitButton } from '../support/liveCommentProof';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
@@ -91,7 +92,7 @@ const docDelivery = (page: Page) => page.locator('.document-header .feedback-con
 async function backToDocumentDrawer(page: Page) {
 	await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 	await expect(overlay(page)).toHaveCount(0);
-	await docComments(page).click();
+	await openComments(page);
 	await expect(drawer(page)).toBeVisible();
 	await expect(page.locator('[data-drawer-unsent]'), 'the drawer has no send footer').toHaveCount(0);
 }
@@ -354,7 +355,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 
 		// FR13.6: the document's drawer groups the image's comments under its thumbnail; a card opens the viewer at its tag.
-		await docComments(page).click();
+		await openComments(page);
 		const card = page.locator('.canvas-comment-drawer .ct').filter({ hasText: 'The header crowds the logo' });
 		await expect(card).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
@@ -413,7 +414,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
 		await expectImagesSettled(page, testInfo, 'doc-393-04-document');
-		await docComments(page).click();
+		await openComments(page);
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
 		await expect(drawer(page).locator('[data-drawer-unsent]')).toHaveCount(0);
@@ -465,7 +466,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expectImagesSettled(page, testInfo, `doc-${width}-many-02-document-two-images`);
 
 		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.
-		await docComments(page).click();
+		await openComments(page);
 		const thumbs = drawer(page).locator('[data-region-thumb]');
 		await expect(thumbs).toHaveCount(2);
 		await shoot(page, testInfo, `doc-${width}-many-03-drawer-two-groups`, true);

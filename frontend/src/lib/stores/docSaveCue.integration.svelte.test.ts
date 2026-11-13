@@ -89,7 +89,7 @@ it('real queue: keystrokes and chained resaves extend one episode', async () => 
 it.each([30, 450])('real queue: disconnect after %ims suspends the cue and a 30ms reconnect flush confirms', async (elapsed) => {
 	const connection = live(); const interrupted = deferred(), recovered = deferred();
 	vi.spyOn(connection, 'flush').mockReturnValueOnce(interrupted.promise).mockReturnValueOnce(recovered.promise);
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true, saved: false } as any);
 	setDraftText(target, 'offline'); await advance(700 + elapsed);
 	connection.disconnected(); interrupted.reject(new Error('offline')); await advance(0);
 	expect(state.status).toBe('idle');
@@ -98,32 +98,32 @@ it.each([30, 450])('real queue: disconnect after %ims suspends the cue and a 30m
 	connection.connection = 'connected';
 	connection.handle({ type: 'doc_opened', artifact_id: 'artifact', store_id: 'store', pending: false, held: null });
 	await advance(30);
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false, saved: true } as any);
 	await settle(recovered); expect(state.status).toBe('saved');
 	await advance(1400); expect(state.status).toBe('idle');
 });
 it('real queue: text typed offline owes confirmation after reconnect', async () => {
 	const connection = live(); connection.disconnected();
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true, saved: false } as any);
 	setDraftText(target, 'offline'); await advance(700);
 	expect(state.status).toBe('idle');
 	const recovered = deferred(); vi.spyOn(connection, 'flush').mockReturnValueOnce(recovered.promise);
 	connection.connection = 'connected';
 	connection.handle({ type: 'doc_opened', artifact_id: 'artifact', store_id: 'store', pending: false, held: null });
 	await advance(30);
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false, saved: true } as any);
 	await settle(recovered); expect(state.status).toBe('saved');
 });
 it('real queue: an unacked transaction keeps the draft unclean and queues a resave without Saved', async () => {
 	const connection = live(); const first = deferred(), second = deferred();
 	vi.spyOn(connection, 'flush').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true, saved: false } as any);
 	setDraftText(target, 'unacked'); await advance(1100);
 	await settle(first);
 	expect(existingDraft(target)?.savedText).toBe('base');
 	expect(state.status).toBe('saving');
 	expect(connection.flush).toHaveBeenCalledTimes(2);
-	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false } as any);
+	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false, saved: true } as any);
 	await settle(second); expect(state.status).toBe('saved');
 });
 it('real queue: error ends without Saved; editing and retry start a fresh clock', async () => {

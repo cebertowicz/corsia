@@ -1,10 +1,11 @@
 import { fetchSources, type ModelSource } from '$lib/conductorSources';
 import type { LocalRowState } from '$lib/setupProviderRows';
+import { apiFetch } from '$lib/api/request';
 
 /** The local download before an account exists, read from the setup service; null when it can't be read, so the last reading stays. */
 export async function readPreauthLocal(): Promise<LocalRowState | null> {
 	try {
-		const response = await fetch('/api/setup/local-download');
+		const response = await apiFetch('/api/setup/local-download');
 		if (!response.ok) return null;
 		const live = await response.json();
 		return { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
@@ -14,8 +15,8 @@ export async function readPreauthLocal(): Promise<LocalRowState | null> {
 }
 
 /** The local model's row from the sources service; throws when the read fails, so the caller keeps what it shows. */
-export async function readLocalRow(session: string): Promise<ModelSource | undefined> {
-	return (await fetchSources(session)).find((source) => source.source === 'omlx');
+export async function readLocalRow(): Promise<ModelSource | undefined> {
+	return (await fetchSources()).find((source) => source.source === 'omlx');
 }
 
 /** The shown sources with only the local row replaced, so a poll never undoes a newer CLI check. */

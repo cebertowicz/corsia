@@ -26,23 +26,18 @@ const readSeq = new Map<string, number>();
 /** Identifies the visit whose one opening divider read may still commit. */
 const visitSeq = new Map<string, number>();
 
-async function readWindow(bearer: string, threadId: string, fromSeq: number, divider: boolean) {
-	return readUpdateCards(bearer, threadId, { fromSeq, divider });
-}
-
 /** Read a thread's cards from `fromSeq`; with `divider`, also freeze this visit's divider. */
 export async function loadUpdateCards(
 	threadId: string,
 	fromSeq: number,
 	options: { divider?: boolean } = {},
 ): Promise<void> {
-	const bearer = get(token);
-	if (!bearer) return;
+	if (!get(token)) return;
 	const mine = (readSeq.get(threadId) ?? 0) + 1;
 	readSeq.set(threadId, mine);
 	const visit = options.divider ? (visitSeq.get(threadId) ?? 0) + 1 : null;
 	if (visit !== null) visitSeq.set(threadId, visit);
-	const result = await readWindow(bearer, threadId, fromSeq, Boolean(options.divider));
+	const result = await readUpdateCards(threadId, { fromSeq, divider: Boolean(options.divider) });
 	if (!result) {
 		if (visit !== null && visitSeq.get(threadId) === visit) {
 			visitDividers.update((all) => ({ ...all, [threadId]: { divider: null, failed: true } }));

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { token as sessionStore } from '$lib/stores/sessionToken';
 import { get } from 'svelte/store';
 
 import {
@@ -32,8 +33,11 @@ function modelResponse(
 	);
 }
 
+afterEach(() => { sessionStore.set(null); });
+
 describe('saveThreadModel', () => {
 	beforeEach(() => {
+		sessionStore.set('tok');
 		_resetThreadModelTruthForTests();
 		activeThreadId.set(null);
 		activeModelId.set(null);
@@ -50,7 +54,7 @@ describe('saveThreadModel', () => {
 		});
 		vi.stubGlobal('fetch', vi.fn(() => patch));
 
-		const saving = saveThreadModel('thread-1', 'model-after', 'tok');
+		const saving = saveThreadModel('thread-1', 'model-after');
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
 		expect(currentModel()).toBe('model-before');
 
@@ -72,7 +76,7 @@ describe('saveThreadModel', () => {
 			{ status: 202, headers: { 'Content-Type': 'application/json' } },
 		)));
 
-		await expect(saveThreadModel('thread-1', 'model-after', 'tok'))
+		await expect(saveThreadModel('thread-1', 'model-after'))
 			.resolves.toEqual({
 			kind: 'pending',
 			operationId: 'operation-1',
@@ -101,7 +105,7 @@ describe('saveThreadModel', () => {
 		});
 		vi.stubGlobal('fetch', vi.fn(() => patch));
 
-		const saving = saveThreadModel('thread-1', 'model-after', 'tok');
+		const saving = saveThreadModel('thread-1', 'model-after');
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
 		handleMessage({
 			type: 'session_updated',
@@ -127,7 +131,7 @@ describe('saveThreadModel', () => {
 			{ status: 409, headers: { 'Content-Type': 'application/json' } },
 		)));
 
-		await expect(saveThreadModel('thread-1', 'model-after', 'tok'))
+		await expect(saveThreadModel('thread-1', 'model-after'))
 			.rejects.toThrow('Destination context does not fit');
 		expect(currentModel()).toBe('model-before');
 	});
@@ -138,7 +142,7 @@ describe('saveThreadModel', () => {
 			throw new Error('network down');
 		}));
 
-		await expect(saveThreadModel('thread-1', 'model-after', 'tok'))
+		await expect(saveThreadModel('thread-1', 'model-after'))
 			.rejects.toThrow('network down');
 		expect(currentModel()).toBe('model-before');
 	});
@@ -151,7 +155,7 @@ describe('saveThreadModel', () => {
 			'Model changed, but cleanup must be retried',
 		)));
 
-		await expect(saveThreadModel('thread-1', 'model-after', 'tok'))
+		await expect(saveThreadModel('thread-1', 'model-after'))
 			.resolves.toMatchObject({
 				kind: 'committed',
 				accepted: true,

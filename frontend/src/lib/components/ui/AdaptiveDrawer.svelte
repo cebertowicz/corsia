@@ -362,9 +362,10 @@
 		overscroll-behavior: contain;
 		scrollbar-gutter: stable;
 		padding: 0 var(--space-4) max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		scroll-padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
 	}
-	.drawer-body.flush-bottom { padding-bottom: 0; }
-	.drawer-body.fill { display: flex; flex-direction: column; overflow: hidden; }
+	.drawer-body.flush-bottom { padding-bottom: 0; scroll-padding-bottom: 0; }
+	.drawer-body.fill { display: flex; flex-direction: column; overflow: auto; }
 	@media (max-width: 620px) {
 		/* Touch minimum for the only dismiss control in the chrome. */
 		.drawer-done { min-height: 44px; }

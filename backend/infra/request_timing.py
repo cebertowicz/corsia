@@ -24,7 +24,11 @@ _BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
                   8_192, 16_384, 32_768, 60_000)
 _FLUSH_SECONDS = 60
 _SLOW_MS = 1_000
+#: A request this slow is also logged, so it can be read where the analytics database can't.
+_LOGGED_SLOW_MS = 5_000
 _UNMATCHED_ROUTE = "<unmatched>"
+#: Recorded for a request whose caller gave up first (the handler was cancelled): the client-closed status.
+CLIENT_CLOSED = 499
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
 
 
@@ -196,6 +200,12 @@ class RequestTimingMiddleware:
 
         try:
             await self.app(scope, receive, timed_send)
+        except asyncio.CancelledError:
+            # A caller that stops waiting (an in-process call's own time limit) cancels the handler. Unrecorded,
+            # the slowest requests would be the ones missing from the route timing.
+            if not recorded:
+                self._record(scope, started_at, CLIENT_CLOSED, timing, None)
+            raise
         except Exception:
             # Unhandled errors reach ServerErrorMiddleware outside this one, so
             # its 500 response never passes through timed_send; count it here.
@@ -220,6 +230,14 @@ class RequestTimingMiddleware:
                     timing.read_queue_ms, timing.read_execution_ms,
                     timing.bulk_queue_ms, timing.bulk_execution_ms,
                 )
+            )
+        if duration_ms > _LOGGED_SLOW_MS:
+            log.warning(
+                "slow request %s %s status=%d dur_ms=%.0f dbq_ms=%.0f db_ms=%.0f dbq_read_ms=%.0f "
+                "db_read_ms=%.0f dbq_bulk_ms=%.0f db_bulk_ms=%.0f response_bytes=%s",
+                key[1], route, status, duration_ms, timing.queue_ms, timing.execution_ms,
+                timing.read_queue_ms, timing.read_execution_ms, timing.bulk_queue_ms,
+                timing.bulk_execution_ms, response_bytes,
             )
 
 

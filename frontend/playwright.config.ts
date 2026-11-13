@@ -53,7 +53,7 @@ const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
 	}, {
 		name: 'webkit-mobile',
-		testMatch: /doc-remote-edit-anchor\.spec\.ts$/,
+		testMatch: /(doc-remote-edit-anchor|doc-phone-tap-comment)\.spec\.ts$/,
 		use: { ...devices['iPhone 15'] },
 	}]
 	: [];
