@@ -17,7 +17,6 @@
 	} = $props();
 
 	const name = $derived(listed ? `${comments.length} comments` : 'Comment');
-	const title = name;
 </script>
 
 {#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of comments" onclick={onBack}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}
@@ -25,7 +24,7 @@
 	<ChatCommentThreads {messageId} {threadId} {comments} onReply={listed ? undefined : onReply} keepReplyVisible={!listed && keep} />
 {/snippet}
 {#if narrow}
-	<AdaptiveDrawer bind:panel ariaLabel={name} heading={title} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} {onClose} {onClosed}>
+	<AdaptiveDrawer bind:panel ariaLabel={name} heading={name} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} {onClose} {onClosed}>
 		{@render body(true)}
 	</AdaptiveDrawer>
 {:else}

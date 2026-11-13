@@ -4,7 +4,7 @@
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
-	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
+	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
 	import { transcriptTextChanged } from './chatTranscriptMutations';
@@ -39,7 +39,7 @@
 	let sheetPanel = $state<HTMLElement | null>(null);
 	const sheetReveal = createChatSheetReveal(() => sheetPanel, messageRoot, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
 	// The same keeping for an opened comment's sheet: the pressed text (after the sheet is capped above it) rises into the space above the sheet.
-	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText()));
+	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText() ?? threadAnchor()));
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
@@ -271,7 +271,8 @@
 			}
 			for (const message of $messages) {
 				if (message.thread_id !== threadId) continue;
-				const comment = message.chat_comments?.find(item => ids.includes(item.id));
+				// The press's own thread first, then the ones around it, so a press on an inner highlight picks it.
+				const comment = ids.map(id => message.chat_comments?.find(item => item.id === id)).find(item => !!item);
 				if (!comment) continue;
 				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card in a document.
 				if (marginComments) { selectedCommentId = comment.id; return; }
@@ -285,8 +286,7 @@
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
-			const ids: string[] = [];
-			for (let el: HTMLElement | null | undefined = hit; el && root.contains(el); el = el.parentElement?.closest<HTMLElement>('[data-comment-ids]')) for (const id of el.dataset.commentIds?.split(',') ?? []) if (id && !ids.includes(id)) ids.push(id);
+			const ids = commentIdsAt(root, hit);
 			if (closing) {
 				const finish = afterClose;
 				afterClose = () => { finish?.(); openHighlight(ids, hit, row); };

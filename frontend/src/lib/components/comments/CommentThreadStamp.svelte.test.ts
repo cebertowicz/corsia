@@ -326,4 +326,15 @@ describe('CommentThread stamping', () => {
 		arrive({ newComment: false, newReplyIds: [] });
 		expect(newMarks()).toBe(0);
 	});
+
+	it('keeps a margin card\'s replies collapsed from where they were when the viewed stamp clears their New signs', () => {
+		const replies = Array.from({ length: 8 }, (_, i) => reply(`r${i + 1}`, `2026-10-16T18:0${i}:00Z`));
+		state.comment = { ...state.comment, replies, newComment: false, newReplyIds: ['r2', 'r3'] };
+		render(vi.fn().mockResolvedValue(undefined), true, { inMargin: true });
+		const shown = () => document.body.querySelectorAll('[data-reply-id]').length;
+		const before = shown();
+		arrive({ newComment: false, newReplyIds: [] });
+		expect(shown()).toBe(before);
+		expect(newMarks()).toBe(0);
+	});
 });

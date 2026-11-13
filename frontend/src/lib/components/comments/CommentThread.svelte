@@ -184,7 +184,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 				{#if hasBody}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={held.replyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={held.newReplyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
 	</div>
@@ -197,7 +197,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body">
 				<div class="ct-original" data-discussion-original use:scrollCue role="region" aria-label="Comment text"><CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
-				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={held.replyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
+				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={held.newReplyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
 				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
@@ -252,7 +252,7 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving}
-			<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={held.replyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
+			<div class="ct-reply-region" data-discussion-replies use:scrollCue role="region" aria-label="Reply history"><CommentReplyList replies={comment.replies} newReplyIds={held.newReplyIds} collapseReplyIds={held.replyIds} onNewestReplyRendered={(element) => (newestReply = element)} /></div>
 		{/if}
 
 		{@render failure?.()}
