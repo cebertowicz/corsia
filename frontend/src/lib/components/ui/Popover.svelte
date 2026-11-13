@@ -5,13 +5,19 @@
 	export const ANCHOR_MOVED = 'popover-anchor-moved';
 	/** Where an anchor is drawn now. */
 	export const anchorRect = (value: Anchor) => typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value;
+	/** An anchor that reaches down to the bottom of `row`, so a surface placed below it never covers what the row holds. */
+	export const anchorClearing = (element: HTMLElement | null, row: () => HTMLElement | null | undefined) => (): DOMRect | null => {
+		if (!element) return null;
+		const rect = element.getBoundingClientRect(), bottom = row()?.getBoundingClientRect().bottom ?? 0;
+		return bottom > rect.bottom ? new DOMRect(rect.left, rect.top, rect.width, bottom - rect.top) : rect;
+	};
 </script>
 
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', ariaLabel, sideKey, keepOpenOnPointer, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -36,6 +42,8 @@
 		takeFocus?: boolean;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
+		/** The dialog's accessible name, for a surface whose content does not name itself. */
+		ariaLabel?: string;
 		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
 		sideKey?: unknown;
 		/** A related control that can be used without dismissing this surface. */
@@ -227,7 +235,7 @@
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
 	     Clipping keeps it measurable without inherited visibility transitions delaying focus. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
 {/if}
 
 <style>

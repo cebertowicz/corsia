@@ -1,6 +1,8 @@
 <script lang="ts">
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
+	import DocOwnerControl from './DocOwnerControl.svelte';
+	import type { DocOwnership } from '$lib/api/docOwnership';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
@@ -31,6 +33,8 @@
 		onReload,
 		onOpenComments,
 		freshness,
+		ownership = null,
+		onOwnershipChanged,
 		onFeedbackChanged,
 		onMarkVerified,
 		liveSession = null,
@@ -67,6 +71,9 @@
 		onReload?: () => void;
 		onOpenComments: (opener: HTMLElement) => void;
 		freshness: DocumentFreshness | null;
+		/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
+		ownership?: DocOwnership | null;
+		onOwnershipChanged?: (value: DocOwnership) => void;
 		onFeedbackChanged?: () => void | Promise<void>;
 		onMarkVerified?: () => Promise<void>;
 		liveSession?: LiveDocumentSession | null;
@@ -99,6 +106,7 @@
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
+	const showOwnership = $derived(!!(ownership && artifactId));
 	// The live-status row renders the stable connection description for unavailable actions.
 	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	$effect(() => {
@@ -179,7 +187,7 @@
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
 			onclick={() => detailsOpen = !detailsOpen}>
 			<span class="document-title" title={title}>{title}</span>
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">Owner: {freshness.owner_name}</span><span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
+			{#if freshness && freshnessPresentation}<span class="identity-age" title={showOwnership ? freshnessPresentation.phrase : `Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}>{#if !showOwnership}<span class="identity-owner">Owner: {freshness.owner_name}</span>{/if}<span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -218,19 +226,20 @@
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
-{#if freshness && freshnessPresentation}
-	<div class="document-metadata" class:expanded={detailsOpen}>
-		<div class="metadata-owner">Owner: {freshness.owner_name}</div>
-		{#if freshnessPresentation.datetime}
+{#if (freshness && freshnessPresentation) || showOwnership}
+	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} data-ownership-row={showOwnership || undefined}>
+		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
+		{#if freshnessPresentation?.datetime}
 			<time datetime={freshnessPresentation.datetime}>
 				{freshnessPresentation.phrase}
 				{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}
 			</time>
-		{:else}
+		{:else if freshnessPresentation}
 			<span class="metadata-secondary">{freshnessPresentation.phrase}</span>
 		{/if}
-		{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if shouldOfferVerification(freshness)}
+		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
+		{#if freshness && shouldOfferVerification(freshness)}
 			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
 		{/if}
 		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
@@ -266,6 +275,8 @@
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
 	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	/* The owner and supervisor items draw their own hover fill and focus ring, which a clipped cell would cut off. */
+	.has-ownership .metadata-owner { overflow: visible; }
 	.verification-action { margin-left: -10px; }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
 	.metadata-error { color: var(--red); }
@@ -278,7 +289,9 @@
 		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
-		.document-metadata:not(.expanded) { display: none; }
+		/* Owner and supervisor stay in view at every width; the rest of the row waits behind Document details. */
+		.document-metadata:not(.expanded):not(.has-ownership), .document-metadata.has-ownership:not(.expanded) > :not(.metadata-owner) { display: none; }
+		.has-ownership .metadata-owner { flex-basis: 100%; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }

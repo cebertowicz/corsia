@@ -10,10 +10,10 @@ subscribers never define transfer authority.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from infra.auth import authenticate
+from infra.auth import authenticate, require_human_user
 from infra.database import write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
@@ -191,3 +191,65 @@ async def release_artifact(token: str, body: ReleaseBody):
     assert result is not None
     service.notify_changed(body.model_dump())
     return result
+
+
+class OwnershipBody(BaseModel):
+    owner: str
+    supervisor_thread_id: str | None = None
+
+
+MULTI_PERSON_REFUSAL = "Taking over a document isn't available yet when more than one person uses this CORSIA."
+
+
+@router.put("/artifacts/{artifact_id}/ownership")
+async def change_document_ownership(artifact_id: str, body: OwnershipBody, user: dict = Depends(require_human_user)):
+    """The signed-in person changes a document's owner or supervisor."""
+    from infra import config
+    from registry.document_supervisor import (
+        SUPERVISOR_KEY,
+        TAKEN_OVER_KEY,
+        is_multi_person,
+        ownership,
+    )
+    from registry.identity_metadata import merge_identity_metadata, parse_metadata
+    from registry.shared_principals import UI_PRINCIPAL, artifact_owner
+
+    def _change():
+        with write_transaction(None, scope="api_document_ownership") as db:
+            artifact = models.get_artifact(artifact_id, db=db)
+            if artifact is None or artifact.get("state") != "active":
+                return "not_found", None
+            current = artifact_owner(artifact_id, db=db)
+            view = ownership(db, artifact, user_id=user["id"], workspace=config.WORKSPACE)
+            agents = {choice["id"] for choice in view["choices"]}
+            new_owner = UI_PRINCIPAL if body.owner == "user" else body.owner
+            if new_owner != UI_PRINCIPAL and new_owner not in agents:
+                return "bad_choice", None
+            if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
+                return "bad_choice", None
+            if UI_PRINCIPAL in {current, new_owner} and is_multi_person(db):
+                return "multi_person", None
+            supervisor = body.supervisor_thread_id
+            if new_owner == UI_PRINCIPAL and supervisor is None and current and current != UI_PRINCIPAL:
+                supervisor = current
+            if new_owner != current:
+                models.rehome_artifact(
+                    integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
+                    new_owner_thread_id=new_owner, actor_thread_id=None, authority="signed-in-person",
+                    reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
+                )
+            metadata = parse_metadata(artifact.get("metadata"))
+            updates = {SUPERVISOR_KEY: supervisor if new_owner == UI_PRINCIPAL else (supervisor if supervisor != new_owner else None)}
+            updates[TAKEN_OVER_KEY] = user["id"] if new_owner == UI_PRINCIPAL else None
+            if updates != {key: metadata.get(key) for key in updates}:
+                merge_identity_metadata(db, artifact_id, updates)
+            return "ok", ownership(db, models.get_artifact(artifact_id, db=db), user_id=user["id"], workspace=config.WORKSPACE)
+
+    status, result = await run_in_db(_change)
+    if status == "not_found":
+        raise HTTPException(404, "Document not found")
+    if status == "bad_choice":
+        raise HTTPException(400, "Pick yourself or an agent in this document's scope.")
+    if status == "multi_person":
+        raise HTTPException(409, MULTI_PERSON_REFUSAL)
+    return {"ownership": result}

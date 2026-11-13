@@ -1,4 +1,5 @@
 import type { DocumentFreshness } from '$lib/docFreshness';
+import type { DocOwnership } from '$lib/api/docOwnership';
 import type { EmailDraftInfo } from '$lib/emailDraft';
 
 export interface ArtifactRow {
@@ -19,6 +20,7 @@ export interface DocContent {
 	writable: boolean;
 	artifact: ArtifactRow | null;
 	freshness: DocumentFreshness | null;
+	ownership?: DocOwnership | null;
 	/** The file's versions are recorded, so it has a History. */
 	history?: boolean;
 	/** On a live_open read: false with a reason when the document opens as a non-live file. */
@@ -40,4 +42,5 @@ export interface DocRevision {
 	artifact_id: string | null;
 	artifact: ArtifactRow | null;
 	freshness: DocumentFreshness | null;
+	ownership?: DocOwnership | null;
 }

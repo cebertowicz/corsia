@@ -10,6 +10,8 @@ from doceditor.note_names import document_name
 from events.envelope import normalize
 from registry import models as registry_models
 from registry import exemption_restore
+from registry.document_supervisor import comment_recipient
+from infra import config
 
 
 def author_id(comment: dict[str, Any]) -> str:
@@ -99,7 +101,8 @@ def recipients(
     stops replies reaching them.
     """
     artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
-    owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
+    # On a document no agent owns, its supervisor takes the owner's place.
+    owner = comment_recipient(db, artifact, workspace=config.WORKSPACE) if artifact else ""
     if document_owner_only:
         return (owner,)
     author = _recipient_for_author(comment)
