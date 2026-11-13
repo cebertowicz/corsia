@@ -102,11 +102,13 @@ def test_a_run_cut_by_a_restart_fails_and_wakes_its_rules_owner_once_naming_it(c
 
     assert _outcomes(rule["id"]) == [("failed", rule_runs.INTERRUPTED)]
     [(summary, details)] = _wakes()
-    # Neither line names a cause: a row left running with no task establishes none.
-    assert summary == "A script run started by your event rule stopped before it finished. It is not replayed."
+    # Neither line names a cause: a row left running with no task establishes none. It does
+    # establish that the loss is CORSIA's, since a script's own failure settles as a report.
+    assert summary == "CORSIA lost track of a script run your event rule started and has no result for it. It is not replayed."
     assert _person_lines() == ["Script run stopped before it finished"]  # the agent's line is not the person's
     assert details["runs"] == [{"rule_id": rule["id"], "event_id": event_id, "event_type": "qa.route"}]
     assert "event_rules explain" in details["next"]
+    assert "This wake does not mean your script or rule is at fault." in details["next"]
     assert cut["idle_drives"] == [OWNER]
 
     _sweep()  # nothing replays it and nothing wakes twice
@@ -133,7 +135,8 @@ def test_two_runs_cut_by_one_restart_reach_their_owner_as_one_wake_with_each_run
     _sweep()
 
     [(summary, details)] = _wakes()
-    assert summary == "2 script runs started by your event rules stopped before they finished. They are not replayed."
+    assert summary == ("CORSIA lost track of 2 script runs your event rules started and has no result for them. "
+                       "They are not replayed.")
     assert _person_lines() == ["2 script runs stopped before they finished"]
     assert details["runs"] == [
         {"rule_id": first["id"], "event_id": event_id, "event_type": "qa.route", "item": "shelf/box#7"},

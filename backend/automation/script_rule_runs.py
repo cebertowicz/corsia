@@ -37,8 +37,9 @@ KEY_PREFIX = "rule:"
 #: The wake for runs the backend lost; a scheduled run's ``interrupted`` status wakes nobody.
 INTERRUPTED_EVENT = "script.interrupted"
 _INTERRUPTED_NEXT = (
-    "Nothing starts these runs again. If a run's work still matters, do it for its item "
-    "yourself. event_rules explain with a run's event_id shows its record."
+    "Nothing starts these runs again. This wake does not mean your script or rule is at fault. "
+    "If a run's work still matters, do it for its item yourself. "
+    "event_rules explain with a run's event_id shows its record."
 )
 
 
@@ -128,11 +129,13 @@ def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
             "event_type": f"{row['connector']}.{row['event_type']}", "item": row["artifact_external_id"],
         }.items() if v is not None} for row in rows]
         # A row left running with no task says the run stopped, never why: a restart is one
-        # way there, a runner task that died in this process is another. Name no cause.
-        summary = ("A script run started by your event rule stopped before it finished. It is not replayed."
+        # way there, a runner task that died in this process is another. Name no cause. The
+        # loss is CORSIA's either way: a script's own failure settles as a report.
+        summary = ("CORSIA lost track of a script run your event rule started and has no result for it. "
+                   "It is not replayed."
                    if len(runs) == 1 else
-                   f"{len(runs)} script runs started by your event rules stopped before they finished. "
-                   "They are not replayed.")
+                   f"CORSIA lost track of {len(runs)} script runs your event rules started and has no result "
+                   "for them. They are not replayed.")
         chip = ("Script run stopped before it finished" if len(runs) == 1
                 else f"{len(runs)} script runs stopped before they finished")
         details = {"runs": runs, "next": _INTERRUPTED_NEXT}
