@@ -5,6 +5,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from infra.database import is_lock_refusal
+
 log = logging.getLogger(__name__)
 
 
@@ -18,19 +20,22 @@ def enter_wal(connection: sqlite3.Connection, path: Path) -> None:
     """
     if connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal":
         return
+    step = "quick_check"
     try:
         check = connection.execute("PRAGMA quick_check").fetchone()
+        if check is None or check[0] != "ok":
+            _stays(path, "quick_check failed", "no result" if check is None else check[0])
+            return
+        step = "mode change"
+        connection.execute("PRAGMA journal_mode=WAL")
     except sqlite3.OperationalError as exc:
-        if "locked" in str(exc) or "busy" in str(exc):
-            log.warning("Live store %s stays in rollback-journal mode: busy, will convert on next open (%s)", path, exc)
+        if is_lock_refusal(exc):
+            _stays(path, "busy, will convert on a later open", exc)
         else:
-            log.warning("Live store %s stays in rollback-journal mode: quick_check failed (%s)", path, exc)
-        return
+            _stays(path, f"{step} failed", exc)
     except sqlite3.DatabaseError as exc:  # damage is the reads' to report, not this open's
-        log.warning("Live store %s stays in rollback-journal mode: quick_check failed (%s)", path, exc)
-        return
-    if check is None or check[0] != "ok":
-        log.warning("Live store %s stays in rollback-journal mode: quick_check failed (%s)",
-                    path, "no result" if check is None else check[0])
-        return
-    connection.execute("PRAGMA journal_mode=WAL")
+        _stays(path, f"{step} failed", exc)
+
+
+def _stays(path: Path, why: str, detail: object) -> None:
+    log.warning("Live store %s stays in rollback-journal mode: %s (%s)", path, why, detail)

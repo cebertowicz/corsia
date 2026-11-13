@@ -82,7 +82,46 @@ def test_busy_integrity_check_keeps_rollback_mode_logs_once_and_converts_next_op
         assert store._read("PRAGMA journal_mode")[0][0] == "delete"
     warnings = [r.getMessage() for r in caplog.records]
     assert len(warnings) == 1
-    assert str(path) in warnings[0] and "busy, will convert on next open" in warnings[0]
+    assert str(path) in warnings[0] and "busy, will convert on a later open" in warnings[0]
+    assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "wal"
+
+
+class _ReaderAppearsBeforeSwitch:
+    """A connection that meets another connection's read lock just as it switches to WAL."""
+
+    def __init__(self, connection, path, readers):
+        self._connection, self._path, self._readers = connection, path, readers
+
+    def execute(self, sql, *args):
+        if "journal_mode=WAL" in sql:
+            reader = sqlite3.connect(self._path, isolation_level=None)
+            reader.execute("BEGIN")
+            reader.execute("SELECT count(*) FROM meta").fetchall()  # a shared lock the switch must wait for
+            self._readers.append(reader)
+        return self._connection.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_lock_held_during_conversion_does_not_refuse_the_open(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "state.sqlite"
+    LiveStore(path)
+    with sqlite3.connect(path, isolation_level=None) as db:
+        db.execute("PRAGMA journal_mode=DELETE")
+    readers: list[sqlite3.Connection] = []
+    connect = LiveStore._connect
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(LiveStore, "_connect", lambda self: _ReaderAppearsBeforeSwitch(connect(self), path, readers))
+            with caplog.at_level(logging.WARNING, logger="doceditor.live_store_journal"):
+                store = LiveStore(path)  # waits out the 1 s busy timeout, then carries on
+            assert store._read("PRAGMA journal_mode")[0][0] == "delete"
+    finally:
+        for reader in readers:
+            reader.close()
+    warnings = [r.getMessage() for r in caplog.records]
+    assert len(warnings) == 1 and "busy, will convert on a later open" in warnings[0]
     assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "wal"
 
 
