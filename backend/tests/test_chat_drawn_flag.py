@@ -129,3 +129,15 @@ def test_the_sidebar_preview_skips_the_stamped_step(db):
 
     _step(db, "answer-only", "[c1.1] Moved.")
     assert sidebar_update(THREAD)["last_message"] == "target text"
+
+
+def test_a_stamped_for_user_step_broadcasts_the_stamp_it_was_saved_with(db):
+    """send_broadcast re-derives nothing: the update row carries the saved stamp, in its fields and its metadata."""
+    from infra.send_broadcast import project_input_message, read_input_broadcast_row
+
+    _step(db, "update-only", "[c1.1] Moved.", {"for_user": True})
+    projected = project_input_message(read_input_broadcast_row("update-only", db=db))
+    assert projected["chat_drawn"] is False and projected["metadata"]["chat_drawn"] is False
+    _step(db, "update-with-text", "Done.\n\n[c1.1] Moved.", {"for_user": True})
+    projected = project_input_message(read_input_broadcast_row("update-with-text", db=db))
+    assert "chat_drawn" not in projected and "chat_drawn" not in projected["metadata"]
