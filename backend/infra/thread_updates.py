@@ -62,6 +62,7 @@ def _previewable(alias: str = "") -> str:
 def _newest_key(alias: str = "") -> str:
     return f"{alias}created_at || '/' || printf('%019d', {alias}id)"
 
+
 def canonical_time(value: str) -> str:
     """One ordering shape for every source: naive UTC with microseconds."""
     return iso(parse(value))

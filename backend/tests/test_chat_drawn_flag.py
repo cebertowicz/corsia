@@ -185,20 +185,18 @@ def test_an_ask_hold_maps_to_the_latest_step_chat_draws(db):
 
 
 def test_no_chat_read_hands_a_stamped_step_to_the_card_builder(db, monkeypatch):
-    """A card is computed at read time from a row's text, so a stamped step has none: every read that
-    attaches cards (page, focus view, one run's range) drops the step first, and a drawn step still gets them."""
+    """Every read that attaches cards (page, focus view, one run's range) drops a stamped step before the card
+    builder sees the page, and a drawn step is still handed to it. This pins the filter itself: the card
+    builder would skip a stamped row's empty chat text anyway, so the rows are checked, not the text."""
     from api import thread_cards
     from api.thread_focus_page import read_authorized_focus_page, read_authorized_run_range
 
     seen: list[str] = []
-
-    def spy(db, text, bases, user_id, **kwargs):
-        seen.append(text)
-        return []
-
-    monkeypatch.setattr(thread_cards, "reference_cards", spy)
+    monkeypatch.setattr(
+        thread_cards, "attach_cards",
+        lambda db, thread_id, user_id, thread_row, messages: seen.extend(m["id"] for m in messages),
+    )
     _worked_turn(db)
-    _step(db, "answer-with-text", "Done.\n\n[c1.1] See docs/plan.md")
     reads = {
         "page": _page(db),
         "focus": read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER),
@@ -207,8 +205,8 @@ def test_no_chat_read_hands_a_stamped_step_to_the_card_builder(db, monkeypatch):
     for name, result in reads.items():
         seen.clear()
         thread_cards.attach_result_cards(db, THREAD, OWNER_USER, result)
-        assert "[c1.1] Moved." not in seen, f"{name} read offered the stamped step to the card builder"
-        assert "All done." in seen, f"{name} read lost the drawn reply"
+        assert "answer-only" not in seen, f"{name} read handed the stamped step to the card builder"
+        assert "reply" in seen, f"{name} read lost the drawn reply"
 
 
 def test_a_card_follows_the_text_chat_draws_on_every_read(db, monkeypatch):
