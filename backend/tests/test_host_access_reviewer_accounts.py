@@ -4,9 +4,95 @@ from types import SimpleNamespace
 
 import pytest
 
-from test_reviewer_account_selection import (  # noqa: F401
-    MODEL, PROJECT, _allow, _limit, _policy, _reviewer_catalog, scope,
-)
+MODEL = "claude-code/claude-opus-4-8"
+PROJECT = "corsia-project"
+_RESET = "2099-01-01T00:00:00+00:00"
+
+
+@pytest.fixture(autouse=True)
+def _reviewer_catalog(isolated_db):
+    """The one Claude Code model the requester's account must offer."""
+    import json
+
+    from infra.database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO models "
+            "(id,harness,provider,provider_model_id,litellm_model,display_name,"
+            "backend,source,enabled,available,context_window,metadata_json,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (MODEL, "claude-code", "claude-code", "claude-opus-4-8", MODEL,
+             "claude-opus-4-8", "cc", "test", 1, 1, 200_000,
+             json.dumps({"resolved_identity": "claude-opus-4-8", "internal_reviewer": False}),
+             "t", "t"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO connections "
+            "(id,type,provider,status,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+            ("reviewer-cc", "cli", "claude-code", "available", "t", "t"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def scope(tmp_path, monkeypatch):
+    """The project, a Default and a signed-in second Claude account, and a writable db."""
+    from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import add_account, set_account_state
+    from infra.database import get_db
+    from vendor_account_fixtures import seed_default_account
+
+    monkeypatch.setattr("infra.config.WORKSPACE", tmp_path)
+    (tmp_path / "projects" / "corsia").mkdir(parents=True)
+    db = get_db()
+    db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,'t','t')",
+               (PROJECT, "corsia", str(tmp_path / "projects" / "corsia")))
+    default = seed_default_account("claude-code", db=db)
+    default = set_account_state(default["id"], "signed_in", expected_revision=0, db=db)
+    receipt = capture_receipt("claude-code", account_id=default["id"], db=db)
+    assert mark_discovery(default["id"], receipt=receipt, status="ready",
+                          models={MODEL: {"available": True, "resolved_identity": "synthetic"}}, db=db)
+    second = add_account("claude-code", "Second", db=db)
+    second = set_account_state(second["id"], "signed_in", expected_revision=0, db=db)
+    receipt = capture_receipt("claude-code", account_id=second["id"], db=db)
+    assert mark_discovery(second["id"], receipt=receipt, status="ready",
+                          models={MODEL: {"available": True, "resolved_identity": "synthetic"}}, db=db)
+    db.commit()
+    yield db, default, second
+    db.close()
+
+
+def _policy(db, *, allowlist, default_id, switch):
+    from vendor_account_fixtures import set_legacy_policy
+
+    set_legacy_policy(PROJECT, "claude-code", allowlist=allowlist, default_account_id=default_id,
+                      switch_on_limit=switch, db=db)
+    db.commit()
+
+
+def _limit(db, account):
+    from connections import harness_usage
+    from connections.account_receipts import capture_receipt
+
+    harness_usage.record_limited(
+        provider="claude-code", receipt=capture_receipt("claude-code", account_id=account["id"], db=db),
+        reason="usage_limit", resets_at=_RESET, source="rate_limit_update", db=db)
+    db.commit()
+
+
+def _allow(db, account):
+    from connections import harness_usage
+    from connections.account_receipts import capture_receipt
+
+    harness_usage.record_allowed(
+        provider="claude-code", receipt=capture_receipt("claude-code", account_id=account["id"], db=db),
+        source="discovery", db=db)
+    db.commit()
 
 
 @pytest.mark.parametrize("binding", ["bound", "pending", "none", "signed_out", "bound_signed_out"])

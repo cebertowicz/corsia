@@ -10,6 +10,8 @@ from doceditor.note_names import document_name
 from events.envelope import normalize
 from registry import models as registry_models
 from registry import exemption_restore
+from registry.document_supervisor import comment_recipients
+from infra import config
 
 
 def author_id(comment: dict[str, Any]) -> str:
@@ -89,24 +91,41 @@ def agreed(db, root_id: str) -> bool:
     return bool(people) and people <= comment_acks.acknowledgers(db, root_id)
 
 
-def recipients(
-    db, comment: dict[str, Any], *, document_owner_only: bool = False,
-) -> tuple[str, ...]:
-    """Resolve feedback recipients, or only the document owner for a user reopen.
+def _ask_raised_to_person(db, comment: dict[str, Any]) -> bool:
+    """Whether an open ask raised to the agent's person carries this document's comments to them."""
+    from plans.public import covering_asks
 
-    An agent that left the thread or acknowledged it is not woken, unless this comment tags it;
-    the document owner still gets the person's comments. The person's own acknowledgement never
-    stops replies reaching them.
+    row = db.execute("SELECT user_id FROM threads WHERE id=?", (comment.get("author_thread_id"),)).fetchone()
+    artifact_id = str(comment["artifact_id"])
+    return bool(row and row["user_id"] and covering_asks(db, [artifact_id], str(row["user_id"]))[artifact_id])
+
+
+def document_recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
+    """Who receives every comment on this comment's document; a re-open goes to exactly these.
+
+    With no one, ``("",)``: a re-open still queues, and stays visible as undelivered with no owner.
     """
     artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
-    owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
-    if document_owner_only:
-        return (owner,)
+    return (comment_recipients(db, artifact, workspace=config.WORKSPACE) if artifact else ()) or ("",)
+
+
+def recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
+    """Resolve feedback recipients.
+
+    An agent that left the thread or acknowledged it is not woken, unless this comment tags it;
+    the document's recipients still get the person's comments. The person's own acknowledgement
+    never stops replies reaching them.
+    """
+    document = document_recipients(db, comment)
     author = _recipient_for_author(comment)
     root = _root_comment(db, comment)
     root_id = str(root["id"] if root else comment["id"])
     tagged = set(comment.get("tagged_agent_ids") or ())
-    resolved = {owner, *tagged}
+    resolved = {*document, *tagged}
+    if comment.get("tagged_user_id"):
+        resolved.add(USER_AUTHOR_ID)
+    if comment["author_kind"] == "agent" and _ask_raised_to_person(db, comment):
+        resolved.add(USER_AUTHOR_ID)
     if root is not None:
         resolved.add(_recipient_for_author(root))
         resolved.update(_agent_authors(db, root_id))
@@ -115,7 +134,7 @@ def recipients(
     quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
-        resolved.add(owner)
+        resolved.update(document)
     resolved.discard(author)
     resolved.discard("")
     return tuple(sorted(resolved))

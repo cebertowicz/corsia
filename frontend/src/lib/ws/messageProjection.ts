@@ -1,6 +1,11 @@
 import type { Message } from '../stores/threads';
 import { readMessageDeliveryState } from '../messageDelivery';
 
+/** A row's metadata, with the server's `chat_drawn: false` stamp kept where every reader looks for it. */
+export function withChatDrawn(metadata: any, payload: any): any {
+	return payload?.chat_drawn === false ? { ...metadata, chat_drawn: false } : metadata;
+}
+
 /** Normalize singleton and batch public rows through the same wire contract. */
 export function addedMessage(payload: any, threadId: string): Message | null {
 	if (typeof payload?.id !== 'string' || typeof payload?.created_at !== 'string') return null;
@@ -13,7 +18,7 @@ export function addedMessage(payload: any, threadId: string): Message | null {
 		thread_id: threadId,
 		role: payload.role,
 		content: payload.content,
-		metadata: payload.metadata,
+		metadata: withChatDrawn(payload.metadata, payload),
 		created_at: payload.created_at,
 		...(sequence !== undefined ? { seq: sequence } : {}),
 		// An update sent mid-turn arrives with its placed answers already out of its chat text.

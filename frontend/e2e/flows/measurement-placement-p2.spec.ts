@@ -133,7 +133,7 @@ const railIsOpen = new WeakMap<object, boolean>();
 async function setRail(page: import('@playwright/test').Page, wantOpen: boolean) {
 	if ((page.viewportSize()?.width ?? 0) > 768) return;
 	if ((railIsOpen.get(page) ?? false) === wantOpen) return;
-	await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	railIsOpen.set(page, wantOpen);
 }
 

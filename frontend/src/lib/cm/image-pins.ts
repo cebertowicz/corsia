@@ -2,6 +2,7 @@ import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { commentRanges, type CommentRange } from './comment-marks';
 import { cellImageRange, CELL_IMAGE, diagramAnchor } from './widget-open';
 import { DIAGRAM } from './widget-blocks';
+import { CELL_EDITOR } from './widget-cell-state';
 import { badgeFill } from '$lib/imageRegions';
 import { viewerBadgeTags } from '$lib/imageGutter';
 
@@ -31,7 +32,8 @@ function drawnImages(view: EditorView): Drawn[] {
 	};
 	const content = view.contentDOM;
 	return [
-		...[...content.querySelectorAll<HTMLElement>('.cm-md-image')].flatMap((wrap) => at(wrap.querySelector('img'), { from: Number(wrap.dataset.from), to: Number(wrap.dataset.to) })),
+		// An open cell's editor draws its image with the cell's own positions; the cell's pins wait for it to close.
+		...[...content.querySelectorAll<HTMLElement>('.cm-md-image')].filter((wrap) => !wrap.closest(CELL_EDITOR)).flatMap((wrap) => at(wrap.querySelector('img'), { from: Number(wrap.dataset.from), to: Number(wrap.dataset.to) })),
 		...[...content.querySelectorAll<HTMLElement>(CELL_IMAGE)].flatMap((wrap) => at(wrap.querySelector('img'), cellImageRange(view, wrap))),
 		...[...content.querySelectorAll<HTMLElement>(DIAGRAM)].flatMap((el) => at(el.querySelector('svg'), diagramAnchor(view, el))),
 	];

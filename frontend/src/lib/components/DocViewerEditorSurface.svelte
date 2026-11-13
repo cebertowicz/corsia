@@ -9,7 +9,8 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
-	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
+	import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
@@ -23,7 +24,7 @@
 	import { activeThreadId } from '$lib/stores/activeThreadId';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
+	type PendingSelection = SelectionOffer;
 
 	let {
 		docState,
@@ -49,7 +50,7 @@
 		onOpenImage,
 		saveError,
 		pendingSel,
-		commentSheetOpen = false,
+		listOverText = false,
 		cardMode,
 		onTyping,
 		onStartComment,
@@ -80,8 +81,8 @@
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
 		pendingSel: PendingSelection | null;
-		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
-		commentSheetOpen?: boolean;
+		/** The comment list is over the text (the sheet, whose closing scrim stays modal until its outro ends, or the list popover). */
+		listOverText?: boolean;
 		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
 		cardMode?: CardMode;
 		onTyping?: () => void;
@@ -139,13 +140,22 @@
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
 
-	// The button follows the selection's end but never leaves the visible document column.
+	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
+	// selection is drawn on, as chat's does, so it never covers selected text.
+	const coarse = coarsePointer();
+	const place = $derived.by(() => {
+		if (!pendingSel) return null;
+		// An offer placed by its widget (above a cell, or at the point it gives) sits as given.
+		if (pendingSel.above || pendingSel.exact) return { top: pendingSel.top, above: !!pendingSel.above, below: !!pendingSel.below };
+		const { top, above } = selectionButtonPlace(pendingSel.anchor?.() ?? { top: pendingSel.top, bottom: pendingSel.top }, coarse);
+		return { top, above, below: !above };
+	});
 	const EDGE = 8;
 	let column: HTMLDivElement | undefined = $state();
 	let buttonWidth = $state(0);
 	const buttonLeft = $derived.by(() => {
 		if (!pendingSel) return 0;
-		const wanted = pendingSel.left + 8;
+		const wanted = (pendingSel.exact ? pendingSel.left : pendingSel.left + 8) - (pendingSel.end ? buttonWidth : 0);
 		const bounds = column?.getBoundingClientRect();
 		if (!bounds) return wanted;
 		return Math.max(bounds.left + EDGE, Math.min(wanted, bounds.right - EDGE - buttonWidth));
@@ -181,9 +191,9 @@
 	{/if}
 </div>
 
-{#if pendingSel && !commentSheetOpen}
-	<button class="sel-comment" class:above={pendingSel.above} out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
-		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
+{#if pendingSel && !listOverText}
+	<button class="sel-comment" class:above={place?.above} class:below={place?.below} out:menuPop style="top:{place?.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!listOverText) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
 	</button>

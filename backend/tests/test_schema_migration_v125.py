@@ -22,9 +22,12 @@ def _fresh() -> sqlite3.Connection:
 
 
 def _wound_back_to_v124() -> sqlite3.Connection:
-    """A fresh current database wound back to its schema-124 shape, with one review receipt."""
+    """A fresh current database given its schema-124 shape (the receipt table, no approval table), with one receipt.
+
+    A current schema holds neither table, since schema 191 drops them, so the 124 shape is built here.
+    """
     db = _fresh()
-    db.execute("DROP TABLE reviewer_gate_approval")
+    db.execute("CREATE TABLE reviewer_gate_state (pr_key TEXT PRIMARY KEY, reviewed_sha TEXT NOT NULL)")
     db.execute("PRAGMA user_version=124")
     db.execute("INSERT INTO reviewer_gate_state(pr_key,reviewed_sha) VALUES ('o/r#1','abc')")
     db.commit()
@@ -32,15 +35,15 @@ def _wound_back_to_v124() -> sqlite3.Connection:
 
 
 def test_the_step_is_registered_at_124() -> None:
-    assert SCHEMA_VERSION == 190
+    assert SCHEMA_VERSION == 192
     assert MIGRATIONS[124] is migrate_124_to_125
 
 
-def test_the_step_matches_a_fresh_schema_and_keeps_receipts() -> None:
-    with closing(_fresh()) as fresh, closing(_wound_back_to_v124()) as db:
+def test_the_step_creates_the_approval_table_and_keeps_receipts() -> None:
+    with closing(_wound_back_to_v124()) as db:
         migrate_124_to_125(db)
 
-        assert _columns(db) == _columns(fresh) == [("pr_key", "TEXT"), ("approved_sha", "TEXT")]
+        assert _columns(db) == [("pr_key", "TEXT"), ("approved_sha", "TEXT")]
         assert db.execute("SELECT reviewed_sha FROM reviewer_gate_state").fetchall() == [("abc",)]
 
 
@@ -57,5 +60,5 @@ def test_the_runner_takes_a_124_database_to_current_and_stays_there() -> None:
 
         assert (result.migrated, result.from_version, result.to_version) == (True, 124, SCHEMA_VERSION)
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-        assert len(_columns(db)) == 2
+        assert _columns(db) == []  # schema 191 drops the table this step created
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

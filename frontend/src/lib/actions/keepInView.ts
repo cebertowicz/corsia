@@ -12,6 +12,12 @@ function scrollMargins(element: HTMLElement): number {
 	return (parseFloat(style.scrollMarginTop) || 0) + (parseFloat(style.scrollMarginBottom) || 0);
 }
 
+/** The scroller's own room: its scroll padding (a band something floats over) is left clear by every scroll into view, the browser's caret reveal included. */
+function roomOf(owner: HTMLElement): number {
+	const style = getComputedStyle(owner);
+	return owner.clientHeight - (parseFloat(style.scrollPaddingTop) || 0) - (parseFloat(style.scrollPaddingBottom) || 0);
+}
+
 /**
  * Keeps `node` scrolled into its nearest scrolling ancestor while `enabled`:
  * once on mount and again whenever the visual viewport or that scroller
@@ -24,27 +30,62 @@ function scrollMargins(element: HTMLElement): number {
  * instead of the node, so bringing a field into view never pushes the top of the
  * block it sits at the end of out of sight above and never clips the ring drawn
  * around that block; a block too tall for the scroller keeps the node-into-view
- * behaviour.
+ * behaviour, and a node itself taller than the scroller shows its end.
+ *
+ * A resize brings the node back only while its end was in view: a reader who scrolled away from the field (up to
+ * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size. The scroll a
+ * reveal makes is not the reader's: a sheet still shrinking can leave the field below its end by the time that scroll's
+ * event arrives.
+ *
+ * Typing at the end of a field brings its end back as growing does: the browser's own caret reveal stops at the caret
+ * line, leaving the field's padding and the Send beside it past the scroller's end when the text did not wrap.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
 	let frame = 0;
 	const owner = scroller(node);
+	/** Whether the node's end (the caret of a growing field, and its Send) was in view at the last scroll. */
+	let endShown = true;
+	/** Where this action's own last reveal left the scroller. */
+	let revealedTop: number | null = null;
+	const topOf = () => owner?.scrollTop ?? window.scrollY;
+	const readShown = () => {
+		if (topOf() === revealedTop) return;
+		revealedTop = null;
+		const end = node.getBoundingClientRect().bottom;
+		const view = owner?.getBoundingClientRect() ?? { top: 0, bottom: window.visualViewport?.height ?? window.innerHeight };
+		endShown = end >= view.top && end <= view.bottom + 1;
+	};
 	const reveal = () => {
 		if (!enabled) return;
-		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= owner.clientHeight;
+		const room = owner ? roomOf(owner) : window.visualViewport?.height ?? window.innerHeight;
+		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
 		const target = fits ? whole! : node;
-		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' });
+		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
+		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room ? 'end' : 'nearest';
+		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
+		endShown = true;
+		revealedTop = topOf();
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
 		frame = requestAnimationFrame(reveal);
 	};
+	const resized = () => { if (endShown) schedule(); };
+	const typed = () => {
+		if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
+			if (node.selectionEnd === node.value.length) schedule();
+		}
+	};
 	const viewport = window.visualViewport;
-	viewport?.addEventListener('resize', schedule);
-	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
-	if (owner) observer?.observe(owner);
-	observer?.observe(node);
+	viewport?.addEventListener('resize', resized);
+	// The node growing is the person typing into it; the scroller or viewport changing size is not.
+	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+	const ownerResized = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
+	if (owner) ownerResized?.observe(owner);
+	grown?.observe(node);
+	node.addEventListener('input', typed);
+	(owner ?? window).addEventListener('scroll', readShown, { passive: true });
 	queueMicrotask(reveal);
 
 	return {
@@ -54,8 +95,11 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		},
 		destroy() {
 			cancelAnimationFrame(frame);
-			viewport?.removeEventListener('resize', schedule);
-			observer?.disconnect();
+			viewport?.removeEventListener('resize', resized);
+			node.removeEventListener('input', typed);
+			(owner ?? window).removeEventListener('scroll', readShown);
+			grown?.disconnect();
+			ownerResized?.disconnect();
 		},
 	};
 }

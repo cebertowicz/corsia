@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
-import { inResolved, openComments, showAllThreads } from '../support/commentDrawer';
+import { inResolved, openComments, resolvedList, showAllThreads } from '../support/commentDrawer';
 import { layouts } from '../support/liveConcurrency';
 
 const text = '# About you\n\n# Work\n\n# Preferences\n';
@@ -25,13 +25,13 @@ for (const [width, height, project] of layouts) {
 			await expect(page.locator(`.cm-suggestion-insert[data-suggestion-id="${id}"]`)).toHaveCount(1);
 			await expect(page.locator(`.cm-suggestion-del[data-suggestion-id="${id}"]`)).toHaveCount(0);
 		}
-		await openComments(page, /^\d+ threads?\b/);
+		await openComments(page, /^\d+ comments?\b/);
 		await showAllThreads(drawer);
 		await page.screenshot({ path: process.env.CORSIA_INSERT_FRAMES ? path.join(process.env.CORSIA_INSERT_FRAMES, `insert-open-${width}.png`) : info.outputPath(`insert-open-${width}.png`) });
 		await accept(ids[0]).click();
 		await accept(ids[1]).click();
 		await reject(ids[2]).click();
-		await inResolved(drawer, () => expect(row(ids[2]).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
+		await inResolved(drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${ids[2]}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 		await expect.poll(storedText).toBe('# About you\nFirst fact\nSecond fact\n\n# Work\n\n# Preferences\n');
 		await page.screenshot({ path: process.env.CORSIA_INSERT_FRAMES ? path.join(process.env.CORSIA_INSERT_FRAMES, `insert-decided-${width}.png`) : info.outputPath(`insert-decided-${width}.png`) });
 	});

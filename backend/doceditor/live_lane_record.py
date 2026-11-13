@@ -28,6 +28,7 @@ async def record_candidate(live: LiveDocument, fork, prior_hash: str,
             prior_hash, file_hash(str(fork["text"]).encode("utf-8")), publication=publication,
         )
         ack = await asyncio.to_thread(live.store.record_pending, record, messages)
-        live.pending_changed()
+        # No pending broadcast here: a routine save promotes this row a moment
+        # later. Viewers hear of a pending row only once its save is refused.
         live.committed(messages, ack)
     return record

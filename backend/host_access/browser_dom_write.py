@@ -1,6 +1,7 @@
 """Agent targets located in the shared page and page-context DOM writes while a person has the pane open (AR1)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Callable, Sequence
@@ -22,6 +23,10 @@ _WRITE_REFUSALS = {
     "rejected_value": "the field didn't keep the value",
     "no_option": "the dropdown has no option with that value or label",
 }
+# A page that is still moving (a smooth scroll that scrollintoview started and did not wait for)
+# is re-read this often, at most this many times (about two seconds), until a hit test holds.
+_SETTLE_INTERVAL = 0.05
+_SETTLE_READS = 40
 
 
 class DomWriteRefused(BrowserSessionError):
@@ -93,14 +98,29 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         # agent-browser's own click scrolls its target into view the same way.
         await run(("scrollintoview", selector), 10)
         box = await _box(run, selector)
-    if box is None:
-        return None, "no_box"
+    # The box comes from agent-browser and the hit test from CDP, so the page can move between the two
+    # reads. A hit test holds only when the box was in view and the same before and after it.
+    node = None
+    for _ in range(_SETTLE_READS):
+        if box is None:
+            return None, "no_box"
+        in_view = _in_viewport(await _viewport(cdp), box)
+        node = await _hit(cdp, selector, box) if in_view else None
+        after = await _box(run, selector)
+        if in_view and after == box:
+            break
+        box = after
+        await asyncio.sleep(_SETTLE_INTERVAL)
+    return node, "covered"
+
+
+async def _hit(cdp: CdpClient, selector: str, box: dict) -> int | None:
+    """The target node at the box's centre, or None when something else is there."""
     if not re.fullmatch(r"(?:@|ref=)?e\d+", selector):
         found, node = await _css_target(cdp, selector, box)
         if found:
-            return node, "covered"
-    node = await _node_for_box(cdp, box)
-    return node, "covered"
+            return node
+    return await _node_for_box(cdp, box)
 
 
 async def _css_target(cdp: CdpClient, selector: str, box: dict) -> tuple[bool, int | None]:

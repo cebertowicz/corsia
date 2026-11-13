@@ -281,6 +281,8 @@ async function seed(
 			return route.fulfill({ json: { ...agentsBody(project, agentId, agentTitle, url), findings_state: 'flagged', findings: [finding] } });
 		}
 		if (url.pathname.endsWith('/key-figures')) return route.fulfill({ json: keyFiguresBody(project.id) });
+		// Workflow runs are real data the disposable backend can serve; the series body below is not their shape.
+		if (url.pathname.endsWith('/workflows')) return route.fallback();
 		if (url.pathname.endsWith('/where-to-look')) {
 			// One row whose agent name and action are unbroken: the Biggest changes card must wrap them.
 			const row = (subject: { id: string; name: string; kind: 'agent' | 'scope' }, latest: number, previous: number, change: number) => ({
@@ -402,7 +404,7 @@ async function seed(
  * and nothing on the page is still loading or has failed.
  */
 async function signedIn(page: Page, data: Seed, timeout = 20_000) {
-	await expect(page.getByRole('button', { name: 'Toggle sidebar', exact: true })).toBeVisible({ timeout });
+	await expect(page.getByRole('button', { name: /^Toggle sidebar/ })).toBeVisible({ timeout });
 	await expect(page.getByText(data.agentTitle).first(), 'the seeded agent is listed, so the read was authenticated').toBeAttached({ timeout });
 }
 
@@ -419,7 +421,7 @@ async function openSidebar(page: Page) {
 	// On a phone the sidebar is off-canvas until toggled; wait for its actual open state before using its rail.
 	const sidebar = page.locator('aside.sidebar');
 	if (!(await sidebar.evaluate((element) => element.classList.contains('open')))) {
-		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+		await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 		await expect(sidebar, 'the phone sidebar opened before rail navigation').toHaveClass(/\bopen\b/);
 		// The sidebar opens before the main surface finishes sliding across the rail.
 		// Wait on the transform transition itself. A `transitionend` listener armed

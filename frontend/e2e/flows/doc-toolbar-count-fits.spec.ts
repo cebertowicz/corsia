@@ -6,7 +6,7 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
- * The document toolbar's "N threads · N unread" count shows whole, inside the toolbar and clear of the other controls,
+ * The document toolbar's "N comments · N unread" count shows whole, inside the toolbar and clear of the other controls,
  * at 320, 360 and 393 px phones and at 900 and 1440, with one-, two- and three-digit counts. The tool cluster breaks into rows only in PE's order, and never clips, overlaps or shrinks a control.
  */
 
@@ -70,7 +70,7 @@ for (const { width, scheme, resolved } of CASES) {
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
-		await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeEnabled();
+		await expect(page.getByRole('button', { name: /^1 comment\b/ })).toBeEnabled();
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		if (resolved) {
@@ -97,10 +97,10 @@ for (const { width, scheme, resolved } of CASES) {
 			shown.threads = threads; shown.unread = unread;
 			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
 			const pill = page.locator('.document-header .comment-status');
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
 			// A person sees the settled state: nothing may redraw the pill after the store update.
 			await page.waitForTimeout(800);
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const measured = await page.evaluate(() => {
 				const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
@@ -149,7 +149,7 @@ for (const { width, scheme, resolved } of CASES) {
 }
 
 /**
- * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 threads · 45 unread" and four
+ * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 comments · 45 unread" and four
  * readers in the presence row. The tool cluster cannot shrink, so wherever the header is narrow it has to fit inside
  * it: on one row where one row can hold it, and wrapped inside the header where it cannot. Full window from 320 to
  * 1440 px (a fresh load at each phone and tablet width, one desktop load resized across the rest; the Workspace panel closed so the document has the room) and a narrow
@@ -293,9 +293,9 @@ function expectLayout(measured: Measured, label: string) {
 function expectWholeInsideOneRow(measured: Measured, label: string) {
 	expect.soft(measured.sendText, `${label}: Send's visible label is in the row, whole`).toMatch(/^Send (?:10\d comments?|99\+)$/);
 	expect.soft(measured.names.send, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
-	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 threads, 45 unread/);
+	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 comments, 45 unread/);
 	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
-	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
 	expectLayout(measured, label);
 	for (const part of measured.parts) {
 		expect.soft(part.shown && part.width > 0 && part.fits, `${label}: ${part.name} is shown and not clipped`).toBe(true);
@@ -346,7 +346,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 				await expect(page.locator('.cm-content')).toContainText('A commentable document.');
 				if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
 				await turnOffDocumentComments(page);
-				await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+				await expect(page.locator('.document-header .comment-status')).toContainText('120 comments');
 				await readers();
 				await expect(page.locator('.document-header .reviewer-group .more')).toHaveText('+2');
 			};
@@ -402,4 +402,59 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 		await page.unrouteAll({ behavior: 'ignoreErrors' });
 		if (frames) writeFileSync(path.join(frames, 'worst-sweep.json'), JSON.stringify([...ordinaryRows, ...results.map(({ label, headerContentWidth, controls, tools, ...rest }) => ({ label, ...rest, headerContentWidth, controlWidths: Object.fromEntries(controls.map((control) => [control.name, Math.round((control.right - control.left) * 10) / 10])), unfit: [rest.groupWidths.first > headerContentWidth + 0.5 && 'first group', rest.groupWidths.second > headerContentWidth + 0.5 && 'second group'].filter(Boolean), toolsLeft: tools.left, controlLeft: Math.min(...controls.map((control) => control.left)) }))], null, 1));
 	} finally { holdPersonBatches(false); }
+});
+
+/**
+ * History is offered, so the row holds the count, "Resolved", "Deliver immediately", Request review and History at once. At every
+ * width from 360 to 430 px, one pixel at a time (the range where History's icon first shows and the row first has to wrap), the
+ * row stays inside the header with the comment icon whole. The document's own History flag is answered true on the content read, so the sweep does not depend on a Git history in the disposable workspace.
+ */
+test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 430 px keeps the row with History inside the header`, async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+	test.setTimeout(300_000);
+	await setDebugVersionOverlay(request, false);
+	const title = `toolbar-history-${Date.now()}`;
+	const threadId = await createSession(request, title);
+	const doc = await seedTextDocument(request, threadId, title, 'history');
+	const shown = { threads: 123, unread: 45, resolved: 3 }; // the count is the 120 open threads; 3 more are resolved
+	await page.route(new RegExp(`/api/artifacts/${doc.artifactId}/comments(\\?|$)`), async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const response = await route.fetch();
+		const body = await response.json();
+		const row = body.comments[0] ?? { id: 'probe', body: 'A comment', anchor_text: 'commentable', from_off: 2, to_off: 13, author: 'You', author_kind: 'user', replies: [] };
+		body.comments = Array.from({ length: shown.threads }, (_, index) => ({ ...row, id: `${row.id}-copy-${index}`, new_comment: index >= shown.resolved && index < shown.resolved + shown.unread, resolved: index < shown.resolved }));
+		await route.fulfill({ response, json: body });
+	});
+	await page.route(/\/api\/files\/content\?/, async (route) => {
+		if (route.request().method() !== 'GET') return route.fallback();
+		const response = await route.fetch();
+		await route.fulfill({ response, json: { ...(await response.json()), history: true } });
+	});
+	await page.setViewportSize({ width: 430, height: 900 });
+	await installWorkspace(page, threadId, [doc], 0);
+	await openThread(page, threadId, title);
+	await expect(page.locator('.document-header .comment-status')).toContainText('120 comments');
+	await expect(page.locator('.document-header .resolved-tool')).toHaveText('Resolved · 3');
+	await expect(page.locator('.document-header .history-tool')).toBeVisible();
+	if (FRAMES) mkdirSync(FRAMES, { recursive: true });
+	const rowsSeen: Array<[number, number]> = [];
+	for (let width = 430; width >= 360; width--) {
+		await page.setViewportSize({ width, height: 900 });
+		await expect.poll(() => page.evaluate((expected) => new Promise<string>((resolve) => {
+			const read = () => `${window.innerWidth === expected ? 'at' : 'not'}:${Math.round(document.querySelector('.document-header')!.getBoundingClientRect().width * 10)}:${document.getAnimations().length}`;
+			const first = read();
+			requestAnimationFrame(() => requestAnimationFrame(() => { const second = read(); resolve(first === second && second.startsWith('at:') && second.endsWith(':0') ? 'settled' : 'moving'); }));
+		}), width), { message: `the header settles at ${width}`, timeout: 15_000 }).toBe('settled');
+		const label = `History row at ${width} px`;
+		const measured = await measureTools(page);
+		const names = measured.controls.map((control) => control.name);
+		expect.soft(names, `${label}: the count, Resolved, Deliver immediately, Request review and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'request', 'history']));
+		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
+		expectLayout(measured, label);
+		rowsSeen.push([width, measured.rows]);
+		if (FRAMES && [380, 381, 393].includes(width)) await page.screenshot({ path: path.join(FRAMES, `history-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, Math.ceil(measured.tools.bottom + 60)) } });
+	}
+	await info.attach('rows-by-width', { body: JSON.stringify(rowsSeen), contentType: 'application/json' });
+	await page.unrouteAll({ behavior: 'ignoreErrors' });
 });

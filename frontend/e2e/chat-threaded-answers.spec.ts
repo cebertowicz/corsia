@@ -77,10 +77,12 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
     const body = await response.json();
     const [sent] = postedComments(body.messages);
-    const answer = body.messages.find((message: any) => message.role === 'assistant' && message.content.includes('This is the answer.'));
-    answerId = answer?.id ?? '';
-    return { cid: sent?.cid, answer: answer?.content, visible: answer?.chat_visible_content };
-  }, { timeout: 30_000 }).toEqual({ cid: 'c2.1', answer: '[c2.1] This is the answer.', visible: '' });
+    const answer = body.messages.flatMap((message: any) => message.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+      .find((a: any) => a.author_kind === 'agent' && a.text === 'This is the answer.');
+    answerId = answer?.assistant_message_id ?? '';
+    // The answer is in the comment's thread and the step that wrote it is in no page read: it draws nothing.
+    return { cid: sent?.cid, answered: Boolean(answerId), inChat: body.messages.some((message: any) => message.id === answerId) };
+  }, { timeout: 30_000 }).toEqual({ cid: 'c2.1', answered: true, inChat: false });
   await expect(page.locator(`[data-message-id="${answerId}"]`)).not.toBeVisible();
   if (mode === 'normal') {
     await page.reload();
@@ -88,8 +90,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await expect(row).toHaveCount(0);
   }
   const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-threaded-answers');
-  // There is no reply chip above the composer: the chat's jump control says a new reply is waiting and jumps to it.
-  await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
+  // The chat's jump control says a new reply is waiting and jumps to it.
   const control = page.getByRole('button', { name: /next new reply/ });
   await expect(control).toBeVisible({ timeout: 30_000 });
   await expect(control).toContainText('1 new');

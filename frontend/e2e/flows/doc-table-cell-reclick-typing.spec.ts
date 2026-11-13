@@ -2,6 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { frame } from '../support/tableCells';
 
 /**
  * Reclicking a commented cell to close its card must not send the next keystroke somewhere the reader never clicked.
@@ -96,38 +97,115 @@ async function savedAfterProseMarker(page: Page, request: Page['request'], docPa
 /** The source of the table and the line under it, as seeded. */
 const TABLE_AND_AFTER = ['| Item | Notes |', '| --- | --- |', `${CELL_ROW} Replace the faded ${QUOTED} |`, '', PARA].join('\n');
 
-/** The typing lands where the press put the caret: the start of the clicked cell's source, and nowhere else. */
+/** The caret is in the open cell's editor now: read once, never retried, so a card that took the focus and gave it back would fail. */
+const caretInCell = async (page: Page, what: string) =>
+	expect(await page.evaluate(() => !!document.activeElement?.closest('.cm-md-cell-editor')), what).toBe(true);
+
+/** The typing lands where the press put the caret: inside the clicked cell's source, and nowhere else. */
 function assertTypedInClickedCell(saved: string) {
 	expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 	expect(saved, 'the text typed after the reclick reached the document').toContain('XYZ');
 	expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
-	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toContain(`${CELL_ROW} XYZReplace the faded ${QUOTED} |`);
+	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
+}
+
+/** zq, typed once, is in column `col` of the table's body row, and the table, its rows and the paragraph under it are otherwise as seeded. */
+function assertTypedInCell(saved: string, col: number) {
+	expect(saved.split('zq'), `zq was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
+	const row = saved.split('\n').find((line) => line.includes('zq')) ?? '';
+	expect(row.startsWith('|') && row.endsWith('|'), `zq is in a table row, not a line of its own: ${JSON.stringify(saved)}`).toBe(true);
+	expect(row.split('|').slice(1, -1).findIndex((cell) => cell.includes('zq')), `zq is in column ${col}: ${JSON.stringify(row)}`).toBe(col);
+	expect(saved.replace('zq', ''), `the table and the paragraph under it are otherwise unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
+	expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
 }
 
 test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', () => {
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name.includes('mobile'), 'a mouse click'); });
 
-	// Typing in a cell at desktop widths needs the table cell editor (#2462): the browser cannot place its caret inside the
-	// rendered table, and that is where desktop typing goes. Until then this asserts only that the keystrokes cannot damage
-	// the document: nothing before the heading, no new table row, the cell's text as it was, nothing under the table.
-	test('reclicking the highlight and typing leaves the table and the top of the document intact', async ({ page, request }, testInfo) => {
+	// The first click opens the cell's editor (#2462) over the highlight, so the reclick lands on that editor, as a reader's does,
+	// and what is typed goes into the clicked cell at the click: nothing before the heading, no new row, nothing under the table.
+	test('reclicking the highlight and typing puts the text in the clicked cell and leaves the rest of the document intact', async ({ page, request }, testInfo) => {
 		test.setTimeout(120_000);
 		const { docPath, commentId, highlight } = await openDocument(page, { width: 1440, height: 900 });
 
 		await highlight.click();
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.cm-md-table .cm-comment-anchor.cm-comment-focused')).toBeVisible();
-
-		await highlight.click();
 		await settled(page);
+		await caretInCell(page, 'the click that opened the card left the caret in the cell it opened');
+
+		await highlight.click({ force: true });
+		await settled(page);
+		await caretInCell(page, 'the reclick left it there too');
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-reclick');
+		await frame(page, 'g1-reclick-focus-1440');
 
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'desktop-after-typing');
+		await frame(page, 'g1-reclick-typed-1440');
 		expect(saved.startsWith('# Editing table cells'), `the text typed after the reclick landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
-		expect(saved, `the table and the line under it are unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
+		expect(saved.split('XYZ'), `XYZ was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
+		expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
+		expect(saved.replace('XYZ', ''), `the table and the line under it are otherwise unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
 		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
+	});
+
+	// The card a click on a cell's highlight opened closes on Escape: the keyboard goes back to that cell, not to the document
+	// under the table, where the paragraph below would join the table as more rows.
+	test('Escape on a cell\'s comment card, then typing, puts the text in that cell and leaves the paragraph under the table a paragraph', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath, highlight } = await openDocument(page, { width: 1440, height: 900 });
+		await highlight.click();
+		const card = page.getByText('Which sign needs replacing?').first();
+		await expect(card).toBeVisible();
+		await settled(page);
+		await page.keyboard.press('Escape');
+		await expect(card).toBeHidden();
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 1);
+	});
+
+	// A cell left by a click outside the document, then the keyboard taken back into the document (Tab): the document's
+	// caret is still in that cell's source, so typing goes into the cell, not under the table.
+	test('after a click outside the document closes a cell, typing with the keyboard back in the document goes into that cell', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath } = await openDocument(page, { width: 1440, height: 900 });
+		await page.locator('.cm-md-table td', { hasText: 'Trailhead signs' }).click();
+		await caretInCell(page, 'setup: the click opened the cell');
+		// A plain spot beside the document, on no control: the click takes the focus out of the editor and closes the cell.
+		const spot = await page.evaluate(() => {
+			const editor = document.querySelector('.md-editor')!.getBoundingClientRect();
+			for (let y = 160; y < innerHeight - 160; y += 40) for (let x = 40; x < editor.left - 20; x += 60) {
+				const el = document.elementFromPoint(x, y);
+				if (el && !el.closest('.md-editor, button, a, input, textarea, select, [contenteditable="true"], [tabindex], [role="button"], [role="link"], label')) return { x, y };
+			}
+			return null;
+		});
+		expect(spot, 'setup: a plain spot beside the document').not.toBeNull();
+		await page.mouse.click(spot!.x, spot!.y);
+		await expect(page.locator('.cm-md-cell-editor'), 'setup: the click outside closed the cell').toHaveCount(0);
+		await page.locator(`${HOST} > .cm-scroller > .cm-content`).focus();
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 0);
+	});
+
+	// However the document's caret came to be in a table's source with no cell open (find, undo, a script), typing goes into
+	// the cell nearest it.
+	test('typing with the document\'s caret in a table\'s source and no cell open goes into the nearest cell', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath } = await openDocument(page, { width: 1440, height: 900 });
+		const at = DOC.indexOf('Replace the faded') + 3;
+		await page.locator(`${HOST} > .cm-scroller > .cm-content`).evaluate((content, at) => {
+			const view = (content as HTMLElement & { cmTile: { root: { view: { dispatch: (spec: object) => void; focus: () => void } } } }).cmTile.root.view;
+			view.dispatch({ selection: { anchor: at } });
+			view.focus();
+		}, at);
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 1);
 	});
 
 	test('a press on a cell leaves the document scrolled where it was', async ({ page }) => {
@@ -155,11 +233,15 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		await highlight.tap();
 		await expect(highlight).toHaveAttribute('data-comment-ids', commentId);
 		await expect(page.locator('.drawer-panel')).toBeVisible();
+		await settled(page);
+		// The sheet is modal, as over prose: the cell the same tap opened closes under it, and no caret is left beneath it.
+		await expect(page.locator('.cm-md-cell-editor .cm-editor'), 'the cell closed under the sheet').toHaveCount(0);
 
 		// The sheet covers the table: the tap lands on whatever is on top of the highlight, as a reader's does.
 		await highlight.tap({ force: true });
 		await settled(page);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-after-reclick');
+		await frame(page, 'g1-reclick-focus-393');
 
 		await page.keyboard.type('XYZ');
 		const saved = await savedAfterProseMarker(page, request, docPath);
@@ -186,21 +268,15 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents phone', ()
 		expect(notes.y - widget.y, 'setup: the table has padding above its header').toBeGreaterThan(4);
 		await page.touchscreen.tap(notes.x + notes.width / 2, widget.y + 2);
 		await settled(page);
-		// The tap leaves the editor unfocused. The next focus() that is not a tap (a card closing hands the keyboard back
-		// this way) gives the keyboard the caret the tap placed. No card is open here, so call it as the card does.
-		expect(await page.locator(`${HOST} > .cm-scroller > .cm-content`).evaluate((el) => {
-			const view = (el as HTMLElement & { cmTile?: { root?: { view?: { focus(): void } } } }).cmTile?.root?.view;
-			view?.focus();
-			return Boolean(view);
-		}), 'setup: the editor view is reachable from its content element').toBe(true);
-		await settled(page);
+		// The tap opened the nearest header cell, and its editor holds the caret.
+		await caretInCell(page, 'the padding tap left the caret in the nearest cell');
 		await page.keyboard.type('QRS');
 
 		const saved = await savedAfterProseMarker(page, request, docPath);
 		await saveEvidenceScreenshot(page, testInfo, 'phone-diagram-and-padding-after-typing');
 		expect(saved.startsWith('# Editing table cells'), `typing landed before the heading: ${JSON.stringify(saved.slice(0, 60))}`).toBe(true);
 		expect(saved, 'closing the diagram comment put the typing on the blank line under the fence').toContain(`${FENCE}\nXYZ\n${CLOSING}`);
-		expect(saved, 'the padding tap put the typing in the nearest header cell').toContain('| Item | QRSNotes |');
+		expect(saved, 'the padding tap put the typing in the nearest header cell').toMatch(/\| Item \| [^|]*QRS[^|]*\|/);
 		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
 		await expect(diagram.locator('svg'), 'the diagram still renders').toBeVisible();
 		await expect(page.locator('.cm-md-table table tr'), 'the table still renders its two rows').toHaveCount(2);

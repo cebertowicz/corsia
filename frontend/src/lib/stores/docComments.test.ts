@@ -14,7 +14,7 @@ vi.mock('$lib/api/docs', () => ({
 	markCommentThreadViewed: mocks.markCommentThreadViewed,
 }));
 
-import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
+import { holdCommentArrival, prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
 	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment,
 } from './docComments';
@@ -288,6 +288,55 @@ describe('prepared comment arrivals', () => {
 		expect(get(docComments).artifact).toBeUndefined();
 		revealCommentArrival('artifact', arrival);
 		expect(get(docComments).artifact.map((comment) => comment.id)).toEqual(['first']);
+	});
+
+	it('reveals the copy a load kept aside while it was held, not the older prepared one', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		// Its own document: earlier tests can leave a load for 'artifact' still running.
+		holdCommentArrival('held-doc', 'note');
+		mocks.fetchComments.mockResolvedValueOnce(note(false));
+		const arrival = await prepareCommentArrival('held-doc', 'note');
+		// Resolved while its arrival was still being shown: the load keeps that copy aside.
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		await loadComments('held-doc');
+		expect(get(docComments)['held-doc']).toEqual([]);
+		revealCommentArrival('held-doc', arrival);
+		expect(get(docComments)['held-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
+	});
+
+	it('reveals the prepared copy when the only copy kept aside is the one showing before the hold', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		// A load shows it first (a reload that found it unseen), then its lane holds that shown copy aside.
+		mocks.fetchComments.mockResolvedValueOnce(note(false));
+		await loadComments('shown-doc');
+		holdCommentArrival('shown-doc', 'note');
+		// Resolved before its lane's turn: the prepared fetch is the newer copy, and no load comes in between.
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		const arrival = await prepareCommentArrival('shown-doc', 'note');
+		revealCommentArrival('shown-doc', arrival);
+		expect(get(docComments)['shown-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
+	});
+
+	it('reveals the newer copy when a load sent before its own fetch answers after it', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		holdCommentArrival('late-doc', 'note');
+		// A load goes out first and is slow; the arrival's own fetch goes out after it, once the comment was resolved.
+		let answerLoad!: (value: ReturnType<typeof note>) => void;
+		mocks.fetchComments.mockImplementationOnce(() => new Promise((resolve) => { answerLoad = resolve; }));
+		const load = loadComments('late-doc');
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		const arrival = await prepareCommentArrival('late-doc', 'note');
+		// The older request's answer lands last; its copy is kept aside but is not the newer one.
+		answerLoad(note(false));
+		await load;
+		revealCommentArrival('late-doc', arrival);
+		expect(get(docComments)['late-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
 	});
 });
 

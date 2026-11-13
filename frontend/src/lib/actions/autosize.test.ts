@@ -48,171 +48,7 @@ describe('autosize', () => {
 		expect(capped.scrollTop).toBe(18);
 	});
 
-	it('with fit and no cap grows until its scroller is full, in whole lines, then scrolls', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto';
-		document.body.append(owner);
-		const node = field(() => 640, 'none');
-		node.style.lineHeight = '20px';
-		node.style.borderTopWidth = node.style.borderBottomWidth = '5px';
-		owner.append(node);
-		// The scroller shows 300px and holds 120px besides the field, so at full height (650px) it overflows by 470px.
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(owner, 'scrollHeight', { get: () => 120 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		// 650 - 470 = 180px, less 10px of border, holds 8 whole 20px lines: 160px of text plus the border.
-		expect(node.style.height).toBe('170px');
-		expect(node.style.overflowY).toBe('auto');
-	});
-
-	it('with fit never drops below one line, however full its scroller already is', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto';
-		document.body.append(owner);
-		const node = field(() => 640, 'none');
-		node.style.lineHeight = '20px';
-		owner.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(owner, 'scrollHeight', { get: () => 2000, configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('20px');
-	});
-
-	it('lets a sticky reply grow despite discussion overflowing behind it', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto'; owner.style.padding = '10px';
-		document.body.append(owner);
-		const pinned = document.createElement('div');
-		pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
-		owner.append(pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(owner, 'scrollHeight', { get: () => 2000, configurable: true });
-		Object.defineProperty(pinned, 'offsetHeight', { get: () => 20 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('260px');
-		expect(node.style.overflowY).toBe('auto');
-	});
-
-	it('reserves the thread before fitting its sticky reply', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky'; thread.append(pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 120 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		Object.defineProperty(pinned, 'offsetHeight', { get: () => 20 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('180px');
-		expect(node.style.overflowY).toBe('auto');
-	});
-
-	it('keeps two lines for a reply when the thread fills its view', () => {
-		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky'; thread.append(pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 400 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('40px');
-	});
-
-	it('makes bounded discussion keyboard-scrollable and releases it when the reply field leaves', () => {
-		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
-		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '20px'; original.append(originalText);
-		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
-		const reply = document.createElement('div'); reply.className = 'ct-reply';
-		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '20px'; reply.append(replyText); replies.append(reply);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
-		thread.append(original, replies, pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 200 });
-		for (const region of [original, replies]) Object.defineProperty(region, 'offsetHeight', { get: () => Number.parseFloat(region.style.maxHeight) || 80 });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
-		const action = autosize(node, { value: 'a long reply', fit: true });
-		expect(original.getAttribute('tabindex')).toBe('0');
-		expect(replies.getAttribute('tabindex')).toBe('0');
-		action.destroy();
-		expect(original.style.maxHeight).toBe('');
-		expect(replies.style.maxHeight).toBe('');
-		expect(original.hasAttribute('tabindex')).toBe(false);
-		expect(replies.hasAttribute('tabindex')).toBe(false);
-	});
-
-	it('keeps a long original readable while the first reply grows', () => {
-		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
-		const text = document.createElement('div'); text.className = 'ct-markdown'; text.style.lineHeight = '20px'; original.append(text);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky'; thread.append(original, pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 200 });
-		Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 200 });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
-		const action = autosize(node, { value: 'a long first reply', fit: true });
-		expect(original.style.maxHeight).toBe('60px');
-		expect(original.getAttribute('tabindex')).toBe('0');
-		expect(node.style.height).toBe('60px');
-		action.destroy();
-	});
-
-	it('fits a margin card within the scroller while reserving room for its chrome', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto';
-		document.body.append(owner);
-		const card = document.createElement('div');
-		card.setAttribute('data-autosize-room', '');
-		owner.append(card);
-		const node = field(() => 640, 'none');
-		node.style.lineHeight = '20px';
-		card.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(card, 'offsetHeight', { get: () => 120 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('180px');
-		expect(node.style.overflowY).toBe('auto');
-	});
-
-	it('reserves the scroller padding when fitting a drawer reply', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto';
-		owner.style.paddingBottom = '16px';
-		document.body.append(owner);
-		const card = document.createElement('div');
-		card.setAttribute('data-autosize-room', '');
-		owner.append(card);
-		const node = field(() => 640, 'none');
-		node.style.lineHeight = '20px';
-		card.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(card, 'offsetHeight', { get: () => 120 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('160px');
-	});
-
-	it('fits a margin card within its smaller visible view', () => {
-		const owner = document.createElement('div');
-		owner.style.overflowY = 'auto';
-		document.body.append(owner);
-		const card = document.createElement('div');
-		card.setAttribute('data-autosize-room', '');
-		card.style.setProperty('--autosize-room', '220px');
-		owner.append(card);
-		const node = field(() => 640, 'none');
-		node.style.lineHeight = '20px';
-		card.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => 300, configurable: true });
-		Object.defineProperty(card, 'offsetHeight', { get: () => 120 + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		autosize(node, { value: 'a pasted page', fit: true });
-		expect(node.style.height).toBe('100px');
-		expect(node.style.overflowY).toBe('auto');
-	});
-
-	it('without fit and no cap takes its whole text', () => {
+	it('with no cap takes its whole text and never scrolls, however full its scroller is', () => {
 		const owner = document.createElement('div');
 		owner.style.overflowY = 'auto';
 		document.body.append(owner);
@@ -262,54 +98,24 @@ describe('autosize', () => {
 		expect(node.style.transition).toBe('');
 	});
 
-	it('holds its room across refits when the panel is sized by its own content', () => {
-		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
-		const text = document.createElement('div'); text.className = 'ct-markdown'; text.style.lineHeight = '20px'; original.append(text);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
-		thread.append(original, pinned);
-		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		// A drawer panel sized by its content up to a cap: the view follows the card, so a refit that measured the
-		// view before releasing the previous bound would shrink the room it hands to the next one.
-		Object.defineProperty(owner, 'clientHeight', { get: () => Math.min(thread.offsetHeight, 320), configurable: true });
-		Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 200, configurable: true });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + (Number.parseFloat(node.style.height) || 0), configurable: true });
-		const action = autosize(node, { value: 'a long reply', fit: true });
-		const first = { field: node.style.height, original: original.style.maxHeight };
-		action.update({ value: 'a long reply', fit: true });
-		action.update({ value: 'a long reply', fit: true });
-		expect({ field: node.style.height, original: original.style.maxHeight }).toEqual(first);
-		// The bound is real (below the 200px the text wants) and never below one line, and refits neither ratchet
-		// it down nor hand the field room that is not there.
-		expect(Number.parseFloat(first.original)).toBeLessThan(200);
-		expect(Number.parseFloat(first.original)).toBeGreaterThanOrEqual(20);
-		expect(Number.parseFloat(first.field)).toBeGreaterThan(0);
-		action.destroy();
-	});
-
 	it('waits for the height ease before a refit, so the ease is not aborted', async () => {
-		let view = 200; const refit: Array<() => void> = [];
+		let view = 200, tall = 100; const refit: Array<() => void> = [];
 		const ResizeObserver = class {
 			constructor(callback: () => void) { refit.push(callback); }
 			observe() {} disconnect() {}
 		};
 		(globalThis as Record<string, unknown>).ResizeObserver = ResizeObserver;
 		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
-		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
-		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
-		thread.append(pinned);
-		const node = field(() => 100, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
-		Object.defineProperty(owner, 'clientHeight', { get: () => view, configurable: true });
-		Object.defineProperty(thread, 'offsetHeight', { get: () => 120, configurable: true });
+		const node = field(() => tall, 'none'); owner.append(node);
+		Object.defineProperty(owner, 'clientWidth', { get: () => view, configurable: true });
 		let easeRunning = true, settleEase: () => void = () => {};
 		const finished = new Promise<void>((resolve) => { settleEase = resolve; });
 		// A finished ease stays listed for a frame, so only a running one may hold the refit.
 		node.getAnimations = () => [{ finished, playState: easeRunning ? 'running' : 'finished' } as unknown as Animation];
-		const action = autosize(node, { value: 'a reply', fit: true });
+		const action = autosize(node, 'a reply');
 		const fitted = node.style.height;
-		// The view shrinks while the field is still easing to its last height: measuring now would write over the ease.
-		view = 60;
+		// The field widens while it is still easing to its last height, rewrapping its text: measuring now would write over the ease.
+		view = 400; tall = 40;
 		refit[0]?.();
 		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 		expect(node.style.height).toBe(fitted);

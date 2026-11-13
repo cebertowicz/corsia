@@ -29,10 +29,13 @@ it('scrolls a picked card on the canvas that is taller than the window until its
 	const windowHeight = 900, card = { top: 250, bottom: 250 + 1085 + 95 };
 	let scrolled = 0;
 	scroller.scrollBy = ((options: ScrollToOptions) => { scrolled += options.top ?? 0; }) as typeof scroller.scrollBy;
+	// The card is placed at the column's top (its line is unknown here), and the column sits 250px down the window; the card is
+	// brought into view from that place and its height, as it will be drawn.
+	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.dataset.marginCard === 'a' ? card.bottom - card.top : 0; });
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
 		if (this === scroller) return { top: 100, bottom: windowHeight } as DOMRect;
-		if (this.dataset.marginCard === 'a') return card as DOMRect;
 		// The column's own box on the canvas is no view: it sits at the top of the text and has no height.
+		if (this === column) return { top: card.top, bottom: card.top } as DOMRect;
 		return { top: 0, bottom: 0 } as DOMRect;
 	});
 	component = mount(DocMarginStack, { target: column, props: { bounds, pinned: [thread('a')], selectedId: 'a', card: snippet } });

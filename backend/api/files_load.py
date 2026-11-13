@@ -16,6 +16,7 @@ from connections.mail.email_document import email_draft_view
 from tools.reviewed_drafts import draft_at
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
+from registry.document_supervisor import ownership as document_ownership
 from registry.identity_bridge import written_row
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -119,6 +120,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)
+        ownership = document_ownership(db, art, user_id=user_id, workspace=config.WORKSPACE) if art else None
         draft = draft_at(p, "email", db=db)
     finally:
         db.close()
@@ -133,9 +135,10 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     recorded = target is not None or document is not None
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
+            "freshness": freshness, "ownership": ownership, "_recorded": recorded,
             # The draft record makes this file an email draft, which the viewer opens as an email.
             "email_draft": email_draft_view(draft["id"], text) if draft else None,
-            "freshness": freshness, "_recorded": recorded, "_document": (p, document) if document else None,
+            "_document": (p, document) if document else None,
             "_notification": notification}
 
 

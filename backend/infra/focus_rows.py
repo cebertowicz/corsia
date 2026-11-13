@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 from core.stop_causes import CONTEXT_OVERFLOW_REASON
+from infra.chat_comment_answers import chat_not_drawn_sql
 
 # System rows that only record activity. Every other system row is a notice
 # (an error, interrupt, sandbox denial, or a type added later) and stays visible.
@@ -158,12 +159,15 @@ CASE WHEN (CASE role
 # A `WHERE` clause continuation that drops the rows the transcript never draws.
 # A user input whose chat text was saved as empty is a chat comment: it lives in
 # its comment thread (infra/chat_comment_index.place_comments), never in chat.
+# An assistant step stamped `chat_drawn: false` (infra/chat_comment_answers.place_answers,
+# the one writer) answered comments and has nothing left for chat.
 NEVER_DRAWN_FILTER = (
     f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
     f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
     # One primary-key lookup per user row; a bounded page never scans the table.
     "AND NOT (role = 'user' AND EXISTS (SELECT 1 FROM chat_visible_content cv "
     "WHERE cv.message_id = id AND cv.content = '')) "
+    f"AND NOT (role = 'assistant' AND {chat_not_drawn_sql()}) "
 )
 
 

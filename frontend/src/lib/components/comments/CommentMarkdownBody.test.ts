@@ -5,12 +5,19 @@ import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let resize: ResizeObserverCallback | undefined;
+let observed: Element[] = [];
+// Long by chat's one rule (over 900 characters), so a read body may collapse.
+const LONG = 'A long comment body. '.repeat(50);
 
+// Like the browser's, observe() refuses anything that is not an element.
 class ResizeObserverStub {
 	constructor(callback: ResizeObserverCallback) {
 		resize = callback;
 	}
-	observe() {}
+	observe(target: unknown) {
+		if (!(target instanceof Element)) throw new TypeError("Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.");
+		observed.push(target);
+	}
 	disconnect() {}
 }
 
@@ -19,6 +26,7 @@ afterEach(() => {
 	component = null;
 	host?.remove();
 	resize = undefined;
+	observed = [];
 	vi.unstubAllGlobals();
 });
 
@@ -31,7 +39,7 @@ describe('CommentMarkdownBody', () => {
 		});
 		host = document.createElement('div');
 		document.body.appendChild(host);
-		component = mount(CommentMarkdownBody, { target: host, props: { text: 'A long comment body' } });
+		component = mount(CommentMarkdownBody, { target: host, props: { text: LONG } });
 		flushSync();
 
 		const reveal = host.querySelector<HTMLElement>('.ct-markdown-reveal')!;
@@ -59,6 +67,28 @@ describe('CommentMarkdownBody', () => {
 		expect(reveal.classList.contains('clamped')).toBe(true);
 	});
 
+	it('shows an unread body whole, in a margin preview too; a read preview clamps', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: LONG, preview: true, unread: true } });
+		flushSync();
+		expect(host.querySelector('.ct-markdown-reveal')!.classList.contains('whole')).toBe(true);
+		unmount(component);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: 'A short read comment', preview: true } });
+		flushSync();
+		expect(host.querySelector('.ct-markdown-reveal')!.classList.contains('whole')).toBe(false);
+	});
+
+	it('watches the reveal box as well as the text, so a preview clamp that changes with the card is measured again', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: 'A long comment body' } });
+		flushSync();
+		expect(observed).toEqual([host.querySelector('.ct-markdown'), host.querySelector('.ct-markdown-reveal')]);
+	});
+
 	it('toggling the disclosure does not reach the card that focuses its thread', () => {
 		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -71,7 +101,7 @@ describe('CommentMarkdownBody', () => {
 		host.addEventListener('click', card);
 		const inner = document.createElement('div');
 		host.appendChild(inner);
-		component = mount(CommentMarkdownBody, { target: inner, props: { text: 'A long comment body' } });
+		component = mount(CommentMarkdownBody, { target: inner, props: { text: LONG } });
 		flushSync();
 		const reveal = host.querySelector<HTMLElement>('.ct-markdown-reveal')!;
 		Object.defineProperties(reveal, {
@@ -85,6 +115,40 @@ describe('CommentMarkdownBody', () => {
 		flushSync();
 		expect(card).not.toHaveBeenCalled();
 		host.removeEventListener('click', card);
+	});
+
+	function mountMeasured(props: Record<string, unknown>) {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			callback(0);
+			return 0;
+		});
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: props as { text: string } });
+		flushSync();
+		const reveal = host.querySelector<HTMLElement>('.ct-markdown-reveal')!;
+		Object.defineProperties(reveal, {
+			clientHeight: { configurable: true, get: () => 64 },
+			scrollHeight: { configurable: true, get: () => 320 }
+		});
+		Object.defineProperty(host.querySelector('.ct-markdown'), 'scrollHeight', { configurable: true, get: () => 320 });
+		resize?.([], {} as ResizeObserver);
+		flushSync();
+		return reveal;
+	}
+
+	it('shows an unread long body whole, with no Show more', () => {
+		const reveal = mountMeasured({ text: LONG, unread: true });
+		expect(host.querySelector('.ct-more')).toBeNull();
+		expect(reveal.classList.contains('whole')).toBe(true);
+		expect(reveal.classList.contains('clamped')).toBe(false);
+	});
+
+	it('never collapses a read body that is tall but not long by the message rule', () => {
+		const reveal = mountMeasured({ text: 'Six short lines\n\nof a comment\n\nthat wraps tall' });
+		expect(host.querySelector('.ct-more')).toBeNull();
+		expect(reveal.classList.contains('whole')).toBe(true);
 	});
 
 	it('renders a tag of the person as a chip with their own account name', () => {

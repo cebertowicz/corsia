@@ -95,6 +95,34 @@ def get_artifact(artifact_id: str, db=None) -> dict | None:
             _db.close()
 
 
+def identity_state(artifact_id: str, *, db) -> str | None:
+    """The identity's own lifecycle state, whoever owns it; ``None`` only when no such identity exists."""
+    row = db.execute("SELECT state FROM artifact_identities WHERE id=?", (artifact_id,)).fetchone()
+    return row["state"] if row else None
+
+
+def retired_cause(artifact_id: str, *, db) -> str | None:
+    """The ``cause`` its latest ``retire()`` was given, or None while the identity is active."""
+    row = db.execute(
+        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
+        " THEN json_extract(metadata, '$.retired_cause') END AS cause"
+        " FROM artifact_identities WHERE id=?",
+        (artifact_id,),
+    ).fetchone()
+    return row["cause"] if row else None
+
+
+def successor_id(artifact_id: str, *, db) -> str | None:
+    """The identity ``retire()`` handed this document to, or None while the identity is active."""
+    row = db.execute(
+        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
+        " THEN json_extract(metadata, '$.successor_id') END AS successor"
+        " FROM artifact_identities WHERE id=?",
+        (artifact_id,),
+    ).fetchone()
+    return row["successor"] if row else None
+
+
 def find_identity_by_external_ids(
     integration: str,
     type: str,
@@ -208,9 +236,21 @@ def retire(
     artifact_id: str,
     *,
     tombstone: bool = False,
+    cause: str | None = None,
+    successor: str | None = None,
     db=None,
 ) -> None:
-    """Retire an artifact as archived or tombstoned."""
+    """Retire an artifact as archived or tombstoned.
+
+    ``cause``: "file_gone" (its file left the disk) or "promoted" (a promote tombstoned it) closes its
+    person's comment task with that cause's reason. Other retirements (an ended session) leave that task
+    open. The cause is kept on the identity, so a close that a paused plan or a held task defers can
+    finish when it resumes; each retirement replaces it.
+
+    ``successor`` names the identity the document moved to, kept the same way: a promote passes it, and
+    the comments move there in this transaction so a person's threads follow the document, not the
+    tombstone (``doceditor.comment_transfer``, and ``plans.person_comment_task`` for its task).
+    """
     with write_transaction(db, scope="retire_artifact") as _db:
         row = _db.execute(
             "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
@@ -231,6 +271,34 @@ def retire(
             "UPDATE artifact_identities SET state=?, updated_at=? WHERE id=?",
             (state, now, artifact_id),
         )
+        if cause:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_set(COALESCE(NULLIF(metadata, ''), '{}'),"
+                " '$.retired_cause', ?) WHERE id=?",
+                (cause, artifact_id),
+            )
+        else:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.retired_cause')"
+                " WHERE id=? AND json_valid(metadata) AND json_extract(metadata, '$.retired_cause') IS NOT NULL",
+                (artifact_id,),
+            )
+        if successor:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_set(COALESCE(NULLIF(metadata, ''), '{}'),"
+                " '$.successor_id', ?) WHERE id=?",
+                (successor, artifact_id),
+            )
+            # Naming a successor moves the document's comments here, so the two commit together or not at all.
+            from doceditor.comment_transfer import move_to_artifact
+
+            move_to_artifact(_db, from_artifact_id=artifact_id, to_artifact_id=successor)
+        else:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.successor_id')"
+                " WHERE id=? AND json_valid(metadata) AND json_extract(metadata, '$.successor_id') IS NOT NULL",
+                (artifact_id,),
+            )
         passive_state = "tombstoned" if tombstone else "subscriber-archived"
         _db.execute(
             """UPDATE artifact_registrations
@@ -240,6 +308,7 @@ def retire(
                      ('owner-pinned', 'owner-active', 'subscriber-parent-chain')""",
             (passive_state, now, artifact_id),
         )
+        plans_public.close_retired_comment_task(_db, artifact_id, cause)
 
 
 def retire_owned_temporary(
@@ -285,7 +354,7 @@ def retire_missing_temporary_candidates(candidates: list[dict], *, db) -> list[s
                 (artifact_id, *_OWNER_REGISTRATION_STATES),
             ).fetchall()
             if any(dict(row) == candidate for row in current):
-                retire(artifact_id, tombstone=True, db=db)
+                retire(artifact_id, tombstone=True, cause="file_gone", db=db)
                 retired.add(artifact_id)
     return sorted(retired)
 

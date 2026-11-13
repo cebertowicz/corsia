@@ -18,12 +18,13 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
+from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
-from registry.shared_principals import WriteAuthority, artifact_owner
+from registry.shared_principals import WriteAuthority
 from registry.shared_target import SharedTarget
 from registry.document_ownership import document_write_authority
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
-from registry.shared_write_errors import DurableWritePolicyError
+from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
     bound_file_mode,
     claim_bound_file,
@@ -238,7 +239,7 @@ def _register_applied(
             if source_identity is not None else None
         )
         if source_artifact is not None:
-            models.retire(source_artifact["id"], tombstone=True, db=db)
+            models.retire(source_artifact["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
         record_post_write_events(
             shared,
             artifact,
@@ -688,31 +689,6 @@ def promote_file(
         db.close()
 
 
-def _recovery_shared_target(target: Path, row: dict, *, workspace: Path, db) -> SharedTarget:
-    """Rebuild the policy decision already persisted in an interrupted intent."""
-    actor = str(row["actor_thread_id"])
-    scope_id = "workspace"
-    for project in db.execute("SELECT id FROM projects").fetchall():
-        project_root = resolve_project_root(workspace, project["id"], db=db)
-        if project_root is not None and target.is_relative_to(
-            project_root.resolve(strict=False)
-        ):
-            scope_id = str(project["id"])
-            break
-    category_root = target.parent
-    artifact = service.find_file_identity(str(target), db=db)
-    owner = artifact_owner(str(artifact["id"]), db=db) if artifact is not None else None
-    return SharedTarget(
-        target,
-        category_root,
-        category_root / "INDEX.md",
-        bool(row["created_parent"]),
-        scope_id,
-        actor_principal=str(owner or actor),
-        owner_thread_id=str(owner) if owner else None,
-    )
-
-
 def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
     target, stage, backup, source, claim = _validated_intent_paths(
         row, workspace=workspace, db=db,
@@ -756,17 +732,26 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
         raise RuntimeError(
             f"Durable write intent {row['id']} does not match its target bytes."
         )
-    shared = _recovery_shared_target(target, row, workspace=workspace, db=db)
-    artifact = _register_applied(
-        shared,
-        source,
-        thread_id=row["actor_thread_id"],
-        description=row["description"],
-        external_id=row["external_id"],
-        content_hash=row["content_sha256"],
-        before=backup.read_bytes() if backup and backup.exists() else None,
-        db=db,
-    )
+    shared = recovery_shared_target(target, row, workspace=workspace, db=db)
+    try:
+        artifact = _register_applied(
+            shared,
+            source,
+            thread_id=row["actor_thread_id"],
+            description=row["description"],
+            external_id=row["external_id"],
+            content_hash=row["content_sha256"],
+            before=backup.read_bytes() if backup and backup.exists() else None,
+            db=db,
+        )
+    except SuccessorHoldsComments as exc:
+        # A promote onto a document that holds comment state fails identically every time it is
+        # retried, so letting it raise here would stop startup on every boot. Announce the undo and
+        # finish it now, through the same path an intent takes after the live write refused.
+        intents.mark_undoing(db, row["id"], 1)
+        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db)
+        logger.warning("Rolled back durable promotion %s: %s", row["id"], exc)
+        return
     try:
         _remove_if_present(stage)
         _remove_if_present(backup)

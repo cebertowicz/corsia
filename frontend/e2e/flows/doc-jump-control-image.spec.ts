@@ -2,7 +2,7 @@ import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
-import { DOC, seedImageDocument, overlay, imageSurface } from '../support/docImageComments';
+import { DOC, clickDocImage, seedImageDocument, overlay, imageSurface } from '../support/docImageComments';
 import { isolatedDb } from '../support/heldComments';
 import { hitBox } from '../support/hitBox';
 
@@ -61,7 +61,7 @@ for (const width of [393, 1440]) {
 			await loginByUrl(page);
 			if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByText(sessionTitle, { exact: true }).click();
-			await page.locator('.cm-md-image img').first().click();
+			await clickDocImage(page);
 			await expect(overlay(page)).toBeVisible();
 			const viewport = overlay(page).locator('.viewport');
 			const pin = overlay(page).locator(`[data-region-tag][data-comment-id="${roots[1]}"]`);
@@ -140,7 +140,9 @@ for (const width of [393, 1440]) {
 			expect(quiet?.n, `the control arrived from the pan alone, unrelated overlay mutations: ${JSON.stringify(quiet?.kinds)}`).toBe(0);
 			await expect(control).toHaveAccessibleName(/1 new, next (above|below): /);
 
-			// Its face is the touch target and it stays clear of the viewer's own controls.
+			// Its face is the touch target and it stays clear of the viewer's own controls. It is measured once its arrival has
+			// finished: mid-arrival its fractional rise rounds the measured height just under its size.
+			await control.evaluate((el) => Promise.all((el.closest('[data-doc-jump]') ?? el).getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))));
 			const face = (await control.boundingBox())!;
 			expect(face.height, 'the jump control meets its touch target height').toBeGreaterThanOrEqual(width === 393 ? 44 : 32);
 			for (const other of await overlay(page).locator('.bar button').all()) {

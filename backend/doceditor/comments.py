@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -127,14 +127,24 @@ def is_accepted_insertion(row: dict) -> bool:
     return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
 
 
-def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
-    """Accepted insertion siblings for the same artifact and quoted text."""
+def accepted_insertions(artifact_id: str, anchor_texts: list[str], *, db) -> dict[str, list[dict]]:
+    """Accepted insertion siblings on one artifact for each quoted text, oldest first, read in one query.
+
+    One query for every quote keeps the read linear in the document's comments; a query per quote walks them once per quote.
+    Bound: SQLite allows 32,766 parameters, so up to 32,763 distinct quotes in one call.
+    """
+    found: dict[str, list[dict]] = {text: [] for text in anchor_texts}
+    if not found:
+        return found
     predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
-    return [dict(row) for row in db.execute(
-        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+    marks = ",".join("?" * len(found))
+    for row in db.execute(
+        f"SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text IN ({marks}) AND "
         + predicate + " ORDER BY created_at, id",
-        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
-    ).fetchall()]
+        (artifact_id, *found, *_ACCEPTED_INSERTION.values()),
+    ).fetchall():
+        found[row["anchor_text"]].append(dict(row))
+    return found
 
 
 def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:
@@ -257,10 +267,7 @@ def create_with_status(
             if announce:
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
-                    author_thread_id=author_thread_id if named else None,
-                    # unread_attention_changed includes eligible new top-level comments.
-                    unread_attention_changed=feedback_state.may_change_unread_attention(
-                        author_kind, parent_id, replacement, review, tags_person=tagged_user_id is not None))
+                    author_thread_id=author_thread_id if named else None)
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
@@ -308,14 +315,14 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         if fields.get("resolved") or fields.get("decision"):
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+        if "decision" in fields:  # deciding or re-opening a suggestion moves the person's count
+            from plans.public import comment_tasks_changed
+            comment_tasks_changed(connection, [row["artifact_id"]])
         comment_recipients.tags_for_comments(connection, [row])
         comment_acks.attach(connection, [row])
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
-        comment_notifications.announce_after_commit(
-            connection, row["artifact_id"],
-            unread_attention_changed="resolved" in fields and row["parent_id"] is None,
-        )
+        comment_notifications.announce_after_commit(connection, row["artifact_id"])
         return row
 
 
@@ -350,3 +357,24 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
             )
             n += cur.rowcount
         return n
+
+
+def holds_rows(db, artifact_id: str) -> bool:
+    """True when this document already has comments -- so it is not a promote successor (`doceditor.comment_transfer`)."""
+    return db.execute(
+        "SELECT 1 FROM doc_comments WHERE artifact_id=? LIMIT 1", (artifact_id,)
+    ).fetchone() is not None
+
+
+def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
+    """Carry this document's comments to the identity that replaces it (`registry.models.retire`).
+
+    Comment ids do not change, so replies, tags, mentions, recipient state, acknowledgements and
+    thread read marks follow their threads by themselves, and anchors stay valid because the
+    promoted bytes are the file's own. Nothing is merged and no position is re-derived: the
+    successor holds no rows of its own, so a region number or a thread position the person has
+    already read comes through unchanged.
+    """
+    return db.execute(
+        "UPDATE doc_comments SET artifact_id=? WHERE artifact_id=?", (to_artifact_id, from_artifact_id)
+    ).rowcount

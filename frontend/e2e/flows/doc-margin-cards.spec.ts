@@ -6,6 +6,7 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, expectMarginColumnUp, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
+import { resolvedList } from '../support/commentDrawer';
 
 /**
  * Margin comments: open threads sit as cards beside their text, a cluster stacks, a picked card keeps its own line and pushes its
@@ -82,6 +83,13 @@ test('@flow:doc-margin-cards a picked card keeps its own line, the cards around 
 	await page.locator('.cm-comment-anchor', { hasText: 'Paragraph 1 of the plan' }).first().click();
 	await expect(card(page, doc, FIRST).locator('.ct.focused')).toHaveCount(1);
 	await expect(page.locator('[data-popover]')).toHaveCount(0);
+	// Whichever card is picked, none is lifted above the column's top, where nothing could scroll to it.
+	for (let i = 0; i < doc.ids.length; i++) {
+		await card(page, doc, i).locator('.ct-head').click({ position: { x: 14, y: 10 } });
+		await expect(card(page, doc, i).locator('.ct.focused')).toHaveCount(1);
+		await expect.poll(() => page.evaluate(() => Math.min(...[...document.querySelectorAll<HTMLElement>('[data-margin-card], [data-margin-head]')].map((el) => parseFloat(el.style.top)))),
+			{ message: `card ${i} picked: no card above the column's top` }).toBeGreaterThanOrEqual(0);
+	}
 });
 
 test('@flow:doc-margin-cards focusing a card below the visible column does not slide the cards off their lines', async ({ page, request }, info) => {
@@ -99,6 +107,96 @@ test('@flow:doc-margin-cards focusing a card below the visible column does not s
 	expect(columnScroll, 'the column itself did not scroll').toBe(0);
 	const [first] = await geometry(page, doc.ids);
 	expect(Math.abs(first.card!.top - first.line!)).toBeLessThanOrEqual(12);
+});
+
+test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in document order with a focus ring, and Escape goes back', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	const text = page.locator('.cm-content');
+	const before = await text.textContent();
+	await page.locator('.cm-line', { hasText: 'Handoff plan' }).click();
+	// Tab in the text indents, as in any editor; Escape first lets the next Tab leave it.
+	await page.keyboard.press('Escape');
+	const reached: string[] = [];
+	for (let i = 0; i < 40 && reached.length < 2; i++) {
+		await page.keyboard.press('Tab');
+		const at = await page.evaluate(() => {
+			const el = document.activeElement as HTMLElement;
+			const style = getComputedStyle(el);
+			return { card: el.closest<HTMLElement>('[data-margin-card]')?.dataset.marginCard ?? null, ring: `${style.outlineStyle} ${style.outlineWidth}` };
+		});
+		if (!at.card) continue;
+		expect(at.ring, 'a focused card control shows the focus ring').toBe('solid 2px');
+		if (reached.at(-1) !== at.card) reached.push(at.card);
+	}
+	expect(reached, 'the cards are reached in the order of their text').toEqual([doc.ids[FIRST], doc.ids[SUGGESTION]]);
+	expect(await text.textContent(), 'leaving the text typed nothing into it').toBe(before);
+	await page.keyboard.press('Escape');
+	await expect(text).toBeFocused();
+	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
+});
+
+/** Selects a stretch of a line no comment is on, starts a comment on it (the composer opens in the column beside it), and cancels it. */
+async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open>>) {
+	const target = 'Paragraph 6 of the plan';
+	await page.locator('.cm-line', { hasText: target }).first().click({ position: { x: 4, y: 4 } });
+	await page.keyboard.press('Home');
+	for (let i = 0; i < target.length; i++) await page.keyboard.press('Shift+ArrowRight');
+	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toBe(target);
+	await page.locator('.sel-comment').click();
+	const composer = page.locator('.canvas-comment-drawer.margin .margin-composer');
+	await expect(composer.getByPlaceholder('Comment, or @ to tag an agent')).toBeFocused();
+	await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
+	await expect(composer).toHaveCount(0);
+	await expect(card(page, doc, FIRST), 'cancelling the draft keeps the column').toBeVisible();
+	return target;
+}
+
+/** Types one character with focus in the text and checks it lands inside or at an end of the commented selection, not at the top. */
+async function expectTypingAtSelection(page: Page, before: string, target: string) {
+	const text = page.locator('.cm-content');
+	expect(await text.textContent(), 'reaching the text typed nothing into it').toBe(before);
+	await page.keyboard.type('Z');
+	const after = (await text.textContent())!;
+	let at = 0;
+	while (at < before.length && before[at] === after[at]) at++;
+	const from = before.indexOf(target), to = from + target.length;
+	expect(after[at], 'the typed character is in the text').toBe('Z');
+	expect(at, 'it lands inside or at an end of the commented selection, not above it').toBeGreaterThanOrEqual(from);
+	expect(at, 'it lands inside or at an end of the commented selection, not below it').toBeLessThanOrEqual(to);
+}
+
+test('@flow:doc-margin-cards after a new comment is cancelled and the column closed, typing lands at the selection, never at the top', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	const text = page.locator('.cm-content');
+	const before = (await text.textContent())!;
+	const target = await cancelDraftOnLine(page, doc);
+	// The comments control closes the column and, as a toggle, keeps focus; the keyboard goes back to the text from it.
+	await pill(page).click();
+	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+	await expect(pill(page)).toBeFocused();
+	for (let i = 0; i < 12 && !(await text.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+	await expect(text).toBeFocused();
+	await expectTypingAtSelection(page, before, target);
+});
+
+test('@flow:doc-margin-cards after a new comment is cancelled, Escape in the column hands focus to the caret and typing lands at the selection', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'The column beside the text is a desktop layout.');
+	test.setTimeout(120_000);
+	const doc = await open(page, request);
+	const text = page.locator('.cm-content');
+	const before = (await text.textContent())!;
+	const target = await cancelDraftOnLine(page, doc);
+	// Focus in a card in the column, as Tab from the text reaches it; Escape there gives focus back to the caret, and the column stays.
+	await card(page, doc, FIRST).getByRole('button').first().focus();
+	await page.keyboard.press('Escape');
+	await expect(text).toBeFocused();
+	await expect(card(page, doc, FIRST), 'the column stays').toBeVisible();
+	await expectTypingAtSelection(page, before, target);
 });
 
 test('@flow:doc-margin-cards each suggestion is its own card with Accept and Reject', async ({ page, request }, info) => {
@@ -155,8 +253,8 @@ test('@flow:doc-margin-cards the drawer lists only resolved threads, newest reso
 	await expect(card(page, doc, ALPHA)).toHaveCount(0);
 	await expect(card(page, doc, BRAVO)).toHaveCount(1);
 	await page.locator('[data-resolved-entry]').click();
-	const order = await page.locator('.resolved-drawer [data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
-	expect(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
+	const order = () => resolvedList(page).locator('[data-comment-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-comment-id')));
+	await expect.poll(order).toEqual([doc.ids[LAST], doc.ids[FIRST], doc.ids[ALPHA]]);
 });
 
 test('@flow:doc-margin-cards below the margin width a thread opens as a popover at the click, and on a phone as the sheet', async ({ page, request }, info) => {
