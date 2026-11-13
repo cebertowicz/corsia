@@ -211,6 +211,54 @@ def test_no_chat_read_hands_a_stamped_step_to_the_card_builder(db, monkeypatch):
         assert "All done." in seen, f"{name} read lost the drawn reply"
 
 
+def test_a_card_follows_the_text_chat_draws_on_every_read(db, monkeypatch):
+    """A step that mixes chat text with a placed answer is offered to the card builder as the text chat draws
+    (the answer section left out), on the page, Focus and run-range reads; chat text that names a file is still
+    offered whole."""
+    from api import thread_cards
+    from api.thread_focus_page import read_authorized_focus_page, read_authorized_run_range
+
+    seen: list[str] = []
+
+    def spy(db, text, bases, user_id, **kwargs):
+        seen.append(text)
+        return []
+
+    monkeypatch.setattr(thread_cards, "reference_cards", spy)
+    _step(db, "mixed", "Done.\n\n[c1.1] See docs/plan.md", {"for_user": True})
+    _step(db, "names-file", "Wrote docs/guide.md.\n\n[c1.1] Moved.", {"for_user": True})
+    _step(db, "reply", "All done.", {"for_user": True})
+    reads = {
+        "page": _page(db),
+        "focus": read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER),
+        "range": read_authorized_run_range(db, THREAD, 50, "target", "reply", None, user_id=OWNER_USER),
+    }
+    for name, result in reads.items():
+        seen.clear()
+        thread_cards.attach_result_cards(db, THREAD, OWNER_USER, result)
+        assert not any("docs/plan.md" in text for text in seen), f"{name} read offered the answer section"
+        assert any("docs/guide.md" in text for text in seen), f"{name} read lost the visible text's file"
+        assert any(text.startswith("Done.") for text in seen), f"{name} read lost the mixed step's chat text"
+
+
+def test_the_card_text_costs_one_read_for_the_page_not_one_per_row(db, monkeypatch):
+    from api import thread_cards
+
+    for index in range(5):
+        _step(db, f"mixed-{index}", f"Done {index}.\n\n[c1.1] See docs/plan.md")
+    page, *_rest = _page(db)
+    calls: list[int] = []
+    real = thread_cards.saved_answer_fields
+
+    def counted(db, thread_id, ids):
+        calls.append(len(ids))
+        return real(db, thread_id, ids)
+
+    monkeypatch.setattr(thread_cards, "saved_answer_fields", counted)
+    thread_cards.attach_cards(db, THREAD, OWNER_USER, {"project_id": None}, page)
+    assert calls == [len([m for m in page if m.get("role") == "assistant"])]
+
+
 def test_the_sidebar_fallback_picks_the_row_the_aggregate_picks(db):
     """`_latest_drawn` and the aggregate share one selection rule: with the stamped steps taken away, the aggregate's
     newest update is the fallback's, across a person step newer than it and two updates that share a time."""
