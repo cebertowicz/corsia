@@ -23,6 +23,7 @@ import shutil
 import subprocess
 
 from infra.backend_git import git_argv
+from infra.bulletins import PUBLIC_REPOSITORY
 
 GIT_TIMEOUT_SECONDS = 30.0
 # Removing a worktree deletes its whole tree, dependencies and build caches
@@ -33,9 +34,6 @@ GIT_TIMEOUT_SECONDS = 30.0
 WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
-# ``git status --porcelain=v2`` writes a position the index did not change as
-# ``.``, so a file this process is in the middle of deleting reads as ``.D``.
-DELETED_IN_WORKTREE = ".D"
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,
 # generated build metadata, and symlinked dependency entries. Any other ignored
@@ -50,17 +48,18 @@ DISPOSABLE_FILES = frozenset({
     "frontend/static/build-info.json", "frontend/src/lib/build-info.json",
 })
 DISPOSABLE_NON_DIRECTORY_NAMES = frozenset({"node_modules", ".venv"})
-# Generated trees that .gitignore ignores at exactly this repository-relative
-# path, each named by the script that writes it: frontend/.qa is the e2e scratch
-# workspace and state; desktop/bundle and desktop/.build-macos are the macOS
-# bundle's BUNDLE_ROOT and BUILD_ROOT, which that script deletes and rebuilds on
-# every run; desktop/.rust-toolchain holds the RUSTUP_HOME and CARGO_HOME the
-# toolchain installer downloads; desktop/src-tauri/gen holds the context and
-# schemas `tauri build` generates. These are matched on the whole path, never on
-# one directory name: a `bundle`, `gen` or `target` directory anywhere else is
-# somebody's work, and the top-level `.qa/` that salvage must still copy is not
-# frontend/.qa.
-DISPOSABLE_DIRECTORY_PATHS = frozenset({
+# Trees CORSIA's own source repository generates and its .gitignore ignores at
+# exactly this path, each named by the script that writes it: frontend/.qa is the
+# e2e scratch workspace and state; desktop/bundle and desktop/.build-macos are the
+# macOS bundle's BUNDLE_ROOT and BUILD_ROOT, which that script deletes and
+# rebuilds on every run; desktop/.rust-toolchain holds the RUSTUP_HOME and
+# CARGO_HOME the toolchain installer downloads; desktop/src-tauri/gen holds the
+# context and schemas `tauri build` generates. They apply only in that repository
+# (``generated_trees``) and only on the whole path: another repository may keep
+# data at the same path, a `bundle` or `gen` directory elsewhere is somebody's
+# work, and the top-level `.qa/` that salvage must still copy is not frontend/.qa.
+# The names in DISPOSABLE_DIRS (`build`, `target` ...) are disposable anywhere.
+CORSIA_GENERATED_TREES = frozenset({
     "frontend/.qa",
     "desktop/bundle",
     "desktop/.build-macos",
@@ -141,6 +140,18 @@ def github_remote_full_name(repo: Path, remote: str) -> str | None:
 def origin_full_name(repo: Path) -> str | None:
     """Return ``owner/repo`` for the GitHub ``origin`` remote, else None."""
     return github_remote_full_name(repo, "origin")
+
+
+def generated_trees(repo: Path) -> frozenset[str]:
+    """Return ``CORSIA_GENERATED_TREES`` for CORSIA's own source repository, else none.
+
+    Fails closed: a repository whose origin cannot be read gets none.
+    """
+    try:
+        corsia = origin_full_name(repo) == PUBLIC_REPOSITORY
+    except ReaperGitError:
+        return frozenset()
+    return CORSIA_GENERATED_TREES if corsia else frozenset()
 
 
 def open_pr_branches(repo: Path) -> set[str] | None:
@@ -232,7 +243,7 @@ def has_worktree_config(admin: Path) -> bool:
     return os.path.lexists(admin / "config.worktree")
 
 
-def _is_disposable(ignored: str) -> bool:
+def _is_disposable(ignored: str, generated: frozenset[str] = frozenset()) -> bool:
     parts = [part for part in ignored.rstrip("/").split("/") if part]
     directories = parts if ignored.endswith("/") else parts[:-1]
     return (
@@ -249,18 +260,18 @@ def _is_disposable(ignored: str) -> bool:
         or any(
             part in DISPOSABLE_DIRS or part.endswith(".egg-info") for part in directories
         )
-        or _inside_disposable_path(directories)
+        or _inside_generated_tree(directories, generated)
     )
 
 
-def _inside_disposable_path(directories: list[str]) -> bool:
-    """True when a named generated tree is this path or one of its parents.
+def _inside_generated_tree(directories: list[str], generated: frozenset[str]) -> bool:
+    """True when one of ``generated`` is this path or one of its parents.
 
     Git reports an ignored directory whole, so the entry is normally the tree
     itself; a path below it shows up where only its contents are ignored.
     """
     return any(
-        "/".join(directories[:depth]) in DISPOSABLE_DIRECTORY_PATHS
+        "/".join(directories[:depth]) in generated
         for depth in range(1, len(directories) + 1)
     )
 
@@ -276,15 +287,13 @@ def is_tool_output_dir(path: Path) -> bool:
 
 def status_skip_reason(
     worktree: Path, git_env: dict[str, str], *, tracked_only: bool = False,
-    allow_deletions: bool = False,
+    generated: frozenset[str] = frozenset(),
 ) -> str | None:
     """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
     worktree's untracked and ignored files are scratch, not unshipped work.
-    ``allow_deletions`` reads a tracked file missing from the tree as the removal
-    that is deleting it rather than as an edit, which is what a removal cut off
-    mid-delete looks like from the inside; nothing else reads as debris.
+    ``generated`` is the repository's ``generated_trees``.
     """
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
@@ -302,12 +311,11 @@ def status_skip_reason(
     reasons: set[str] = set()
     for line in result.stdout.splitlines():
         kind, _, rest = line.partition(" ")
-        deleted = kind == "1" and rest.startswith(DELETED_IN_WORKTREE)
-        if kind in {"2", "u"} or (kind == "1" and not (allow_deletions and deleted)):
+        if kind in {"1", "2", "u"}:
             reasons.add("dirty")
         elif kind == "?":
             reasons.add("untracked")
-        elif kind == "!" and not _is_disposable(rest):
+        elif kind == "!" and not _is_disposable(rest, generated):
             reasons.add("ignored_data")
     for reason in ("dirty", "untracked", "ignored_data"):
         if reason in reasons:

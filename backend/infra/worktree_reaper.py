@@ -27,7 +27,13 @@ from infra.worktree_reaper_checks import (
     orphan_skip_reason,
     recheck_before_removal,
 )
-from infra.worktree_reaper_probe import ProcessProbe, ReaperGitError
+from infra.worktree_reaper_probe import (
+    ProcessProbe,
+    ReaperGitError,
+    generated_trees,
+    status_skip_reason,
+    worktree_git_env,
+)
 from infra.worktree_reaper_remove import (
     quarantine_entries,
     remove_orphan,
@@ -162,14 +168,21 @@ def _remove_candidate(
             )
             salvage = verdict is RemovalVerdict.SALVAGE
 
-            def copy_out(quarantined: Path) -> None:
-                copies.append(salvage_worktree(
-                    repo, quarantined, candidate.admin, candidate.name, ctx.now, candidate.path,
-                ))
+            def clear(quarantined: Path) -> str | None:
+                if salvage:
+                    copies.append(salvage_worktree(
+                        repo, quarantined, candidate.admin, candidate.name, ctx.now,
+                        candidate.path, ctx.generated,
+                    ))
+                    return None
+                # The check that cleared it, again at the quarantine path.
+                return status_skip_reason(
+                    quarantined, worktree_git_env(repo, candidate.admin, quarantined),
+                    tracked_only=merged, generated=ctx.generated,
+                )
 
             outcome = verdict if isinstance(verdict, str) else remove_worktree(
-                repo, candidate.path, candidate.name, force=merged or salvage,
-                salvage=copy_out if salvage else None,
+                repo, candidate.path, candidate.name, clear,
             )
     except RepoBusyError:
         report.skip(candidate.name, owner, "repo_busy", idle_days)
@@ -336,13 +349,14 @@ def reap(
     repo = policy.path.resolve(strict=False)
     report = RepoReport(repo=str(repo), trigger=mode)
     budget = budget or RunBudget()
-    ctx = CheckContext(repo=repo, probe=probe or ProcessProbe(), now=time.time())
     if (repo / ".git").is_symlink() or not (repo / ".git").is_dir():
         report.skip(repo.name, None, "repo_layout")
         return report
+    ctx = CheckContext(
+        repo=repo, probe=probe or ProcessProbe(), now=time.time(),
+        generated=generated_trees(repo),
+    )
     found, orphans, _registrations = scan_repo(repo)
-    if mode == "idle":
-        report.quarantine_removed = sweep_quarantine(repo)
     wanted = {path.resolve(strict=False) for path in candidates or []}
     selected = [item for item in found if candidates is None or item.path in wanted]
     selected.sort(key=lambda item: item.idle_since)
@@ -350,6 +364,10 @@ def reap(
     deferred = pr_terminal_heads()
     salvage_queue, halted = _walk_candidates(
         repo, report, ctx, budget, mode, pr_sha, deferred, selected)
+    if mode == "idle":
+        # After the cheap removals and before the slow copies: each entry it
+        # finishes was decided already and is mostly deleted.
+        report.quarantine_removed = sweep_quarantine(repo, budget)
     if halted:
         # The repository lock is held elsewhere; nothing else can be removed.
         _skip_queued(report, salvage_queue, "repo_busy")

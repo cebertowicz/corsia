@@ -43,6 +43,8 @@ class CheckContext:
     repo: Path
     probe: ProcessProbe
     now: float
+    # The repository's ``generated_trees``: read once per pass.
+    generated: frozenset[str] = frozenset()
     _active_threads: set[str] | None = field(default=None, init=False)
     _threads_loaded: bool = field(default=False, init=False)
     _open_prs: set[str] | None = field(default=None, init=False)
@@ -106,7 +108,9 @@ class CheckContext:
 def _status_reason(ctx: CheckContext, candidate: Candidate, merged: bool) -> str | None:
     git_env = worktree_git_env(ctx.repo, candidate.admin, candidate.path)
     try:
-        return status_skip_reason(candidate.path, git_env, tracked_only=merged)
+        return status_skip_reason(
+            candidate.path, git_env, tracked_only=merged, generated=ctx.generated,
+        )
     except ReaperGitError:
         return "status_error"
 

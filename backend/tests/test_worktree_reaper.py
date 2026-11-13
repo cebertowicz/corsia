@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -30,6 +31,7 @@ from infra import (
 )
 import infra.worktree_reaper_pr as worktree_reaper_pr
 from infra.project_repo_policy import RepoPolicy
+from infra.bulletins import PUBLIC_REPOSITORY
 from infra.worktree_reaper import RepoReport, RunBudget, emit_report, reap
 from infra.worktree_reaper_probe import (
     WORKTREE_REMOVE_TIMEOUT_SECONDS,
@@ -54,6 +56,7 @@ def _status_reason(repo: Path, worktree: Path) -> str | None:
     assert admin is not None
     return worktree_reaper_probe.status_skip_reason(
         worktree, worktree_reaper_probe.worktree_git_env(repo, admin, worktree),
+        generated=worktree_reaper_probe.generated_trees(repo),
     )
 
 
@@ -240,9 +243,13 @@ def test_symlinked_dependency_entry_is_disposable(repo, tmp_path, name):
     assert _status_reason(repo, wt) is None
 
 
-# Each pair is a directory the repository's own .gitignore ignores at exactly
-# that path, with a file a build leaves inside it. `.qa` and `gen` also exist
-# elsewhere as state, so these are matched by path rather than by name.
+def _as_corsia(repo: Path) -> None:
+    _git(repo, "remote", "set-url", "origin", f"git@github.com:{PUBLIC_REPOSITORY}.git")
+
+
+# Each pair is a directory CORSIA's own .gitignore ignores at exactly that path,
+# with a file a build leaves inside it. `.qa` and `gen` also exist elsewhere as
+# state, so these are matched by path rather than by name.
 GENERATED_TREES = [
     ("frontend/.qa", "state/run.json"),
     ("desktop/bundle", "bin/git"),
@@ -259,6 +266,7 @@ def test_a_generated_build_tree_does_not_block_removal(repo, tree, inside):
     Salvage used to copy gigabytes of it to the salvage folder before deleting
     the tree, which is where one nightly's budget went.
     """
+    _as_corsia(repo)
     _exclude(repo, f"{tree}/")
     wt = _add(repo, "generated")
     generated = wt / tree / inside
@@ -274,6 +282,7 @@ def test_a_generated_build_tree_does_not_block_removal(repo, tree, inside):
 @pytest.mark.parametrize(("tree", "inside"), GENERATED_TREES)
 def test_generated_output_is_left_out_of_the_salvage_copy(repo, monkeypatch, tree, inside):
     monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    _as_corsia(repo)
     _exclude(repo, f"{tree}/")
     wt = _add(repo, "mixed")
     (wt / "notes.md").write_text("hand written\n")
@@ -292,6 +301,7 @@ def test_generated_output_is_left_out_of_the_salvage_copy(repo, monkeypatch, tre
 
 def test_an_ignored_directory_of_the_same_name_elsewhere_is_still_work(repo):
     """These paths are allowlisted where they are, not by name, anywhere."""
+    _as_corsia(repo)
     _exclude(repo, "frontend/.qa/", "gen/")
     wt = _add(repo, "elsewhere")
     source = wt / "services" / "worker" / "gen" / "client.py"
@@ -299,6 +309,20 @@ def test_an_ignored_directory_of_the_same_name_elsewhere_is_still_work(repo):
     source.write_text("written\n")
 
     assert _status_reason(repo, wt) == "ignored_data"
+
+
+@pytest.mark.parametrize(("tree", "inside"), GENERATED_TREES)
+def test_another_repositorys_data_at_a_generated_path_is_still_data(repo, tree, inside):
+    """The paths are CORSIA's layout; another repository may keep data there."""
+    _exclude(repo, f"{tree}/")
+    wt = _add(repo, "other")
+    data = wt / tree / inside
+    data.parent.mkdir(parents=True)
+    data.write_text("somebody's\n")
+
+    assert _status_reason(repo, wt) == "ignored_data"
+    _as_corsia(repo)
+    assert _status_reason(repo, wt) is None
 
 
 @pytest.mark.parametrize(
@@ -633,46 +657,27 @@ def test_merged_worktree_with_a_running_owner_turn_waits_for_the_idle_pass(
 
 
 # --- failure paths ---------------------------------------------------------
+#
+# One rule: the removal path writes the copied-out record once the entry's work
+# is copied out or its check passed at the quarantine path, and only an entry
+# with a record is ever deleted. These tests walk each state and failure.
 
-def test_failed_remove_leaves_only_a_quarantine_entry_that_the_next_run_reaps(repo):
+def _record(entry: Path) -> Path:
+    return entry.with_name(entry.name + worktree_reaper_remove.COPIED_OUT_SUFFIX)
+
+
+def test_a_tree_git_cannot_fully_delete_is_finished_on_its_record(repo):
+    """Git's forced removal stops at a read-only directory but drops the
+    registration, so the record lets the same pass delete what is left.
+    """
     wt = _add(repo, "readonly")
     _age(repo, wt, 8 * DAY)
     os.chmod(wt / "ro", 0o555)
 
-    first = _run(repo)
+    report = _run(repo)
 
-    assert _reasons(first) == {"readonly": "quarantine_removal_pending"}
-    assert not wt.exists()
-    assert len(_quarantine(repo)) == 1
-    assert first.quarantine_entries == _quarantine(repo)
-
-    second = _run(repo)
-
-    assert second.quarantine_removed == 1
-    assert _quarantine(repo) == [] and second.quarantine_entries == []
-
-
-# --- a pass cut off part way is finished by the next one ---------------------
-
-def _interrupt_move_into_quarantine(monkeypatch) -> None:
-    """Let ``git worktree move`` rename the tree, then die before Git records it.
-
-    Checked against a real git: the admin directory's ``gitdir`` file is what says
-    where a worktree lives, so writing back the path it left is the state a kill
-    leaves between the rename and the registry update.
-    """
-    real_git = worktree_reaper_remove.git
-
-    def _cut(cwd: Path, args: list[str], **kwargs):
-        result = real_git(cwd, args, **kwargs)
-        into_quarantine = worktree_reaper_remove.QUARANTINE_DIR in args[-1]
-        if args[:2] == ["worktree", "move"] and result.returncode == 0 and into_quarantine:
-            admin = worktree_reaper_probe.admin_dir(Path(args[-1]))
-            assert admin is not None
-            (admin / "gitdir").write_text(f"{Path(args[2]) / '.git'}\n", encoding="utf-8")
-        return result
-
-    monkeypatch.setattr(worktree_reaper_remove, "git", _cut)
+    assert report.removed == 1 and not wt.exists()
+    assert _quarantine(repo) == [] and report.quarantine_entries == []
 
 
 def test_a_removal_that_runs_out_of_time_is_finished_by_the_next_pass(repo, monkeypatch):
@@ -698,74 +703,18 @@ def test_a_removal_that_runs_out_of_time_is_finished_by_the_next_pass(repo, monk
     first = _run(repo)
 
     logger.remove(sink)
-    assert WORKTREE_REMOVE_TIMEOUT_SECONDS > 30.0 and asked == [WORKTREE_REMOVE_TIMEOUT_SECONDS]
+    # The removal, then the same pass's sweep, which runs after the candidate walk.
+    assert WORKTREE_REMOVE_TIMEOUT_SECONDS > 30.0 and asked == [WORKTREE_REMOVE_TIMEOUT_SECONDS] * 2
     assert _reasons(first) == {"slow": "remove_error"}
     assert "timed out" in first.skips[0].detail and "timed out" in "".join(logged)
-    assert len(_quarantine(repo)) == 1
+    entry = worktree_reaper_remove.quarantine_root(repo) / first.quarantine_entries[0]
+    assert _record(entry).is_file()
 
     monkeypatch.setattr(worktree_reaper_remove, "git", real_git)
     second = _run(repo)
 
     assert second.quarantine_removed == 1 and _quarantine(repo) == []
     assert str(wt) not in _git(repo, "worktree", "list", "--porcelain")
-
-
-def test_a_registered_quarantine_entry_is_finished_by_the_next_pass(repo):
-    """A registered entry with no record is finished when its tree is the proof:
-    nothing in it but the deletions a cut-off removal makes and disposable output.
-    """
-    wt = _add(repo, "cut")
-    _age(repo, wt, 8 * DAY)
-    quarantine = worktree_reaper_remove.quarantine_root(repo)
-    quarantine.mkdir()
-    entry = quarantine / "cut-1"
-    _git(repo, "worktree", "move", str(wt), str(entry))
-    (entry / "README").unlink()                  # the delete that ran out of time
-    (entry / "node_modules").mkdir()             # ... and the scratch it was deleting
-    (entry / "node_modules" / "dep.js").write_text("{}\n")
-
-    report = _run(repo)
-
-    assert report.quarantine_removed == 1 and report.removed == 0
-    assert not entry.exists() and _quarantine(repo) == []
-    assert str(wt) not in _git(repo, "worktree", "list", "--porcelain")
-
-
-def _legacy_entry(repo: Path, name: str) -> Path:
-    """An entry as an older build left it: registered in the quarantine, no record."""
-    wt = _add(repo, name)
-    _age(repo, wt, 8 * DAY)
-    quarantine = worktree_reaper_remove.quarantine_root(repo)
-    quarantine.mkdir(exist_ok=True)
-    entry = quarantine / f"{name}-1"
-    _git(repo, "worktree", "move", str(wt), str(entry))
-    return entry
-
-
-def test_a_registered_entry_with_an_edit_and_no_record_is_kept(repo):
-    """Reviewer case 1: an entry an older build left (a failed salvage it could not
-    move back) has no copied-out record. Its own deletions are not proof when an
-    edit nobody copied out sits beside them, so every pass keeps it.
-    """
-    entry = _legacy_entry(repo, "legacy")
-    (entry / "README").unlink()
-    (entry / "ro" / "kept").write_text("edited by hand, never copied\n")
-
-    for _ in range(2):
-        report = _run(repo)
-        assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
-    assert (entry / "ro" / "kept").read_text() == "edited by hand, never copied\n"
-    assert str(entry) in _git(repo, "worktree", "list", "--porcelain")  # registered right here
-
-
-def test_a_registered_entry_with_an_untracked_file_and_no_record_is_kept(repo):
-    entry = _legacy_entry(repo, "legacyfile")
-    (entry / "notes.md").write_text("hand written, never copied\n")
-
-    for _ in range(2):
-        report = _run(repo)
-        assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
-    assert (entry / "notes.md").read_text() == "hand written, never copied\n"
 
 
 def test_a_removal_cut_off_after_salvage_is_finished_on_its_record(repo, monkeypatch):
@@ -803,10 +752,109 @@ def test_a_removal_cut_off_after_salvage_is_finished_on_its_record(repo, monkeyp
     assert str(wt) not in _git(repo, "worktree", "list", "--porcelain")
 
 
-def test_a_record_swept_before_its_entry_exists_never_deletes_that_entry(repo, monkeypatch):
-    """Reviewer case 2: the sweep runs outside the repository lock, so it can meet a
-    record whose entry is not there yet and delete it. Losing a record only ever
-    strands an entry: the entry that then appears with uncopied work is kept.
+def _entry(repo: Path, name: str) -> Path:
+    """A registered quarantine entry with no record, as a cut-off pass leaves it."""
+    wt = _add(repo, name)
+    _age(repo, wt, 8 * DAY)
+    quarantine = worktree_reaper_remove.quarantine_root(repo)
+    quarantine.mkdir(exist_ok=True)
+    entry = quarantine / f"{name}-1"
+    _git(repo, "worktree", "move", str(wt), str(entry))
+    return entry
+
+
+def _strand(repo: Path, entry: Path) -> None:
+    """Point the registration back at the path the entry left: a move cut off."""
+    admin = worktree_reaper_probe.admin_dir(entry)
+    assert admin is not None
+    (admin / "gitdir").write_text(f"{repo / '.worktrees' / entry.name[:-2] / '.git'}\n")
+
+
+def _unregister(entry: Path) -> None:
+    """Delete the entry's admin directory: Git registers it nowhere any more."""
+    admin = worktree_reaper_probe.admin_dir(entry)
+    assert admin is not None
+    shutil.rmtree(admin)
+
+
+NO_RECORD_STATES = {
+    "edited": lambda repo, entry: (entry / "ro" / "kept").write_text("edited\n"),
+    "untracked": lambda repo, entry: (entry / "notes.md").write_text("hand written\n"),
+    "deletion_only": lambda repo, entry: (entry / "README").unlink(),
+    "clean": lambda repo, entry: None,
+    "stranded": _strand,
+    "unregistered": lambda repo, entry: _unregister(entry),
+}
+
+
+@pytest.mark.parametrize("state", sorted(NO_RECORD_STATES))
+def test_an_entry_with_no_record_is_never_deleted(repo, state):
+    """Whatever its tree or its registration looks like, an entry nobody recorded
+    as copied out waits for a person and is listed in every run report.
+    """
+    entry = _entry(repo, "kept")
+    NO_RECORD_STATES[state](repo, entry)
+    before = sorted(str(path.relative_to(entry)) for path in entry.rglob("*"))
+
+    for _ in range(2):
+        report = _run(repo)
+        assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
+    assert sorted(str(path.relative_to(entry)) for path in entry.rglob("*")) == before
+
+
+@pytest.mark.parametrize("change", ["untracked", "deletion_only"])
+def test_a_failed_salvage_with_no_way_back_keeps_the_work_for_a_person(repo, monkeypatch, change):
+    """The reviewer's case: salvage fails and the move back is refused, so the entry
+    stays registered in the quarantine with no record. A tree whose only change is
+    a deleted file is work too, and no later pass deletes either.
+    """
+    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
+    real_git = worktree_reaper_remove.git
+
+    def _stuck(cwd: Path, args: list[str], **kwargs):
+        leaves = worktree_reaper_remove.QUARANTINE_DIR not in args[-1]
+        if args[:2] == ["worktree", "move"] and leaves:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "cannot move back")
+        return real_git(cwd, args, **kwargs)
+
+    def _no_copy(*_args, **_kwargs):
+        raise worktree_reaper.SalvageError("disk full")
+
+    monkeypatch.setattr(worktree_reaper_remove, "git", _stuck)
+    monkeypatch.setattr(worktree_reaper, "salvage_worktree", _no_copy)
+    wt = _add(repo, "trapped")
+    NO_RECORD_STATES[change](repo, wt)
+    _age_all(repo, wt, 8 * DAY)
+
+    first = _run(repo)
+    entry = worktree_reaper_remove.quarantine_root(repo) / first.quarantine_entries[0]
+
+    assert _reasons(first) == {"trapped": "salvage_failed"} and not _record(entry).exists()
+    for _ in range(2):
+        report = _run(repo)
+        assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
+    assert (entry / "notes.md").is_file() if change == "untracked" else not (entry / "README").exists()
+    assert str(entry) in _git(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_record_write_failure_keeps_the_entry(repo, monkeypatch):
+    def _no_record(_entry: Path) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(worktree_reaper_remove, "mark_copied_out", _no_record)
+    wt = _add(repo, "unrecorded")
+    _age(repo, wt, 8 * DAY)
+
+    first = _run(repo)
+    second = _run(repo)
+
+    assert _reasons(first) == {"unrecorded": "quarantine_removal_pending"}
+    assert second.quarantine_removed == 0 and len(second.quarantine_entries) == 1
+
+
+def test_a_record_swept_before_its_entry_exists_never_deletes_that_entry(repo):
+    """A record whose entry is gone is deleted; an entry that then appears under
+    that name has no record and is kept.
     """
     quarantine = worktree_reaper_remove.quarantine_root(repo)
     quarantine.mkdir()
@@ -815,12 +863,10 @@ def test_a_record_swept_before_its_entry_exists_never_deletes_that_entry(repo, m
 
     _run(repo)
     assert not record.exists()
-    entry = _legacy_entry(repo, "racing")
-    (entry / "ro" / "kept").write_text("never copied\n")
+    entry = _entry(repo, "racing")
     report = _run(repo)
 
     assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
-    assert (entry / "ro" / "kept").read_text() == "never copied\n"
 
 
 def test_a_new_entry_never_takes_the_name_of_a_record_still_there(repo, monkeypatch):
@@ -832,144 +878,72 @@ def test_a_new_entry_never_takes_the_name_of_a_record_still_there(repo, monkeypa
     assert worktree_reaper_remove._quarantine_target(repo, "wt").name == "wt-1000-1"
 
 
-def _refuse_remove(monkeypatch, refusal: str) -> None:
+def test_a_recorded_entry_git_still_registers_and_refuses_is_kept(repo, monkeypatch):
+    entry = _entry(repo, "refused")
+    worktree_reaper_remove.mark_copied_out(entry)
     real_git = worktree_reaper_remove.git
 
     def _refusing(cwd: Path, args: list[str], **kwargs):
         if args[:2] == ["worktree", "remove"]:
-            message = refusal.format(path=args[-1])
-            return subprocess.CompletedProcess(["git", *args], 128, "", message)
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: refused")
         return real_git(cwd, args, **kwargs)
 
     monkeypatch.setattr(worktree_reaper_remove, "git", _refusing)
 
-
-def test_a_git_refusal_while_finishing_keeps_the_entry(repo, monkeypatch):
-    """Reviewer case 3: a refusal other than "not a working tree" is never followed
-    by a delete of our own, even for an entry its record says may go.
-    """
-    entry = _legacy_entry(repo, "refused")
-    (entry / "notes.md").write_text("copied out\n")
-    worktree_reaper_remove.mark_copied_out(entry)
-    _refuse_remove(monkeypatch, "fatal: validation failed, cannot remove working tree: x")
-    deleted: list[Path] = []
-    monkeypatch.setattr(worktree_reaper_remove, "delete_quarantined",
-                        lambda _repo, path: deleted.append(path) or True)
-
     report = _run(repo)
 
-    assert deleted == [] and report.quarantine_removed == 0
-    assert report.quarantine_entries == [entry.name]
-    assert (entry / "notes.md").read_text() == "copied out\n"
+    assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
+    assert (entry / "README").is_file() and _record(entry).is_file()
 
 
-def test_a_finish_git_no_longer_registers_is_deleted_as_known_nowhere(repo, monkeypatch):
-    """git 2.53.0's refusal for a path it has no registration for; checked by hand."""
-    entry = _legacy_entry(repo, "dropped")
+def test_a_recorded_entry_git_no_longer_registers_is_finished(repo):
+    """A removal cut off after Git dropped the registration: real git refuses the
+    path, and the record is what lets the sweep delete the directory left.
+    """
+    entry = _entry(repo, "dropped")
     worktree_reaper_remove.mark_copied_out(entry)
-    _refuse_remove(monkeypatch, "fatal: '{path}' is not a working tree")
+    _unregister(entry)
 
     report = _run(repo)
 
     assert report.quarantine_removed == 1 and _quarantine(repo) == []
 
 
-def test_finishing_one_stranded_entry_leaves_another_ones_registration(repo, monkeypatch):
-    """``git worktree prune`` would drop every stranded entry's registration, and the
-    next sweep would then read a kept one as known to Git nowhere and delete it.
+def test_finishing_one_entry_leaves_another_ones_registration(repo):
+    """Nothing calls ``git worktree prune``: it would drop the registration of every
+    stranded entry, including one kept for a person.
     """
-    quarantine = worktree_reaper_remove.quarantine_root(repo)
-    quarantine.mkdir()
-    entries = {}
-    for name in ("a-debris", "b-work"):
-        wt = _add(repo, name)
-        entries[name] = quarantine / f"{name}-1"
-        _git(repo, "worktree", "move", str(wt), str(entries[name]))
-        admin = worktree_reaper_probe.admin_dir(entries[name])
-        assert admin is not None
-        (admin / "gitdir").write_text(f"{wt / '.git'}\n", encoding="utf-8")  # move cut off
-    (entries["b-work"] / "notes.md").write_text("never copied\n")
+    finished = _entry(repo, "a-done")
+    worktree_reaper_remove.mark_copied_out(finished)
+    _unregister(finished)
+    kept = _entry(repo, "b-work")
+    _strand(repo, kept)
+    (kept / "notes.md").write_text("never copied\n")
 
     first = _run(repo)
     second = _run(repo)
 
-    assert first.quarantine_removed == 1 and not entries["a-debris"].exists()
-    assert second.quarantine_removed == 0 and second.quarantine_entries == ["b-work-1"]
-    assert (entries["b-work"] / "notes.md").read_text() == "never copied\n"
-    assert "a-debris" not in _git(repo, "worktree", "list", "--porcelain")
+    assert first.quarantine_removed == 1 and not finished.exists()
+    assert second.quarantine_removed == 0 and second.quarantine_entries == [kept.name]
+    assert str(repo / ".worktrees" / "b-work") in _git(repo, "worktree", "list", "--porcelain")
+    assert (kept / "notes.md").read_text() == "never copied\n"
 
 
-def test_a_move_cut_off_part_way_is_reclaimed_by_the_next_pass(repo, monkeypatch):
-    _interrupt_move_into_quarantine(monkeypatch)
-    wt = _add(repo, "moved")
-    _age(repo, wt, 8 * DAY)
+def test_an_orphan_cut_off_mid_delete_is_finished_on_its_record(repo, monkeypatch):
+    (repo / ".worktrees").mkdir()
+    orphan = _orphan(repo, "half-deleted", 8 * DAY)
+    real_delete = worktree_reaper_remove.delete_quarantined
+    monkeypatch.setattr(worktree_reaper_remove, "delete_quarantined", lambda *_args: False)
 
     first = _run(repo)
 
-    # Git no longer knows the tree at the path it was moved to, so the removal it
-    # asks for is refused; the entry stays and the next pass is what reclaims it.
-    assert _reasons(first) == {"moved": "quarantine_removal_pending"}
-    assert len(_quarantine(repo)) == 1
+    assert _reasons(first) == {"half-deleted": "quarantine_removal_pending"}
+    assert not orphan.exists() and len(first.quarantine_entries) == 1
 
+    monkeypatch.setattr(worktree_reaper_remove, "delete_quarantined", real_delete)
     second = _run(repo)
 
     assert second.quarantine_removed == 1 and _quarantine(repo) == []
-    assert str(wt) not in _git(repo, "worktree", "list", "--porcelain")
-
-
-def test_a_move_cut_off_part_way_never_deletes_unshipped_work(repo, monkeypatch):
-    """The same interrupted move, but the tree still holds an untracked file. Git's
-    own check answers for it, and the answer is to leave the entry and report it.
-    """
-    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
-    _interrupt_move_into_quarantine(monkeypatch)
-    wt = _add(repo, "movedwork")
-    (wt / "notes.md").write_text("hand written\n")
-    _age_all(repo, wt, 8 * DAY)
-
-    _run(repo)
-    entry = worktree_reaper_remove.quarantine_root(repo) / _quarantine(repo)[0]
-    second = _run(repo)
-
-    assert second.quarantine_removed == 0 and second.quarantine_entries == [entry.name]
-    assert (entry / "notes.md").read_text() == "hand written\n"
-
-
-def test_a_copy_cut_off_with_no_way_back_keeps_the_work_for_a_person(repo, monkeypatch):
-    """A salvage that failed and could not be moved back is the one quarantined
-    entry whose checks did not finish, so it records that its work was never
-    copied out and no later pass deletes it, however long it waits.
-    """
-    from infra import worktree_reaper_salvage
-
-    monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda _: set())
-    real_git = worktree_reaper_remove.git
-
-    def _stuck(cwd: Path, args: list[str], **kwargs):
-        # Moving out of the quarantine is refused: the tree stays where it is.
-        leaves = worktree_reaper_remove.QUARANTINE_DIR not in args[-1]
-        if args[:2] == ["worktree", "move"] and leaves:
-            return subprocess.CompletedProcess(["git", *args], 128, "", "cannot move back")
-        return real_git(cwd, args, **kwargs)
-
-    def _no_copy(*args, **kwargs):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(worktree_reaper_remove, "git", _stuck)
-    monkeypatch.setattr(worktree_reaper_salvage.shutil, "copy2", _no_copy)
-    wt = _add(repo, "trapped")
-    (wt / "notes.md").write_text("hand written\n")
-    _age_all(repo, wt, 8 * DAY)
-
-    first = _run(repo)
-    entry = worktree_reaper_remove.quarantine_root(repo) / _quarantine(repo)[0]
-
-    assert _reasons(first) == {"trapped": "salvage_failed"}
-
-    second = _run(repo)
-
-    assert second.quarantine_removed == 0 and second.quarantine_entries == [entry.name]
-    assert (entry / "notes.md").read_text() == "hand written\n"
 
 
 def test_the_budget_is_spent_on_removals_before_salvage_copies(repo, monkeypatch):
@@ -997,7 +971,24 @@ def test_the_budget_is_spent_on_removals_before_salvage_copies(repo, monkeypatch
     assert second.removed == 1 and not keep.exists()
 
 
+def test_the_sweep_runs_after_clean_removals_and_stops_with_the_budget(repo):
+    entries = []
+    for name in ("q1", "q2", "q3"):
+        entries.append(_entry(repo, name))
+        worktree_reaper_remove.mark_copied_out(entries[-1])
+    clean = _add(repo, "clean")
+    _age(repo, clean, 8 * DAY)
+
+    report = reap(_policy(repo), mode="idle", probe=FakeProbe(),
+                  budget=RunBudget(removals_left=2))
+
+    assert report.removed == 1 and not clean.exists()
+    assert report.quarantine_removed == 1 and len(report.quarantine_entries) == 2
+    assert all(_record(entry).is_file() for entry in entries if entry.exists())
+
+
 def test_file_written_after_the_precheck_moves_the_worktree_back(repo, monkeypatch):
+    """A plain clean removal runs its check again at the quarantine path."""
     wt = _add(repo, "racy")
     _age(repo, wt, 8 * DAY)
     real_git = worktree_reaper_remove.git
@@ -1207,8 +1198,7 @@ def test_run_metric_lists_what_is_still_quarantined(repo, isolated):
     quarantine = worktree_reaper_remove.quarantine_root(repo)
     quarantine.mkdir()
     _git(repo, "worktree", "move", str(stuck), str(quarantine / "stuck-1"))
-    (quarantine / "stuck-1" / "README").write_text("never copied\n")  # so the sweep keeps it
-
+    
     for mode in ("idle", "pr_terminal"):
         emit_report(reap(_policy(repo), mode=mode, probe=FakeProbe()))
         event = isolated[-1]
@@ -1220,57 +1210,6 @@ def test_run_metric_lists_what_is_still_quarantined(repo, isolated):
 
 
 # --- hardening: locale, live recheck, pass-level failure ------------------
-
-_GERMAN_DIRTY = "enthält geänderte oder unversionierte Dateien"
-
-
-def _translating_git(tmp_path: Path, monkeypatch) -> None:
-    """Put a git first on PATH that translates like a localized build.
-
-    The host git ships without translations, so this wrapper stands in for
-    one: unless LC_ALL is C it rewrites the dirty-tree refusal into German.
-    Every other command, and every C-locale call, is the real git unchanged.
-    """
-    real = subprocess.run(["which", "git"], capture_output=True, text=True).stdout.strip()
-    shim_dir = tmp_path / "localized-git"
-    shim_dir.mkdir()
-    shim = shim_dir / "git"
-    shim.write_text(
-        "#!/bin/bash\n"
-        f'REAL="{real}"\n'
-        'if [ "${LC_ALL:-}" != "C" ] && [[ " $* " == *" worktree remove "* ]]; then\n'
-        '  "$REAL" "$@" 2>&1 | sed "s/contains modified or untracked files.*/'
-        f'{_GERMAN_DIRTY}/" >&2\n'
-        "  exit ${PIPESTATUS[0]}\n"
-        "fi\n"
-        'exec "$REAL" "$@"\n'
-    )
-    shim.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
-    monkeypatch.setenv("LANG", "de_DE.UTF-8")
-
-
-def test_race_is_recognized_under_a_non_english_locale(repo, tmp_path, monkeypatch):
-    _translating_git(tmp_path, monkeypatch)
-    wt = _add(repo, "racy")
-    _age(repo, wt, 8 * DAY)
-    real_git = worktree_reaper_remove.git
-
-    def _racing_git(cwd: Path, args: list[str], **kwargs):
-        result = real_git(cwd, args, **kwargs)
-        into_quarantine = worktree_reaper_remove.QUARANTINE_DIR in args[-1]
-        if args[:2] == ["worktree", "move"] and result.returncode == 0 and into_quarantine:
-            (Path(args[-1]) / "late.txt").write_text("written mid-removal")
-        return result
-
-    monkeypatch.setattr(worktree_reaper_remove, "git", _racing_git)
-
-    report = _run(repo)
-
-    assert _reasons(report) == {"racy": "raced_dirty"}
-    assert (wt / "late.txt").exists() and _quarantine(repo) == []
-
 
 def test_reaper_git_runs_in_the_c_locale(repo, monkeypatch):
     monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
@@ -1491,11 +1430,11 @@ def test_salvage_reads_the_quarantined_tree(repo, monkeypatch):
     original = worktree_reaper_salvage.salvage_worktree
     read_from: list[Path] = []
 
-    def spy(repo_path, worktree, admin, name, now, origin):
+    def spy(repo_path, worktree, *args):
         read_from.append(worktree)
         # A late write to the old path no longer lands in the tree being copied.
         assert not wt.exists() and worktree.is_dir()
-        return original(repo_path, worktree, admin, name, now, origin)
+        return original(repo_path, worktree, *args)
 
     monkeypatch.setattr(worktree_reaper, "salvage_worktree", spy)
     report = _run(repo)
@@ -1526,9 +1465,8 @@ def test_salvage_is_reported_when_removal_then_fails(repo, monkeypatch):
     (wt / "notes").write_text("keep")
     _age_all(repo, wt, 8 * DAY)
 
-    def salvage_then_fail(repo_path, worktree, name, *, force=False, salvage=None):
-        assert salvage is not None
-        salvage(worktree)
+    def salvage_then_fail(repo_path, worktree, name, clear):
+        clear(worktree)
         raise OSError("remove failed")
 
     monkeypatch.setattr(worktree_reaper, "remove_worktree", salvage_then_fail)
