@@ -9,8 +9,13 @@ export interface ChatComment extends ChatCommentAnchor {
 	root_cid?: string;
 }
 
-/** A comment or reply send refused before it left this device; its message is the sentence the person reads in the box. */
-export class CommentSendRefused extends Error {}
+/**
+ * A comment or reply send that was refused; its message is the sentence the person reads in the box.
+ * `final` when no press of the box can send it (its chat is deleted), so the box offers no Retry.
+ */
+export class CommentSendRefused extends Error {
+	constructor(message: string, readonly final = false) { super(message); }
+}
 
 /** The sentence for a send that failed for a cause nobody named. */
 export const unknownSendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;

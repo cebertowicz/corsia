@@ -1431,7 +1431,22 @@ describe('a comment reply the composer cannot send', () => {
 		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(notAccepted));
 		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
 		expect(get(toasts).map(toast => toast.message)).not.toContain(notAccepted);
-		// A reply sent from a thread is recorded like one sent from the composer, so reply_count still counts it.
+		// Nothing was stored, so nothing is counted as sent.
+		expect(productEventMock).not.toHaveBeenCalledWith('composer', 'sent', expect.anything());
+	});
+
+	it('records a stored reply like one sent from the composer, so reply_count counts it', async () => {
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
+			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
+			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
+		}]);
+		activeThreadId.set('thread-1');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ messages: [] }) })));
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		await composer.sendReply(reply);
 		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ thread_id: 'thread-1', comment_count: 1, reply_count: 1 }));
 	});
 });

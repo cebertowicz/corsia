@@ -56,7 +56,8 @@ def test_a_second_press_answers_with_the_stored_comment(target, frames, publish_
 def test_a_refused_comment_is_not_stored(target, frames, publish_only):
     with pytest.raises(HTTPException) as refused:
         _post(comment={"cid": "c1.1", "seq": 99, "note": "on nothing"})
-    assert refused.value.status_code == 400
+    # A code, never chat composer's sentence about numbered comments and a message: the box shows its own line.
+    assert (refused.value.status_code, refused.value.detail) == (400, "comment_not_sent")
     assert target.execute("SELECT 1 FROM messages WHERE id='box-1'").fetchone() is None
     assert user_rows(frames) == notices(frames) == []
 
@@ -71,7 +72,7 @@ def test_a_comment_on_a_person_row_is_refused_not_hidden(target, frames, publish
     target.commit()
     with pytest.raises(HTTPException) as refused:
         _post(comment={**_comment_metadata()["reply_context"]["comments"][0], "seq": 2})
-    assert refused.value.status_code == 400
+    assert (refused.value.status_code, refused.value.detail) == (400, "comment_not_sent")
     assert target.execute("SELECT 1 FROM messages WHERE id='box-1'").fetchone() is None
     assert target.execute("SELECT 1 FROM chat_visible_content WHERE message_id='box-1'").fetchone() is None
 
@@ -104,7 +105,7 @@ def test_an_undeliverable_input_that_was_never_stored_is_refused(target, frames,
     monkeypatch.setattr(send_service, "send_thread_input", refuse)
     with pytest.raises(HTTPException) as refused:
         _post()
-    assert (refused.value.status_code, refused.value.detail) == (502, "Provider refused the input")
+    assert (refused.value.status_code, refused.value.detail) == (502, "comment_not_sent")
 
 
 def test_another_persons_thread_is_not_found(target, frames, publish_only):

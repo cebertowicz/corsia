@@ -50,7 +50,8 @@ const unsettledPosts = new Map<string, string>();
 /** Read the post's answer: the commented rows' threads as they now stand, or the sentence the box shows. */
 async function adoptPosted(response: Response, threadId: string, noun: 'comment' | 'reply'): Promise<void> {
 	const result = await response.json().catch(() => null);
-	if (!response.ok && result?.detail === 'chat_not_found') throw new CommentSendRefused(`This chat is deleted, so this ${noun} can’t be sent.`);
+	// No press can send it now, so the box offers no Retry (final); the text stays for the person to copy.
+	if (!response.ok && result?.detail === 'chat_not_found') throw new CommentSendRefused(`This chat is deleted, so this ${noun} couldn’t be sent. Your text stays here to copy.`, true);
 	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
@@ -69,7 +70,6 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 	if (blocked) refuse(blocked, noun);
 	const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 	const comment = { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid };
-	emitComposerSend(threadId, '', 0, [comment]);
 	// Each press makes the comment a new id, so the post is known by what it says and where.
 	const key = JSON.stringify([threadId, seq, from_off, to_off, quote, note, root_user_message_id ?? null, root_cid ?? null]);
 	let body = unsettledPosts.get(key);
@@ -87,6 +87,8 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 	} catch { refuse('notAccepted', noun); }
 	await adoptPosted(response, threadId, noun);
 	unsettledPosts.delete(key);
+	// Counted once the server holds it: a refused press, or a press again after a lost answer, is not another comment.
+	emitComposerSend(threadId, '', 0, [comment]);
 }
 
 /**

@@ -7,6 +7,10 @@ import { postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
+import { emitProductEvent } from '$lib/product_events';
+
+vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
+const sentEvents = () => vi.mocked(emitProductEvent).mock.calls.filter(([surface, event]) => surface === 'composer' && event === 'sent');
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -60,6 +64,7 @@ afterEach(() => {
 	if (component) unmount(component as never);
 	component = null; messages.set([]); activeThreadId.set(null); host?.remove();
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
+	vi.mocked(emitProductEvent).mockClear();
 	for (const on of [anchor, second]) chatCommentDrafts.dropRoot('thread', 'm1', { ...on, quote: '', anchor_prefix: '', anchor_suffix: '' });
 	Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.unstubAllGlobals();
 });
@@ -192,22 +197,41 @@ it('sends the same request again when the first press got no answer, so the serv
 	await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 	const [first, again] = fetchMock.mock.calls.map(call => JSON.parse(String((call[1] as RequestInit).body)));
 	expect(again).toEqual(first);
+	// One comment stored, so one composer 'sent' record: the press that got no answer is not counted.
+	await vi.waitFor(() => { flushSync(); expect(box()).toBeNull(); });
+	expect(sentEvents()).toHaveLength(1);
+	expect(sentEvents()[0][2]).toMatchObject({ thread_id: 'thread', comment_count: 1, reply_count: 0 });
 });
 
-// Known refusal codes: only a deleted chat has its own sentence; a malformed post keeps the generic one.
+it('counts no composer send for a post the server refuses', async () => {
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ detail: 'comment_not_sent' }) })));
+	setup(reply => postChatComment(reply, 'thread', false, true));
+	await openBox(); await post();
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[role="alert"]')).not.toBeNull(); });
+	host.querySelector<HTMLButtonElement>('[role="dialog"] button.submit')!.click(); await settle();
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector<HTMLButtonElement>('button.submit')?.textContent).toBe('Retry'); });
+	expect(sentEvents()).toEqual([]);
+});
+
+// Known refusal codes: only a deleted chat has its own sentence, and no Retry since no press can send it;
+// a malformed post, or one refused before it was stored, keeps the generic one with Retry.
 it.each([
-	['chat_not_found', 'This chat is deleted, so this comment can’t be sent.'],
-	['comment_missing', 'Couldn’t send this comment. Try again.'],
-])('keeps the text with the sentence for %s', async (detail, sentence) => {
+	['chat_not_found', 'This chat is deleted, so this comment couldn’t be sent. Your text stays here to copy.', false],
+	['comment_missing', 'Couldn’t send this comment. Try again.', true],
+	['comment_not_sent', 'Couldn’t send this comment. Try again.', true],
+])('keeps the text with the sentence for %s', async (detail, sentence, retry) => {
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail }) })));
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post();
 	expect(host.querySelector('[role="alert"]')?.textContent).toBe(sentence);
 	expect(box()?.value).toBe('Keep my comment');
+	await vi.waitFor(() => { flushSync(); expect(host.querySelector('[role="dialog"] button.submit')?.textContent ?? null).toBe(retry ? 'Retry' : null); });
+	expect(host.querySelector('[role="dialog"] button.cancel')?.textContent).toBe('Cancel');
+	expect(host.querySelector('[role="dialog"]')?.textContent).toContain('text');
 });
 
 it.each([
-	['chat_not_found', 'reply', 'This chat is deleted, so this reply can’t be sent.'],
+	['chat_not_found', 'reply', 'This chat is deleted, so this reply couldn’t be sent. Your text stays here to copy.'],
 	['comment_not_retryable', 'comment', 'Couldn’t retry this comment. Try again.'],
 ] as const)('says why a Retry refused with %s did not send the %s', async (detail, noun, sentence) => {
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail }) })));

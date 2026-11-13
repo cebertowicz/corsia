@@ -8,7 +8,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -20,6 +20,8 @@
 		submittingLabel?: string;
 		pending?: boolean;
 		error?: string;
+		/** False when no press can get past `error` (a deleted chat): the box drops its Retry and keeps Cancel and the text. */
+		retryable?: boolean;
 		retainText?: boolean;
 		mentions?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
@@ -38,7 +40,7 @@
 	});
 	async function submit() {
 		const value = text.trim();
-		if (!value || posting || pending || disabledReason) return;
+		if (!value || posting || pending || disabledReason || (error && !retryable)) return;
 		posting = true;
 		const offset = text.length - text.trimStart().length;
 		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
@@ -62,7 +64,7 @@
 	</div>
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
-		<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>
+		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}
 	{#if error}<p class="selection-reason" role="alert">{error}</p>{/if}

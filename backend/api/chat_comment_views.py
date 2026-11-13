@@ -144,7 +144,9 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
         # so the box closes on it rather than offering a second post of the same text.
         stored = exc.input_undeliverable and await run_read(lambda: _posted(user['id'], thread_id, input_id))
         if not stored:
-            raise HTTPException(exc.status_code, exc.detail) from exc
+            # Refused before it was stored. The refusal's own text is written for chat's composer (a message,
+            # numbered comments, steps that box offers), so this box gets a code and shows its generic line.
+            raise HTTPException(exc.status_code, 'comment_not_sent') from exc
         return stored
     result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
     if result is None:

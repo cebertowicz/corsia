@@ -1,9 +1,10 @@
 // The text typed in a chat comment's box or a comment thread's reply field, until the server stores it.
 // A stored comment or reply lives on the server, on the comment it belongs to, with its own delivery state;
 // nothing here copies it. A post that fails keeps its text here with the cause the box shows.
-import { refusalText, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+import { CommentSendRefused, refusalText, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 
-type Draft = { text: string; posting?: boolean; error?: string };
+/** `final`: the failure is one no press can get past (its chat is deleted), so the box offers no Retry. */
+type Draft = { text: string; posting?: boolean; error?: string; final?: boolean };
 // A reply draft belongs to its comment; a new comment's draft to the passage it is on, so two passages of one message never share text, a failure or a post.
 const replyKey = (commentId: string) => `reply:${commentId}`;
 const rootKey = (threadId: string, messageId: string, anchor: Pick<ChatCommentAnchor, 'from_off' | 'to_off'>) => `root:${JSON.stringify([threadId, messageId, anchor.from_off, anchor.to_off])}`;
@@ -43,7 +44,7 @@ async function post(key: string, text: string, noun: 'comment' | 'reply', send: 
 		delete drafts[key];
 		return true;
 	} catch (failure) {
-		drafts[key] = { text, error: refusalText(failure, noun) };
+		drafts[key] = { text, error: refusalText(failure, noun), ...(failure instanceof CommentSendRefused && failure.final ? { final: true } : {}) };
 		return false;
 	}
 }
