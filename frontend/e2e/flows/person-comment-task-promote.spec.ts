@@ -9,7 +9,7 @@ import { expect } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
 
 const repo = path.resolve(process.cwd(), '..');
-const PROMOTED = "This document is in another place, and its comments can't be shown there. CORSIA keeps them.";
+const PROMOTED = "This document is in another place, and its comments can’t be shown there. CORSIA keeps them.";
 
 for (const editedOnDisk of [false, true]) test(`comment task after promote, edited on disk first: ${editedOnDisk}`, async ({ page, request }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'promote is the same at every width; the main spec covers the row at each');

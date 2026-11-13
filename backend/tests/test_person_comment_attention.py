@@ -286,7 +286,7 @@ def test_a_promote_that_leaves_the_source_closes_its_task_with_the_promote_reaso
         models.retire(artifact, tombstone=True, cause='promoted', db=db)
         assert _tasks(db, artifact) == [(task, 'closed')]
         assert _reason(db, task) == (
-            "This document is in another place, and its comments can't be shown there. CORSIA keeps them."
+            "This document is in another place, and its comments can’t be shown there. CORSIA keeps them."
         )
         add_comment(db, artifact, author_id='owner', parent_id=root['id'])
         public.comment_tasks_changed(db, [artifact])

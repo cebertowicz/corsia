@@ -23,10 +23,10 @@ from registry.shared_principals import document_scope
 
 PROVENANCE = 'document.person_comment_task'
 # Close reasons, one per cause; each stays true on the closed node.
-COVERED = "Covered by this document's review."
+COVERED = "Covered by this document’s review."
 DELETED = 'This document is deleted.'
 NO_OWNER = 'This document has no owner.'
-PROMOTED = "This document is in another place, and its comments can't be shown there. CORSIA keeps them."
+PROMOTED = "This document is in another place, and its comments can’t be shown there. CORSIA keeps them."
 # The retirement causes that end a document's task, each with its reason.
 _RETIRED = {'file_gone': DELETED, 'promoted': PROMOTED}
 
