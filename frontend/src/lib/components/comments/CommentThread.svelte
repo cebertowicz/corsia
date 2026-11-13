@@ -328,7 +328,6 @@
 		:global(.popover:has(.ct, .composer)) { padding-block: var(--space-2); --compose-band: 0px; }
 		/* When the card is taller than the room, the popover scrolls as one: the reply keeps its whole height and the reply box scrolls with it, not over it. */
 		:global([data-popover]) .ct-reply-region { flex-shrink: 0; }
-		:global([data-popover]) .ct-compose { position: static; }
 	}
 
 	.ct.resolved:not(.drawerCard) { padding: 0; background: none; cursor: default; gap: 0; }

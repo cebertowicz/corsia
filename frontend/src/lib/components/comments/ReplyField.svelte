@@ -89,6 +89,8 @@
 	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-elevated); position: sticky; bottom: 0; z-index: 1; background: var(--compose-fill); }
 	:global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-secondary); }
 	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--compose-band, var(--space-3)); background: var(--compose-fill); pointer-events: none; }
+	/* In a short window the reply field sits after the replies instead of pinned over them, so no reply is cut by it; the popover scrolls as one. */
+	@media (pointer: coarse) and (max-height: 28.125rem) { :global([data-popover]) .ct-compose { position: static; } }
 	/* Replies grow until their available scroller is full, then scroll inside. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
