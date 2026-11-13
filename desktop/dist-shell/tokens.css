@@ -34,6 +34,13 @@
   --space-6: 24px;
   --space-7: 32px;
   --touch-target: 44px;
+  /* The fine steps the comment card's head, halo and recipient line sit on, between --space-1 and --space-3. */
+  --space-px-2: 2px;
+  --space-px-3: 3px;
+  --space-px-5: 5px;
+  --space-px-7: 7px;
+  --space-px-10: 10px;
+  --space-px-15: 15px;
   --space-8: 48px;
   /* The comment margin column: one width for every surface that shows threads beside text (a document's column, a wide chat's). */
   --margin-column: 308px;
