@@ -4,12 +4,13 @@
 	const parts = $derived(name.length > 20 ? { head: name.slice(0, -4), tail: name.slice(-4) } : { head: name, tail: '' });
 </script>
 
-<span class="name" title={name}><span class="name-head" class:cut={!!parts.tail}>{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}</span>
+<span class="name" class:cut={!!parts.tail} title={name}><span class="name-head">{parts.head}</span>{#if parts.tail}<span class="name-tail">{parts.tail}</span>{/if}</span>
 
 <style>
-	.name { display: flex; min-width: 0; white-space: nowrap; }
+	/* A grid, so the cut name's floor is its min-content: a wrapper that keeps its automatic minimum never squeezes the name
+	   below it (and a wrapper with min-width 0 still can). */
+	.name { display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, max-content); min-width: 0; white-space: nowrap; }
 	.name-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	/* A name cut in the middle keeps its first letter and the ellipsis, so a short row never shows only the tail. */
-	.name-head.cut { min-width: 1.8em; }
-	.name-tail { flex: none; }
+	.name.cut { grid-template-columns: minmax(1.8em, max-content) max-content; }
 </style>

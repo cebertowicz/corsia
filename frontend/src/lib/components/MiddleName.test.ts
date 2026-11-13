@@ -17,14 +17,14 @@ describe('MiddleName', () => {
 	it('cuts a long name in the middle: the head keeps a floor of its first letter and the ellipsis, and the tail stays whole', () => {
 		const name = render('Responsive Design Review and Accessibility Coordination Agent');
 		const head = name.querySelector('.name-head')!;
-		expect(head.classList.contains('cut')).toBe(true);
+		expect(name.classList.contains('cut')).toBe(true);
 		expect(head.textContent).toBe('Responsive Design Review and Accessibility Coordination A');
 		expect(name.querySelector('.name-tail')?.textContent).toBe('gent');
 	});
 
 	it('leaves a short name whole, with no floor that would pad it', () => {
 		const name = render('Jo');
-		expect(name.querySelector('.name-head')?.classList.contains('cut')).toBe(false);
+		expect(name.classList.contains('cut')).toBe(false);
 		expect(name.querySelector('.name-tail')).toBeNull();
 	});
 });

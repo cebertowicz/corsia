@@ -14,7 +14,8 @@
    and shut with the icon. Agree and Resolve do different things, so a target's width separates them. */
 .ct-act { display: flex; flex: none; align-items: center; justify-content: center; width: var(--ct-hit); height: var(--ct-hit); padding: 0; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
 .ct-act.ack { margin-left: auto; }
-.ct-act.ack + .ct-act.resolve { margin-left: var(--ct-hit); }
+/* Exactly one target width between the two targets: the margin plus the header row's gap. */
+.ct-act.ack + .ct-act.resolve { margin-left: calc(var(--ct-hit) - var(--ct-head-gap, 0px)); }
 .ct-act.ack:hover { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
 .ct-act.ack.on { color: var(--green); }
 .ct-act.resolve:hover { background: var(--bg-hover); color: var(--text-primary); }

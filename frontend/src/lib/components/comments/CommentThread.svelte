@@ -10,7 +10,7 @@
 	import { changedLabel } from '$lib/docImageComments';
 	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
-	import Avatar from '$lib/components/ui/Avatar.svelte';
+	import { formatDateTime } from '$lib/time';
 	import { agentColor } from '$lib/docPresence';
 	import { badgeFill } from '$lib/imageRegions';
 	import CommentMeta from './CommentMeta.svelte';
@@ -97,8 +97,9 @@
 	const chipFill = $derived(tagColor ? badgeFill(tagColor) : null);
 	const me = $derived($userParticipant);
 	const who = (id: string, kind?: 'user' | 'agent') => resolveParticipant(id, me, kind);
-	// Avatar owns the shared initials presentation.
+	// CommentMeta draws the author's avatar in this colour.
 	const author = $derived(who(comment.author, comment.authorKind));
+	const replyNoun = $derived(comment.replies.length === 1 ? 'reply' : 'replies'), replyCount = $derived(`${comment.replies.length} ${replyNoun}`);
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
@@ -230,7 +231,7 @@
 <svelte:window onvisibilitychange={onVisibilityChange} />
 
 <!-- Who started it and when: a resolved row says it before its quote is read. -->
-{#snippet resolvedMeta()}<div class="ct-head ct-res-meta"><Avatar name={author.name} color={avatarColor} hidden /><CommentMeta {author} at={comment.at} createdAt={comment.createdAt} /></div>{/snippet}
+{#snippet resolvedMeta()}<div class="ct-head ct-res-meta"><CommentMeta {author} color={avatarColor} at={comment.at} createdAt={comment.createdAt} /></div>{/snippet}
 {#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
 	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 		<svg class="ct-{mark}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={mark === 'check' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>
@@ -276,16 +277,15 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" data-autosize-room class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} class:preview bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
+	<div class="ct" data-autosize-room class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} class:removed={comment.orphaned && comment.detached} class:preview bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}, ${comment.createdAt ? formatDateTime(comment.createdAt) : comment.at}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
-			<Avatar name={author.name} color={avatarColor} hidden />
-			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
+			<CommentMeta {author} color={avatarColor} at={comment.at} createdAt={comment.createdAt} />
 			{#if (preview && collapseReplyIds.size) || comment.newComment}<NewMarker />{/if}
 			{#if comment.replies.length}
-				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
+				<span class="ct-reply-count" title={replyCount} data-count-long={comment.replies.length >= 100 || undefined}><svg class="ct-count-mark" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{comment.replies.length}<span class="ct-count-unit">{` ${replyNoun}`}</span></span>
 			{/if}
 			{#if !isSuggestion && !comment.resolved && (onAgree || !chatSurface)}
 				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree with this comment" aria-pressed={comment.acked} title="Agree with this comment">
@@ -361,10 +361,13 @@
 	.ct-original:global([data-above='true']), .ct-reply-region:global([data-above='true']) { --cue-top: var(--space-2); }
 	.ct-original:global([data-more='true']), .ct-reply-region:global([data-more='true']) { --cue-bottom: var(--space-2); }
 	.ct-original:focus-visible, .ct-reply-region:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.ct-head { display: flex; align-items: center; gap: 7px; }
+	/* The header row is the container its parts give way in (CommentMeta), in a fixed order: the avatar, then the time. */
+	.ct-head { --ct-head-gap: 7px; display: flex; align-items: center; gap: var(--ct-head-gap); container: ct-head / inline-size; }
 	/* One row at every width: a long name shortens in the middle (CommentMeta), so the time and actions never drop below it. */
 	.ct-reply-count { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
-	/* Avatar owns the shared initials presentation; the Agree and Resolve boxes are in comment-link.css. */
+	/* The comments pill's mark; it stands in for the noun only where the row drops it (CommentMeta). */
+	.ct-count-mark { display: none; width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+	/* CommentMeta draws the avatar (Avatar owns the shared initials presentation); the Agree and Resolve boxes are in comment-link.css. */
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
 	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }

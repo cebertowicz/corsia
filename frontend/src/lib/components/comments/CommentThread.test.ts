@@ -4,6 +4,7 @@ import CommentThread from './CommentThread.svelte';
 import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
+import { formatDateTime } from '$lib/time';
 
 const hexToRgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 let host: HTMLElement;
@@ -370,6 +371,51 @@ describe('CommentThread', () => {
 		expect(rows({ inMargin: true, focused: true, scrollOnFocus: false })).toEqual(rest);
 		expect(rows({ focused: true, scrollOnFocus: false })).toEqual(rest);
 		expect(rows({ focused: true, flat: true, scrollOnFocus: false })).toEqual(rest);
+	});
+
+	// The fit widths are container queries jsdom can't lay out; the browser specs measure them. These pin the order they rely on.
+	it('builds the header so its parts give way in order: the avatar, then the time, never the reply count', () => {
+		const createdAt = '2026-11-11T12:00:00Z';
+		render(thread({ author: 'Responsive Design Review Agent', createdAt, replies: [reply, reply] }), false, { inMargin: true, focused: false, scrollOnFocus: false });
+		const head = host.querySelector<HTMLElement>('.ct-head')!;
+		const parts = [...head.children].map((el) => el.className.split(' ').find((c) => /^(avatar|ct-who|ct-reply-count|ct-act)$/.test(c)));
+		expect(parts.filter(Boolean).slice(0, 3)).toEqual(['avatar', 'ct-who', 'ct-reply-count']);
+		// The avatar is a direct child the container rule can hide; the count sits outside the box that clips the time.
+		expect(head.querySelector(':scope > .avatar[aria-hidden="true"]')).not.toBeNull();
+		const who = head.querySelector('.ct-who')!;
+		expect([...who.children].map((el) => el.classList[0])).toEqual(['ct-author', 'ct-at', 'ct-at']);
+		expect(who.querySelector('.ct-reply-count')).toBeNull();
+		// The count's noun, the last to give way, is its own element; the mark that stands in for it is not read out.
+		const count = head.querySelector<HTMLElement>(':scope > .ct-reply-count')!;
+		expect([count.textContent, count.title]).toEqual(['2 replies', '2 replies']);
+		expect(count.querySelector('.ct-count-unit')?.textContent).toBe(' replies');
+		expect(count.querySelector('.ct-count-mark')?.getAttribute('aria-hidden')).toBe('true');
+		// A time that gives way stays readable: in its title and in the card's accessible name.
+		const time = who.querySelector<HTMLElement>('.ct-at.full')!;
+		expect(time.title).toBe(formatDateTime(createdAt));
+		expect(host.querySelector('.ct')!.getAttribute('aria-label')).toBe(`Comment by Responsive Design Review Agent, ${formatDateTime(createdAt)}`);
+	});
+
+	it('keeps the same header order on a card with no replies, which the narrower fit width keys on', () => {
+		render(thread({ author: 'Jo', createdAt: new Date().toISOString() }), false, { inMargin: true, focused: false, scrollOnFocus: false });
+		const head = host.querySelector<HTMLElement>('.ct-head')!;
+		expect(head.querySelector('.ct-reply-count')).toBeNull();
+		expect(head.querySelector(':scope > .avatar + .ct-who')).not.toBeNull();
+	});
+
+	it('marks a three-digit reply count, which keys the header row\'s tighter gaps, and no shorter count', () => {
+		const count = (n: number) => {
+			render(thread({ replies: Array.from({ length: n }, (_, i) => ({ ...reply, id: `r${i}` })) }), false, { inMargin: true, focused: false, scrollOnFocus: false });
+			const el = host.querySelector<HTMLElement>('.ct-head > .ct-reply-count')!;
+			const out = [el.textContent, el.hasAttribute('data-count-long')];
+			if (component) unmount(component);
+			component = null; host.remove();
+			return out;
+		};
+		expect(count(2)).toEqual(['2 replies', false]);
+		expect(count(12)).toEqual(['12 replies', false]);
+		expect(count(99)).toEqual(['99 replies', false]);
+		expect(count(100)).toEqual(['100 replies', true]);
 	});
 
 	it('lets the person read a long deleted text in full, and clamps it again, with the Show more control chat comments use', () => {
