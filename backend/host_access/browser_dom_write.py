@@ -96,7 +96,7 @@ async def target_node(run: RunCommand, endpoint: str, selector: str) -> int | No
 async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: bool = True) -> tuple[int | None, str]:
     """Find the node at the centre of agent-browser's box for a ref or selector, and why not if absent."""
     box = await _box(run, selector)
-    if box is not None and _has_area(box) and not _in_viewport(await _viewport(cdp), box):
+    if box is not None and not _is_empty(box) and not _in_viewport(await _viewport(cdp), box):
         if not scroll:
             return None, "no_box"
         # The hit test reads only the viewport. Scrolling moves neither focus nor pointer, and
@@ -105,13 +105,14 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         box = await _box(run, selector)
     # The box comes from agent-browser and the hit test from CDP, so the page can move between the two
     # reads. A hit test holds only when the box was in view and the same before and after it.
-    in_view = False
+    seen = False
     for _ in range(_SETTLE_READS):
-        if box is None or not _has_area(box):
+        if box is None or _is_empty(box):
             # agent-browser reports an all-zero box, not an error, for a hidden element and for a ref
             # whose node the page replaced since the snapshot; for a ref the second is far likelier.
             return None, "stale_ref" if box is not None and _is_ref(selector) else "no_box"
         in_view = _in_viewport(await _viewport(cdp), box)
+        seen = seen or in_view
         node = await _hit(cdp, selector, box) if in_view else None
         after = await _box(run, selector)
         if in_view and after == box:
@@ -119,7 +120,7 @@ async def _locate(run: RunCommand, cdp: CdpClient, selector: str, *, scroll: boo
         box = after
         await asyncio.sleep(_SETTLE_INTERVAL)
     # The target never held still in view, so no hit test on it can be trusted.
-    return None, "moving" if in_view else "off_screen"
+    return None, "moving" if seen else "off_screen"
 
 
 async def _hit(cdp: CdpClient, selector: str, box: dict) -> int | None:
@@ -173,8 +174,9 @@ def _is_ref(selector: str) -> bool:
     return re.fullmatch(r"(?:@|ref=)?e\d+", selector) is not None
 
 
-def _has_area(box: dict) -> bool:
-    return box["width"] > 0 and box["height"] > 0
+def _is_empty(box: dict) -> bool:
+    """The all-zero box agent-browser gives for an element with no layout; one zero side is a real element."""
+    return not any(box[key] for key in ("x", "y", "width", "height"))
 
 
 def _in_viewport(viewport: dict, box: dict) -> bool:

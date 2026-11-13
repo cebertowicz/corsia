@@ -347,6 +347,38 @@ async def test_a_hit_on_a_target_that_never_stops_moving_is_not_written(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_a_target_that_passed_through_view_is_refused_as_moving_not_never_in_view(monkeypatch):
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    run = _scrolling_run([900, 500, 300, 100, -200, -500], [])
+    with pytest.raises(browser_dom_write.DomWriteRefused, match="the page kept moving") as refused:
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert refused.value.reason == "moving"
+
+
+@pytest.mark.asyncio
+async def test_a_box_with_one_zero_side_at_a_real_position_is_hit_tested(monkeypatch):
+    """A zero-height link wrapping floated children is a real element, not a stale ref."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    hits = []
+
+    async def the_target(_cdp, _selector, box):
+        hits.append(box)
+        return 7
+
+    async def run(args, timeout):
+        if tuple(args[:2]) == ("get", "box"):
+            return CommandResult(0, json.dumps({"data": {"x": 20, "y": 60, "width": 200, "height": 0}}), "")
+        return await _run(args, timeout)
+
+    monkeypatch.setattr(browser_dom_write, "_hit", the_target)
+    assert await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert hits == [{"x": 20, "y": 60, "width": 200, "height": 0}]
+
+
+@pytest.mark.asyncio
 async def test_a_target_scrolling_cannot_bring_into_view_is_refused_as_never_in_view(monkeypatch):
     """A copy of a link parked off the page (a hidden mobile menu) never reaches the viewport."""
     cdp = FakeCdp(labelled=False)
