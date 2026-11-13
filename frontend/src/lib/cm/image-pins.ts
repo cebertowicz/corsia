@@ -123,7 +123,10 @@ export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement,
 				pin.classList.toggle('selected', !!range.focused);
 				pin.setAttribute('aria-pressed', String(!!range.focused));
 				pin.classList.toggle('removed', !range.pin);
-				pin.setAttribute('aria-label', range.pin ? `Comment ${range.pin.number}` : 'Comment on text that isn’t in the document');
+				// A thread with something unopened carries the sign the text highlight does (`data-unread`), named for it.
+				pin.toggleAttribute('data-unread', !!range.unread);
+				const unreadName = range.unread === 'reply' ? ', new reply' : range.unread === 'comment' ? ', new comment' : '';
+				pin.setAttribute('aria-label', (range.pin ? `Comment ${range.pin.number}` : 'Comment on text that isn’t in the document') + unreadName);
 				pin.style.left = `${x}px`;
 				pin.style.top = `${y}px`;
 				// A deleted passage's sign takes the amber its card is edged in.
