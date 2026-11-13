@@ -117,14 +117,14 @@ async function commentUnread(request: APIRequestContext, artifactId: string, id:
 }
 
 /**
- * A document with one unread agent comment, open, its highlight brought into view; on a desktop the canvas is widened
- * until the margin column is up. An agent's comment counts as unread once the person has commented on the document
- * before it, so the person's own note comes first.
+ * A document with one unread agent comment, open, its highlight brought into view; with `margin` the canvas is widened
+ * until the margin column is up, otherwise it stays narrower than the column needs. An agent's comment counts as unread
+ * once the person has commented on the document before it, so the person's own note comes first.
  */
-async function documentWithUnreadComment(page: Page, request: APIRequestContext, width: number, height: number) {
+async function documentWithUnreadComment(page: Page, request: APIRequestContext, width: number, height: number, { margin = width > 768 } = {}) {
 	await page.setViewportSize({ width, height });
 	const stamps = watchStamps(page);
-	const wide = width > 768;
+	const wide = margin;
 	const doc = await openSuggestionDocument(page, request, docText, [
 		{ quote: 'document line 5', body: 'A note of my own.', author: 'person' },
 		{ quote: docQuote, body: 'An agent note to read.' },
@@ -184,6 +184,30 @@ test('document sheet at 393: an unread comment stays unread on load and on scree
 	await anchor.click();
 	await expect(sheet).toBeVisible();
 	await expect(sheet.locator('.ct-new')).toHaveCount(0);
+	expect(stamps()).toHaveLength(1);
+});
+
+test('document popover at 900: an unread comment stays unread on load and on screen, and opening it from its highlight reads it', async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('desktop'));
+	test.setTimeout(150_000);
+	// The canvas is narrower than the margin column needs, so the highlight opens its thread over the text.
+	const { anchor, stamps } = await documentWithUnreadComment(page, request, 900, 900, { margin: false });
+	await expect(page.locator('[data-margin-card]'), 'no margin column at this width').toHaveCount(0);
+	await page.waitForTimeout(SEEN_FOR_MS);
+	expect(stamps(), 'nothing is read on load or on screen').toEqual([]);
+	await anchor.click();
+	const popover = page.getByRole('dialog').filter({ hasText: 'An agent note to read.' });
+	await expect(popover).toBeVisible();
+	await expect.poll(() => stamps().length).toBe(1);
+	// The New mark holds while the thread is open.
+	await expect(popover.locator('.ct-new').first()).toBeVisible();
+	await page.waitForTimeout(500);
+	await expect(popover.locator('.ct-new').first()).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(popover).toHaveCount(0);
+	await anchor.click();
+	await expect(popover).toBeVisible();
+	await expect(popover.locator('.ct-new')).toHaveCount(0);
 	expect(stamps()).toHaveLength(1);
 });
 
