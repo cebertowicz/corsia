@@ -53,21 +53,13 @@ def _known(value: object) -> bool:
 
 
 def long_context_bound(model: str, listing: str | None = None) -> int | None:
-    """The input size above which the recorded identity bills its published long vector, or None."""
+    """The input size above which the recorded identity bills its published long vector, or None.
+
+    The official boundary is one call's input only: output tokens do not move a
+    call into the long tier. ``measurement_pricing.INPUT_TIER_SQL`` applies it.
+    """
     price = _price(model, listing)
     return price.long_context_above_input_tokens if price is not None else None
-
-
-def is_long_context(model: str, prompt: int, cache_write: int, cache_read: int,
-                    listing: str | None = None) -> bool:
-    """Whether the provider bills this one call at the identity's Standard long-context vector.
-
-    The official boundary is input only: output tokens do not move a call into
-    the long tier. The ledger buckets are disjoint, so all three input buckets
-    contribute exactly once.
-    """
-    bound = long_context_bound(model, listing)
-    return bound is not None and prompt + cache_write + cache_read > bound
 
 
 def _rates(price: ListPrice, *, long_context: bool,

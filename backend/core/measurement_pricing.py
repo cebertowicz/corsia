@@ -37,6 +37,8 @@ def _above_long_context_bound(input_tier: str, model: str, listing: str | None) 
     bound = long_context_bound(model, listing)
     exceeded = int(input_tier.removeprefix(_TIER_PREFIX)) if input_tier.startswith(_TIER_PREFIX) else 0
     return bound is not None and exceeded >= bound
+
+
 # Providers with a published idle-hours vector bill by the call's own time, so
 # the hour is read per row, in UTC, before aggregation, against the window of
 # the price entries for the External identity the row served. The row's list is
