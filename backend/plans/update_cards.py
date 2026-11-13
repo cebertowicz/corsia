@@ -89,6 +89,10 @@ def observe_node_event(
             kind = "person_step"
     if kind is None:
         return
+    from plans.workflow_fields import announced
+
+    if not announced(connection, node_id, payload if event == "node_created" else None):
+        return
     thread_id = _eligible_thread_id(connection, node_id, any_depth=kind == "blocked")
     if thread_id is None:
         return
