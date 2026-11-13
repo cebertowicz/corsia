@@ -195,6 +195,8 @@ describe('MarkdownEditor edits', () => {
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// The press the editor reports once the pointer is up, with the caret where it landed.
 			const tap = async (at: number) => {
+				// The pointer is over `at` when it goes down, as it is in a browser.
+				vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(at);
 				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
 				view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' });
 				window.dispatchEvent(new MouseEvent('mouseup'));
@@ -215,6 +217,21 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brxown fox');
 		});
 
+		it('a tap opens the comment it landed on even when the text moves before the frame that reads it', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			// The list reloads and the text shifts: the point under the pointer is now outside the comment.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(14);
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
+		});
+
 		it('where cards open as the phone sheet, keys that carry the caret into a comment before the tap is read open nothing', async () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
@@ -233,6 +250,7 @@ describe('MarkdownEditor edits', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
 			// No pointer selection: a touch leaves the caret to the browser, whose report CodeMirror labels 'select' once 50 ms have passed.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
 			window.dispatchEvent(new MouseEvent('mouseup'));
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();

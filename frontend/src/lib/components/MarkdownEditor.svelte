@@ -180,11 +180,12 @@
 	/** Which highlight the reader is in: a press decides until a key or a later press moves the caret (`caret-rule.ts`). */
 	const caretRule = new CaretRule();
 
-	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
+	/** `pressed` is what the press landed on, read when it landed (a press only, never a caret report). */
+	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean, pressed?: { hit: CommentRange | undefined }) {
 		const r = v.state.selection.main;
 		const offer = selectionOffer(v, composerAnchor);
 		if (r.empty && !offer) {
-			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights, cardMode !== 'sheet') : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
+			const read = caretRule.read(!!click, !!typed, () => click ? (pressed ? pressed.hit : highlightAtPress(v, click, curHighlights, cardMode !== 'sheet')) : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
 			if (!read) return;
 			onSelect?.(null);
 			const { hit, arrived } = read;
@@ -236,8 +237,10 @@
 					mousedown(press, v) {
 						caretRule.pressStarted();
 						onSelect?.(null);
+						// What the press landed on is read now, where the reader pressed: the frame that reads the press can come after the list reloads and the text moves, and the press does not follow it.
+						const pressed = { hit: highlightAtPress(v, press, curHighlights, cardMode !== 'sheet') };
 						// The press is read a frame after mouseup, once the editor has placed the caret; a key that moves it first supersedes the press.
-						const up = () => { caretRule.pressUp(press); requestAnimationFrame(() => { if (caretRule.settled(press)) handleSelection(v, press); }); };
+						const up = () => { caretRule.pressUp(press); requestAnimationFrame(() => { if (caretRule.settled(press)) handleSelection(v, press, undefined, pressed); }); };
 						window.addEventListener('mouseup', up, { once: true });
 						return false;
 					}
