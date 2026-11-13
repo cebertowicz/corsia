@@ -210,25 +210,6 @@ class TestCORSIASelfCommentSuppression:
         assert result["thread_id"] is None
         assert "reviewer" not in result
 
-    def test_reviewer_composed_fp_comment_suppressed(self):
-        from reviewer.reviewer_threads import format_threaded_comment_body
-        from events.ingress import _is_corsia_self_comment
-
-        finding = {
-            "severity": "FLAG",
-            "category": "test/integration",
-            "description": "A sample finding for integration test.",
-            "path": "backend/foo.py",
-            "line": 42,
-        }
-        body = format_threaded_comment_body(finding)
-        payload = {"action": "created", "comment": {"body": body}}
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True, (
-            "Reviewer-composed FP comment must be suppressed. "
-            "This means format_finding_comment placed the marker on its own line "
-            "(preceded by \\n) as required by the standalone-line anchor."
-        )
-
     def test_reviewer_composed_summary_comment_suppressed(self):
         from events.markers import REVIEW_SUMMARY_MARKER
         from events.ingress import _is_corsia_self_comment
@@ -251,50 +232,4 @@ class TestCORSIASelfCommentSuppression:
         assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True, (
             "Reviewer-composed resolved-reply body must be suppressed. "
             "Check that post_resolve_reply still places the marker on its own trailing line."
-        )
-
-    def test_post_review_summary_places_marker_on_standalone_line(self):
-        from reviewer.reviewer_threads import build_summary_body
-        from events.markers import REVIEW_SUMMARY_MARKER
-
-        body_text = "## Review\n\n2 open findings."
-        marker_body = build_summary_body(body_text)
-
-        lines = marker_body.splitlines()
-        assert REVIEW_SUMMARY_MARKER in lines, (
-            "REVIEW_SUMMARY_MARKER must appear as a standalone line in the "
-            "build_summary_body output — the ingress detector requires it. "
-            "If the body format changed, update both the composer and the spec."
-        )
-
-    def test_post_resolve_reply_places_marker_on_standalone_line(self):
-        from reviewer.reviewer_threads import build_resolve_reply_body
-        from events.markers import REVIEW_RESOLVED_MARKER
-
-        evidence_report = "No cited lines; not verified fixed."
-        body = build_resolve_reply_body(evidence_report)
-
-        lines = body.splitlines()
-        assert REVIEW_RESOLVED_MARKER in lines, (
-            "REVIEW_RESOLVED_MARKER must appear as a standalone line in the "
-            "build_resolve_reply_body output — the ingress detector requires it."
-        )
-
-    def test_format_threaded_comment_body_places_fp_marker_on_standalone_line(self):
-        from reviewer.reviewer_threads import format_threaded_comment_body
-        from events.markers import REVIEW_FP_MARKER_PREFIX
-
-        finding = {
-            "severity": "FLAG",
-            "category": "test/marker-placement",
-            "description": "Marker placement assertion.",
-            "path": "backend/foo.py",
-            "line": 1,
-        }
-        body = format_threaded_comment_body(finding)
-        lines = body.splitlines()
-        marker_lines = [ln for ln in lines if ln.startswith(REVIEW_FP_MARKER_PREFIX)]
-        assert len(marker_lines) == 1, (
-            f"Expected exactly one FP marker line in format_threaded_comment_body output. "
-            f"Got {len(marker_lines)}. Body:\n{body}"
         )

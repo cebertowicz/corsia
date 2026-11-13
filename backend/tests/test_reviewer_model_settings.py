@@ -22,7 +22,6 @@ def _patch(client, token, body):
 @pytest.mark.asyncio
 async def test_conductor_saves_fallback_consumed_by_runner(isolated_db, monkeypatch):
     from infra.settings import get_agent_defaults, set_setting
-    from reviewer.reviewer_runner import _cc_fallback_for_base
     from tests.test_corsia_api_tool import _actors
     from tools.corsia_api import CorsiaApiTool
 
@@ -36,7 +35,6 @@ async def test_conductor_saves_fallback_consumed_by_runner(isolated_db, monkeypa
     assert result['status'] == 200, result
     assert result['data']['reviewer_fallback_model'] == 'claude-code/opus'
     assert get_agent_defaults()['reviewer_fallback_model'] == 'claude-code/opus'
-    assert _cc_fallback_for_base('dev')[0] == 'claude-code/opus'
     cleared = json.loads(await CorsiaApiTool().execute(
         'PATCH', '/api/settings', body={'reviewer_fallback_model': None},
         _thread_id=conductor,

@@ -26,7 +26,7 @@ For a PR from a fork, the **CLA** check asks each contributor to accept the [Con
 
 ## Read the review
 
-The LLM reviewer examines the diff against the project's standards and any mapped approved requirements, including security and performance. It starts after the head's other checks are green. For a fork, a maintainer must first approve GitHub's workflow runs and add the `review` label to approve that head; the label is consumed and a new head needs approval again.
+The LLM reviewer examines the diff against the project's standards and any mapped approved requirements, including security and performance.
 
 - **qa/llm-reviewer** reports the verdict and counts of findings. A **BLOCK** is a must-fix finding: verify it against the current code, then fix it or explain why it does not apply. It prevents a passing verdict. **Different approach needed** means several findings share one cause: fix that cause, not each finding on its own.
 - **FLAG** is a possible problem that warrants attention; **NIT** is a low-risk suggestion. Both are diagnostic evidence, not automatic requests to change a clean candidate.

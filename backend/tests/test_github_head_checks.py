@@ -13,7 +13,7 @@ from events.connectors import github_repo_activity as poller
 from events.connectors.github_notifications_feed import GhResponse
 from tests.test_github_pr_facts import _rule
 
-CHECK_STATE = {"field": "check_state", "op": "present"}
+READ_FACT = {"field": "draft", "op": "present"}
 
 
 def payload(sha="abc"):
@@ -309,7 +309,7 @@ async def _settled(monkeypatch, read, number=7):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timed_out", [False, True])
 async def test_a_held_suite_arrives_as_action_required_whatever_else_failed(isolated_db, monkeypatch, timed_out):
-    _rule("head.checks_completed", [CHECK_STATE])
+    _rule("head.checks_completed", [READ_FACT])
     found = [{"id": 2, "updated_at": "t", "status": "completed", "conclusion": "action_required",
               "latest_check_runs_count": 0},
              {"id": 3, "updated_at": "t", "status": "completed", "conclusion": "success",
@@ -330,15 +330,15 @@ async def test_a_held_suite_arrives_as_action_required_whatever_else_failed(isol
         return GhResponse(200, {}, {"total_count": len(runs), "check_runs": runs}), None
 
     facts = (await _settled(monkeypatch, read))["facts"]
-    # check_state is state_of the head's one ranked conclusion, so the two can't disagree.
-    assert facts["check_state"] == "action_required" and facts["conclusion"] == "action_required"
-    assert facts["pr_number"] == 7 and facts["mergeable"] == "UNKNOWN" and facts["head_sha"] == "abc"
-    assert facts["current_head"] == "abc" and len(paths) == 2  # suites once, then the PR; no runs read
+    assert facts["conclusion"] == "action_required"
+    assert facts["pr_number"] == 7 and facts["head_sha"] == "abc"
+    assert not {"check_state", "current_head", "mergeable"} & set(facts)
+    assert len(paths) == 2  # suites once, then the PR; no runs read
 
 
 @pytest.mark.asyncio
 async def test_a_head_whose_pull_request_moved_on_is_still_named_by_its_settled_head(isolated_db, monkeypatch):
-    _rule("head.checks_completed", [CHECK_STATE])
+    _rule("head.checks_completed", [READ_FACT])
     failed = response()
     failed.body["check_suites"][0]["conclusion"] = "failure"
     paths = []
@@ -354,7 +354,7 @@ async def test_a_head_whose_pull_request_moved_on_is_still_named_by_its_settled_
 
     event = await _settled(monkeypatch, read)
     assert event["facts"]["head_sha"] == "abc" and event["facts"]["conclusion"] == "failure"
-    assert event["facts"]["current_head"] == "new" and event["facts"]["check_state"] == "failing"
+    assert "current_head" not in event["facts"] and "check_state" not in event["facts"]
     assert paths == ["repos/o/r/commits/abc/check-suites", "repos/o/r/pulls/7"]
     assert event["event_id"] == checks._event_id("o/r", "abc", failed.body["check_suites"])
 
@@ -389,7 +389,7 @@ def _reads_with_a_pull_request(pull):
 async def test_a_rule_naming_a_read_fact_and_a_read_populated_one_fires_after_the_read(isolated_db, monkeypatch):
     from events.rule_match import test_matches
 
-    match = [{"field": "check_state", "op": "eq", "value": "green"},
+    match = [{"field": "conclusion", "op": "eq", "value": "success"},
              {"field": "draft", "op": "eq", "value": False},
              {"field": "author_origin", "op": "eq", "value": "outside"}]
     _rule("head.checks_completed", match)
@@ -407,4 +407,5 @@ async def test_a_failed_rule_probe_reads_anyway_and_the_head_still_settles(isola
     monkeypatch.setattr("events.rule_reads.type_rules", broken)
     pull = {"head": {"sha": "abc"}, "base": {"ref": "dev"}, "mergeable": True, "user": {"login": "someone"}}
     event = await _settled(monkeypatch, _reads_with_a_pull_request(pull))
-    assert event["facts"]["check_state"] == "green" and event["facts"]["current_head"] == "abc"
+    assert event["facts"]["conclusion"] == "success" and event["facts"]["author_origin"]
+    assert "check_state" not in event["facts"] and "current_head" not in event["facts"]

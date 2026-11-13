@@ -123,40 +123,31 @@ def _register(world, repo: Path) -> None:
                              protect_base_checkout=False, db=db)
 
 
-# 1 (head) -- the head tree comes from the object store into the start's own directory.
+# 1 (head) -- a head_repo fact is only a fact the worker sees: no head is written, so the
+# worker reads only its staging directory and the start's empty one, never its cwd or an ancestor.
 @pytest.mark.asyncio
-async def test_the_head_tree_is_written_from_the_object_store_beside_never_above_the_cwd(world, tmp_path):
+@pytest.mark.parametrize("sha", ["real", "0" * 40, None])
+async def test_a_head_repo_fact_starts_the_worker_without_writing_a_head(world, tmp_path, sha):
     from automation import worker_runner
+    from infra.database import get_db
+    from infra.thread_confinement import read_dirs
 
-    repo, sha = _repo(tmp_path)
+    repo, real = _repo(tmp_path)
     _register(world, repo)
     world["reply"].write_text("HANG")
     rule = await make_rule()
-    await request(head_repo="app", head_sha=sha)
+    await request(head_repo="app", head_sha=real if sha == "real" else sha)
     assert await worker_runner.drive() == 1
-    head = world["folder"] / "workers" / str(_decision(rule)) / "head"
-    assert (head / "app.py").read_text() == "x = 1\n"
-    worker = starts(rule)[0][3]
+    [(outcome, _reason, _identity, worker)] = starts(rule)
+    assert outcome == "started"
+    staging = world["staging"].resolve()
+    start = world["folder"] / "workers" / str(_decision(rule))
+    assert read_dirs(worker, get_db()) == (str(staging), str(start))
+    assert start.is_dir() and list(start.iterdir()) == []  # no head tree is written
     cwd = Path(_launch(worker)["working_dir"])
     assert cwd.name == "confined" and cwd.is_dir()
-    assert head not in cwd.parents and cwd != head and cwd not in head.parents
-
-
-# 9 -- a head SHA not in the object store, or a head with no SHA, refuses the start.
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("sha", "cause"), [
-    ("0" * 40, "commit 000000000000 is not in app's object store"),
-    (None, "head_repo needs head_sha"),
-])
-async def test_a_missing_head_sha_refuses_the_start(world, tmp_path, sha, cause):
-    repo, _sha = _repo(tmp_path)
-    _register(world, repo)
-    rule = await make_rule()
-    await request(head_repo="app", head_sha=sha)
-    await settle_all()
-    [(outcome, reason, _identity, _worker)] = starts(rule)
-    assert outcome == "refused" and reason.startswith(cause)
-    assert _workers() == [] and cause in owner_wakes()[0]
+    for read in (staging, start):
+        assert read not in cwd.parents and cwd != read and cwd not in read.parents
 
 
 # 10 -- a paused owner's start is skipped, not replayed; a fresh request after resume starts.

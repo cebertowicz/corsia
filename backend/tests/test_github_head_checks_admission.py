@@ -25,7 +25,6 @@ async def test_admission_routes_only_new_completed_suites(monkeypatch):
     monkeypatch.setattr(checks, "observe_admitted_check_suite", lambda p, pr=None: seen.append((p, pr)))
     monkeypatch.setattr(router, "_resolve_event_identity", AsyncMock(return_value=(None, {"number": 7})))
     monkeypatch.setattr(router, "prepare_route_ordered", AsyncMock(return_value=SimpleNamespace(result="done")))
-    monkeypatch.setattr(ingress, "gate_trigger_leg", lambda *_args: True)
     base = {"repository": {"full_name": "o/r"}, "check_suite": {"head_sha": "sha", "conclusion": "success"}}
     for delivery_id, action in (("new", "completed"), ("dup", "completed"), ("held", "completed"), ("other", "requested")):
         await admission._admission_unit("check_suite", {**base, "action": action}, delivery_id, "webhook", object(), [])
@@ -40,12 +39,12 @@ async def test_admission_routes_only_new_completed_suites(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cancelled_suite_uses_payload_pr_without_lookup(monkeypatch):
-    from reviewer import gh_helpers
+    from events import pr_lookup
 
     def forbidden(*_args):
         pytest.fail("unexpected GitHub lookup")
 
-    monkeypatch.setattr(gh_helpers, "get_prs_for_sha", forbidden)
+    monkeypatch.setattr(pr_lookup, "get_prs_for_sha", forbidden)
     monkeypatch.setenv("CORSIA_TEST_MODE", "0")
     monkeypatch.setenv(checks.ENABLE_ENV, "1")
     monkeypatch.setattr(router, "emit_product_event", lambda *_args, **_kwargs: None)

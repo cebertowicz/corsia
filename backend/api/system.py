@@ -195,7 +195,7 @@ async def get_settings(user: dict = Depends(require_user)):
 
 def _save_exact_model_defaults(body: dict) -> dict:
     """Save the no-fallback model settings in ``body``: exact runnable IDs only."""
-    from reviewer.reviewer_runner import reviewer_model_error
+    from reviewer.model_check import reviewer_model_error
 
     updated = {key: body[key] for key in _EXACT_REVIEWER_MODELS if key in body}
     for key, value in updated.items():

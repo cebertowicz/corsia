@@ -1,8 +1,7 @@
-"""Shared HTML comment markers for CORSIA's LLM reviewer output.
+"""Shared HTML comment markers carried by automated review comments.
 
-Single canonical source of truth — imported by both events.github_mapper
-(comment noise-filter) and reviewer.reviewer_threads (comment authoring).
-No dependencies on either layer.
+Single canonical source of truth for the comment noise-filter in
+events.github_mapper and the ``has_reviewer_marker`` event fact.
 """
 
 REVIEW_SUMMARY_MARKER = "<!-- corsia-review-summary -->"

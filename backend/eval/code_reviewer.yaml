@@ -1,10 +1,7 @@
 # Reviewer evaluation defaults and operator notes.
 #
-# Live production reviewer selection is NOT driven by this file. Runtime
-# selection resolves from CORSIA_REVIEWER_MODEL / CORSIA_REVIEWER_FALLBACK_MODEL
-# first, then agents.defaults.reviewer_model / reviewer_fallback_model in
-# settings.json. During the Claude Code weekly-limit outage, set the runtime
-# primary to codex/codex-auto-review after the Codex backend support is deployed.
+# CORSIA no longer selects or runs a review model itself: review runs as a
+# workflow that does its own GitHub reads, so nothing here drives a live gate.
 #
 # The historical CI-flow proposal remains in
 # docs/design/e2e-test-tiering-and-mock-infrastructure.md; it is not runtime or

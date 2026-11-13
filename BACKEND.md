@@ -36,7 +36,7 @@ subagents/*                  ← provider runtime continuity; may call infra/run
 registry/*                   ← observes canonical messages/tools and projects registry rows into artifact/document views
 memory/*                     ← infra DB + llm helpers; jobs call into memory, not the reverse
 tools/*                      ← tools.base/registry + infra config/sandbox as needed
-reviewer/*                  ← reviewer-only helpers called from events/reviewer_gate.py
+reviewer/*                  ← helpers shared with the host-access lease reviewer
 ```
 
 ## External MCP tools

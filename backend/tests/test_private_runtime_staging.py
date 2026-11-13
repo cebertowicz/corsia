@@ -118,23 +118,3 @@ def test_startup_sweep_clears_leftover_installers_and_staged_browser_directories
     assert not staged.exists()
     assert outside.exists()
 
-
-def test_codex_reviewer_output_file_is_private_and_removed_after_the_run(state_root) -> None:
-    from reviewer.reviewer_backends import invoke_codex_reviewer
-
-    seen: list[Path] = []
-
-    def run(cmd, **_kwargs):
-        output = Path(cmd[cmd.index("--output-last-message") + 1])
-        seen.append(output)
-        assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
-        output.write_text("verdict")
-        return subprocess.CompletedProcess(cmd, 0, '{"type":"turn.completed"}\n', "")
-
-    with patch("reviewer.reviewer_backends.subprocess.run", run), patch(
-        "reviewer.reviewer_backends.codex_exact_source_controls", return_value=[],
-    ), patch("reviewer.reviewer_backends.codex_project_discovery_args", return_value=[]):
-        assert invoke_codex_reviewer("p", str(state_root), model="m", source_git_dir=str(state_root), env={}) == "verdict"
-
-    assert seen[0].parent == state_root / "runtime" / "reviewer-output"
-    assert not seen[0].exists()

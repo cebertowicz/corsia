@@ -54,7 +54,7 @@ class TestResolver:
     def test_populated_array_without_head_metadata_falls_back_to_current_head(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
         )
         payload = _check_suite_payload(pull_requests=[{"number": 704}])
         assert identity.pr_number_from_check_suite_event(payload) == 704
@@ -63,7 +63,7 @@ class TestResolver:
     def test_populated_single_pr_array_matches_current_head(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
         )
         payload = _check_suite_payload(
             pull_requests=[
@@ -78,7 +78,7 @@ class TestResolver:
     def test_populated_single_pr_array_rejects_stale_head(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda *a: called.append(a) or [_pr(704, head_sha="newer-sha")],
         )
         payload = _check_suite_payload(
@@ -93,7 +93,7 @@ class TestResolver:
     def test_populated_multi_pr_array_filters_by_current_head(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
         )
         payload = _check_suite_payload(
             pull_requests=[
@@ -118,35 +118,19 @@ class TestResolver:
 
     def test_empty_array_falls_back_to_head_sha(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda repo, sha: [_pr(704)]
+            "events.pr_lookup.get_prs_for_sha", lambda repo, sha: [_pr(704)]
         )
         payload = _check_suite_payload(pull_requests=[])
         assert identity.pr_number_from_check_suite_event(payload) == 704
 
-    def test_fork_head_resolves_through_the_open_pr_list(self, monkeypatch):
-        """A fork PR's suite has no pull_requests and its commit lists no PR until merge."""
-        import json
-
-        def run_gh(args, **kw):
-            if "/commits/" in args[1]:
-                return "[]"
-            return json.dumps({"number": 2065, "state": "open", "base": {"ref": "dev"},
-                               "head": {"ref": "fork-branch", "sha": "abc123"}})
-        monkeypatch.setattr("reviewer.gh_helpers._run_gh", run_gh)
-        payload = _check_suite_payload(pull_requests=[], head_branch="fork-branch")
-        assert identity.check_suite_pr_metadata_from_event(payload) == {
-            "number": 2065, "state": "open", "base_ref": "dev",
-            "head_ref": "fork-branch", "head_sha": "abc123",
-        }
-
     def test_empty_array_and_no_pr_for_sha(self, monkeypatch):
-        monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda repo, sha: [])
+        monkeypatch.setattr("events.pr_lookup.get_prs_for_sha", lambda repo, sha: [])
         payload = _check_suite_payload(pull_requests=[])
         assert identity.pr_number_from_check_suite_event(payload) is None
 
     def test_empty_array_and_fetch_error_is_loud(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda repo, sha: None
+            "events.pr_lookup.get_prs_for_sha", lambda repo, sha: None
         )  # rate-limit / error
         payload = _check_suite_payload(pull_requests=[])
         with pytest.raises(identity.PrResolutionError):
@@ -155,7 +139,7 @@ class TestResolver:
     def test_empty_array_missing_head_sha_no_call(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(1)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(1)]
         )
         payload = _check_suite_payload(pull_requests=[], head_sha="")
         assert identity.pr_number_from_check_suite_event(payload) is None
@@ -163,7 +147,7 @@ class TestResolver:
 
     def test_multiple_prs_filter_by_current_head_branch(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda repo, sha: [
                 _pr(700, head_ref="other-branch"),
                 _pr(704, head_ref="feature/foo"),
@@ -175,7 +159,7 @@ class TestResolver:
 
     def test_closed_pr_still_routes_when_current_head_matches(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda repo, sha: [_pr(704, state="closed")],
         )
         payload = _check_suite_payload(pull_requests=[])
@@ -183,7 +167,7 @@ class TestResolver:
 
     def test_superseded_sha_does_not_route_to_current_pr(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda repo, sha: [_pr(704, head_sha="newer-sha")],
         )
         payload = _check_suite_payload(pull_requests=[])
@@ -191,7 +175,7 @@ class TestResolver:
 
     def test_closed_historical_match_does_not_beat_open_pr(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda repo, sha: [
                 _pr(703, state="closed"),
                 _pr(704, state="open"),
@@ -202,7 +186,7 @@ class TestResolver:
 
     def test_multiple_current_head_branch_matches_are_loud(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda repo, sha: [_pr(704), _pr(705)],
         )
         payload = _check_suite_payload(pull_requests=[], head_branch="feature/foo")
@@ -216,7 +200,7 @@ class TestResolver:
         ccd2d5dcc199d432: partial-metadata shape misclassified main reds)."""
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda *a: called.append(a) or [_pr(704, base_ref="main")],
         )
         payload = _check_suite_payload(
@@ -232,7 +216,7 @@ class TestResolver:
     def test_partial_metadata_keeps_payload_identity_when_lookup_finds_none(
         self, monkeypatch
     ):
-        monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda *a: [])
+        monkeypatch.setattr("events.pr_lookup.get_prs_for_sha", lambda *a: [])
         payload = _check_suite_payload(
             pull_requests=[
                 {"number": 704, "head": {"ref": "feature/foo", "sha": "abc123"}}
@@ -246,7 +230,7 @@ class TestResolver:
         self, monkeypatch
     ):
         """Enrichment failure must not dead-letter an identity-known event."""
-        monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda *a: None)
+        monkeypatch.setattr("events.pr_lookup.get_prs_for_sha", lambda *a: None)
         payload = _check_suite_payload(
             pull_requests=[
                 {"number": 704, "head": {"ref": "feature/foo", "sha": "abc123"}}
@@ -259,7 +243,7 @@ class TestResolver:
     def test_complete_payload_metadata_skips_lookup(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or []
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or []
         )
         payload = _check_suite_payload(
             pull_requests=[{
@@ -276,7 +260,7 @@ class TestResolver:
 class TestResolveIdentityEndToEnd:
     def test_check_suite_resolves_owner_via_fallback(self, monkeypatch):
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda repo, sha: [_pr(704)]
+            "events.pr_lookup.get_prs_for_sha", lambda repo, sha: [_pr(704)]
         )
         payload = _check_suite_payload(pull_requests=[])
         rid = identity.resolve_identity("webhook.github.check_suite_completed", payload)
@@ -291,7 +275,7 @@ class TestConnectorNormalization:
 
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
         )
         envelope = normalize(
             "github",
@@ -313,7 +297,7 @@ class TestConnectorNormalization:
 
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(999)]
         )
         payload = _check_suite_payload(
             pull_requests=[
@@ -345,7 +329,7 @@ class TestConnectorNormalization:
 
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
         )
         envelope = normalize("github", _check_suite_payload(pull_requests=[{"number": 704}]))
 
@@ -359,7 +343,7 @@ class TestConnectorNormalization:
 
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: called.append(a) or [_pr(704)]
         )
         envelope = normalize("github", _check_suite_payload(pull_requests=[]))
 
@@ -375,7 +359,7 @@ class TestConnectorNormalization:
 
         called = []
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda *a: called.append(a)
             or [_pr(704, base_ref="main", head_ref="feature/foo", head_sha="abc123")],
         )
@@ -407,34 +391,6 @@ class TestRouterCancellation:
         assert result.reason == "check_suite_cancelled_dropped"
 
 
-class TestReviewerRouteResolutionFailure:
-    def test_resolution_failure_sets_reviewer_status_error(self, monkeypatch):
-        from events import identity as identity_mod
-        from events import reviewer_route
-
-        status_calls = []
-
-        def fail_resolution(payload):
-            raise identity_mod.PrResolutionError("lookup failed")
-
-        monkeypatch.setattr(identity_mod, "pr_number_from_check_suite_event", fail_resolution)
-        monkeypatch.setattr(
-            "reviewer.reviewer_status.set_error",
-            lambda repo, sha, description: status_calls.append((repo, sha, description)),
-        )
-        payload = _check_suite_payload(pull_requests=[])
-
-        reviewer_route.check_gate_on_trigger("webhook.github.check_suite_completed", payload)
-
-        assert status_calls == [
-            (
-                "cebertowicz/corsia",
-                "abc123",
-                "qa/llm-reviewer: PR resolution error — lookup failed",
-            )
-        ]
-
-
 class TestNoOwnerMainFailureRouting:
     def test_empty_array_main_failure_dead_letters_after_head_sha_fallback(
         self, monkeypatch
@@ -442,7 +398,7 @@ class TestNoOwnerMainFailureRouting:
         from events import router
 
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha",
+            "events.pr_lookup.get_prs_for_sha",
             lambda *a: [
                 _pr(704, base_ref="main", head_ref="feature/foo", head_sha="abc123")
             ],
@@ -501,7 +457,7 @@ class TestNoOwnerMainFailureRouting:
         from events import router
 
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: [_pr(999)]
         )
         monkeypatch.setattr(
             router,
@@ -557,7 +513,7 @@ class TestNoOwnerMainFailureRouting:
         from events import router
 
         monkeypatch.setattr(
-            "reviewer.gh_helpers.get_prs_for_sha", lambda *a: [_pr(999)]
+            "events.pr_lookup.get_prs_for_sha", lambda *a: [_pr(999)]
         )
         monkeypatch.setattr(
             router,
@@ -619,7 +575,7 @@ class TestNoOwnerMainFailureRouting:
                 raise AssertionError("check_suite PR metadata resolved more than once")
             return [_pr(704, base_ref="main", head_ref="feature/foo", head_sha="abc123")]
 
-        monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", resolve_prs)
+        monkeypatch.setattr("events.pr_lookup.get_prs_for_sha", resolve_prs)
         monkeypatch.setattr(
             router,
             "resolve_targets",

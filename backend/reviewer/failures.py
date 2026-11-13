@@ -2,8 +2,7 @@
 
 Owns the exception classes and error-text classification shared by the
 Claude Code and Codex reviewer backends, plus Claude Code's CLI-failure
-helpers and ``--max-turns`` budget resolution. Names are re-exported from
-``reviewer_backends`` so importers are unchanged.
+helpers and ``--max-turns`` budget resolution.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ class CCMaxTurnsError(RuntimeError):
 # per turn ≈ 157 turns), so wall clock decides when a review stops, for both
 # backends alike. It stays finite so a pathological fast loop is still bounded.
 # Raise it further only together with the 1800 s subprocess timeout that both
-# backends pass to subprocess.run in reviewer_backends.py.
+# backends pass to subprocess.run.
 DEFAULT_CC_MAX_TURNS = 200
 
 
