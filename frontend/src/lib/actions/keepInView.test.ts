@@ -22,19 +22,20 @@ function build(pinnedHeight: number | null) {
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); });
 
 describe('keepInView with a pinned bottom row', () => {
-	it('leaves the height of a sticky [data-pin-bottom] row clear below the field it reveals', () => {
-		const { field } = build(52);
+	it('leaves the height of a sticky [data-pin-bottom] row clear at the scroller\'s bottom, for the browser\'s caret reveal too', () => {
+		const { owner, field } = build(52);
 		const action = keepInView(field, { enabled: true });
 		action.update({ enabled: true });
-		expect(field.style.scrollMarginBottom).toBe('52px');
+		expect(owner.style.scrollPaddingBottom).toBe('52px');
 		action.destroy();
+		expect(owner.style.scrollPaddingBottom).toBe('');
 	});
 
-	it('asks for no margin when nothing is pinned', () => {
-		const { field } = build(null);
+	it('adds no scroll padding when nothing is pinned', () => {
+		const { owner, field } = build(null);
 		const action = keepInView(field, { enabled: true });
 		action.update({ enabled: true });
-		expect(field.style.scrollMarginBottom).toBe('0px');
+		expect(owner.style.scrollPaddingBottom).toBe('');
 		action.destroy();
 	});
 });

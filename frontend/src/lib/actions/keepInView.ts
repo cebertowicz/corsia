@@ -42,8 +42,9 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * around that block; a block too tall for the scroller keeps the node-into-view
  * behaviour, and a node itself taller than the scroller shows its end.
  *
- * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: the node carries its height as a scroll
- * margin while it is revealed alone. A revealed block holds that row at its own end, so it needs none.
+ * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: while the node is revealed alone the
+ * scroller carries that row's height as scroll padding, so the browser's own caret reveal after each typed character leaves it clear too, not only
+ * this action's scroll. A revealed block holds that row at its own end, so it needs none.
  *
  * A resize brings the node back only while its end was in view: a reader who scrolled away from the field (up to
  * read the thread above a long reply) is not pulled back to it when the scroller or viewport changes size.
@@ -54,23 +55,40 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	const owner = scroller(node);
 	/** Whether the node's end (the caret of a growing field, and its Send) was in view at the last scroll. */
 	let endShown = true;
+	/** The bottom scroll padding this action added to the scroller for a pinned row. */
+	let held = 0;
+	/** When this action last scrolled, and how many times in a row a scroll right after one has been put back. */
+	let revealedAt = -Infinity, repairs = 0;
 	const readShown = () => {
 		const end = node.getBoundingClientRect().bottom;
 		const view = owner?.getBoundingClientRect() ?? { top: 0, bottom: window.visualViewport?.height ?? window.innerHeight };
-		endShown = end >= view.top && end <= view.bottom + 1;
+		endShown = end >= view.top && end <= view.bottom - held + 1;
+		// The browser can move the scroller once more right after a reveal (its own caret reveal, settling against the layout that
+		// reveal left), which leaves the end under the pinned row; a scroll that close behind ours is put back, a few times at most.
+		if (endShown) repairs = 0;
+		else if (enabled && node === document.activeElement && performance.now() - revealedAt < 250 && repairs < 3) { repairs++; schedule(); }
 	};
 	const reveal = () => {
 		if (!enabled) return;
-		const room = owner ? roomOf(owner) : window.visualViewport?.height ?? window.innerHeight;
+		revealedAt = performance.now();
+		const room = owner ? roomOf(owner) + held : window.visualViewport?.height ?? window.innerHeight;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= room;
 		const target = fits ? whole! : node;
-		if (!fits) {
-			const margin = `${pinnedBottom(owner)}px`;
-			if (node.style.scrollMarginBottom !== margin) node.style.scrollMarginBottom = margin;
+		const pinned = owner && !fits ? pinnedBottom(owner) : 0;
+		if (owner && pinned !== held) {
+			const own = (parseFloat(getComputedStyle(owner).scrollPaddingBottom) || 0) - held;
+			owner.style.scrollPaddingBottom = `${own + pinned}px`;
+			held = pinned;
 		}
 		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
-		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room ? 'end' : 'nearest';
+		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
 		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
+		// A field taller than the room above the pinned row can be left by `scrollIntoView` with its end under that row (the browser does not
+		// always honour the scroll padding for a block taller than the room); the end is then scrolled up to the row's top edge directly.
+		if (owner && pinned && target === node) {
+			const over = node.getBoundingClientRect().bottom - (owner.getBoundingClientRect().bottom - pinned);
+			if (over > 1) owner.scrollTop += over;
+		}
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
@@ -94,6 +112,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		},
 		destroy() {
 			cancelAnimationFrame(frame);
+			if (owner && held) owner.style.scrollPaddingBottom = '';
 			viewport?.removeEventListener('resize', resized);
 			(owner ?? window).removeEventListener('scroll', readShown);
 			grown?.disconnect();
