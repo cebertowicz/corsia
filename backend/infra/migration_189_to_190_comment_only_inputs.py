@@ -20,7 +20,7 @@ def migrate_189_to_190(conn: sqlite3.Connection) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO chat_visible_content(message_id,thread_id,content) "
         "SELECT id,thread_id,'' FROM messages "
-        # str.strip()'s blanks, as `comment_only` reads them; trim() alone drops only spaces.
+        # The six blanks `comment_only` strips (its _BLANKS); trim() alone drops only spaces.
         "WHERE role='user' AND trim(COALESCE(content,''),char(32,9,10,13,11,12))='' AND json_valid(metadata) "
         "AND COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) > 0 "
         # Absent, null or an empty list; anything else counts as attachments, as in `comment_only`.

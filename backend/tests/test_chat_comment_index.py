@@ -366,3 +366,22 @@ def test_viewing_a_shared_answer_leaves_an_earlier_answer_to_the_reply_unread(is
         assert [(a['assistant_message_id'], a['unread']) for a in answers] == [('early', True), ('shared', False)]
     finally:
         db.close()
+
+
+def test_a_held_comment_and_reply_carry_what_tells_a_hold_from_a_send(isolated_db):
+    """A queued input is held, not in flight, when no write happened and no turn owns it; its thread reads both."""
+    db = get_db()
+    try:
+        _seed_root_and_reply(db)
+        db.execute("UPDATE messages SET delivery_state='queued', delivery_error='no_model_selected', write_outcome='proved_no_write' WHERE id='user'")
+        db.execute("UPDATE messages SET delivery_state='queued', active_turn_id='turn-1' WHERE id='reply'")
+        page = [{'id': 'target', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', page)
+        root = next(comment for comment in page[0]['chat_comments'] if comment['cid'] == 'c1.1')
+        held = ('queued', 'no_model_selected', 'proved_no_write', None)
+        assert tuple(root[key] for key in ('delivery_state', 'delivery_error', 'write_outcome', 'active_turn_id')) == held
+        reply = next(answer for answer in root['answers'] if answer['author_kind'] == 'user')
+        sending = ('queued', None, None, 'turn-1')
+        assert tuple(reply[key] for key in ('delivery_state', 'delivery_error', 'write_outcome', 'active_turn_id')) == sending
+    finally:
+        db.close()

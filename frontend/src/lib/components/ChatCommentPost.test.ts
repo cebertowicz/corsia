@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { workspaceModels } from '$lib/stores/models';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-import { endedSends } from '$lib/chatCommentDelivery';
+import { unsentSends } from '$lib/chatCommentDelivery';
 import { commentFailure, postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
@@ -283,10 +283,10 @@ it.each([
 ])('takes the Retry away after a Retry refused with %s only when no press can get past it', async (detail, retry) => {
 	const id = `retried-${detail}`;
 	const failed = { id: 'c1', cid: 'cid-1', user_message_id: id, quote: 'text', note: 'n', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-12T00:00:00Z', delivery_state: 'failed', delivery_error: 'x', answers: [] };
-	expect(endedSends(failed as never)[0].retry?.label).toBe('Retry');
+	expect(unsentSends(failed as never)[0].retry?.label).toBe('Retry');
 	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail, reference: 'ref-3' }) })));
 	await retryChatComment('thread', id, 'comment');
-	const [send] = endedSends(failed as never);
+	const [send] = unsentSends(failed as never);
 	expect([send.delivery.failed, send.retry?.label ?? null]).toEqual([true, retry]);
 });
 

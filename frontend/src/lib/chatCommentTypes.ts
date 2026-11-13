@@ -1,5 +1,9 @@
-/** The server's delivery of the input that carried a comment or a person's reply; an ended one shows in its thread as chat shows it. */
-type Delivery = { delivery_state?: string | null; delivery_error?: string | null };
+/** The server's delivery of the input that carried a comment or a person's reply; a held or ended one shows in its thread as chat shows it. */
+export type Delivery = {
+	delivery_state?: string | null; delivery_error?: string | null;
+	/** With `active_turn_id`, what tells a held queued input from one being sent (messageDelivery.deliveryPresentation). */
+	write_outcome?: string | null; active_turn_id?: string | null; delivering_reason?: string | null;
+};
 
 export type ChatCommentAnswer = {
 	user_message_id: string;

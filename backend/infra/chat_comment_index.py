@@ -9,19 +9,28 @@ from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers,
 from infra.delivery_retry import newest_attempt_delivery
 
 
+# The blanks the 189 -> 190 data step trims in SQL (char(32,9,10,13,11,12)); str.strip() alone also drops
+# Unicode spaces SQL keeps, and the two would then disagree about a row.
+_BLANKS = ' \t\n\r\x0b\x0c'
+
+
 def comment_only(content: str | None, metadata: dict | None) -> bool:
     """A user input that carries chat comments and nothing else: no text, no attachments.
 
     Its comments are its whole content, so chat draws nothing for it; it lives in
-    its comment thread only. The 189 -> 190 data step reads the same rule in SQL:
-    comments are a non-empty list, and attachments are absent, null or an empty list.
+    its comment thread only. This is the one rule: place_comments stores its answer
+    for reads (an empty `chat_visible_content`), the live broadcast asks it of each
+    row, and the 189 -> 190 data step reads it in SQL, pinned to this function by
+    tests/test_migration_189_to_190_comment_only_inputs.py: comments are a non-empty
+    array, attachments are absent, null or an empty array (any other value counts as
+    attachments), and the text holds only those six blanks.
     """
     metadata = metadata if isinstance(metadata, dict) else {}
     reply_context = metadata.get('reply_context')
     comments = reply_context.get('comments') if isinstance(reply_context, dict) else None
     attachments = metadata.get('attachments')
-    return (isinstance(comments, list) and bool(comments) and attachments in (None, [])
-            and not (content or '').strip())
+    no_attachments = attachments is None or (isinstance(attachments, list) and not attachments)
+    return isinstance(comments, list) and bool(comments) and no_attachments and not (content or '').strip(_BLANKS)
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
@@ -100,19 +109,21 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
     if not sender_ids:
         return
     senders = db.execute(
-        "SELECT id,metadata,delivery_state,delivery_error FROM messages "
+        "SELECT id,metadata,delivery_state,delivery_error,write_outcome,active_turn_id FROM messages "
         "WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
         (thread_id, json.dumps(sender_ids)),
     ).fetchall()
     comments = {}
     # A comment is its input: it shows the delivery of that input's newest Retry copy, so a failure stays in
     # its thread with Retry until a copy is delivered, including where the copy got a thread of its own.
-    for sender_id, metadata, delivery_state, delivery_error in senders:
+    # A queued input also carries what tells a hold from a send in flight, so its thread can say it is held.
+    for sender_id, metadata, delivery_state, delivery_error, write_outcome, active_turn_id in senders:
         if delivery_state in ('failed', 'ambiguous'):
             delivery_state, delivery_error = newest_attempt_delivery(db, thread_id, sender_id, delivery_state, delivery_error)
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
             comments[(sender_id, comment['cid'])] = {
                 **comment, 'delivery_state': delivery_state, 'delivery_error': delivery_error,
+                'write_outcome': write_outcome, 'active_turn_id': active_turn_id,
             }
     threads = {}
     for target, sender, cid, created, _, _, _, root_sender, _, _ in rows:
@@ -133,6 +144,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
                 'author_kind': 'user', 'user_message_id': sender, 'cid': cid,
                 'text': comment['note'], 'created_at': created, 'unread': False,
                 'delivery_state': comment['delivery_state'], 'delivery_error': comment['delivery_error'],
+                'write_outcome': comment['write_outcome'], 'active_turn_id': comment['active_turn_id'],
             })
             replies_added.add((sender, cid))
         if answer_id and text is not None:

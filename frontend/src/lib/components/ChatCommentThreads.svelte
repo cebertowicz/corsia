@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { endedSends, type EndedSend } from '$lib/chatCommentDelivery';
+	import { unsentSends, type UnsentSend } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 	import { retryChatComment } from './composerSend';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
@@ -20,7 +20,7 @@
 
 	/** The ended sends whose Retry is on its way, so a second press waits for the first. */
 	let retrying = $state<string[]>([]);
-	async function retry(send: EndedSend): Promise<void> {
+	async function retry(send: UnsentSend): Promise<void> {
 		retrying = [...retrying, send.messageId];
 		try { await retryChatComment(threadId, send.messageId, send.root ? 'comment' : 'reply'); }
 		finally { retrying = retrying.filter(id => id !== send.messageId); }
@@ -35,12 +35,12 @@
 		return JSON.stringify([answer.user_message_id, answer.cid, answer.author_kind === 'agent' ? answer.assistant_message_id : null]);
 	}
 	function thread(comment: ChatComment): CommentThreadData {
-		const ended = new Set(endedSends(comment).filter(send => !send.root).map(send => send.messageId));
+		const unsent = new Set(unsentSends(comment).filter(send => !send.root).map(send => send.messageId));
 		return {
 			id: comment.cid, anchor: comment.quote, author: 'user', authorKind: 'user', text: comment.note,
 			at: formatTime(comment.created_at), createdAt: comment.created_at, resolved: false, orphaned: detached, detached,
-			// A reply whose delivery ended shows below as chat shows it, not as a delivered reply.
-			replies: comment.answers.filter(answer => !ended.has(answer.user_message_id)).map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
+			// A reply that is held or whose delivery ended shows below as chat shows it, not as a delivered reply.
+			replies: comment.answers.filter(answer => !unsent.has(answer.user_message_id)).map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
 				authorThreadId: answer.author_kind === 'agent' ? threadId : undefined, authorKind: answer.author_kind, text: answer.text, at: formatTime(answer.created_at), createdAt: answer.created_at })),
 			newReplyIds: comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).map(answerId),
 		};
@@ -68,7 +68,7 @@
 				{#if !detached && !margin}<CommentQuote quote={comment.quote} />{/if}
 				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentDrafts.get(comment.id), (text) => chatCommentDrafts.set(comment.id, text)} replyPending={!!chatCommentDrafts.reply(comment.id)?.posting} replyError={chatCommentDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); await postReply(comment, text); }}>
 				{#snippet failure()}
-				{#each endedSends(comment) as send (send.messageId)}
+				{#each unsentSends(comment) as send (send.messageId)}
 					<div class="failed-reply" role="status">
 						<CommentReplyList replies={[{ id: send.messageId, author: 'user', authorKind: 'user', text: send.note, at: formatTime(send.createdAt) }]} />
 						<!-- Chat's label and red mark for a message in this state (UserMessageBubble). -->

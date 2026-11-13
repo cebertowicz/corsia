@@ -52,3 +52,28 @@ def test_reads_malformed_rows_as_comment_only_does():
         marked = {row[0] for row in db.execute("SELECT message_id FROM chat_visible_content")}
     assert marked == {message_id for message_id, metadata in cases.items() if comment_only('', metadata)}
     assert marked == {'null-files', 'empty-files'}
+
+
+def test_reads_every_value_as_comment_only_does():
+    """The data step and the live broadcast decide each row alike, so a row never shows live and vanishes on reload."""
+    from infra.chat_comment_index import comment_only
+
+    texts = {'empty': '', 'ascii-blanks': ' \t\n\r\x0b\x0c', 'nbsp': ' ', 'line-sep': ' ', 'nel': '\x85', 'text': 'x'}
+    files = {'absent': ..., 'false': False, 'zero': 0, 'empty-string': '', 'empty-object': {}, 'list-of-null': [None]}
+    contexts = {'list-context': [COMMENTS['reply_context']], 'null-context': None}
+    cases = {}
+    for text_name, text in texts.items():
+        for files_name, value in files.items():
+            cases[f'{text_name}/{files_name}'] = (text, COMMENTS if value is ... else {**COMMENTS, 'attachments': value})
+    for name, context in contexts.items():
+        cases[name] = ('', {'reply_context': context})
+    cases['list-metadata'] = ('', [COMMENTS])
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        for message_id, (text, metadata) in cases.items():
+            _message(db, message_id, 'user', text, metadata)
+        migrate_189_to_190(db)
+        marked = {row[0] for row in db.execute("SELECT message_id FROM chat_visible_content")}
+    expected = {message_id for message_id, (text, metadata) in cases.items() if comment_only(text, metadata)}
+    assert marked == expected
+    assert expected == {'empty/absent', 'ascii-blanks/absent'}

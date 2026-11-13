@@ -1,8 +1,10 @@
 """Read stamps and the write-time index of chat-comment answers."""
 
-# What chat draws for a message, decided when it was saved: the chat text of an agent message
-# that answered comments, or '' for a person's comment-only input, which chat never draws
-# (chat_comment_index.place_comments; focus_rows.NEVER_DRAWN_FILTER reads it).
+# What chat draws for a message, decided when it was saved. Two meanings: for an agent message
+# that answered comments, its chat text without the answers; '' for a person's comment-only input,
+# which chat never draws. The '' row is written by chat_comment_index.place_comments (and the
+# 189 -> 190 data step) from chat_comment_index.comment_only, the rule the live broadcast also asks,
+# and every chat read honours it through focus_rows.NEVER_DRAWN_FILTER.
 CHAT_VISIBLE_CONTENT_SQL = """CREATE TABLE IF NOT EXISTS chat_visible_content (
     message_id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL,
