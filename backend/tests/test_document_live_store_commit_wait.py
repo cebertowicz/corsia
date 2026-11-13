@@ -5,10 +5,19 @@ import logging
 import sqlite3
 import threading
 import time
+import types
 
 import pytest
 
+from doceditor import live_store_journal
 from doceditor.live_store import LiveStore
+
+
+@pytest.fixture(autouse=True)
+def _fresh_process():
+    live_store_journal._stayed.clear()  # each test is a process that has opened no store yet
+    yield
+    live_store_journal._stayed.clear()
 
 
 def _hold_commit(path, held: threading.Event, release: threading.Event) -> None:
@@ -36,7 +45,7 @@ def test_existing_rollback_journal_store_converts_on_open(tmp_path):
     assert store._read("PRAGMA journal_mode")[0][0] == "wal"
 
 
-@pytest.mark.parametrize("table", ["live", "mirror"])
+@pytest.mark.parametrize("table", ["live", "mirror", "publish"])  # publish: damage no open-time read touches
 def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table, caplog):
     path = tmp_path / "state.sqlite"
     LiveStore(path)
@@ -48,8 +57,10 @@ def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table,
     data[(root - 1) * size:root * size] = b"\xa5" * size
     path.write_bytes(bytes(data))
     with caplog.at_level(logging.WARNING, logger="doceditor.live_store_journal"):
-        LiveStore(path)  # the open itself must not rewrite the damaged bytes
+        store = LiveStore(path)  # the open itself must not rewrite the damaged bytes
     assert path.read_bytes() == bytes(data)
+    if table == "publish":  # quick_check fails yet the store's reads succeed
+        assert store._read("SELECT count(*) FROM meta")[0][0] == 1
     assert [r.getMessage().split(": ", 1)[1].split(" (")[0] for r in caplog.records] == ["quick_check failed"]
     assert sorted(entry.name for entry in tmp_path.iterdir()) == ["state.sqlite"]
 
@@ -69,7 +80,7 @@ class _BusyOnCheck:
         return getattr(self._connection, name)
 
 
-def test_busy_integrity_check_keeps_rollback_mode_logs_once_and_converts_next_open(tmp_path, monkeypatch, caplog):
+def test_busy_integrity_check_keeps_rollback_mode_and_logs_once_per_process(tmp_path, monkeypatch, caplog):
     path = tmp_path / "state.sqlite"
     LiveStore(path)
     with sqlite3.connect(path, isolation_level=None) as db:
@@ -82,7 +93,9 @@ def test_busy_integrity_check_keeps_rollback_mode_logs_once_and_converts_next_op
         assert store._read("PRAGMA journal_mode")[0][0] == "delete"
     warnings = [r.getMessage() for r in caplog.records]
     assert len(warnings) == 1
-    assert str(path) in warnings[0] and "busy, will convert on a later open" in warnings[0]
+    assert str(path) in warnings[0] and "busy, will convert on the first open after a restart" in warnings[0]
+    assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "delete"  # no second scan in this process
+    live_store_journal._stayed.clear()  # a restarted process
     assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "wal"
 
 
@@ -121,8 +134,61 @@ def test_lock_held_during_conversion_does_not_refuse_the_open(tmp_path, monkeypa
         for reader in readers:
             reader.close()
     warnings = [r.getMessage() for r in caplog.records]
-    assert len(warnings) == 1 and "busy, will convert on a later open" in warnings[0]
+    assert len(warnings) == 1 and "busy, will convert on the first open after a restart" in warnings[0]
+    live_store_journal._stayed.clear()  # a restarted process
     assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "wal"
+
+
+class _CountingCheck:
+    """Counts integrity checks, and optionally answers the switch to WAL with the mode SQLite stayed in."""
+
+    def __init__(self, connection, checks, stuck_in=None):
+        self._connection, self._checks, self._stuck_in = connection, checks, stuck_in
+
+    def execute(self, sql, *args):
+        if "quick_check" in sql:
+            self._checks.append(sql)
+        if self._stuck_in and "journal_mode=WAL" in sql:
+            return types.SimpleNamespace(fetchone=lambda: (self._stuck_in,))
+        return self._connection.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_failing_store_is_scanned_once_per_process(tmp_path, monkeypatch):
+    path = tmp_path / "state.sqlite"
+    LiveStore(path)
+    with sqlite3.connect(path, isolation_level=None) as db:
+        db.execute("PRAGMA journal_mode=DELETE")
+        size = db.execute("PRAGMA page_size").fetchone()[0]
+        root = db.execute("SELECT rootpage FROM sqlite_master WHERE name='publish'").fetchone()[0]
+    data = bytearray(path.read_bytes())
+    data[(root - 1) * size:root * size] = b"\xa5" * size
+    path.write_bytes(bytes(data))
+    checks: list[str] = []
+    connect = LiveStore._connect
+    monkeypatch.setattr(LiveStore, "_connect", lambda self: _CountingCheck(connect(self), checks))
+    LiveStore(path)
+    LiveStore(path)
+    assert len(checks) == 1
+
+
+def test_store_sqlite_cannot_switch_to_wal_says_which_mode_it_is_in(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "state.sqlite"
+    LiveStore(path)
+    with sqlite3.connect(path, isolation_level=None) as db:
+        db.execute("PRAGMA journal_mode=DELETE")
+    checks: list[str] = []
+    connect = LiveStore._connect
+    monkeypatch.setattr(LiveStore, "_connect", lambda self: _CountingCheck(connect(self), checks, stuck_in="delete"))
+    with caplog.at_level(logging.WARNING, logger="doceditor.live_store_journal"):
+        store = LiveStore(path)
+        LiveStore(path)
+    warnings = [r.getMessage() for r in caplog.records]
+    assert len(warnings) == 1 and str(path) in warnings[0] and "still in delete mode" in warnings[0]
+    assert store._read("PRAGMA journal_mode")[0][0] == "delete"
+    assert len(checks) == 1
 
 
 @pytest.mark.parametrize("operation", ["read", "connect_for_write_check"])
