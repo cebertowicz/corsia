@@ -7,8 +7,8 @@ vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeo
 import type { DocOwnership } from '$lib/api/docOwnership';
 
 const agent = (id: string, name: string, status = 'ready', responsibility = '') => ({ id, name, status, responsibility });
-const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA.';
-const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here.';
+const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner.';
+const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here. Pick one of the agents listed.';
 function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
 		owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },
@@ -68,7 +68,8 @@ describe('DocOwnerControl', () => {
 		expect(picker()!.textContent).toContain(MULTI);
 	});
 	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' }, multi_person: true, can_change: false, refusal: SHARED }));
+		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'Everyone' }, multi_person: true, can_change: false, refusal: SHARED, choices: [] }));
+		expect(item('owner').textContent).toContain('Everyone');
 		for (const role of ['owner', 'supervisor'] as const) {
 			item(role).click(); await settle();
 			expect(options()).toEqual([]);
@@ -128,7 +129,7 @@ describe('DocOwnerControl', () => {
 		expect(changed).toHaveBeenCalledWith('doc', { supervisor: expect.any(String) });
 	});
 	it('shows the server’s refusal in the picker when it sent one', async () => {
-		changed.mockRejectedValue(new OwnershipChangeError(409, 'Only an agent can own a document when more than one person uses CORSIA here.'));
+		changed.mockRejectedValue(new OwnershipChangeError(409, MULTI));
 		await render(ownership());
 		item('owner').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();

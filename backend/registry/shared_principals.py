@@ -9,6 +9,7 @@ from typing import Collection
 
 from core.workspace_layout import resolve_project_root
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
+from infra.queries import thread_available_sql
 from infra.workspace_paths import WorkspaceReference, workspace_selection_for_root
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
@@ -167,11 +168,13 @@ def scope_relative(path: Path, scope_root: Path) -> str:
     return path.relative_to(scope_root).as_posix() if path.is_relative_to(scope_root) else str(path)
 
 
-def scope_agent_rows(project_id: str | None, user_id: str, *, db, name: str | None = None) -> list:
-    """The persistent agents one person has in one scope, by title; with ``name``, the ones whose id or title match.
+def pickable_agents(project_id: str | None, user_id: str, *, db, name: str | None = None) -> list:
+    """The agents one person may pick as an owner or supervisor in one scope, by title; with ``name``, those whose id or title match.
 
-    The one home of which agents an owner or supervisor can be, shared by
-    ``resolve_explicit_owner`` and the document picker's choices.
+    The one home of that rule: this person's persistent agents in this scope
+    that are still available (not archived by the person, not purged).
+    ``resolve_explicit_owner``, the document picker's choices and the ownership
+    PUT all read it, so what is offered, accepted and resolved is one list.
     """
     scope_sql = "project_id IS NULL" if project_id is None else "project_id=?"
     params: list[object] = [user_id]
@@ -183,7 +186,7 @@ def scope_agent_rows(project_id: str | None, user_id: str, *, db, name: str | No
         params.extend((name, name))
     return db.execute(
         f"""SELECT id,title,project_id,user_id,agent_enabled,lifecycle_state,archived_reason,agent_responsibility FROM threads
-            WHERE user_id=? AND {scope_sql} AND COALESCE(agent_enabled,0)=1 {match_sql}
+            WHERE user_id=? AND {scope_sql} AND COALESCE(agent_enabled,0)=1 AND {thread_available_sql()} {match_sql}
             ORDER BY title COLLATE NOCASE, id""",
         params,
     ).fetchall()
@@ -207,7 +210,7 @@ def resolve_explicit_owner(
             return conductor
         raise ValueError("This scope has no designated conductor.")
 
-    rows = scope_agent_rows(project_id, user_id, db=db, name=requested)
+    rows = pickable_agents(project_id, user_id, db=db, name=requested)
     if len(rows) != 1:
         raise ValueError(
             "owner must resolve to one persistent agent name or ID, "
@@ -241,14 +244,18 @@ def owner_label(owner_thread_id: str, *, db) -> str:
     return title or owner_thread_id
 
 
-def person_owner_label(owner: str | None, *, db) -> str:
-    """The owner as a person reads it: ``You`` for their own, ``Not set`` with no agent owner, else the agent's name.
+def person_owner_label(owner: str | None, *, db, multi_person: bool) -> str:
+    """The owner as a person reads it: the agent's name, or for a shared owner ``You`` or ``Not set``.
 
+    A ``ui`` or ``project:`` document is everyone's while more than one person
+    uses CORSIA, so it reads ``Everyone`` then, as the picker's refusal says.
     Every person-facing surface (the document header, the Files tree, the
     viewer) shows this; ``owner_label`` stays the agents' wording.
     """
     from infra.auth import is_owner_sentinel
 
+    if owner is not None and is_owner_sentinel(owner) and multi_person:
+        return "Everyone"
     if owner == UI_PRINCIPAL:
         return "You"
     if owner is None or is_owner_sentinel(owner):

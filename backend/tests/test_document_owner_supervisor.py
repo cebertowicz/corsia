@@ -23,14 +23,14 @@ def _view(artifact_id: str):
     """The ownership payload as the document load builds it."""
     import infra.config as config
     from infra.database import get_db
-    from registry.document_supervisor import ownership
+    from registry.document_supervisor import is_multi_person, ownership
     from registry import models
 
     db = get_db()
     try:
         return ownership(
             db, models.get_artifact(artifact_id, db=db),
-            user_id=PERSON["id"], workspace=config.WORKSPACE,
+            user_id=PERSON["id"], workspace=config.WORKSPACE, multi_person=is_multi_person(db),
         )
     finally:
         db.close()
@@ -421,6 +421,8 @@ def test_the_picker_choices_are_the_agents_an_explicit_owner_resolves_to(owned_d
 
     _client, artifact_id = owned_document
     _add_agent("agent-2", "Research coordinator")
+    _add_agent("agent-3", "Release planning")
+    _archive_agent("agent-3")
     db = get_db()
     try:
         db.execute("INSERT INTO threads (id,user_id,title,agent_enabled,created_at,updated_at) VALUES ('plain',?,'Not an agent',0,'t','t')", (PERSON["id"],))
@@ -428,24 +430,29 @@ def test_the_picker_choices_are_the_agents_an_explicit_owner_resolves_to(owned_d
         choices = [choice["id"] for choice in _view(artifact_id)["choices"]]
         assert choices == ["agent-1", "agent-2"]
         assert [resolve_explicit_owner(choice, project_id=None, user_id=PERSON["id"], db=db) for choice in choices] == choices
-        with pytest.raises(ValueError):
-            resolve_explicit_owner("plain", project_id=None, user_id=PERSON["id"], db=db)
+        # Neither a thread that is no agent nor an archived agent can be picked or resolved.
+        for refused in ("plain", "agent-3"):
+            with pytest.raises(ValueError):
+                resolve_explicit_owner(refused, project_id=None, user_id=PERSON["id"], db=db)
     finally:
         db.close()
 
 
-def test_a_scope_lookup_failure_is_logged_not_swallowed(owned_document, monkeypatch, caplog):
+def test_a_scope_lookup_failure_is_logged_and_offers_nothing_the_put_would_not_honor(owned_document, monkeypatch, caplog):
     import registry.document_supervisor as supervisor
+    from api.registry_ownership import AGENT_CHOICE_REFUSAL
 
-    _client, artifact_id = owned_document
+    client, artifact_id = owned_document
 
     def boom(*_args, **_kwargs):
         raise OSError("scope unreadable")
 
     monkeypatch.setattr(supervisor, "document_project", boom)
     with caplog.at_level("WARNING", logger="registry.document_supervisor"):
-        _view(artifact_id)
+        assert _view(artifact_id)["choices"] == []
     assert any("resolve the scope" in record.getMessage() and record.exc_info for record in caplog.records)
+    refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-1"})
+    assert (refused.status_code, refused.json()["detail"]) == (400, AGENT_CHOICE_REFUSAL)
 
 
 def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_document):
@@ -458,10 +465,15 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
     _one_person_account()
     db = get_db()
     try:
-        assert person_owner_label("ui", db=db) == "You"
-        assert person_owner_label("project:p1", db=db) == "Not set"
-        assert person_owner_label(None, db=db) == "Not set"
-        assert person_owner_label("agent-1", db=db) == "Document agent"
+        assert person_owner_label("ui", db=db, multi_person=False) == "You"
+        assert person_owner_label("project:p1", db=db, multi_person=False) == "Not set"
+        assert person_owner_label(None, db=db, multi_person=False) == "Not set"
+        assert person_owner_label("agent-1", db=db, multi_person=False) == "Document agent"
+        # Shared by everyone while more than one person uses CORSIA, as the picker's refusal says.
+        assert person_owner_label("ui", db=db, multi_person=True) == "Everyone"
+        assert person_owner_label("project:p1", db=db, multi_person=True) == "Everyone"
+        assert person_owner_label(None, db=db, multi_person=True) == "Not set"
+        assert person_owner_label("agent-1", db=db, multi_person=True) == "Document agent"
     finally:
         db.close()
     assert _view(artifact_id)["owner"]["label"] == "Document agent"
@@ -473,9 +485,13 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
         path = artifact["path"] or artifact["external_id"]
         # Agents keep their own wording; every person-facing read asks for the person's.
         assert artifact_freshness(artifact, path, db=db)["owner_name"] == "the user"
-        assert artifact_freshness(artifact, path, db=db, person_facing=True)["owner_name"] == "You"
+        assert artifact_freshness(artifact, path, db=db, multi_person=False)["owner_name"] == "You"
+        assert artifact_freshness(artifact, path, db=db, multi_person=True)["owner_name"] == "Everyone"
     finally:
         db.close()
+    seed_account(OTHER_USER, OTHER_TOKEN)
+    assert _view(artifact_id)["owner"]["label"] == "Everyone"
+    _one_person_account()
     _set_owner(artifact_id, "project:p1")
     assert _view(artifact_id)["owner"]["label"] == "Not set"
 
@@ -550,10 +566,27 @@ def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_40
         db.close()
     refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
     assert (refused.status_code, refused.json()["detail"]) == (409, RELEASED_REFUSAL)
-    # The picker says so before a pick, on a single-person install and on a multi-person one.
-    assert (_view(artifact_id)["can_change"], _view(artifact_id)["refusal"]) == (False, RELEASED_REFUSAL)
-    seed_account(OTHER_USER, OTHER_TOKEN)
-    assert _view(artifact_id)["refusal"] == RELEASED_REFUSAL
+    # The picker says so before a pick and lists no one, on a multi-person install and on a single-person one.
+    view = _view(artifact_id)
+    assert (view["can_change"], view["refusal"], view["choices"]) == (False, RELEASED_REFUSAL, [])
+    _one_person_account()
+    view = _view(artifact_id)
+    assert (view["can_change"], view["refusal"], view["choices"]) == (False, RELEASED_REFUSAL, [])
+
+
+def test_an_archived_document_with_an_owner_reads_as_missing_not_as_owned_by_no_one(owned_document):
+    from api.registry_ownership import NOT_FOUND_REFUSAL
+    from infra.database import get_db
+
+    client, artifact_id = owned_document
+    db = get_db()
+    try:
+        db.execute("UPDATE artifact_identities SET state='archived' WHERE id=?", (artifact_id,))
+        db.commit()
+    finally:
+        db.close()
+    refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
+    assert (refused.status_code, refused.json()["detail"]) == (404, NOT_FOUND_REFUSAL)
 
 
 def _stored_pick(artifact_id: str):
@@ -595,76 +628,99 @@ def _move_agent_to_project(thread_id: str, project_id: str | None) -> None:
         db.close()
 
 
-def test_a_pick_outside_the_documents_scope_is_ignored_everywhere_and_stands_again_when_it_is_back(owned_document):
-    """A pick is read through one rule and never deleted, so whichever path moved the document sees the same thing."""
+def _archive_agent(thread_id: str) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id=?", (thread_id,))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _recording_events(monkeypatch) -> list[tuple[str, dict]]:
+    import api.registry_ownership as ownership_api
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        ownership_api, "emit_product_event", lambda category, action, **kw: events.append((action, kw["properties"])),
+    )
+    return events
+
+
+def test_the_stored_pick_is_what_the_header_shows_and_comments_reach_until_its_agent_is_archived(owned_document):
+    """Stored, shown and routed are one value: a pick is not re-checked on read, only its agent's availability."""
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
-    _pick_directly(artifact_id, "agent-2")
-    assert _view(artifact_id)["supervisor"]["source"] == "picked"
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"}).status_code == 200
 
+    # A known trade-off: a pick survives its agent moving out of the document's scope.
     _move_agent_to_project("agent-2", "p9")
-    assert (_view(artifact_id)["supervisor"] or {}).get("source") != "picked"
-    assert "agent-2" not in _comment_recipients(artifact_id)
+    assert (_view(artifact_id)["supervisor"]["id"], _view(artifact_id)["supervisor"]["source"]) == ("agent-2", "picked")
+    assert _comment_recipients(artifact_id) == ("agent-1", "agent-2")
+
+    _archive_agent("agent-2")
+    assert (_view(artifact_id)["supervisor"]["id"], _view(artifact_id)["supervisor"]["source"]) == ("agent-1", "owner")
+    assert _comment_recipients(artifact_id) == ("agent-1",)
     assert _stored_pick(artifact_id) == "agent-2"
 
-    _move_agent_to_project("agent-2", None)
-    assert _view(artifact_id)["supervisor"]["id"] == "agent-2"
-    assert "agent-2" in _comment_recipients(artifact_id)
 
-
-def test_a_person_taking_over_keeps_the_previous_owner_as_supervisor_when_the_stored_pick_does_not_stand(owned_document, monkeypatch):
-    import api.registry_ownership as ownership_api
-
+def test_an_explicit_choice_is_written_over_a_stored_pick_the_header_does_not_show(owned_document, monkeypatch):
+    """Picking the owner, or clearing, replaces a stored pick whose agent is archived, so it can't come back over the choice."""
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
     _pick_directly(artifact_id, "agent-2")
-    _move_agent_to_project("agent-2", "p9")
-    events: list[str] = []
-    monkeypatch.setattr(ownership_api, "emit_product_event", lambda category, action, **kw: events.append(action))
+    _archive_agent("agent-2")
+    events = _recording_events(monkeypatch)
+
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-1"}).status_code == 200
+    assert _stored_pick(artifact_id) is None
+    assert events == [("supervisor_changed", {"from": "agent", "to": "none"})]
+
+    _pick_directly(artifact_id, "agent-2")
+    events.clear()
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": None}).status_code == 200
+    assert _stored_pick(artifact_id) is None
+    assert events == [("supervisor_changed", {"from": "agent", "to": "none"})]
+
+
+@pytest.mark.parametrize(("stored", "supervises", "actions"), [
+    (None, "agent-1", ["owner_changed", "supervisor_changed"]),
+    ("agent-2", "agent-2", ["owner_changed"]),
+])
+def test_a_person_taking_over_keeps_the_stored_pick_and_otherwise_the_previous_owner_supervises(
+    owned_document, monkeypatch, stored, supervises, actions,
+):
+    client, artifact_id = owned_document
+    _one_person_account()
+    _add_agent("agent-2", "Research coordinator")
+    if stored:
+        _pick_directly(artifact_id, stored)
+    events = _recording_events(monkeypatch)
 
     assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"}).status_code == 200
-    assert _view(artifact_id)["supervisor"]["id"] == "agent-1"
-    assert "agent-1" in _comment_recipients(artifact_id)
-    assert events == ["owner_changed", "supervisor_changed"]
+    assert (_stored_pick(artifact_id), _view(artifact_id)["supervisor"]["id"]) == (supervises, supervises)
+    assert [action for action, _ in events] == actions
 
 
-def test_a_put_that_changes_nothing_the_person_sees_emits_nothing_even_with_a_pick_that_does_not_stand(owned_document, monkeypatch):
-    import api.registry_ownership as ownership_api
-
+def test_a_put_that_changes_nothing_stored_emits_nothing(owned_document, monkeypatch):
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
     _pick_directly(artifact_id, "agent-2")
-    _move_agent_to_project("agent-2", "p9")
-    events: list[str] = []
-    monkeypatch.setattr(ownership_api, "emit_product_event", lambda category, action, **kw: events.append(action))
+    _archive_agent("agent-2")
+    events = _recording_events(monkeypatch)
 
     assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"}).status_code == 200
     assert events == []
     assert _stored_pick(artifact_id) == "agent-2"
 
 
-def test_an_archived_agents_pick_does_not_stand(owned_document):
-    client, artifact_id = owned_document
-    _one_person_account()
-    _add_agent("agent-2", "Research coordinator")
-    _pick_directly(artifact_id, "agent-2")
-    assert _view(artifact_id)["supervisor"]["source"] == "picked"
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        db.execute("UPDATE threads SET agent_enabled=0 WHERE id='agent-2'")
-        db.commit()
-    finally:
-        db.close()
-    assert (_view(artifact_id)["supervisor"] or {}).get("source") != "picked"
-    assert "agent-2" not in _comment_recipients(artifact_id)
-
-
-def test_a_pick_on_a_shared_document_stops_routing_when_the_install_becomes_multi_person(owned_document):
+def test_a_pick_on_a_shared_document_keeps_routing_when_the_install_becomes_multi_person(owned_document):
+    """A known trade-off: the earlier single-person pick stays, shown and routed, and no one may change it."""
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
@@ -673,7 +729,6 @@ def test_a_pick_on_a_shared_document_stops_routing_when_the_install_becomes_mult
     assert _comment_recipients(artifact_id) == ("agent-2",)
 
     seed_account(OTHER_USER, OTHER_TOKEN)
-    assert (_view(artifact_id)["supervisor"] or {}).get("source") != "picked"
-    assert "agent-2" not in _comment_recipients(artifact_id)
-
-
+    view = _view(artifact_id)
+    assert (view["supervisor"]["id"], view["can_change"], view["choices"], view["owner"]["label"]) == ("agent-2", False, [], "Everyone")
+    assert _comment_recipients(artifact_id) == ("agent-2",)

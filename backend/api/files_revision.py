@@ -23,6 +23,7 @@ from registry import service as registry_service
 from registry.file_types import image_media_type
 from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
+from registry.document_supervisor import is_multi_person
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -93,7 +94,7 @@ async def revision(
                 "writable": _writable(candidate, bases, db=db),
                 "artifact_id": resolved_artifact_id,
                 "artifact": art,
-                "freshness": artifact_freshness(art, candidate, db=db, person_facing=True),
+                "freshness": artifact_freshness(art, candidate, db=db, multi_person=is_multi_person(db)),
             }
         finally:
             db.close()
