@@ -5,6 +5,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
 import { placeTop } from '$lib/documentReadingPlace';
 import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
+import { CELL_EDITOR } from './widget-cell-state';
 
 export { FAILED_IMAGE, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE };
 
@@ -233,8 +234,9 @@ export async function imageRequestAt(root: HTMLElement, { from, to }: { from: nu
 	const editor = root.querySelector<HTMLElement>('.cm-editor');
 	const view = editor ? EditorView.findFromDOM(editor) : null;
 	if (!view || from > view.state.doc.length) return null;
+	// An image in an open cell's editor carries the cell's own positions, never the document's.
 	const widget = () => [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-md-image')]
-		.find((wrap) => Number(wrap.dataset.from) < to && Number(wrap.dataset.to) > from) ?? null;
+		.find((wrap) => !wrap.closest(CELL_EDITOR) && Number(wrap.dataset.from) < to && Number(wrap.dataset.to) > from) ?? null;
 	// Outside the rendered part of the document the image has no widget yet.
 	if (from < view.viewport.from || from > view.viewport.to) {
 		view.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'center' }) });

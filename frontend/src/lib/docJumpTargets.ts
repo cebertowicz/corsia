@@ -65,8 +65,8 @@ function landingsById(root: ParentNode): Map<string, Landing> {
 
 /** The text offset at the top of the scrollport, or null when no editor answers there. */
 function offsetAtTop(scroller: HTMLElement | null, top: number): number | null {
-	const content = scroller?.querySelector<HTMLElement>('.cm-content');
-	const editor = content ? EditorView.findFromDOM(content) : null;
+	// From the scroller, whose first `.cm-content` is the document's; inside that content is an open table cell's editor.
+	const editor = scroller ? EditorView.findFromDOM(scroller) : null;
 	if (!editor || !scroller) return null;
 	const at = editor.posAtCoords({ x: scroller.getBoundingClientRect().left + 1, y: top + 1 });
 	return typeof at === 'number' && Number.isFinite(at) ? at : null;

@@ -16,6 +16,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+from doceditor import person_comment_projection
 from infra.schema import SCHEMA_SQL
 from plans import admission, mutations, operator_projection, review_evidence, service
 from plans import watch_operations
@@ -104,6 +105,8 @@ def _envelope(db) -> dict:
     payload = operator_projection.read_thread(
         "owner", actor=PlanActor(None, "user", None, kind="user"), db=db,
     )
+    # The route sends the projection through the comment-attention pass, as here.
+    payload = person_comment_projection.annotate(db, payload, "user")
     return json.loads(json.dumps(payload))
 
 

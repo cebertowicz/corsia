@@ -3,6 +3,7 @@ import { closeComments, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { longPressOn } from '../support/tableCells';
 
 /**
  * Where a comment's text lands. With the comment list open beside the editor (desktop), a navigation brings a table row and a
@@ -122,6 +123,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		const cell = page.locator('.cm-md-table tr', { hasText: 'cut line' }).locator('td').nth(1);
 		await cell.scrollIntoViewIfNeeded();
 		await cell.click();
+		await expect(page.locator('.cm-md-cell-editor .cm-content')).toBeFocused();
 		await page.locator('.sel-comment').click();
 		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Empty-cell comment.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
@@ -221,7 +223,13 @@ test.describe('@flow:document-table-comment-frames @surface:documents phone', ()
 		await place();
 		await expect.poll(async () => { const box = await boxOf(cell); return box ? box.y + box.height > 700 : false; }).toBe(true);
 		const scrolledTo = await scrollTop();
+		// A tap on a cell of a document that can be edited opens the cell's editor; a long press then selects a word for the
+		// comment, as a phone reader selects text anywhere else in the document.
 		await cell.tap();
+		const content = page.locator('.cm-md-cell-editor .cm-content');
+		await expect(content).toBeFocused();
+		await longPressOn(content, 'owner');
+		await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? ''), { message: 'the long press selected text in the cell' }).not.toBe('');
 		await page.locator('.sel-comment').tap();
 		const panel = page.locator('.drawer-panel');
 		await expect(panel).toBeVisible();

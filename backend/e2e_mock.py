@@ -206,29 +206,17 @@ router = APIRouter(prefix="/api/test", tags=["test"])
 router.include_router(pressure_fixture.router)
 
 
-@router.post("/inject-message")
-async def inject_message(token: str, body: dict) -> dict:
-    """Inject a pre-built message row directly into a session for E2E testing."""
-    import uuid
-    from fastapi import HTTPException
+async def _require_owned_thread(token: str, thread_id: str) -> None:
+    """Any valid token must not be able to reach another user's session."""
     from infra.auth import authenticate
-    from infra.database import get_db, write_transaction
+    from infra.database import get_db
     from infra.db_async import run_in_db
-    from infra.queries import insert_message
-    from infra.time import utc_now_iso
-    from infra import state
 
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
 
-    thread_id = body.get("thread_id") or ""
-    msg = body.get("message") or {}
-    if not thread_id or not msg:
-        raise HTTPException(400, "thread_id and message are required")
-
-    # Any valid token must not be able to inject into another user's session.
-    def _check_ownership():
+    def _owned():
         db = get_db()
         try:
             return db.execute(
@@ -238,8 +226,25 @@ async def inject_message(token: str, body: dict) -> dict:
         finally:
             db.close()
 
-    if not await run_in_db(_check_ownership):
+    if not await run_in_db(_owned):
         raise HTTPException(404, "Thread not found")
+
+
+@router.post("/inject-message")
+async def inject_message(token: str, body: dict) -> dict:
+    """Inject a pre-built message row directly into a session for E2E testing."""
+    import uuid
+    from infra.database import write_transaction
+    from infra.db_async import run_in_db
+    from infra.queries import insert_message
+    from infra.time import utc_now_iso
+    from infra import state
+
+    thread_id = body.get("thread_id") or ""
+    msg = body.get("message") or {}
+    if not thread_id or not msg:
+        raise HTTPException(400, "thread_id and message are required")
+    await _require_owned_thread(token, thread_id)
 
     mid = str(uuid.uuid4())
     now = utc_now_iso()
@@ -262,6 +267,43 @@ async def inject_message(token: str, body: dict) -> dict:
                     "metadata": metadata, "created_at": now},
     })
     return {"ok": True, "message_id": mid}
+
+
+@router.post("/fail-queued-input")
+async def fail_queued_input(token: str, body: dict) -> dict:
+    """End one queued input no Turn has claimed as failed, through the writer a fail-closed admission uses.
+
+    The row is left as production leaves it: failed with its reason, visible and retryable, broadcast to
+    the thread, and its failure reported to its owner.
+    """
+    from infra.database import write_transaction
+    from infra.db_async import run_in_db
+    from infra.failed_wake_surface import drive_failed_wake_owners
+    from infra.queued_input_settlement import fail_queued
+    from infra.send_broadcast import broadcast_message_rows
+
+    thread_id = body.get("thread_id") or ""
+    message_id = body.get("message_id") or ""
+    error = body.get("error") or ""
+    if not thread_id or not message_id or not error:
+        raise HTTPException(400, "thread_id, message_id and error are required")
+    await _require_owned_thread(token, thread_id)
+
+    def _fail() -> tuple[str, ...]:
+        with write_transaction(None, scope="e2e_mock_fail_queued") as db:
+            row = db.execute(
+                "SELECT id,delivery_revision FROM messages WHERE id=? AND thread_id=? "
+                "AND delivery_state='queued' AND active_turn_id IS NULL",
+                (message_id, thread_id),
+            ).fetchone()
+            return fail_queued(db, thread_id, [row], error=error) if row is not None else ()
+
+    failed = await run_in_db(_fail)
+    if not failed:
+        raise HTTPException(409, "The input is not queued, or a Turn has claimed it")
+    await broadcast_message_rows(thread_id, failed)
+    await drive_failed_wake_owners(failed)
+    return {"ok": True, "message_ids": list(failed)}
 
 
 @router.post("/mock-gates/{gate_name}/release")

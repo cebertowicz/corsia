@@ -24,12 +24,18 @@ def test_blueprint_is_indexed_and_searchable():
     assert search_items(indexed, "software blueprint") == [row]
 
 
-@pytest.mark.parametrize("path", ["../outside", "/absolute", ".hidden", "inner/.hidden", "scripts/run", "nested/scripts/run"])
+@pytest.mark.parametrize("path", ["../outside", "/absolute", ".hidden", "inner/.hidden"])
 def test_blueprint_refuses_unsafe_indexed_paths(path):
     row = pack_row()
     row["files"].append({"path": path, "sha256": "c" * 64})
     with pytest.raises(LibraryIndexValidationError):
         _validate_index({"skills": [row]})
+
+
+def test_blueprint_accepts_scripts_folder():
+    row = pack_row()
+    row["files"].append({"path": "scripts/run.py", "sha256": "c" * 64})
+    assert _validate_index({"skills": [row]})
 
 
 @pytest.mark.parametrize("name", ["../escape", "a/b", ".hidden", "", "a\\\\b"])

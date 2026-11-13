@@ -350,8 +350,10 @@ def notify_closed(
 
     if not executor or executor == causing_executor:
         return
+    from plans.workflow_fields import announced
+
     node = _node(db, node_id)
-    if node["state"] in node_order.OPEN_TASK_STATES:
+    if node["state"] in node_order.OPEN_TASK_STATES or not announced(db, node_id):
         return
     append(
         db,

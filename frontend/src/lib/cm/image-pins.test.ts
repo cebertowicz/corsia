@@ -39,8 +39,19 @@ class Diagram extends WidgetType {
 	}
 }
 
-const replaced = (widget: WidgetType, from: number, to: number) => StateField.define({
-	create: () => Decoration.set([Decoration.replace({ widget, block: true }).range(from, to)]),
+/** An open table cell's editor holding an image: its wrap carries the cell editor's own positions, not the document's. */
+class CellEditor extends WidgetType {
+	toDOM() {
+		const cell = document.createElement('div');
+		cell.className = 'cm-md-cell-editor';
+		cell.append(new Image(0, IMAGE.length, true).toDOM());
+		cell.querySelector('img')!.getBoundingClientRect = box(500, 400, 100, 50);
+		return cell;
+	}
+}
+
+const replaced = (widget: WidgetType, from: number, to: number, ...more: [WidgetType, number, number][]) => StateField.define({
+	create: () => Decoration.set([[widget, from, to] as const, ...more].map(([w, a, b]) => Decoration.replace({ widget: w, block: true }).range(a, b))),
 	update: (decorations) => decorations,
 	provide: (field) => EditorView.decorations.from(field),
 });
@@ -96,6 +107,14 @@ describe('image pins', () => {
 		expect(pin.style.getPropertyValue('--disc-color')).toBe(badgeFill('#3366ff'));
 		const [tag] = viewerBadgeTags([point], { width: 400, height: 200 });
 		expect([pin.style.left, pin.style.top]).toEqual([`${40 + tag.x}px`, `${100 + tag.y}px`]);
+	});
+
+	it('draws no pin on an image inside an open cell editor, whose positions are the cell\'s, not the document\'s', async () => {
+		const doc = `${IMAGE}\ncell\n`;
+		const { view } = mount(doc, replaced(new Image(0, IMAGE.length, true), 0, IMAGE.length, [new CellEditor(), IMAGE.length + 1, IMAGE.length + 5]));
+		await show(view, [{ from: 0, to: IMAGE.length, id: 'c1', region: true, pin: { region: point, number: 1, color: '#3366ff' } }]);
+		const [tag] = viewerBadgeTags([point], { width: 400, height: 200 });
+		expect(pins(view).map((pin) => [pin.style.left, pin.style.top])).toEqual([[`${40 + tag.x}px`, `${100 + tag.y}px`]]);
 	});
 
 	it('draws nothing on an image that has not drawn, and nothing for a comment with no pin', async () => {

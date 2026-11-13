@@ -92,6 +92,8 @@
 			if (data?.thread_id !== subscribed || data?.error_type === 'stop_failed') return;
 			void load();
 		};
+		// A comment posted here, or its delivery changing, reloads the page so its thread shows the server's copy.
+		const offComments = on('chat_comments_changed', refreshLifecycle);
 		const offActivity = on('turn_activity', refreshLifecycle);
 		const offComplete = on('turn_complete', refreshLifecycle);
 		const offCancelled = on('turn_cancelled', refreshLifecycle);
@@ -105,6 +107,7 @@
 			generation += 1;
 			unsubscribeThread(subscribed);
 			offConnected?.();
+			offComments?.();
 			offActivity?.();
 			offComplete?.();
 			offCancelled?.();

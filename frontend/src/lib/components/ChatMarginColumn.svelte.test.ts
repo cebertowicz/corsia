@@ -5,7 +5,7 @@ import { messages } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 import ChatMarginColumn from './ChatMarginColumn.svelte';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
-import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
@@ -40,6 +40,8 @@ function thread() {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
+	chatCommentDrafts.set('kept', '');
+	chatCommentDrafts.set('lost', '');
 	messages.set([]);
 	host?.remove();
 	document.body.innerHTML = '';
@@ -76,7 +78,7 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	transcript(); thread();
 	messages.update(current => [...current, { id: 'm2', thread_id: 'other', role: 'assistant', content: 'elsewhere', seq: 2, created_at: '2026-11-08T00:00:00Z', chat_comments: [{ id: 'else', cid: 'c9', user_message_id: 's9', quote: 'elsewhere', note: 'No', from_off: 0, to_off: 9, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-08T00:00:00Z', answers: [] }] } as never]);
 	const sent: unknown[] = [];
-	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: async (reply: unknown) => { sent.push(reply); } } });
 	flushSync();
 
 	expect(host.querySelectorAll('[data-margin-card]')).toHaveLength(2);
@@ -144,7 +146,7 @@ it('says why a card\'s reply is refused when its message has no place in history
 	transcript(); thread();
 	messages.update(current => current.map(message => ({ ...message, seq: undefined })));
 	const sent: unknown[] = [];
-	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: async (reply: unknown) => { sent.push(reply); } } });
 	flushSync();
 	const card = host.querySelectorAll<HTMLElement>('[data-margin-card]')[0];
 	card.querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
@@ -154,10 +156,13 @@ it('says why a card\'s reply is refused when its message has no place in history
 	await tick();
 	flushSync();
 	expect(sent).toHaveLength(0);
-	expect(get(toasts).map(toast => toast.message)).toContain('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	const sentence = 'Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.';
+	// The card says why; a toast as well would repeat it over the passage the comment is on.
+	expect(card.textContent).toContain(sentence);
+	expect(get(toasts).map(toast => toast.message)).not.toContain(sentence);
 	expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Please change it');
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
-	chatReplyDrafts.set('kept', '');
+	chatCommentDrafts.set('kept', '');
 });
 
 it('keeps an unsent reply when the canvas narrows and the same thread opens in its popover', () => {
@@ -178,5 +183,5 @@ it('keeps an unsent reply when the canvas narrows and the same thread opens in i
 	component = mount(ChatCommentThreads, { target: popover, props: { messageId: 'm1', threadId: 'thread', comments: [lost], onReply: vi.fn() } });
 	flushSync();
 	expect(popover.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('The one in the closet');
-	chatReplyDrafts.set('lost', '');
+	chatCommentDrafts.set('lost', '');
 });

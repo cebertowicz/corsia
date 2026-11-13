@@ -36,6 +36,20 @@ afterEach(() => {
 
 const TABLE = ['| Feature | Status |', '|---------|--------|', '| Login   | Done   |'].join('\n');
 
+describe('markdown live preview — escapes', () => {
+	it('shows an escaped character without its backslash', () => {
+		const view = mount('Progress \\| status \\*kept\\*\n');
+		expect(view.dom.textContent, 'the characters stay, the backslashes are syntax').toContain('Progress | status *kept*');
+		expect(view.dom.textContent).not.toContain('\\');
+	});
+
+	it('renders a pipe escaped inside a table cell as a pipe', () => {
+		const source = ['| Feature | Status |', '| --- | --- |', '| a \\| b | Done |'].join('\n');
+		const view = mount(`${source}\n`);
+		expect(view.dom.querySelector('table')!.textContent).toContain('a | b');
+	});
+});
+
 describe('markdown live preview — table rendering', () => {
 	it('renders a GFM table as an HTML table (not raw pipe source)', () => {
 		const view = mount(`# Doc\n\n${TABLE}\n`);

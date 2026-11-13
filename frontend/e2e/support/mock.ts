@@ -132,6 +132,28 @@ export async function injectMessage(
     return body.message_id as string;
 }
 
+/**
+ * End one queued input that no Turn has claimed as failed, through the server's own writer for an input that
+ * could not be delivered: the row reads, broadcasts and retries exactly as a real failed delivery does.
+ */
+export async function failQueuedInput(
+    request: APIRequestContext,
+    threadId: string,
+    messageId: string,
+    error: string,
+): Promise<void> {
+    const resp = await request.post(`${BASE_URL}/api/test/fail-queued-input`, {
+        params: { token: TEST_TOKEN },
+        data: { thread_id: threadId, message_id: messageId, error },
+    });
+    if (!resp.ok()) {
+        const body = await resp.text();
+        throw new Error(
+            `Failed to fail the queued input: ${resp.status()} ${resp.statusText()} — ${body}`,
+        );
+    }
+}
+
 export async function seedPressuredHistory(
     request: APIRequestContext,
     sessionId: string,

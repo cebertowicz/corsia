@@ -265,6 +265,15 @@ def creation_payload(db, node_id: str) -> dict[str, Any]:
     return json.loads(row["payload_json"] or "{}") if row is not None else {}
 
 
+def announced(db, node_id: str, created: dict | None = None) -> bool:
+    """Whether a node's moves are news: False for a task created with ``announce`` False.
+
+    The system keeps such a task in step with state outside the plan, so creating, settling
+    or closing it is bookkeeping. ``created`` is the creation payload when the caller has it.
+    """
+    return (creation_payload(db, node_id) if created is None else created).get("announce", True) is not False
+
+
 NOT_A_STEP = {"workflow_ref": None, "workflow_version": None, "workflow_step": None, "difficulty": None}
 
 

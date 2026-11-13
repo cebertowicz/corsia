@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage } from './support/mock';
-import { commentEditor, commentEditorClosed, commentPendingOnMessage } from './support/chatComments';
+import { injectMessage, seedMockResponses } from './support/mock';
+import { commentEditor, commentEditorClosed, commentOnMessage } from './support/chatComments';
 
 const text = 'First selected phrase. Second selected phrase. Third selected phrase.';
 const quotes = ['First selected phrase', 'Second selected phrase', 'Third selected phrase'];
@@ -36,7 +36,7 @@ for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const)
 		test.describe.configure({ timeout: 120_000 });
 		test.skip(() => test.info().project.name === 'chromium-mobile', 'viewport set by this spec');
 		test.use({ seedPerTest: true, viewport: { width: size, height: size === 1440 ? 900 : 852 }, colorScheme: scheme, hasTouch: size === 393, isMobile: size === 393, deviceScaleFactor: 2 });
-		test('stored long quotes and notes', async ({ page, request }) => {
+		test('stored comments stay out of the chat bubble', async ({ page, request }) => {
 			test.setTimeout(120_000);
 			const title = `Stored ${size} ${scheme}`;
 			const thread = await createSession(request, title);
@@ -47,76 +47,48 @@ for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const)
 			if (size === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await sidebarThread(page, title).click();
 			await waitForWsConnected(page);
-			const block = page.locator('.sent-comment');
-			await expect(block).toBeVisible();
-			await expect(block.getByRole('button', { name: 'Show more' })).toBeVisible();
-			await expect(block.locator('.quote-line')).toHaveCSS('border-left-width', '2px');
-			const sizing = await block.evaluate(element => {
-				const quote = element.querySelector<HTMLElement>('.quote-line')!;
-				const note = element.querySelector<HTMLElement>('.sent-note')!;
-				return { quoteFont: getComputedStyle(quote).fontSize, noteFont: getComputedStyle(note).fontSize, railHeight: quote.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(quote).lineHeight), quoteClipped: quote.scrollHeight > quote.clientHeight, noteClipped: note.scrollHeight > note.clientHeight };
-			});
-			expect(sizing.quoteFont).toBe(sizing.noteFont);
-			expect(Math.abs(sizing.railHeight - sizing.lineHeight)).toBeLessThan(1);
-			expect(sizing.quoteClipped).toBe(true);
-			expect(sizing.noteClipped).toBe(true);
-			const contrast = await block.evaluate(element => {
-				const bubble = element.closest<HTMLElement>('.user-bubble')!;
-				const rgb = (s: string) => (s.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
-				const luminance = (a: number[]) => a.map(v => { const n = v / 255; return n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
-				const bg = luminance(rgb(getComputedStyle(bubble).backgroundColor));
-				return [...element.querySelectorAll<HTMLElement>('.quote.bubble, .sent-note, .sent-comment-toggle')].map(el => {
-					let opacity = 1;
-					for (let current: HTMLElement | null = el; current; current = current.parentElement) { opacity *= Number(getComputedStyle(current).opacity); if (current === bubble) break; }
-					const background = rgb(getComputedStyle(bubble).backgroundColor);
-					const foreground = rgb(getComputedStyle(el).color).map((value, i) => value * opacity + background[i] * (1 - opacity));
-					const fg = luminance(foreground);
-					return { ratio: (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05), opacity };
-				});
-			});
-			expect(contrast).toHaveLength(3);
-			for (const result of contrast) { expect(result.ratio).toBeGreaterThanOrEqual(4.5); expect(result.opacity).toBe(1); }
-			await page.screenshot({ path: path.join(frames, `long-collapsed-${size}-${scheme}.png`) });
-			await block.getByRole('button', { name: 'Show more' }).click();
-			await expect(block.getByRole('button', { name: 'Show less' })).toBeVisible();
-			await expect.poll(() => block.locator('.quote-line').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
-			await expect.poll(() => block.locator('.sent-note').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
-			await block.locator('.sent-comment-source').hover();
-			await expect(block.locator('.sent-comment-source')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-			await page.screenshot({ path: path.join(frames, `long-expanded-${size}-${scheme}.png`) });
+			// A comment lives in its thread on the highlighted text, never in a chat bubble: the bubble shows only its own words.
+			const bubble = page.locator('.messages .message.user').filter({ hasText: 'A message' });
+			await expect(bubble).toBeVisible();
+			await expect(bubble.locator('.sent-comment')).toHaveCount(0);
+			await expect(bubble).not.toContainText('A long quoted sentence');
+			await expect(bubble).not.toContainText('A long note with a question');
+			await page.screenshot({ path: path.join(frames, `stored-${size}-${scheme}.png`) });
 		});
-		test('select, edit and send', async ({ page, request }) => {
+		test('select, post and send', async ({ page, request }) => {
 			test.setTimeout(120_000);
 			const title = `Comments ${size} ${scheme}`;
 			const thread = await createSession(request, title);
 			const id = await injectMessage(request, thread, { role: 'assistant', content: text, metadata: { for_user: true } }, TEST_TOKEN);
+			await seedMockResponses(request, [...notes, 'typed'].map(note => ({ content: `Received ${note}` })));
 			await openAppPastLanding(page);
 			await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
 			if (size === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await sidebarThread(page, title).click();
 			await waitForWsConnected(page);
-			await expect(page.locator(`[data-message-id="${id}"]`)).toBeVisible();
+			const row = page.locator(`[data-message-id="${id}"]`);
+			await expect(row).toBeVisible();
+			// Each comment posts from its own box as it is written: no chip in the chat input, no chat message, and it stays on its highlight.
 			for (let index = 0; index < quotes.length; index++) {
 				await select(page, id, quotes[index]);
 				await page.locator('.sel-comment').click();
 				await commentEditor(page).fill(notes[index]);
 				await commentEditor(page).press('Control+Enter');
 				await commentEditorClosed(page);
-				await commentPendingOnMessage(page.locator(`[data-message-id="${id}"]`), quotes[index]);
-				await expect(page.locator('.comment-chip')).toHaveCount(index + 1);
+				await commentOnMessage(row, quotes[index]);
+				await expect(page.locator('.comment-chip')).toHaveCount(0);
+				await expect(page.locator('.messages .message.user')).toHaveCount(0);
 			}
-			await page.locator('.comment-chip').first().click();
-			await commentEditor(page).fill('Edited first note');
-			await commentEditor(page).press('Control+Enter');
-			await commentEditorClosed(page);
-			await expect(page.locator('.comment-chip')).toHaveCount(3);
-			await page.screenshot({ path: path.join(frames, `chips-${size}-${scheme}.png`) });
+			await page.screenshot({ path: path.join(frames, `posted-${size}-${scheme}.png`) });
+			// Typed text is still a chat message of its own, and carries no comment.
 			await chatComposer(page).fill('Please address these comments');
 			// On a phone Enter is a newline in the composer, so the send control is what sends there.
 			if (size === 393) await sendButton(page).click();
 			else await chatComposer(page).press('Enter');
-			await expect(page.locator('.sent-comment')).toHaveCount(3);
-			await expect(page.getByText('Edited first note')).toBeVisible();
+			const bubble = page.locator('.messages .message.user');
+			await expect(bubble).toHaveCount(1);
+			await expect(bubble).toContainText('Please address these comments');
+			await expect(bubble.locator('.sent-comment')).toHaveCount(0);
 			await page.screenshot({ path: path.join(frames, `sent-${size}-${scheme}.png`) });
 		});
 	});

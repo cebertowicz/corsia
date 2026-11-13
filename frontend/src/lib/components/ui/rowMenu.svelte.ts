@@ -14,14 +14,37 @@ export interface OpenRowMenu<T> {
 /**
  * Opens a row's `ui/Menu` by right-click, Shift+F10 or the context-menu key on
  * a focused row, and a touch
- * long-press whose following tap is swallowed so it does not also activate the
- * row. A row the user has nothing to do on leaves the browser's own menu alone.
+ * long-press whose ending tap is swallowed so it activates neither the row nor
+ * the menu item that opened under the finger. A row the user has nothing to do
+ * on leaves the browser's own menu alone.
  */
 export function createRowMenu<T>(canAct: (item: T) => boolean) {
 	let open = $state<OpenRowMenu<T> | null>(null);
 	let pressTimer: ReturnType<typeof setTimeout> | null = null;
 	let pressFrom: { x: number; y: number } | null = null;
-	let swallowTap = false;
+	let disarmTap: (() => void) | null = null;
+
+	/**
+	 * The press that opened the menu still ends in a click wherever the finger lifts,
+	 * which is over the menu, since it opens under the finger. Swallow that one click
+	 * anywhere on the page, and nothing once the next press starts.
+	 */
+	function swallowEndingTap() {
+		disarmTap?.();
+		const swallow = (event: MouseEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+			disarm();
+		};
+		const disarm = () => {
+			window.removeEventListener('click', swallow, true);
+			window.removeEventListener('pointerdown', disarm, true);
+			disarmTap = null;
+		};
+		window.addEventListener('click', swallow, true);
+		window.addEventListener('pointerdown', disarm, true);
+		disarmTap = disarm;
+	}
 
 	function show(item: T, x: number, y: number, trigger: HTMLElement | null) {
 		open = { item, x, y, trigger };
@@ -64,7 +87,6 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			show(item, box.left, box.bottom, target);
 		},
 		onPointerDown(event: PointerEvent, item: T) {
-			swallowTap = false;
 			if (event.pointerType !== 'touch' || !canAct(item)) return;
 			cancelPress();
 			pressFrom = { x: event.clientX, y: event.clientY };
@@ -72,7 +94,7 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			const trigger = event.target as HTMLElement | null;
 			pressTimer = setTimeout(() => {
 				cancelPress();
-				swallowTap = true;
+				swallowEndingTap();
 				show(item, x, y, trigger);
 			}, LONG_PRESS_MS);
 		},
@@ -82,13 +104,6 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			if (moved > PRESS_SLOP_PX) cancelPress();
 		},
 		onPointerEnd: cancelPress,
-		/** Capture-phase: the tap that ends a long-press must not also activate the row. */
-		onClickCapture(event: MouseEvent) {
-			if (!swallowTap) return;
-			swallowTap = false;
-			event.preventDefault();
-			event.stopPropagation();
-		},
 		/** The row's event handlers, spread onto the element so the row stays small. */
 		rowHandlers: (item: T) => ({
 			oncontextmenu: (event: MouseEvent) => api.onContextMenu(event, item),
@@ -97,7 +112,6 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			onpointermove: api.onPointerMove,
 			onpointerup: api.onPointerEnd,
 			onpointercancel: api.onPointerEnd,
-			onclickcapture: api.onClickCapture,
 		}),
 	};
 	return api;

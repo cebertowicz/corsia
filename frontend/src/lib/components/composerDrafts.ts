@@ -1,11 +1,9 @@
 import type { Message } from '$lib/stores/threads';
 import type { Attachment } from './inputBarHelpers';
-import type { ChatComment } from '$lib/chatCommentAnchors';
 
 export type ComposerDraft = {
 	content: string;
 	attachments: Attachment[];
-	comments?: ChatComment[];
 };
 
 type PendingSubmitDraft = {
@@ -31,7 +29,6 @@ export function cloneDraft(draft: ComposerDraft): ComposerDraft {
 	return {
 		content: draft.content,
 		attachments: [...draft.attachments],
-		comments: draft.comments?.map(comment => ({ ...comment })),
 	};
 }
 
@@ -63,12 +60,7 @@ function sameAttachments(left: Attachment[], right: Attachment[]): boolean {
 
 function sameComposerDraft(left: ComposerDraft, right: ComposerDraft): boolean {
 	return left.content === right.content
-		&& sameAttachments(left.attachments, right.attachments)
-		&& (left.comments ?? []).length === (right.comments ?? []).length
-		&& (left.comments ?? []).every((comment, index) => {
-			const other = right.comments?.[index];
-			return other && comment.id === other.id && comment.note === other.note;
-		});
+		&& sameAttachments(left.attachments, right.attachments);
 }
 
 /**

@@ -22,7 +22,7 @@ def test_valid_pack():
     validate_pack(item, files)
 
 
-@pytest.mark.parametrize("path,content", [(".hidden", b"text"), ("scripts/run", b"text"), ("readme", b"\x00"), ("assets/evil.png", b"\x00text")])
+@pytest.mark.parametrize("path,content", [(".hidden", b"text"), ("readme", b"\x00"), ("assets/evil.png", b"\x00text")])
 def test_forbidden_contents(path, content):
     item, files = bundle()
     files[path] = content
@@ -30,6 +30,14 @@ def test_forbidden_contents(path, content):
     item["digest"] = pack_digest(files)
     with pytest.raises(LibraryIntegrityError):
         validate_pack(item, files)
+
+
+def test_scripts_folder_is_permitted():
+    item, files = bundle()
+    files["scripts/run.py"] = b"print('hello')\n"
+    item["files"].append(file_row("scripts/run.py", files["scripts/run.py"]))
+    item["digest"] = pack_digest(files)
+    validate_pack(item, files)
 
 
 def test_recognized_binary_asset_is_permitted():

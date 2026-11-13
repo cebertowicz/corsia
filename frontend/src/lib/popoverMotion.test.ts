@@ -58,3 +58,19 @@ describe('peerFade', () => {
 		expect(cancel).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe('an exit with no entrance (out: alone)', () => {
+	it('is cancelled when the leaving element comes back, so it is not left faded and shifted', () => {
+		const cancel = vi.fn();
+		animate.mockReturnValue({ cancel });
+		const element = node();
+		element.inert = true; // Svelte makes an element inert while it leaves
+		const leaving = menuPop(element, undefined, { direction: 'out' }) as { tick?: (t: number, u: number) => void };
+		leaving.tick?.(0.5, 0.5);
+		leaving.tick?.(0, 1);
+		expect(cancel, 'leaving, the exit runs to its end and holds it').not.toHaveBeenCalled();
+		element.inert = false; // resumed: interactive again, then its exit is reset
+		leaving.tick?.(1, 0);
+		expect(cancel).toHaveBeenCalledTimes(1);
+	});
+});

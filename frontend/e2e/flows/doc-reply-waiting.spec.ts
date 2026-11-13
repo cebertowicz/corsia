@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
-import { chatComposer, createSession, loadPastFirstRunLanding, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
+import { createSession, loadPastFirstRunLanding, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -24,23 +24,6 @@ function makeAgentReply(replyId: string, threadId: string): void {
 			'connection.close()',
 		].join('\n'), path.join(stateRoot, 'corsia.db'), replyId, threadId,
 	], { cwd: repoRoot, encoding: 'utf8' });
-}
-function seedPlan(threadId: string): void {
-	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
-	const workspace = process.env.CORSIA_E2E_WORKSPACE;
-	const state = process.env.CORSIA_E2E_STATE_DIR;
-	if (!python || !workspace || !state || process.env.CORSIA_E2E_MOCK !== '1') throw new Error('Requires isolated synthetic state');
-	execFileSync(python, ['-c', [
-		'import runpy',
-		'runpy.run_path("frontend/e2e/support/focus-outcomes.py")["assert_disposable_roots"]()',
-		'from infra.database import get_db',
-		'from plans import service',
-		'import sys',
-		'db = get_db()',
-		'plan = service.ensure_plan("thread", sys.argv[1], db=db)',
-		'service.add_node(plan.id, kind="task", title="Review launch", acceptance_criteria="Review the plan", db=db)',
-		'db.commit()',
-	].join('\n'), threadId], { cwd: repoRoot, env: { ...process.env, PYTHONPATH: 'backend', CORSIA_TEST_MODE: '1', CORSIA_WORKSPACE: workspace, CORSIA_STATE_DIR: state } });
 }
 function seedDecision(threadId: string): void {
 	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
@@ -81,7 +64,6 @@ test.afterEach(async ({ page }) => {
 // The people in every frame. The disposable account is called "e2e"; the comments are shown under a real name.
 const READER = 'Jordan Lee';
 const REPLIER = 'Maya Chen';
-const LONG_REPLIER = 'Maya Chen — Customer Support Operations';
 const THREAD_TITLE = 'Launch plan review';
 // One backend serves every test in the run, so a fixed session title leaves several sidebar rows with the same
 // words by the later tests, and opening a thread by title can land on another test's document. Each test titles
@@ -93,7 +75,6 @@ test.beforeEach(() => {
 	titleSeq += 1;
 	threadTitle = `${THREAD_TITLE} ${RUN}-${titleSeq}`;
 });
-const LONG_DOCUMENT_NAME = 'launch-plan-for-the-Q4-onboarding-and-support-readiness-review.md';
 
 // Three threads on three different passages, each answered by someone other than the reader.
 const PASSAGES = [
@@ -170,16 +151,6 @@ const DOCUMENT_TEXT = [
 	'',
 ].join('\n');
 
-// Reader context that keeps the third unread reply below the comments sheet once the first two have been on screen.
-function partialReadFollowups(width: number): Array<{ rootIndex: number; body: string }> {
-	return width === 393
-		? [{ rootIndex: 0, body: 'Noted.' }]
-		: [
-			{ rootIndex: 0, body: 'I checked the owner list against the release calendar and noted the two dependencies that must be confirmed before the launch date can hold. The rest of the work is already assigned, so this is only a request for confirmation rather than a new scope decision.' },
-			{ rootIndex: 0, body: 'Noted.' },
-		];
-}
-
 const FROZEN_NOW = '2026-10-23T15:45:00.000-07:00';
 const FROZEN_UTC = new Date(FROZEN_NOW).toISOString();
 let seededTimestampOffset = 0;
@@ -242,14 +213,6 @@ async function shot(page: Page, name: string, chatRows = 4): Promise<void> {
 	const output = path.join(screenshotDir, `${name}.png`);
 	writeFileSync(output, await settled(page));
 	expect(existsSync(output), `Saved evidence frame ${name}`).toBeTruthy();
-}
-
-async function tabTo(page: Page, selector: string): Promise<void> {
-	for (let index = 0; index < 60; index += 1) {
-		await page.keyboard.press('Tab');
-		if (await page.locator(selector).evaluate((element) => document.activeElement === element)) return;
-	}
-	throw new Error(`Keyboard focus did not reach ${selector}`);
 }
 
 // The document is on screen with its text drawn and its comment count read.
@@ -373,135 +336,11 @@ async function seedScenario(
 	return { artifactId, docPath, name, roots };
 }
 
-/** A second real registered document for the cross-document aggregation fixture. */
-/*
-async function seedAdditionalReplyDocumentBroken(
-	request: APIRequestContext,
-	first: { docPath: string },
-	threadId: string,
-): Promise<{ artifactId: string; docPath: string; name: string; roots: string[] }> {
-	const name = 'release-notes.md';
-	const docPath = path.join(path.dirname(first.docPath), name);
-	const saved = await request.put(`/api/files/content?token=[REDACTED]encodeURIComponent(TEST_TOKEN)}`, {
-		data: { path: docPath, text: DOCUMENT_TEXT, thread_id: threadId, create: true },
-	});
-	expect(saved.ok(), await saved.text()).toBeTruthy();
-	const artifactId = (await saved.json()).artifact.id as string;
-	const passage = PASSAGES[0];
-	const from = DOCUMENT_TEXT.indexOf(passage.anchor);
-	const root = await request.post(`/api/artifacts/${artifactId}/comments?token=[REDACTED]encodeURIComponent(TEST_TOKEN)}`, {
-		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length, delivery_policy: 'immediate' },
-	});
-	expect(root.ok(), await root.text()).toBeTruthy();
-	const rootId = (await root.json()).comment.id as string;
-	addAgentReply(artifactId, rootId, threadId, 'The release notes now include the confirmed launch timing.');
-	sqlite([
-		['UPDATE doc_comments SET author=?, created_at=?, updated_at=? WHERE id=?', [READER, FROZEN_UTC, FROZEN_UTC, rootId]],
-	]);
-	return { artifactId, docPath, name, roots: [rootId] };
-}
-
-*/
-async function seedAdditionalReplyDocument(
-	request: APIRequestContext,
-	first: { docPath: string },
-	threadId: string,
-): Promise<{ artifactId: string; docPath: string; name: string; roots: string[] }> {
-	const name = 'release-notes.md';
-	const docPath = path.join(path.dirname(first.docPath), name);
-	const saved = await request.put('/api/files/content', {
-		params: { token: TEST_TOKEN },
-		data: { path: docPath, text: DOCUMENT_TEXT, thread_id: threadId, create: true },
-	});
-	expect(saved.ok(), await saved.text()).toBeTruthy();
-	const artifactId = (await saved.json()).artifact.id as string;
-	const passage = PASSAGES[0];
-	const from = DOCUMENT_TEXT.indexOf(passage.anchor);
-	const root = await request.post(`/api/artifacts/${artifactId}/comments`, {
-		params: { token: TEST_TOKEN },
-		data: { body: passage.ask, anchor_text: passage.anchor, from_off: from, to_off: from + passage.anchor.length, delivery_policy: 'immediate' },
-	});
-	expect(root.ok(), await root.text()).toBeTruthy();
-	const rootId = (await root.json()).comment.id as string;
-	addAgentReply(artifactId, rootId, threadId, 'The release notes now include the confirmed launch timing.');
-	sqlite([
-		['UPDATE doc_comments SET author=?, created_at=?, updated_at=? WHERE id=?', [READER, FROZEN_UTC, FROZEN_UTC, rootId]],
-		// Posting the comment raised a plan row for it; seedScenario closes the first document's rows the same way.
-		["UPDATE plan_nodes SET state='closed', archived_at=? WHERE title LIKE '% left % comment%'", [null]],
-	]);
-	return { artifactId, docPath, name, roots: [rootId] };
-}
-
-// Stands in for the queue the backend will serve: one item per open thread with a reply the reader has not seen,
-// in document order, read from the real comment state, so the dock advances when the document stamps a reply seen.
-async function serveReplyQueue(
-	page: Page,
-	request: APIRequestContext,
-	scenario: { artifactId: string; docPath: string; name: string },
-	threadId: string,
-	documentAvailable: () => boolean = () => true,
-	includeNeedsYou = false,
-	additionalScenarios: readonly { artifactId: string; docPath: string; name: string }[] = [],
-): Promise<void> {
-	await page.route('**/api/attention/queue', async (route) => {
-		if (!documentAvailable()) {
-			await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ current: null, count: 0, items: [] }) });
-			return;
-		}
-		const listed = await (await request.get(`/api/artifacts/${scenario.artifactId}/comments?token=${encodeURIComponent(TEST_TOKEN)}`)).json();
-		type Thread = { id: string; anchor_text: string | null; from_off: number | null; new_reply_ids?: string[]; replies?: Array<{ id: string; body: string; author: string; created_at: string }> };
-		const documents = [
-			{ document: scenario, comments: listed.comments as Thread[] },
-			...(await Promise.all(additionalScenarios.map(async (document) => ({
-				document,
-				comments: (await (await request.get(`/api/artifacts/${document.artifactId}/comments?${new URLSearchParams({ token: TEST_TOKEN })}`)).json()).comments as Thread[],
-			})))),
-		];
-		const waiting = documents
-			.flatMap(({ document, comments }) => comments
-				.filter((thread) => (thread.new_reply_ids?.length ?? 0) > 0)
-				.map((thread) => ({ document, thread })))
-			.sort((left, right) => (left.thread.from_off ?? 0) - (right.thread.from_off ?? 0));
-		const items = waiting.map(({ document, thread }) => {
-			const reply = thread.replies!.find((candidate) => candidate.id === thread.new_reply_ids!.at(-1))!;
-			return {
-				detail: {
-					title: document.name,
-					unread_count: thread.new_reply_ids!.length,
-					newest_at: reply.created_at,
-					destination: { pane: 'document-replies', id: document.artifactId, path: document.docPath, title: document.name },
-					source: { thread_id: threadId },
-				},
-			};
-		});
-		const queueItems = includeNeedsYou
-			? [{
-				external_id: 'fixture-decision', renderer: 'decision', detail: {
-					id: 'fixture-decision', plan_id: 'fixture-plan', node_id: 'fixture-node', source_node_id: 'fixture-node',
-					thread_id: 'release-review', title: 'Confirm launch timing', context: '', tradeoff: '', recommendation: 'yes',
-					options: [{ id: 'yes', label: 'Yes', detail: '' }], other_enabled: false, order_key: 0, revision: 1,
-					raised_at: null, source: { thread_id: 'release-review', thread_label: 'Release coordinator', project_id: null, project_label: null, parent_reviewed: true },
-				},
-			}]
-			: [];
-		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ current: queueItems[0] ?? null, count: queueItems.length, items: queueItems, reply_items: items }) });
-	});
-}
-
 async function reloadComments(page: Page, artifactId: string): Promise<void> {
 	await page.evaluate(async (id) => {
 		const { loadComments } = await import('/src/lib/stores/docComments.ts');
 		await loadComments(id);
 	}, artifactId);
-}
-
-// Frame 03 captures the deterministic unread state before its visible cards acknowledge those replies.
-async function resetDockPosition(page: Page): Promise<void> {
-	await page.evaluate(async () => {
-		const { activeId, expandedId } = await import('/src/lib/stores/attentionDock.svelte.ts');
-		activeId.set(null);
-		expandedId.set(null);
-	});
 }
 
 async function holdViewedStamps(page: Page): Promise<() => Promise<void>> {
@@ -579,22 +418,6 @@ async function shotRailClosed(page: Page, name: string, width: number): Promise<
 	await expect(rail).not.toHaveClass(/collapsed/);
 }
 
-// Top-to-bottom order on screen: every box is fully in the viewport and ends at or above the next one's top.
-// Returns the problems found, so a failed poll names the overlapping or clipped pieces.
-async function stackProblems(page: Page, parts: Record<string, ReturnType<Page['locator']>>): Promise<string[]> {
-	const viewport = page.viewportSize()!;
-	const named = await Promise.all(Object.entries(parts).map(async ([name, locator]) => [name, await locator.boundingBox()] as const));
-	const problems: string[] = [];
-	for (const [index, [name, box]] of named.entries()) {
-		if (!box) { problems.push(`${name} has no box`); continue; }
-		const edges = `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}`;
-		if (box.x < 0 || box.y < 0 || box.x + box.width > viewport.width + 0.5 || box.y + box.height > viewport.height + 0.5) problems.push(`${name} ${edges} leaves the viewport`);
-		const [previousName, previous] = named[index - 1] ?? [];
-		if (previous && previous.y + previous.height > box.y + 0.5) problems.push(`${previousName} overlaps ${name} ${edges}`);
-	}
-	return problems;
-}
-
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		test(`${TAG} ${theme} ${width}px: row and comments pill clear only after thread disclosure`, async ({ page, request }) => {
@@ -644,99 +467,6 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('.reply-mark')).toHaveCount(0);
 			await expect(pillUnread).not.toHaveAttribute('aria-label', /unread/);
 		});
-
-		test(`${TAG} ${theme} ${width}px: reply chip stacks above Needs you and the composer`, async ({ page, request }, testInfo) => {
-			test.setTimeout(60_000);
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			await seedScenario(page, request, threadId, `stacked-needs-you-${theme}-${width}`, [0]);
-			seedDecision(threadId);
-			const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
-			expect(queue.ok()).toBeTruthy();
-			const projected = await queue.json();
-			expect(projected.current.renderer).toBe('decision');
-			expect(projected.current.detail.source.thread_id).toBe(threadId);
-			expect(projected.reply_items.filter((item: { detail: { source: { thread_id: string } } }) => item.detail.source.thread_id === threadId)).toHaveLength(1);
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			const chip = page.locator('.attention-dock .reply-chip-notice');
-			const dock = page.locator('[data-attention-dock]');
-			const composer = chatComposer(page);
-			await expect(chip).toBeVisible();
-			// The chip is the shared AttachmentRow chip and counts only replies; the decision stays the dock's one job.
-			await expect(chip.getByRole('button')).toContainText('1 new reply · launch-plan.md');
-			await expect(dock).toBeVisible();
-			await expect(dock).toContainText('Choose the launch approach');
-			await expect(dock).not.toContainText(' of ');
-			await expect(composer).toBeVisible();
-			await expect.poll(() => stackProblems(page, { chip, dock: dock.locator('.dock-bar'), composer })).toEqual([]);
-			// The shared chip's 44px hit extension must not steal the neighbouring controls' edges.
-			for (const neighbour of [dock.locator('.dock-bar'), composer]) {
-				const edgeHits = await neighbour.evaluate((element) => {
-					const rect = element.getBoundingClientRect();
-					return [rect.top + 1, rect.bottom - 1].map(y => {
-						const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
-						return !!hit && (element === hit || element.contains(hit));
-					});
-				});
-				expect(edgeHits, 'neighbour edges remain hit-testable').toEqual([true, true]);
-			}
-			await shot(page, `03a-reply-chip-needs-you-stack-${theme}-${width}`);
-			if (width === 393) {
-				// The transcript outgrows the phone screen, so the frame above is scrolled to the newest message and the oldest rows
-				// pass under the header, as in any long chat. Prove nothing is lost: scrolled to the top, the first message is
-				// the topmost element at its own top edge, not covered by the header.
-				await page.locator('.messages').evaluate((element) => { element.scrollTop = 0; });
-				await expect.poll(() => page.locator('.messages').evaluate((element) => element.scrollTop)).toBe(0);
-				const firstMessageReachable = await page.locator('.messages .msg-time').first().evaluate((time) => {
-					const bubble = time.closest('.messages > *') ?? time;
-					const box = bubble.getBoundingClientRect();
-					const hit = document.elementFromPoint(box.left + box.width / 2, box.top + 4);
-					return !!hit && bubble.contains(hit);
-				});
-				expect(firstMessageReachable, 'The first message is clear of the header when the transcript is scrolled to the top').toBe(true);
-			}
-			const decision = projected.current.detail;
-			const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
-				params: { token: TEST_SESSION_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
-			});
-			expect(answer.ok(), await answer.text()).toBeTruthy();
-		});
-	}
-}
-
-for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: one chip aggregates two documents and opens the newest`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const first = await seedScenario(page, request, threadId, `two-documents-${theme}-${width}`, [0]);
-			// SQLite timestamps have second precision. The later document must have a strictly newer reply so
-			// this checks R4.2's cross-document destination rule rather than relying on a tie in server order.
-			await page.waitForTimeout(1_100);
-			const newest = await seedAdditionalReplyDocument(request, first, threadId);
-			// Use the real queue projection for cross-document aggregation.
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			const notice = page.locator('.attention-dock .reply-chip-notice');
-			const chip = notice.getByRole('button');
-			await expect(chip).toContainText('2 new replies · 2 documents');
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await expect(chatComposer(page)).toBeVisible();
-			await expect.poll(() => stackProblems(page, { chip: notice, composer: chatComposer(page) })).toEqual([]);
-			await shot(page, `03b-reply-chip-two-documents-${theme}-${width}`);
-			await chip.click();
-			await documentReady(page);
-			await expect(page.locator(`[data-comment-id="${newest.roots[0]}"]`)).toHaveClass(/focused/);
-		});
 	}
 }
 
@@ -756,12 +486,8 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(sidebarThread(page, threadTitle)).toBeAttached();
 			await openThread(page, threadTitle);
 			await expect(page.getByText(CHAT[0].content, { exact: true })).toBeVisible();
-			await expect(page.locator('.attention-dock .reply-chip-notice')).toHaveCount(0);
 			await shot(page, `00-current-chat-${theme}-${width}`);
 			addAgentReply(scenario.artifactId, scenario.roots[2], threadId, PASSAGES[2].reply);
-			// The reply is now waiting; refresh the real queue after the fixture writes it.
-			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-			await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('1 new reply · launch-plan.md');
 			const releaseViewedStamps = await holdViewedStamps(page);
 			try {
 				await page.evaluate(async ({ id, path, title }) => {
@@ -771,11 +497,9 @@ for (const theme of ['light', 'dark'] as const) {
 				// Arrival skips the first two quiet threads and visibly scrolls to Budget's unread reply.
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
-				// This landing frame is intentionally before the 1.5 s visible dwell: marker, pill, and dock still agree.
+				// This landing frame is intentionally before the 1.5 s visible dwell: marker and pill still agree.
 				await expect(page.getByRole('button', { name: '3 threads, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
-				// The reply is on screen but not yet read (the stamp is held), so Chat still counts it beside the document.
-				if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('1 new reply · launch-plan.md');
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
 				await shotRailClosed(page, `01-document-arrival-${theme}-${width}-rail-closed`, width);
@@ -797,7 +521,6 @@ for (const theme of ['light', 'dark'] as const) {
 			const threadId = await createSession(request, threadTitle);
 			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `passive-${theme}-${width}`);
-			await serveReplyQueue(page, request, scenario, threadId);
 			await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
 			await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
 			await documentReady(page);
@@ -807,131 +530,20 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.waitForTimeout(1100);
 			LATER_REPLIES.forEach((body, index) => addAgentReply(scenario.artifactId, scenario.roots[index], threadId, body));
 			await reloadComments(page, scenario.artifactId);
-			// The backend would push the new queue; the stand-in queue is read again.
-			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-			await resetDockPosition(page);
 			const commentsPill = page.getByRole('button', { name: '3 threads, 3 unread' });
 			await expect(commentsPill).toBeVisible();
 			await expect(commentsPill).toHaveText(/^\s*3 threads · 3 unread$/);
-			// Beside the document, Chat counts the same waiting replies in its one chip; none enters the Needs-you dock.
-			// The pill counts the three unread threads; the chip counts their replies: the later three, plus the seeded
-			// replies except the first, which the document's arrival opened and so read.
-			if (width === 1440) {
-				await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('5 new replies · launch-plan.md');
-				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			}
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
-			// Opening the comments shows the three threads the pill and the dock counted. Hold the
+			// Opening the comments shows the three threads the pill counted. Hold the
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
 			await page.getByRole('button', { name: '3 threads, 3 unread' }).click();
 			await expect(page.getByText('3 open', { exact: true })).toBeVisible();
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
-			// Beside the document, Chat counts the same waiting replies in its one chip; none enters the Needs-you dock.
-			// The pill counts the three unread threads; the chip counts their replies: the later three, plus the seeded
-			// replies except the first, which the document's arrival opened and so read.
-			if (width === 1440) {
-				await expect(page.locator('.attention-dock .reply-chip-notice').getByRole('button')).toContainText('5 new replies · launch-plan.md');
-				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			}
 			await shot(page, `03-three-replies-${theme}-${width}`);
 			await shotRailClosed(page, `03-three-replies-${theme}-${width}-rail-closed`, width);
 			await releaseViewedStamps();
-		});
-	}
-}
-
-for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: persistent reply chip lands on the first unread document reply`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `${theme}-${width}`, [0, 1, 2], {
-				readerFollowups: partialReadFollowups(width),
-			});
-			// The dock belongs on Chat. Keep this journey there until its explicit
-			// destination action opens the seeded document.
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			const replyChip = page.locator('.attention-dock .reply-chip-notice');
-			const captureLanding = width !== 1440 || Boolean(process.env.REPLY_AWARENESS_SCREENSHOT_DIR);
-			await expect(replyChip).toBeVisible();
-			await expect(replyChip.getByRole('button')).toContainText('3 new replies · launch-plan.md');
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			if (captureLanding) await shot(page, `04-reply-chip-${theme}-${width}`);
-			await replyChip.getByRole('button').click();
-			await documentReady(page);
-			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
-			// Arriving opened the first thread, so it reads; the other two stay new until opened, though the second is on screen.
-			await expect(page.getByRole('button', { name: '3 threads, 2 unread', exact: true })).toBeVisible();
-			await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(2);
-			// The remaining New reply must be wholly below the sheet viewport, not merely clipped at its edge.
-			const unreadCard = page.locator(`[data-comment-id="${scenario.roots[2]}"]`);
-			// The reader context keeps this agent reply beyond the viewport without changing the unread-thread count.
-			await expect.poll(() => unreadCard.evaluate((card) => {
-				const viewport = card.closest('[data-doc-comments-drawer]')?.querySelector<HTMLElement>('.drawer-comments');
-				if (!viewport) return false;
-				return card.getBoundingClientRect().top >= viewport.getBoundingClientRect().bottom;
-			})).toBe(true);
-			// Being on screen never reads a document reply; only opening its thread does.
-			await expect(page.getByText(PASSAGES[0].reply, { exact: true }).last()).toBeVisible();
-			if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('2 new replies · launch-plan.md');
-			if (captureLanding) {
-				await shot(page, `05-open-in-document-${theme}-${width}`);
-				await shotRailClosed(page, `05-open-in-document-${theme}-${width}-rail-closed`, width);
-			}
-			// What the dock reads next, on Chat (beside the document the 1440 frame above already shows it).
-			if (width === 393) {
-				await page.evaluate(async (id) => {
-					const { setActiveSurface } = await import('/src/lib/stores/artifactWorkspace.ts');
-					setActiveSurface(id, 'chat');
-				}, threadId);
-				// Arriving acknowledged the first initial reply. A later reply on that thread
-				// joins the two still unread.
-				await page.waitForTimeout(1100);
-				addAgentReply(scenario.artifactId, scenario.roots[0], threadId, LATER_REPLIES[0]);
-				await reloadComments(page, scenario.artifactId);
-				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-				await resetDockPosition(page);
-				await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-				await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('3 new replies · launch-plan.md');
-				await shot(page, `05b-reply-chip-next-reply-${theme}-${width}`);
-			}
-
-			// The reader leaves: a reply that arrives while the thread is open in view counts as seen.
-			await page.goto('about:blank');
-			// A reply is new when it is stamped later than the thread's seen stamp; wait it out so
-			// this reply is deterministically newer than the one just viewed.
-			await page.waitForTimeout(1100);
-			LATER_REPLIES.forEach((body, index) => addAgentReply(scenario.artifactId, scenario.roots[index], threadId, body));
-			await loadPastFirstRunLanding(page, () => page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`), { lands: true });
-			await openThread(page, threadTitle);
-			// The restored document tab may still be claiming the phone canvas while the thread settles;
-			// turn to Chat until the thread's chat is the surface on screen.
-			await expect(async () => {
-				await page.evaluate(async (id) => {
-					const { setActiveSurface } = await import('/src/lib/stores/artifactWorkspace.ts');
-					setActiveSurface(id, 'chat');
-				}, threadId);
-				await expect(page.locator('.attention-dock .reply-chip-notice')).toBeVisible({ timeout: 1_000 });
-			}).toPass({ timeout: 15_000 });
-			// The persistent chip aggregates this chat's replies and lands on the first unread root.
-			const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
-			await expect(chip).toHaveCount(1);
-			// Two initially unread replies remain at desktop; the phone path adds one more
-			// reply before leaving the document. The final chip must aggregate those with
-			// the three replies that arrived after the reader left.
-			await expect(chip).toContainText(`${width === 393 ? 6 : 5} new replies · launch-plan.md`);
-			if (captureLanding) await shot(page, `06-reply-chip-${theme}-${width}`);
-			await chip.click();
-			await documentReady(page);
-			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
-			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toContainText(LATER_REPLIES[0]);
 		});
 	}
 }
@@ -945,7 +557,6 @@ for (const width of [1440, 393]) {
 		const threadId = await createSession(request, threadTitle);
 		await replacePreviousFixtureThread(request, threadId);
 		const scenario = await seedScenario(page, request, threadId, `before-${width}`, []);
-		await serveReplyQueue(page, request, scenario, threadId);
 		await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
 		await documentReady(page);
 		await expect(page.locator('.ct-new')).toHaveCount(0);
@@ -959,435 +570,88 @@ for (const width of [1440, 393]) {
 		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		await shot(page, `00b-before-chat-light-${width}`);
 	});
-
-	for (const theme of ['light', 'dark'] as const) {
-		test(`${TAG} ${theme} ${width}px: long names stay legible in the reply chip and the reply it opens`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `long-dock-${theme}-${width}`, [0, 1, 2], { name: LONG_DOCUMENT_NAME, replier: LONG_REPLIER });
-			await serveReplyQueue(page, request, scenario, threadId);
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			// The collapsed notice is the one reply chip; the long document name stays inside the viewport above the composer.
-			const notice = page.locator('.attention-dock .reply-chip-notice');
-			const chip = notice.getByRole('button');
-			await expect(chip).toContainText(`3 new replies · ${LONG_DOCUMENT_NAME}`);
-			// The tooltip and the accessible name carry the whole name, whatever the visible text shows.
-			await expect(chip).toHaveAttribute('title', `3 new replies · ${LONG_DOCUMENT_NAME}`);
-			await expect(chip).toHaveAccessibleName(`3 new replies · ${LONG_DOCUMENT_NAME}, document`);
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await expect.poll(() => stackProblems(page, { chip: notice, composer: chatComposer(page) })).toEqual([]);
-			await shot(page, `08-long-reply-chip-${theme}-${width}`);
-			// The expanded reply is now the document's own card: the long replier name is shown there, on the first unread thread.
-			await chip.click();
-			await documentReady(page);
-			const card = page.locator(`[data-comment-id="${scenario.roots[0]}"]`);
-			await expect(card).toHaveClass(/focused/);
-			await expect(card.locator('.ct-reply .ct-msg-author').getByText(LONG_REPLIER, { exact: true })).toBeVisible();
-			await shot(page, `09-long-reply-document-${theme}-${width}`);
-		});
-	}
-
-	test(`${TAG} long document names remain in the persistent reply chip at ${width}px`, async ({ page, request }, testInfo) => {
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		skipMismatchedProject(width, testInfo.project.name);
-		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, threadTitle);
-		await replacePreviousFixtureThread(request, threadId);
-		const scenario = await seedScenario(page, request, threadId, `long-chip-${width}`, [0, 1, 2], { name: LONG_DOCUMENT_NAME, replier: LONG_REPLIER });
-		await serveReplyQueue(page, request, scenario, threadId);
-		await loadPastFirstRunLanding(page, () => page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`), { lands: true });
-		await openThread(page, threadTitle);
-		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
-		await expect(chip).toContainText('3 new replies');
-		await expect(chip).toContainText(LONG_DOCUMENT_NAME);
-		await shot(page, `10-long-chip-light-${width}`);
-	});
-
-	test(`${TAG} keyboard focus stays visible from the reply chip into the reply it opens at ${width}px`, async ({ page, request }, testInfo) => {
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		skipMismatchedProject(width, testInfo.project.name);
-		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, threadTitle);
-		await replacePreviousFixtureThread(request, threadId);
-		const scenario = await seedScenario(page, request, threadId, `focus-${width}`);
-		await serveReplyQueue(page, request, scenario, threadId);
-		await loginByUrl(page);
-		await openThread(page, threadTitle);
-		// Replies never become a dock stop: the keyboard reaches the chip, then the phone plan control and composer.
-		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
-		const planChip = page.getByRole('button', { name: /^Open plan/ });
-		await tabTo(page, '.attention-dock .reply-chip-notice button');
-		await expect(chip).toBeFocused();
-		await expect(chip).toContainText('3 new replies · launch-plan.md');
-		await expect(chip).toHaveCSS('outline-style', 'solid');
-		await shot(page, `04b-reply-chip-focus-light-${width}`);
-		// The plan control mounts with the thread's plan snapshot, after the hand-off it sits beside, and Tab can
-		// only reach it once it is in the DOM. Wait on it before the keystroke instead of racing its mount;
-		// measured, a Tab sent before the mount lands on the composer and the assertion reports 'inactive'.
-		if (width === 393) await expect(planChip).toBeVisible();
-		await page.keyboard.press('Tab');
-		if (width === 393) {
-			await expect(planChip).toBeFocused();
-			await page.keyboard.press('Tab');
-		}
-		await expect(chatComposer(page)).toBeFocused();
-		await shot(page, `04c-composer-focus-after-chip-light-${width}`);
-		await page.keyboard.press('Shift+Tab');
-		if (width === 393) {
-			await expect(planChip).toBeVisible();
-			await expect(planChip).toBeFocused();
-			await page.keyboard.press('Shift+Tab');
-		}
-		await expect(chip).toBeFocused();
-		// Enter opens the document on the first unread reply, the destination the old card's Open in document reached.
-		await page.keyboard.press('Enter');
-		await documentReady(page);
-		await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
-		await shot(page, `04d-document-focus-after-chip-light-${width}`);
-	});
-
-	for (const theme of ['light', 'dark'] as const) {
-		test(`${TAG} ${theme} ${width}px: failed document open gives the same recovery`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `failed-open-${theme}-${width}`);
-			await serveReplyQueue(page, request, scenario, threadId);
-			await page.route('**/api/files/content**', async (route) => {
-				if (route.request().method() !== 'GET') return route.continue();
-				return route.abort('failed');
-			});
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await page.locator('.attention-dock .reply-chip-notice').getByRole('button').click();
-			const failurePanel = page.locator('.load-error');
-			await expect(failurePanel).toBeVisible();
-			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
-			await expect(failurePanel.getByRole('button', { name: 'Retry' })).toBeVisible();
-			await shot(page, `07-failed-open-${theme}-${width}`);
-			await failurePanel.getByRole('button', { name: 'Retry' }).click();
-			await expect(failurePanel).toContainText("Couldn't open launch-plan.md.");
-		});
-	}
-}
-
-test(`${TAG} light 393px: same reply count keeps the responsive document UI unchanged`, async ({ page, request }, testInfo) => {
-	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-	skipMismatchedProject(393, testInfo.project.name);
-	await page.setViewportSize({ width: 393, height: 852 });
-	await page.emulateMedia({ colorScheme: 'light' });
-	const threadId = await createSession(request, threadTitle);
-	await replacePreviousFixtureThread(request, threadId);
-	// The main responsive journey keeps one shorter reader context so its one-unread,
-	// offscreen checkpoint remains stable. This separate fixture proves the same UI
-	// with the desktop thread's two reader follow-ups rather than changing that journey.
-	const scenario = await seedScenario(page, request, threadId, 'same-count-393', [0, 1, 2], {
-		readerFollowups: [
-			{ rootIndex: 0, body: 'I checked the owner list against the release calendar and noted the two dependencies that must be confirmed before the launch date can hold. The rest of the work is already assigned, so this is only a request for confirmation rather than a new scope decision.' },
-			{ rootIndex: 0, body: 'Noted.' },
-		],
-	});
-	await serveReplyQueue(page, request, scenario, threadId);
-	await loginByUrl(page);
-	await openThread(page, threadTitle);
-	await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-	await page.locator('.attention-dock .reply-chip-notice').getByRole('button').click();
-	await documentReady(page);
-	await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
-	await shot(page, '05c-same-count-light-393');
-});
-
-for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: a removed document closes its reply hand-off without retry`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `removed-${theme}-${width}`);
-			let documentAvailable = true;
-			await serveReplyQueue(page, request, scenario, threadId, () => documentAvailable);
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
-			await expect(chip).toContainText('3 new replies · launch-plan.md');
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			// The terminal state is an actual removal. Deleting the disposable file and
-			// reconciling its registered row keeps the pane and document surface truthful.
-			rmSync(scenario.docPath);
-			const reconciled = await request.post(`/api/threads/${threadId}/artifacts/reconcile?token=${encodeURIComponent(TEST_TOKEN)}`);
-			expect(reconciled.ok(), await reconciled.text()).toBeTruthy();
-			// The pane's background reconciliation may have applied the removal first.
-			await expect.poll(async () => {
-				const pane = await request.get(`/api/threads/${threadId}/artifacts`, { params: { token: TEST_TOKEN } });
-				expect(pane.ok()).toBeTruthy();
-				return JSON.stringify(await pane.json());
-			}).not.toContain(scenario.artifactId);
-			// The real reconciler emits this frame after it commits. This request-context
-			// fixture has no browser WebSocket transport, so deliver the exact event to
-			// the mounted pane and prove its normal refetch removes the stale rail row.
-			await page.evaluate(async (id) => {
-				const { emit } = await import('/src/lib/ws/events.ts');
-				emit('artifacts_changed', { affected_thread_ids: [id] });
-			}, threadId);
-			documentAvailable = false;
-			await chip.click();
-			const removed = page.locator('.gone');
-			await expect(removed.getByText('launch-plan.md is unavailable.', { exact: true })).toBeVisible();
-			await expect(removed.getByRole('button', { name: 'Retry' })).toHaveCount(0);
-			await expect(page.locator('.row.openable', { hasText: 'launch-plan.md' })).toHaveCount(0);
-			await shot(page, `07b-removed-document-${theme}-${width}`);
-			await removed.getByRole('button', { name: 'Close tab' }).click();
-			await expect(page.getByText(CHAT[0].content, { exact: true })).toBeVisible();
-			// The removed document's reply hand-off is gone from Chat, and nothing moved into Needs you.
-			await expect(page.locator('.attention-dock .reply-chip-notice')).toHaveCount(0);
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-		});
-	}
-}
-
-for (const theme of ['light', 'dark'] as const) {
-	test(`${TAG} hidden worker reply reaches visible chat ${theme}`, async ({ page, request }, testInfo) => {
-		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		skipMismatchedProject(1440, testInfo.project.name);
-		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.emulateMedia({ colorScheme: theme });
-		const threadId = await createSession(request, threadTitle);
-		await replacePreviousFixtureThread(request, threadId);
-		const childId = await createSession(request, 'Reviewer');
-		sqlite([["UPDATE threads SET spawned_by=? WHERE id=?", [threadId, childId]]]);
-		const scenario = await seedScenario(page, request, threadId, `hidden-worker-${theme}`, []);
-		addAgentReply(scenario.artifactId, scenario.roots[0], childId, PASSAGES[0].reply);
-		const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
-		expect((await response.json()).reply_items[0].detail.source.thread_id).toBe(threadId);
-		await loginByUrl(page);
-		await openThread(page, threadTitle);
-		const notice = page.locator('.attention-dock .reply-chip-notice');
-		await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
-		await shot(page, `visible-root-chip-${theme}`);
-		await notice.getByRole('button').click();
-		await documentReady(page);
-		await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
-		await expect(notice).toHaveCount(0, { timeout: 10_000 });
-		await shot(page, `visible-root-cleared-${theme}`);
-	});
-}
-
-test(`${TAG} real queue: open the chip and read its reply`, async ({ page, request }, testInfo) => {
-	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-	skipMismatchedProject(1440, testInfo.project.name);
-	await page.setViewportSize({ width: 1440, height: 900 });
-	const threadId = await createSession(request, threadTitle);
-	await replacePreviousFixtureThread(request, threadId);
-	const scenario = await seedScenario(page, request, threadId, 'real-reply-queue', [0]);
-	const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
-	expect(queue.ok()).toBeTruthy();
-	expect((await queue.json()).reply_items[0].detail.unread_count).toBe(1);
-	await loginByUrl(page);
-	await openThread(page, threadTitle);
-	const notice = page.locator('.attention-dock .reply-chip-notice');
-	await expect(notice.getByRole('button')).toContainText('1 new reply · launch-plan.md');
-	await expect(notice.locator('.ct-new-dot')).toBeVisible();
-	await notice.getByRole('button').click();
-	await documentReady(page);
-	await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
-	await expect.poll(async () => {
-		const response = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
-		return ((await response.json()).reply_items ?? []).length;
-	}, { timeout: 10_000 }).toBe(0);
-	await expect(notice).toHaveCount(0);
-	expect(scenario.roots).toHaveLength(3);
-});
-
-// A reply counts as read once the document has shown it whole for the 1.5 s dwell (CommentThread.svelte, VIEWED_DWELL_MS).
-// The server then drops it from the thread's unread replies and the chip's count follows the queue.
-for (const theme of ['light', 'dark'] as const) {
-	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: reading replies shrinks the chip and reading them all clears it`, async ({ page, request }, testInfo) => {
-			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-			skipMismatchedProject(width, testInfo.project.name);
-			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, threadTitle);
-			await replacePreviousFixtureThread(request, threadId);
-			const scenario = await seedScenario(page, request, threadId, `read-${theme}-${width}`, [0, 1, 2], { readerFollowups: partialReadFollowups(width) });
-			await loginByUrl(page);
-			await openThread(page, threadTitle);
-			const notice = page.locator('.attention-dock .reply-chip-notice');
-			await expect(notice.getByRole('button')).toContainText('3 new replies · launch-plan.md');
-			await notice.getByRole('button').click();
-			await documentReady(page);
-			// Arriving opened the first thread; the other two stay new until opened.
-			await expect(page.getByRole('button', { name: '3 threads, 2 unread', exact: true })).toBeVisible();
-			const showSurface = (surface: 'chat' | 'artifact') => width === 393
-				? page.evaluate(async ({ id, next }) => {
-					const { setActiveSurface } = await import('/src/lib/stores/artifactWorkspace.ts');
-					setActiveSurface(id, next);
-				}, { id: threadId, next: surface })
-				: Promise.resolve();
-			const reloadQueue = async () => {
-				// Re-read the server projection after the viewed stamp.
-				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-			};
-			await showSurface('chat');
-			await reloadQueue();
-			await expect(notice.getByRole('button')).toContainText('2 new replies · launch-plan.md');
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await shot(page, `11a-reply-chip-partly-read-${theme}-${width}`);
-
-			// The reader opens each remaining thread by clicking its card.
-			await showSurface('artifact');
-			// On the phone the comments sheet closed with the surface; the document's own pill opens it again.
-			if (width === 393) await page.getByRole('button', { name: '3 threads, 2 unread', exact: true }).click();
-			for (const root of [scenario.roots[1], scenario.roots[2]]) {
-				const card = page.locator(`[data-comment-id="${root}"] .ct`).first();
-				await card.scrollIntoViewIfNeeded();
-				await card.locator('.ct-reply-count').click();
-			}
-			await expect(page.locator('.ct-new')).toHaveCount(0);
-			await showSurface('chat');
-			await reloadQueue();
-			await expect(notice).toHaveCount(0);
-			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await expect(chatComposer(page)).toBeVisible();
-			await shot(page, `11b-reply-chip-all-read-${theme}-${width}`);
-		});
-	}
 }
 
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 1920, 393]) {
-		for (const withDecision of [false, true]) {
-			test(`${TAG} ${theme} ${width}px: transparent controls above the transcript with ${withDecision ? 'a decision' : 'only a reply'}`, async ({ page, request }, testInfo) => {
-				test.setTimeout(60_000);
-				test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-				skipMismatchedProject(width, testInfo.project.name);
-				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-				await page.emulateMedia({ colorScheme: theme });
-				const threadId = await createSession(request, threadTitle);
-				await replacePreviousFixtureThread(request, threadId);
-				const scenario = await seedScenario(page, request, threadId, `backdrop-${theme}-${width}-${withDecision}`, [],
-					width === 393 && !withDecision ? { name: LONG_DOCUMENT_NAME } : {});
-				const longBubble = Array(80).fill('Please check the launch owners, the release schedule, and the support coverage before the announcement.').join(' ');
-				await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
-				await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
-				sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
-				// An existing decision starts collapsed; a newly arriving decision auto-opens.
-				if (withDecision) seedDecision(threadId);
-				else seedPlan(threadId);
-				await loginByUrl(page);
-				await openThread(page, threadTitle);
-				const messages = page.locator('.messages');
-				await expect(messages.getByText(longBubble)).toBeAttached();
-				await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
-				await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
-				await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
-				if (!withDecision) {
-					await expect(page.locator('.attention-dock')).toHaveCount(0);
-					const arrowBeforeReply = page.locator('.chat-attention-stack > .chat-scroll-control');
-					await expect(arrowBeforeReply).toBeVisible();
-					await expect(arrowBeforeReply.locator('xpath=ancestor::*[contains(@class,"attention-dock")]')).toHaveCount(0);
-				}
-				addAgentReply(scenario.artifactId, scenario.roots[0], threadId, PASSAGES[0].reply);
+		test(`${TAG} ${theme} ${width}px: transparent controls above the transcript with a decision`, async ({ page, request }, testInfo) => {
+			test.setTimeout(60_000);
+			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+			skipMismatchedProject(width, testInfo.project.name);
+			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
+			await page.emulateMedia({ colorScheme: theme });
+			const threadId = await createSession(request, threadTitle);
+			await replacePreviousFixtureThread(request, threadId);
+			await seedScenario(page, request, threadId, `backdrop-${theme}-${width}`, []);
+			const longBubble = Array(80).fill('Please check the launch owners, the release schedule, and the support coverage before the announcement.').join(' ');
+			await injectMessage(request, threadId, { role: 'user', content: longBubble }, TEST_TOKEN);
+			await injectMessage(request, threadId, { role: 'assistant', content: 'I will review those details.' }, TEST_TOKEN);
+			sqlite([['UPDATE messages SET created_at=? WHERE thread_id=?', [FROZEN_UTC, threadId]]]);
+			// An existing decision starts collapsed; a newly arriving decision auto-opens.
+			seedDecision(threadId);
+			await loginByUrl(page);
+			await openThread(page, threadTitle);
+			const messages = page.locator('.messages');
+			await expect(messages.getByText(longBubble)).toBeAttached();
+			await messages.locator('.user-bubble-wrapper', { hasText: longBubble }).getByRole('button', { name: 'Show more' }).click();
+			await expect.poll(() => messages.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(200);
+			await messages.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true })); el.dispatchEvent(new Event('scroll')); });
+			const dock = page.locator('.attention-dock');
+			await expect(dock).toBeVisible();
+			const arrow = page.locator('.chat-attention-stack > .chat-scroll-control');
+			await expect(arrow).toBeVisible();
+			await expect(page.locator('.chat-scroll-control:visible, .scroll-fab:visible')).toHaveCount(1);
+			await expect(dock.locator('.chat-scroll-control')).toHaveCount(0);
+			for (const surface of [dock, page.locator('.chat-attention-stack')]) {
+				const background = await surface.evaluate(el => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
+				expect(background).toEqual({ color: 'rgba(0, 0, 0, 0)', image: 'none' });
+			}
+			if (width === 393) {
+				const plan = page.locator('.plan-progress-chip');
+				await expect(plan).toBeVisible();
+				const arrowBox = (await arrow.boundingBox())!;
+				const planBox = (await plan.boundingBox())!;
+				expect(Math.abs((arrowBox.y + arrowBox.height / 2) - (planBox.y + planBox.height / 2))).toBeLessThanOrEqual(1);
+				expect(arrowBox.width).toBeGreaterThanOrEqual(44);
+				expect(planBox.height).toBeGreaterThanOrEqual(44);
+			}
+			await expect.poll(async () => {
 				await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-				const dock = page.locator('.attention-dock');
-				await expect(dock).toBeVisible();
-				await expect(dock.locator('.reply-chip-notice')).toBeVisible();
-				const arrow = page.locator('.chat-attention-stack > .chat-scroll-control');
-				await expect(arrow).toBeVisible();
-				await expect(page.locator('.chat-scroll-control:visible, .scroll-fab:visible')).toHaveCount(1);
-				await expect(dock.locator('.chat-scroll-control')).toHaveCount(0);
-				for (const surface of [dock, page.locator('.chat-attention-stack')]) {
-					const background = await surface.evaluate(el => ({ color: getComputedStyle(el).backgroundColor, image: getComputedStyle(el).backgroundImage }));
-					expect(background).toEqual({ color: 'rgba(0, 0, 0, 0)', image: 'none' });
-				}
-				if (width === 393) {
-					const plan = page.locator('.plan-progress-chip');
-					await expect(plan).toBeVisible();
-					const arrowBox = (await arrow.boundingBox())!;
-					const planBox = (await plan.boundingBox())!;
-					const noticeBox = (await dock.locator('.reply-chip-notice').boundingBox())!;
-					expect(Math.abs((arrowBox.y + arrowBox.height / 2) - (planBox.y + planBox.height / 2))).toBeLessThanOrEqual(1);
-					expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(arrowBox.y);
-					expect(arrowBox.width).toBeGreaterThanOrEqual(44);
-					expect(planBox.height).toBeGreaterThanOrEqual(44);
-				}
-				if (!withDecision) {
-					const blankHit = await dock.evaluate(el => {
-						const box = el.getBoundingClientRect();
-						const hit = document.elementFromPoint(box.right - 8, box.top + 4);
-						return !!hit && !el.contains(hit);
-					});
-					expect(blankHit, 'Blank dock space passes pointer input to the transcript').toBe(true);
-				}
-				if (withDecision) {
-					await expect.poll(async () => {
-						await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
-						return dock.locator('.dock-bar').count();
-					}).toBe(1);
-					const bar = dock.locator('.dock-bar');
-					await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-					await bar.focus();
-					await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-					await bar.evaluate(el => el.blur());
-					if (width !== 393) {
-						await bar.hover();
-						await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-						await page.mouse.move(0, 0);
-					}
-				} else await expect(dock.locator('.dock-bar')).toHaveCount(0);
-				const bubble = messages.locator('.user-bubble-wrapper', { hasText: longBubble });
-				const overlap = await bubble.evaluate((element) => {
-					const bubbleBox = element.getBoundingClientRect();
-					const chipBox = document.querySelector('.attention-dock .reply-chip-notice')!.getBoundingClientRect();
-					return bubbleBox.left < chipBox.right && bubbleBox.right > chipBox.left && bubbleBox.top < chipBox.bottom && bubbleBox.bottom > chipBox.top;
-				});
-				expect(overlap, 'The long user bubble is directly behind the reply chip').toBe(true);
-				await shot(page, `12-backdrop-${withDecision ? 'needs-you' : 'reply-only'}-${theme}-${width}`, 5);
-				if (width === 393 && withDecision) {
-					await dock.locator('.dock-bar').click();
-					const decisionDrawer = page.getByRole('dialog', { name: /^Decision —/ });
-					await expect(decisionDrawer).toBeVisible();
-					await shot(page, `13-decision-expanded-${theme}-${width}`, 5);
-					await page.keyboard.press('Escape');
-					await expect(decisionDrawer).toBeHidden();
-				}
-				if (width === 393) {
-					await page.locator('.plan-progress-chip').click();
-					const drawer = page.getByRole('dialog', { name: /^Plan —/ });
-					await expect(drawer).toBeVisible();
-					await drawer.getByRole('button', { name: 'Done' }).click();
-					await expect(drawer).toBeHidden();
-				}
-				await arrow.click();
-				await expect.poll(() => messages.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
-				await dock.locator('.reply-chip-notice button').click();
-				await documentReady(page);
-				await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
-				if (withDecision) {
-					const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
-					const decision = (await queue.json()).current.detail;
-					const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
-						params: { token: TEST_SESSION_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
-					});
-					expect(answer.ok(), await answer.text()).toBeTruthy();
-				}
+				return dock.locator('.dock-bar').count();
+			}).toBe(1);
+			const bar = dock.locator('.dock-bar');
+			await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+			await bar.focus();
+			await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+			await bar.evaluate(el => el.blur());
+			if (width !== 393) {
+				await bar.hover();
+				await expect(bar).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+				await page.mouse.move(0, 0);
+			}
+			await shot(page, `12-backdrop-needs-you-${theme}-${width}`, 5);
+			if (width === 393) {
+				await bar.click();
+				const decisionDrawer = page.getByRole('dialog', { name: /^Decision —/ });
+				await expect(decisionDrawer).toBeVisible();
+				await shot(page, `13-decision-expanded-${theme}-${width}`, 5);
+				await page.keyboard.press('Escape');
+				await expect(decisionDrawer).toBeHidden();
+				await page.locator('.plan-progress-chip').click();
+				const drawer = page.getByRole('dialog', { name: /^Plan —/ });
+				await expect(drawer).toBeVisible();
+				await drawer.getByRole('button', { name: 'Done' }).click();
+				await expect(drawer).toBeHidden();
+			}
+			await arrow.click();
+			await expect.poll(() => messages.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(3);
+			const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
+			const decision = (await queue.json()).current.detail;
+			const answer = await request.post(`/api/plans/decisions/${decision.id}/answer`, {
+				params: { token: TEST_SESSION_TOKEN }, data: { option_id: 'A', expected_revision: decision.revision, mutation_id: `answer-${threadId}` },
 			});
-		}
+			expect(answer.ok(), await answer.text()).toBeTruthy();
+		});
 	}
 }
 
@@ -1406,43 +670,24 @@ test.afterAll(({}, testInfo) => {
 				'01-document-arrival',
 				'02-later-reply-passive',
 				'03-three-replies',
-				'03a-reply-chip-needs-you-stack',
-				'03b-reply-chip-two-documents',
-				'04-reply-chip',
-				'05-open-in-document',
-				'06-reply-chip',
-				'07-failed-open',
-				'07b-removed-document',
-				'08-long-reply-chip',
-				'09-long-reply-document',
-				'11a-reply-chip-partly-read',
-				'11b-reply-chip-all-read',
 				'12-backdrop-needs-you',
-				'12-backdrop-reply-only',
 			]) expected.add(`${frame}-${theme}-${width}.png`);
 			if (width === 1440) {
 				expected.add(`01-document-arrival-${theme}-${width}-rail-closed.png`);
 				expected.add(`03-three-replies-${theme}-${width}-rail-closed.png`);
-				expected.add(`05-open-in-document-${theme}-${width}-rail-closed.png`);
 			}
-			if (width === 393) expected.add(`05b-reply-chip-next-reply-${theme}-${width}.png`);
 		}
 	}
 	for (const width of [1440, 393]) {
 		for (const frame of [
 			'00a-before-in-document',
 			'00b-before-chat',
-			'04b-reply-chip-focus',
-			'04c-composer-focus-after-chip',
-			'04d-document-focus-after-chip',
-			'10-long-chip',
 		]) expected.add(`${frame}-light-${width}.png`);
 	}
-	expected.add('05c-same-count-light-393.png');
 
 	const runStartedAt = statSync(path.join(screenshotDir, EVIDENCE_RUN_MARKER)).mtimeMs;
 	const capturedFrames = readdirSync(screenshotDir).filter((entry) => entry.endsWith('.png')).sort();
-	expect(capturedFrames, 'The empty evidence directory contains exactly the current run’s 89 frames').toEqual([...expected].sort());
+	expect(capturedFrames, 'The empty evidence directory contains exactly the current run’s frames').toEqual([...expected].sort());
 	for (const frame of expected) {
 		const output = path.join(screenshotDir, frame);
 		expect(existsSync(output), `Persisted reply-awareness evidence frame ${output}`).toBeTruthy();

@@ -7,12 +7,12 @@ import { toasts } from '$lib/stores/toast';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
-function render(onSubmit: (text: string) => Promise<void> = async () => {}) {
+function render(onSubmit: (text: string) => Promise<void> = async () => {}, extra: Record<string, unknown> = {}) {
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	component = mount(CommentComposer, {
 		target: host,
-		props: { quote: 'Selected text', onSubmit, onCancel: () => {} },
+		props: { quote: 'Selected text', onSubmit, onCancel: () => {}, ...extra },
 	});
 	flushSync();
 	return host.querySelector<HTMLTextAreaElement>('textarea')!;
@@ -93,5 +93,15 @@ describe('CommentComposer', () => {
 
 		acknowledge();
 		await vi.waitFor(() => expect(textarea.value).toBe(''));
+	});
+
+	it('offers no Retry, by button or keyboard, for a failure no press can get past', () => {
+		const onSubmit = vi.fn(async () => {});
+		const textarea = render(onSubmit, { body: 'Kept to copy', error: 'This chat is deleted.', retryable: false });
+		expect(host.querySelector('.submit')).toBeNull();
+		expect(host.querySelector('.cancel')?.textContent).toBe('Cancel');
+		expect(textarea.value).toBe('Kept to copy');
+		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+		expect(onSubmit).not.toHaveBeenCalled();
 	});
 });

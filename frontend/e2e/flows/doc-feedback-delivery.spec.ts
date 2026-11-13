@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { closeComments, showAllThreads, showResolved, openComments } from '../support/commentDrawer';
+import { closeComments, showAllThreads, openComments } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
@@ -218,8 +218,10 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
-	// A resolved thread leaves the open list for the drawer's Resolved entry.
-	await showResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
+	// A resolved thread leaves the open list for the header's Resolved entry. The comments sheet is modal at this width and
+	// covers that header, so a person closes it first.
+	await closeComments(page);
+	await page.locator('[data-resolved-entry]').click();
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
 	await resolved.getByRole('button', { name: 'Resolved · 1 message' }).click();
@@ -227,7 +229,7 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	// The re-opened comment is held for the owner: the header's Send is its one sender, reachable once the drawer is closed.
-	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
+	await closeComments(page);
 	if (deliverImmediately) await expect(headerSend(page)).toHaveCount(0);
 	else {
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');

@@ -92,7 +92,20 @@
 	}
 </script>
 
-{#if word && count === 0}
+{#if owes(entry) && count === 0}
+	<span class="plan-state update-dot needs-you-dot" role="img" aria-label={label} title={line ? label : title}></span>
+{:else if owes(entry)}
+	<span
+		class="plan-state update-dot needs-you-dot"
+		role="button"
+		tabindex="0"
+		title={line ? label : title}
+		aria-label={`${label}: ${count} item${count === 1 ? '' : 's'}`}
+		onclick={show}
+		onkeydown={(event) => activate(event, show)}
+		onpointerdown={(event) => event.stopPropagation()}
+	></span>
+{:else if word && count === 0}
 	<!-- Nothing listable behind it: a word, not a control that opens an empty list. -->
 	<span class="plan-state static {entry?.state}" class:line title={line ? label : title}>{label}</span>
 {:else if word}
@@ -139,6 +152,7 @@
 		width: 8px; height: 8px; border-radius: var(--radius-circle);
 		background: var(--accent);
 	}
+	.update-dot.needs-you-dot { background: var(--amber); }
 	.update-dot:focus-visible { border-radius: var(--radius-circle); }
 	@media (max-width: 768px) {
 		.plan-state[role="button"] { position: relative; }

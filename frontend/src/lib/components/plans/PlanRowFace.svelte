@@ -9,6 +9,8 @@
 -->
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
+	import { feedbackLine } from '$lib/api/messageCards';
+	import CommentCountLine from '$lib/components/comments/CommentCountLine.svelte';
 	import { activeToolsByThread } from '$lib/stores/threads';
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
@@ -50,6 +52,9 @@
 			? `${node.branch_progress.done}/${node.branch_progress.total}`
 			: null,
 	);
+	const attention = $derived(node.comment_attention);
+	// An open ask keeps its own subtext and gains the count after it; a file task's subtext is the count.
+	const countFollows = $derived(!!attention && !attention.system_task && node.requires_user_action);
 	const symbol = $derived.by(() => {
 		if (state === 'needs-you') return '!';
 		if (state === 'waiting') return isNext ? '→' : '•';
@@ -69,10 +74,21 @@
 		{#if branchProgress}<span class="branch-progress">{branchProgress}<span class="sr-only">{' done'}</span></span>{/if}
 		<span class="row-status sr-only">{label}</span>
 	</span>
-	{#if liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
-	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
+	{#if attention && !countFollows && feedbackLine(attention)}
+		<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot={attention.system_task || node.requires_user_action} /></span>
+	{/if}
+	{#if !attention?.system_task && liveStep}
+		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={liveRun} /></span>
+		{:else}<span class="row-subline {state} {tone}">{@render liveRun()}</span>{/if}
+	{:else if !attention?.system_task && (subline.lead || subline.moment)}
+		{#if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot lead={plainRun} /></span>
+		{:else}<span class="row-subline {state} {tone}">{@render plainRun()}</span>{/if}
+	{:else if attention && countFollows}<span class="row-subline counted {state} {tone}"><CommentCountLine counts={attention} dot /></span>{/if}
 </span>
+
+<!-- The row's own subtext: one inline run that truncates once, at its end. -->
+{#snippet liveRun()}{#if liveStep}<PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{/if}{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}{/snippet}
+{#snippet plainRun()}{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}{/snippet}
 
 <style>
 	.row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
@@ -100,6 +116,9 @@
 	.row-subline.needs-you { color: var(--amber-text); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
+	/* A line carrying a comment count cuts nothing: the subtext keeps its words and the count wraps below it (CommentCountLine). */
+	.row-subline.counted { overflow: visible; text-overflow: clip; white-space: normal; }
+	.row-subline.counted .subline-text, .row-subline.counted .subline-moment { white-space: pre-wrap; }
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;

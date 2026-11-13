@@ -215,6 +215,9 @@ def clear_write(
     if changed.rowcount != 1:
         raise service.PlanError("plan hold clearance conflict")
     service.touch_node(db, node_id, at=now)
+    from plans import user_ask
+
+    user_ask.hold_cleared(db, hold)
     if detail is not None and "verdict" in detail:
         from plans import gate_handoff
 

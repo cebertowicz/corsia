@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
-import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread, postedComments } from './support/chatComments';
 
 const text = 'First selected phrase. Second selected phrase.';
 const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-comments-real');
@@ -58,35 +58,36 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
       await page.getByText('Comment worker', { exact: true }).first().click();
     }
     await expect(page.locator(`[data-message-id="${id}"]`)).toBeVisible();
+    // Each comment posts from its own box as it is written; typed text is a chat message of its own and carries no comment.
+    const count = scenario === 'two-comments' ? 2 : 1;
+    await seedMockResponses(request, Array.from({ length: count + 1 }, () => ({ content: 'Received comments' })));
     await select(page, id, 'First selected phrase', 'First note');
     if (scenario === 'two-comments') await select(page, id, 'Second selected phrase', 'Second note');
-    await seedMockResponses(request, [{ content: 'Received comments' }]);
     const composer = scenario === 'subagent' ? page.getByLabel('Agent chat').getByRole('textbox', { name: 'Message CORSIA' }) : chatComposer(page);
-    if (scenario !== 'comments-only') await composer.fill('Please address the comments');
-    await composer.press('Enter');
-    const count = scenario === 'two-comments' ? 2 : 1;
+    if (scenario !== 'comments-only') {
+      await composer.fill('Please address the comments');
+      await composer.press('Enter');
+    }
+    const userRows = scenario === 'comments-only' ? 0 : 1;
     const messageRow = page.locator(`[data-message-id="${id}"]`);
-    let context: any;
-    let sentId = '';
+    let comments: any[] = [];
+    let sentIds: string[] = [];
     await expect.poll(async () => {
       const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
       const body = await response.json();
-      const sent = body.messages.find((m: any) => m.role === 'user' && m.metadata?.reply_context?.comments?.length === count);
-      context = sent?.metadata.reply_context;
-      sentId = sent?.id ?? '';
-      return Boolean(context);
-    }).toBe(true);
-    expect(context.comments.map((c: any) => c.cid)).toEqual(context.comments.map((_: any, i: number) => expect.stringMatching(new RegExp(`^c[0-9]+\\.${i + 1}$`))));
-    console.log(`STORED ${scenario} ${JSON.stringify(context)}`);
-    if (scenario === 'comments-only') {
-      // A send that carries comments and no typed text adds no user bubble: the comment lives on its highlight, and its note reads in the thread the highlight opens.
-      await expect(page.locator('.messages .message.user')).toHaveCount(0);
-      await expect(page.locator(`[data-message-id="${sentId}"]`)).toHaveCount(0);
-      await commentOnMessage(messageRow, 'First selected phrase');
-      await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
-    } else {
-      await expect(page.locator('.sent-comment')).toHaveCount(count);
-    }
+      comments = postedComments(body.messages);
+      sentIds = [...new Set(comments.map((c: any) => c.user_message_id))];
+      return comments.length;
+    }).toBe(count);
+    expect(new Set(comments.map((c: any) => c.cid)).size).toBe(count);
+    for (const comment of comments) expect(comment.cid).toMatch(/^c[0-9]+\.[0-9]+$/);
+    console.log(`STORED ${scenario} ${JSON.stringify(comments)}`);
+    // A posted comment adds no user bubble: it lives on its highlight, and its note reads in the thread the highlight opens.
+    for (const sentId of sentIds) await expect(page.locator(`[data-message-id="${sentId}"]`)).toHaveCount(0);
+    await expect(page.locator('.messages .message.user')).toHaveCount(userRows);
+    await expect(page.locator('.sent-comment')).toHaveCount(0);
+    await commentOnMessage(messageRow, 'First selected phrase');
+    if (scenario !== 'subagent') await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
     await expect.poll(async () => {
       const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
       const body = await response.json();
@@ -98,14 +99,11 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
       await page.getByRole('button', { name: /Expand (?:1 event|Worked)/ }).click();
       await page.getByText('Comment worker', { exact: true }).first().click();
     }
-    if (scenario === 'comments-only') {
-      // The same reading after a reload: no bubble was stored on screen, and the highlight still carries the comment.
-      await expect(page.locator('.messages .message.user')).toHaveCount(0);
-      await commentOnMessage(messageRow, 'First selected phrase');
-      await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
-    } else {
-      await expect(page.locator('.sent-comment')).toHaveCount(count);
-    }
+    // The same reading after a reload: no comment bubble was stored on screen, and the highlight still carries the comment.
+    await expect(page.locator('.messages .message.user')).toHaveCount(userRows);
+    await expect(page.locator('.sent-comment')).toHaveCount(0);
+    await commentOnMessage(messageRow, 'First selected phrase');
+    if (scenario !== 'subagent') await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
     await page.screenshot({ path: path.join(frames, `real-send-${scenario}-1440-light.png`), animations: 'disabled' });
   });
 }

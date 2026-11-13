@@ -2,7 +2,6 @@ import type { EditorView } from '@codemirror/view';
 import type { EditorState, Text } from '@codemirror/state';
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import type { CellSpan } from './widget-cells';
 
 export const TABLE = '.cm-md-table';
 export const DIAGRAM = '.cm-md-mermaid';
@@ -106,7 +105,7 @@ export function blockRange(view: EditorView, el: HTMLElement): { from: number; t
 	return null;
 }
 
-export const cellElement = (table: HTMLElement, cell: CellSpan) => table.querySelector('table')?.rows[cell.row]?.cells[cell.col] ?? null;
+export const cellElement = (table: HTMLElement, cell: { row: number; col: number }) => table.querySelector('table')?.rows[cell.row]?.cells[cell.col] ?? null;
 
 /** The rendered table row a source position sits on, for the margin rail: its box and its place in the table. */
 export function tableRowAt(view: EditorView, el: Element, pos: number): { rect: DOMRect; index: number } | null {

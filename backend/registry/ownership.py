@@ -147,12 +147,10 @@ def rehome_artifact(
             emit_owner_removal(conn, identity, old_owner, "ownership_rehomed", removal_event)
             if old_owner and old_owner != new_owner_thread_id else None
         )
-        result = {
-            "event_id": event_id,
-            "artifact": resolve(integration, type, external_id, db=conn),
-            "old_owner_thread_id": old_owner,
-            "new_owner_thread_id": new_owner_thread_id,
-        }
+        from plans.public import comment_tasks_changed  # plans imports registry
+        comment_tasks_changed(conn, [artifact_id])  # the person's comment task follows its owner
+        result = {"event_id": event_id, "artifact": resolve(integration, type, external_id, db=conn),
+                  "old_owner_thread_id": old_owner, "new_owner_thread_id": new_owner_thread_id}
         if chat_event is not None:
             result["removal_event"] = chat_event
         return result
@@ -226,13 +224,11 @@ def release_artifact(
         chat_event = emit_owner_removal(
             conn, identity, old_owner, "ownership_released", removal_event,
         )
-        result = {
-            "event_id": event_id,
-            "artifact": resolve(integration, type, external_id, db=conn),
-            "old_owner_thread_id": old_owner,
-            "new_owner_thread_id": None,
-            "triage_thread_id": triage_thread_id,
-        }
+        from plans.public import comment_tasks_changed  # plans imports registry
+        comment_tasks_changed(conn, [artifact_id])  # a released document's comment task closes
+        result = {"event_id": event_id, "artifact": resolve(integration, type, external_id, db=conn),
+                  "old_owner_thread_id": old_owner, "new_owner_thread_id": None,
+                  "triage_thread_id": triage_thread_id}
         if chat_event is not None:
             result["removal_event"] = chat_event
         return result

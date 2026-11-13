@@ -1,16 +1,15 @@
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, StateField, type EditorState, type Extension, type Range } from '@codemirror/state';
+import { Facet, type EditorState, type Extension, type Range } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
-import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
-import {
-	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, refreshMarkdownImages, renderableImage, selectImageOnClick
-} from './markdown-image';
-import { renderedFragment } from './rendered-images';
+import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
-import { BlockWidget, priorWidget } from './block-widget';
+import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
+import { markdownTableDecorations } from './widget-table';
+import { markdownCellEditing } from './widget-cell-editor';
+import { cellEditorExtensions } from './widget-cell-setup';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -29,36 +28,6 @@ class HrWidget extends WidgetType {
 		return s;
 	}
 	eq() { return true; }
-}
-
-/**
- * Renders a GFM table block as a real HTML table, reusing the app's canonical
- * markdown renderer so inline formatting and theming match everywhere else.
- * The table always stays rendered — it never drops to raw pipe/dash source.
- * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
- */
-class TableWidget extends BlockWidget {
-	readonly images: ImageContext | null;
-	constructor(readonly src: string, images: ImageContext | null, prior: TableWidget | null = null) {
-		super(prior);
-		// The context provider is live; retain this render's values so a refresh can compare them with the next one.
-		this.images = images && { ...images };
-	}
-	eq(o: TableWidget) {
-		const [a, b] = [o.images, this.images];
-		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token && a?.imageCacheKey === b?.imageCacheKey;
-	}
-	toDOM() {
-		const el = document.createElement('div');
-		el.className = 'cm-md-table md-content';
-		// Same trust boundary as every `{@html} renderMarkdown(...)` surface:
-		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
-		// the document. Keep this widget on that single sanitized renderer.
-		el.append(renderedFragment(renderMarkdown(this.src), this.images));
-		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
-		return this.drew(el);
-	}
-	ignoreEvent() { return true; }
 }
 
 // Per-DOM mount controllers so each widget can re-render on theme change and
@@ -148,6 +117,10 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 					case 'CodeInfo': // a fence's language name ("ts") is syntax too
 						hide(node.from, node.to);
 						break;
+					case 'Escape':
+						// A backslash escape shows the character it escapes, not the backslash, like every other mark here.
+						hide(node.from, node.from + 1);
+						break;
 					case 'InlineCode':
 						decos.push(Decoration.mark({ class: 'cm-md-inline-code' }).range(node.from, node.to));
 						break;
@@ -209,54 +182,8 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 );
 
 /**
- * Replaces each GFM table with a rendered block widget. Block decorations must
- * come from a state field (CodeMirror forbids them from view plugins), and the
- * replaced range spans whole lines so the widget cleanly takes the table's place.
- */
-function buildTableDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
-	const decos: Range<Decoration>[] = [];
-	const { doc } = state;
-	const images = state.facet(imageContext)();
-	syntaxTree(state).iterate({
-		enter: (node) => {
-			if (node.name !== 'Table') return;
-			const { from, to } = blockSource(doc, node);
-			const src = doc.sliceString(from, to);
-			decos.push(Decoration.replace({ widget: new TableWidget(src, images, priorWidget(prior, from, to, TableWidget)), block: true }).range(from, to));
-			return false;
-		}
-	});
-	return Decoration.set(decos, true);
-}
-
-/**
- * A block-decoration StateField whose set is derived from the syntax tree.
- * Rebuilds when the document changes OR when the background parser advances
- * (the language tree reference changes between transactions). The tree check is
- * essential: CodeMirror parses incrementally, so a block node (table / mermaid
- * fence) below the initial parse budget enters the tree later via a parse
- * transaction that carries NO doc change. A `docChanged`-only field computes
- * once against the partial tree and never sees those nodes — leaving real-world
- * docs (a table 40 lines down) stuck on raw markdown until the next edit.
- */
-function syntaxDecorationField(build: (state: EditorState, prior?: DecorationSet) => DecorationSet, refreshesImages = false): StateField<DecorationSet> {
-	return StateField.define<DecorationSet>({
-		create: (state) => build(state),
-		update(deco, tr) {
-			const imageRefresh = refreshesImages && tr.effects.some((effect) => effect.is(refreshMarkdownImages));
-			const mapped = deco.map(tr.changes);
-			if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state, mapped);
-			return mapped;
-		},
-		provide: (f) => EditorView.decorations.from(f)
-	});
-}
-
-const markdownTableDecorations = syntaxDecorationField(buildTableDecorations, true);
-
-/**
  * Replaces each ```mermaid fenced block with a rendered diagram block widget.
- * Mirrors the table field: block decorations must come from a state field, and
+ * Like the table field (`widget-table.ts`): block decorations must come from a state field, and
  * the replaced range spans whole lines so the widget cleanly takes the block's
  * place.
  */
@@ -286,5 +213,9 @@ export const markdownLivePreview: Extension = [
 	selectImageOnClick,
 	openSelectedImageOnEnter,
 	openLinkOnClick,
-	openLinkOnAltEnter
+	openLinkOnAltEnter,
+	markdownCellEditing,
+	// A cell's own editor drops the same markdown syntax marks the document does, over the cell's own source, and draws its
+	// images as the document does: shown, with their markdown one unit the caret steps over and a delete removes whole.
+	cellEditorExtensions.of([markdownInlinePreview, markdownImages])
 ];

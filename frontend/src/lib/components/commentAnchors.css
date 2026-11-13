@@ -23,7 +23,7 @@
 .sel-comment.below { translate: 0 0; }
 .sel-comment:hover { filter: brightness(1.08); }
 @keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-@media (max-width: 768px) { .sel-comment { padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3); font-size: var(--text-subhead); gap: var(--space-2); } .sel-comment svg { width: var(--space-4); height: var(--space-4); } }
+@media (pointer: coarse), (max-width: 768px) { .sel-comment { min-height: var(--touch-target); padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3); font-size: var(--text-subhead); gap: var(--space-2); } .sel-comment svg { width: var(--space-4); height: var(--space-4); } }
 
 /* While a thread is unread its highlight is the sign. A stronger accent wash and a medium underline in the text colour replace the read highlight's amber ones. The underline is the text colour, never the accent, so it is not read as a link (a link is accent-coloured text); nothing is added to the line, so nothing can overlap or crowd. */
 .cm-comment-anchor[data-unread] { background-color: color-mix(in srgb, var(--accent) 22%, transparent); border-bottom: medium solid var(--text-primary); }

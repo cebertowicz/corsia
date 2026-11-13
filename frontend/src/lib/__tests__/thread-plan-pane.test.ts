@@ -580,25 +580,6 @@ describe("ThreadPlanPane", () => {
     __reset();
   });
 
-  it("never lists a comment reply from this thread as a decision row", async () => {
-    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
-    __reset();
-    activeThreadId.set("t1");
-    queue.set({ ...queueBody(null, 0, []), reply_items: [{
-      detail: {
-        title: "launch-plan.md", unread_count: 1, newest_at: "2026-10-24",
-        destination: { pane: "document-replies", id: "artifact-1" },
-        source: { thread_id: "t1" },
-      },
-    }] });
-    routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });
-    component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
-    await settle();
-
-    expect(host.querySelectorAll(".decision-row")).toHaveLength(0);
-    __reset();
-  });
-
   it("clears a stale right-pane decision handoff instead of swallowing the click", async () => {
     const { __reset } = await import("$lib/stores/attentionDock.svelte");
     __reset();

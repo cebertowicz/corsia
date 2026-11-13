@@ -10,8 +10,9 @@
  * one read that starts when it ends, so a burst of nudges costs at most two
  * reads and the last one reads the server's state after the burst.
  */
-import { get, writable } from 'svelte/store';
+import { derived, get, writable } from 'svelte/store';
 import { readThreadPlanStates, type ThreadPlanStateEntry } from '$lib/api/plans';
+import { isYourMove } from '$lib/components/threadRowMark';
 import { on } from '$lib/ws';
 import { token } from './auth';
 import { connectionState } from './connection';
@@ -35,6 +36,16 @@ export function planSetAsideUntil(entry: ThreadPlanStateEntry | undefined): stri
 }
 
 let listed = new Set<string>();
+const listedIds = writable<ReadonlySet<string>>(listed);
+
+/**
+ * Whether any thread the menu lists shows its needs-you mark. On a phone the menu
+ * is hidden, so the controls that open it carry the same dot.
+ */
+export const listedNeedsYou = derived(
+	[threadPlanStates, listedIds],
+	([states, ids]) => [...ids].some((id) => isYourMove(states[id])),
+);
 let stopAmbient: (() => void) | null = null;
 /** Under the server's per-read cap, and short enough for any URL limit. */
 const CHUNK = 100;
@@ -135,6 +146,7 @@ function startAmbient(): () => void {
 export function watchThreadPlanStates(threadIds: string[]): void {
 	const added = threadIds.filter((id) => !listed.has(id));
 	listed = new Set(threadIds);
+	listedIds.set(listed);
 	stopAmbient ??= startAmbient();
 	void load(added);
 }
@@ -148,6 +160,7 @@ export function stopThreadPlanStates(): void {
 	stopAmbient?.();
 	stopAmbient = null;
 	listed = new Set();
+	listedIds.set(listed);
 }
 
 export function resetThreadPlanStatesForTests(): void {

@@ -21,15 +21,24 @@ from infra.failure_reference import new_error_reference
 
 logger = logging.getLogger(__name__)
 
+# Drop reasons that mean the place a comment quotes is no longer in its chat, so no resend can store it.
+_QUOTE_GONE = frozenset({"invalid_seq", "invalid_offsets", "not_agent_message", "invalid_root"})
+
 
 class RejectedComments(ValueError):
     """Submitted comments failed admission; ``positions`` are 1-based, empty when unknown.
 
-    Its text is shown to the person: which comments, and what to do. The
-    composer keeps the draft when a send is refused.
+    Its text is shown to the person in chat's composer: which comments, and what to do. The
+    composer keeps the draft when a send is refused. ``cause`` names the failure for a
+    surface that words it itself: ``comment_check_failed`` (a system failure, logged under
+    ``reference``), ``comment_quote_gone`` or ``comment_invalid``.
     """
 
-    def __init__(self, positions: list[int], *, reference: str | None = None):
+    def __init__(self, positions: list[int], *, reference: str | None = None, quote_gone: bool = False):
+        self.reference = reference
+        self.cause = (
+            "comment_check_failed" if reference else "comment_quote_gone" if quote_gone else "comment_invalid"
+        )
         if reference:
             super().__init__(
                 "Couldn’t check your comments, so nothing was sent. Your message and comments "
@@ -71,7 +80,9 @@ def require_every_comment(raw: object, stored: dict | None, dropped: list[dict] 
     }
     missing = [position for position in range(1, len(submitted) + 1) if position not in kept]
     if missing:
-        raise RejectedComments(missing)
+        reasons = {item["reason"] for item in dropped or [] if item["field"] == "comments"
+                   and item.get("index", -1) + 1 in missing}
+        raise RejectedComments(missing, quote_gone=bool(reasons & _QUOTE_GONE))
 
 
 def has_comment_candidates(raw: object) -> bool:
@@ -171,6 +182,11 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
             reason = "empty_quote"
         root_sender = item.get('root_user_message_id') if isinstance(item, dict) else None
         root_cid = item.get('root_cid') if isinstance(item, dict) else None
+        if not reason and root_sender is None and root_cid is None and db.execute(
+            "SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND role='assistant'", (thread_id, item['seq']),
+        ).fetchone() is None:
+            # A comment lives in the thread of the agent message it marks; with none, it has no place to show.
+            reason = 'not_agent_message'
         if not reason and (root_sender is not None or root_cid is not None):
             if not isinstance(root_sender, str) or not root_sender or not isinstance(root_cid, str) or not root_cid:
                 reason = 'invalid_root'
@@ -206,6 +222,14 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
     return comments
 
 
+def _possible_duplicate(value: Any, dropped: list[dict]) -> bool:
+    """A Retry of comments whose delivery is uncertain: the agent may already have them."""
+    if value is True:
+        return True
+    dropped.append(_dropped("possible_duplicate", "not_true"))
+    return False
+
+
 def validate_reply_context(
     db: sqlite3.Connection, thread_id: str, raw: object, *, dropped: list[dict] | None = None,
 ) -> dict | None:
@@ -238,6 +262,7 @@ def validate_reply_context(
             ("comments", lambda value: _comments(db, thread_id, value, newest, int(db.execute(
                 "SELECT next_input_order FROM threads WHERE id=?", (thread_id,),
             ).fetchone()[0]), dropped)),
+            ("possible_duplicate", lambda value: _possible_duplicate(value, dropped)),
         )
         for field, build in builders:
             if raw.get(field) is None:

@@ -43,7 +43,6 @@ async def test_an_agent_create_names_the_comment_and_its_author_thread(
     assert sent == [{
         "type": "doc_comment_changed", "artifact_id": artifact_id,
         "comment_id": created["comment"]["id"], "author_thread_id": reviewer,
-        "unread_attention_changed": True,
     }]
 
 
@@ -86,7 +85,7 @@ async def test_user_comments_replies_and_updates_name_nothing(
         body="Reply.", parent_id=root["id"], _thread_id=reviewer,
     ))
     assert reply["comment"]["parent_id"] == root["id"]
-    assert sent == [{**plain, "unread_attention_changed": True}]
+    assert sent == [plain]
 
     del sent[:]
     updated = json.loads(await DocCommentUpdateTool().execute(

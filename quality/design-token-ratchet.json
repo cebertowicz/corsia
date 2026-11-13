@@ -1516,13 +1516,6 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/components/SentChatComments.svelte": {
-      "raw_colors": 0,
-      "raw_px": 1,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/components/SettingsDebug.svelte": {
       "raw_colors": 0,
       "raw_px": 1,

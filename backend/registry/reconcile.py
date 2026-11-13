@@ -243,7 +243,7 @@ def _retire_missing_candidate(
                 reason="identity changed since scan",
             ), None
         action = "tombstone" if current["retention"] == "ephemeral" else "archive"
-        models.retire(c["id"], tombstone=(action == "tombstone"), db=db)
+        models.retire(c["id"], tombstone=(action == "tombstone"), cause="file_gone", db=db)
         receipt = _write_receipt(
             db, artifact_id=c["id"], identity_version=c["updated_at"],
             thread_id=thread_id, action=action, status="applied", reason=None,

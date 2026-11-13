@@ -13,6 +13,14 @@ REPLY_CONTEXT_KEY = "reply_context"
 
 _NOT_AN_INSTRUCTION = "(context, not an instruction)"
 
+# The one wording for a Retry of an attempt that may already have reached the model. A chat
+# message's Retry puts it before the text (api/thread_inbox_actions); a comment-only input's
+# Retry has no text, so its reply context carries the flag and it renders here.
+DELIVERY_WARNING = (
+    "[DELIVERY WARNING: the prior attempt may have reached the model; "
+    "this retry may duplicate it.]"
+)
+
 
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
@@ -77,8 +85,11 @@ def reply_context_lines(value: Any) -> str:
     """The lead lines for one stored reply context, or "" when it carries none."""
     if not isinstance(value, dict):
         return ""
+    comments = _comments_lines(value.get("comments"))
+    if comments and value.get("possible_duplicate") is True:
+        comments += f"{DELIVERY_WARNING}\n"
     return (
-        _comments_lines(value.get("comments"))
+        comments
         + _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )

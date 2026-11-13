@@ -124,7 +124,7 @@ function takeOver(view: EditorView, waiting: Settlements, request: ArrivalSelect
 
 /** The editor mounted inside `root`, if any: the same lookup the document canvas uses elsewhere. */
 export function arrivalSelectIn(root: ParentNode | null | undefined, request: ArrivalSelect): Promise<SelectOutcome> | null {
-	const content = root?.querySelector<HTMLElement>('.cm-content');
-	const view = content ? EditorView.findFromDOM(content) : null;
+	const dom = root?.querySelector<HTMLElement>('.cm-editor');
+	const view = dom ? EditorView.findFromDOM(dom) : null;
 	return view ? startArrivalSelect(view, request) : null;
 }

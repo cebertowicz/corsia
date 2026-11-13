@@ -38,16 +38,18 @@ test('@surface:doc-delivery-preference a toggle on one client sets the lane of a
 		await expect.poll(() => heldIn(document.artifactId, 'document-held')).toBe(1);
 		expect(deliveredBatches(document.artifactId, 'document-held')).toBe(0);
 
-		// On again from A: B's next comment goes in the immediate lane; the one already held keeps waiting for its Send.
+		// On again from A sends the open document's held comments, whether or not A has yet seen the count, and B's next comment goes in the immediate lane.
 		await toggle(clientA).click();
 		await expect(toggle(clientA)).toHaveAttribute('aria-pressed', 'true');
 		await expect(toggle(clientB)).toHaveAttribute('aria-pressed', 'true');
+		await expect.poll(() => heldIn(document.artifactId, 'document-held')).toBe(0);
+		expect(deliveredBatches(document.artifactId, 'document-held')).toBe(1);
 		await outsideClose(clientB);
 		await expect(clientB.locator('[data-popover]')).toHaveCount(0);
 		await beginComment(clientB, `second line ${stamp}`, 'Posted from B while A has delivery on.');
 		await submitButton(clientB).click();
 		await expect.poll(() => batchRows(document.artifactId).filter((row) => row.policy === 'immediate').reduce((sum, row) => sum + row.items, 0)).toBe(1);
-		expect(heldIn(document.artifactId, 'document-held')).toBe(1);
+		expect(heldIn(document.artifactId, 'document-held')).toBe(0);
 		expect(await readDeliveryPreference(request)).toEqual({ immediate: true, stored: true });
 	} finally {
 		await Promise.all(contexts.map((context) => context.close()));

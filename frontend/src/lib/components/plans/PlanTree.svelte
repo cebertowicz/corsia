@@ -80,7 +80,7 @@
 
 	// Right-click, Shift+F10 or a long-press opens the row's actions, when it has any.
 	const taskMenu = createTaskMenu(
-		(node) => !userActionBusy && !!onUserAction && node.user_actions.length > 0,
+		(node) => !userActionBusy && !!onUserAction && (node.user_actions.length > 0 || !!node.comment_attention),
 	);
 
 	// Which tasks are quietly scheduled depends on the clock, so the tree re-arranges on its minute tick.

@@ -12,6 +12,7 @@ from loguru import logger
 from core.installed_context import INSTALLED_SOURCES
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.chat_comment_answers import message_answer_fields
+from infra.chat_comment_index import comment_only
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.turn_errors import apply_error_next_steps, last_turn_error_id
@@ -192,21 +193,41 @@ def broadcast_input_rows(
     exclude_ws: Any | None = None,
     broadcast: Callable[[str, dict], None] | None = None,
 ) -> None:
-    """Publish one singleton or one atomically ordered multi-row event."""
-    if not rows:
-        return
-    payload = input_rows_payload(thread_id, rows)
-    if broadcast is not None:
-        if exclude_ws is not None:
-            raise ValueError("custom input broadcast cannot exclude one socket")
-        broadcast(thread_id, payload)
-        return
+    """Publish the drawn rows as one singleton or one ordered multi-row event.
+
+    A comment-only user input is not a chat row: it lives in its comment thread,
+    so chat clients get a `chat_comments_changed` notice naming the commented
+    rows (by seq) instead of the row itself. A batch holding both goes out as
+    two frames: the drawn rows' event, then the notice.
+    """
+    if broadcast is not None and exclude_ws is not None:
+        raise ValueError("custom input broadcast cannot exclude one socket")
+    hidden = [row.role == "user" and comment_only(row.content, row.metadata) for row in rows]
+    drawn = tuple(row for row, comment in zip(rows, hidden) if not comment)
+    comments = [row for row, comment in zip(rows, hidden) if comment]
+    payloads = [input_rows_payload(thread_id, drawn)] if drawn else []
+    if comments:
+        payloads.append(chat_comments_changed_payload(thread_id, comments))
     import infra.state as state
 
-    if exclude_ws is None:
-        state.broadcast_to_thread(thread_id, payload)
-    else:
-        state.broadcast_to_thread(thread_id, payload, exclude_ws=exclude_ws)
+    for payload in payloads:
+        if broadcast is not None:
+            broadcast(thread_id, payload)
+        elif exclude_ws is None:
+            state.broadcast_to_thread(thread_id, payload)
+        else:
+            state.broadcast_to_thread(thread_id, payload, exclude_ws=exclude_ws)
+
+
+def chat_comments_changed_payload(thread_id: str, rows: list[InputBroadcastRow]) -> dict:
+    """Tell chat clients which commented rows to re-read, without the input row."""
+    seqs = sorted({
+        comment["seq"]
+        for row in rows
+        for comment in (row.metadata or {})["reply_context"]["comments"]
+        if isinstance(comment, dict) and isinstance(comment.get("seq"), int)
+    })
+    return {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": seqs}
 
 
 def _read_input_broadcast_rows(

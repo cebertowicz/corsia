@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
 import { apiFetch } from './request';
+import type { CommentAttention } from './plansTypes';
 
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
 
@@ -15,6 +16,8 @@ export interface PersonStepInstruction {
 	plan_id: string;
 	owner_thread_id: string;
 	owner_name: string;
+	/** Present when this step is the document's comment task: the counts its bar reads out. */
+	comment_attention?: CommentAttention;
 }
 
 /** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */

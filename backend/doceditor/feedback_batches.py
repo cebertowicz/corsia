@@ -97,6 +97,10 @@ def record_comment(
         for recipient in recipients:
             if recipient not in refused:
                 batch_ids.append(_join_open_batch(db, comment, recipient, delivery_policy))
+        if comment["author_kind"] == "agent" and USER_AUTHOR_ID in recipients and USER_AUTHOR_ID not in refused:
+            from plans.public import reconcile_person_comment_task
+
+            reconcile_person_comment_task(db, str(comment["artifact_id"]))
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,

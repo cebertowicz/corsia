@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from infra import write_effects
+from infra.database import TransactionOwnershipError, write_transaction
 import plans.ask_endings as ask_endings
 import plans.operator_display_state as operator_display_state
 import plans.service as service
@@ -52,6 +54,7 @@ _ENDS_ASK = {
 ASK_ENDINGS = ask_endings.ASK_ENDINGS
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
+_COMMENT_TASKS = "person_comment_task_reconcile"
 
 
 def askable_sql(alias: str) -> str:
@@ -291,6 +294,64 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
+
+
+def comment_tasks_changed(db, artifact_ids) -> None:
+    """Reconcile each document's comment task once this write commits, once per document.
+
+    Called where an input of the task changes: an ask, a suggestion's decision, the owner. In a
+    transaction nobody here owns, it reconciles in place and a failure fails that write.
+    """
+    ids = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
+    if not ids:
+        return
+    try:
+        write_effects.after_commit_merged(db, _COMMENT_TASKS, ids, lambda owed: _reconcile_comment_tasks(db, owed))
+    except TransactionOwnershipError:
+        from plans import person_comment_task
+
+        for artifact_id in ids:
+            with write_transaction(db, scope=_COMMENT_TASKS) as connection:
+                person_comment_task.reconcile(connection, artifact_id)
+
+
+def hold_cleared(db, hold) -> None:
+    """After ``holds.clear_write``, the one path that ends a hold: reconcile what it may have changed.
+
+    An ended ask on a document may bring its comment task back. Any hold ending on a comment task
+    itself (a pause, a block, a watch) may let a close it was spared while held go through now.
+    """
+    from plans.person_comment_task import PROVENANCE
+
+    ask = hold["kind"] == "blocked" and hold["owner_kind"] == "user" and hold["owner_id"]
+    documents = [
+        row["artifact_id"]
+        for row in db.execute(
+            "SELECT artifact_id,role,provenance FROM plan_node_artifact_links WHERE node_id=?", (hold["node_id"],),
+        )
+        if row["provenance"] == PROVENANCE or (ask and row["role"] == "attention" and row["artifact_id"] == hold["owner_id"])
+    ]
+    comment_tasks_changed(db, documents)
+
+
+def _reconcile_comment_tasks(db, artifact_ids) -> None:
+    """After commit, reconcile each document in its own write; one failure never skips the rest.
+
+    The failures are raised together once every document has had its turn, so they reach the
+    after-commit failure path (``write_effects.run``) like any other committed effect's.
+    """
+    from plans import person_comment_task
+
+    failures = []
+    for artifact_id in artifact_ids:
+        try:
+            with write_transaction(db, scope=_COMMENT_TASKS) as connection:
+                person_comment_task.reconcile(connection, artifact_id)
+        except Exception as error:
+            error.add_note(f"comment task reconcile for document {artifact_id}")
+            failures.append(error)
+    if failures:
+        raise ExceptionGroup("comment task reconcile failed", failures)
 
 
 def withdraw_node_asks(

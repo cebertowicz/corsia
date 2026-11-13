@@ -195,7 +195,6 @@ def test_person_comment_is_live_before_edit_idle_delivery(client, isolated_db, m
         assert posted.status_code == 200, posted.text
         assert len(frames) == 1
         assert frames[0][0] == artifact_id
-        assert not frames[0][1]["unread_attention_changed"]
         before = client.get(url).json()
         assert {row["id"] for row in before["comments"]} == {root["id"], "live-person"}
         earlier = next(row for row in before["comments"] if row["id"] == root["id"])

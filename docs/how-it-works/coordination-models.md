@@ -52,7 +52,7 @@ Delivery follows the rules in [Context and memory](context-and-memory.md): an ed
 
 The shared skill library can carry a coordination model as a **blueprint pack**. Fetching one is limited to the scope's designated coordinator (`backend/library/pack_fetch.py`). Before anything is written, the fetch checks that (`backend/library/pack_validation.py`):
 
-- Each path is relative, has no dot-prefixed part and no `scripts` folder.
+- Each path is relative and has no dot-prefixed part. A pack may carry scripts; fetching never runs them.
 - Content is UTF-8 text; binary files are allowed only under `assets/` and only as recognized images or fonts.
 - The digest of all files matches the library's index entry.
 - The manifest declares schema `corsia.pack/1`, kind `blueprint`, and the indexed name and version.

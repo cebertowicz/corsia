@@ -553,12 +553,14 @@ describe('RailScopedSection motion truth', () => {
 		expect(host.querySelector('.scoped-item.agent .paused-glyph')).toBeNull();
 	});
 
-	it('keeps the owed words trailing a paused agent row without resurrecting the old glyph', () => {
+	it('shows an accessible attention dot on a paused agent row', () => {
 		threadPlanStates.set({ 'agent-1': { state: 'needs_input', label_key: 'waiting', paused: true, attention_items: [] } });
 		renderRail();
 
 		expect(host.querySelector<HTMLElement>('.scoped-item.agent svg.paused-mark')).not.toBeNull();
-		expect(host.querySelector<HTMLElement>('.scoped-item.agent .plan-state')?.textContent).toBe('Needs input');
+		const dot = host.querySelector<HTMLElement>('.scoped-item.agent .needs-you-dot');
+		expect(dot?.getAttribute('aria-label')).toBe('Needs input');
+		expect(dot?.textContent).toBe('');
 		expect(host.querySelector('.scoped-item.agent .paused-glyph')).toBeNull();
 	});
 

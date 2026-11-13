@@ -38,7 +38,6 @@
 
 	let {
 		entries,
-		placedEnvelopes = new Set<string>(),
 		expandedTools,
 		expandedReasoning,
 		onToggleToolBlock,
@@ -56,7 +55,6 @@
 		showWait = true,
 	}: {
 		entries: TranscriptEntry[];
-		placedEnvelopes?: ReadonlySet<string>;
 		expandedTools: Set<string>;
 		expandedReasoning: Set<string>;
 		onToggleToolBlock: (id: string) => void;
@@ -205,7 +203,6 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	{#if !placedEnvelopes.has(msg.id)}
 	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />
@@ -226,7 +223,6 @@
 			/>
 		{/if}
 	</div>
-	{/if}
 	{#if heldNotice && heldInput?.id === msg.id}<div class="message system"><SystemMessageRow msg={heldNotice} /></div>{/if}
 {/snippet}
 

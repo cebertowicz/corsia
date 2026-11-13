@@ -1,65 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
 import { buildTranscriptPresentation, isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
 
+// The server never hands chat a comment-only send (backend/tests/test_chat_comment_not_in_chat.py), so the
+// transcript holds only the seq each send used. The work on either side of those gaps is one fold.
 const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
 const target = {
-  ...base, id: 'target', role: 'assistant', content: 'A visible answer', metadata: { for_user: true },
-  chat_comments: [{ cid: 'root', user_message_id: 'root-message', answers: [1, 2, 3].map(n => ({
+  ...base, id: 'target', seq: 1, role: 'assistant', content: 'A visible answer', metadata: { for_user: true },
+  chat_comments: [{ cid: 'root', user_message_id: 'root-message', answers: [1, 2].map(n => ({
     author_kind: 'user', user_message_id: `send-${n}`, cid: `answer-${n}`,
   })) }],
 };
-const work = (n: number) => ({ ...base, id: `work-${n}`, role: 'assistant', content: '', metadata: { turn_id: `t${n}` } });
-const send = (n: number, options: Record<string, unknown> = {}) => ({
-  ...base, id: `send-${n}`, role: 'user', content: '', delivery_state: 'delivered',
-  metadata: { reply_context: { comments: [{ id: `comment-${n}`, cid: `answer-${n}`, root_user_message_id: 'root-message', root_cid: 'root' }] } },
-  ...options,
+const last = { ...base, id: 'last', seq: 10, role: 'assistant', content: 'Done', metadata: { for_user: true } };
+const stub = (firstId: string, lastId: string, firstSeq: number, lastSeq: number) => ({
+  firstId, lastId, firstSeq, lastSeq, count: 2, weight: 2, turnIds: [], kinds: [], continuesOlder: false,
 });
-const last = { ...base, id: 'last', role: 'assistant', content: 'Done', metadata: { for_user: true } };
 
-function presentation(sends: any[]) {
-  const rows: any[] = [target];
-  sends.forEach((row, i) => rows.push(work(i + 1), row));
-  rows.push(work(4), last);
-  const placed = suppressibleCommentEnvelopes(rows, 'thread');
-  return { placed, entries: buildTranscriptPresentation(rows, true, null, undefined, [], placed) };
-}
-
-describe('Focus comment sends', () => {
-  it('joins work across three placed sends', () => {
-    const { entries, placed } = presentation([send(1), send(2), send(3)]);
-    expect([...placed]).toEqual(['send-1', 'send-2', 'send-3']);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
-  });
-  it('keeps a fallback send between two work blocks', () => {
-    const fallback = send(2, { metadata: { reply_context: { comments: [{ id: 'unplaced', cid: 'unplaced' }] } } });
-    const { entries } = presentation([send(1), fallback, send(3)]);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
-    expect(entries[2]).toMatchObject({ message: { id: 'send-2' } });
-  });
-  it('keeps an optimistic send visible between work blocks', () => {
-    const { entries, placed } = presentation([send(1, { _optimistic: true })]);
-    expect(placed.has('send-1')).toBe(false);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
-  });
-  it('keeps a previously expanded inner stub open after merging', () => {
-    const stub = (firstId: string, lastId: string, firstSeq: number, lastSeq: number) => ({
-      firstId, lastId, firstSeq, lastSeq, count: 2, weight: 2, turnIds: [], kinds: [], continuesOlder: false,
-    });
+describe('Focus work around comment sends', () => {
+  it('joins the server runs on either side of each send into one fold that opens and closes', () => {
+    // Sends took seq 4 and 7; the runs around them are 2-3, 5-6 and 8-9.
     const stubs = [stub('a', 'b', 2, 3), stub('c', 'd', 5, 6), stub('e', 'f', 8, 9)];
-    const rows: any[] = [{ ...target, seq: 1 }, { ...send(1), seq: 4 }, { ...send(2), seq: 7 }, { ...last, seq: 10 }];
-    const placed = suppressibleCommentEnvelopes(rows, 'thread');
-    const before = buildTranscriptPresentation(rows, true, null, undefined, stubs);
-    const expanded = new Set(runTokens(before, 3, true));
-    const after = buildTranscriptPresentation(rows, true, null, undefined, stubs, placed);
-    const tokens = runTokens(after, 1, true);
-    expect(isRunExpanded(tokens, expanded)).toBe(true);
-    expect(isRunExpanded(tokens, toggleRun(tokens, expanded))).toBe(false);
-  });
-  it('keeps a failed send with an unseen target in place', () => {
-    const failed = send(2, { delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'unplaced', root_cid: 'missing', root_user_message_id: 'missing' }] } } });
-    const { entries, placed } = presentation([send(1), failed, send(3)]);
-    expect(placed.has('send-2')).toBe(false);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
+    const entries = buildTranscriptPresentation([target, last] as any[], true, null, undefined, stubs);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
+    const tokens = runTokens(entries, 1, true);
+    const opened = toggleRun(tokens, new Set());
+    expect(isRunExpanded(tokens, opened)).toBe(true);
+    expect(isRunExpanded(tokens, toggleRun(tokens, opened))).toBe(false);
   });
 });

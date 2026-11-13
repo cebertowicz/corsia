@@ -1,4 +1,4 @@
-"""Seed a raised decision in e2e-local's disposable database for reply-chip frames."""
+"""Seed a raised decision in e2e-local's disposable database for the dock backdrop frames."""
 import runpy
 import sys
 from pathlib import Path

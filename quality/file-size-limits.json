@@ -73,7 +73,7 @@
     "backend/llm/providers/anthropic.py::_parse_response": 81,
     "backend/registry/durable_writes.py::_publish_bytes": 128,
     "backend/registry/durable_writes.py::_validated_intent_paths": 94,
-    "backend/registry/ownership.py::rehome_artifact": 96,
+    "backend/registry/ownership.py::rehome_artifact": 94,
     "backend/subagents/child_thread.py::persist_assistant_step": 89,
     "backend/tools/artifact_ownership.py::ArtifactRehomeTool.execute": 87,
     "backend/tools/artifact_ownership.py::ArtifactReleaseTool.execute": 90,

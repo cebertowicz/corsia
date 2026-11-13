@@ -138,6 +138,29 @@ describe('DocViewerStatus freshness metadata', () => {
 		}
 	});
 
+	it('turning immediate delivery on asks the server to send the document lane even before this client has seen anything held', async () => {
+		deliverCommentsImmediately.set(false);
+		token.set('test-token');
+		const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+			reviews: [], woken: [], undelivered_batches: [], sent_count: 0,
+			open_count: 0, document_held_count: 0, image_held_count: 0,
+		}))));
+		const sends = () => fetchMock.mock.calls.filter(([url]) => url === '/api/doc-feedback/send');
+		vi.stubGlobal('fetch', fetchMock);
+		try {
+			render(value(), undefined, { commentCount: 0 });
+			flushSync();
+			host.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]')!.click(); flushSync();
+			await vi.waitFor(() => expect(sends()).toHaveLength(1));
+			expect(JSON.parse(sends()[0][1].body)).toEqual({ artifact_id: 'artifact-1', delivery_policy: 'document-held' });
+			expect(get(deliveryConfirmation)).toBeNull();
+		} finally {
+			vi.unstubAllGlobals();
+			token.set(null);
+			for (const toast of get(toasts)) toasts.dismiss(toast.id);
+		}
+	});
+
 	it('updates the comment-pill count and unsent indicator as feedback changes', () => {
 		render(value(), undefined, { commentCount: 1 });
 		const pill = host.querySelector('.comment-status')!;
