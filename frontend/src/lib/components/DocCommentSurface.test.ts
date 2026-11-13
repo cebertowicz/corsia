@@ -274,10 +274,17 @@ describe('DocCommentSurface suggestions', () => {
 		}
 	});
 
-	it.each([false, true])('draws one thread flat in the popover and the sheet: the container is its card (narrow %s)', (narrow) => {
+	it.each([false, true])('draws one thread flat in the popover and boxed in the sheet (narrow %s)', (narrow) => {
 		render({ narrow, state: { kind: 'thread', id: suggestion.id }, ...(narrow ? {} : { bounds: noRoomCanvas() }) });
 		const card = document.body.querySelector<HTMLElement>(`${narrow ? '[data-adaptive-drawer]' : '[data-popover]'} .ct`)!;
-		expect(card.classList.contains('flat')).toBe(true);
+		expect(card.classList.contains('flat')).toBe(!narrow);
+	});
+
+	it('gives the thread sheet the same heading and Close control as the toolbar sheet', () => {
+		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
+		const sheet = document.body.querySelector<HTMLElement>('[data-adaptive-drawer]')!;
+		expect(sheet.querySelector('.drawer-comments')).not.toBeNull();
+		expect(sheet.querySelector('[aria-label="Close comments"]')).not.toBeNull();
 	});
 
 	it('leaves the focus in the text a card was picked from, and moves it into a card opened any other way', async () => {

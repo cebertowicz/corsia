@@ -12,6 +12,9 @@ type AutosizeParam = string | undefined | { value: string; fit?: boolean };
  * whenever it changes, including when it is cleared after a send. Write `use:autosize` after `bind:value`: effects run in
  * attribute order, and a re-fit that runs before the bound value is written measures the old text.
  */
+/** The height a bounded discussion region fades at its bottom edge (`--cue-bottom`): its last line is shown above it, not under it. */
+const CUE = 8;
+
 export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 	let current = node.offsetHeight;
 	let fit = typeof param === 'object' && !!param.fit;
@@ -70,7 +73,7 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 			const latest = replies?.querySelector<HTMLElement>('.ct-reply:last-child') ?? null;
 			const replyText = latest?.querySelector<HTMLElement>('.ct-markdown');
 			const originalMinimum = originalLine ? Number.parseFloat(getComputedStyle(originalLine).lineHeight) || 0 : 0;
-			const replyMinimum = latest && replyText ? replyText.getBoundingClientRect().top - latest.getBoundingClientRect().top + (Number.parseFloat(getComputedStyle(replyText).lineHeight) || 0) : 0;
+			const replyMinimum = latest && replyText ? replyText.getBoundingClientRect().top - latest.getBoundingClientRect().top + (Number.parseFloat(getComputedStyle(replyText).lineHeight) || 0) + CUE : 0;
 			const room = height - (card!.offsetHeight - wanted - originalHeight - repliesHeight);
 			// Give the draft a third line when the original and latest reply can still each show a line.
 			const fieldRoom = room >= originalMinimum + replyMinimum + 3 * line + inset ? 3 * line + inset : 2 * line + inset;
@@ -112,6 +115,8 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 	// ease instead of aborting it mid-flight.
 	const owner = scroller(node);
 	let width = owner?.clientWidth, height = owner?.clientHeight, frame = 0;
+	// A change of the field's own width re-wraps its text: the send button appearing beside a reply narrows it after the text was measured.
+	let fieldWidth = node.clientWidth;
 	const refit = () => {
 		cancelAnimationFrame(frame);
 		// Check and write in the same frame: measuring turns the transition off, so an ease started between the
@@ -129,12 +134,14 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 			resize();
 		});
 	};
-	const observer = owner && typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-		if (owner.clientWidth === width && owner.clientHeight === height) return;
-		width = owner.clientWidth; height = owner.clientHeight;
+	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+		const fieldChanged = node.clientWidth !== fieldWidth;
+		if (!fieldChanged && owner && owner.clientWidth === width && owner.clientHeight === height) return;
+		fieldWidth = node.clientWidth; width = owner?.clientWidth; height = owner?.clientHeight;
 		refit();
 	}) : null;
 	if (owner) observer?.observe(owner);
+	observer?.observe(node);
 	return {
 		update: (next?: AutosizeParam) => { fit = typeof next === 'object' && !!next.fit; resize(); },
 		destroy: () => {

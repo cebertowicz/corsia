@@ -113,6 +113,10 @@ def recipients(
         # A held tag does not make someone a participant until its batch is delivered.
         resolved.update(_tagged_agents(db, root_id, delivered_only=True))
     quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
+    from doceditor.comment_audience import person_left
+
+    if person_left(db, root_id):
+        quiet.add(USER_AUTHOR_ID)
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
         resolved.add(owner)

@@ -25,6 +25,9 @@ export type CommentThreadData = {
 	acked?: boolean;
 	/** Everyone who has acknowledged the thread, in order: the Agreed line names them. */
 	acknowledgedBy?: { id: string; name: string; kind: 'user' | 'agent' }[];
+	/** Who the person's next reply wakes, and whether they stopped replies reaching them. */
+	replyGoesTo?: { id: string; name: string }[];
+	leftByYou?: boolean;
 	replacement?: string | null;
 	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;

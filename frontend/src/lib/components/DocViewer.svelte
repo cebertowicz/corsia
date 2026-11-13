@@ -375,6 +375,7 @@
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
 		onResolve={threadActions.resolve}
 		onAgree={threadActions.agree}
+		onMute={threadActions.mute}
 		{target}
 		artifactId={loadedArtifactId}
 		readOnly={readonly || confirming}

@@ -5,9 +5,10 @@
 	import MentionPicker from './MentionPicker.svelte';
 	import { createMentionSelection } from './mentionSelection';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import RecipientLine from './RecipientLine.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection() }: {
 		/** Replies grow until their available scroller is full, then scroll inside. */
 		value?: string;
 		selection?: [number, number] | null;
@@ -17,6 +18,8 @@
 		posting?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
+		/** The agents this reply wakes, from the server's reply rule; absent where the caller does not know (chat comments). */
+		goesTo?: string[];
 		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
@@ -24,6 +27,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
+	const tagNames = $derived(picker && goesTo ? picker.occurrences(value).map(item => value.slice(item.start, item.end).replace(/^@/, '')) : []);
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
 	export function focus(options?: FocusOptions) { input?.focus(options); }
@@ -75,6 +79,7 @@
 			</button>
 		{/if}
 	</Field>
+	{#if goesTo}<RecipientLine names={[...new Set([...goesTo, ...tagNames])]} none="No one gets this reply." />{/if}
 </div>
 
 <style>
@@ -83,7 +88,12 @@
 	/* The pinned reply takes its surface's own fill: the popover card is elevated, the comment drawers are opaque secondary sheets. */
 	:global([data-popover]) .ct-compose, :global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-elevated); position: sticky; bottom: 0; z-index: 1; background: var(--compose-fill); }
 	:global([data-adaptive-drawer]) .ct-compose { --compose-fill: var(--bg-secondary); }
-	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--space-3); background: var(--compose-fill); pointer-events: none; }
+	:global([data-popover]) .ct-compose::after, :global([data-adaptive-drawer]) .ct-compose::after { content: ''; position: absolute; inset: 100% 0 auto; height: var(--compose-band, var(--space-3)); background: var(--compose-fill); pointer-events: none; }
+	/* A boxed card in a sheet: its reply takes the card's own ground (the head's pinned ground), and its band ends at the card's padding (8px), so the card's bottom border draws under the reply instead of under a lighter band. */
+	:global([data-adaptive-drawer]) :global(.ct:not(.flat)) .ct-compose { --compose-fill: var(--ct-pin, color-mix(in srgb, var(--text-primary) 4%, var(--bg-secondary))); }
+	:global([data-adaptive-drawer]) :global(.ct:not(.flat)) .ct-compose::after { height: 8px; }
+	/* A phone on its side has about 150px under a highlight: the reply sits against its line and keeps its pin, so the field and who gets it stay whole while the discussion scrolls behind. */
+	@media (pointer: coarse) and (max-height: 450px) { .ct-compose { margin-top: 0; } }
 	/* Replies grow until their available scroller is full, then scroll inside. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }

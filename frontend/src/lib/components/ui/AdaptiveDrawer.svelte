@@ -232,14 +232,14 @@
 	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
 	.drawer-backdrop.covered { visibility: hidden; }
 	.within .drawer-motion { max-width: none; padding: 0; }
-	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
+	.within .drawer-panel { max-height: min(calc(var(--drawer-h) * 0.82), max(var(--drawer-cap, 100dvh), 46dvh)); }
 	.drawer-backdrop.follow-keyboard {
 		bottom: auto;
 		top: var(--doc-visual-viewport-offset, 0px);
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))), max(var(--drawer-cap, 100dvh), 46dvh));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -250,7 +250,7 @@
 	.drawer-panel {
 		--drawer-drag-y: 0px;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))), max(var(--drawer-cap, 100dvh), 46dvh));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -271,8 +271,9 @@
 		transition: none;
 	}
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
-	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
-	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
+	/* `--drawer-half-fit` lets a half-height sheet grow to its content, never below the height it has today. */
+	.drawer-panel.half { max-height: max(min(46dvh, calc(100dvh - max(16px, var(--safe-top)))), var(--drawer-half-fit, 0px)); }
+	.within .drawer-panel.half { max-height: max(calc(var(--drawer-h) * 0.46), var(--drawer-half-fit, 0px)); }
 	.drawer-panel:focus {
 		outline: none;
 	}

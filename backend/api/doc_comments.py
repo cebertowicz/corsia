@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
+from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
@@ -80,6 +80,7 @@ async def list_comments(artifact_id: str, token: str):
             comments, anchors_checked = anchored_threads(artifact_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
             feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
+            comment_audience.annotate(db, artifact, comments)
             feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
         finally:
@@ -298,6 +299,8 @@ class CommentPatch(BaseModel):
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
     diagram_source: str | None = None
+    # The person stops (True) or resumes (False) getting replies on this thread.
+    left: bool | None = None
 
     @model_validator(mode="after")
     def _reopen_names_its_lane(self) -> "CommentPatch":
@@ -307,12 +310,35 @@ class CommentPatch(BaseModel):
         return self
 
 
+async def _person_leave(comment_id: str, user: dict, left: bool) -> dict:
+    def _leave():
+        db = get_db()
+        try:
+            artifact_id = store.get_artifact_id_for_comment(comment_id, db=db)
+            if artifact_id is None:
+                return None
+            _assert_owns_artifact(artifact_id, user["id"], db)
+            comment = store.get_comment(comment_id, db=db)
+            with write_transaction(db, scope="person_leave_comment_thread") as connection:
+                comment_audience.set_person_left(connection, str(comment["parent_id"] or comment["id"]), left)
+            return comment
+        finally:
+            db.close()
+
+    comment = await run_in_db(_leave)
+    if comment is None:
+        raise HTTPException(404, "Comment not found")
+    return {"comment": {**comment, "left_by_you": left}}
+
+
 @router.patch("/comments/{comment_id}")
 async def patch_comment(comment_id: str, token: str, body: CommentPatch):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-    fields = {k: v for k, v in body.model_dump(exclude={"delivery_policy"}).items() if v is not None}
+    fields = {k: v for k, v in body.model_dump(exclude={"delivery_policy", "left"}).items() if v is not None}
+    if body.left is not None and not fields:
+        return await _person_leave(comment_id, user, body.left)
     if not fields:
         raise HTTPException(400, "No fields to update")
 

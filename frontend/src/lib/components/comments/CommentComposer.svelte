@@ -4,11 +4,12 @@
 	import Field from '$lib/components/ui/Field.svelte';
 	import CommentQuote from './CommentQuote.svelte';
 	import MentionPicker from './MentionPicker.svelte';
+	import RecipientLine from './RecipientLine.svelte';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection() }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection() }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -19,6 +20,9 @@
 		submitLabel?: string;
 		submittingLabel?: string;
 		mentions?: boolean;
+		/** Who a new comment goes to, from the document's resolver; absent where the caller does not know (chat comments). */
+		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; name?: string };
+		onRetry?: () => void;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
@@ -26,6 +30,9 @@
 	} = $props();
 	let text = $state(untrack(() => body));
 	const explanationId = $props.id();
+	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
+	const tagged = $derived(mentions && picker ? picker.occurrences(text).map(item => text.slice(item.start, item.end).replace(/^@/, '')) : []);
+	const names = $derived([...new Set([...(goesTo?.state === 'agent' && goesTo.name ? [goesTo.name] : []), ...tagged])]);
 	let posting = $state(false);
 	$effect(() => {
 		text;
@@ -55,6 +62,7 @@
 			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 		</Field>
 	</div>
+	{#if goesTo}<RecipientLine {names} none="No one gets these comments." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
 		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? submittingLabel : submitLabel}</button>

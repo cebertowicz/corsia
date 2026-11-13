@@ -84,4 +84,6 @@
 		font-size: var(--text-caption); font-weight: var(--fw-bold); line-height: 1; font-variant-numeric: tabular-nums;
 	}
 	.num.stale { border-style: dashed; }
+	/* A phone on its side has about 320px for the whole sheet: a smaller picture and less air under it keep the card's reply and the line that says who gets it in view. */
+	@media (pointer: coarse) and (max-height: 28.125rem) { .thumb { padding-bottom: 0; } img { max-height: var(--space-8); } }
 </style>

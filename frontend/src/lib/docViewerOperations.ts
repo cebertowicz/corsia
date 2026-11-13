@@ -1,7 +1,7 @@
 import { fetchContent, markArtifactVerified, RequestRefused } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
+import { ackComment, leaveCommentThread, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -136,5 +136,6 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 		},
 		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },
 		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
+		mute(id: string, muted: boolean) { const artifact = artifactId(); return artifact ? leaveCommentThread(artifact, id, muted) : Promise.resolve(false); },
 	};
 }

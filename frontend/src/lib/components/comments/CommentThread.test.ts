@@ -46,6 +46,145 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
+	describe('an open margin card taller than the room beside the text', () => {
+		function mountIn(extra: Record<string, unknown>, content: number) {
+			const owner = document.createElement('div');
+			owner.style.overflowY = 'auto';
+			Object.defineProperty(owner, 'clientHeight', { configurable: true, value: 600 });
+			document.body.appendChild(owner);
+			host = owner;
+			const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+			Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => content });
+			component = mount(CommentThread, { target: owner, props: { comment: thread(), inMargin: true, focused: true, scrollOnFocus: false, ...extra } });
+			flushSync();
+			return () => { if (original) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original); else delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight; };
+		}
+		it('keeps to the room and scrolls inside itself', () => {
+			const restore = mountIn({}, 2400);
+			const card = host.querySelector<HTMLElement>('.ct')!;
+			expect(card.style.maxHeight).toBe('584px');
+			expect(card.style.overflowY).toBe('auto');
+			restore();
+		});
+		it('is left alone when it fits, or when it is not the open card', () => {
+			let restore = mountIn({}, 300);
+			expect(host.querySelector<HTMLElement>('.ct')!.style.maxHeight).toBe('');
+			restore(); unmount(component!); host.remove();
+			restore = mountIn({ focused: false }, 2400);
+			expect(host.querySelector<HTMLElement>('.ct')!.style.maxHeight).toBe('');
+			restore();
+		});
+	});
+
+	describe('the mute control', () => {
+		const goesTo = [{ id: 'a1', name: 'Docs lane' }];
+		const mute = () => button('.ct-act.mute');
+		it('sits under the author’s name, apart from Agree and Resolve, named for its chat, and not beside the reply field', () => {
+			render(thread({ anchor: 'commentable', replyGoesTo: goesTo }), false, { onMute: vi.fn() });
+			expect(mute().parentElement).toBe(host.querySelector('.ct-head .ct-sub'));
+			expect(host.querySelector('.ct-head .ct-acts')?.contains(mute())).toBe(false);
+			expect(host.querySelector('.ct-head .ct-acts .ct-act.ack')).not.toBeNull();
+			expect(host.querySelector('.ct-head .ct-who')?.textContent).toContain('You');
+			expect(host.querySelector('.ct-head .ct-who')?.contains(mute())).toBe(false);
+			expect(mute().getAttribute('aria-label')).toBe('Mute this comment on “commentable”');
+			expect(mute().getAttribute('title')).toBe('Mute this comment');
+			expect(host.querySelector('.ct-compose')?.contains(mute())).toBe(false);
+			expect(host.querySelector('.ct-compose button.rl-link')).toBeNull();
+		});
+
+		it('puts Agree and Resolve before the bell in the tab order, as they sit on screen', () => {
+			render(thread({ anchor: 'commentable', replyGoesTo: goesTo }), false, { onMute: vi.fn() });
+			const acts = host.querySelector('.ct-head .ct-acts')!, sub = host.querySelector('.ct-head .ct-sub')!;
+			expect(acts.compareDocumentPosition(sub) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect(acts.compareDocumentPosition(mute()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+
+		it('is absent where a reply has no rule to mute, and when the person cannot reply', () => {
+			render(thread());
+			expect(host.querySelector('.ct-act.mute')).toBeNull();
+			unmount(component!); host.remove();
+			render(thread({ replyGoesTo: goesTo }), true);
+			expect(host.querySelector('.ct-act.mute')).toBeNull();
+		});
+
+		it('shows the app’s spinner in the bell while pending, names it as a full sentence, ignores a second press and announces the result politely', async () => {
+			let answer: (ok: boolean) => void = () => {};
+			const onMute = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+			render(thread({ anchor: 'commentable', replyGoesTo: goesTo }), false, { onMute });
+			expect(mute().querySelector('svg')).not.toBeNull();
+			expect(mute().querySelector('.spinner')).toBeNull();
+			mute().click(); flushSync();
+			expect(mute().getAttribute('aria-label')).toBe('Muting this comment on “commentable”');
+			expect(mute().getAttribute('title')).toBe('Muting this comment…');
+			expect(mute().getAttribute('aria-busy')).toBe('true');
+			expect(mute().querySelector('.spinner')).not.toBeNull();
+			expect(mute().querySelector('svg')).toBeNull();
+			mute().click(); flushSync();
+			expect(onMute).toHaveBeenCalledTimes(1);
+			expect(onMute).toHaveBeenCalledWith('c1', true);
+			answer(true);
+			await vi.waitFor(() => expect(mute().getAttribute('aria-busy')).toBe('false'));
+			expect(mute().querySelector('.spinner')).toBeNull();
+			expect(host.querySelector('[role="alert"]')).toBeNull();
+			const status = host.querySelector('.ct-head [role="status"]')!;
+			expect(status.getAttribute('aria-live')).toBe('polite');
+			expect(status.textContent).toBe('Comment muted');
+		});
+
+		it('names the pending unmute the same way when the person had muted', () => {
+			const onMute = vi.fn(() => new Promise<boolean>(() => {}));
+			render(thread({ anchor: 'commentable', replyGoesTo: goesTo, leftByYou: true }), false, { onMute });
+			expect(mute().getAttribute('aria-label')).toBe('Unmute this comment on “commentable”');
+			mute().click(); flushSync();
+			expect(mute().getAttribute('aria-label')).toBe('Unmuting this comment on “commentable”');
+		});
+
+		it('says so in the system’s error style in the row where the time was, so nothing moves, and keeps the old state', async () => {
+			render(thread({ replyGoesTo: goesTo, replies: [reply] }), false, { onMute: () => Promise.resolve(false) });
+			expect(host.querySelector('.ct-sub .ct-at')).not.toBeNull();
+			mute().click();
+			await vi.waitFor(() => expect(host.querySelector('[role="alert"]')).not.toBeNull());
+			const alert = host.querySelector('[role="alert"]')!;
+			expect(alert.textContent).toBe('Couldn’t mute. Try again.');
+			expect(alert.classList.contains('error-text')).toBe(true);
+			expect(alert.parentElement).toBe(host.querySelector('.ct-head .ct-sub'));
+			expect(host.querySelector('.ct-head .ct-sub .ct-at')).toBeNull();
+			expect(host.querySelector('.ct-head .ct-sub .ct-reply-count')).toBeNull();
+			expect(host.querySelector('.ct-head ~ [role="alert"]')).toBeNull();
+			expect(mute().getAttribute('aria-label')).toMatch(/^Mute this comment/);
+			mute().click();
+			await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t mute. Try again.'));
+			expect(host.querySelector('.ct-head .ct-sub .ct-reply-count')?.textContent).toBe('1 reply');
+		});
+
+		it('names a dropped connection and what to do, and a logged failure shows its reference on its own line', async () => {
+			const answers = [{ cause: 'connection' as const, reference: null }, { cause: 'server' as const, reference: 'K3M7QD' }];
+			render(thread({ replyGoesTo: goesTo, replies: [reply] }), false, { onMute: () => Promise.resolve(answers.shift()!) });
+			mute().click();
+			await vi.waitFor(() => expect(host.querySelector('[role="alert"]')).not.toBeNull());
+			expect(host.querySelector('[role="alert"]')!.textContent).toBe('Couldn’t mute. The connection to CORSIA dropped. Try again.');
+			expect(host.querySelector('.ct-mute-failed.ref')).toBeNull();
+			mute().click();
+			await vi.waitFor(() => expect(host.querySelector('.ct-mute-failed.ref')).not.toBeNull());
+			expect(host.querySelector('[role="alert"]')!.textContent).toBe('Couldn’t mute. Try again. Reference: K3M7QD');
+			expect(host.querySelector('.ct-mute-ref')?.textContent).toBe('Reference: K3M7QD');
+		});
+
+		it('keeps the head on top of a card that scrolls and gives it a ground only while it is pinned', () => {
+			render(thread({ replyGoesTo: goesTo }), false, { onMute: vi.fn() });
+			const card = host.querySelector<HTMLElement>('.ct')!;
+			const head = host.querySelector<HTMLElement>('.ct-head')!;
+			expect(head.classList.contains('stuck')).toBe(false);
+			card.style.overflowY = 'auto';
+			card.getBoundingClientRect = () => ({ top: 100, bottom: 400, left: 0, right: 288, width: 288, height: 300, x: 0, y: 100, toJSON() {} }) as DOMRect;
+			head.getBoundingClientRect = () => ({ top: 101, bottom: 150, left: 0, right: 288, width: 288, height: 49, x: 0, y: 101, toJSON() {} }) as DOMRect;
+			card.scrollTop = 120; card.dispatchEvent(new Event('scroll')); flushSync();
+			expect(head.classList.contains('stuck')).toBe(true);
+			card.scrollTop = 0; card.dispatchEvent(new Event('scroll')); flushSync();
+			expect(head.classList.contains('stuck')).toBe(false);
+		});
+	});
+
 	it('keeps focus in the reply field when a clicked Send goes away after posting', async () => {
 		render(thread());
 		const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
@@ -131,6 +270,8 @@ describe('CommentThread', () => {
 			render(thread(), false, { showReply: true, keepReplyVisible: true });
 			await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
 			await vi.waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+			// With no scroller to hold the card whole, the field itself is brought into view.
+			expect(scrollIntoView.mock.contexts).toContain(host.querySelector('.ct-input'));
 		} finally {
 			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
 		}
@@ -142,7 +283,7 @@ describe('CommentThread', () => {
 		const author = host.querySelector<HTMLElement>('.ct-author')!;
 		expect(author.getAttribute('aria-label')).toBe(name);
 		expect(author.title).toBe(name);
-		expect(author.querySelector('.name-tail')?.textContent).toBe('5058');
+		expect(author.textContent).toBe(name);
 		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
 	});
 
@@ -335,16 +476,16 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct.orphaned')).not.toBeNull();
 	});
 
-	it('keeps the card header on one row, the long name shortened in the middle, at rest, focused, in the margin and in the popover or sheet', () => {
+	it('gives the card header’s name its own line, shortened in the middle with the full name as title and label, with the time and replies under it, at rest, focused, in the margin and in the popover or sheet', () => {
 		const name = 'Suggestion Reviewer 1793988264642';
 		const rows = (extra: Record<string, unknown>) => {
 			render(thread({ author: name, createdAt: new Date().toISOString(), replies: [{ ...reply, author: name }] }), false, extra);
-			const out = { name: host.querySelector('.ct-author')!.textContent, tail: host.querySelector('.ct-author .name-tail')?.textContent, replyTail: host.querySelector('.ct-msg-author .name-tail')?.textContent, label: host.querySelector('.ct-author')!.getAttribute('aria-label') };
+			const out = { name: host.querySelector('.ct-author')!.textContent, tail: host.querySelector('.ct-author .name-tail')?.textContent, replyTail: host.querySelector('.ct-msg-author .name-tail')?.textContent, label: host.querySelector('.ct-author')!.getAttribute('aria-label'), nameOnItsLine: host.querySelector('.ct-head .ct-who')!.contains(host.querySelector('.ct-author')) && !host.querySelector('.ct-head .ct-who')!.contains(host.querySelector('.ct-at')), timeAndReplies: host.querySelector('.ct-head .ct-sub')!.contains(host.querySelector('.ct-at')) && host.querySelector('.ct-head .ct-sub')!.contains(host.querySelector('.ct-reply-count')) };
 			unmount(component!); component = null; host.remove();
 			return out;
 		};
 		const rest = rows({ inMargin: true, focused: false, scrollOnFocus: false });
-		expect(rest).toEqual({ name, tail: '4642', replyTail: '4642', label: name });
+		expect(rest).toEqual({ name, tail: '4642', replyTail: '4642', label: name, nameOnItsLine: true, timeAndReplies: true });
 		expect(rows({ inMargin: true, focused: true, scrollOnFocus: false })).toEqual(rest);
 		expect(rows({ focused: true, scrollOnFocus: false })).toEqual(rest);
 		expect(rows({ focused: true, flat: true, scrollOnFocus: false })).toEqual(rest);

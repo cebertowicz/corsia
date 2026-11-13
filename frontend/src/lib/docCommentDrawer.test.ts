@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickedOpener, onSheetMoved, openerFocus, presence, scrollListToCard } from './docCommentDrawer';
+import { capSheetBelowAnchor, clickedOpener, fitHalfSheet, onSheetMoved, openerFocus, presence, scrollDocumentForCard, scrollListToCard } from './docCommentDrawer';
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -107,5 +107,121 @@ describe('onSheetMoved', () => {
 		expect(() => onSheetMoved(document.createElement('div'))()).not.toThrow();
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		expect(reveal).not.toHaveBeenCalled();
+	});
+});
+
+describe('capSheetBelowAnchor', () => {
+	const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+	function sheet(backdropBottom: number) {
+		document.body.innerHTML = '<div data-adaptive-drawer><div class="panel"></div></div>';
+		const backdrop = document.querySelector<HTMLElement>('[data-adaptive-drawer]')!;
+		backdrop.getBoundingClientRect = () => ({ bottom: backdropBottom } as DOMRect);
+		return document.querySelector<HTMLElement>('.panel')!;
+	}
+
+	it('leaves the room under the highlighted text, with a gap, and takes the cap off when stopped', async () => {
+		const panel = sheet(852);
+		const stop = capSheetBelowAnchor(panel, () => 189);
+		await frame(); await frame();
+		expect(panel.style.getPropertyValue('--drawer-cap')).toBe('647px');
+		stop();
+		expect(panel.style.getPropertyValue('--drawer-cap')).toBe('');
+	});
+
+	it('sets no cap when there is no anchor to keep in view, and never a negative one', async () => {
+		const panel = sheet(300);
+		const stop = capSheetBelowAnchor(panel, () => null);
+		await frame(); await frame();
+		expect(panel.style.getPropertyValue('--drawer-cap')).toBe('');
+		stop();
+		const low = capSheetBelowAnchor(panel, () => 900);
+		await frame(); await frame();
+		expect(panel.style.getPropertyValue('--drawer-cap')).toBe('0px');
+		low();
+	});
+
+	it('does nothing without a sheet', () => {
+		expect(() => capSheetBelowAnchor(null, () => 10)()).not.toThrow();
+	});
+});
+
+describe('fitHalfSheet', () => {
+	const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+	// A panel whose chrome is 80px and whose list holds 300px of card, under a backdrop of the given height.
+	function sheet(backdropHeight: number) {
+		document.body.innerHTML = '<div data-adaptive-drawer><div class="panel"><div class="drawer-comments"></div></div></div>';
+		const backdrop = document.querySelector<HTMLElement>('[data-adaptive-drawer]')!;
+		backdrop.getBoundingClientRect = () => ({ bottom: backdropHeight } as DOMRect);
+		Object.defineProperty(backdrop, 'clientHeight', { value: backdropHeight });
+		const panel = document.querySelector<HTMLElement>('.panel')!;
+		const list = document.querySelector<HTMLElement>('.drawer-comments')!;
+		Object.defineProperty(panel, 'offsetHeight', { value: 200 });
+		Object.defineProperty(list, 'clientHeight', { value: 120 });
+		Object.defineProperty(list, 'scrollHeight', { value: 300 });
+		return panel;
+	}
+
+	it('keeps a line of text above the sheet on a tall screen', async () => {
+		const panel = sheet(852);
+		const stop = fitHalfSheet(panel, () => 600);
+		await frame(); await frame();
+		// Room is 852 - 600 - 120 = 132, under the 380px the whole card would take.
+		expect(panel.style.getPropertyValue('--drawer-half-fit')).toBe('132px');
+		stop();
+		expect(panel.style.getPropertyValue('--drawer-half-fit')).toBe('');
+	});
+
+	it('keeps no text above the sheet on a short screen, so the card head and reply field are both in view first', async () => {
+		const panel = sheet(393);
+		const stop = fitHalfSheet(panel, () => 129);
+		await frame(); await frame();
+		// Room is 393 - 129 = 264, under the 380px the whole card would take; a tall screen would have left 144.
+		expect(panel.style.getPropertyValue('--drawer-half-fit')).toBe('264px');
+		stop();
+	});
+
+	it('does nothing without a sheet', () => {
+		expect(() => fitHalfSheet(null, () => 10)()).not.toThrow();
+	});
+});
+
+describe('scrollDocumentForCard', () => {
+	function setup({ cardTop = 214, offsetHeight = 149, scrollHeight = 191, scrollTop = 0, maxScroll = 400, scrollerTop = 112, innerHeight = 393 } = {}) {
+		document.body.innerHTML = '<div class="bounds"><div class="cm-scroller"></div></div><div class="card"></div>';
+		const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+		const card = document.querySelector<HTMLElement>('.card')!;
+		scroller.getBoundingClientRect = () => ({ top: scrollerTop } as DOMRect);
+		Object.defineProperty(scroller, 'scrollHeight', { value: maxScroll + 255 });
+		Object.defineProperty(scroller, 'clientHeight', { value: 255 });
+		scroller.scrollTop = scrollTop;
+		card.getBoundingClientRect = () => ({ top: cardTop } as DOMRect);
+		Object.defineProperty(card, 'offsetHeight', { value: offsetHeight });
+		Object.defineProperty(card, 'clientHeight', { value: offsetHeight - 2 });
+		Object.defineProperty(card, 'scrollHeight', { value: scrollHeight });
+		Object.defineProperty(window, 'innerHeight', { value: innerHeight, configurable: true });
+		return { card, scroller, bounds: document.querySelector<HTMLElement>('.bounds')! };
+	}
+	const anchor = { top: 175 } as DOMRect;
+
+	it('scrolls the document up by the card’s shortfall when the highlight can stay in view', () => {
+		const { card, scroller, bounds } = setup();
+		expect(scrollDocumentForCard(card, anchor, bounds)).toBe(44);
+		expect(scroller.scrollTop).toBe(44);
+	});
+
+	it('stops where the highlight would leave the document’s top, and where the document ends', () => {
+		const a = setup({ scrollerTop: 160 });
+		expect(scrollDocumentForCard(a.card, anchor, a.bounds)).toBe(7);
+		const b = setup({ scrollTop: 395 });
+		expect(scrollDocumentForCard(b.card, anchor, b.bounds)).toBe(5);
+	});
+
+	it('does nothing when the card is whole, sits above its highlight, or has no document', () => {
+		const whole = setup({ offsetHeight: 193 });
+		expect(scrollDocumentForCard(whole.card, anchor, whole.bounds)).toBe(0);
+		const above = setup({ cardTop: 100 });
+		expect(scrollDocumentForCard(above.card, anchor, above.bounds)).toBe(0);
+		expect(scrollDocumentForCard(above.card, anchor, null)).toBe(0);
+		expect(scrollDocumentForCard(null, anchor, above.bounds)).toBe(0);
 	});
 });
