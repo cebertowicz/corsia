@@ -37,6 +37,14 @@ describe('RecipientLine', () => {
 		expect(host.querySelector('.rl-name [title]')).toBeNull();
 	});
 
+	it('carries the full list as its hover title so a cut row can still be read', () => {
+		render({ names: ['Docs lane', 'Agent Substrate'] });
+		expect(host.querySelector('.rl-who')?.getAttribute('title')).toBe('Docs lane, Agent Substrate');
+		unmount(component); host.remove();
+		render({ names: [], none: 'No agent gets this reply.' });
+		expect(host.querySelector('.rl-who')?.hasAttribute('title')).toBe(false);
+	});
+
 	it('says it is checking, then offers Retry when the check failed', () => {
 		render({ names: [], notice: 'loading' });
 		expect(host.textContent).toContain('Checking who gets this…');

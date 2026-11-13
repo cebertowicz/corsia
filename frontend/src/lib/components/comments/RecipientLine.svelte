@@ -13,7 +13,7 @@
 
 <div class="rl">
 	<div class="rl-row" class:has-link={notice === 'error'}>
-		<span class="rl-who" role="status" aria-live="polite">
+		<span class="rl-who" role="status" aria-live="polite" title={notice === null && !empty ? names.join(', ') : undefined}>
 			{#if notice === 'loading'}
 				<span class="rl-text">Checking who gets this…</span>
 			{:else if notice === 'error'}
@@ -52,6 +52,14 @@
 	   the names sit on the link's first line. */
 	/* A phone on its side has about 150px under a highlight: the line sits against the field and takes only its text's height. */
 	@media (pointer: coarse) and (max-height: 28.125rem) { .rl { margin-top: 0; } .rl-row { min-height: var(--space-4); } }
+	/* A short desktop window has no room for a second row under a reply that already scrolls: the names stay on one row and a long one is cut with an ellipsis, its full text in the hover title. A touch window keeps wrapping above, since it has no hover. */
+	@media (pointer: fine) and (max-height: 28.125rem) {
+		.rl { margin-top: 0; }
+		.rl-row { min-height: var(--space-4); }
+		.rl-who { flex-wrap: nowrap; overflow: hidden; }
+		.rl-item { flex: 0 1 auto; }
+		.rl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+	}
 	@media (pointer: coarse) {
 		.rl-link { display: inline-flex; align-items: center; min-height: var(--touch-target); }
 		.has-link .rl-who { padding-top: calc((var(--touch-target) - 1lh) / 2); }
