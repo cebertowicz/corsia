@@ -110,7 +110,7 @@ def _record_tags(connection, request: CommentInput, row: dict) -> None:
     comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
     comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
     if request.tag_person and request.parent_id:
-        # Tagging someone who left the thread brings them back into it (Steve, Oct 29).
+        # Tagging someone who left the thread brings them back into it.
         from doceditor.comment_audience import set_person_left
 
         parent = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (request.parent_id,)).fetchone()
