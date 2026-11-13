@@ -249,10 +249,10 @@ async function backToDocument(page: Page): Promise<void> {
 const controlButton = (page: Page) => page.locator('[data-doc-jump]').getByRole('button');
 const controlBox = (page: Page) => page.locator('[data-doc-jump]');
 
-/** Arriving on a thread opens it, so its New replies clear once its card is shown. */
-async function awaitFocusedRead(page: Page): Promise<void> {
+/** Arriving on a thread opens it and stamps its New replies read at once; the opened card keeps the New signs until it is closed, so the stamp shows in the control's count, not in the card. */
+async function awaitFocusedRead(page: Page, before: string): Promise<void> {
 	await expect(page.locator('[data-comment-id].focused')).toBeVisible();
-	await expect(page.locator('[data-comment-id].focused .ct-reply.new')).toHaveCount(0);
+	await expect.poll(async () => ((await controlBox(page).count()) ? await controlButton(page).innerText() : ''), { message: 'the arrival read the thread, so the control counts one fewer' }).not.toBe(before);
 }
 
 /** The control's face is its touch target: like chat's control, no pseudo-element padding. Measured at rest: mid-arrival
@@ -952,9 +952,10 @@ for (const theme of ['light', 'dark'] as const) {
 			// Tapping through every waiting thread reads them all: the control leaves.
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await controlBox(page).count())) break;
+				const before = await controlButton(page).innerText();
 				await controlButton(page).click();
 				// The comments list opens over the document and covers the control; stay until the arrival reads it, then put it away to tap again.
-				await awaitFocusedRead(page);
+				await awaitFocusedRead(page, before);
 				await closeComments(page);
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
