@@ -1,6 +1,6 @@
 """An assistant step that draws nothing in chat is stamped once, and every reader reads the stamp.
 
-`place_answers` is the one writer of `metadata.chat_drawn = false`. The Focus filter, the
+`place_answers` is the one stamper of `metadata.chat_drawn = false`; the appender clears it. The Focus filter, the
 run and stub counts, the saved-answer fields frames carry, the sidebar preview and the update
 feed read it; none re-derives it (#2602: the folded line counted a step its list did not show).
 """
@@ -182,3 +182,64 @@ def test_an_ask_hold_maps_to_the_latest_step_chat_draws(db):
     db.commit()
     assert _flag(db, "answer-only") is False
     assert _turn_step(db, THREAD, "turn-1", "2026-01-03") == "worked"
+
+
+def test_no_chat_read_hands_a_stamped_step_to_the_card_builder(db, monkeypatch):
+    """A card is computed at read time from a row's text, so a stamped step has none: every read that
+    attaches cards (page, focus view, one run's range) drops the step first, and a drawn step still gets them."""
+    from api import thread_cards
+    from api.thread_focus_page import read_authorized_focus_page, read_authorized_run_range
+
+    seen: list[str] = []
+
+    def spy(db, text, bases, user_id, **kwargs):
+        seen.append(text)
+        return []
+
+    monkeypatch.setattr(thread_cards, "reference_cards", spy)
+    _worked_turn(db)
+    _step(db, "answer-with-text", "Done.\n\n[c1.1] See docs/plan.md")
+    reads = {
+        "page": _page(db),
+        "focus": read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER),
+        "range": read_authorized_run_range(db, THREAD, 50, "target", "reply", None, user_id=OWNER_USER),
+    }
+    for name, result in reads.items():
+        seen.clear()
+        thread_cards.attach_result_cards(db, THREAD, OWNER_USER, result)
+        assert "[c1.1] Moved." not in seen, f"{name} read offered the stamped step to the card builder"
+        assert "All done." in seen, f"{name} read lost the drawn reply"
+
+
+def test_the_sidebar_fallback_picks_the_row_the_aggregate_picks(db):
+    """`_latest_drawn` and the aggregate share one selection rule: with the stamped steps taken away, the aggregate's
+    newest update is the fallback's, across a person step newer than it and two updates that share a time."""
+    from infra.thread_updates import _latest_drawn, latest_by_thread_with_attention
+
+    seqs = iter(range(10, 99))
+    def seed(thread_id, with_stamped):
+        if thread_id != THREAD:
+            seed_thread(db, thread_id)
+        rows = [("drawn-1", False, "2026-01-02T00:00:00"), ("drawn-2", False, "2026-01-03T00:00:00"),
+                ("drawn-3", False, "2026-01-03T00:00:00")]
+        rows += [("stamped-1", True, "2026-01-05T00:00:00")] if with_stamped else []
+        for name, stamped, at in rows:
+            mid = f"{thread_id}-{name}"
+            meta = json.dumps({"chat_drawn": False}) if stamped else None
+            db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES (?,?,'assistant','x',?,?,?)",
+                       (mid, thread_id, meta, at, next(seqs)))
+            db.execute("INSERT INTO thread_updates(thread_id,kind,source_kind,source_id,after_seq,created_at) VALUES (?,?,?,?,0,?)",
+                       (thread_id, "marked", "message", mid, at))
+        db.execute("INSERT INTO thread_updates(thread_id,kind,source_kind,source_id,node_id,title,after_seq,created_at) "
+                   "VALUES (?,'person_step','plan_event',?,'n','step',0,'2026-01-04T00:00:00')", (thread_id, f"{thread_id}-pe"))
+
+    seed(THREAD, True)
+    seed("twin", False)
+    db.commit()
+    stamped_display, _ = latest_by_thread_with_attention(db, [THREAD, "twin"])
+    fallback = _latest_drawn(db, THREAD)
+    assert fallback["message_id"] == f"{THREAD}-drawn-3"
+    assert stamped_display[THREAD] == fallback
+    assert stamped_display["twin"]["message_id"] == "twin-drawn-3"
+    assert {k: v for k, v in fallback.items() if k not in ("id", "thread_id", "message_id", "source_id")} == {
+        k: v for k, v in stamped_display["twin"].items() if k not in ("id", "thread_id", "message_id", "source_id")}

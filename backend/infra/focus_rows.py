@@ -159,8 +159,8 @@ CASE WHEN (CASE role
 # A `WHERE` clause continuation that drops the rows the transcript never draws.
 # A user input whose chat text was saved as empty is a chat comment: it lives in
 # its comment thread (infra/chat_comment_index.place_comments), never in chat.
-# An assistant step stamped `chat_drawn: false` (infra/chat_comment_answers.place_answers,
-# the one writer) answered comments and has nothing left for chat.
+# An assistant step stamped `chat_drawn: false` (infra/chat_comment_answers.place_answers is the one
+# stamper; subagents/assistant_step_tool_append clears it) answered comments and has nothing left for chat.
 NEVER_DRAWN_FILTER = (
     f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
     f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
