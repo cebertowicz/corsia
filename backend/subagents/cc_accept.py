@@ -34,6 +34,26 @@ _UNVERIFIED_INPUT_DELIVERY_DETAIL = (
 )
 
 
+class ResumeVerdictOwnsWrite(Exception):
+    """Claude closed stdin before a native resume's frame drained.
+
+    The feed's pending resume verdict decides the write: a refusal proves
+    Claude never read it, so the feed redelivers it; any other verdict
+    commits the unverified delivery exactly as an ordinary failed drain.
+    """
+
+    def __init__(
+        self,
+        identity: TurnIdentity,
+        error: BaseException,
+        commit_unverified: Callable[[], Awaitable[TurnSettlement]],
+    ) -> None:
+        super().__init__(str(error))
+        self.identity = identity
+        self.error = error
+        self.commit_unverified = commit_unverified
+
+
 def require_owned_accept_db(db) -> None:
     if db is not None:
         raise RuntimeError("CC async acceptance requires an owned DB connection")
@@ -377,17 +397,27 @@ async def accept_reconstructed_input(
     except BaseException as exc:
         if not observation.write_observed:
             raise
-        cc_trust.distrust(live)
-        observation.unverified = observation.unverified or not observation.accepted
-        if not observation.accepted and mark_ambiguous is not None:
-            mark_ambiguous()
-        if observation.unverified:
+
+        async def commit_unverified() -> TurnSettlement:
+            if not observation.accepted and mark_ambiguous is not None:
+                mark_ambiguous()
             live.input_delivery_unproven = True
             if settle_delivery is not None:
                 await _settle_input_delivery(settle_delivery)
-            terminal = await finish_unverified_input_delivery(
+            return await finish_unverified_input_delivery(
                 thread_id, live, identity, bcast=bcast, db=db,
             )
-            raise _CommittedTerminalFailure(terminal, exc) from exc
-        raise
+
+        cc_trust.distrust(live)
+        observation.unverified = observation.unverified or not observation.accepted
+        if (
+            not observation.accepted
+            and live.resume_verdict is not None
+            and isinstance(exc, (BrokenPipeError, ConnectionResetError))
+        ):
+            raise ResumeVerdictOwnsWrite(identity, exc, commit_unverified) from exc
+        if not observation.unverified:
+            raise
+        terminal = await commit_unverified()
+        raise _CommittedTerminalFailure(terminal, exc) from exc
     return identity

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -969,6 +970,87 @@ class TestLoudFailure:
         assert live.session.resume_session_id == live.session.session_id
         assert live.session.session_id != cc_sid
         await rt.retire("main-1")
+
+    @pytest.mark.asyncio
+    async def test_a_refused_resume_that_closes_stdin_before_the_drain_still_rebuilds(
+        self, main_db, fake_claude_reject_resume_once, tmp_path, monkeypatch
+    ):
+        """Claude exits on the refusal before the frame's drain: the verdict decides."""
+        import subagents.cc_runtime as rt
+        from subagents import cc_write_confirmation
+
+        _, cc_sid = _seed_native_resume(main_db, tmp_path, monkeypatch)
+        original = cc_write_confirmation.confirm_frame_drain
+        drains: list[str] = []
+
+        async def drain_after_claude_closed_stdin(writer, on_accepted):
+            if not drains:
+                # The refused process never reads stdin; wait until its pipe is gone.
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+            drains.append("drain")
+            return await original(writer, on_accepted)
+
+        monkeypatch.setattr(
+            cc_write_confirmation, "confirm_frame_drain", drain_after_claude_closed_stdin,
+        )
+        accepted: list[str] = []
+        settle = settle_test_input
+
+        def settle_once(batch):
+            accepted.append(batch.turn_id)
+            settle(batch)
+
+        monkeypatch.setattr(sys.modules[__name__], "settle_test_input", settle_once)
+        casts: list[tuple[str, dict]] = []
+        await _feed_main(
+            "main-1",
+            "resume after a closed pipe",
+            binary=fake_claude_reject_resume_once,
+            claude_dir=str(tmp_path / "claude"),
+            broadcast=lambda sid, m: casts.append((sid, m)),
+        )
+
+        assert await _wait(lambda: any(
+            sid == "main-1"
+            and m.get("type") == "step_text"
+            and (m.get("content") or "").startswith("echo:resume after a closed pipe")
+            for sid, m in casts
+        )), "turn did not retry after the refused resume closed stdin"
+        assert len(drains) == 2
+        # Only the redelivery drained, so it alone proves the input's delivery.
+        assert len(accepted) == 1
+        live = rt._LIVE.get("main-1")
+        assert live.session.session_id != cc_sid
+        assert not live.input_delivery_unproven
+        await rt.retire("main-1")
+
+    @pytest.mark.asyncio
+    async def test_a_closed_pipe_with_no_resume_verdict_still_ends_the_turn_unverified(
+        self, main_db, fake_claude, tmp_path, monkeypatch
+    ):
+        """Without a native resume to wait on, a failed drain ends the Turn at once."""
+        import subagents.cc_runtime as rt
+        from subagents import cc_write_confirmation
+
+        async def drain_lost(writer, on_accepted):
+            raise ConnectionResetError("Connection lost")
+
+        monkeypatch.setattr(cc_write_confirmation, "confirm_frame_drain", drain_lost)
+        casts: list[tuple[str, dict]] = []
+        with pytest.raises(ConnectionResetError):
+            await _feed_main(
+                "main-1", "never drained", binary=fake_claude,
+                claude_dir=str(tmp_path / "empty-claude-home"),
+                broadcast=lambda sid, m: casts.append((sid, m)),
+            )
+        assert any(
+            sid == "main-1" and m.get("type") == "turn_complete" for sid, m in casts
+        )
+        live = rt._LIVE.get("main-1")
+        assert live is None or live.input_delivery_unproven
+        if live is not None:
+            await rt.retire("main-1")
 
     @pytest.mark.asyncio
     async def test_stop_during_resume_verdict_wait_ends_turn_without_rebuild(

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 from subagents.cc_accept import (
-    TerminalSettlement, accept_reconstructed_input,
+    ResumeVerdictOwnsWrite, TerminalSettlement, accept_reconstructed_input,
     require_owned_accept_db,
 )
 from subagents.cc_destination import build_cc_user_frame
@@ -214,8 +214,14 @@ async def _redeliver_rejected_resume(
     identity: TurnIdentity,
     finish: _DeferredFinish,
     acceptance: _FeedAcceptance,
+    *,
+    first_write_unproven: bool,
 ) -> TurnIdentity:
-    """Deliver the same input in the same Turn after Claude refused it unread."""
+    """Deliver the same input in the same Turn after Claude refused it unread.
+
+    A first write that never drained settled no delivery evidence, so this
+    redelivery is the write that proves (or fails) the input's delivery.
+    """
     if _wait_scope(live).stop_requested:
         await finish()
         return identity
@@ -225,10 +231,15 @@ async def _redeliver_rejected_resume(
         if _LIVE.get(transition.thread_id) is live and live.corsia_turn == identity:
             await finish()
         raise
+    proves = first_write_unproven
     return await accept_reconstructed_input(
         transition.thread_id, replacement, frame, turn_id=identity.turn_id,
         bcast=transition.bcast, preadmitted_turn=identity,
         input_message_id=acceptance.input_message_id,
+        mark_accepted=acceptance.mark_accepted if proves else None,
+        mark_ambiguous=acceptance.mark_ambiguous if proves else None,
+        settle_delivery=acceptance.settle_delivery if proves else None,
+        settle_delivery_terminal=acceptance.settle_delivery_terminal if proves else None,
     )
 
 
@@ -243,20 +254,38 @@ async def _accept_confirming_resume(
     verdict = asyncio.get_running_loop().create_future()
     live.resume_verdict = verdict
     waited = False
+    unread: ResumeVerdictOwnsWrite | None = None
     try:
-        identity = await _record_and_accept(transition, live, acceptance)
-        if identity is None or _LIVE.get(transition.thread_id) is not live:
+        try:
+            identity = await _record_and_accept(transition, live, acceptance)
+        except ResumeVerdictOwnsWrite as closed:
+            # Claude closed stdin before the drain; its verdict decides the write.
+            unread, identity = closed, closed.identity
+        if unread is None and (
+            identity is None or _LIVE.get(transition.thread_id) is not live
+        ):
             return identity
         waited = True
-        finish = await _await_resume_verdict(live, verdict)
+        try:
+            finish = await _await_resume_verdict(live, verdict)
+        except BaseException:
+            if unread is not None:
+                await asyncio.shield(unread.commit_unverified())
+            raise
     finally:
         live.resume_verdict = None
         # A refusal handed over while accepting has no rebuild; end it here.
         if not waited and verdict.done() and verdict.result() is not None:
             await asyncio.shield(verdict.result()())
     if finish is None:
+        if unread is not None:
+            terminal = await unread.commit_unverified()
+            raise _CommittedTerminalFailure(terminal, unread.error) from unread.error
         return identity
-    return await _redeliver_rejected_resume(transition, live, identity, finish, acceptance)
+    return await _redeliver_rejected_resume(
+        transition, live, identity, finish, acceptance,
+        first_write_unproven=unread is not None,
+    )
 
 
 async def _accept_under_lock(
