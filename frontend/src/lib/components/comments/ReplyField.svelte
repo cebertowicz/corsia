@@ -8,7 +8,7 @@
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
 	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
-		/** Replies grow until their available scroller is full, then scroll inside. */
+		/** The reply's text. The field grows with it and never scrolls itself; the card's outer scroller keeps the caret in view. */
 		value?: string;
 		selection?: [number, number] | null;
 		keepVisible?: boolean;
@@ -68,7 +68,7 @@
 	}
 </script>
 
-<div class="ct-compose open" data-autosize-sticky>
+<div class="ct-compose open" data-reply-composer>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
 		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
@@ -82,7 +82,7 @@
 
 <style>
 	.ct-compose { margin-top: var(--space-1); }
-	/* Replies grow until their available scroller is full, then scroll inside. */
+	/* The field grows with its text and never scrolls itself. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }

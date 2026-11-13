@@ -121,7 +121,7 @@
 			// shorter than the composer clips the field and Send out of the card. The discussion above it scrolls with
 			// the card, so the composer alone is that floor; only when the band by the anchor is shorter does the card
 			// take the tallest band the canvas has, bottom-pinned.
-			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]') : null;
+			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-reply-composer]') : null;
 			const need = pinned ? pinned.getBoundingClientRect().height + gap : 0;
 			const band = area.bottom - area.top - 2 * gap;
 			if (pinned && need > room && band > need) {

@@ -30,6 +30,11 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
   const send = page.getByRole('button', { name: 'Send reply' });
   const card = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ct ")][1]');
   // The field grows with its text and never scrolls itself; the card never scrolls inside itself; the caret line (the end of the text) and Send stay on screen.
+  /** Types at the end of the reply, as a person does after scrolling up to read: the product, not the test, scrolls the field's end back. */
+  const typeAtEnd = async () => {
+   await input.evaluate((field: HTMLTextAreaElement) => { field.focus({ preventScroll: true }); field.setSelectionRange(field.value.length, field.value.length); });
+   await page.keyboard.insertText('.');
+  };
   const checkOutcome = async () => {
    await expectNoCardScroller(card);
    await expect(send).toBeVisible();
@@ -82,7 +87,8 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
    await expectNoCardScroller(card);
    for (const text of ['Existing thread', 'long reply line 0']) await expectDiscussionReachableByScroll(card, text);
    await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.clientHeight / parseFloat(getComputedStyle(field).lineHeight))).toBeGreaterThan(1.5);
-   await send.scrollIntoViewIfNeeded();
+   // Reading the discussion scrolled the field away; typing at its end brings the field's end and Send back by itself.
+   await typeAtEnd();
    await expect.poll(async () => {
     const popover = (await input.locator('xpath=ancestor::*[@data-popover][1]').boundingBox())!;
     const button = (await send.boundingBox())!;
@@ -92,10 +98,11 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
    await send.click();
    await expect(page.getByText('next reply line 0')).toBeVisible();
    await input.fill(Array.from({ length: 40 }, (_, i) => `third reply line ${i}`).join('\n'));
-   // Replies no longer scroll in a region of their own: each is reached by scrolling the popover.
+   // Each reply is reached by scrolling the popover; nothing inside the card scrolls.
    await expectNoCardScroller(card);
    for (const text of ['next reply line 0', 'long reply line 0']) await expectDiscussionReachableByScroll(card, text);
-   await send.scrollIntoViewIfNeeded();
+   await typeAtEnd();
+   await expect(send).toBeInViewport({ ratio: 1 });
    await send.click({ trial: true });
   } else {
    await send.click();
