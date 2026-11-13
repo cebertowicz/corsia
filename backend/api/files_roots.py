@@ -20,7 +20,7 @@ from infra.workspace_paths import looks_like_workspace_reference
 from registry import service as registry_service
 from registry.doc_freshness import freshness
 from registry.identity_metadata import parse_metadata
-from registry.shared_principals import is_under_shared_roots, owner_label, shared_roots
+from registry.shared_principals import is_under_shared_roots, person_owner_label, shared_roots
 
 MAX_NODES = 2000
 _PRUNE_DIRS = {
@@ -149,7 +149,7 @@ def shared_projector(db) -> Callable[[str, dict], None]:
             return
         owner = row["parent_thread_id"]
         if owner not in labels:
-            labels[owner] = owner_label(owner, db=db)
+            labels[owner] = person_owner_label(owner, db=db)
         row["owner_name"] = labels[owner]
         row["freshness"] = freshness(path, parse_metadata(row["metadata"]), now)
 

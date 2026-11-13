@@ -119,7 +119,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             art = art or registry_service.register_write_strict(thread_id, str(p), db=db)
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
-        freshness = artifact_freshness(art, p, db=db)
+        freshness = artifact_freshness(art, p, db=db, person_facing=True)
         ownership = document_ownership(db, art, user_id=user_id, workspace=config.WORKSPACE) if art else None
         draft = draft_at(p, "email", db=db)
     finally:

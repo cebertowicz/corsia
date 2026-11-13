@@ -9,16 +9,33 @@ person's, so agents suggest; a ``project:`` owner is no one's.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from infra.auth import is_owner_sentinel
 from infra.queries import thread_is_available
-from registry.identity_metadata import parse_metadata
-from registry.shared_principals import UI_PRINCIPAL, artifact_owner, document_scope
+from registry.identity_metadata import merge_identity_metadata, parse_metadata
+from registry.shared_principals import (
+    UI_PRINCIPAL,
+    artifact_owner,
+    document_project,
+    person_owner_label,
+    scope_agent_rows,
+    scope_conductor,
+)
+
+log = logging.getLogger(__name__)
 
 SUPERVISOR_KEY = "supervisor_thread_id"
+
+# The refusal sentences the screen shows, in the payload before a pick and in the 409 after one.
+MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
+SHARED_REFUSAL = (
+    "Everyone here shares this document, so its owner and supervisor can’t be changed "
+    "while more than one person uses CORSIA."
+)
 
 
 def _thread(db, thread_id: str | None):
@@ -59,27 +76,79 @@ def owner_kind(owner: str | None) -> str:
     return "agent"
 
 
-def _conductor(db, artifact: dict[str, Any], workspace: Path) -> str | None:
+def _scope(db, artifact: dict[str, Any], workspace: Path) -> tuple[str | None, str | None] | None:
+    """The ``(project id, conductor)`` of the scope that holds the document, or ``None`` when it can't be resolved."""
     path = artifact.get("path") or artifact.get("external_id")
     if not path:
         return None
     try:
-        return document_scope(path, workspace=workspace, db=db)[1]
+        project_id = document_project(path, workspace=workspace, db=db)[1]
+        return project_id, scope_conductor(project_id, db=db)
     except (ValueError, OSError):
+        log.warning("Couldn't resolve the scope of document %s", artifact.get("id"), exc_info=True)
         return None
 
 
+def _lazy(read: Callable[[], Any]) -> Callable[[], Any]:
+    """``read`` run at most once, and only when first asked."""
+    box: list[Any] = []
+
+    def get() -> Any:
+        if not box:
+            box.append(read())
+        return box[0]
+    return get
+
+
+def _pick_is_valid(db, pick: str, owner: str | None, scope: tuple[str | None, str | None] | None) -> bool:
+    """Whether a stored supervisor pick still stands.
+
+    It stands while one person may still change this document's supervisor, and
+    while the picked agent is an agent in the document's own scope. Every
+    ownership transition (a new owner, a moved document, a second person on
+    the install) is checked by this one reading.
+    """
+    # A released document (no owner) is no one's to share; its pick keeps routing.
+    if owner is not None and not may_change(owner, multi_person=is_multi_person(db)):
+        return False
+    row = _thread(db, pick)
+    if row is None or not row["agent_enabled"]:
+        return False
+    return scope is None or row["project_id"] == scope[0]
+
+
+def _checked_pick(db, artifact: dict[str, Any], owner: str | None, scope: Callable[[], Any]) -> str | None:
+    pick = parse_metadata(artifact.get("metadata")).get(SUPERVISOR_KEY)
+    return pick if pick and _pick_is_valid(db, pick, owner, scope()) else None
+
+
+def clear_invalid_pick(db, artifact: dict[str, Any], *, workspace: Path) -> bool:
+    """Drop a stored supervisor pick that no longer stands; report whether one was dropped.
+
+    Called inside the transaction of every write that can move ownership.
+    """
+    pick = parse_metadata(artifact.get("metadata")).get(SUPERVISOR_KEY)
+    if not pick:
+        return False
+    owner = artifact_owner(str(artifact["id"]), db=db)
+    if _checked_pick(db, artifact, owner, _lazy(lambda: _scope(db, artifact, workspace))) is not None:
+        return False
+    merge_identity_metadata(db, str(artifact["id"]), {SUPERVISOR_KEY: None})
+    return True
+
+
 def _supervisor(
-    db, owner: str | None, metadata: dict[str, Any], conductor: Callable[[], str | None],
+    db, owner: str | None, pick: str | None, conductor: Callable[[], str | None],
 ) -> tuple[Any, str]:
     """The effective supervisor's thread row and where it came from, or ``(None, "none")``.
 
-    The first available of: the agent the person picked, the owning agent, the
-    scope conductor (looked up only when reached). The header shows it and
-    comments go to it, so the two cannot disagree.
+    The first available of: the agent the person picked (when the pick still
+    stands), the owning agent, the scope conductor (looked up only when
+    reached). The header shows it and comments go to it, so the two cannot
+    disagree.
     """
     candidates: list[tuple[Callable[[], str | None], str]] = [
-        (lambda: metadata.get(SUPERVISOR_KEY), "picked"),
+        (lambda: pick, "picked"),
         (lambda: owner if owner_kind(owner) == "agent" else None, "owner"),
         (conductor, "conductor"),
     ]
@@ -98,8 +167,9 @@ def comment_recipients(db, artifact: dict[str, Any], *, workspace: Path) -> tupl
     document with neither still reaches the agent that last owned it.
     """
     owner = artifact_owner(str(artifact["id"]), db=db)
-    metadata = parse_metadata(artifact.get("metadata"))
-    row, _source = _supervisor(db, owner, metadata, lambda: _conductor(db, artifact, workspace))
+    scope = _lazy(lambda: _scope(db, artifact, workspace))
+    pick = _checked_pick(db, artifact, owner, scope)
+    row, _source = _supervisor(db, owner, pick, lambda: (scope() or (None, None))[1])
     found = tuple(dict.fromkeys(str(who) for who in (row["id"] if row is not None else None, owner) if who))
     released_owner = artifact.get("parent_thread_id")
     return found or ((str(released_owner),) if released_owner else ())
@@ -127,40 +197,38 @@ def may_change(owner: str | None, *, multi_person: bool) -> bool:
 
 def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) -> dict[str, Any]:
     """The owner, the effective supervisor and the picker's choices for one document."""
-    metadata = parse_metadata(artifact.get("metadata"))
     owner = artifact_owner(str(artifact["id"]), db=db)
     kind = owner_kind(owner)
-    conductor = _conductor(db, artifact, workspace)
+    scope = _scope(db, artifact, workspace)
     owner_row = _thread(db, owner) if kind == "agent" else None
-    scope_row = _thread(db, conductor) or owner_row
-    project_id = scope_row["project_id"] if scope_row is not None else None
-    row, source = _supervisor(db, owner, metadata, lambda: conductor)
-    agents = [
-        agent for agent in db.execute(
-            f"""SELECT id,title,project_id,user_id,agent_enabled,lifecycle_state,archived_reason FROM threads
-                WHERE user_id=? AND COALESCE(agent_enabled,0)=1 AND {'project_id IS NULL' if project_id is None else 'project_id=?'}
-                ORDER BY title COLLATE NOCASE""",
-            (user_id,) if project_id is None else (user_id, project_id),
-        ).fetchall()
-        if thread_is_available(agent)
-    ]
+    # The picker lists the document's own scope; only an unresolvable scope falls back to the owner's.
+    project_id = scope[0] if scope is not None else owner_row["project_id"] if owner_row is not None else None
+    pick = _checked_pick(db, artifact, owner, lambda: scope)
+    row, source = _supervisor(db, owner, pick, lambda: scope[1] if scope is not None else None)
+    agents = [agent for agent in scope_agent_rows(project_id, user_id, db=db) if thread_is_available(agent)]
     paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
     status = _status(row, paused)
     supervisor = None if row is None else {
         "id": str(row["id"]), "name": str(row["title"] or row["id"]), "source": source, "status": status,
     }
     choices = [
-        {"id": str(agent["id"]), "name": str(agent["title"] or agent["id"]), "status": _status(agent, paused)}
+        {"id": str(agent["id"]), "name": str(agent["title"] or agent["id"]), "status": _status(agent, paused),
+         "responsibility": str(agent["agent_responsibility"] or "").strip()}
         for agent in agents
     ]
     multi_person = is_multi_person(db)
+    can_change = may_change(owner, multi_person=multi_person)
     return {
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
-                  "name": str(owner_row["title"] or owner) if owner_row is not None else None},
+                  "name": str(owner_row["title"] or owner) if owner_row is not None else None,
+                  "label": person_owner_label(owner, db=db)},
         "supervisor": supervisor,
         "can_act": status == "ready",
         "multi_person": multi_person,
-        "can_change": may_change(owner, multi_person=multi_person),
+        "can_change": can_change,
+        "shared_refusal": None if can_change else SHARED_REFUSAL,
+        "multi_person_refusal": MULTI_PERSON_REFUSAL if multi_person else None,
+        "scope": "workspace" if project_id is None else "project",
         "choices": choices,
     }
 

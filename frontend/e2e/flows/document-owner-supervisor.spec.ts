@@ -91,6 +91,14 @@ async function reviewLeavesOwnershipReachable(page: Page): Promise<'drawer' | 'p
 		expect(overlaps(await box(item), await box(panel)), `the review ${kind} covers ${await item.getAttribute('data-role')}`).toBe(false);
 	}
 	await reachable(page.getByRole('combobox', { name: 'Add reviewers' }), `reviewer search reachable in the ${kind}`);
+	// The popover leaves the document's own heading readable: the text of the H1 is never under the card.
+	if (kind === 'popover') {
+		const heading = await page.locator('.cm-content .cm-md-h1').first().evaluate((element) => {
+			const range = document.createRange(); range.selectNodeContents(element);
+			const { x, y, width, height } = range.getBoundingClientRect(); return { x, y, width, height };
+		});
+		expect(overlaps(heading, await box(panel)), 'the review popover covers the document heading').toBe(false);
+	}
 	// A drawer is a sheet: Close returns the document, and the items take the next tap. The popover leaves them live.
 	if (kind === 'drawer') { await page.getByRole('button', { name: 'Close', exact: true }).click(); await expect(reviews).toHaveCount(0); }
 	for (const item of [ownerItem(page), supervisorItem(page)]) await reachable(item, `${await item.getAttribute('data-role')} reachable after the review ${kind}`);
@@ -108,7 +116,8 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		test.skip(touch !== (label === 'phone'), 'wide runs on the desktop project, phone on the mobile one');
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width, height });
-		const seeded = await seedOwnedDocument(page, request);
+		// A heading long enough to run under the popover's column, so a card placed over it would be caught.
+		const seeded = await seedOwnedDocument(page, request, 'Project planning for the community garden and the neighbourhood volunteers who tend it');
 		await seeded.open(page);
 
 		// At rest: two plainly labelled items.
@@ -136,7 +145,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		// A failed save keeps the old owner and says so.
 		await page.route('**/api/artifacts/*/ownership', (route) => route.fulfill({ status: 500, body: '{"detail":"boom"}' }));
 		await pick(page, seeded, 'owner', 'Planning specialist');
-		await expect(ownerItem(page)).toContainText('Change failed');
+		await expect(ownerItem(page)).toContainText('Couldn’t change');
 		await expect(ownerItem(page)).toContainText('Release planning');
 		await page.unroute('**/api/artifacts/*/ownership');
 

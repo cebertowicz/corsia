@@ -93,7 +93,7 @@ async def revision(
                 "writable": _writable(candidate, bases, db=db),
                 "artifact_id": resolved_artifact_id,
                 "artifact": art,
-                "freshness": artifact_freshness(art, candidate, db=db),
+                "freshness": artifact_freshness(art, candidate, db=db, person_facing=True),
             }
         finally:
             db.close()

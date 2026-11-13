@@ -1,13 +1,18 @@
 import { apiFetch } from '$lib/api/request';
 
 export interface DocOwnership {
-	owner: { kind: 'agent' | 'person' | 'none'; id: string | null; name: string | null };
+	owner: { kind: 'agent' | 'person' | 'none'; id: string | null; name: string | null; /** The word every person-facing surface shows for this owner. */ label: string };
 	supervisor: { id: string; name: string; source: string; status: string } | null;
 	can_act: boolean;
 	multi_person: boolean;
 	/** False on a document everyone shares while more than one person uses CORSIA: the server refuses any change. */
 	can_change: boolean;
-	choices: { id: string; name: string; status: string }[];
+	/** The sentences the server refuses with, shown before a pick so the screen and the refusal read alike. */
+	shared_refusal: string | null;
+	multi_person_refusal: string | null;
+	/** Where the picker's agents come from. */
+	scope: 'project' | 'workspace';
+	choices: { id: string; name: string; status: string; responsibility: string }[];
 }
 
 /** Carries the server's refusal sentence, when it sent one, so the control can show why. */
