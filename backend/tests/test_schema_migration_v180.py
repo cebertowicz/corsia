@@ -25,7 +25,7 @@ def _index_sql(db: sqlite3.Connection) -> str | None:
 
 
 def test_the_step_is_registered_at_179() -> None:
-    assert SCHEMA_VERSION == 192
+    assert SCHEMA_VERSION == 193
     assert MIGRATIONS[179] is migrate_179_to_180
 
 

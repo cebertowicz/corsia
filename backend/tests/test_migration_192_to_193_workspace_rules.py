@@ -7,7 +7,7 @@ from infra.database_migrations import MIGRATIONS
 from infra.delegation_scope import WORKSPACE_SCOPE_ID
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.migration_170_to_171_worker_profile import _INDEXES, _RULES
-from infra.migration_191_to_192_workspace_rules import migrate_191_to_192
+from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
 from infra.schema import SCHEMA_VERSION
 
 
@@ -27,8 +27,8 @@ def _observe(db, rule_id, scope):
 
 
 def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
-    assert SCHEMA_VERSION == 192
-    assert MIGRATIONS[191] is migrate_191_to_192
+    assert SCHEMA_VERSION == 193
+    assert MIGRATIONS[192] is migrate_192_to_193
     assert rule_scope(None) == WORKSPACE_SCOPE_ID
     assert rule_scope('abc') == 'project:abc'
     db = sqlite3.connect(':memory:')
@@ -43,7 +43,7 @@ def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
     original = db.execute('SELECT * FROM event_rules').fetchall()
     objects = db.execute("SELECT type, name, sql FROM sqlite_master WHERE tbl_name='event_rules' "
                          "AND sql IS NOT NULL AND type IN ('index','trigger') ORDER BY type, name").fetchall()
-    migrate_191_to_192(db)
+    migrate_192_to_193(db)
     assert db.execute('SELECT * FROM event_rules').fetchall() == original
     assert db.execute("SELECT type, name, sql FROM sqlite_master WHERE tbl_name='event_rules' "
                       "AND sql IS NOT NULL AND type IN ('index','trigger') ORDER BY type, name").fetchall() == objects

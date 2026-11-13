@@ -15,7 +15,7 @@ import uuid
 from typing import Literal
 
 from connections.account_provider import AccountProvider
-from connections.account_rule_scope import reached_projects as reached_projects
+from connections.account_rule_scope import reach_rule_scope
 from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
@@ -95,6 +95,16 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
         return reach_reaches_thread(reach, thread_id, db=db)
     except (AppReachError, ConnectedAccountError):
         return False
+
+
+def reached_projects(account_id: str, *, db: sqlite3.Connection) -> frozenset[str | None] | None:
+    """Where agents' mail rules may fire on an account's unowned mail (``reach_rule_scope``);
+    ``None`` when it can't be read."""
+    try:
+        return reach_rule_scope(_account_reach(account_id, db=db), db)
+    except (ConnectedAccountError, sqlite3.Error):
+        log.exception("Rule scope for a connected account is unreadable")
+        return None
 
 
 def get_account(account_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
