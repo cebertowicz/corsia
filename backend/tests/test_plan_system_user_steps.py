@@ -318,6 +318,25 @@ def test_a_step_opened_with_no_selected_task_still_wakes_the_agent_when_it_ends(
     assert wake_currency.is_current("owner", json.loads(wake["continuation_condition"]), db=db)
 
 
+def test_a_step_end_is_not_news_once_the_plan_is_paused(db):
+    """The active-plan check runs before the step rule, so a pause still silences the wake at claim."""
+    from plans import wake_currency
+
+    plan = owner_plan(db)
+    step = _open(db)
+    assert _settle(db, step) is True
+    condition = json.loads(_closed_wake(db, step)["continuation_condition"])
+    assert wake_currency.is_current("owner", condition, db=db)
+
+    lifecycle.transition(
+        plan.id, "paused", actor_id="user:test", provenance="test",
+        expected_revision=service._plan_row(db, plan.id)["revision"], db=db,
+    )
+    db.commit()
+
+    assert not wake_currency.is_current("owner", condition, db=db)
+
+
 def test_an_agent_asked_person_task_closing_with_nothing_to_do_wakes_no_one(db):
     """Only a step the system opened is news on its own; other closed tasks keep the actionable-work rule."""
     plan = owner_plan(db)
