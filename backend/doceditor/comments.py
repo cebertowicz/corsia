@@ -127,14 +127,24 @@ def is_accepted_insertion(row: dict) -> bool:
     return all(row.get(field) == value for field, value in _ACCEPTED_INSERTION.items())
 
 
-def accepted_insertions(artifact_id: str, anchor_text: str, *, db) -> list[dict]:
-    """Accepted insertion siblings for the same artifact and quoted text."""
+def accepted_insertions(artifact_id: str, anchor_texts: list[str], *, db) -> dict[str, list[dict]]:
+    """Accepted insertion siblings on one artifact for each quoted text, oldest first, read in one query.
+
+    One query for every quote keeps the read linear in the document's comments; a query per quote walks them once per quote.
+    Bound: SQLite allows 32,766 parameters, so up to 32,763 distinct quotes in one call.
+    """
+    found: dict[str, list[dict]] = {text: [] for text in anchor_texts}
+    if not found:
+        return found
     predicate = " AND ".join(f"{field}=?" for field in _ACCEPTED_INSERTION)
-    return [dict(row) for row in db.execute(
-        "SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text=? AND "
+    marks = ",".join("?" * len(found))
+    for row in db.execute(
+        f"SELECT * FROM doc_comments WHERE artifact_id=? AND anchor_text IN ({marks}) AND "
         + predicate + " ORDER BY created_at, id",
-        (artifact_id, anchor_text, *_ACCEPTED_INSERTION.values()),
-    ).fetchall()]
+        (artifact_id, *found, *_ACCEPTED_INSERTION.values()),
+    ).fetchall():
+        found[row["anchor_text"]].append(dict(row))
+    return found
 
 
 def _next_region_number(connection, cid: str, artifact_id: str, image_src: str | None, region) -> int | None:

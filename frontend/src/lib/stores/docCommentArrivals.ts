@@ -1,20 +1,23 @@
 import { get } from 'svelte/store';
 import { fetchComments, type CommentFeedback } from '$lib/api/docs';
 import { docComments, fromServer, loadComments, reshow, type DocComment } from './docComments';
-import { endHold, heldIds, holdCall, startHold } from './docCommentHolds';
+import { copyStamp, endHold, heldIds, holdCall, startHold } from './docCommentHolds';
 
 export interface PreparedCommentArrival {
 	comment: DocComment | null;
 	feedback: CommentFeedback;
+	/** The stamp of the request this copy came from, against the copies a hold keeps aside (`copyStamp`). */
+	at: number;
 }
 
 export async function prepareCommentArrival(
 	artifactId: string,
 	commentId: string | null,
 ): Promise<PreparedCommentArrival> {
+	const at = copyStamp();
 	const { comments, feedback } = await fetchComments(artifactId);
 	const row = commentId ? comments.find((comment) => comment.id === commentId) : null;
-	return { comment: row ? fromServer(row) : null, feedback };
+	return { comment: row ? fromServer(row) : null, feedback, at };
 }
 
 /** The rows with this comment added at the top, or in place of its current copy when `replace`. */
@@ -27,8 +30,10 @@ const merged = (comment: DocComment, replace: boolean) => (rows: DocComment[]): 
 export function revealCommentArrival(artifactId: string, arrival: PreparedCommentArrival): void {
 	const comment = arrival.comment;
 	if (!comment) return;
-	endHold(artifactId, comment.id);
-	reshow(artifactId, merged(comment, true));
+	// The newest data: a copy kept aside from a request sent after this one (resolved or replied to since), else the prepared
+	// one, never the copy that was showing when the hold began, whatever order the responses landed in.
+	const kept = endHold(artifactId, comment.id, arrival.at);
+	reshow(artifactId, merged(kept ?? comment, true));
 }
 
 /** Keep this comment out of the document's comments until it is released; a copy already shown is set aside. */

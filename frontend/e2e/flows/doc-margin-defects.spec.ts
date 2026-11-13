@@ -34,7 +34,7 @@ test('@flow:doc-margin-defects a picked card returns to rest on a click into pla
 	await expect(page.locator('.ct.focused')).toHaveCount(0);
 	await expect(page.locator('.cm-comment-focused')).toHaveCount(0);
 	await settled();
-	await expect(page.locator('.canvas-comment-drawer.margin'), 'the column stays up').toBeVisible();
+	await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first(), 'the column stays up').toBeVisible();
 	// Escape from inside the card, then from the text, lets it go the same way.
 	await pick();
 	await page.keyboard.press('Escape');
@@ -45,7 +45,7 @@ test('@flow:doc-margin-defects a picked card returns to rest on a click into pla
 	await page.keyboard.press('Escape');
 	await expect(page.locator('.ct.focused')).toHaveCount(0);
 	await settled();
-	await expect(page.locator('.canvas-comment-drawer.margin'), 'the column stays up').toBeVisible();
+	await expect(page.locator('.canvas-comment-drawer.margin .margin-card').first(), 'the column stays up').toBeVisible();
 });
 
 test('@flow:doc-margin-defects Send reply of a card near the bottom of the window can be reached, and a refused Resolve stays on its card', async ({ page, request }, info) => {

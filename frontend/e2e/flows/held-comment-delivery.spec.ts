@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 import { createSession, loadPastFirstRunLanding } from '../support/corsia';
 import {
 	chatSend, chatSendGroup, deliveredBatches, headerSend, heldIn, imageBarSend, installWorkspace,
-	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
+	openThread, seedHeldComments, seedTextDocument, expectSenders, senderLines, sentToast, headerSent, headerSentStatus, watchSendRequests, watchSenders, holdPersonBatches, turnOffDocumentComments, readDeliveryPreference, setDebugVersionOverlay, setMockCorsiaAgentModel, makeHeldBatchDue,
 } from '../support/heldComments';
 import {
 	bar, commentOnRegion, expectBarFits, openDocument, openImage, overlay, putSheetAway, seedImageDocument,
@@ -130,13 +130,16 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		expect(sends.document).toHaveLength(0);
 		await captureFrame(page, 'document-comment-held', String(width) as '1440' | '393');
 		await headerSend(page).click();
-		await expect(sentToast(page, '1 comment sent')).toBeVisible();
-		await captureFrame(page, 'document-send-toast', String(width) as '1440' | '393');
-		await sentToast(page, '1 comment sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
+		// The header says it went, where Send stood; nothing floats over the document's text or its margin cards.
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
+		await expect(page.locator('.document-canvas .delivery-confirmation')).toHaveCount(0);
+		await captureFrame(page, 'document-sent', String(width) as '1440' | '393');
 		if (width === 1440) await page.keyboard.press('Escape');
 		await post('Please check this revision too.');
 		await page.getByRole('button', { name: 'Deliver comments immediately', exact: true }).click();
-		await expect(sentToast(page, '1 comment sent')).toBeVisible();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^1 comment sent/);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Deliver comments immediately', exact: true })).toHaveAttribute('aria-pressed', 'true');
 		expect(sends.document.map((body) => JSON.parse(body).delivery_policy)).toEqual(['document-held', 'document-held']);
@@ -217,8 +220,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 
 		// The header sends its own document; the chat then reads the one that is left, which is not on screen.
 		await headerSend(page).click();
-		await expect(sentToast(page, '2 comments sent')).toBeVisible();
-		await sentToast(page, '2 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 		await expect(headerSend(page)).toHaveCount(0);
 		await expect(chatSend(page)).toHaveText('Send 2 comments');
 		expect(heldIn(first.artifactId, 'document-held'), 'the first document sent').toBe(0);
@@ -287,11 +290,12 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		const watch = await watchSenders(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(sentToast(page, '3 comments sent')).toBeVisible();
+		// The header says Sent where its Send stands, for a moment, and its status says what the image sent; the document still
+		// holds its own two, so its Send then returns.
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 		await expect(chatSendGroup(page)).toHaveCount(0);
-		await captureFrame(page, 'post-image-close-confirmation', '1440');
-		await sentToast(page, '3 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
 		await expect(sentToast(page, '3 comments sent')).toHaveCount(0);
 		await captureFrame(page, 'post-image-close', '1440');
 		const seen = await watch.stop();
@@ -365,7 +369,8 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await page.getByText(seeded.sessionTitle).first().click();
 		await expect(page.locator('.document-header')).toBeVisible();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(sentToast(page, '2 comments sent')).toBeVisible();
+		await expect(headerSent(page)).toHaveText('Sent');
+		await expect(headerSentStatus(page)).toHaveText(/^2 comments sent/);
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		await captureFrame(page, 'reload-containing-document-remount', String(width) as '1440' | '393');
 		expect(deliveredBatches(seeded.artifactId, 'image-held'), 'the remainder was delivered once').toBe(1);
@@ -391,14 +396,63 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 		await captureFrame(page, 'image-bar-send-3', '393');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
+		await expect(headerSent(page), 'the header says the image\'s comments went, for a moment').toHaveText('Sent');
+		// The status says so for the same moment, so it is read before the document's own Send returns in Sent's place.
+		await expect(headerSentStatus(page)).toHaveText(/^3 comments sent/);
 		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 		await expect.poll(() => heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		expect(deliveredBatches(seeded.artifactId, 'image-held')).toBe(1);
-		await expect(sentToast(page, '3 comments sent')).toBeVisible();
-		await captureFrame(page, 'post-image-close-confirmation', '393');
-		await sentToast(page, '3 comments sent').getByRole('button', { name: 'Dismiss', exact: true }).click();
 		await expect(sentToast(page, '3 comments sent')).toHaveCount(0);
 		await captureFrame(page, 'post-image-close', '393');
+	});
+
+	test('a narrow image bar beside chat keeps Back, the count and Send 99 whole on one row (1440, 520 split)', async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedImageDocument(page, request, 'held-split-image-many', 520);
+		await openDocument(page, seeded, 1440);
+		await openImage(page);
+		holdPersonBatches(true);
+		try {
+			await page.evaluate(async (artifactId) => {
+				const { liveDocumentBindings } = await import('/src/lib/stores/liveDocuments.ts');
+				const { addDocImageComment } = await import('/src/lib/stores/imageRegionComments.ts');
+				let bindings: Record<string, import('../../src/lib/stores/liveDocumentSession').LiveDocumentSession> = {};
+				const stop = liveDocumentBindings.subscribe((value) => { bindings = value; });
+				stop();
+				const session = Object.values(bindings).find((bound) => bound.artifactId === artifactId);
+				if (!session) throw new Error('The open image must have its containing live document');
+				const text = session.text.toString(), quote = '![Mock screen](shots/screen.png)', from = text.indexOf(quote);
+				if (from < 0) throw new Error('The live document must contain the seeded image');
+				for (let index = 1; index <= 98; index++) {
+					await addDocImageComment({ artifactId, from, to: from + quote.length, text, session }, { x: 0.2, y: 0.25, w: 0.1, h: 0.1 }, `Split pin ${index}`);
+				}
+			}, seeded.artifactId);
+			await commentOnRegion(page, 'Split pin 99', { x: 0.6, y: 0.1 });
+			await putSheetAway(page);
+		} finally { holdPersonBatches(false); }
+		await expect(imageBarSend(page).locator('.send-full')).toHaveText('Send 99 comments');
+		await expectBarFits(page);
+		// The bar's own width (under 600px here, at a desktop window) picks the short forms; the names stay whole.
+		const back = bar(page).getByRole('button', { name: 'Back to walkthrough.md', exact: true });
+		await expect(back).toHaveAccessibleName('Back to walkthrough.md');
+		await expect(back).toHaveText('Back', { useInnerText: true });
+		await expect(imageBarSend(page)).toHaveAccessibleName(/Send 99/);
+		await expect(imageBarSend(page)).toHaveText('Send 99', { useInnerText: true });
+		const row = await bar(page).evaluate((element) => {
+			const visible = [...element.querySelectorAll<HTMLElement>('button')].filter((control) => control.getClientRects().length > 0);
+			return {
+				width: element.clientWidth,
+				rows: new Set(visible.map((control) => { const box = control.getBoundingClientRect(); return Math.round(box.top + box.height / 2); })).size,
+				clipped: visible.filter((control) => control.scrollWidth > control.clientWidth + 0.5 || [...control.querySelectorAll<HTMLElement>(':scope > span')]
+					.some((part) => part.getClientRects().length > 0 && part.scrollWidth > part.clientWidth + 0.5)).map((control) => control.getAttribute('aria-label') ?? control.innerText),
+			};
+		});
+		expect(row.width, 'the split leaves the bar narrow').toBeLessThan(600);
+		expect(row.rows, 'every control shares one row').toBe(1);
+		expect(row.clipped, 'no control label is cut').toEqual([]);
+		await captureFrame(page, 'image-bar-send-99-split', '1440');
 	});
 
 	test('image-bar Send 101 fits at 393 and sends only its image lane', async ({ page, request }, testInfo) => {

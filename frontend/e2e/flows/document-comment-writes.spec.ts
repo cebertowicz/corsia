@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { test } from '../support/test';
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { closeComments, openResolved, replyField, showAllThreads, openComments as openCommentsPill } from '../support/commentDrawer';
+import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown, openComments as openCommentsPill } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -43,8 +43,8 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
-		await openCommentsPill(page, /^1 thread\b/);
-		await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
+		await openCommentsPill(page, /^1 comment\b/);
+		await expectCommentsShown(page.getByRole('region', { name: 'Document comments', exact: true }));
 		await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	};
 	await loginByUrl(page);
@@ -53,21 +53,25 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Review this sentence.');
 	const field = await replyField(comment);
-	const oneLine = (await field.boundingBox())!.height;
+	// Layout height, not the drawn box: below the margin's width the list is a popover, drawn scaled while it opens.
+	const height = (target: Locator) => target.evaluate((node) => (node as HTMLElement).offsetHeight);
+	const oneLine = await height(field);
 	const reply = 'Reply persisted.\nOn several\nlines.\nAs a person types it.';
 	await field.fill(reply);
-	await expect.poll(async () => (await field.boundingBox())!.height).toBeGreaterThan(oneLine);
+	await expect.poll(() => height(field)).toBeGreaterThan(oneLine);
 	await comment.getByRole('button', { name: 'Send reply' }).click();
 	await expect(comment).toContainText('Reply persisted.');
 	// The sent reply leaves the field empty and one line tall again, not held at the height of the text it held.
-	await expect.poll(async () => (await (await replyField(comment)).boundingBox())!.height).toBe(oneLine);
+	await expect.poll(async () => height(await replyField(comment))).toBe(oneLine);
 	// The person is the only one in this thread, so their acknowledgement resolves it.
-	await comment.getByRole('button', { name: 'Agree', exact: true }).click();
-	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
-	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
-	await expect(resolved).toBeVisible();
-	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
-	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
+	await comment.getByRole('button', { name: 'Agree with this comment', exact: true }).click();
+	// Below the margin's width opening Resolved closes the open list's popover; the open list is opened again once it is re-opened.
+	await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), async () => {
+		const resolved = page.getByRole('region', { name: /^Resolved comment by / });
+		await expect(resolved).toBeVisible();
+		await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
+		await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
+	});
 	await expect(comment).toBeVisible();
 	// The adaptive comments drawer is modal, so close it before returning to the document to move the anchor.
 	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
@@ -111,7 +115,7 @@ test('@flow:resolved-reply a person can reply to an agent on a resolved thread',
 	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	// The agent's reply is still unread after the agent resolved the thread, so the default list keeps it, open.
-	await openCommentsPill(page, /^1 thread, 1 unread\b/);
+	await openCommentsPill(page, /^1 comment, 1 unread\b/);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved.getByRole('button', { name: 'Resolved · 2 messages' })).toBeVisible();
@@ -149,15 +153,14 @@ test('@flow:document-comment-highlight a resolved comment loses its highlight, s
 	await page.getByRole('region', { name: /^Comment by / }).getByRole('button', { name: 'Resolve', exact: true }).click();
 	await expect(anchorMark).toHaveCount(0);
 	await saveEvidenceScreenshot(page, testInfo, 'highlight-2-resolved', { fullPage: false });
-	// Picking the resolved comment in the drawer shows which text it was.
-	await openCommentsPill(page, /^0 threads\b/);
-	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
-	await showAllThreads(drawer);
-	await drawer.getByRole('button', { name: /^Go to text: / }).click();
+	// Picking the resolved comment in its list shows which text it was.
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
+	const resolved = resolvedList(page);
+	await resolved.getByRole('button', { name: /^Go to text: / }).click();
 	await expect(anchorMark).toHaveCount(1);
 	await saveEvidenceScreenshot(page, testInfo, 'highlight-3-resolved-picked-in-drawer', { fullPage: false });
-	await drawer.getByRole('region', { name: /^Resolved comment by / }).getByRole('button', { name: /^Resolved · / }).click();
-	await drawer.getByRole('button', { name: 'Re-open', exact: true }).click();
+	await resolved.getByRole('region', { name: /^Resolved comment by / }).getByRole('button', { name: /^Resolved · / }).click();
+	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	await expect(anchorMark).toHaveCount(1);
 	await saveEvidenceScreenshot(page, testInfo, 'highlight-4-reopened', { fullPage: false });
 });
