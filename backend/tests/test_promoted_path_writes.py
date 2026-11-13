@@ -155,3 +155,10 @@ def test_a_carried_promote_points_saved_calls_at_the_new_path(durable_scope):
     saved = json.loads(db.execute("SELECT ops FROM doc_comment_writer_line WHERE id='line-carried'").fetchone()[0])
     assert saved[0]["call"]["path"].endswith("projects/alpha/shared/planning/carried.md")
     assert saved[0]["call"]["old_string"] == "Launch"
+
+
+def test_a_path_under_another_workspace_is_not_a_promoted_path(durable_scope, tmp_path):
+    """A write whose workspace is not the one this process selected has no registry row here, so it is never refused."""
+    from registry.promoted_path import promoted_to
+
+    assert promoted_to(tmp_path / "elsewhere" / "note.md") is None
