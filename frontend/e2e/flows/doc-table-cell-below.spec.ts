@@ -10,19 +10,24 @@ import { cell, DOC, editorInCell, LAYOUTS, LONG, onlyIn, openTableDocument, save
 
 const LAST_ROW = `| Wide | ${LONG} | open |`;
 const WANT = DOC.replace(`${LAST_ROW}\n\n`, `${LAST_ROW}\n\nx\n\n`);
+/** The same table ended by a heading on the very next line, with no blank line between. */
+const HEADING = '## Right under the table';
+const HEADED = DOC.replace(`${LAST_ROW}\n\n`, `${LAST_ROW}\n${HEADING}\n\n`);
+const HEADED_WANT = DOC.replace(`${LAST_ROW}\n\n`, `${LAST_ROW}\n\nx\n\n${HEADING}\n\n`);
 
-/** The document's own caret: the line above the one it is on, and whether the document has the focus. */
+/** The document's own caret: its line, the line above, its column, and whether the document has the focus. */
 const documentCaret = (page: Page) => page.evaluate(() => {
 	const content = document.querySelector('.cm-content:not(.cm-md-cell-editor .cm-content)') as (HTMLElement & { cmTile?: { root: { view: any } } }) | null;
 	const view = content?.cmTile?.root.view;
 	if (!view) return null;
 	const line = view.state.doc.lineAt(view.state.selection.main.head);
-	return { line: line.text as string, above: line.number > 1 ? (view.state.doc.line(line.number - 1).text as string) : '', focused: view.hasFocus as boolean };
+	const head = view.state.selection.main.head as number;
+	return { line: line.text as string, above: line.number > 1 ? (view.state.doc.line(line.number - 1).text as string) : '', column: head - line.from, focused: view.hasFocus as boolean };
 });
 
 const underTable = async (page: Page) => {
 	await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
-	await expect.poll(() => documentCaret(page), { message: 'the caret is on the line directly under the table' }).toEqual({ line: '', above: LAST_ROW, focused: true });
+	await expect.poll(() => documentCaret(page), { message: 'the caret is on the line directly under the table' }).toEqual({ line: '', above: LAST_ROW, column: 0, focused: true });
 };
 
 const ROUTES: Array<[string, (page: Page, layout: Layout) => Promise<void>]> = [
@@ -70,6 +75,20 @@ for (const layout of LAYOUTS.filter((l) => l.width !== 900)) {
 				await expect.poll(() => savedText(page, seeded), { message: 'the saved markdown', timeout: 20_000 }).toBe(WANT);
 				await expect(page.locator('.cm-md-table').first().locator('tr'), 'the table keeps its rows').toHaveCount(4);
 				await expect(page.locator('.cm-line', { hasText: 'Paragraph below the first table.' }), 'the next paragraph is still drawn as one').toHaveCount(1);
+			});
+		}
+		// Leaving by key puts the caret at the start of the heading; a typed character there would turn the heading into a row.
+		for (const [name, arrive] of ROUTES.slice(0, 3)) {
+			test(`after ${name}, text typed at the start of a heading right under the table is its own paragraph`, async ({ page }) => {
+				test.setTimeout(120_000);
+				const seeded = await openTableDocument(page, layout, { text: HEADED });
+				await arrive(page, layout);
+				await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
+				await expect.poll(() => documentCaret(page), { message: 'the caret is at the start of the heading' }).toEqual({ line: HEADING, above: LAST_ROW, column: 0, focused: true });
+				expect(await savedText(page, seeded), 'arriving changes nothing').toBe(HEADED);
+				await page.keyboard.type('x');
+				await expect.poll(() => savedText(page, seeded), { message: 'the saved markdown', timeout: 20_000 }).toBe(HEADED_WANT);
+				await expect(page.locator('.cm-md-table').first().locator('tr'), 'the table keeps its rows').toHaveCount(4);
 			});
 		}
 	});

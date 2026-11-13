@@ -176,7 +176,8 @@ describe('typing on the line under a table in the middle of a document', () => {
 
 	it('for random documents and random typed text on the line under a table, the table and the next block are unchanged and nothing typed is lost', () => {
 		const pieces = ['x', 'ab', ' ', '|', '| a |', '\\', 'é', '`c`', '\n'];
-		const afters = ['', `\n${NEXT}\n`, '\n## Heading\n', '\n- item\n', `\n${THREEROW}\n`, '\n'];
+		// The last four follow the table with no blank line: each block ends the table on its own.
+		const afters = ['', `\n${NEXT}\n`, '\n## Heading\n', '\n- item\n', `\n${THREEROW}\n`, '\n', '## Heading\n', '- item\n', '> quoted\n', '```\ncode\n```\n'];
 		const befores = ['', 'Intro.\n\n', '# Plan\n\n'];
 		let state = 11;
 		const next = (n: number) => { state = (Math.imul(state, 1103515245) + 12345) >>> 0; return state % n; };
@@ -203,5 +204,79 @@ describe('typing on the line under a table in the middle of a document', () => {
 			const typed = typedText.join('');
 			expect(flat(text), `${name}: nothing typed is lost or added`).toBe(flat(base.slice(0, under) + typed + base.slice(under)));
 		}
+	});
+});
+
+/**
+ * A table can end with no blank line when a heading, list item, blockquote or fence starts on the very next line. Every way
+ * of leaving the table puts the caret at the start of that block; text typed there is its own paragraph, with a blank line
+ * above it and a blank line before the block, and the table and the block are unchanged.
+ */
+describe('typing at the start of a block that follows a table with no blank line', () => {
+	const BLOCKS: Array<[string, string]> = [
+		['a heading', '## Heading'],
+		['a list item', '- item'],
+		['a blockquote', '> quoted'],
+		['a fence', '```\ncode\n```']
+	];
+	const blocks = (text: string) => Lexer.lex(text).filter((t) => t.type !== 'space').map((t) => `${t.type}:${t.raw.trim()}`);
+	const routes: Array<[string, (r: Rig, at: number) => void]> = [
+		['Escape', (r) => { clicked(r, cellEl(r, 1, 1)); press(r, 'Escape'); }],
+		['Tab from the last cell', (r) => { clicked(r, cellEl(r, 2, 2)); press(r, 'Tab'); }],
+		['Enter from the last row', (r) => { clicked(r, cellEl(r, 2, 0)); press(r, 'Enter'); }],
+		// A click at the block's start, or an arrow key onto it, puts the document's caret there with no cell open.
+		['a caret placed at the block\'s start', (r, at) => r.view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' })]
+	];
+
+	for (const [kind, block] of BLOCKS) {
+		const doc = `# Plan\n\n${THREEROW}\n${block}\n`;
+		const at = doc.indexOf(block);
+		const want = `# Plan\n\n${THREEROW}\n\nx\n\n${block}\n`;
+		it(`GFM ends the table at ${kind} with no blank line, and reads x typed at its start as more rows`, () => {
+			expect(tables(doc)[0].rows.length).toBe(ROWS);
+			expect(blocks(doc)).toContain(blocks(`${block}\n`)[0]);
+			expect(tables(`${doc.slice(0, at)}x${doc.slice(at)}`)[0].rows.length, 'the hazard').toBeGreaterThan(ROWS);
+		});
+		for (const [name, leave] of routes) {
+			it(`after ${name}, x typed at the start of ${kind} under the table is its own paragraph and the block is unchanged`, () => {
+				const r = track(build(doc));
+				leave(r, at);
+				expect(mountedEditor(r), 'no cell is open').toBeNull();
+				expect(r.view.state.doc.toString(), 'arriving changes nothing').toBe(doc);
+				expect(r.view.state.selection.main.head, `the caret is at the start of ${kind}`).toBe(at);
+				type(r, 'x');
+				const text = r.view.state.doc.toString();
+				expect(text).toBe(want);
+				expect(tables(text)[0].rows.length, 'the table keeps its rows').toBe(ROWS);
+				expect(paragraphs(text)).toContain('x');
+				for (const b of blocks(doc)) expect(blocks(text), `${b} is unchanged`).toContain(b);
+				expect(r.view.state.selection.main.head, 'the caret follows the typed text').toBe(want.indexOf('x\n') + 1);
+				type(r, 'y');
+				expect(r.view.state.doc.toString(), 'typing on adds nothing more').toBe(want.replace('x\n', 'xy\n'));
+			});
+		}
+		it(`at the start of ${kind}, the typed text and both blank lines are one undo step`, () => {
+			const r = track(build(doc));
+			routes[0][1](r, at);
+			type(r, 'x');
+			r.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', [MOD]: true, bubbles: true, cancelable: true }));
+			expect(r.view.state.doc.toString()).toBe(doc);
+		});
+	}
+
+	it('a paste ending in a line break at the start of a heading adds one more break before it', () => {
+		const doc = `${THREEROW}\n## Heading\n`;
+		const r = track(build(doc));
+		routes[3][1](r, doc.indexOf('## Heading'));
+		type(r, 'pasted\n', 'input.paste');
+		expect(r.view.state.doc.toString()).toBe(`${THREEROW}\n\npasted\n\n## Heading\n`);
+	});
+
+	it('typing inside the block, not at its start, is ordinary editing of that block', () => {
+		const doc = `${THREEROW}\n## Heading\n`;
+		const r = track(build(doc));
+		r.view.dispatch({ selection: { anchor: doc.length - 1 } });
+		type(r, 's');
+		expect(r.view.state.doc.toString()).toBe(`${THREEROW}\n## Headings\n`);
 	});
 });

@@ -14,9 +14,9 @@ import { type OpenCell } from './widget-cell-state';
  *
  * A table is one block widget over its source lines, so a keystroke in a cell would otherwise recreate the whole table —
  * which is why an editor cannot live inside a cell while the widget is thrown away on every change. So the widget answers
- * CodeMirror's `updateDOM` and moves in only the cells whose text actually changed, leaving every other node where it is —
- * including the cell being edited, whose hidden text has to keep pace with the editor lying over it so the row grows as that
- * text wraps. CodeMirror calls `updateDOM` only when `eq` says the two widgets differ, and hands it the widget that drew the
+ * CodeMirror's `updateDOM` and moves in only the cells whose text actually changed, leaving every other node where it is.
+ * The cell being edited holds its own editor in place of its drawn content (`widget-cell-editor.ts`), so the patch copies
+ * only that cell's attributes and leaves the editor inside it alone; the row grows as the editor's text wraps. CodeMirror calls `updateDOM` only when `eq` says the two widgets differ, and hands it the widget that drew the
  * node, so `eq` stays the strict question "does this render the same" and `updateDOM` patches the difference. A change of
  * *shape* — a row added, a column gained — and a change of the image context, whose URLs are baked into the rendered cells,
  * both refuse the patch and rebuild instead.

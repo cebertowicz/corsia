@@ -170,7 +170,8 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 			if (!cell) continue;
 			// A mark inside one cell wraps the characters it covers; a mark across cells, or covering a whole cell, marks the cells.
 			const inside = hit.length === 1 && (from > span.from || to < span.to || !!mark.suggestion);
-			// The open cell's text is its editor's, which draws such a mark itself (`cellMarks`, `widget-cell-comment.ts`).
+			// The open cell's text is its editor's, which draws such a mark itself: `paintOpenCell` writes it into `cellMarksField`
+			// (`widget-cell-comment.ts`).
 			if (inside && cell.querySelector(CELL_EDITOR)) continue;
 			const range = inside ? cellTextRange(cell, src, span, from, to) : null;
 			if (range) { wrapRange(range, mark); continue; }

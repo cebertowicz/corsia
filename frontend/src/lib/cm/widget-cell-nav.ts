@@ -52,25 +52,28 @@ export function caretAfterTable(state: EditorState, tableTo: number): number {
 }
 
 /**
- * How many line breaks separate an insertion at `at` from a table ending directly above it: 1 when `at` is on a blank line
- * right under the table's last row, 0 when `at` is the end of that row and of the document (a document ending in a table
- * with no newline). Null when no table ends directly above.
+ * Where an insertion at `at` sits against a table ending directly above it. `above` counts the line breaks already between
+ * them: 1 on the line right under the table's last row, 0 at the end of that row when it ends the document (a document
+ * ending in a table with no newline). `onBlock` is true when that line is not blank but the start of a block that ends the
+ * table with no blank line between (a heading, list item, blockquote or fence). Null when no table ends directly above.
  */
-function breaksBelowTable(state: EditorState, at: number): number | null {
+function belowTable(state: EditorState, at: number): { above: number; onBlock: boolean } | null {
 	const line = state.doc.lineAt(at);
-	if (!line.text.trim() && line.number > 1) {
+	const onBlock = at === line.from && !!line.text.trim();
+	if (line.number > 1 && (onBlock || !line.text.trim())) {
 		const above = state.doc.line(line.number - 1);
-		return tableAt(state, above.from, above.to)?.to === above.to ? 1 : null;
+		return tableAt(state, above.from, above.to)?.to === above.to ? { above: 1, onBlock } : null;
 	}
-	return at === state.doc.length && tableAt(state, line.from, line.to)?.to === at ? 0 : null;
+	return at === state.doc.length && tableAt(state, line.from, line.to)?.to === at ? { above: 0, onBlock: false } : null;
 }
 
 /**
  * Text typed on the line directly under a table becomes its own paragraph. Leaving a table (Escape, Tab, Enter, a click
  * or an arrow key) can put the caret there, and GFM, like the editor's own parse, reads a line right under a row as another
- * row (or, past the header's width, as a cell that is never drawn), and a paragraph right under that line joins it. So the
- * text goes in with a blank line above it, and a blank line below it when a block follows, leaving the table and that block
- * as they were. The separators are added only when something is typed, pasted or composed there with no cell open, never
+ * row (or, past the header's width, as a cell that is never drawn), and a paragraph right under that line joins it. That
+ * line can also be the start of a heading, list item, blockquote or fence that ends the table with no blank line, where a
+ * typed character turns the block's first line into a row. So the text goes in with a blank line above it, and a blank
+ * line below it when a block follows, leaving the table and that block as they were. The separators are added only when something is typed, pasted or composed there with no cell open, never
  * when the reader only arrives, so arriving changes nothing in the document; they go in the same transaction as the text,
  * so one undo takes all of it out.
  */
@@ -81,15 +84,17 @@ export const typingBelowTable = EditorState.transactionFilter.of((tr) => {
 	tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => { count++; if (fromA === toA) { at = fromA; insert = text.toString(); } });
 	const text = insert.replace(/^\n+/, '');
 	if (count !== 1 || at < 0 || !text.replace(/\n+$/, '')) return tr;
-	const above = breaksBelowTable(state, at);
-	if (above === null) return tr;
+	const below = belowTable(state, at);
+	if (!below) return tr;
+	const { above, onBlock } = below;
 	const lead = insert.length - text.length, trail = text.length - text.replace(/\n+$/, '').length;
 	const before = '\n'.repeat(Math.max(0, 2 - above - lead));
-	// A block on the next line would join the typed line; the rest of the caret's line is blank, and its own line break
-	// counts as one of the two.
+	// The block the caret stands at the start of needs a blank line before it. On a blank line, a block on the next line
+	// would join the typed line; the rest of the caret's line is blank, and its own line break counts as one of the two.
 	const line = state.doc.lineAt(at);
 	const next = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null;
-	const after = next && next.text.trim() && above === 1 ? '\n'.repeat(Math.max(0, 1 - trail)) : '';
+	const breaks = onBlock ? 2 : next && next.text.trim() && above === 1 ? 1 : 0;
+	const after = '\n'.repeat(Math.max(0, breaks - trail));
 	if (!before && !after) return tr;
 	const end = at + insert.length;
 	const shift = (pos: number) => pos < at ? pos : pos + before.length + (pos > end ? after.length : 0);
