@@ -64,14 +64,14 @@ class RuleScope:
     """What rules on one webhook read before routing's preparation gate.
 
     ``any_rule``: some rule for its type is enabled, in any project; without one,
-    nothing else is read. ``unrouted_projects``: the projects tracking its
+    nothing else is read. ``unrouted_scopes``: the scopes of projects tracking its
     repository, which scope rules when routing gives it no thread (``None``: the
     lookup failed). ``reads_head``: a rule for its type names a fact read from GitHub
     (a reply's or settled head's PR facts), so the envelope is completed before the gate.
     """
 
     any_rule: bool = True
-    unrouted_projects: frozenset[str | None] | None = frozenset()
+    unrouted_scopes: frozenset[str] | None = frozenset()
     envelope: EventEnvelope | None = None
     reads_head: bool = False
 
@@ -81,7 +81,7 @@ def rule_scope(
 ) -> RuleScope:
     """The webhook's :class:`RuleScope`, read outside the preparation gate: its lookup runs git.
 
-    Only an event routing gives no thread uses the projects, but routing decides
+    Only an event routing gives no thread uses the scopes, but routing decides
     inside the gate, so each event of a type some self-rule names pays the lookup.
     """
     event_type = MANIFEST.routed_type(internal_event)
@@ -104,7 +104,7 @@ def rule_scope(
     if not self_rule:
         return RuleScope(any_rule=any_rule, envelope=envelope, reads_head=reads_head)
     facts = envelope.facts if envelope else {}
-    return RuleScope(unrouted_projects=rule_reads.unrouted_projects(
+    return RuleScope(unrouted_scopes=rule_reads.unrouted_scopes(
         MANIFEST.connector, event_type, facts, self_rule=True), envelope=envelope, reads_head=reads_head)
 
 
@@ -173,7 +173,7 @@ def _apply(
     plan = apply_webhook_rules_sync(
         envelope, internal_event, routed_targets(thread, wake_reason, routing_state),
         ends_artifact=ends_artifact(internal_event),
-        unrouted_projects=scope.unrouted_projects, target_filter=target_filter, skipped=skipped)
+        unrouted_scopes=scope.unrouted_scopes, target_filter=target_filter, skipped=skipped)
     if plan is None or thread is None:
         return plan
     if thread in plan.drops:

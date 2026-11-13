@@ -39,7 +39,7 @@ from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read the
     WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
 )
 from events.rule_runs import OWNER_GONE, queue
-from infra.delegation_scope import WORKSPACE_SCOPE_ID
+from infra.delegation_scope import scope_label
 from infra.queries import thread_gone_for_good, thread_is_temporary, thread_unavailable_reason
 from registry.retirement_predicate import identity_ended
 
@@ -48,7 +48,6 @@ WAKE = "wake"
 DIGEST = "digest"
 REGISTERED_OWNER = "registered_owner"
 THREAD_PREFIX = "thread:"
-PROJECT_PREFIX = "project:"
 OPERATORS = ("eq", "not_eq", "in", "prefix", "present")
 NAMING = ("eq", "in")  # the operators whose values name what an event must be
 MAX_TESTS = 4
@@ -58,7 +57,7 @@ NOTE_LIMIT = 500
 PAUSED = "paused"
 NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
-OUT_OF_PROJECT = "recipient outside the rule's scope"
+OUT_OF_SCOPE = "recipient outside the rule's scope"
 LOOKUP_FAILED = "could not read which projects may see this event"
 UNAVAILABLE = "recipient unavailable"
 WRITER_LEFT = "its writer left the rule's scope; rule turned off"
@@ -90,13 +89,11 @@ def from_row(row: Mapping[str, Any]) -> Rule:
 
 def lookup(
     db: sqlite3.Connection, connector: str, event_type: str, thread: str | None,
-    projects: Iterable[str | None] = (),
+    scopes: Iterable[str] = (),
 ) -> list[Rule]:
-    """The enabled rules for one declared type in ``thread``'s project (rules resolve
-    in the artifact owner's scope), or, with no thread, in each of ``projects``: the
-    one indexed read every event pays."""
-    rows = rule_reads.enabled_rules(db, connector, event_type, PROJECT_PREFIX, thread,
-                                    [rule_scope(project) for project in projects], rule_scope(None))
+    """The enabled rules in the artifact owner's scope, or, with no thread, in
+    each of ``scopes``: the one indexed read every event pays."""
+    rows = rule_reads.enabled_rules(db, connector, event_type, thread, list(scopes))
     return [from_row(row) for row in rows]
 
 
@@ -143,9 +140,6 @@ def lookup_failed(db: sqlite3.Connection, event: RuleEvent) -> list[Outcome]:
 def thread_target(to: str) -> str | None:
     return to.removeprefix(THREAD_PREFIX) if to.startswith(THREAD_PREFIX) else None
 
-
-def rule_scope(project_id: str | None) -> str:
-    return PROJECT_PREFIX + project_id if project_id is not None else WORKSPACE_SCOPE_ID
 
 
 def routed(
@@ -197,7 +191,7 @@ def _settle_unreachable(
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=CREATOR_GONE))
         elif thread_unavailable_reason(writer):
             plan.settled.append(Outcome(rule.id, rule.created_by, HELD, reason=CREATOR_UNAVAILABLE))
-        elif writer is not None and rule_scope(writer["project_id"]) != rule.scope:
+        elif writer is not None and scope_label(writer["project_id"]) != rule.scope:
             turn_off(db, rule.id, rule.scope, _iso(_now()))
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
                                         reason=WRITER_LEFT))
@@ -205,8 +199,8 @@ def _settle_unreachable(
             reason = ("no registered owner" if thread is None
                       else UNAVAILABLE if rule.action == DELIVER else OWNER_GONE)
             plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
-        elif row is not None and rule_scope(row["project_id"]) != rule.scope:
-            plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
+        elif row is not None and scope_label(row["project_id"]) != rule.scope:
+            plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_SCOPE))
         else:
             current.append(rule)
     return current
@@ -277,7 +271,7 @@ def evaluate(
     by_thread, state, anchor = routed(targets, skipped)
     scope = anchor or event.requester
     rules = [rule for rule in lookup(db, event.connector, event.event_type, scope,
-                                     () if scope else event.unrouted_projects)
+                                     () if scope else event.unrouted_scopes)
              if matches(rule, event.facts) and (anchor or reaches_unowned(rule, event))]
     if not rules:
         return None

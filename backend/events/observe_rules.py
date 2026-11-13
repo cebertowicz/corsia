@@ -27,6 +27,7 @@ from events import connectors, rules
 from events.rule_actions import RuleRefused
 from events.rule_outcomes import Outcome, RuleEvent
 from infra.database import write_transaction
+from infra.delegation_scope import scope_label
 
 OBSERVE = "observe"
 SHIPPED_SCOPE = "global"
@@ -78,7 +79,7 @@ def applicable(db: sqlite3.Connection, project_id: str | None, thread_id: str, t
     """The enabled observe rows that cover ``thread_id``'s call of ``tool``: a shipped rule set's
     (scope ``global``) and the thread's own in its project. One statement served by the partial
     index on observe rows (tool, enabled, scope); it reads the shipped rows and the caller's own."""
-    scopes = (SHIPPED_SCOPE, rules.rule_scope(project_id))
+    scopes = (SHIPPED_SCOPE, scope_label(project_id))
     return [from_row(row) for row in db.execute(
         "SELECT * FROM event_rules WHERE kind='observe' AND enabled=1 AND tool=? AND scope IN (?, ?) "
         "AND (scope=? OR created_by=?) ORDER BY created_at, id",

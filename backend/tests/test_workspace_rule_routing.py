@@ -15,7 +15,7 @@ from events.rule_outcomes import RuleEvent
 from events.resolve import Target
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
-from infra.delegation_scope import WORKSPACE_SCOPE_ID
+from infra.delegation_scope import WORKSPACE_SCOPE_ID, scope_label
 from tests.event_routing_helpers import mk_session
 from tools.event_rules import EventRulesTool
 
@@ -79,7 +79,7 @@ def _wakes():
 
 
 @pytest.mark.parametrize(('mode', 'outside', 'wakes'), [
-    ('all', False, True), ('selected', False, False), ('selected', True, True), ('corsia', False, False),
+    ('all', False, True), ('selected', False, False), ('selected', True, True), ('corsia', False, True),
 ])
 def test_unowned_mail_respects_account_reach(isolated_db, mode, outside, wakes):
     _agent('writer')
@@ -92,6 +92,36 @@ def test_unowned_mail_respects_account_reach(isolated_db, mode, outside, wakes):
     decisions = _rows("SELECT outcome FROM event_route_decisions WHERE rule_id='rule'")
     assert [row['outcome'] for row in decisions] == (['woke'] if wakes else [])
     assert _rows("SELECT enabled FROM event_rules WHERE id='rule'")[0]['enabled'] == 1
+
+
+def test_only_corsia_account_filters_other_workspace_rule(isolated_db):
+    _agent('corsia')
+    _agent('other')
+    set_corsia_agent('corsia')
+    _rule('corsia-rule', 'corsia')
+    _rule('other-rule', 'other')
+    _deliver(_account('corsia'), 'message')
+    assert [row['thread_id'] for row in _wakes()] == ['corsia']
+
+
+@pytest.mark.parametrize('project', [None, '', 'abc'])
+def test_lookup_uses_scope_label_for_thread_project(isolated_db, project):
+    _agent('workspace-writer')
+    _rule('workspace-rule', 'workspace-writer')
+    now = datetime.now(timezone.utc).isoformat()
+    _write('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', 'abc', 'ABC', now, now)
+    _agent('project-writer', 'abc')
+    _rule('project-rule', 'project-writer')
+    _agent('anchor')
+    db = get_db()
+    try:
+        db.execute('PRAGMA foreign_keys=OFF')
+        db.execute('UPDATE threads SET project_id=? WHERE id=?', (project, 'anchor'))
+        expected = [row['id'] for row in db.execute('SELECT id FROM event_rules WHERE scope=? AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id', (scope_label(project), 'gmail', 'email.received'))]
+        assert expected
+        assert [rule.id for rule in rules.lookup(db, 'gmail', 'email.received', 'anchor')] == expected
+    finally:
+        db.close()
 
 
 def test_anchored_lookup_separates_scopes_and_missing_thread(isolated_db):

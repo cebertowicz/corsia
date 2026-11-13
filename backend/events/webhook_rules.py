@@ -22,7 +22,7 @@ from infra.database import get_db, write_transaction
 
 def apply_webhook_rules_sync(
     envelope: EventEnvelope, watch_event: str, targets: list[Target], *, ends_artifact: bool,
-    unrouted_projects: frozenset[str | None] | None = frozenset(), target_filter: Filter | None = None,
+    unrouted_scopes: frozenset[str] | None = frozenset(), target_filter: Filter | None = None,
     skipped: tuple[str, ...] = (),
 ) -> rules.RulePlan | None:
     """Rules for one webhook event: deliver what they add, return what rides.
@@ -31,24 +31,24 @@ def apply_webhook_rules_sync(
     thread, and this returns the plan so it can drop that delivery or add the
     rules' notes to it. One read when no rule for the type in the event's project
     matches; the write transaction opens only when one does. With no owner and
-    nothing routed, only ``unrouted_projects`` (``rule_reads.unrouted_projects``,
+    nothing routed, only ``unrouted_scopes`` (``rule_reads.unrouted_scopes``,
     read before routing's preparation gate) scope the rules; ``None`` means that
     lookup failed, and no rule fires.
     """
     event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
     anchor = rules.routed(targets, skipped)[2]
     if anchor is None:
-        if unrouted_projects is None:
+        if unrouted_scopes is None:
             with write_transaction(None, scope="apply_webhook_rules") as conn:
                 rules.record(conn, event, rules.lookup_failed(conn, event))
             return None
-        if not unrouted_projects:
+        if not unrouted_scopes:
             return None
-        event = replace(event, unrouted_projects=unrouted_projects)
+        event = replace(event, unrouted_scopes=unrouted_scopes)
     reader = get_db()
     try:
         if not any(matches(rule, event.facts) for rule in rules.lookup(
-                reader, event.connector, event.event_type, anchor, event.unrouted_projects)):
+                reader, event.connector, event.event_type, anchor, event.unrouted_scopes)):
             return None
     finally:
         reader.close()

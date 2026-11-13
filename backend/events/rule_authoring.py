@@ -25,6 +25,7 @@ from events.rule_listing import OUTCOME_JOINS, OUTCOME_SCOPE, shape as _shape
 from events.rule_actions import RuleRefused, check_script, check_worker
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
+from infra.delegation_scope import scope_label
 from infra.queries import thread_available_sql, thread_is_temporary
 
 _EXPLAIN_LIMIT = 50
@@ -120,7 +121,7 @@ def _repositories(connector: str, tests: list[dict[str, Any]], tracked: frozense
              for value in (test["value"] if test["op"] == "in" else [test["value"]])]
     if not named:
         return
-    if project_id is None:
+    if not project_id:
         raise RuleRefused("Naming a repository needs a project that tracks it; this chat is in no project.")
     if tracked is None:
         raise RuleRefused(_UNREADABLE)  # fails closed when no list was read for this create
@@ -152,7 +153,7 @@ def _recipient(
     target = rules.thread_target(to) if isinstance(to, str) else None
     if not target:
         raise RuleRefused("to is self, registered_owner or thread:<agent id>")
-    if project_id is None:
+    if not project_id:
         raise RuleRefused("Your rules deliver only to you or to the registered owner of the file the event is about.")
     if _conductor(db, project_id) != writer:
         raise RuleRefused(
@@ -190,9 +191,9 @@ def create(
     if thread_is_temporary(row):
         raise RuleRefused("A temporary agent can't write rules; they would outlive its task. "
                           "Ask the agent that started you.")
-    own_scope = rules.rule_scope(project_id)
+    own_scope = scope_label(project_id)
     if scope is not None and scope != own_scope:
-        if project_id is None:
+        if not project_id:
             raise RuleRefused(f"You can only write rules in your own scope ({own_scope}).")
         raise RuleRefused(
             f"You can only write rules about events you can already read: those in your own "
@@ -256,7 +257,7 @@ def disable(
     """Turn one rule off: its writer, its recipient or the project's conductor may."""
     row = db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()
     if row is None or row["scope"] not in (
-            rules.rule_scope(project_id), observe_rules.SHIPPED_SCOPE):
+            scope_label(project_id), observe_rules.SHIPPED_SCOPE):
         raise RuleRefused(f"no rule {rule_id!r} in your scope")
     if row["kind"] == observe_rules.OBSERVE:
         observe_rule = observe_rules.from_row(row)
@@ -270,8 +271,8 @@ def disable(
         (rule.id, caller),
     ).fetchone() is not None
     if (caller not in (rule.created_by, rules.thread_target(rule.to))
-            and not delivered_to_caller and (project_id is None or _conductor(db, project_id) != caller)):
-        if project_id is None:
+            and not delivered_to_caller and (not project_id or _conductor(db, project_id) != caller)):
+        if not project_id:
             raise RuleRefused("Only the rule's writer, its named recipient or a recipient it has delivered to can turn it off.")
         raise RuleRefused(
             "Only the rule's writer, its named recipient, a recipient it has delivered to or "
@@ -330,7 +331,7 @@ def explain(
         raise RuleRefused("give event_id, event_type, or artifact (the file's external id)")
     # A shipped rule set's rule is global: its outcomes show only for chats in this scope.
     where = [OUTCOME_SCOPE]
-    args: list[Any] = [rules.rule_scope(project_id), observe_rules.SHIPPED_SCOPE, project_id]
+    args: list[Any] = [scope_label(project_id), observe_rules.SHIPPED_SCOPE, project_id]
     if event_id:
         where.append("d.event_id=?")
         args.append(event_id)

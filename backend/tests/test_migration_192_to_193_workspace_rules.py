@@ -2,9 +2,8 @@ import sqlite3
 
 import pytest
 
-from events.rules import rule_scope
 from infra.database_migrations import MIGRATIONS
-from infra.delegation_scope import WORKSPACE_SCOPE_ID
+from infra.delegation_scope import WORKSPACE_SCOPE_ID, scope_label
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.migration_170_to_171_worker_profile import _INDEXES, _RULES
 from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
@@ -29,8 +28,8 @@ def _observe(db, rule_id, scope):
 def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
     assert SCHEMA_VERSION == 193
     assert MIGRATIONS[192] is migrate_192_to_193
-    assert rule_scope(None) == WORKSPACE_SCOPE_ID
-    assert rule_scope('abc') == 'project:abc'
+    assert scope_label(None) == WORKSPACE_SCOPE_ID
+    assert scope_label('abc') == 'project:abc'
     db = sqlite3.connect(':memory:')
     db.execute(_RULES)
     for statement in _INDEXES:

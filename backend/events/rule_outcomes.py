@@ -77,7 +77,7 @@ class RuleEvent:
     artifact_ref: Mapping[str, str] | None
     ends_artifact: bool = False
     # Read only when routing gave the event no thread: its connector's unrouted scope.
-    unrouted_projects: frozenset[str | None] = frozenset()
+    unrouted_scopes: frozenset[str] = frozenset()
     trace: tuple[str, ...] = ()  # the rules whose script runs led to this event, oldest first
     # The agent whose rule started the worker this event reports on, set by the server only:
     # with no owner to scope by, the event still reaches that agent's own rules.

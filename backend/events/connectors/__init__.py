@@ -101,10 +101,9 @@ class ConnectorManifest:
     # on an event routing gave no thread must name it (``rules.reaches_unrouted``).
     repository_fact: str | None = None
     project_repositories: Callable[[str], frozenset[str] | None] | None = None
-    # Project ids whose self-rules may fire on an unrouted event; a None member means
-    # chats outside projects. A None result means the scope could not be read.
-    # No resolver means such an event reaches no rule.
-    unrouted_scope: Callable[[Mapping[str, Any]], frozenset[str | None] | None] | None = None
+    # Rule scopes whose writers' rules to themselves may fire on an event routing gave no thread.
+    # None means the scopes could not be read; no resolver means such an event reaches no rule.
+    unrouted_scope: Callable[[Mapping[str, Any]], frozenset[str] | None] | None = None
     # A CORSIA-produced (platform) event's fact naming the agent that asked for it: with no
     # artifact owner, the event still reaches that agent's own rules (``events.rules``).
     requester_fact: str | None = None

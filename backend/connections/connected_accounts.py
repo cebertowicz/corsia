@@ -25,6 +25,7 @@ from connections.messages.provider import MESSAGES
 from connections.microsoft.provider import MICROSOFT
 from infra import key_store
 from infra.database import write_transaction
+from infra.delegation_scope import scope_label
 from infra.time import utc_now_iso
 
 PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT, MAILHOST, MESSAGES)}
@@ -97,11 +98,13 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
         return False
 
 
-def reached_projects(account_id: str, *, db: sqlite3.Connection) -> frozenset[str | None] | None:
-    """Where agents' mail rules may fire on an account's unowned mail (``reach_rule_scope``);
-    ``None`` when it can't be read."""
+def rule_scopes(account_id: str, *, db: sqlite3.Connection) -> frozenset[str] | None:
+    """Rule scopes reached by an account's unowned mail; ``None`` when unreadable."""
     try:
-        return reach_rule_scope(_account_reach(account_id, db=db), db)
+        reach = _account_reach(account_id, db=db)
+        if reach.mode == ONLY_CORSIA:
+            return frozenset({scope_label(None)})
+        return reach_rule_scope(reach, db)
     except (ConnectedAccountError, sqlite3.Error):
         log.exception("Rule scope for a connected account is unreadable")
         return None

@@ -42,10 +42,10 @@ def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]
     return {**{k: raw[k] for k in keys if raw.get(k) is not None}, "author_origin": "outside"}
 
 
-def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str | None] | None:
-    """Mail in a conversation no agent owns reaches agents' own rules in the projects
+def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
+    """Mail in a conversation no agent owns reaches agents' own rules in the scopes
     its account reaches; the poller's reach filter still holds each recipient to it."""
-    from connections.connected_accounts import reached_projects
+    from connections.connected_accounts import rule_scopes
     from infra.database import get_db
 
     account = facts.get("account_id")
@@ -53,7 +53,7 @@ def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str | None] | None:
         return frozenset()
     db = get_db()
     try:
-        return reached_projects(str(account), db=db)
+        return rule_scopes(str(account), db=db)
     finally:
         db.close()
 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from events import observe_rules, rules
+from infra.delegation_scope import scope_label
 
 _STARTS = "'queued','running','ran','failed','started','returned','invalid','no_result'"
 _ACTED = "'woke','digested','dropped','registered','not_registered'"
@@ -46,7 +47,7 @@ def _stats(db: sqlite3.Connection, ids: list[str], now: str, project_id: str | N
             "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions d {OUTCOME_JOINS} WHERE d.rule_id IN ({marks}) "
             f"AND {OUTCOME_SCOPE} GROUP BY d.rule_id",
-            (since, since, since, *ids, rules.rule_scope(project_id),
+            (since, since, since, *ids, scope_label(project_id),
              observe_rules.SHIPPED_SCOPE, project_id),
         ).fetchall()
     }
@@ -74,7 +75,7 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
     found = db.execute(
         "SELECT * FROM event_rules WHERE scope=? AND (enabled=1 OR updated_at>=?) "
         "ORDER BY created_at, id",
-        (rules.rule_scope(project_id), cutoff),
+        (scope_label(project_id), cutoff),
     ).fetchall()
     return _with_stats(db, found, now, project_id)
 
