@@ -23,6 +23,53 @@ export async function expectDiscussionVisible(thread: Locator, text: string) {
 	}, text)).toBe(true);
 }
 
+/** The comment's text and its replies are two boxes in one column: no pixel belongs to both, and neither box's bottom edge cuts a line of text (a line scrolled off the top is fine). */
+export async function expectRegionsApart(card: Locator) {
+	await expect.poll(() => card.evaluate(root => {
+		const text = root.querySelector<HTMLElement>('[data-discussion-original]');
+		const list = root.querySelector<HTMLElement>('[data-discussion-replies]');
+		const original = text?.getBoundingClientRect();
+		const replies = list?.getBoundingClientRect();
+		if (!text || !list || !original || !replies) return true;
+		if (original.bottom > replies.top + 0.5) return `comment text ${original.top.toFixed(1)}-${original.bottom.toFixed(1)} overlaps replies ${replies.top.toFixed(1)}-${replies.bottom.toFixed(1)}`;
+		for (const [name, region, box] of [['comment text', text, original], ['replies', list, replies]] as const) {
+			const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+			for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+				if (!node.data.trim()) continue;
+				const range = document.createRange();
+				range.selectNodeContents(node);
+				for (const rect of range.getClientRects()) {
+					if (rect.height > 0 && rect.top < box.bottom - 1 && rect.bottom > box.bottom + 1) return `${name} end at ${box.bottom.toFixed(1)}: a line ${rect.top.toFixed(1)}-${rect.bottom.toFixed(1)} ("${node.data.trim().slice(0, 24)}") is cut by it`;
+				}
+			}
+		}
+		return true;
+	})).toBe(true);
+}
+
+/** The newest reply is whole where the thread opened: every line box of it sits inside the replies region's visible rect. */
+export async function expectNewestReplyWhole(card: Locator) {
+	await expect.poll(() => card.evaluate(root => {
+		const list = root.querySelector<HTMLElement>('[data-discussion-replies]');
+		const newest = list?.querySelector<HTMLElement>('.ct-reply:last-child');
+		if (!list || !newest) return 'no replies region or newest reply';
+		const box = list.getBoundingClientRect();
+		const walker = document.createTreeWalker(newest, NodeFilter.SHOW_TEXT);
+		let lines = 0;
+		for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+			if (!node.data.trim()) continue;
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			for (const rect of range.getClientRects()) {
+				if (!rect.height) continue;
+				lines++;
+				if (rect.top < box.top - 1 || rect.bottom > box.bottom + 1) return `newest reply line ${rect.top.toFixed(1)}-${rect.bottom.toFixed(1)} ("${node.data.trim().slice(0, 24)}") is outside the replies region ${box.top.toFixed(1)}-${box.bottom.toFixed(1)}`;
+			}
+		}
+		return lines > 0 ? true : 'newest reply has no line boxes';
+	})).toBe(true);
+}
+
 /** The field stays on screen and unclipped, and its Send takes the click where it lands. */
 export async function expectFieldAndSendUsable(card: Locator, field: Locator) {
 	const send = card.getByRole('button', { name: 'Send reply' });

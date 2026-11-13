@@ -143,6 +143,118 @@ describe('autosize', () => {
 		expect(replies.hasAttribute('tabindex')).toBe(false);
 	});
 
+	it('caps the comment text at whole lines so no half line sits against the replies', () => {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '20px'; original.append(originalText);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply';
+		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '20px'; reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 640, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
+		// 253px of room is not a multiple of the 20px line, so half the leftover is 52.5px.
+		Object.defineProperty(owner, 'clientHeight', { get: () => 253 });
+		Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 400 });
+		Object.defineProperty(replies, 'offsetHeight', { get: () => Number.parseFloat(replies.style.maxHeight) || 400 });
+		Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
+		autosize(node, { value: 'a long reply', fit: true });
+		const originalRoom = Number.parseFloat(original.style.maxHeight);
+		expect(originalRoom).toBeGreaterThan(0);
+		expect(originalRoom % 20).toBe(0);
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeGreaterThanOrEqual(20);
+	});
+
+	it('ends the comment text between lines when a paragraph gap is not a multiple of the line height', () => {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '21px'; originalText.append('A first line.', 'A second paragraph, line one.', 'and line two.'); original.append(originalText);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply';
+		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '21px'; reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 640, 'none'); node.style.lineHeight = '21px'; pinned.append(node);
+		// Layout in a real browser: one line, a 16px gap, then a paragraph of two lines, so the lines end at 21, 58 and 79 and 42 falls inside the second paragraph's first line.
+		const rects = [{ top: 0, bottom: 21, height: 21 }, { top: 37, bottom: 58, height: 21 }, { top: 58, bottom: 79, height: 21 }];
+		let index = 0;
+		const proto = Range.prototype as unknown as { getClientRects?: () => unknown[] };
+		proto.getClientRects = () => [rects[index++ % rects.length]];
+		try {
+			Object.defineProperty(owner, 'clientHeight', { get: () => 253 });
+			Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 400 });
+			Object.defineProperty(replies, 'offsetHeight', { get: () => Number.parseFloat(replies.style.maxHeight) || 400 });
+			Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
+			autosize(node, { value: 'a long reply', fit: true });
+			expect([21, 58, 79]).toContain(Number.parseFloat(original.style.maxHeight));
+		} finally {
+			delete proto.getClientRects;
+		}
+	});
+
+	it('leaves the replies the newest reply whole before the comment takes another line', () => {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '21px'; originalText.append('A comment of six lines.'); original.append(originalText);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply';
+		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '21px'; replyText.append('A newest reply of two lines.'); reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 640, 'none'); node.style.lineHeight = '21px'; pinned.append(node);
+		// The newest reply is a 21px header and two 21px lines, 63px whole; the comment's six lines end at 21, 42, 63, 84, 105 and 126.
+		reply.getBoundingClientRect = () => ({ top: 0, bottom: 63, height: 63 }) as DOMRect;
+		replyText.getBoundingClientRect = () => ({ top: 21, bottom: 63, height: 42 }) as DOMRect;
+		const proto = Range.prototype as unknown as { getClientRects?: (this: Range) => unknown[] };
+		proto.getClientRects = function (this: Range) { return this.startContainer.textContent === 'A comment of six lines.' ? [1, 2, 3, 4, 5, 6].map(n => ({ top: (n - 1) * 21, bottom: n * 21, height: 21 })) : []; };
+		try {
+			// 222px of view less 80px of chrome and a two-line field leaves 100px: half of it would be 50px, but the reply needs 63.
+			Object.defineProperty(owner, 'clientHeight', { get: () => 222 });
+			Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 126 });
+			Object.defineProperty(replies, 'offsetHeight', { get: () => Number.parseFloat(replies.style.maxHeight) || 200 });
+			Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
+			autosize(node, { value: 'a long reply', fit: true });
+			expect(Number.parseFloat(replies.style.maxHeight)).toBeGreaterThanOrEqual(63);
+			expect(Number.parseFloat(original.style.maxHeight)).toBe(21);
+		} finally {
+			delete proto.getClientRects;
+		}
+	});
+
+	it('ends a newest reply too tall for what is left on one of its own line ends', () => {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const originalText = document.createElement('div'); originalText.className = 'ct-markdown'; originalText.style.lineHeight = '21px'; originalText.append('A comment of six lines.'); original.append(originalText);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply';
+		const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '21px'; replyText.append('A newest reply of four lines.'); reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 640, 'none'); node.style.lineHeight = '21px'; pinned.append(node);
+		// A 21px header and four 21px lines: 105px whole, ending at 21, 42, 63, 84 and 105.
+		reply.getBoundingClientRect = () => ({ top: 0, bottom: 105, height: 105 }) as DOMRect;
+		replyText.getBoundingClientRect = () => ({ top: 21, bottom: 105, height: 84 }) as DOMRect;
+		const proto = Range.prototype as unknown as { getClientRects?: (this: Range) => unknown[] };
+		const lines = (count: number) => Array.from({ length: count }, (_, n) => ({ top: n * 21, bottom: (n + 1) * 21, height: 21 }));
+		proto.getClientRects = function (this: Range) { return this.startContainer.textContent === 'A comment of six lines.' ? lines(6) : lines(5); };
+		try {
+			// 100px is left: the comment keeps its first line (21px), so the reply has 79px, which falls inside its fourth line.
+			Object.defineProperty(owner, 'clientHeight', { get: () => 222 });
+			Object.defineProperty(original, 'offsetHeight', { get: () => Number.parseFloat(original.style.maxHeight) || 126 });
+			Object.defineProperty(replies, 'offsetHeight', { get: () => Number.parseFloat(replies.style.maxHeight) || 200 });
+			Object.defineProperty(thread, 'offsetHeight', { get: () => 80 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0) });
+			autosize(node, { value: 'a long reply', fit: true });
+			expect(Number.parseFloat(original.style.maxHeight)).toBe(21);
+			expect(Number.parseFloat(replies.style.maxHeight)).toBe(63);
+		} finally {
+			delete proto.getClientRects;
+		}
+	});
+
 	it('keeps a long original readable while the first reply grows', () => {
 		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; document.body.append(owner);
 		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
@@ -260,6 +372,48 @@ describe('autosize', () => {
 		action.update('');
 		expect(node.style.height).toBe('36px');
 		expect(node.style.transition).toBe('');
+	});
+
+	/** A just-opened thread card in a panel that is as tall as its content (237px) and may grow to `cap`. */
+	function openedCard(cap: string) {
+		const owner = document.createElement('div'); owner.style.overflowY = 'auto'; owner.style.maxHeight = cap; document.body.append(owner);
+		const thread = document.createElement('div'); thread.setAttribute('data-autosize-room', ''); owner.append(thread);
+		const original = document.createElement('div'); original.setAttribute('data-discussion-original', '');
+		const text = document.createElement('div'); text.className = 'ct-markdown'; text.style.lineHeight = '20px'; original.append(text);
+		const replies = document.createElement('div'); replies.setAttribute('data-discussion-replies', '');
+		const reply = document.createElement('div'); reply.className = 'ct-reply'; const replyText = document.createElement('div'); replyText.className = 'ct-markdown'; replyText.style.lineHeight = '20px'; reply.append(replyText); replies.append(reply);
+		const pinned = document.createElement('div'); pinned.setAttribute('data-autosize-sticky', ''); pinned.style.position = 'sticky';
+		thread.append(original, replies, pinned);
+		const node = field(() => 32, 'none'); node.style.lineHeight = '20px'; pinned.append(node);
+		const fixed = (el: HTMLElement, h: number) => Object.defineProperty(el, 'offsetHeight', { get: () => Number.parseFloat(el.style.maxHeight) || h, configurable: true });
+		fixed(original, 55); fixed(replies, 110);
+		Object.defineProperty(thread, 'offsetHeight', { get: () => 40 + original.offsetHeight + replies.offsetHeight + (Number.parseFloat(node.style.height) || 0), configurable: true });
+		Object.defineProperty(owner, 'clientHeight', { get: () => Math.min(thread.offsetHeight, Number.parseFloat(cap)), configurable: true });
+		Object.defineProperty(owner, 'offsetHeight', { get: () => owner.clientHeight, configurable: true });
+		return { original, replies, action: autosize(node, { value: '', fit: true }) };
+	}
+	it('leaves a just-opened card its whole discussion when its panel has room to grow to its max-height', () => {
+		const { original, replies, action } = openedCard('400px');
+		expect(original.style.maxHeight).toBe('');
+		expect(replies.style.maxHeight).toBe('');
+		action.destroy();
+	});
+	it('ignores an ancestor max-height that is a percentage rather than reading it as pixels', () => {
+		const wrap = document.createElement('div'); wrap.style.maxHeight = '100%'; Object.defineProperty(wrap, 'offsetHeight', { get: () => 500, configurable: true }); document.body.append(wrap);
+		const { original, replies, action } = openedCard('400px');
+		wrap.append(original.closest('[data-autosize-room]')!.parentElement!);
+		action.update({ value: '', fit: true });
+		expect(original.style.maxHeight).toBe('');
+		expect(replies.style.maxHeight).toBe('');
+		action.destroy();
+	});
+	it('scrolls the discussion inside a card taller than its panel may grow', () => {
+		const { original, replies, action } = openedCard('180px');
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeLessThan(110);
+		expect(Number.parseFloat(replies.style.maxHeight)).toBeGreaterThan(0);
+		expect(replies.getAttribute('tabindex')).toBe('0');
+		expect(original.style.maxHeight).not.toBe('');
+		action.destroy();
 	});
 
 	it('holds its room across refits when the panel is sized by its own content', () => {

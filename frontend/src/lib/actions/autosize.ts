@@ -1,5 +1,39 @@
 import { scroller } from './keepInView';
 
+/** How much taller `node` may grow before an ancestor's `max-height` stops it; zero when no ancestor has one. */
+function headroom(node: HTMLElement): number {
+	let room = Number.POSITIVE_INFINITY;
+	for (let parent: HTMLElement | null = node; parent && parent !== document.body; parent = parent.parentElement) {
+		const value = getComputedStyle(parent).maxHeight;
+		// Only a pixel length is a cap here: a percentage, `none` or a calc() has no height of its own to measure against.
+		const cap = value.endsWith('px') ? Number.parseFloat(value) : Number.NaN;
+		if (Number.isFinite(cap)) room = Math.min(room, Math.max(0, cap - parent.offsetHeight));
+	}
+	return Number.isFinite(room) ? room : 0;
+}
+
+/** Where each line of `region`'s text ends, as a height from the top of its content, ascending; empty where the browser reports no line boxes. */
+function lineEnds(region: HTMLElement): number[] {
+	const top = region.getBoundingClientRect().top - region.scrollTop;
+	const bottoms: number[] = [];
+	const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+	for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+		if (!node.data.trim()) continue;
+		const range = document.createRange();
+		range.selectNodeContents(node);
+		if (typeof range.getClientRects !== 'function') return [];
+		for (const rect of range.getClientRects()) if (rect.height > 0) bottoms.push(rect.bottom - top);
+	}
+	bottoms.sort((a, b) => a - b);
+	// Runs of one line (a bold word, a mention) end a pixel or two apart: they are one end, the lowest of them.
+	const ends: number[] = [];
+	for (const bottom of bottoms) {
+		if (ends.length && bottom - ends[ends.length - 1] < 3) ends[ends.length - 1] = bottom;
+		else ends.push(bottom);
+	}
+	return ends;
+}
+
 /** The field's value, or the value and `fit`: grow until what scrolls the field (a popover, a sheet) would have to scroll, then scroll. */
 type AutosizeParam = string | undefined | { value: string; fit?: boolean };
 
@@ -16,6 +50,9 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 	let current = node.offsetHeight;
 	let fit = typeof param === 'object' && !!param.fit;
 	let lastBoundedReply: HTMLElement | null = null;
+	// The bounded replies show the newest reply from its top until the reader scrolls them: a card that is still opening refits several
+	// times, and the scroll can be back at the top between fits.
+	let followNewest = true;
 	const resize = () => {
 		const style = getComputedStyle(node);
 		const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
@@ -62,7 +99,10 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 		const alreadyBounded = !!replies?.style.maxHeight;
 		if (original) original.style.maxHeight = '';
 		if (replies) replies.style.maxHeight = '';
-		const height = owner && card ? (Number.isFinite(viewHeight) ? viewHeight : owner.clientHeight - ownerPadding) : null;
+		// A panel sized by its content up to a max-height (a popover; a drawer's panel around its scroller) can still grow by what
+		// that cap leaves. Fitting to its height right now would shrink a card that has just opened below what it may show.
+		const growth = owner && ownerStyle ? headroom(owner) : 0;
+		const height = owner && card ? (Number.isFinite(viewHeight) ? viewHeight : owner.clientHeight - ownerPadding + growth) : null;
 		if (height !== null && original) {
 			const originalHeight = original.offsetHeight, repliesHeight = replies?.offsetHeight ?? 0;
 			const line = Number.parseFloat(style.lineHeight) || 0;
@@ -71,20 +111,32 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 			const replyText = latest?.querySelector<HTMLElement>('.ct-markdown');
 			const originalMinimum = originalLine ? Number.parseFloat(getComputedStyle(originalLine).lineHeight) || 0 : 0;
 			const replyMinimum = latest && replyText ? replyText.getBoundingClientRect().top - latest.getBoundingClientRect().top + (Number.parseFloat(getComputedStyle(replyText).lineHeight) || 0) : 0;
+			// The newest reply, whole, is what a card that has just opened must show; its first line is the least it may be cut to.
+			const replyNeed = Math.max(replyMinimum, latest?.getBoundingClientRect().height ?? 0);
 			const room = height - (card!.offsetHeight - wanted - originalHeight - repliesHeight);
 			// Give the draft a third line when the original and latest reply can still each show a line.
-			const fieldRoom = room >= originalMinimum + replyMinimum + 3 * line + inset ? 3 * line + inset : 2 * line + inset;
+			const fieldRoom = room >= originalMinimum + replyNeed + 3 * line + inset ? 3 * line + inset : 2 * line + inset;
 			const budget = room - fieldRoom;
 			if (budget < originalHeight + repliesHeight) {
-				const originalRoom = Math.min(originalHeight, Math.max(originalMinimum, replies ? Math.min(budget / 2, budget - replyMinimum) : budget));
-				const replyRoom = Math.min(repliesHeight, Math.max(replyMinimum, budget - originalRoom));
+				// Neither region ends mid-line, and the newest reply comes first: the comment takes the largest of its own line ends that leaves the
+				// replies the newest reply's whole height, never less than its first line. The text's own lines say where they end (a paragraph gap
+				// is not a line); with no layout to read, whole multiples of one line stand in.
+				const limit = Math.max(originalMinimum, replies ? budget - replyNeed : budget);
+				const ends = lineEnds(original);
+				const whole = ends.length ? Math.max(ends[0], ...ends.filter(end => end <= limit + 0.5)) : originalMinimum > 0 ? Math.floor((limit + 0.5) / originalMinimum) * originalMinimum : limit;
+				const originalRoom = Math.min(originalHeight, Math.max(originalMinimum, whole));
+				let replyRoom = Math.min(repliesHeight, Math.max(replyMinimum, budget - originalRoom));
+				// A newest reply taller than what is left is shown from its top and ends on one of its own line ends.
+				const latestEnds = latest && replyRoom < latest.getBoundingClientRect().height ? lineEnds(latest) : [];
+				if (latestEnds.length) replyRoom = Math.max(replyMinimum, ...latestEnds.filter(end => end <= replyRoom + 0.5));
 				original.style.maxHeight = `${originalRoom}px`; if (replies) replies.style.maxHeight = `${replyRoom}px`;
 				for (const [region, bounded] of [[original, originalRoom < originalHeight], [replies, replyRoom < repliesHeight]] as const) {
 					if (!region) continue;
 					if (bounded) region.setAttribute('tabindex', '0'); else region.removeAttribute('tabindex');
 				}
 				original.scrollTop = oldOriginal;
-				if (replies && latest && (!alreadyBounded || latest !== lastBoundedReply)) replies.scrollTop += latest.getBoundingClientRect().top - replies.getBoundingClientRect().top;
+				if (!alreadyBounded || latest !== lastBoundedReply) followNewest = true;
+				if (replies && latest && followNewest) replies.scrollTop += latest.getBoundingClientRect().top - replies.getBoundingClientRect().top;
 				else if (replies) replies.scrollTop = oldReplies;
 				lastBoundedReply = latest;
 			} else {
@@ -106,6 +158,11 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 	// text one line for a frame, so the scroll is put back before it is drawn.
 	const hold = () => { if (node.style.overflowY === 'hidden' && node.scrollTop !== 0) node.scrollTop = 0; };
 	node.addEventListener('scroll', hold);
+	// The reader's own scrolling of the replies (wheel, touch, keys, the scrollbar) ends the following; typing in the field does not.
+	const scrollRoot = node.closest<HTMLElement>('[data-autosize-room]');
+	const readerScrolls = (event: Event) => { if ((event.target as Element | null)?.closest?.('[data-discussion-replies]')) followNewest = false; };
+	const readerEvents = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const;
+	for (const type of readerEvents) scrollRoot?.addEventListener(type, readerScrolls, { passive: true });
 	resize();
 	// Refit when the available view changes, including a drawer changing size around a keyboard or a drag. A refit
 	// measures with the transition off, which cancels a growth ease still running on the field, so it waits for the
@@ -140,6 +197,7 @@ export function autosize(node: HTMLTextAreaElement, param?: AutosizeParam) {
 		destroy: () => {
 			cancelAnimationFrame(frame); observer?.disconnect();
 			node.removeEventListener('scroll', hold);
+			for (const type of readerEvents) scrollRoot?.removeEventListener(type, readerScrolls);
 			const card = node.closest<HTMLElement>('[data-autosize-room]');
 			card?.querySelectorAll<HTMLElement>('[data-discussion-original], [data-discussion-replies]').forEach(region => {
 				region.style.maxHeight = ''; region.removeAttribute('tabindex');

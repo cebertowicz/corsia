@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
+- A comment thread that has just opened, on a wide screen or a phone, shows its newest reply in full instead of cutting it off below the card's edge; a thread taller than its card still scrolls inside it.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
