@@ -28,6 +28,15 @@ describe('ended chat comment sends', () => {
 		expect(endedSends(comment('delivered', answers)).map(send => [send.messageId, send.note, send.root])).toEqual([['broken', 'broken text', false], ['stopped', 'stopped text', false]]);
 	});
 
+	it('names a comment or a reply in its Retry title', () => {
+		const titles = (state: string) => endedSends(comment(state, [answer('reply', state)])).map(send => send.retry?.title);
+		expect(titles('failed')).toEqual(['Send this comment again', 'Send this reply again']);
+		expect(titles('ambiguous')).toEqual([
+			'This may send the comment twice if the provider received it before the connection failed',
+			'This may send the reply twice if the provider received it before the connection failed',
+		]);
+	});
+
 	it('marks the comment for attention only where chat would put its red mark', () => {
 		expect(needsAttention(comment('cancelled'))).toBe(false);
 		expect(needsAttention(comment('delivered', [answer('broken', 'ambiguous')]))).toBe(true);
