@@ -95,7 +95,7 @@ describe('typing after a table that ends the document', () => {
 		expect(s.view.state.doc.toString(), 'a newline alone joins nothing to the table').toBe(`${THREEROW}\n`);
 	});
 
-	it('for random typed text at the end of random documents ending in a table, the table keeps its rows and the text is outside it', () => {
+	it('for random typed text at the end of random documents ending in a table, the table keeps its rows and the text is outside it (end of document)', () => {
 		const pieces = ['x', 'ab', ' ', '|', '| a |', '\\', '-', '# h', '\n', '\n\n', 'é', '`c`'];
 		const ends = ['', '\n'];
 		let state = 7;
@@ -117,6 +117,91 @@ describe('typing after a table that ends the document', () => {
 			expect(text.startsWith(THREEROW), name).toBe(true);
 			expect(tables(text)[0]?.rows.length, name).toBe(ROWS);
 			expect(text.slice(THREEROW.length).replace(/\n/g, ''), `${name}: nothing typed is lost or added`).toBe(typedText.join('').replace(/\n/g, ''));
+		}
+	});
+});
+
+/**
+ * Typing on the line directly under a table in the middle of a document. Every way of leaving the table puts the caret on
+ * that line; the text typed there is its own paragraph, with a blank line above it and a blank line below it before the
+ * block that follows, and the table and that block are unchanged.
+ */
+describe('typing on the line under a table in the middle of a document', () => {
+	const NEXT = 'Next paragraph stays a paragraph.';
+	const MID = `# Plan\n\n${THREEROW}\n\n${NEXT}\n`;
+	const UNDER = MID.indexOf(THREEROW) + THREEROW.length + 1;
+	const WANT = `# Plan\n\n${THREEROW}\n\nx\n\n${NEXT}\n`;
+	const blocks = (text: string) => Lexer.lex(text).filter((t) => t.type !== 'space').map((t) => `${t.type}:${t.raw.trim()}`);
+
+	const routes: Array<[string, (r: Rig) => void]> = [
+		['Escape', (r) => { clicked(r, cellEl(r, 1, 1)); press(r, 'Escape'); }],
+		['Tab from the last cell', (r) => { clicked(r, cellEl(r, 2, 2)); press(r, 'Tab'); }],
+		['Enter from the last row', (r) => { clicked(r, cellEl(r, 2, 0)); press(r, 'Enter'); }],
+		// A click on the line, or an arrow key onto it, puts the document's caret there with no cell open.
+		['a caret placed on the line', (r) => r.view.dispatch({ selection: { anchor: UNDER }, userEvent: 'select.pointer' })],
+	];
+
+	for (const [name, leave] of routes) {
+		it(`after ${name}, typed text is its own paragraph and the table and the next paragraph are unchanged`, () => {
+			const r = track(build(MID));
+			leave(r);
+			expect(mountedEditor(r), 'no cell is open').toBeNull();
+			expect(r.view.state.doc.toString(), 'arriving changes nothing').toBe(MID);
+			expect(r.view.state.selection.main.head, 'the caret is on the line under the table').toBe(UNDER);
+			type(r, 'x');
+			const text = r.view.state.doc.toString();
+			expect(text).toBe(WANT);
+			expect(tables(text)[0].rows.length, 'the table keeps its rows').toBe(ROWS);
+			expect(paragraphs(text)).toEqual(['x', NEXT]);
+			expect(r.view.state.selection.main.head, 'the caret follows the typed text').toBe(WANT.indexOf('x\n') + 1);
+			type(r, 'y');
+			expect(r.view.state.doc.toString(), 'typing on adds nothing more').toBe(WANT.replace('x\n', 'xy\n'));
+		});
+	}
+
+	it('the typed text and both blank lines are one undo step', () => {
+		const r = track(build(MID));
+		routes[0][1](r);
+		type(r, 'x');
+		r.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', [MOD]: true, bubbles: true, cancelable: true }));
+		expect(r.view.state.doc.toString()).toBe(MID);
+	});
+
+	it('a paste ending in a line break needs no second break before the next block', () => {
+		const r = track(build(MID));
+		routes[3][1](r);
+		type(r, 'pasted\n', 'input.paste');
+		expect(r.view.state.doc.toString()).toBe(WANT.replace('x\n', 'pasted\n'));
+	});
+
+	it('for random documents and random typed text on the line under a table, the table and the next block are unchanged and nothing typed is lost', () => {
+		const pieces = ['x', 'ab', ' ', '|', '| a |', '\\', 'é', '`c`', '\n'];
+		const afters = ['', `\n${NEXT}\n`, '\n## Heading\n', '\n- item\n', `\n${THREEROW}\n`, '\n'];
+		const befores = ['', 'Intro.\n\n', '# Plan\n\n'];
+		let state = 11;
+		const next = (n: number) => { state = (Math.imul(state, 1103515245) + 12345) >>> 0; return state % n; };
+		const r = track(build(MID));
+		for (let seed = 0; seed < 300; seed++) {
+			const base = `${befores[next(befores.length)]}${THREEROW}\n${afters[next(afters.length)]}`;
+			const under = base.indexOf(THREEROW) + THREEROW.length + 1;
+			r.view.dispatch({ changes: { from: 0, to: r.view.state.doc.length, insert: base }, selection: { anchor: under } });
+			const typedText: string[] = [];
+			for (let i = 0, n = 1 + next(4); i < n; i++) {
+				// The first piece is text typed on the line under the table. An Enter pressed there first moves the reader to a
+				// new line that is no longer under the table, where typing joins the next paragraph as it does anywhere in prose.
+				const piece = i === 0 ? pieces[next(pieces.length - 1)] : pieces[next(pieces.length)];
+				typedText.push(piece);
+				type(r, piece, next(2) ? 'input.type' : 'input.paste');
+			}
+			const text = r.view.state.doc.toString();
+			const name = `seed ${seed}: ${JSON.stringify(base)} then ${JSON.stringify(typedText)} gives ${JSON.stringify(text)}`;
+			expect(tables(text)[0]?.rows.length, name).toBe(ROWS);
+			expect(tables(text).length, `${name}: no table gained or lost`).toBe(tables(base).length);
+			const was = blocks(base), now = blocks(text);
+			for (const block of was) expect(now, `${name}: ${block} is unchanged`).toContain(block);
+			const flat = (s: string) => s.replace(/\n/g, '');
+			const typed = typedText.join('');
+			expect(flat(text), `${name}: nothing typed is lost or added`).toBe(flat(base.slice(0, under) + typed + base.slice(under)));
 		}
 	});
 });

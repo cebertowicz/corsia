@@ -1,4 +1,4 @@
-import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
+import { EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { emitProductEvent } from '$lib/product_events';
 import { cellElement, drawnTableAt, TABLE } from './widget-blocks';
@@ -6,14 +6,10 @@ import {
 	CELL_SYNC, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
 import { heldText, heldToSource, runDifference, sourceToHeld, writeCellEdit } from './widget-cell-row';
-import { adjacentCell, caretAfterTable, cellBelow, cellLabel, tableOfCell, typingBelowFinalTable } from './widget-cell-nav';
-import { cellKeys } from './widget-cell-keys';
+import { adjacentCell, caretAfterTable, cellBelow, cellLabel, tableOfCell, typingBelowTable } from './widget-cell-nav';
 import { CellPresses } from './widget-cell-presses';
-import { CELL_THEME } from './widget-cell-theme';
 import { repaintTableCell } from './widget-table';
-import { cellHighlight } from './theme';
-import { INLINE_MARKDOWN } from './widget-cell-markdown';
-import { cellMarksField } from './widget-cell-comment';
+import { cellEditorSetup } from './widget-cell-setup';
 
 /**
  * Editing the text of a rendered table cell where it is read.
@@ -24,15 +20,12 @@ import { cellMarksField } from './widget-cell-comment';
  * changes to the row, so the document keeps its single Yjs binding, its single undo manager and its single markdown parse:
  * the nested editor holds no document state of its own and is rewritten from the document whenever the two disagree, which
  * is also how a live edit from another client reaches the cell. Formatting renders while you type because the cell parses
- * inline markdown (`widget-cell-markdown.ts`) and runs the document's own hide-syntax pass (`cellEditorExtensions`).
+ * inline markdown and runs the document's own hide-syntax pass (`widget-cell-setup.ts`).
  *
  * The editor replaces the `<td>`'s drawn content while it is open, so it wraps, grows the row and takes the cell's look
  * like the text it replaces. `widget-table.ts` keeps the table's DOM, and this `<td>`, alive across edits and leaves the
  * open cell's content alone; the cell is repainted from the source when the editor closes.
  */
-
-/** A cell editor's added extensions: the hide-syntax pass (`markdown-live.ts`) and the save key (`MarkdownEditor.svelte`), as cell keys skip the doc's keymap. */
-export const cellEditorExtensions = Facet.define<Extension, readonly Extension[]>({ combine: (values) => values });
 
 type Change = { from: number; to: number; insert: string };
 
@@ -53,6 +46,9 @@ class CellEditors {
 	private mounted: HTMLTableCellElement | null = null;
 	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
 	private clickedAt: { x: number; y: number } | null = null;
+	// Whether the open cell had the caret when the document last changed, read before the document redraws: a table drawn
+	// anew (a row another client added) takes the old `<td>`, and the focus with it, out of the page.
+	private focused = false;
 	private readonly presses: CellPresses;
 
 	constructor(private readonly host: EditorView) {
@@ -62,6 +58,11 @@ class CellEditors {
 			opened: (at) => { this.clickedAt = at; },
 			close: () => this.close()
 		});
+	}
+
+	/** Runs before the document redraws for a change, while the open cell's editor is still where the reader left it. */
+	update() {
+		this.focused = !!this.editor?.hasFocus;
 	}
 
 	/**
@@ -110,7 +111,6 @@ class CellEditors {
 		const td = widget ? cellElement(widget, cell) : null;
 		if (!td) { this.close(); return false; }
 		if (td === this.mounted && wrap.parentElement === td) { this.clickedAt = null; return true; }
-		const hadFocus = wrap.contains(document.activeElement);
 		td.replaceChildren(wrap);
 		this.mounted = td;
 		// Named for the cell it is in, so a screen reader says which cell is being edited, and again after Tab or Enter.
@@ -118,7 +118,7 @@ class CellEditors {
 		// Focus is taken only once the editor is in the document — before that, focusing it does nothing — and the click
 		// that opened the cell counts as the reader asking for the caret there, at the word they clicked rather than at the
 		// start of the cell. The editor is in the cell by now, so it reads the click's point off its own layout.
-		if (hadFocus || this.fresh) {
+		if (this.focused || this.fresh) {
 			this.editor?.focus();
 			this.fresh = false;
 			this.placeAtClick();
@@ -191,7 +191,7 @@ class CellEditors {
 		this.editor?.focus();
 	}
 
-	/** The cell's own editor: an inline markdown parse, the document's hide-syntax pass, and no history of its own. */
+	/** Opens the cell's own editor (`cellEditorSetup`) on the cell's content as GFM reads it, the caret at the click. */
 	private attach(cell: OpenCell) {
 		const host = this.host;
 		const source = cellSource(host.state, cell), held = heldText(source);
@@ -209,21 +209,12 @@ class CellEditors {
 			state: EditorState.create({
 				doc: held.text,
 				selection: { anchor: at, head: at },
-				extensions: [
-					INLINE_MARKDOWN,
-					...host.state.facet(cellEditorExtensions),
-					cellHighlight,
-					cellMarksField,
-					EditorView.lineWrapping,
-					EditorView.updateListener.of(this.fromCell),
-					cellKeys(host, {
-						leave: () => this.leave(),
-						next: () => this.moveTo(adjacentCell(host.state, this.cell!, 1)),
-						previous: () => this.moveTo(adjacentCell(host.state, this.cell!, -1)),
-						below: () => this.moveTo(cellBelow(host.state, this.cell!))
-					}),
-					CELL_THEME
-				]
+				extensions: cellEditorSetup(host, {
+					leave: () => this.leave(),
+					next: () => this.moveTo(adjacentCell(host.state, this.cell!, 1)),
+					previous: () => this.moveTo(adjacentCell(host.state, this.cell!, -1)),
+					below: () => this.moveTo(cellBelow(host.state, this.cell!))
+				}, this.fromCell)
 			})
 		});
 	}
@@ -294,7 +285,7 @@ class CellEditors {
 const cellEditing = ViewPlugin.fromClass(CellEditors);
 
 export const markdownCellEditing: Extension = [
-	openCellState, typingBelowFinalTable,
+	openCellState, typingBelowTable,
 	cellEditing,
 	EditorView.updateListener.of((update) => update.view.plugin(cellEditing)?.settle(update)),
 ];

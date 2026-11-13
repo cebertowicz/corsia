@@ -52,33 +52,52 @@ export function caretAfterTable(state: EditorState, tableTo: number): number {
 }
 
 /**
- * Text typed at the end of a document that ends in a table goes below a blank line. Leaving the table puts the caret
- * there, and GFM, like the editor's own parse, reads a line right under a row as another row of the table (or, past the
- * header's width, as a cell that is never drawn). The separator is added only when something is typed, pasted or composed
- * there with no cell open, never when the reader only leaves, so leaving changes nothing in the document; it goes in the
- * same transaction as the text, so one undo takes both out.
+ * How many line breaks separate an insertion at `at` from a table ending directly above it: 1 when `at` is on a blank line
+ * right under the table's last row, 0 when `at` is the end of that row and of the document (a document ending in a table
+ * with no newline). Null when no table ends directly above.
  */
-export const typingBelowFinalTable = EditorState.transactionFilter.of((tr) => {
+function breaksBelowTable(state: EditorState, at: number): number | null {
+	const line = state.doc.lineAt(at);
+	if (!line.text.trim() && line.number > 1) {
+		const above = state.doc.line(line.number - 1);
+		return tableAt(state, above.from, above.to)?.to === above.to ? 1 : null;
+	}
+	return at === state.doc.length && tableAt(state, line.from, line.to)?.to === at ? 0 : null;
+}
+
+/**
+ * Text typed on the line directly under a table becomes its own paragraph. Leaving a table (Escape, Tab, Enter, a click
+ * or an arrow key) can put the caret there, and GFM, like the editor's own parse, reads a line right under a row as another
+ * row (or, past the header's width, as a cell that is never drawn), and a paragraph right under that line joins it. So the
+ * text goes in with a blank line above it, and a blank line below it when a block follows, leaving the table and that block
+ * as they were. The separators are added only when something is typed, pasted or composed there with no cell open, never
+ * when the reader only arrives, so arriving changes nothing in the document; they go in the same transaction as the text,
+ * so one undo takes all of it out.
+ */
+export const typingBelowTable = EditorState.transactionFilter.of((tr) => {
 	if (!tr.docChanged || !tr.isUserEvent('input') || tr.startState.field(openCellState, false)) return tr;
-	const state = tr.startState, end = state.doc.length;
-	let insert = '', count = 0;
-	tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => { count++; if (fromA === end && toA === end) insert = text.toString(); });
+	const state = tr.startState;
+	let at = -1, insert = '', count = 0;
+	tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => { count++; if (fromA === toA) { at = fromA; insert = text.toString(); } });
 	const text = insert.replace(/^\n+/, '');
-	if (count !== 1 || !text) return tr;
-	// The last line holding anything, and the blank lines after it.
-	let line = state.doc.lineAt(end);
-	while (!line.text.trim() && line.number > 1) line = state.doc.line(line.number - 1);
-	const table = tableAt(state, line.from, line.to);
-	if (!table || table.to !== line.to) return tr;
-	const newlines = state.doc.sliceString(table.to, end).split('\n').length - 1 + (insert.length - text.length);
-	if (newlines >= 2) return tr;
-	const separator = '\n'.repeat(2 - newlines);
-	const shift = (pos: number) => pos >= end ? pos + separator.length : pos;
+	if (count !== 1 || at < 0 || !text.replace(/\n+$/, '')) return tr;
+	const above = breaksBelowTable(state, at);
+	if (above === null) return tr;
+	const lead = insert.length - text.length, trail = text.length - text.replace(/\n+$/, '').length;
+	const before = '\n'.repeat(Math.max(0, 2 - above - lead));
+	// A block on the next line would join the typed line; the rest of the caret's line is blank, and its own line break
+	// counts as one of the two.
+	const line = state.doc.lineAt(at);
+	const next = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null;
+	const after = next && next.text.trim() && above === 1 ? '\n'.repeat(Math.max(0, 1 - trail)) : '';
+	if (!before && !after) return tr;
+	const end = at + insert.length;
+	const shift = (pos: number) => pos < at ? pos : pos + before.length + (pos > end ? after.length : 0);
 	const selection = tr.selection && EditorSelection.create(
 		tr.selection.ranges.map((range) => EditorSelection.range(shift(range.anchor), shift(range.head))), tr.selection.mainIndex);
 	const event = tr.annotation(Transaction.userEvent);
 	return {
-		changes: { from: end, insert: separator + insert },
+		changes: { from: at, insert: before + insert + after },
 		...(selection ? { selection } : {}),
 		effects: tr.effects,
 		scrollIntoView: tr.scrollIntoView,

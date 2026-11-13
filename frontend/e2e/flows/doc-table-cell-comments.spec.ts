@@ -1,7 +1,8 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import {
-	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, onlyIn, openTableDocument, savedContaining, savedText, settled, sheetAtRest
+	cell, cellContent, DOC, editorIn, editorInCell, frame, keysOf, LAYOUTS, longPressOn, onlyIn, openTableDocument, savedContaining, savedText, settled,
+	sheetAtRest
 } from '../support/tableCells';
 
 /**
@@ -57,10 +58,18 @@ for (const layout of LAYOUTS) {
 			const keys = await keysOf(page);
 
 			// A word selected inside the open cell, as in prose: the selection reaches the document, so the comment offer appears.
-			await cell(page, 3, 1).click({ position: { x: 6, y: 6 } });
-			await editorInCell(page, cell(page, 3, 1));
-			await page.keyboard.press(keys.docStart);
-			for (let char = 0; char < 'A long'.length; char++) await page.keyboard.press('Shift+ArrowRight');
+			// On a phone the reader has no keyboard: a long press on the word selects it.
+			if (layout.project === 'chromium-mobile') {
+				await cell(page, 3, 1).tap({ position: { x: 6, y: 6 } });
+				await editorInCell(page, cell(page, 3, 1));
+				await longPressOn(cellContent(page), 'long');
+				await expect.poll(() => page.evaluate(() => document.getSelection()?.toString()), { message: 'the long press selected the word' }).toBe('long');
+			} else {
+				await cell(page, 3, 1).click({ position: { x: 6, y: 6 } });
+				await editorInCell(page, cell(page, 3, 1));
+				await page.keyboard.press(keys.docStart);
+				for (let char = 0; char < 'A long'.length; char++) await page.keyboard.press('Shift+ArrowRight');
+			}
 			await expect(page.locator('.sel-comment'), 'the comment offer appears for text selected in a cell').toBeVisible();
 			await frame(page, `05-selection-in-cell-${at}`);
 			await page.keyboard.press('Escape');

@@ -8,7 +8,8 @@ import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-
 import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
 import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
 import { markdownTableDecorations } from './widget-table';
-import { cellEditorExtensions, markdownCellEditing } from './widget-cell-editor';
+import { markdownCellEditing } from './widget-cell-editor';
+import { cellEditorExtensions } from './widget-cell-setup';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -214,6 +215,7 @@ export const markdownLivePreview: Extension = [
 	openLinkOnClick,
 	openLinkOnAltEnter,
 	markdownCellEditing,
-	// A cell's own editor drops the same markdown syntax marks the document does, over the cell's own source.
-	cellEditorExtensions.of(markdownInlinePreview)
+	// A cell's own editor drops the same markdown syntax marks the document does, over the cell's own source, and draws its
+	// images as the document does: shown, with their markdown one unit the caret steps over and a delete removes whole.
+	cellEditorExtensions.of([markdownInlinePreview, markdownImages])
 ];

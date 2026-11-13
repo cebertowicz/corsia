@@ -155,6 +155,31 @@ export const editorIn = (page: Page) => page.locator('.cm-md-cell-editor .cm-edi
 export const cellContent = (page: Page) => page.locator('.cm-md-cell-editor .cm-content');
 
 /**
+ * A thumb held on `words` inside `root`, as a reader with no keyboard selects text: Chromium's own long-press gesture,
+ * which selects the word under it. Playwright has no long-press, and raw touch events held still select nothing.
+ */
+export async function longPressOn(root: Locator, words: string) {
+	const page = root.page();
+	const point = await root.evaluate((el, words) => {
+		const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+			const at = node.textContent!.indexOf(words);
+			if (at < 0) continue;
+			const range = document.createRange();
+			range.setStart(node, at);
+			range.setEnd(node, at + words.length);
+			const r = range.getBoundingClientRect();
+			return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+		}
+		return null;
+	}, words);
+	expect(point, `"${words}" is drawn`).not.toBeNull();
+	const session = await page.context().newCDPSession(page);
+	await session.send('Input.synthesizeTapGesture', { x: point!.x, y: point!.y, duration: 1000, gestureSourceType: 'touch' });
+	await session.detach();
+}
+
+/**
  * The open cell's editor lies inside the cell it edits, with the caret inside both, and covers nothing of the row below:
  * the numbers the review frames are checked by.
  */

@@ -273,6 +273,24 @@ describe('a live edit from another client reaches the open cell', () => {
 		expect(r.view.state.doc.toString()).toContain('DoneED');
 		expect(cellText(r)).toBe('Login!');
 	});
+
+	for (const [change, edit, row] of [
+		['adds a row below it', (text: string) => [text.indexOf('\n\nafter'), `\n| Sync | Open |`], 1],
+		['adds a row above it', (text: string) => [text.indexOf('| Login'), `| Sync | Open |\n`], 2]
+	] as const) {
+		it(`keeps the caret in the open cell when another client ${change}, so typing goes on landing there`, () => {
+			const r = track(open());
+			clicked(r);
+			typed(r, 5, 'XY');
+			expect(cellEditor(r)!.hasFocus, 'setup: the reader is typing in the cell').toBe(true);
+			r.edit(AUTHOR, (text) => { const [at, insert] = edit(text.toString()); text.insert(at as number, insert as string); });
+			expect(editingCell(r), 'the cell is still open, in the table as now drawn').toBe(cellEl(r, row));
+			expect(cellEditor(r)!.hasFocus, 'the cell still has the caret').toBe(true);
+			expect(cellCaret(r), 'where the reader left it').toBe(7);
+			typed(r, cellCaret(r), '!');
+			expect(r.view.state.doc.toString()).toContain('| LoginXY! |');
+		});
+	}
 });
 
 describe('a selection in the cell is a selection in the document', () => {

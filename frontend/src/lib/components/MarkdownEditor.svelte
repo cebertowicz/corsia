@@ -146,7 +146,7 @@
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
 	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
 	import { openCellState } from '$lib/cm/widget-cell-state';
-	import { cellEditorExtensions } from '$lib/cm/widget-cell-editor';
+	import { cellEditorExtensions } from '$lib/cm/widget-cell-setup';
 
 	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {

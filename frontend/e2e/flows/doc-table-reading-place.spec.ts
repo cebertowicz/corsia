@@ -194,7 +194,15 @@ async function placement(page: Page, key: string): Promise<Placement> {
 	// The document's scroller: a click on a cell opens that cell's own editor, which has one too.
 	return readPainted(page.locator('.cm-scroller:not(.cm-md-cell-editor .cm-scroller)'), (scroller, key) => {
 		const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`))!;
-		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = tr.querySelector('strong')!.getBoundingClientRect();
+		// The title's own words, drawn or in the open cell's editor (which styles them without a <strong>): the first text in
+		// the row that holds the key is the title cell's.
+		const words = document.createTreeWalker(tr, NodeFilter.SHOW_TEXT);
+		let range: Range | null = null;
+		for (let node = words.nextNode(); node && !range; node = words.nextNode()) {
+			const at = node.textContent!.indexOf(key);
+			if (at >= 0) { range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + key.length); }
+		}
+		const box = scroller.getBoundingClientRect(), rect = tr.getBoundingClientRect(), text = range!.getBoundingClientRect();
 		// At phone width the comments come up as a sheet over the text; beside a wide canvas they sit in the margin.
 		const sheet = window.innerWidth <= 768 ? document.querySelector<HTMLElement>('[data-doc-comments-drawer]') : null;
 		const bottom = sheet ? Math.min(box.bottom, sheet.getBoundingClientRect().top) : box.bottom;
