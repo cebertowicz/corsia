@@ -95,10 +95,8 @@
 		onDrawerShown?: (shown: boolean) => void;
 		/** The sheet controller's modal presence, including its closing scrim. */
 		onSheetModalChange?: (open: boolean) => void;
-		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
-		onRevealDraft?: (opening: boolean) => void;
-		/** Asks the editor to keep the text a phone's thread sheet was opened from clear of it, now and whenever the sheet moves. */
-		onRevealCard?: (opening: boolean, panel: HTMLElement | null) => void;
+		/** Asks the editor to keep the draft's text, or the text a thread sheet was opened from, clear of the sheet, now and whenever it moves. */
+		onRevealDraft?: (opening: boolean) => void; onRevealCard?: (opening: boolean, panel: HTMLElement | null) => void;
 		/** Resolved threads at every width (zero on an image's drawer), for the header control that opens their drawer. */
 		resolvedCount?: number;
 		/** A new comment is being written over the margin column: the column stays, its cards where they were, with the composer beside the text. */
@@ -212,7 +210,6 @@
 		// An image's comments read in number order, like its tags.
 		return image ? [...allShown].sort(byCommentNumber) : allShown;
 	});
-	/** Two or more threads on the pressed text: the list's title, which also names its sheet. */
 	const stackedTitle = $derived(sheet.state?.kind === 'thread' && sheet.state.ids && sheet.state.ids.length > 1 ? `${sheet.state.ids.length} comments` : null);
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
