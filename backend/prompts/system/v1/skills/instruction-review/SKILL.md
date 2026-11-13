@@ -36,7 +36,7 @@ Test each line with the questions in `context-stewardship`'s **Make each source 
 
 ## Authority
 
-Decide first whose words you may change. An invariant, an authority limit, or text the person wrote themselves goes to them as an exact before and after unless they have said you may edit it directly (see **Choices the owner sets**). A file another agent holds, and text that shipped with the product, always go to their owner as an exact before and after; you never edit them.
+Decide first whose words you may change. An invariant, an authority limit, or text the person wrote themselves goes to them as an exact before and after unless they have said you may edit it directly (see **Defaults**). A file another agent holds, and text that shipped with the product, always go to their owner as an exact before and after; you never edit them.
 
 ## Apply
 
@@ -56,11 +56,11 @@ Arm the wake yourself; a horizon written only in a message wakes nothing. If not
 
 ## Report
 
-Only when the set changed, something needs the person, or one of their choices has not been asked yet: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
+Only when the set changed or something needs the person: say what changed in outcome words, in the shape skill `asking-the-person` gives: the size before and after, what moved where, what waits on another owner, and what wakes the next review. A person's goals, commitments and decision rights are never filed under obsolete guidance — when one looks stale, ask, don't edit.
 
-## Choices the owner sets
+## Defaults
 
-Ask once, record the answer, and run the default in brackets until they answer: how size is counted [lines or characters — whichever you can count repeatedly]; the budget's headroom [a quarter above the first count]; whether you may edit the person's own instruction text or only propose it [propose]; the review horizon [weekly, and after any material roster or objective change]; whether the review reaches past the always-loaded set [no]. A choice is asked in one report; after that it is listed only in a report sent for another reason. Their answer replaces the default and is recorded.
+Never ask the person about these; run each as written and record it once with the count. Size is counted in lines or characters, whichever you can count repeatedly. The budget's headroom is a quarter above the first count. You propose changes to the person's own instruction text and never edit it. The review runs weekly, and after any material roster or objective change. It stops at the always-loaded set. When the person asks, unprompted, for one of these to be different, that replaces the default and is recorded.
 
 ## Never
 

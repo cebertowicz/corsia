@@ -208,6 +208,10 @@ def append_node_transition(
     ).fetchone()
     if row is None or row["parent_id"] is not None:
         return None
+    from plans.workflow_fields import announced
+
+    if not announced(connection, node_id):
+        return None
     event_type, label = _MILESTONE_TRANSITIONS[str(new_state)]
     summary = f"{label}: {row['title']}"
     return append_owner_event(

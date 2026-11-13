@@ -4,12 +4,12 @@ import { commentDraft, cancelCommentCapture, discardCommentDraft, type CommentDr
 import { captureComment, selectComment, selectionRange, SELECTION_LOST, SELECTION_RECONNECTED, type CommentSelection } from '$lib/stores/commentSelection';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
-import type { SelectionLabel } from '$lib/stores/commentDraft';
+import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 import { plainErrorText } from '$lib/plainError';
 import { submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
-export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null;
+export type ViewerSelection = SelectionOffer | null;
 type Context = {
 	scope: () => string;
 	draft: () => CommentDraft | null;

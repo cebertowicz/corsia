@@ -67,7 +67,8 @@ export const docTheme = EditorView.theme({
 	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--accent-line)' },
 	'.cm-md-link-open': { transition: 'text-decoration-color 150ms' },
 	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' }, '.cm-md-link-open:hover': { textDecorationColor: 'var(--accent)' } },
-	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' } },
+	// A table cell is a tap target now that it edits: a finger's height.
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' }, '.cm-md-table td, .cm-md-table th': { height: '44px' } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },
@@ -83,6 +84,28 @@ export const docTheme = EditorView.theme({
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
+	// A body cell wraps as its editor does (`pre-wrap`, below): a space at a line's end hangs past it. The document's own
+	// wrapping (`break-spaces`) reaches a `td` and would make it take room, so a cell would end a line one word sooner than its
+	// editor and a click on the drawn word would put the caret on another. A header cell keeps `.md-content th`'s `nowrap`.
+	'.cm-md-table td': { whiteSpace: 'pre-wrap' },
+	// The open cell's editor sits in the cell, in place of its drawn content, and takes the cell's type and wrapping from it.
+	// It is an editing island inside the table, which the rule above makes read-only, so its content asks for editing back.
+	'.cm-md-cell-editor .cm-content, .cm-md-cell-editor .cm-content *': { WebkitUserModify: 'read-write' },
+	'.cm-md-cell-editor .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
+	'.cm-md-cell-editor .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit', fontFamily: 'inherit' },
+	'.cm-md-cell-editor .cm-content': { padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'inherit', overflowWrap: 'inherit', wordBreak: 'inherit' },
+	'.cm-md-table th .cm-md-cell-editor .cm-content': { whiteSpace: 'pre' },
+	'.cm-md-cell-editor .cm-line': { padding: '0' },
+	// The document's own link and code rules above reach the cell's editor and outrank `app.css`'s `.md-content a` and
+	// `.md-content code`, which style elements the editor does not draw; these two give the cell's marks back their look.
+	'.cm-md-cell-editor .cm-md-link': { color: 'var(--accent-text)', textDecoration: 'none' },
+	'.cm-md-cell-editor .cm-md-inline-code': {
+		fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: 'var(--text-subhead)', padding: '2px 6px', border: 'none',
+		borderRadius: 'var(--radius-2xs)', background: 'var(--bg-tertiary)'
+	},
+	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
+	// for the comment flows, would otherwise be a second caret on the same text.
+	'&.cm-md-cell-open .cm-cursorLayer': { display: 'none' },
 	'.cm-md-table .table-wrap': { margin: '0' },
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
@@ -122,6 +145,9 @@ export const docTheme = EditorView.theme({
 	'.cm-image-pin.selected .disc::after': { opacity: '1' },
 	// A deleted passage's sign (900 and 393, where no card shows): the dashed amber edge its margin card has, on the page colour.
 	'.cm-image-pin.removed .disc': { background: 'var(--bg-primary)', border: '1.5px dashed var(--amber)', boxShadow: 'none' },
+	// Unread: the unread highlight's two marks on the disc, a ring in the text colour past the halo and the accent wash beyond it. Tokens only; nothing is added to the disc, so nothing moves.
+	'.cm-image-pin[data-unread] .disc': { boxShadow: '0 0 0 1.5px var(--image-region-halo), 0 0 0 3px var(--text-primary), 0 0 0 5.5px color-mix(in srgb, var(--accent) 22%, transparent)' },
+	'.cm-image-pin.removed[data-unread] .disc': { boxShadow: '0 0 0 1.5px var(--text-primary), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent)' },
 	'.cm-image-pin:focus-visible': { outline: 'none' },
 	'.cm-image-pin:focus-visible .disc': { outline: '2px solid var(--accent)', outlineOffset: '3px' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on
@@ -129,8 +155,22 @@ export const docTheme = EditorView.theme({
 	// the layout until the next frame. CodeMirror measures in the same task it
 	// writes in; it would record the old geometry and place clicks by it.
 	'@media (prefers-reduced-motion: reduce)': { '.cm-scroller, .cm-scroller *': { transitionProperty: 'none !important' } },
+	// Forced colours drop shadows and washes: an unread pin is the system highlight colours as a fill, a read one keeps its own.
+	'@media (forced-colors: active)': { '.cm-image-pin[data-unread] .disc, .cm-image-pin.removed[data-unread] .disc': { forcedColorAdjust: 'none', background: 'Highlight', color: 'HighlightText', border: '1.5px solid HighlightText', boxShadow: '0 0 0 2px Highlight' } },
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
+
+/**
+ * The marks a rendered table cell draws as `strong`, `em` and `del` elements, for the cell's own editor, whose highlighting
+ * draws classed spans that `app.css`'s element rules cannot reach. A link is coloured by `.cm-md-cell-editor .cm-md-link`.
+ */
+export const cellHighlight = syntaxHighlighting(
+	HighlightStyle.define([
+		{ tag: t.strong, fontWeight: '600' },
+		{ tag: t.emphasis, fontStyle: 'italic' },
+		{ tag: t.strikethrough, textDecoration: 'line-through' }
+	])
+);
 
 export const docHighlight = syntaxHighlighting(
 	HighlightStyle.define([

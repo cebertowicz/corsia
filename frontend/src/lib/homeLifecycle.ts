@@ -99,7 +99,10 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		blurTimer = undefined;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '60px');
 		document.documentElement.style.setProperty('--floater-bottom-pad', '4px');
-		document.documentElement.style.setProperty('--messages-pad-top', 'calc(var(--safe-top) + 12px)');
+		// The transcript gives up its header clearance only for its own keyboard; an editor in a sheet over it
+		// (a chat comment) keeps the passage it is about below the header.
+		if ((e.target as HTMLElement).closest('[data-adaptive-drawer]')) document.documentElement.style.removeProperty('--messages-pad-top');
+		else document.documentElement.style.setProperty('--messages-pad-top', 'calc(var(--safe-top) + 12px)');
 		updateCanvasShift();
 		options.chatPanel()?.captureBottomOffset();
 		requestAnimationFrame(() => requestAnimationFrame(() => {

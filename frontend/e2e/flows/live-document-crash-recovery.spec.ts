@@ -137,7 +137,7 @@ for (const [width, viewport] of viewports) {
 						const settledState = (await liveFaultEvidence(request, document.artifactId)).durable_state_digest;
 						await page.reload();
 						// Reload returns to the thread list; reopen the owning thread's saved canvas.
-						if (width === '393') await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+						if (width === '393') await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 						await page.getByText(document.title, { exact: true }).first().click();
 						await expect(page.locator('.cm-content')).toBeVisible();
 						await expectConverged(page, request, document, expected);

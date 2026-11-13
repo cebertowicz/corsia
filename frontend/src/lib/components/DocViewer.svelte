@@ -14,6 +14,7 @@
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createCommentOpeners } from '$lib/docViewerClickPoint';
+	import { createHeldUnread } from '$lib/docHeldUnread.svelte';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
@@ -29,7 +30,7 @@
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
-	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
+	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
@@ -125,11 +126,13 @@
 	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => commentSurface?.cardMode() === 'margin');
 	const reviewBarState = createReviewBarState();
+	closeCellUnderSheet(commentUI, () => docRoot);
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
 	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
-	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)));
+	const heldUnread = createHeldUnread(() => !!commentUI.state, () => listedComments);
+	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	const openCards = createCommentOpeners(commentUI, scroll);

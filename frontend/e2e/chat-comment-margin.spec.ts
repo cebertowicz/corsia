@@ -1,8 +1,8 @@
 import { expect, test } from './support/test';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses, waitForThreadReply } from './support/mock';
-import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
+import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread, settleHighlight } from './support/chatComments';
 import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
 
 
@@ -43,14 +43,13 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
 	});
 	await page.locator('.sel-comment').click();
 	await commentEditor(page).fill('A note on the phrase');
+	// The comment posts from its own box and starts the Turn that answers it; it never becomes a chat message.
+	await seedMockResponses(request, [{ content: 'Received comment' }]);
 	await page.getByRole('button', { name: 'Comment', exact: true }).click();
 	await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
 	await commentEditorClosed(page);
-	// The comment belongs to the message only once the message carrying it is delivered.
-	await seedMockResponses(request, [{ content: 'Received comment' }]);
-	await chatComposer(page).fill('Please address this');
-	await page.getByRole('button', { name: 'Send message' }).click();
 	await commentOnMessage(row, QUOTE);
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 	await waitForThreadReply(request, thread, 'Received comment');
 	return { row, narrow };
 }
@@ -60,23 +59,11 @@ async function commentedMessage(page: Page, request: APIRequestContext, width: n
  * composer, so the click that follows lands where it was measured. Two animation frames are not enough: while the
  * transcript is still settling, a click measured on the highlight is delivered onto text that has moved, and the
  * card never opens (the recorded 1440 timeout; the saved trace shows the pointer landing under `.input-floater`).
+ * Both axes count: a side pane closing slides the transcript sideways while its lines keep their height.
  */
 async function centerAndSettle(page: Page, row: Locator) {
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-	const read = () => row.evaluate((el) => {
-		const anchor = el.querySelector<HTMLElement>('.cm-comment-anchor') ?? el;
-		const box = anchor.getBoundingClientRect();
-		const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
-		const hits = [...anchor.getClientRects()].length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
-		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
-		return clear ? `settled:${Math.round(box.y)}` : 'covered';
-	});
-	await expect.poll(async () => {
-		const before = await read();
-		await page.waitForTimeout(80);
-		const after = await read();
-		return before === after ? before : `moved:${before}>${after}`;
-	}, { message: 'the highlighted line stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+$/);
+	await settleHighlight(page, row.locator('.cm-comment-anchor').first());
 }
 
 /**
@@ -109,7 +96,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	test.setTimeout(120_000);
 	const { row } = await commentedMessage(page, request, 1440);
 	// Leave enough chat width for the margin, as in the long-reply cases below.
-	await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	await centerAndSettle(page, row);
 
@@ -143,7 +130,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await card.getByRole('button', { name: 'Send reply' }).click();
 	await expect(card.getByText('Answer from the card')).toBeVisible();
 	// A reply goes to CORSIA, never into the transcript as a message of its own.
-	await expect(page.locator('.messages .message.user')).toHaveCount(1);
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 
 	// The first Escape lets the picked card go; the card itself stays beside its text.
 	await card.click();
@@ -158,7 +145,7 @@ for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark']
 	const { row } = await commentedMessage(page, request, width);
 	await page.setViewportSize({ width, height: 900 });
 	await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
-	await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	const card = page.locator('.chat-margin .chat-margin-card');
 	await expect(card).toHaveCount(1);
