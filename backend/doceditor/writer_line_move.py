@@ -43,6 +43,21 @@ def _repoint(ops_json: str, old_path: str | None, new_path: str | None) -> str:
     return json.dumps(ops) if changed else ops_json
 
 
+def repoint_lines(db, *, artifact_id: str, old_path: str, new_path: str) -> int:
+    """Point this document's saved calls at the path it moved to, its identity unchanged; returns how many lines.
+
+    A promote that carries the file's identity changes only its path, so no line is re-keyed; the wake
+    still asks the agent to repeat a saved call, and that call must name the file where it now is.
+    """
+    changed = 0
+    for row in db.execute("SELECT id, ops FROM doc_comment_writer_line WHERE artifact_id=?", (artifact_id,)).fetchall():
+        ops = _repoint(str(row["ops"]), old_path, new_path)
+        if ops != str(row["ops"]):
+            db.execute("UPDATE doc_comment_writer_line SET ops=? WHERE id=?", (ops, row["id"]))
+            changed += 1
+    return changed
+
+
 def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
     """Carry this document's writer lines to the identity that replaces it; returns how many.
 
