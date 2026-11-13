@@ -107,6 +107,8 @@ class LiveStore:
         connection = sqlite3.connect(self.path, timeout=1.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=1000")
+        # WAL: a commit in flight must not block other connects and reads (stored in the file).
+        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
