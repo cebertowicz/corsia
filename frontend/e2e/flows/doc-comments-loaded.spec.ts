@@ -149,8 +149,9 @@ function bodyCut(body: Locator): Promise<string | null> {
 				if (!rect.height) continue;
 				const line = `line ${Math.round(rect.top)}-${Math.round(rect.bottom)} ("${node.data.trim().slice(0, 20)}")`;
 				// A body taller than the view is read in turn: only lines that start inside the view are held to it.
-				if (rect.top >= bottom) return null;
-				if (rect.top < top - 1 || rect.bottom > bottom + 1) return `${line} off screen`;
+				// The line at the view's edge runs on past it: the rest is read by scrolling the one scroller.
+				if (rect.top >= bottom || rect.bottom > bottom + 1) return null;
+				if (rect.top < top - 1) return `${line} off screen`;
 				for (let parent = node.parentElement; parent && parent !== card.parentElement; parent = parent.parentElement) {
 					if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
 					const clip = parent.getBoundingClientRect();

@@ -135,11 +135,12 @@ export async function expectDiscussionReachableByScroll(card: Locator, text: str
 			const raised = region.getBoundingClientRect().bottom - (composerTop() - 8);
 			if (raised > 0) port.scrollTop += raised;
 		}
-		// Scroll the line itself into the band: scrolling to the end of the region would show a long reply's tail
-		// and leave its first line, the one being asserted, clipped above.
+		// Scroll the line itself to the top of its scroll box, up or down: scrolling to the end of the region would show a
+		// long reply's tail and leave its first line, the one being asserted, clipped above, and a long draft below the
+		// discussion leaves the box scrolled past it.
 		const first = lineOf();
 		if (!first) return scrollers.length ? 'line not in the scroll box' : 'line not in the card';
-		if (inner) inner.scrollTop += Math.max(0, first.getBoundingClientRect().top - inner.getBoundingClientRect().top - 2);
+		if (inner) inner.scrollTop += first.getBoundingClientRect().top - inner.getBoundingClientRect().top - 2;
 		const range = lineOf() ?? first;
 		const line = range.getBoundingClientRect();
 		if (!line.height) return 'line has no height';
