@@ -27,7 +27,6 @@ DOCUMENTED = {
     "BACKEND_PORT": "Sets the backend port.",
     "CI": "Identifies a CI environment for workspace checks.",
     "CLAUDE_BIN": "Selects the Claude executable.",
-    "CODEX_BIN": "Selects the Codex executable.",
     "CODEX_HOME": "Selects the Codex home directory.",
     "CORSIA_AGENT_BROWSER_VERSION_RANGE": "Sets the accepted agent-browser version range.",
     "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI": "Allows a home workspace in CI or tests.",
@@ -45,8 +44,6 @@ DOCUMENTED = {
     "CORSIA_PROVIDER_STREAM_CAPTURE_DIR": "Sets the directory for captured provider streams.",
     "CORSIA_PROVIDER_STREAM_CAPTURE_THREADS": "Selects chats whose provider streams are captured.",
     "CORSIA_PR_QUIET_WATCH_DISABLE": "Disables the GitHub pull request quiet watch when set to 1.",
-    "CORSIA_REVIEWER_MODEL": "Selects the primary review model.",
-    "CORSIA_REVIEWER_FALLBACK_MODEL": "Selects the fallback review model.",
     "HERMES_HOME": "Selects the Hermes Agent directory for import.",
     "OPENCLAW_CONFIG_PATH": "Selects the OpenClaw configuration file for import.",
     "OPENCLAW_HOME": "Selects the OpenClaw home directory for import.",
@@ -77,7 +74,6 @@ DOCUMENTED = {
     "CORSIA_PRE_MIGRATION_BACKUPS_KEEP": "Sets how many pre-migration backups to keep.",
     "CORSIA_PYTHON": "Selects the Python executable used by the launcher.",
     "CORSIA_RESTART_JITTER_SECONDS": "Sets the random delay applied to restart timing, in seconds.",
-    "CORSIA_REVIEWER_MAX_TURNS": "Sets the maximum reviewer turns.",
     "CORSIA_SERVICE_LABEL": "Sets the service label.",
     "CORSIA_SERVICE_MANAGER": "Selects the service manager.",
     "CORSIA_SERVICE_PATH": "Overrides the executable search path used for the service.",
@@ -99,7 +95,6 @@ DOCUMENTED = {
     "LC_ALL": "Provides locale information for region detection.",
     "LITELLM_LOCAL_MODEL_COST_MAP": "Controls the local LiteLLM model cost map.",
     "LOCALAPPDATA": "Provides the Windows local application data directory.",
-    "OMLX_BASE_URL": "Sets the oMLX endpoint for the reviewer.",
     "PATH": "Provides executable search paths.",
     "SHELL": "Selects the user's shell.",
     "TIKTOKEN_CACHE_DIR": "Selects the tokenization cache directory.",
@@ -128,7 +123,7 @@ NOT_SETTINGS = {
 STANDARD = {"PATH", "HOME", "SHELL", "TZ", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
             "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "TIKTOKEN_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR"}
 DEVELOPMENT = {"CORSIA_TEST_MODE", "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI", "CI", "GITHUB_ACTIONS"}
-MODEL = {"OMLX_BASE_URL", "CLAUDE_BIN", "CODEX_BIN", "CODEX_HOME"}
+MODEL = {"CLAUDE_BIN", "CODEX_HOME"}
 
 
 def add(found, name, path, default):

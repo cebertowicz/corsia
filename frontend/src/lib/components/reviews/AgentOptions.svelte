@@ -1,16 +1,17 @@
 <script lang="ts" generics="T extends TaggableAgent">
 	import Avatar from '$lib/components/ui/Avatar.svelte';
+	import MiddleName from '$lib/components/MiddleName.svelte';
 	import { Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
 	import type { TaggableAgent } from '$lib/api/docReviews';
-	let { id, label, matches, active, choose, status = 'ready', retry }: { id: string; label: string; matches: T[]; active: number; choose: (reviewer: T) => void; status?: 'loading' | 'error' | 'empty' | 'no_thread' | 'ready'; retry?: () => Promise<void> } = $props();
+	let { id, label, matches, active, choose, status = 'ready', retry, compact = false }: { id: string; label: string; matches: T[]; active: number; choose: (reviewer: T) => void; status?: 'loading' | 'error' | 'empty' | 'no_thread' | 'ready'; retry?: () => Promise<void>; compact?: boolean } = $props();
 </script>
-<div {id} role="listbox" tabindex="-1" aria-label={label} class="options">
+<div {id} role="listbox" tabindex="-1" aria-label={label} class="options" class:compact>
 	{#each matches as reviewer, index (reviewer.id)}
 		<!-- svelte-ignore a11y_click_events_have_key_events (The input owns keyboard navigation.) -->
-		<div id={`${id}-option-${reviewer.id}`} role="option" tabindex="-1" aria-selected={index === active} class="option" class:active={index === active} onmousedown={(event) => event.preventDefault()} onclick={() => choose(reviewer)}>
+		<div id={`${id}-option-${reviewer.id}`} role="option" tabindex="-1" aria-label={reviewer.responsibility ? `${reviewer.name} ${reviewer.responsibility}` : reviewer.name} aria-selected={index === active} class="option" class:active={index === active} onmousedown={(event) => event.preventDefault()} onclick={() => choose(reviewer)}>
 			<Avatar name={reviewer.name} color={agentColor(reviewer.id)} hidden size="md" />
-			<span class="option-text"><span class="option-name">{reviewer.name}</span>{#if reviewer.responsibility}<span class="option-detail" title={reviewer.responsibility}>{reviewer.responsibility}</span>{/if}</span>
+			<span class="option-text">{#if compact}<span class="option-name"><MiddleName name={reviewer.name} /></span>{:else}<span class="option-name" title={reviewer.name}>{reviewer.name}</span>{/if}{#if reviewer.responsibility}<span class="option-detail" title={reviewer.responsibility}>{reviewer.responsibility}</span>{/if}</span>
 		</div>
 	{/each}
 	{#if status === 'loading'}<p class="empty" role="status">Loading agents…</p>
@@ -27,9 +28,12 @@
 	.option-name { overflow-wrap: anywhere; }
 	.option-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.option-detail { color: var(--text-tertiary); font-size: var(--text-caption); }
+	.compact .option-text { flex: 1; flex-direction: row; align-items: center; gap: var(--space-2); }
+	.compact .option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.compact .option-detail { flex: none; }
 	.empty { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.empty { margin: var(--space-2); }
 	/* The Retry button is 28px tall (space-7 less space-1); its margins take it down to one text line, so the error row is as tall as the loading row and Retry's size and hit area are unchanged. */
 	.empty :global(.btn) { vertical-align: middle; margin-block: calc((1lh - (var(--space-7) - var(--space-1))) / 2); }
-	@media (max-width: 48rem) { .option { min-height: var(--touch-target); } }
+	@media (max-width: 48rem), (any-pointer: coarse) { .option { min-height: var(--touch-target); } }
 </style>

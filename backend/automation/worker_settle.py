@@ -27,7 +27,6 @@ from typing import Any
 
 from loguru import logger
 
-from automation import review_intent
 from core.workflow_result import ResultInvalid, check_result
 from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
@@ -168,8 +167,6 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "worker_thread": row["worker_thread_id"],
         # The repository a script on this event may read (``script_github_channel``).
         "repo": _artifact_repository(row),
-        # Without a connection the revision read opens its own; the stamp is never left out.
-        **(review_intent.stamp(check.get("intent"), db=db) if outcome == RETURNED else {}),
     }
     if context:
         facts.update(source=context["source"], kind=context["kind"], **context["item"],

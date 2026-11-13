@@ -24,8 +24,6 @@ _FACTS = (
     REQUESTER_FACT, "rule_id", "request_event", "request_identity", "workflow", "source",
     "item", "item_version", "artifact_integration", "artifact_type", "valid", "result",
     "reason", "detail", "kind", "injection_signs", "model", "worker_thread", "repo",
-    "intent_node", "intent_linked_node", "intent_revision", "intent_current_revision", "intent_text",
-    "intent_reason",
 )
 
 
