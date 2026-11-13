@@ -878,7 +878,39 @@ def test_a_new_entry_never_takes_the_name_of_a_record_still_there(repo, monkeypa
     assert worktree_reaper_remove._quarantine_target(repo, "wt").name == "wt-1000-1"
 
 
-def test_a_recorded_entry_git_still_registers_and_refuses_is_kept(repo, monkeypatch):
+def test_a_removal_cut_off_mid_delete_is_finished_with_real_git(repo):
+    """Git deletes a tree in directory order, so a removal cut off mid-delete can
+    leave the tree without its ``.git`` file: real git then refuses it and still
+    lists it. The record authorizes deleting the directory, and Git asked again
+    drops only that entry's registration; nothing calls prune.
+    """
+    entry = _entry(repo, "a-cut")
+    worktree_reaper_remove.mark_copied_out(entry)
+    admin = worktree_reaper_probe.admin_dir(entry)
+    (entry / ".git").unlink()
+    (entry / "README").unlink()
+    kept = _entry(repo, "b-work")
+    kept_admin = worktree_reaper_probe.admin_dir(kept)
+    (kept / "notes.md").write_text("never copied\n")
+    refused = subprocess.run(
+        ["git", "worktree", "remove", "--force", str(entry)], cwd=repo, capture_output=True, text=True,
+    )
+    assert refused.returncode != 0 and entry.name in _git(repo, "worktree", "list", "--porcelain")
+
+    report = _run(repo)
+
+    assert report.quarantine_removed == 1 and report.quarantine_entries == [kept.name]
+    assert not entry.exists() and not _record(entry).exists() and not admin.exists()
+    assert entry.name not in _git(repo, "worktree", "list", "--porcelain")
+    assert kept_admin is not None and kept_admin.is_dir()
+    assert (kept / "notes.md").read_text() == "never copied\n"
+
+
+def test_a_registration_git_keeps_refusing_keeps_its_record(repo, monkeypatch):
+    """The directory is deleted on the record, but the entry counts as finished only
+    once Git registers it nowhere; until then the record stays and the next sweep
+    finishes the registration.
+    """
     entry = _entry(repo, "refused")
     worktree_reaper_remove.mark_copied_out(entry)
     real_git = worktree_reaper_remove.git
@@ -889,11 +921,21 @@ def test_a_recorded_entry_git_still_registers_and_refuses_is_kept(repo, monkeypa
         return real_git(cwd, args, **kwargs)
 
     monkeypatch.setattr(worktree_reaper_remove, "git", _refusing)
+    logged: list[str] = []
+    sink = logger.add(logged.append, format="{message}", level="WARNING")
 
-    report = _run(repo)
+    first = _run(repo)
 
-    assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
-    assert (entry / "README").is_file() and _record(entry).is_file()
+    logger.remove(sink)
+    assert first.quarantine_removed == 0 and not entry.exists() and _record(entry).is_file()
+    assert entry.name in _git(repo, "worktree", "list", "--porcelain")
+    assert "fatal: refused" in "".join(logged)
+
+    monkeypatch.setattr(worktree_reaper_remove, "git", real_git)
+    second = _run(repo)
+
+    assert second.quarantine_removed == 1 and _quarantine(repo) == []
+    assert entry.name not in _git(repo, "worktree", "list", "--porcelain")
 
 
 def test_a_recorded_entry_git_no_longer_registers_is_finished(repo):

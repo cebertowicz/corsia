@@ -33,6 +33,8 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_salvage import SalvageError
 
 if TYPE_CHECKING:
+    import subprocess
+
     from infra.worktree_reaper import RunBudget
 
 QUARANTINE_DIR = "corsia-reaping"
@@ -150,26 +152,35 @@ def _registered(repo: Path, entry: Path) -> bool:
     return entry.resolve(strict=False) in {item.path for item in list_worktrees(repo)}
 
 
-def _finish(repo: Path, entry: Path) -> bool:
-    """Delete an entry that has a record; on failure the record stays for the next sweep.
-
-    Git's forced removal deletes the tree and then its registration. When Git
-    refuses and no longer registers the entry anywhere, only the directory is
-    left and is deleted here; while Git still registers it, it is kept and logged.
-    Deleting a real tree takes minutes, so the removal answers to its own timeout.
-    """
-    removed = git(
+def _remove(repo: Path, entry: Path) -> subprocess.CompletedProcess[str]:
+    """Run Git's forced removal; a real tree takes minutes, so it has its own timeout."""
+    return git(
         repo, ["worktree", "remove", "--force", str(entry)],
         timeout=WORKTREE_REMOVE_TIMEOUT_SECONDS, git_env=common_git_env(repo),
     )
+
+
+def _finish(repo: Path, entry: Path) -> bool:
+    """Delete an entry that has a record; on failure the record stays for the next sweep.
+
+    Git's forced removal deletes the tree and then its registration. A removal cut
+    off mid-delete can leave a tree Git refuses (its ``.git`` file already gone).
+    The record authorizes deletion, so the directory is deleted here and Git is
+    asked once more, which then drops only this entry's registration. It counts
+    only once Git registers the entry nowhere.
+    """
+    removed = _remove(repo, entry)
     if removed.returncode != 0:
+        if os.path.lexists(entry) and not delete_quarantined(repo, entry):
+            logger.warning("worktree_reaper: entry {} kept; delete failed", entry.name)
+            return False
         if _registered(repo, entry):
-            logger.warning(
-                "worktree_reaper: entry {} kept; git refused: {}", entry.name, git_detail(removed),
-            )
-            return False
-        if not delete_quarantined(repo, entry):
-            return False
+            again = _remove(repo, entry)
+            if _registered(repo, entry):
+                logger.warning(
+                    "worktree_reaper: entry {} kept; git refused: {}", entry.name, git_detail(again),
+                )
+                return False
     _drop_record(entry)
     return True
 
@@ -179,8 +190,9 @@ def sweep_quarantine(repo: Path, budget: RunBudget) -> int:
 
     An entry with a copied-out record is finished (``_finish``). An entry without
     one is kept whatever state it is in, and every run report lists it until a
-    person acts. A record whose entry is gone is deleted. ``budget`` is checked
-    before each entry, and each finished entry counts as one removal.
+    person acts. A record whose entry is gone is deleted, unless Git still
+    registers that entry: then it is finished. ``budget`` is checked before each
+    entry, and each finished entry counts as one removal.
     """
     root = quarantine_root(repo)
     if not root.is_dir() or root.is_symlink():
@@ -188,10 +200,17 @@ def sweep_quarantine(repo: Path, budget: RunBudget) -> int:
     finished = 0
     for entry in sorted(root.iterdir()):
         if entry.name.endswith(COPIED_OUT_SUFFIX):
-            if not os.path.lexists(entry.with_name(entry.name.removesuffix(COPIED_OUT_SUFFIX))):
-                entry.unlink(missing_ok=True)
-            continue
-        if not is_copied_out(entry):
+            record, entry = entry, entry.with_name(entry.name.removesuffix(COPIED_OUT_SUFFIX))
+            if os.path.lexists(entry):
+                continue
+            try:
+                gone = not _registered(repo, entry)
+            except (OSError, ReaperGitError):
+                gone = False  # Unknown: keep the record for the next sweep.
+            if gone:
+                record.unlink(missing_ok=True)
+                continue
+        elif not is_copied_out(entry):
             continue
         if budget.exhausted():
             break
