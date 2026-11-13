@@ -1,40 +1,80 @@
-"""Carry a document's comment state to the identity it moved to.
+"""One document's comment state follows it when a promote cannot carry its identity.
 
-A promote that cannot keep a working file's identity registers a new one and retires the old, and
-the person's comments must not stay behind on the retired id. So ``registry.models.retire``, having
-named the successor, calls this in that same transaction: the move, the tombstone and the new
-registration commit or roll back together, and no caller can name a successor and strand a thread.
-
-This module deliberately holds no rules of its own. Every row here belongs to another module, and
-each of them moves its own rows with its own invariants -- comment ids and image-region numbering
-(``comments.move_identity``), a queued writer line's place in line and its wake
-(``writer_line_move.move_identity``), a feedback batch's items, coalesced edit and count
-(``feedback_batch_core.move_identity``), a review request's state (``review_requests.move_identity``).
-An owner's next invariant then needs an edit in that owner only, not a matching copy here.
+A promote that cannot carry the working file's identity (#2555) registers a new identity and
+tombstones the old one. The person's comments must not stay on the tombstone. The rule is
+plain: each owner module moves its own rows to the successor identity under its own key, and
+nothing is merged -- a comment id, an image region number, a writer's place in line and a
+batch's due time keep the values the person has already seen. The successor is an identity
+registered for the promoted file in that same transaction, so it holds no comment state of
+its own; `refuse_if_occupied` proves that before a row moves rather than inventing merge rules
+for a state no promote can produce. `registry.models.retire` calls this inside its own write
+transaction, so the tombstone, the successor link and every moved row commit together or not
+at all.
 """
 
 from __future__ import annotations
 
 from doceditor import comments, feedback_batch_core, review_requests, writer_line_move
+from registry.shared_write_errors import SuccessorHoldsComments
+
+# Each module moves the rows it owns: `comments` the threads and their read marks,
+# `writer_line_move` the agents' place in line, `feedback_batch_core` the batches and their
+# items, `review_requests` the asks of one reviewer thread.
+OWNERS = (
+    ("comments", comments),
+    ("writer lines", writer_line_move),
+    ("feedback batches", feedback_batch_core),
+    ("review requests", review_requests),
+)
 
 
-def move_to_artifact(db, *, source_artifact_id: str, target_artifact_id: str) -> int:
-    """Move every comment row of a retiring identity onto the identity that replaces it; returns how many.
+def occupied_comment_tables(db, artifact_id: str) -> list[str]:
+    """Which kinds of comment state this identity holds; empty for a freshly registered one."""
+    return [
+        label
+        for label, owner in OWNERS
+        if owner.holds_rows(db, artifact_id)
+    ]
 
-    Runs in the caller's write transaction. Never called with the same id on both sides -- a promote
-    that carries the identity never retires it -- and a no-op then anyway. The order is the
-    dependency order: comments first, since a writer line's thread root and a batch's items name
-    them, then the writer lines, the batches and the review requests.
+
+def refuse_if_occupied(db, *, from_artifact_id: str, to_artifact_id: str) -> None:
+    """Stop a promote whose successor already holds comment state, with what to do about it.
+
+    Two documents' comment state is never merged here: positions the person has read would
+    change, and every merge rule tried has cost more than the rare case it served. A promote
+    registers its target identity in the same transaction, so an occupied successor means the
+    shared path was already registered to a document with comments of its own while the working
+    file's recorded hash had gone stale. The caller's transaction rolls the promote back, so the
+    file, its comments and both documents stay exactly as they were.
     """
-    if not source_artifact_id or not target_artifact_id or target_artifact_id == source_artifact_id:
-        return 0
-    moved = comments.move_identity(db, from_artifact_id=source_artifact_id, to_artifact_id=target_artifact_id)
-    moved += writer_line_move.move_identity(
-        db, from_artifact_id=source_artifact_id, to_artifact_id=target_artifact_id,
+    occupied = occupied_comment_tables(db, to_artifact_id)
+    if not occupied:
+        return
+    target = db.execute(
+        "SELECT path FROM artifact_identities WHERE id=?", (to_artifact_id,)
+    ).fetchone()
+    where = f" at {target[0]}" if target and target[0] else ""
+    raise SuccessorHoldsComments(
+        f"Cannot promote: the shared path is still registered to an earlier document{where} "
+        f"({to_artifact_id}) that holds {', '.join(occupied)}, and this file's recorded hash "
+        "no longer matches its bytes, so the promote cannot keep its own identity either. "
+        "Nothing was moved and the promote is rolled back. Promote to a different shared "
+        "path, or re-register the working file so its recorded hash matches its bytes first."
     )
-    moved += feedback_batch_core.move_identity(
-        db, from_artifact_id=source_artifact_id, to_artifact_id=target_artifact_id,
-    )
-    return moved + review_requests.move_identity(
-        db, from_artifact_id=source_artifact_id, to_artifact_id=target_artifact_id,
-    )
+
+
+def move_to_artifact(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
+    """Move every row of comment state to the successor identity; returns how many moved.
+
+    Called by `registry.models.retire` for the identity a promoted document now lives under.
+    Refuses first if the successor is occupied. Comment ids never change, so replies, tags,
+    mentions, recipient state, acknowledgements and thread read marks follow their threads by
+    themselves, and anchors stay valid because the promoted bytes are the file's own.
+    """
+    refuse_if_occupied(db, from_artifact_id=from_artifact_id, to_artifact_id=to_artifact_id)
+    moved = 0
+    for _label, owner in OWNERS:
+        moved += owner.move_identity(
+            db, from_artifact_id=from_artifact_id, to_artifact_id=to_artifact_id
+        )
+    return moved

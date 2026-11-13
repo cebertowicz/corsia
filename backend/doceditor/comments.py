@@ -348,32 +348,23 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
             n += cur.rowcount
         return n
 
+
+def holds_rows(db, artifact_id: str) -> bool:
+    """True when this document already has comments -- so it is not a promote successor (`doceditor.comment_transfer`)."""
+    return db.execute(
+        "SELECT 1 FROM doc_comments WHERE artifact_id=? LIMIT 1", (artifact_id,)
+    ).fetchone() is not None
+
+
 def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
     """Carry this document's comments to the identity that replaces it (`registry.models.retire`).
 
     Comment ids do not change, so replies, tags, mentions, recipient state, acknowledgements and
     thread read marks follow their threads by themselves, and anchors stay valid because the
-    promoted bytes are the file's own. A numbered image region is the one key two documents cannot
-    share: `idx_doc_comments_region_number` holds one number per image per document. The identity
-    being promoted into keeps every number the person has already read, since comment text cites
-    them, so arriving regions take the next free number on that image in the order they had --
-    the same `MAX(region_number) + 1` rule `_next_region_number` uses when a region is first drawn.
+    promoted bytes are the file's own. Nothing is merged and no position is re-derived: the
+    successor holds no rows of its own, so a region number or a thread position the person has
+    already read comes through unchanged.
     """
-    moved = 0
-    for row in db.execute(
-        """SELECT id, image_src FROM doc_comments
-           WHERE artifact_id=? AND region_number IS NOT NULL
-           ORDER BY COALESCE(image_src, ''), region_number""",
-        (from_artifact_id,),
-    ).fetchall():
-        db.execute(
-            """UPDATE doc_comments SET artifact_id=?, region_number=(
-                   SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
-                   WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')
-               ) WHERE id=?""",
-            (to_artifact_id, to_artifact_id, row["image_src"], row["id"]),
-        )
-        moved += 1
-    return moved + db.execute(
+    return db.execute(
         "UPDATE doc_comments SET artifact_id=? WHERE artifact_id=?", (to_artifact_id, from_artifact_id)
     ).rowcount

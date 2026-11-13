@@ -361,3 +361,10 @@ def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
         "UPDATE doc_review_requests SET artifact_id=? WHERE artifact_id=?",
         (to_artifact_id, from_artifact_id),
     ).rowcount
+
+
+def holds_rows(db, artifact_id: str) -> bool:
+    """True when this document already has review requests (`doceditor.comment_transfer`)."""
+    return db.execute(
+        "SELECT 1 FROM doc_review_requests WHERE artifact_id=? LIMIT 1", (artifact_id,)
+    ).fetchone() is not None

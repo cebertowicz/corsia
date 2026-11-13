@@ -292,7 +292,7 @@ def retire(
             # Naming a successor moves the document's comments here, so the two commit together or not at all.
             from doceditor.comment_transfer import move_to_artifact
 
-            move_to_artifact(_db, source_artifact_id=artifact_id, target_artifact_id=successor)
+            move_to_artifact(_db, from_artifact_id=artifact_id, to_artifact_id=successor)
         else:
             _db.execute(
                 "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.successor_id')"

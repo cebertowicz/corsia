@@ -23,7 +23,7 @@ from registry.shared_principals import WriteAuthority, artifact_owner
 from registry.shared_target import SharedTarget
 from registry.document_ownership import document_write_authority
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
-from registry.shared_write_errors import DurableWritePolicyError
+from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
     bound_file_mode,
     claim_bound_file,
@@ -757,16 +757,25 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
             f"Durable write intent {row['id']} does not match its target bytes."
         )
     shared = _recovery_shared_target(target, row, workspace=workspace, db=db)
-    artifact = _register_applied(
-        shared,
-        source,
-        thread_id=row["actor_thread_id"],
-        description=row["description"],
-        external_id=row["external_id"],
-        content_hash=row["content_sha256"],
-        before=backup.read_bytes() if backup and backup.exists() else None,
-        db=db,
-    )
+    try:
+        artifact = _register_applied(
+            shared,
+            source,
+            thread_id=row["actor_thread_id"],
+            description=row["description"],
+            external_id=row["external_id"],
+            content_hash=row["content_sha256"],
+            before=backup.read_bytes() if backup and backup.exists() else None,
+            db=db,
+        )
+    except SuccessorHoldsComments as exc:
+        # A promote onto a document that holds comment state fails identically every time it is
+        # retried, so letting it raise here would stop startup on every boot. Announce the undo and
+        # finish it now, through the same path an intent takes after the live write refused.
+        intents.mark_undoing(db, row["id"], 1)
+        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db)
+        logger.warning("Rolled back durable promotion %s: %s", row["id"], exc)
+        return
     try:
         _remove_if_present(stage)
         _remove_if_present(backup)
