@@ -98,7 +98,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new Error('The document could not be saved'));
 		await settled();
-		expect(document.body.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'The document could not be saved' : null);
+		expect(document.body.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'Couldn’t accept the suggestions. Try again.' : null);
 	});
 
 	it.each(meanwhile)('a reject fails after $what: shown only on the opening that started it', async ({ act, sameOpening }) => {
@@ -109,7 +109,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await act();
 		decision.fail(new Error('Network down'));
 		await settled();
-		expect(host.querySelector('[role="alert"]')?.textContent ?? null).toBe(sameOpening ? 'Network down' : null);
+		expect(host.querySelector('[role="alert"]')?.textContent ?? null).toBe(sameOpening ? 'Couldn’t reject this suggestion. Try again.' : null);
 	});
 
 	it.each(meanwhile)('an accept refused with 409 after $what: recorded only on the opening that started it', async ({ act, sameOpening }) => {

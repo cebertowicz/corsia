@@ -19,6 +19,9 @@ export class SuggestionRefused extends Error {
 	}
 }
 
+/** This side stopped before asking the server (the document could not be saved first); its message is a sentence written for the person. */
+export class SuggestionBlocked extends Error {}
+
 export async function decideSuggestion(
 	commentId: string, decision: 'accept' | 'reject', allFromAuthor = false
 ): Promise<SuggestionDecision> {
@@ -28,13 +31,13 @@ export async function decideSuggestion(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ decision, all_from_author: allFromAuthor }),
 	});
-	return decided(response, `Couldn't ${decision} this suggestion`);
+	return decided(response, allFromAuthor ? 'Couldn’t accept the suggestions. Try again.' : `Couldn’t ${decision} this suggestion. Try again.`);
 }
 
 /** Accept every open suggestion on a document, from every author, in one write; having none is not an error. */
 export async function acceptAllSuggestions(artifactId: string): Promise<SuggestionDecision> {
 	const response = await apiFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all`, { sessionInAddress: true, method: 'POST' });
-	return decided(response, "Couldn't accept the suggestions");
+	return decided(response, 'Couldn’t accept the suggestions. Try again.');
 }
 
 async function decided(response: Response, fallback: string): Promise<SuggestionDecision> {
@@ -42,9 +45,11 @@ async function decided(response: Response, fallback: string): Promise<Suggestion
 		let detail = fallback, kind: string | null = null;
 		try {
 			const body = await response.json();
-			if (typeof body.detail === 'string') detail = body.detail;
-			else if (body.detail && typeof body.detail.line === 'string') detail = body.detail.line;
 			if (typeof body.kind === 'string') kind = body.kind;
+			// Only a refusal the server wrote for a person (it names its `kind`, or sends a `line`) is shown. Any other answer (a crash, a gateway
+			// page, a bare `detail`) is runtime text, so the card shows the same fallback sentence the review bar does.
+			if (kind && typeof body.detail === 'string') detail = body.detail;
+			else if (body.detail && typeof body.detail.line === 'string') detail = body.detail.line;
 		} catch { /* Preserve the useful local fallback for non-JSON errors. */ }
 		throw new SuggestionRefused(detail, response.status, kind);
 	}

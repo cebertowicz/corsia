@@ -194,7 +194,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	}
 	// This canvas is under 900 px, so the list is a modal sheet over the document column (RSR-7): Escape inside its controls
 	// closes it and returns focus to the pill, and the document's selection Comment button works once it has closed.
-	await drawer.getByRole('button', { name: 'Close comments', exact: true }).focus();
+	await drawer.getByRole('button', { name: 'Close', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
 	await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeFocused();

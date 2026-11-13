@@ -94,8 +94,8 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveClass(/\bfocused\b/);
 			// On a phone the card opens in a bottom sheet: a tap on the insert must leave its decision within reach.
 			if (project === 'chromium-mobile') {
-				await expect(card('Tighten the first line.').getByRole('button', { name: 'Accept', exact: true })).toBeInViewport();
-				await expect(card('Tighten the first line.').getByRole('button', { name: 'Reject', exact: true })).toBeInViewport();
+				await expect(card('Tighten the first line.').getByRole('button', { name: /^Accept(:|$)/ })).toBeInViewport();
+				await expect(card('Tighten the first line.').getByRole('button', { name: /^Reject(:|$)/ })).toBeInViewport();
 			}
 			// The popover holds that one thread, not the other suggestion's.
 			await expect(card('Loosen the second line.')).toHaveCount(0);

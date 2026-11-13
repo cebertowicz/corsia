@@ -270,7 +270,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 		if (outgoing.url().includes(`/api/comments/${fine}/decision`)) fineDecisionRequests += 1;
 	});
 	const delayedAccept = await delayDecision(page, loose);
-	const accepting = row(loose).getByRole('button', { name: /^(Accept|Accepting…)$/ });
+	const accepting = row(loose).getByRole('button', { name: /^(Accept|Accepting)(:|$)/ });
 	await accept(loose).dblclick();
 	await delayedAccept.arrived;
 	await expect(accepting).toHaveText('Accepting…');
@@ -283,7 +283,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 	await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 	expect(looseDecisionRequests).toBe(1);
 	const delayedReject = await delayDecision(page, fine);
-	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting…)$/ });
+	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting)(:|$)/ });
 	// Closing Resolved resizes the sheet; wait for the card and its hit target to settle.
 	await expect.poll(() => row(fine).evaluate(async (card) => {
 		const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -317,7 +317,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await first.openComments();
 	await failOneDecision(page, first.loose, 'accept');
 	await first.accept(first.loose).click();
-	await expect(first.row(first.loose).getByRole('alert')).toHaveText('Synthetic accept failure');
+	await expect(first.row(first.loose).getByRole('alert')).toHaveText('Couldn’t accept this suggestion. Try again.');
 	await expect(first.accept(first.fine)).toBeEnabled();
 	await expect(first.row(first.loose).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-failure', { failure: { target: first.row(first.loose).getByRole('alert'), min: TEXT } });
@@ -326,7 +326,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await expect(first.row(first.loose).getByRole('alert')).toHaveCount(0);
 	await failOneDecision(page, first.fine, 'reject');
 	await first.reject(first.fine).click();
-	await expect(first.row(first.fine).getByRole('alert')).toHaveText('Synthetic reject failure');
+	await expect(first.row(first.fine).getByRole('alert')).toHaveText('Couldn’t reject this suggestion. Try again.');
 	await expect(first.reject(first.fine)).toBeEnabled();
 	await first.reject(first.fine).click();
 	await inResolved(first.drawer, () => expect(first.row(first.fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
@@ -335,7 +335,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	const acceptAll = second.drawer.getByRole('button', { name: `Accept all from ${second.reviewerTitle}`, exact: true });
 	await failOneDecision(page, second.loose, 'accept');
 	await acceptAll.click();
-	await expect(second.drawer.getByRole('alert')).toHaveText('Synthetic accept failure');
+	await expect(second.drawer.getByRole('alert')).toHaveText('Couldn’t accept the suggestions. Try again.');
 	await expect(acceptAll).toHaveText(`Accept all from ${second.reviewerTitle}`);
 	await expect(second.drawer.getByText(/skipped$/)).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-failure', { failure: { target: second.drawer.getByRole('alert'), min: TEXT } });

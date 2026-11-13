@@ -11,25 +11,27 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
-		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean; inSheet?: boolean;
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
-		/** Accepts them all and puts the accepted text on screen; throws when it could not, so no verdict is sent. */
-		onAcceptAll?: () => Promise<void>;
+		/** Accepts them all and puts the accepted text on screen, resolving to how many it accepted; throws when it could not, so no verdict is sent. */
+		onAcceptAll?: () => Promise<number | void>;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
 		onAnswered?: () => void;
 	} = $props();
 
-	const ACCEPT_FAILED = "Couldn't accept the suggestions. Try again.";
+	const ACCEPT_FAILED = 'Couldn’t accept the suggestions. Try again.';
 	let noteInput = $state<HTMLTextAreaElement>();
 	let requestButton = $state<HTMLButtonElement>();
 	let changesButton = $state<HTMLButtonElement>();
-	/** Reject asks for another review; approval with changes does not. */
-	const LABELS = { changes_requested: 'Reject', approved_with_changes: 'Approve with changes' } as const;
+	/** Send back asks for another review; approval with changes does not. Named for what it does with the document, so it is never read as the suggestion Reject. */
+	const LABELS = { changes_requested: 'Send back', approved_with_changes: 'Approve with changes' } as const;
 	let approveButton = $state<HTMLButtonElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+	/** How many suggestions the last Approve all accepted, for the receipt. */
+	let acceptedCount = $state(0);
 
 	const read = $derived(bar.read);
 	const asker = $derived(read?.asker?.name ?? 'An agent');
@@ -52,12 +54,14 @@
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
 		if (!receipt) return [];
-		const said = { approved: 'Approved', approved_with_changes: 'Approved with changes', changes_requested: 'Rejected' }[receipt.verdict];
+		const said = { approved: 'Approved', approved_with_changes: 'Approved with changes', changes_requested: 'Sent back' }[receipt.verdict];
 		const time = receipt.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 		const comments = receipt.sent.comments;
 		const delivered = receipt.verdict === 'approved' && comments > 0
 			? `${comments} comment${comments === 1 ? '' : 's'} sent` : '';
-		return [said, delivered, time].filter(Boolean);
+		const accepted = receipt.verdict === 'approved' && acceptedCount > 0
+			? `${acceptedCount} suggestion${acceptedCount === 1 ? '' : 's'} accepted` : '';
+		return [said, accepted, delivered, time].filter(Boolean);
 	});
 	const view = $derived(bar.phase === 'answered' ? 'receipt' : bar.phase === 'stale' ? 'stale' : 'ask');
 
@@ -68,6 +72,7 @@
 	$effect(() => {
 		void artifactId;
 		personReceipt = null;
+		acceptedCount = 0;
 	});
 	$effect(() => {
 		if (!draftOpen && bar.failure === DRAFT_OPEN) bar.failure = '';
@@ -119,16 +124,17 @@
 	}
 	const acceptFirst = $derived(pendingSuggestions > 0 && onAcceptAll !== undefined);
 	const approveText = $derived(acceptFirst ? 'Approve all' : 'Approve');
+	const acceptHint = $derived(acceptFirst ? (pendingSuggestions === 1 ? 'Approve all accepts the open suggestion.' : `Approve all accepts the ${pendingSuggestions} open suggestions.`) : '');
 	const approveDescription = $derived(acceptFirst ? `Accepts the ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'}, then approves` : approveSends);
 	async function approve() {
 		if (round > 0 && blocked()) return;
 		if (acceptFirst) {
-			bar.accepting = true; bar.failure = '';
-			try { await onAcceptAll?.(); } catch { bar.failure = ACCEPT_FAILED; return; } finally { bar.accepting = false; }
+			bar.accepting = true; bar.failure = ''; acceptedCount = 0;
+			try { acceptedCount = (await onAcceptAll?.()) ?? 0; } catch { bar.failure = ACCEPT_FAILED; return; } finally { bar.accepting = false; }
 		}
 		void settle('approved');
 	}
-	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Reject. */
+	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Send back. */
 	async function approveWithChanges() {
 		if (blocked()) return;
 		if (round > 0) { void settle('approved_with_changes'); return; }
@@ -164,8 +170,8 @@
 {:else if bar.visible}
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
-		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
-		{suppressed} {inSheet} bind:capsuleClearance
+		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure} hint={noting ? '' : acceptHint}
+		{suppressed} bind:capsuleClearance
 		receipt={{ icon: bar.receipt?.verdict === 'changes_requested' ? 'changes' : 'check', label: 'Review answered', segments: receiptText }}
 		stale={{ label: 'Review request ended', text: 'This review request has ended', sub: 'Refreshing' }}
 	>

@@ -338,7 +338,7 @@
 {/if}
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
@@ -356,7 +356,7 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer fill ariaLabel={heading} {heading} doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}

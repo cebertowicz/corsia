@@ -321,16 +321,16 @@ journey('request changes with only a note', [
 	const doc = await seed(request, `Review note ${mode} ${theme}`);
 	raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
 	await open(page, doc, mode, theme);
-	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Send back', exact: true }).click();
 	const note = bar(page).getByRole('textbox');
 	await expect(note).toBeFocused();
-	const send = bar(page).getByRole('button', { name: 'Reject', exact: true });
+	const send = bar(page).getByRole('button', { name: 'Send back', exact: true });
 	await expect(send).toBeDisabled();
 	await note.fill('Not yet: the rollback is missing.');
 	await expectLayout(page, mode);
 	await shot(page, 'noting', info);
 	await send.click();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Sent back');
 	await shot(page, 'receipt-requested', info);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
@@ -346,13 +346,13 @@ journey('answer a plain ask on an image', [['1440 light', 'default', 'light'], [
 	await expect(bar(page).getByRole('button', { name: 'Approve with changes' })).toBeVisible();
 	await expectLayout(page, mode);
 	await shot(page, 'image-ask', info);
-	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
-	const send = bar(page).getByRole('button', { name: 'Reject', exact: true });
+	await bar(page).getByRole('button', { name: 'Send back', exact: true }).click();
+	const send = bar(page).getByRole('button', { name: 'Send back', exact: true });
 	await expect(send).toBeDisabled();
 	await bar(page).getByRole('textbox').fill('Use the new palette.');
 	await shot(page, 'image-noting', info);
 	await send.click();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Sent back');
 	await expect(page.getByRole('img', { name: doc.name })).toBeVisible();
 	await shot(page, 'image-receipt', info);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -366,10 +366,10 @@ journey('a note in flight keeps its layout', [['1440 light', 'default', 'light']
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	await page.route('**/api/attention/*/clear', async (route) => { await held; await route.continue(); });
 	await open(page, doc, mode, theme);
-	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Send back', exact: true }).click();
 	const note = bar(page).getByRole('textbox');
 	await note.fill('Not yet: the rollback is missing.');
-	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Send back', exact: true }).click();
 
 	// Mid-send the bar is still the note layout: the same input, only the sender busy, nothing else pressable.
 	await expect(bar(page).locator('.spinner')).toHaveCount(1);
@@ -384,7 +384,7 @@ journey('a note in flight keeps its layout', [['1440 light', 'default', 'light']
 	await expectLayout(page, mode);
 	await shot(page, 'note-sending', info);
 	release();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Sent back');
 });
 
 journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
@@ -396,7 +396,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await openComments(page, /^2 threads\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
-	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
+	const close = drawer.getByRole('button', { name: 'Close', exact: true });
 	const jump = drawer.locator('[data-comment-jump]').first();
 	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	await settled(page);
@@ -421,22 +421,21 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	await open(page, doc, mode, theme);
 	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
-	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
-	await expect(approve).toBeVisible();
-	const reply = drawer.getByPlaceholder('Reply…').first();
-	await reply.focus();
+	// No verdict button is on screen while the sheet is up, in it or behind it; closing the sheet brings the bar back.
+	const approve = page.getByRole('button', { name: 'Approve', exact: true });
+	await expect(drawer.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
 	await expect(approve).toBeHidden();
-	await reply.blur();
+	await drawer.getByPlaceholder('Reply…').first().focus();
+	await expect(approve).toBeHidden();
+	await closeComments(drawer);
 	await expect(approve).toBeVisible();
 	await approve.click();
-	await expect(drawer.locator('.rb-receipt')).toContainText('Approved');
-	await closeComments(drawer);
-	await expect(page.locator('.review-bar .rb-receipt')).toBeVisible();
+	await expect(page.locator('.review-bar .rb-receipt')).toContainText('Approved');
 });
 
 test.describe('375px review sheet', () => {
 	test.use({ hasTouch: true, isMobile: true });
-	test('@surface:review-bar suggestion actions stay on one row in the sheet', async ({ page, request }) => {
+	test('@surface:review-bar suggestion actions fit the bar at 375px and the sheet holds none of them', async ({ page, request }) => {
 		const doc = await seed(request, 'Review sheet suggestion actions');
 		raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 		const reviewer = await createSession(request, 'Sheet suggester');
@@ -446,12 +445,19 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await openComments(page, /^\d+ threads?\b/);
-		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
+		// The bar's three answers sit on one row at 375px; the sheet holds no copy of them.
+		const buttons = page.locator('.review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
-		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
-		const boxes = await buttons.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().top));
-		expect(new Set(boxes.map(Math.round)).size).toBe(1);
+		await expect(page.getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
+		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toHaveCount(0);
+		await expect(page.locator('[data-doc-comments-drawer] .review-bar')).toHaveCount(0);
+		await closeComments(page.locator('[data-doc-comments-drawer]'));
+		await expect(page.getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
+		// The two quiet answers share a row above the primary one, and all three sit inside the 375px width.
+		const boxes = await buttons.evaluateAll((items) => items.map((item) => { const r = item.getBoundingClientRect(); return { top: Math.round(r.top), left: r.left, right: r.right }; }));
+		expect(new Set(boxes.map((box) => box.top)).size).toBeLessThanOrEqual(2);
+		for (const box of boxes) { expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(375); }
 	});
 });
 
@@ -460,16 +466,17 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
 	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
-	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
-	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
+	// The sheet holds comments only: the review controls leave the screen while it is up, and the note waits in the bar.
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveCount(0);
+	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(0);
 	await closeComments(drawer);
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-	await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeFocused();
+	await expect(page.getByRole('button', { name: 'Send back', exact: true })).toBeFocused();
 });
 
 journey('a pending review send survives moving through the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
@@ -482,18 +489,19 @@ journey('a pending review send survives moving through the phone comments sheet'
 	const blocked = new Promise<void>((resolve) => { release = resolve; });
 	const sent = new Promise<void>((resolve) => { started = resolve; });
 	await page.route(`**/api/attention/${doc.artifactId}/clear`, async (route) => { started(); await blocked; await route.continue(); });
-	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
-	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('button', { name: 'Send back', exact: true }).click();
 	await sent;
 	await openComments(page, /^1 thread\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
-	await expect(drawer.getByText('Sending your review…')).toBeVisible();
-	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
+	await expect(drawer).toBeVisible();
+	await expect(drawer.getByText('Sending your review…')).toHaveCount(0);
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveCount(0);
 	await closeComments(drawer);
 	await expect(page.getByText('Sending your review…')).toBeVisible();
 	release();
-	await expect(page.locator('.rb-receipt')).toContainText('Rejected');
+	await expect(page.locator('.rb-receipt')).toContainText('Sent back');
 });
 
 journey('held comments have the header Send, whole at every size, and the drawer has no footer', [
@@ -645,7 +653,7 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		await expect(leadAsk).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
 		await expect(requester).toHaveText(`${doc.title}:`);
 		expect(await requester.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the long ask leaves its requester untruncated').toBe(true);
-		expect(await leadAsk.evaluate((element) => element.scrollWidth > element.clientWidth && getComputedStyle(element).textOverflow === 'ellipsis'), 'the long ask end-ellipsizes in the lead row').toBe(true);
+		expect(await leadAsk.evaluate((element) => element.scrollHeight > element.clientHeight + 1 && getComputedStyle(element).webkitLineClamp === '2'), 'the long ask wraps to two lines in the lead row and ends in an ellipsis').toBe(true);
 	}
 	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
 	if (mode === 'phone') {
@@ -733,7 +741,7 @@ for (const theme of ['light', 'dark'] as const) {
 		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
 		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
-		const requestChanges = bar(page).getByRole('button', { name: 'Reject', exact: true });
+		const requestChanges = bar(page).getByRole('button', { name: 'Send back', exact: true });
 		for (const control of [pill, requestReview, approve, requestChanges]) {
 			await expect(control).toBeVisible();
 			const box = (await control.boundingBox())!;
@@ -788,7 +796,8 @@ for (const theme of ['light', 'dark'] as const) {
 		// With the pane closed nothing overlays the canvas, so there is no inset. The header's Toggle panel button sits under
 		// the overlaid pane at this width, so the pane's keyboard shortcut toggles it.
 		await page.keyboard.press('ControlOrMeta+Backslash');
-		await expect(page.locator('.pane.collapsed')).toBeVisible();
+		// A collapsed pane is 0px wide, so it is "visible" only while its width transition runs; assert the state, not the animation.
+		await expect(page.locator('.pane.collapsed')).toBeAttached();
 		await settled(page);
 		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'pane closed').toBe('0px');
 		expect(await bar(page).locator('.rb-line').evaluate((el) => getComputedStyle(el).display), 'line 1 whole with the pane closed').toBe('flex');

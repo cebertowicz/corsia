@@ -3,12 +3,12 @@ import { expect } from '@playwright/test';
 import { agentComment, reviewerSession, suggest } from '../support/liveConcurrency';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { setDebugVersionOverlay } from '../support/heldComments';
-import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from '../support/discussionVisible';
+import { expectCaretLineVisible, expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../support/discussionVisible';
 
 const quote = 'target line for a reply';
 const text = Array.from({ length: 45 }, (_, i) => i === 25 ? quote : `document line ${i}`).join('\n\n');
 
-/** One rule, two ends of it: where the card's room holds the thread, the original and the latest reply show beside the field; where it cannot, field and Send stay pinned and clickable, the highlight stays clear, and the thread is reachable by scrolling inside the card. */
+/** One rule: a long reply never makes anything inside the card scroll. The field grows to its text, the card (or sheet) is the one box that scrolls, the field's bottom edge and Send stay in view as lines are typed, the highlight stays clear, and the whole thread is reachable by scrolling that box. */
 for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps the field usable and the thread reachable on a ${state}`, async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop');
 	await page.setViewportSize({ width: 900, height: 420 });
@@ -55,11 +55,17 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 		input = resolved.getByPlaceholder('Reply…');
 		card = resolved;
 	}
-	await input.fill(Array.from({ length: 40 }, (_, i) => `second reply ${i}`).join('\n'));
+	const second = Array.from({ length: 40 }, (_, i) => `second reply ${i}`);
+	// A suggestion's reply scrolls with its card, so it is typed a line at a time: after each line the field is inside the popover's visible box and shows its last line, and Accept and Reject still take a tap.
+	if (state === 'suggestion') for (let line = 1; line <= second.length; line++) {
+		await input.fill(second.slice(0, line).join('\n'));
+		await expectCaretLineVisible(card, input);
+	} else await input.fill(second.join('\n'));
 	await expectFieldAndSendUsable(card, input);
 	if (state === 'resolved') {
-		await expectDiscussionVisible(card, 'Existing thread');
-		await expectDiscussionVisible(card, 'first reply 0');
+		await expectCaretLineVisible(card, input);
+		await expectDiscussionReachableByScroll(card, 'Existing thread');
+		await expectDiscussionReachableByScroll(card, 'first reply 0');
 		await page.evaluate(() => document.querySelector('.drawer-panel')?.getAnimations({ subtree: true }).forEach((animation) => animation.play()));
 	} else {
 		await expectDiscussionReachableByScroll(card, 'first reply 0');

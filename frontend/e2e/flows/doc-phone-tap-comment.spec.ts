@@ -105,8 +105,8 @@ async function expectOpenOn(page: Page, word: Word, why: string) {
 }
 
 async function putSheetAway(page: Page) {
-	// One card's sheet closes with Close; the list's with Close comments.
-	await sheet(page).getByRole('button', { name: /^Close( comments)?$/ }).tap();
+	// Every comment sheet closes with the one Close.
+	await sheet(page).getByRole('button', { name: 'Close', exact: true }).tap();
 	await expect(sheet(page)).toHaveCount(0);
 }
 

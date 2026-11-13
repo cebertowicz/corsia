@@ -54,7 +54,7 @@ export async function openComments(scope: Page | Locator, name?: RegExp): Promis
  * `openComments`, it reads again when the column opens itself after the read, so it cannot leave it open.
  */
 export async function closeComments(scope: Page | Locator): Promise<void> {
-	const close = scope.getByRole('button', { name: 'Close comments', exact: true });
+	const close = scope.getByRole('button', { name: 'Close', exact: true });
 	if (await close.count()) return close.click();
 	const pill = commentsPill(scope);
 	await expect(async () => {

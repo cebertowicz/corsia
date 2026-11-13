@@ -316,6 +316,8 @@
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
 	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
 	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
+	/* A receipt is its own row under the tools at every width (the ask shares its first line with them), as it already is on a phone-sized header. */
+	.document-header:has(:global(.review-bar.receipt)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
 	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
 	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }

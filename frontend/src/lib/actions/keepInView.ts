@@ -33,8 +33,13 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	const reveal = () => {
 		if (!enabled) return;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= owner.clientHeight;
-		const target = fits ? whole! : node;
-		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' });
+		// A field too tall to bring its whole card along still brings the bordered block it sits in, so its border and Send are not left half under the scroller's edge.
+		const block = node.closest<HTMLElement>('[data-autosize-sticky]');
+		const blockFits = block !== null && owner !== null && block.getBoundingClientRect().height <= owner.clientHeight;
+		const target = fits ? whole! : blockFits ? block! : node;
+		// A field that scrolls with its card and has grown taller than the card's scroller cannot be shown whole: its bottom edge (the line being typed, the border and Send) is what stays in view, and the card alone scrolls.
+		const tooTall = owner !== null && !fits && !blockFits && block !== null && block.classList.contains('unpinned');
+		if (typeof target.scrollIntoView === 'function') (tooTall ? block! : target).scrollIntoView({ block: tooTall ? 'end' : 'nearest' });
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
@@ -45,6 +50,11 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
 	if (owner) observer?.observe(owner);
 	observer?.observe(node);
+	// Content above the node that changes height moves it without resizing it: the scroller's own children are watched too, and again whenever the content under the scroller is replaced or restyled (a region above bounded or released), so a region above growing brings the node back into view.
+	const watchChildren = () => { if (owner) for (const child of owner.children) observer?.observe(child); };
+	watchChildren();
+	const mutations = owner && typeof MutationObserver === 'function' ? new MutationObserver(() => { watchChildren(); schedule(); }) : null;
+	mutations?.observe(owner!, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
 	queueMicrotask(reveal);
 
 	return {
@@ -56,6 +66,7 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			cancelAnimationFrame(frame);
 			viewport?.removeEventListener('resize', schedule);
 			observer?.disconnect();
+			mutations?.disconnect();
 		},
 	};
 }

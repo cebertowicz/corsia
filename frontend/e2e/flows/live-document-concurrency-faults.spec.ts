@@ -172,7 +172,7 @@ for (const [width, height, project] of layouts) {
 
 			// Accept flushes the live draft first (DocCommentSurface); that flush's file rename is refused once.
 			await refuseLiveFaultOnce(request, document.artifactId, 'rename');
-			await row.getByRole('button', { name: 'Accept', exact: true }).click();
+			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
 			await expect(row.getByRole('alert')).toHaveText("Couldn't save the document before accepting this suggestion");
 			expect(decisions, 'a refused flush never sends the decision').toBe(0);
 			await expect(page.getByText(/^Not saved to the file:/)).toBeVisible();
@@ -192,7 +192,7 @@ for (const [width, height, project] of layouts) {
 			await page.screenshot({ path: testInfo.outputPath(`live-accept-flush-refused-${width}.png`) });
 
 			// The one refusal is spent: the same Accept now flushes, applies once and keeps the typed text.
-			await row.getByRole('button', { name: 'Accept', exact: true }).click();
+			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
 			await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), () => expect(row.getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			expect(decisions).toBe(1);
 			await expect.poll(() => renderedCount(page, 'tight line')).toBe(1);

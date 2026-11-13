@@ -32,17 +32,6 @@ export function observeCanvasWidth(bounds: HTMLElement | null, update: (width: n
 	return () => observer.disconnect();
 }
 
-/** Report focus in a sheet's comment input, excluding its own review controls. */
-export function observeSheetTyping(panel: HTMLElement | null, update: (typing: boolean) => void) {
-	if (!panel) { update(false); return; }
-	const isField = (target: EventTarget | null) => target instanceof HTMLElement && panel.contains(target)
-		&& !target.closest('.rb-sheet-host') && target.matches('textarea, input, [contenteditable="true"]');
-	const onIn = (event: FocusEvent) => update(isField(event.target));
-	const onOut = (event: FocusEvent) => update(isField(event.relatedTarget));
-	panel.addEventListener('focusin', onIn); panel.addEventListener('focusout', onOut);
-	return () => { panel.removeEventListener('focusin', onIn); panel.removeEventListener('focusout', onOut); };
-}
-
 /** The card or image thumbnail a click in the drawer landed on, if any: what may open an image over the document. */
 export function clickedOpener(event: MouseEvent): Element | null {
 	return event.target instanceof Element ? event.target.closest('[data-comment-id], [data-region-thumb]') : null;

@@ -1,6 +1,6 @@
 import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { visibleRegion, type Box } from './visible-region';
+import { sheetOverlays, visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
@@ -134,6 +134,7 @@ export const commentMarks = [
 // Check in a later frame, once the scroll is applied and the revealed lines are
 // measured, and jump again until the target stays on screen.
 export const MAX_SCROLL_PASSES = 8;
+const centreKey = {};
 const STEADY_CHECKS = 2;
 
 /** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
@@ -181,6 +182,16 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				},
 			});
 			// The reader's place is taken again from where this lands.
+			releasePlace(view);
+			return;
+		}
+		// With a sheet over the pane CodeMirror's own centre is the pane's, which a short band (a phone held sideways) leaves under the sheet: centre in the band instead.
+		if (!widget && !quote && sheetOverlays(view) && boxOf(view)) {
+			view.requestMeasure({
+				key: centreKey,
+				read: (current) => ({ box: boxAt(current, target, null), ...visibleRegion(current) }),
+				write: ({ box, band, scroller }) => { if (!done && box) scroller.scrollTop += (box.top + box.bottom) / 2 - (band.top + band.bottom) / 2; },
+			});
 			releasePlace(view);
 			return;
 		}

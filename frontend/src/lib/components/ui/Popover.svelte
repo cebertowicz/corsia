@@ -121,7 +121,8 @@
 			// below the card's own minimum clips the field and Send out of the card. The discussion regions are
 			// already at their minimums, so what the composer sits on plus the composer is that floor; take the
 			// tallest band the canvas has, bottom-pinned, and the discussion scrolls inside it.
-			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]') : null;
+			// A composer that scrolls with its card (an unpinned one) is kept in view by that scroll, so the card stays within its band beside the text.
+			const pinned = engaged ? surface.querySelector<HTMLElement>('[data-autosize-sticky]:not(.unpinned)') : null;
 			const need = pinned ? pinned.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + gap : 0;
 			const band = area.bottom - area.top - 2 * gap;
 			if (pinned && need > room && band > need) {

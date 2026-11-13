@@ -1,7 +1,7 @@
 import type { DocComment } from '$lib/stores/docComments';
 import { loadComments } from '$lib/stores/docComments';
 import { authorsWithOpenSuggestions as groupOpenSuggestions } from '$lib/docCommentDrawer';
-import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
+import { decideSuggestion, SuggestionBlocked, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 import { recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -38,14 +38,16 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			outcome = fresh();
 			return () => { if (artifact) clearRefusals(artifact); };
 		});
-		const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+		// A refusal the server wrote for a person, or this side's own sentence, is shown as it is. Anything else (a crash, a dropped
+		// connection) is runtime text, so the card says what the review bar says.
+		const reason = (error: unknown, fallback: string) => (error instanceof SuggestionRefused || error instanceof SuggestionBlocked ? error.message : fallback);
 		async function submitSuggestionDecision(id: string, decision: 'accept' | 'reject', allFromAuthor = false) {
 			// The document this decision is for. The props may name another one by the time it settles.
 			const started = outcome, doc = inputs.target(), artifact = inputs.artifactId();
 			inputs.onSuggestionBusy?.(true, decision === 'accept' ? id : undefined);
 			try {
 				if (decision === 'accept') {
-					if (!doc || !await flushDraft(doc)) throw new Error("Couldn't save the document before accepting this suggestion");
+					if (!doc || !await flushDraft(doc)) throw new SuggestionBlocked("Couldn't save the document before accepting this suggestion");
 				}
 				const result: SuggestionDecision = allFromAuthor
 					? await decideSuggestion(id, decision, true)
@@ -79,8 +81,8 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 				// The saved file no longer has the quote: the card stays orphaned with this reason until it is decided or the surface resets.
 				const stale = decision === 'accept' && error instanceof SuggestionRefused && error.kind === 'stale';
 				settle(started, (current) => {
-					if (stale && artifact) recordRefusal(artifact, id, reason(error));
-					else current.errors = { ...current.errors, [id]: reason(error) };
+					if (stale && artifact) recordRefusal(artifact, id, reason(error, `Couldn’t ${decision} this suggestion. Try again.`));
+					else current.errors = { ...current.errors, [id]: reason(error, `Couldn’t ${decision} this suggestion. Try again.`) };
 				});
 			}
 		}
@@ -99,7 +101,7 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			try {
 				await submitSuggestionDecision(id, 'accept', true);
 			} catch (error) {
-				settle(started, (current) => { current.acceptAllError = reason(error); });
+				settle(started, (current) => { current.acceptAllError = reason(error, 'Couldn’t accept the suggestions. Try again.'); });
 			} finally {
 				acceptAllBusy = null;
 				settle(started, (current) => { current.acceptAllShownBusy = null; });

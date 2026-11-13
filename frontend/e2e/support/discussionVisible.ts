@@ -30,12 +30,14 @@ export async function expectFieldAndSendUsable(card: Locator, field: Locator) {
 	await expect(send).toBeEnabled();
 	await expect.poll(() => field.evaluate((el) => {
 		const rect = el.getBoundingClientRect();
-		if (rect.top < 0 || rect.bottom > innerHeight) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} off screen (viewport ${innerHeight})`;
+		// A field taller than the box that scrolls its card cannot show whole: its bottom edge, the line being typed, is what must be in view.
+		if (rect.bottom > innerHeight || (rect.height <= innerHeight && rect.top < 0)) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} off screen (viewport ${innerHeight})`;
 		if (rect.height < 16) return `field height ${Math.round(rect.height)}`;
 		for (let parent = el.parentElement; parent; parent = parent.parentElement) {
 			if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
 			const box = parent.getBoundingClientRect();
-			if (rect.top < box.top || rect.bottom > box.bottom) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} clipped by ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			// A field scrolled flush to its scroller's edge can read a fraction of a pixel past it.
+			if (rect.bottom > box.bottom + 1 || (rect.height <= box.height && rect.top < box.top - 1)) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} clipped by ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
 		}
 		return true;
 	})).toBe(true);
@@ -85,7 +87,8 @@ export async function expectDiscussionReachableByScroll(card: Locator, text: str
 		// and leave its first line, the one being asserted, clipped above.
 		const first = lineOf();
 		if (!first) return scrollers.length ? 'line not in the scroll box' : 'line not in the card';
-		if (inner) inner.scrollTop += Math.max(0, first.getBoundingClientRect().top - inner.getBoundingClientRect().top - 2);
+		// Either way: a card whose field is being typed in has already scrolled its first reply above the box.
+		if (inner) inner.scrollTop += first.getBoundingClientRect().top - inner.getBoundingClientRect().top - 2;
 		const range = lineOf() ?? first;
 		const line = range.getBoundingClientRect();
 		if (!line.height) return 'line has no height';
@@ -101,4 +104,42 @@ export async function expectDiscussionReachableByScroll(card: Locator, text: str
 		}
 		return true;
 	}, text)).toBe(true);
+}
+
+/** The line being typed stays in view and nothing inside the card scrolls but the card: the field grows to its text (it never scrolls itself), exactly one box scrolls the card, and that box's visible edge holds the field's bottom border, its last line and Send (the whole field when it is shorter than the box), with Accept and Reject still taking a tap where they sit. */
+export async function expectCaretLineVisible(card: Locator, field: Locator) {
+	await expect.poll(() => field.evaluate((el: HTMLTextAreaElement) => {
+		if (el.scrollHeight > el.clientHeight + 1) return `field scrolls itself: ${el.clientHeight} of ${el.scrollHeight}`;
+		const block = el.closest('[data-autosize-sticky]') as HTMLElement | null;
+		const rect = (block ?? el).getBoundingClientRect();
+		const send = block?.querySelector('[data-send-reply]')?.getBoundingClientRect() ?? null;
+		if (rect.bottom > innerHeight + 1) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} off screen (viewport ${innerHeight})`;
+		if (send && (send.top < -1 || send.bottom > innerHeight + 1)) return `Send ${Math.round(send.top)}-${Math.round(send.bottom)} off screen`;
+		const scrollers: string[] = [];
+		// What each box lets through is what the next box out is asked about: a field taller than the box that scrolls it shows only its bottom edge there, and the boxes around that one are not held to the clipped-off part.
+		let top = rect.top;
+		let bottom = rect.bottom;
+		for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+			const overflowY = getComputedStyle(parent).overflowY;
+			if (!/(auto|scroll|hidden|clip)/.test(overflowY)) continue;
+			const box = parent.getBoundingClientRect();
+			if (bottom > box.bottom + 1 || (bottom - top <= box.height && top < box.top - 1)) return `field ${Math.round(top)}-${Math.round(bottom)} outside ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			top = Math.max(top, box.top);
+			bottom = Math.min(bottom, box.bottom);
+			if (send && (send.top < box.top - 1 || send.bottom > box.bottom + 1)) return `Send ${Math.round(send.top)}-${Math.round(send.bottom)} outside ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			if (/(auto|scroll)/.test(overflowY) && parent.scrollHeight > parent.clientHeight + 1 && !parent.matches('[data-popover], [data-adaptive-drawer]') ) scrollers.push(parent.className || parent.tagName);
+		}
+		if (scrollers.length > 1) return `more than one box scrolls the card: ${scrollers.join(', ')}`;
+		return true;
+	})).toBe(true);
+	for (const name of [/^Accept/, /^Reject/]) {
+		if (!(await card.getByRole('button', { name }).count())) continue;
+		const button = card.getByRole('button', { name }).first();
+		await expect.poll(() => button.evaluate((el) => {
+			const r = el.getBoundingClientRect();
+			if (r.top < 0 || r.bottom > innerHeight) return `at ${Math.round(r.top)}-${Math.round(r.bottom)} off screen`;
+			const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+			return !!hit && (hit === el || el.contains(hit)) ? true : 'covered';
+		})).toBe(true);
+	}
 }

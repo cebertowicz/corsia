@@ -190,13 +190,13 @@ for (const [width, height, project] of layouts) {
 			await expect(reader.locator('.cm-content')).toContainText(remote);
 			await openComments(reader, /^2 threads\b/);
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
-			await drawerRow(reader, red.id).getByRole('button', { name: 'Accept', exact: true }).click();
+			await drawerRow(reader, red.id).getByRole('button', { name: /^Accept(:|$)/ }).click();
 			// A decided suggestion leaves the open cards for the Resolved list.
 			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
 			await expect(drawerRow(reader, dog.id)).toContainText("The text doesn't match this suggestion.");
-			await expect(drawerRow(reader, dog.id).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
-			await drawerRow(reader, dog.id).getByRole('button', { name: 'Reject', exact: true }).click();
+			await expect(drawerRow(reader, dog.id).getByRole('button', { name: /^Accept(:|$)/ })).toBeDisabled();
+			await drawerRow(reader, dog.id).getByRole('button', { name: /^Reject(:|$)/ }).click();
 			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog.id).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`, remote], ['brown', 'dog jumps']);
 			await reader.screenshot({ path: testInfo.outputPath(`live-overlap-decided-${width}.png`) });
@@ -254,9 +254,9 @@ for (const [width, height, project] of layouts) {
 			const draft = { value: `draft ${stamp}`, selection: [2, 5], focused: true };
 
 			const held = await holdRequest(reader, `**/api/comments/${loose}/decision**`);
-			await drawerRow(reader, loose).getByRole('button', { name: 'Accept', exact: true }).click();
+			await drawerRow(reader, loose).getByRole('button', { name: /^Accept(:|$)/ }).click();
 			await held.arrived;
-			await expect(drawerRow(reader, loose).getByRole('button', { name: 'Accepting…', exact: true })).toHaveAttribute('aria-busy', 'true');
+			await expect(drawerRow(reader, loose).getByRole('button', { name: /^Accepting(:|$)/ })).toHaveAttribute('aria-busy', 'true');
 			await reply.fill(draft.value);
 			await reply.evaluate(element => (element as HTMLInputElement).setSelectionRange(2, 5));
 			expect(await replyState()).toEqual(draft);

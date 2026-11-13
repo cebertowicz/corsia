@@ -71,7 +71,7 @@ describe('comment sheet visibility', () => {
 		flushSync();
 		const drawer = document.querySelector('.drawer-motion')!;
 		expect(modal).toBe(true);
-		document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
+		document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click();
 		flushSync();
 		expect(restoreFocus).not.toHaveBeenCalled();
 		drawer.dispatchEvent(new Event('outroend'));

@@ -134,7 +134,7 @@ describe('the document jump control', () => {
 		control()!.click();
 		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
 		await vi.waitFor(() => expect(control()).toBeNull());
-		document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
+		document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click();
 		await vi.waitFor(() => expect(control()?.textContent).toContain('1 new'), { timeout: 2000 });
 	});
 

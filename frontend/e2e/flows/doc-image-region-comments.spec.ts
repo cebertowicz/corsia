@@ -98,7 +98,7 @@ async function backToDocumentDrawer(page: Page) {
 }
 /** The document's comments drawer closed with its own Close button. */
 async function closeDocumentDrawer(page: Page) {
-	await drawer(page).getByRole('button', { name: 'Close comments', exact: true }).click();
+	await drawer(page).getByRole('button', { name: 'Close', exact: true }).click();
 	await expect(drawer(page)).toHaveCount(0);
 }
 /** The document drawer's list, which keeps its own scroll. */

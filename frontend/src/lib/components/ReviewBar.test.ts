@@ -56,7 +56,7 @@ describe('ReviewBar', () => {
 		await render();
 		expect(button('Approve')).toBeTruthy();
 		expect(button('Approve with changes')).toBeTruthy();
-		expect(button('Reject')).toBeTruthy();
+		expect(button('Send back')).toBeTruthy();
 		unmount(component!); component = null; host.innerHTML = '';
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render();
@@ -72,7 +72,7 @@ describe('ReviewBar', () => {
 		},
 	);
 
-	it.each(['Reject', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
+	it.each(['Send back', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		button(label)!.click();
@@ -126,7 +126,7 @@ describe('ReviewBar', () => {
 		expect(button('Done')).toBeTruthy();
 		expect(button('Won’t do')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
-		expect(button('Reject')).toBeUndefined();
+		expect(button('Send back')).toBeUndefined();
 	});
 
 	it('settles the person step through its existing Done action without waiting on comments', async () => {
@@ -195,12 +195,12 @@ describe('ReviewBar', () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockRejectedValue(new Error('500'));
 		await render();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
 		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(host.querySelector('.review-bar.receipt')).toBeNull();
 		expect(host.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Tighten the rollout');
@@ -211,12 +211,12 @@ describe('ReviewBar', () => {
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
 		await render();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
 		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
 
 		// Mid-send: the same input is still mounted, the bar is still the note layout, and only the sender spins.
@@ -224,7 +224,7 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('.review-bar.noting')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(host.querySelectorAll('.spinner')).toHaveLength(1);
-		expect(button('Reject')!.querySelector('.spinner')).toBeTruthy();
+		expect(button('Send back')!.querySelector('.spinner')).toBeTruthy();
 		expect(button('Cancel')!.disabled).toBe(true);
 		input.focus();
 
@@ -243,8 +243,8 @@ describe('ReviewBar', () => {
 		button('Approve')!.click();
 		flushSync();
 		expect(button('Approve')!.querySelector('.spinner')).toBeTruthy();
-		expect(button('Reject')!.disabled).toBe(true);
-		expect(button('Reject')!.querySelector('.spinner')).toBeNull();
+		expect(button('Send back')!.disabled).toBe(true);
+		expect(button('Send back')!.querySelector('.spinner')).toBeNull();
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		await vi.waitFor(() => expect(document.activeElement).toBe(button('Approve')));
@@ -287,9 +287,9 @@ describe('ReviewBar', () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
 
 		expect(api.answerReview).not.toHaveBeenCalled();
@@ -384,7 +384,7 @@ describe('ReviewBar', () => {
 		flushSync();
 		expect(host.textContent).toContain(DRAFT_OPEN);
 		expect(api.answerReview).not.toHaveBeenCalled();
-		button('Reject')!.click();
+		button('Send back')!.click();
 		flushSync();
 		expect(host.querySelector('textarea')).toBeNull();
 	});
