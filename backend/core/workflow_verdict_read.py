@@ -19,13 +19,15 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from core.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
-from api.measurement_model_cost import clear_chain, materialize_chain, query_model_costs, query_recording_gaps
+from core.cost_identity import IdentityResolver
+from api.measurement_model_cost import (MODEL_GROUPS_SQL, clear_chain, materialize_chain, query_model_costs,
+                                        query_recording_gaps)
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
 from infra.measure_registry import workflow_for_file
+from infra.packed_rows import fetch_all
 from plans.public import run_end_records
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdict_types import split_subject, subject_of
@@ -72,15 +74,7 @@ def model_key(identity_key: str) -> str:
 def _model_groups(db: sqlite3.Connection, trees: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, str]:
     """Each run's model from its plan owner's fresh tokens on the run's tasks."""
     run_of = {node["id"]: run_id for run_id, nodes in trees.items() for node in nodes}
-    rows = db.execute(f"""
-        SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
-          SELECT u.plan_node_id AS node_id,{identity_columns("u")},
-            COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0) AS fresh
-          FROM llm_usage u {identity_join("u")}
-          JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
-          WHERE u.plan_node_id IN (SELECT value FROM json_each(:ids))
-        ) GROUP BY node_id,{IDENTITY_GROUP}
-    """, {"ids": json_ids(run_of)}).fetchall()
+    rows = fetch_all(db, MODEL_GROUPS_SQL, {"ids": json_ids(run_of)})
     resolve = IdentityResolver(db)
     totals: defaultdict[str, defaultdict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in rows:
@@ -132,7 +126,7 @@ def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None,
         params = {} if plan_ids is None else {"plans": json_ids(plan_ids)}
         if plan_ids is not None:
             query += " WHERE plan_id IN (SELECT value FROM json_each(:plans))"
-    return [dict(row) for row in db.execute(query, params).fetchall()]
+    return [dict(row) for row in fetch_all(db, query, params)]
 
 
 def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

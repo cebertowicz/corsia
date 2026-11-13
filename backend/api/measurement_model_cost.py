@@ -23,8 +23,24 @@ from api.measurement_chain import chain_ctes
 from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
-from core.cost_identity import ModelIdentity
+from core.cost_identity import IDENTITY_GROUP, ModelIdentity, identity_columns, identity_join
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
+from infra.packed_rows import fetch_all
+
+
+# The tasks' own usage, read through the node index. ``INDEXED BY``: production never runs ANALYZE, and with no
+# statistics the planner drives this join from each plan owner's whole usage history (``idx_llm_usage_session``)
+# and filters to the tasks afterwards, so the read grew with every call the install ever recorded instead of with
+# the tasks asked for. The index is partial (``plan_node_id IS NOT NULL``), which the ``IN`` term proves.
+MODEL_GROUPS_SQL = f"""
+    SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
+      SELECT u.plan_node_id AS node_id,{identity_columns("u")},
+        COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0) AS fresh
+      FROM llm_usage u INDEXED BY idx_llm_usage_plan_node {identity_join("u")}
+      JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
+      WHERE u.plan_node_id IN (SELECT value FROM json_each(:ids))
+    ) GROUP BY node_id,{IDENTITY_GROUP}
+"""
 
 
 def _bound(params: dict[str, Any], task_ids: Collection[str] | None) -> dict[str, Any]:
@@ -93,7 +109,7 @@ def query_model_costs(
     their own ``task_id``), so a caller that also reads the gaps walks the chains once."""
     prefix, source, bound = _chain_source(params, task_ids, chain_rows)
     rows = []
-    for row in (dict(item) for item in db.execute(prefix + _cost_sql(source), bound).fetchall()):
+    for row in (dict(item) for item in fetch_all(db, prefix + _cost_sql(source), bound)):
         identity = resolve(row)
         rows.append({**row, "model": identity.key, "identity": identity})
     return classify_usage_rows(rows, endpoint_listings(db))
