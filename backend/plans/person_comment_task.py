@@ -119,11 +119,9 @@ def _close(db, node_id: str, reason: str) -> bool:
 
 def document_retired(db, artifact_id: str, cause: str | None) -> None:
     """Close the open task when the retirement ends its comments' place: the file is gone, or a promote
-    tombstoned it without carrying the comments over. An ended document never gets a new one (``reconcile``)."""
-    reason = _RETIRED.get(cause or '')
-    node_id = _open_task(db, artifact_id)[0] if reason else None
-    if node_id:
-        _close(db, node_id, reason)
+    tombstoned it without carrying the comments over (``reconcile`` reads the cause ``retire`` kept)."""
+    if cause in _RETIRED:
+        reconcile(db, artifact_id)
 
 
 def _create(db, artifact_id: str, artifact: dict, owner: str) -> str:
@@ -148,6 +146,10 @@ def reconcile(db, artifact_id: str) -> str | None:
         if node_id:
             _close(db, node_id, DELETED)
         return None
+    ended = _RETIRED.get(registry_models.retired_cause(artifact_id, db=db) or '')
+    if ended:
+        # The comments' place is gone. A close a paused plan or held task deferred finishes on its resume.
+        return node_id if node_id and not _close(db, node_id, ended) else None
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = _owner(db, artifact)
     if not owner or not owner['user_id']:
@@ -165,7 +167,7 @@ def reconcile(db, artifact_id: str) -> str | None:
             )
         return None
     if state != 'active':
-        # Retired for a cause that leaves the document readable (``document_retired`` closes the others).
+        # Retired for a cause that leaves the document readable (the others close above).
         return node_id
     if node_id and holder != owner_id and _close(db, node_id, moved(owner['title'] or 'another agent')):
         node_id = None

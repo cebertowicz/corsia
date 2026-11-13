@@ -17,7 +17,7 @@ def validate_blueprint_path(path: str) -> None:
     """Apply the same path policy to indexed and fetched blueprints."""
     validate_relative_path(path)
     parts = path.split("/")
-    if any(part.startswith(".") for part in parts) or "scripts" in parts:
+    if any(part.startswith(".") for part in parts):
         raise LibraryIntegrityError(f"pack path is not allowed: {path}")
 
 

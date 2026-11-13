@@ -2,6 +2,7 @@ import { Transaction, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { blockRange, cellElement, TABLE, widgetOf } from './widget-blocks';
 import { tableCells } from './widget-cells';
+import { openCellState } from './widget-cell-state';
 
 /** The cell a press in a table lands on: the one it hit, or, on padding or a border, the one nearest the press point. */
 function pressedCell(widget: HTMLElement, event: MouseEvent): Element | null {
@@ -28,9 +29,12 @@ function blankLineAfter(state: EditorState, to: number): number | null {
  * the blank line after its fence. Where no such place exists the caret stays where it was. The widget ignores the press
  * and CodeMirror ignores selections inside it, so without this the editor keeps the caret it had before (the start of a
  * document just opened), and the next focus() hands that caret to the keyboard. Labelled a pointer selection, so it picks
- * no comment and releases none; the widget's own click does that.
+ * no comment and releases none; the widget's own click does that. A tap's click that finds a cell already open has just
+ * opened it: the cell's editor holds the caret and the focus, and a selection written to the document here would take the
+ * focus off it.
  */
 export function caretToWidget(view: EditorView, event: MouseEvent) {
+	if (view.state.field(openCellState, false)) return;
 	const widget = event.target instanceof Element ? widgetOf(view, event.target) : null;
 	const block = widget && blockRange(view, widget);
 	if (!widget || !block) return;

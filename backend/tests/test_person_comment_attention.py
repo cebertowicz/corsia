@@ -295,6 +295,85 @@ def test_a_promote_that_leaves_the_source_closes_its_task_with_the_promote_reaso
         db.close()
 
 
+def _stop(connection, task, how):
+    """Pause the task's plan, or hold the task itself; returns what ends the stop."""
+    from plans import lifecycle
+
+    node = service._node_row(connection, task)
+    if how == 'plan_paused':
+        plan_id = node['plan_id']
+        lifecycle.transition(plan_id, 'paused', expected_revision=service._plan_row(connection, plan_id)['revision'],
+                             actor_id=None, provenance='test', db=connection)
+        return plan_id
+    public.mutate(node['plan_id'], 'pause_node', {
+        'node_id': task, 'expected_revision': node['revision'], 'reason': 'Not now',
+    }, actor=_person(), provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
+    return connection.execute(
+        'SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL', (task,),
+    ).fetchone()['id']
+
+
+def _restart(connection, task, how, stop):
+    from plans import lifecycle
+
+    node = service._node_row(connection, task)
+    if how == 'plan_paused':
+        lifecycle.transition(stop, 'active', expected_revision=service._plan_row(connection, stop)['revision'],
+                             actor_id=None, provenance='test', db=connection)
+        return
+    public.mutate(node['plan_id'], 'resume_node', {
+        'node_id': task, 'expected_revision': node['revision'], 'hold_id': stop,
+    }, actor=_person(), provenance='test', mutation_id=uuid.uuid4().hex, db=connection)
+
+
+@pytest.mark.parametrize('how', ['plan_paused', 'task_held'])
+@pytest.mark.parametrize(('cause', 'tombstone', 'reason'), [
+    ('file_gone', False, person_comment_task.DELETED),
+    ('promoted', True, person_comment_task.PROMOTED),
+])
+def test_a_retirement_close_deferred_by_a_stop_finishes_when_the_stop_ends(isolated_db, how, cause, tombstone, reason):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_stop') as connection:
+            stop = _stop(connection, task, how)
+        models.retire(artifact, tombstone=tombstone, cause=cause, db=db)
+        # The stop spares the task from the close for now; the comments still wait on the person.
+        assert _open_tasks(db, artifact) == [task]
+        with write_transaction(db, scope='test_restart') as connection:
+            _restart(connection, task, how, stop)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == reason
+    finally:
+        db.close()
+
+
+def test_a_retired_cause_left_on_a_reactivated_document_does_not_close_its_task(isolated_db):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_stop') as connection:
+            stop = _stop(connection, task, 'plan_paused')
+        models.retire(artifact, tombstone=False, cause='file_gone', db=db)
+        # A rehome makes the identity active again the way registry.ownership does, metadata untouched.
+        db.execute("UPDATE artifact_identities SET state='active' WHERE id=?", (artifact,))
+        db.commit()
+        assert models.retired_cause(artifact, db=db) is None
+        with write_transaction(db, scope='test_restart') as connection:
+            _restart(connection, task, 'plan_paused', stop)
+        assert _open_tasks(db, artifact) == [task]
+    finally:
+        db.close()
+
+
 def test_a_retirement_with_no_cause_keeps_its_task_and_dismiss_settles_it(isolated_db):
     from api.doc_comment_thread_views import _check_access
     from doceditor import comment_thread_views

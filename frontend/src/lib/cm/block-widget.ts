@@ -1,4 +1,6 @@
-import { WidgetType, type DecorationSet } from '@codemirror/view';
+import { EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
+import { StateField, type EditorState, type Transaction } from '@codemirror/state';
 
 /**
  * A block widget that starts at the height its predecessor was drawn at. An edit to a table or diagram replaces its widget,
@@ -33,4 +35,30 @@ export function priorWidget<T extends BlockWidget>(prior: DecorationSet | undefi
 		return false;
 	});
 	return found;
+}
+
+/**
+ * A block-decoration StateField whose set is derived from the syntax tree.
+ * Rebuilds when the document changes OR when the background parser advances
+ * (the language tree reference changes between transactions). The tree check is
+ * essential: CodeMirror parses incrementally, so a block node (table / mermaid
+ * fence) below the initial parse budget enters the tree later via a parse
+ * transaction that carries NO doc change. A `docChanged`-only field computes
+ * once against the partial tree and never sees those nodes — leaving real-world
+ * docs (a table 40 lines down) stuck on raw markdown until the next edit.
+ * `alsoOn` names any other transaction the field rebuilds on (the table's: an image refresh).
+ */
+export function syntaxDecorationField(
+	build: (state: EditorState, prior?: DecorationSet) => DecorationSet,
+	alsoOn: (tr: Transaction) => boolean = () => false
+): StateField<DecorationSet> {
+	return StateField.define<DecorationSet>({
+		create: (state) => build(state),
+		update(deco, tr) {
+			const mapped = deco.map(tr.changes);
+			if (tr.docChanged || alsoOn(tr) || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state, mapped);
+			return mapped;
+		},
+		provide: (f) => EditorView.decorations.from(f)
+	});
 }
