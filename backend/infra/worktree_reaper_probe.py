@@ -33,6 +33,9 @@ GIT_TIMEOUT_SECONDS = 30.0
 WORKTREE_REMOVE_TIMEOUT_SECONDS = 300.0
 LSOF_TIMEOUT_SECONDS = 60.0
 GH_TIMEOUT_SECONDS = 60.0
+# ``git status --porcelain=v2`` writes a position the index did not change as
+# ``.``, so a file this process is in the middle of deleting reads as ``.D``.
+DELETED_IN_WORKTREE = ".D"
 
 # Ignored directories rebuilt from lockfiles or caches, gate scratch directories,
 # generated build metadata, and symlinked dependency entries. Any other ignored
@@ -273,11 +276,15 @@ def is_tool_output_dir(path: Path) -> bool:
 
 def status_skip_reason(
     worktree: Path, git_env: dict[str, str], *, tracked_only: bool = False,
+    allow_deletions: bool = False,
 ) -> str | None:
     """Return ``submodule``, ``dirty``, ``untracked`` or ``ignored_data``, or None when clean.
 
     ``tracked_only`` reports only uncommitted edits to tracked files: a merged
     worktree's untracked and ignored files are scratch, not unshipped work.
+    ``allow_deletions`` reads a tracked file missing from the tree as the removal
+    that is deleting it rather than as an edit, which is what a removal cut off
+    mid-delete looks like from the inside; nothing else reads as debris.
     """
     files = ["--untracked-files=no"] if tracked_only else [
         "--untracked-files=all", "--ignored=matching",
@@ -295,7 +302,8 @@ def status_skip_reason(
     reasons: set[str] = set()
     for line in result.stdout.splitlines():
         kind, _, rest = line.partition(" ")
-        if kind in {"1", "2", "u"}:
+        deleted = kind == "1" and rest.startswith(DELETED_IN_WORKTREE)
+        if kind in {"2", "u"} or (kind == "1" and not (allow_deletions and deleted)):
             reasons.add("dirty")
         elif kind == "?":
             reasons.add("untracked")

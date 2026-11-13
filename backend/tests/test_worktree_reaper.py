@@ -713,8 +713,8 @@ def test_a_removal_that_runs_out_of_time_is_finished_by_the_next_pass(repo, monk
 def test_a_registered_quarantine_entry_is_finished_by_the_next_pass(repo):
     """The sweep can reach an entry still registered inside the quarantine now.
 
-    Finishing it owes no check: the whole set ran before the tree moved in, and
-    whatever was unshipped was copied out or pinned at that point.
+    Finishing it owes no check beyond its own deletions: the whole set ran before
+    the tree moved in, and whatever was unshipped was copied out or pinned then.
     """
     wt = _add(repo, "cut")
     _age(repo, wt, 8 * DAY)
@@ -723,13 +723,37 @@ def test_a_registered_quarantine_entry_is_finished_by_the_next_pass(repo):
     entry = quarantine / "cut-1"
     _git(repo, "worktree", "move", str(wt), str(entry))
     (entry / "README").unlink()                  # the delete that ran out of time
-    (entry / "notes.md").write_text("work\n")    # ... in a tree Git now calls dirty
+    (entry / "node_modules").mkdir()             # ... and the scratch it was deleting
+    (entry / "node_modules" / "dep.js").write_text("{}\n")
 
     report = _run(repo)
 
     assert report.quarantine_removed == 1 and report.removed == 0
     assert not entry.exists() and _quarantine(repo) == []
     assert str(wt) not in _git(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_registered_entry_with_an_edit_and_no_record_is_kept(repo):
+    """An entry an older build left in the quarantine carries no record of its own,
+    and that build's failed salvage counted on being left alone. So only a tree
+    whose every change is its own deletions and disposable output is finished: an
+    edit nobody copied out is kept, recorded, and reported.
+    """
+    wt = _add(repo, "legacy")
+    _age(repo, wt, 8 * DAY)
+    quarantine = worktree_reaper_remove.quarantine_root(repo)
+    quarantine.mkdir()
+    entry = quarantine / "legacy-1"
+    _git(repo, "worktree", "move", str(wt), str(entry))
+    (entry / "README").unlink()                  # its own deletions are not enough
+    (entry / "ro" / "kept").write_text("edited by hand, never copied\n")
+
+    report = _run(repo)
+
+    assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
+    assert (entry / "ro" / "kept").read_text() == "edited by hand, never copied\n"
+    assert worktree_reaper_remove.holds_unsaved_work(entry)
+    assert str(entry) in _git(repo, "worktree", "list", "--porcelain")  # registered right here
 
 
 def test_a_move_cut_off_part_way_is_reclaimed_by_the_next_pass(repo, monkeypatch):

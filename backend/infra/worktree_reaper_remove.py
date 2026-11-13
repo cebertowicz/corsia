@@ -143,6 +143,13 @@ def holds_unsaved_work(entry: Path) -> bool:
     return _unsaved_work_record(entry).exists()
 
 
+def _keep_for_a_person(entry: Path, reason: str) -> bool:
+    """Record and report an entry the reaper will not delete; always returns False."""
+    mark_unsaved_work(entry, reason)
+    logger.warning("worktree_reaper: entry {} still holds work; left for a person", entry.name)
+    return False
+
+
 def _stranded_move(entry: Path) -> bool:
     """Return whether Git still points this entry's admin directory elsewhere.
 
@@ -175,10 +182,7 @@ def _finish_stranded_move(repo: Path, entry: Path) -> bool:
         return False
     try:
         if status_skip_reason(entry, worktree_git_env(repo, admin, entry)) is not None:
-            logger.warning(
-                "worktree_reaper: entry {} still holds work; left for a person", entry.name
-            )
-            return False
+            return _keep_for_a_person(entry, "its move was cut off before any copy")
         if os.path.lexists(entry) and not delete_quarantined(repo, entry):
             logger.warning("worktree_reaper: stranded entry {} could not be deleted", entry.name)
             return False
@@ -193,9 +197,18 @@ def _finish_removal(repo: Path, entry: Path) -> bool:
     """Finish a removal an earlier pass started; False when something remains.
 
     ``--force`` is owed here because the whole set of checks ran before the entry
-    was moved in, and whatever was still unshipped was copied out or marked.
+    was moved in, and whatever was still unshipped was copied out or marked. An
+    entry an older build left here carries no record of its own, so the tree is
+    asked first, and only the deletions this removal caused read as debris.
     """
     try:
+        admin = admin_dir(entry)
+        if admin is None:
+            return False
+        if status_skip_reason(
+            entry, worktree_git_env(repo, admin, entry), allow_deletions=True,
+        ) is not None:
+            return _keep_for_a_person(entry, "left by a build that recorded nothing about its work")
         removed = git(
             repo, ["worktree", "remove", "--force", str(entry)],
             timeout=WORKTREE_REMOVE_TIMEOUT_SECONDS, git_env=common_git_env(repo),
