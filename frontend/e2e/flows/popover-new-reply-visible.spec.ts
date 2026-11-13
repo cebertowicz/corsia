@@ -64,8 +64,8 @@ for (const [width, height, project] of [[1440, 900, 'desktop'], [900, 900, 'desk
 for (const [width, height, project] of [[1440, 900, 'desktop'], [900, 900, 'desktop'], [393, 852, 'mobile'], [1440, 420, 'desktop']] as const) for (const theme of ['light', 'dark'] as const) {
 	test(`a just-opened chat thread shows its newest reply at ${width}x${height} ${theme}`, async ({ page, request }, info) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith(project));
-		// In WebKit at phone width a click on a chat highlight opens no sheet at all, before any reply is written (the open step fails, not the fit): unexplained, so not asserted here.
-		test.skip(info.project.name === 'webkit-mobile' && width === 393, 'a chat highlight does not open its sheet in WebKit mobile');
+		// Known defect, cebertowicz/corsia#2565: in WebKit at phone width a click on a chat highlight opens no sheet at all (the open step fails, not the fit). Expected to fail until it is fixed; once it passes, this marker fails the run and comes out.
+		test.fail(info.project.name === 'webkit-mobile' && width === 393, '#2565: a chat highlight does not open its sheet in WebKit mobile');
 		test.setTimeout(120_000);
 		const { row } = await commentedMessage(page, request, width);
 		await page.setViewportSize({ width, height });
