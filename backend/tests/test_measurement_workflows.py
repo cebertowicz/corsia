@@ -129,13 +129,20 @@ def turn(db, turn_id: str, node_id: str, *, started: str, ended: str, thread_id:
                (turn_id, thread_id, OPUS, started, ended, node_id, node_id))
 
 
-def task(db, node_id: str, plan_id: str, *, created: str, title: str = "A task outside any workflow") -> None:
-    """An accepted task that ran under no workflow, which coverage counts in the denominator only."""
+def task(db, node_id: str, plan_id: str, *, created: str, title: str = "A task outside any workflow",
+         origin: str | None = None, follows: str | None = None) -> None:
+    """An accepted task that ran under no workflow, which coverage counts in the denominator only.
+
+    ``origin`` is the provenance its writer stamps on ``node_created``; ``None`` seeds no creation event.
+    """
     with raw_plan_seed(db):
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                   "commitment_id,requirements_revision,revision,created_at,updated_at) "
-                   "VALUES (?,?,NULL,1,'task',?,'done','accepted',?,1,1,?,?)",
-                   (node_id, plan_id, title, node_id, created, created))
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,follow_up_of,order_key,kind,title,"
+                   "acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                   "VALUES (?,?,NULL,?,1,'task',?,'done','accepted',?,1,1,?,?)",
+                   (node_id, plan_id, follows, title, node_id, created, created))
+        if origin is not None:
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+                       "VALUES (?,?,?,'node_created',?)", (f"created-{node_id}", node_id, origin, created))
     with raw_plan_seed(db):
         db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
                    "VALUES (?,?,'test','accepted','active','accepted',?)", (f"end-{node_id}", node_id, created))
@@ -403,7 +410,7 @@ def test_the_window_is_the_pages_current_window_and_coverage_counts_the_pages_ta
     assert section["window"] == WINDOW
     # The page's task set: every task accepted inside the window, whether or not a workflow ran it.
     # Eight of the ten sit under a run, including the failed run's accepted step and the unversioned run's.
-    assert section["coverage"] == {"under_workflow": 8, "all_tasks": 10}
+    assert headline(section["coverage"]) == {"under_workflow": 8, "all_tasks": 10}
 
 
 def test_each_workflow_is_one_entry_biggest_first_with_its_owner(section) -> None:
@@ -543,7 +550,7 @@ def test_a_selected_agent_sees_only_its_own_runs(db) -> None:
     assert [entry["ref"] for entry in only_billing["workflows"]] == [INVOICE]
     assert "root" not in json.dumps(only_billing)
     # The other agent's plan is out of this scope: its two untagged tasks leave the denominator too.
-    assert read(MeasurementScope("alpha", "root"))["coverage"] == {"under_workflow": 7, "all_tasks": 9}
+    assert headline(read(MeasurementScope("alpha", "root"))["coverage"]) == {"under_workflow": 7, "all_tasks": 9}
 
 
 def test_empty_scope_keeps_coverage_without_reading_workflow_history(db, monkeypatch) -> None:
@@ -552,8 +559,37 @@ def test_empty_scope_keeps_coverage_without_reading_workflow_history(db, monkeyp
     task(db, 'plain-only', 'plan-root', created='2026-10-01T09:00:00Z')
     monkeypatch.setattr(workflow_verdict_read, 'read_snapshot', lambda *args, **kwargs: pytest.fail('no runs to read'))
     result = read()
-    assert result['coverage'] == {'under_workflow': 0, 'all_tasks': 1}
+    assert headline(result['coverage']) == {'under_workflow': 0, 'all_tasks': 1}
     assert result['workflows'] == []
+
+
+def headline(coverage: dict[str, Any]) -> dict[str, int]:
+    """The coverage headline alone, without its split by origin."""
+    return {key: coverage[key] for key in ("under_workflow", "all_tasks")}
+
+
+def test_coverage_splits_the_same_tasks_by_how_each_was_created(section, db) -> None:
+    """Each origin counts its tasks and how many ran under a workflow; the rows sum to the headline.
+
+    The section's run steps were created by ``plans.workflow_run``; its two plain tasks carry no
+    creation event, so they read ``null``, never a guessed origin.
+    """
+    task(db, "comments-1", "plan-root", created="2026-10-10T09:00:00Z", origin="document.feedback_batch")
+    task(db, "comments-2", "plan-root", created="2026-10-11T09:00:00Z", origin="document.feedback_batch")
+    task(db, "review-1", "plan-root", created="2026-10-12T09:00:00Z", origin="document.review_request")
+    task(db, "redo-1", "plan-root", created="2026-10-13T09:00:00Z", origin="tool.plans", follows="plain-1")
+    coverage = read()["coverage"]
+    origins = {(row["provenance"], row["follow_up"]): (row["all_tasks"], row["under_workflow"])
+               for row in coverage["by_origin"]}
+    assert origins[("document.feedback_batch", False)] == (2, 0)
+    assert origins[("document.review_request", False)] == (1, 0)
+    assert origins[("tool.plans", True)] == (1, 0)
+    assert origins[(None, False)] == (2, 0)
+    assert sum(total for total, _ in origins.values()) == coverage["all_tasks"] == 14
+    assert sum(under for _, under in origins.values()) == coverage["under_workflow"] == 8
+    # Largest share outside workflows first, so the reader sees what holds the share down.
+    outside = [row["all_tasks"] - row["under_workflow"] for row in coverage["by_origin"]]
+    assert outside == sorted(outside, reverse=True)
 
 
 def test_route_returns_visible_plan_target_for_worker_run(db) -> None:
@@ -635,7 +671,7 @@ def test_the_route_answers_for_the_page_parameters_and_the_live_window(db) -> No
     assert set(body) == {"definition_version", "scope", "period", "window", "coverage", "workflows"}
     assert body["definition_version"] == 1 and body["scope"] == {"project": "all", "agent": None}
     assert body["window"] == {"from": live.latest.first, "to": live.period_end(live.latest.last)}
-    assert body["coverage"] == {"under_workflow": 1, "all_tasks": 2}
+    assert headline(body["coverage"]) == {"under_workflow": 1, "all_tasks": 2}
     (entry,) = body["workflows"]
     assert [run["run_id"] for run in entry["runs"]] == ["clock-run-in"]
     assert entry["ref"] == CLOSE and entry["owner"] is None
@@ -666,7 +702,7 @@ def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, mo
 
     window = resolve_grain("weeks", "UTC", now=NOW).latest
     rows = {row["period"]: row for row in body["rows"] if row["period"] in window.periods}
-    assert section["coverage"] == {"under_workflow": 8, "all_tasks": 10}
+    assert headline(section["coverage"]) == {"under_workflow": 8, "all_tasks": 10}
     assert sorted(period for period, row in rows.items() if row["n"]) == ["2026-10-05", "2026-10-12"]
     assert sum(row["n"] for row in rows.values()) == section["coverage"]["all_tasks"]
     assert sum((row["raw_value"] or 0) * row["n"] for row in rows.values()) == pytest.approx(
