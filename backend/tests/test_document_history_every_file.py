@@ -438,7 +438,15 @@ async def test_a_credential_named_file_is_never_recorded_whatever_the_ignore_rul
     assert head(workspace) == before
 
 
-def test_grouped_list_of_the_capped_history_stays_under_a_second(tmp_path):
+def test_grouped_list_of_the_capped_history_reads_git_once(tmp_path, monkeypatch):
+    """The capped list costs one bounded ``git log``, never a call per commit. Counted, not timed:
+    wall-clock time on a shared runner measures the runner's load, not this code."""
+    from infra import document_history
+    real, calls = document_history._git_bytes, []
+
+    def counted(repo, *args, **kwargs):
+        calls.append(args)
+        return real(repo, *args, **kwargs)
     repo = tmp_path / 'workspace'
     repo.mkdir()
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
@@ -453,12 +461,13 @@ def test_grouped_list_of_the_capped_history_stays_under_a_second(tmp_path):
         lines += [b'M 100644 inline sample.md', f'data {len(body)}'.encode(), body]
     subprocess.run(['git', '-C', str(repo), 'fast-import', '--quiet'], input=b'\n'.join(lines) + b'\n', check=True)
     subprocess.run(['git', '-C', str(repo), 'checkout', '-q', 'main'], check=True)
-    started = time.monotonic()
+    monkeypatch.setattr(document_history, '_git_bytes', counted)
     rows, truncated = list_versions(repo, 'sample.md')
-    elapsed = time.monotonic() - started
     assert truncated is True
     assert 0 < len(rows) < 500
-    assert elapsed < 1.0, elapsed
+    logs = [args for args in calls if args[0] == 'log']
+    assert len(calls) <= 2 and len(logs) == 1, calls
+    assert f'--max-count={document_history.HISTORY_CAP + 1}' in logs[0]
 
 
 async def live_lane(path: Path, tmp_path: Path):
