@@ -114,10 +114,10 @@
 
 <style>
 	/* Two items that wrap onto their own lines when the row is too narrow for both, instead of squeezing their names. */
-	.ownership { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-2); row-gap: 0; min-width: 0; max-width: 100%; }
+	/* The row, not each item, steps left by the items' padding, so the labels line up with the text above on every wrapped line. */
+	.ownership { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--space-2); row-gap: 0; min-width: 0; max-width: calc(100% + var(--space-2)); margin-left: calc(var(--space-2) * -1); }
 	/* Each item is a ghost button like the toolbar's (.doc-tool): quiet at rest, filled on hover, with a chevron that says it opens. */
-	.item { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: 100%; border: 0; padding: calc(var(--space-1) / 2) var(--space-2); margin-left: calc(var(--space-2) * -1); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
-	.item + .item { margin-left: 0; }
+	.item { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: 100%; border: 0; padding: calc(var(--space-1) / 2) var(--space-2); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
 	.item:hover, .item[aria-expanded='true'] { background: var(--bg-tertiary); color: var(--text-primary); }
 	.item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.label { flex: none; }

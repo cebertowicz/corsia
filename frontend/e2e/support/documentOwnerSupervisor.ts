@@ -1,11 +1,12 @@
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { expect, type Page, type APIRequestContext } from '@playwright/test';
+import { expect, type Page, type APIRequestContext, type Locator } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from './corsia';
 import { isolatedDb } from './heldComments';
 import { injectMessage } from './mock';
 
 export const LONG_NAME = 'Community outreach and neighbourhood volunteer coordination for the Garden Volunteers';
+const AGENT_NAMES = ['Research coordinator', 'Community outreach', 'Garden volunteers', 'Planning specialist', LONG_NAME];
 
 /**
  * A registered planning document owned by the agent "Release planning", supervised by "Research coordinator", in a
@@ -14,9 +15,8 @@ export const LONG_NAME = 'Community outreach and neighbourhood volunteer coordin
  */
 export async function seedOwnedDocument(page: Page, request: APIRequestContext) {
 	const owner = await createSession(request, 'Release planning');
-	const names = ['Research coordinator', 'Community outreach', 'Garden volunteers', 'Planning specialist', LONG_NAME];
 	const agents: string[] = [];
-	for (const name of names) agents.push(await createSession(request, name));
+	for (const name of AGENT_NAMES) agents.push(await createSession(request, name));
 	isolatedDb([
 		"for agent in sys.argv[2:]: connection.execute(\"UPDATE threads SET agent_enabled=1, agent_status='active' WHERE id=?\", (agent,))",
 		"connection.execute(\"INSERT INTO plans(id,owner_kind,owner_id,state,created_at,updated_at) VALUES (?, 'thread', ?, 'paused', '2026-01-01', '2026-01-01')\", ('paused-' + sys.argv[4], sys.argv[4]))",
@@ -53,7 +53,15 @@ export async function seedOwnedDocument(page: Page, request: APIRequestContext) 
 		await expect(target.locator('.cm-content .cm-md-h1')).toBeVisible();
 		await expect(ownerItem(target)).toBeVisible();
 	}
-	return { open, artifact, owner, agents, docPath };
+	/**
+	 * The picker option for one of this seed's agents, found by its id: every seed in a run reuses the same names in
+	 * one database, so a name alone can match an earlier seed's agent. "You" has no seeded agent and is found by name.
+	 */
+	function option(picker: Locator, name: string): Locator {
+		const index = AGENT_NAMES.indexOf(name);
+		return index < 0 ? picker.getByRole('option', { name: new RegExp(`^${name}`) }) : picker.locator(`[role="option"][id*="-option-${agents[index].slice(0, 8)}"]`);
+	}
+	return { open, option, artifact, owner, agents, docPath };
 }
 
 export const ownership = (page: Page) => page.getByRole('group', { name: 'Owner and supervisor' });

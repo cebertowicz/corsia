@@ -39,7 +39,9 @@ async function atRest(page: Page, touch: boolean, step: string) {
 	}
 }
 
-async function pick(page: Page, role: 'owner' | 'supervisor', name: string) {
+type Seeded = Awaited<ReturnType<typeof seedOwnedDocument>>;
+
+async function pick(page: Page, seeded: Seeded, role: 'owner' | 'supervisor', name: string) {
 	const item = role === 'owner' ? ownerItem(page) : supervisorItem(page);
 	await item.click();
 	const picker = rolePicker(page);
@@ -47,7 +49,7 @@ async function pick(page: Page, role: 'owner' | 'supervisor', name: string) {
 	await expect(page.locator('[data-popover] .role-picker')).toHaveCount(1);
 	const b = await box(picker), viewport = page.viewportSize()!;
 	expect(b.x).toBeGreaterThanOrEqual(0); expect(b.x + b.width).toBeLessThanOrEqual(viewport.width + 0.5);
-	await picker.getByRole('option', { name: new RegExp(`^${name}`) }).click();
+	await seeded.option(picker, name).click();
 	await expect(picker).toHaveCount(0);
 }
 
@@ -126,20 +128,20 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		await expect(rolePicker(page)).toHaveCount(0);
 
 		// A pick saves at once and is there when the document is opened again.
-		await pick(page, 'supervisor', 'Garden volunteers');
+		await pick(page, seeded, 'supervisor', 'Garden volunteers');
 		await expect(supervisorItem(page)).toHaveAccessibleName('Supervisor: Garden volunteers');
 		await seeded.open(page);
 		await expect(supervisorItem(page)).toHaveAccessibleName('Supervisor: Garden volunteers');
 
 		// A failed save keeps the old owner and says so.
 		await page.route('**/api/artifacts/*/ownership', (route) => route.fulfill({ status: 500, body: '{"detail":"boom"}' }));
-		await pick(page, 'owner', 'Planning specialist');
+		await pick(page, seeded, 'owner', 'Planning specialist');
 		await expect(ownerItem(page)).toContainText('Change failed');
 		await expect(ownerItem(page)).toContainText('Release planning');
 		await page.unroute('**/api/artifacts/*/ownership');
 
 		// The person takes the document over; the picked supervisor stays.
-		await pick(page, 'owner', 'You');
+		await pick(page, seeded, 'owner', 'You');
 		await expect(ownerItem(page)).toHaveAccessibleName('Owner: You');
 		await expect(supervisorItem(page)).toHaveAccessibleName('Supervisor: Garden volunteers');
 		await atRest(page, touch, 'you own');
