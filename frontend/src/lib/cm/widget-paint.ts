@@ -135,6 +135,24 @@ export function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLEl
 	return insert;
 }
 
+/** Whether text sits in a diagram or a non-editable part drawn inside the cell. The whole table widget is non-editable, so the check stops at the cell. */
+function inDrawnPart(node: Node, cell: HTMLElement): boolean {
+	for (let el = node.parentElement; el && el !== cell; el = el.parentElement) {
+		if (el instanceof SVGElement || el.getAttribute('contenteditable') === 'false') return true;
+	}
+	return false;
+}
+
+/** A cell's visible text nodes, leaving out a diagram's or image's own text and the blank nodes between elements. */
+function cellTextNodes(cell: HTMLElement): Text[] {
+	const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, {
+		acceptNode: (node) => inDrawnPart(node, cell) || !(node as Text).data.trim() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+	});
+	const nodes: Text[] = [];
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node as Text);
+	return nodes;
+}
+
 /**
  * The drawn text of `from`..`to` (offsets into the table's `src`) inside `span`'s drawn `cell`, or null when the drawn text
  * does not show that part where the source has it (formatting, or the same words drawn more or less often than written).
@@ -170,13 +188,28 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;
-			// A mark inside one cell wraps the characters it covers; a mark across cells, or covering a whole cell, marks the cells.
+			// A mark inside one cell wraps the characters it covers; a mark across cells, or covering a whole cell, marks each cell's text.
 			const inside = hit.length === 1 && (from > span.from || to < span.to || !!mark.suggestion);
 			// The open cell's text is its editor's, which draws such a mark itself: `paintOpenCell` writes it into `cellMarksField`
 			// (`widget-cell-comment.ts`).
-			if (inside && cell.querySelector(CELL_EDITOR)) continue;
+			const open = !!cell.querySelector(CELL_EDITOR);
+			if (inside && open) continue;
 			const range = inside ? cellTextRange(cell, src, span, from, to) : null;
 			if (range) { wrapRange(range, mark); continue; }
+			// A whole cell is marked on its text, as a text comment is; only a cell with no text, or an open cell (whose text is its
+			// editor's), is marked as a cell.
+			const texts = mark.suggestion || open ? [] : cellTextNodes(cell);
+			if (texts.length) {
+				for (const text of texts) {
+					// Another whole-cell comment already drew this text: it joins that mark, in paint order, as it did on the cell.
+					const drawn = text.parentElement;
+					if (drawn?.classList.contains('cm-comment-wrap') && drawn.childNodes.length === 1 && !drawn.dataset.suggestionId) { drawn.classList.add(...markClasses(mark.kind)); addCommentId(drawn, mark); if (mark.unread) drawn.dataset.unread = ''; continue; }
+					const range = document.createRange();
+					range.selectNodeContents(text);
+					wrapRange(range, mark);
+				}
+				continue;
+			}
 			cell.classList.add(...markClasses(mark.kind));
 			addCommentId(cell, mark);
 			if (mark.unread) cell.dataset.unread = '';

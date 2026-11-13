@@ -46,6 +46,7 @@
 		onOpenHistory,
 		resolvedCount = 0,
 		resolvedOpen = false,
+		resolvedInColumn = false,
 		onOpenResolved,
 	}: {
 		title?: string;
@@ -85,6 +86,8 @@
 		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
 		resolvedCount?: number;
 		resolvedOpen?: boolean;
+		/** The resolved list opens in the margin column's place, a plain region rather than a dialog. */
+		resolvedInColumn?: boolean;
 		onOpenResolved?: () => void;
 	} = $props();
 
@@ -193,9 +196,9 @@
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
+			<CommentsPill class="doc-tool comment-status" data-comments-entry count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
-			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
+			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup={resolvedInColumn ? undefined : 'dialog'} aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
 			</span>
 			<span class="tool-group tool-more">
 			{#if artifactId}
@@ -312,6 +315,9 @@
 		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
+		/* The count and Resolved sit closer, so "N comments · N unread" and "Resolved · N" keep one row in a 296px header. */
+		.document-header .tool-send :global(.comment-status:has(+ .resolved-tool)) { padding-inline-end: var(--space-1); }
+		.document-header .tool-send .resolved-tool { padding-inline-start: var(--space-1); }
 	}
 	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }

@@ -13,6 +13,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
 - A document comment or reply box now says under the field which agents it goes to; in a short window, such as a phone on its side, the reply field follows the replies instead of covering them.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
+- A comment list full of comments and long threads now stays usable on a phone and a computer: Accept all stays at the top while the list scrolls, a long thread shows a replies row and opens whole with Back, unread comments and replies always show in full, and nothing inside a comment card scrolls on its own, the reply field included. Before, controls could sit off screen and text was cut off inside small scrolling boxes.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
@@ -20,6 +21,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
+- A passage you comment on in a chat's last message now stays in view above the comment sheet on a phone, after a refused send and when you open a failed comment; before, the sheet could cover it.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
 - A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.

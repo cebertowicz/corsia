@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
 import { get } from 'svelte/store';
-import { tick } from 'svelte';
+import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
@@ -19,7 +19,8 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
 /**
  * Return focus to the document's editor. CodeMirror's own focus() re-applies its selection without scrolling;
  * a bare element focus() makes WebKit put the caret at the start of the editable and scroll there once the
- * DOM selection was cleared, as it is when the comment popover's focused control is removed.
+ * DOM selection was cleared, as it is when the comment popover's focused control is removed. With a table cell open, the
+ * focus goes to that cell's editor: the document's caret is then in the table's source, which is drawn over and takes no typing.
  */
 export function focusDocumentEditor(root: HTMLElement | undefined) {
 	// Looked up from the outer `.cm-editor`: CodeMirror finds a view from the first `.cm-content` inside what it is given,
@@ -27,6 +28,9 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
 	const view = dom && EditorView.findFromDOM(dom);
 	if (!view) return;
+	const cell = view.state.field(openCellState, false) && view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
+	const cellView = cell && EditorView.findFromDOM(cell);
+	if (cellView) { cellView.focus(); return; }
 	const selection = view.state.selection.main;
 	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
 	view.focus();
@@ -80,7 +84,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	function restoreReplyFocus(root: () => HTMLElement | undefined) {
 		restoreFocus = () => void tick().then(() => {
 			const button = root()?.querySelector<HTMLElement>('[data-doc-jump] button');
-			if (button) button.focus({ preventScroll: true }); else restoreEditor();
+			button?.focus({ preventScroll: true });
+			// A control on its way out is inert and refuses focus: then the text takes it.
+			if (!button || document.activeElement !== button) restoreEditor();
 		});
 	}
 	/** Where closing the card gives the caret back, when that is not the document's own caret (a table cell the card closed). */
@@ -91,6 +97,9 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let quiet = $state(false);
 	/** The draft was started with the margin column up: the column stays while it is written, and closing the draft goes back to it. */
 	let overColumn = $state(false);
+	/** Counts what the reader opened (a pick, a draft, the list, a saved comment, the next unread), never a change nobody asked for: the resolved list gives the canvas back on these alone. */
+	let opened = $state(0);
+	const bump = () => untrack(() => opened++);
 	/** Closes everything, the column under a draft included: another document, the history view. */
 	function closeAll() {
 		state = null;
@@ -110,11 +119,12 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		anchor = rect;
 		atClick = false;
 		state = { kind: 'draft' };
+		bump();
 	}
 	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. The highlight is how a thread is opened now that no marker stands by it: its card, once shown, stamps the replies viewed. */
 	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
 		const margin = marginUp?.();
-		// A document canvas with no room for the column shows its list as a sheet: a highlight picked there opens that one thread in its place.
+		// A document canvas with no room for the column shows its list as a popover (a phone's as a sheet): a highlight picked there opens that one thread in its place.
 		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
 		if (changed) arrivedDocComments.set(new Set([id]));
 		return changed;
@@ -129,6 +139,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
 		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
+		bump();
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id, fromText: true };
@@ -139,6 +150,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	}
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false) {
 		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
+		bump();
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
@@ -179,12 +191,14 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list') { close(); return; }
 		quiet = false;
 		state = { kind: 'list' };
+		bump();
 		anchor = opener;
 		atClick = false;
-		restoreFocus = () => opener.focus();
+		// The column sits beside the text, so focus leaving it goes back to the caret; a list over the text hands it back to its button.
+		restoreFocus = marginUp?.() ? restoreEditor : () => opener.focus();
 	}
 	return {
-		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
+		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; bump(); }, get opened() { return opened; },
 		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
 		get atClick() { return atClick; },
 		get restoreFocus() { return restoreFocus; },
@@ -197,21 +211,19 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 /** How a card opened from the text shows: in the margin column beside it, as a popover over it, or as the phone sheet. */
 export type CardMode = 'margin' | 'popover' | 'sheet';
 
-/** Whether the margin column fits beside the text now: the canvas is wide enough and the pane is not a drawer over it. */
-export function marginFits(root: HTMLElement | undefined, paneDrawer: boolean) {
-	return !paneDrawer && hasRoomForMargin(root?.getBoundingClientRect().width ?? 0);
-}
-
 /**
  * A canvas that is already wide enough for the text and the margin column shows the column on load, with the shell left alone;
- * a narrower one waits for the reader to open comments. Checked once per document, when its comments are ready. Call it while a component initialises.
+ * a narrower one waits for the reader to open comments. Checked once per document, when its comments are ready. `fits` is the
+ * surface's own margin rule, the one its column follows. A list shown this way (`quietList`) was never opened by the reader, so
+ * when the column stops fitting it closes rather than taking another form over the text. Call it while a component initialises.
  */
-export function openColumnOnLoad(inputs: { artifactId: () => string | null; ready: () => boolean; root: () => HTMLElement | undefined; paneDrawer: () => boolean; hasComments: () => boolean; shown: () => boolean; open: () => void }) {
+export function openColumnOnLoad(inputs: { artifactId: () => string | null; ready: () => boolean; paneDrawer: () => boolean; fits: () => boolean; hasComments: () => boolean; shown: () => boolean; open: () => void; quietList: () => boolean; close: () => void }) {
 	let checked: string | null = null;
 	$effect(() => {
-		const id = inputs.artifactId(), root = inputs.root();
-		if (!id || checked === id || !inputs.ready() || !root || inputs.paneDrawer()) return;
+		const id = inputs.artifactId();
+		if (!id || checked === id || !inputs.ready() || inputs.paneDrawer()) return;
 		checked = id;
-		if (inputs.hasComments() && !inputs.shown() && marginFits(root, false)) inputs.open();
+		if (inputs.hasComments() && !inputs.shown() && inputs.fits()) inputs.open();
 	});
+	$effect(() => { if (inputs.quietList() && !inputs.fits()) inputs.close(); });
 }

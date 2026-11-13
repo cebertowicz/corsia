@@ -18,7 +18,7 @@ test('captures the integer viewports across media-query transitions only', () =>
     fs.writeFileSync(path.join(root, 'component.svelte'), '<script>const sample = "@media (max-width: 900px) {";</script><style>@media (width < 32.5rem) {}</style>');
     const boundaries = scanBreakpoints(root);
     assert.deepEqual(boundaries, [320, 401, 501, 520, 769]);
-    assert.deepEqual(captureWidths(boundaries), [320, 393, 400, 401, 500, 501, 519, 520, 768, 769, 1440]);
+    assert.deepEqual(captureWidths(boundaries), [320, 393, 400, 401, 500, 501, 519, 520, 768, 769, 1440, 1920]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

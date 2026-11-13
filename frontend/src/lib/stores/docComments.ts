@@ -4,7 +4,7 @@ import {
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
-import { heldIds, withhold } from './docCommentHolds';
+import { copyStamp, heldIds, shownStamp, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapCommentRange } from '$lib/cm/comment-range';
@@ -53,7 +53,7 @@ export const retryPlacement = (commentId: string) => placements.retry(commentId)
  * Comments still held stay out.
  */
 export function reshow(artifactId: string, edit: (rows: DocComment[]) => DocComment[] = (rows) => rows): void {
-	placements.show(artifactId, withhold(artifactId, edit(get(docComments)[artifactId] ?? [])));
+	placements.show(artifactId, withhold(artifactId, edit(get(docComments)[artifactId] ?? []), shownStamp(artifactId)));
 }
 
 
@@ -104,6 +104,7 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'loading' } }));
 	}
 	try {
+		const at = copyStamp();
 		const { comments, feedback } = await fetchComments(artifactId);
 		const rows = comments.map(fromServer);
 		// What this canvas already showed stays through a failed load, so a retry after one still finds what is new.
@@ -112,7 +113,7 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 			const known = new Set([...shown.map((row) => row.id), ...heldIds(artifactId)]);
 			reloadListeners.forEach((listener) => listener(artifactId, rows.filter((row) => !known.has(row.id))));
 		}
-		placements.show(artifactId, withhold(artifactId, rows));
+		placements.show(artifactId, withhold(artifactId, rows, at));
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
 		return feedback;
 	} catch (error) {

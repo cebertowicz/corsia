@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { closeComments, openComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -58,7 +58,7 @@ async function openDocument(page: Page, size: { width: number; height: number },
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(page.getByRole('button', { name: /^2 threads\b/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^2 comments\b/ })).toBeEnabled();
 	await settle(page);
 	return { title, artifactId, ids };
 }
@@ -115,7 +115,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('an empty table cell can start and keep a comment after reload', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { title, ids } = await openDocument(page, { width: 1440, height: 900 });
-		await openComments(page, /^2 threads\b/);
+		await openComments(page, /^2 comments\b/);
 		const comments = page.locator('[data-doc-comments-drawer]');
 		await comments.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		await closeComments(comments);
@@ -131,7 +131,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		await loginByUrl(page, { waitForComposer: false });
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toBeVisible();
-		await openComments(page, /^3 threads\b/);
+		await openComments(page, /^3 comments\b/);
 		await expect(page.getByText('Empty-cell comment.', { exact: true })).toBeVisible();
 		await expect(page.getByText('Couldn’t find its place', { exact: true })).toHaveCount(0);
 		await evidence(page, testInfo, 'empty-cell-after-reload');
@@ -146,7 +146,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		].join('\n');
 		const doc = DOC.replace(['| Item | Owner |', '| --- | --- |', ...TABLE_ROWS].join('\n'), wideTable);
 		const { ids } = await openDocument(page, { width: 1440, height: 900 }, doc);
-		await openComments(page, /^2 threads\b/);
+		await openComments(page, /^2 comments\b/);
 		const side = page.locator('[data-doc-comments-drawer]');
 		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		const cell = page.locator('.cm-md-table td', { hasText: 'owner-07' });
@@ -160,29 +160,29 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('navigating to a table row and a prose comment lands inside the editor, and saving on visible text does not scroll', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { ids } = await openDocument(page, { width: 2400, height: 900 });
-		await openComments(page, /^2 threads\b/);
+		// At this width the comment column opens with the document; openComments presses the control only if it does not report them open.
+		await openComments(page, /^2 comments\b/);
 		const side = page.locator('[data-doc-comments-drawer]');
-		await expect(side).toBeVisible();
+		await expectCommentsShown(side);
 		await expect(page.locator('[data-adaptive-drawer]'), 'the list is the side-by-side drawer, not a sheet').toHaveCount(0);
 		const { band, scrollTop, handle } = await viewportOf(page);
 		const drawerBox = (await side.boundingBox())!, editorBox = (await page.locator('.cm-editor').boundingBox())!;
 		expect(Math.abs(drawerBox.y - editorBox.y), 'the drawer beside the editor starts at the editor top').toBeLessThanOrEqual(2);
 
 		const row = page.locator('.cm-md-table tr', { hasText: 'owner-07' });
-		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
+		// A resting margin card keeps its Go to text control for the keyboard only, so these jumps press it.
+		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').press('Enter');
 		await landsInside(page, row, band, 'the table row lands inside the editor');
 		await evidence(page, testInfo, 'desktop-table-row-navigation');
 
 		await handle.evaluate((element) => element.scrollTo(0, 0));
 		const prose = page.locator('.cm-line', { hasText: 'Prose anchor sentence' });
-		await side.locator(`[data-comment-id="${ids.prose}"]`).locator('[data-comment-jump]').click();
+		await side.locator(`[data-comment-id="${ids.prose}"]`).locator('[data-comment-jump]').press('Enter');
 		await landsInside(page, prose, band, 'the prose line lands inside the editor');
 		await evidence(page, testInfo, 'desktop-prose-navigation');
 
-		// A save on text that is already in view leaves the reader where they are. The list closes first: closing it widens the editor and
-		// rewraps the text, so that reflow, which is not a scroll, would otherwise sit between the two measurements.
-		await closeComments(side);
-		await expect(side).toHaveCount(0);
+		// A save on text that is already in view leaves the reader where they are. The column stays open: a new comment's composer opens in
+		// it at this width, so closing it first would make the draft reopen it and rewrap the text, a reflow that is not a scroll.
 		await settle(page);
 		const target = page.locator('.cm-line', { hasText: 'Visible save target line.' });
 		await landsInside(page, target, band, 'the line to comment on is in view');

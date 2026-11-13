@@ -9,12 +9,15 @@ document save lives in the API layer, which this module does not import.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import sqlite3
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
+from weakref import WeakValueDictionary
 
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
@@ -44,6 +47,21 @@ INSERT_STALE_MESSAGE = (
 DocumentWriter = Callable[
     [str, str, str | None, str, str | None, str | None], Awaitable[dict[str, Any] | None]
 ]
+
+_accept_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def accept_lock(artifact_id: str) -> asyncio.Lock:
+    """One document's Accepts, one at a time from loading siblings through recording the decision.
+
+    An insertion's place depends on its accepted siblings, so the next Accept must read every earlier
+    one's recorded decision. Callers hold a strong reference while waiting or working, so an idle
+    document leaves no lock behind. The lock lives in this server process.
+    """
+    lock = _accept_locks.get(artifact_id)
+    if lock is None:
+        lock = _accept_locks[artifact_id] = asyncio.Lock()
+    return lock
 
 
 
@@ -225,6 +243,24 @@ async def decide_suggestion(
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
+    if decision != "accept":
+        lock: contextlib.AbstractAsyncContextManager = contextlib.nullcontext()
+    else:
+        artifact_id = await run_in_db(store.get_artifact_id_for_comment, comment_id)
+        if artifact_id is None:
+            raise CommentActionError("not_found", "Comment not found")
+        lock = accept_lock(artifact_id)
+    async with lock:
+        return await _decide_suggestion(
+            comment_id, decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id,
+            write=write, include_document=include_document, reason=reason)
+
+
+async def _decide_suggestion(
+    comment_id: str, decision: str, *, user_id: str, decided_by: str,
+    actor_thread_id: str | None, write: DocumentWriter, include_document: bool, reason: str | None,
+) -> dict[str, Any]:
+    """An Accept runs this whole body under its document's ``accept_lock``."""
 
     def _load():
         db = get_db()
@@ -237,7 +273,7 @@ async def decide_suggestion(
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
             if decision == "accept" and comment.get("insert_after"):
                 comment["_accepted_insertions"] = store.accepted_insertions(
-                    comment["artifact_id"], comment["anchor_text"], db=db)
+                    comment["artifact_id"], [comment["anchor_text"]], db=db)[comment["anchor_text"]]
             return comment, artifact, owner[1] if owner else None
         finally:
             db.close()

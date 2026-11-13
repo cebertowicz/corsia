@@ -58,6 +58,13 @@
 		artifactId; threadId;
 		unseen.clear(); eligible.clear(); pill = null;
 	});
+	// A below pill stands over the text's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).
+	$effect(() => {
+		const canvas = root;
+		if (!canvas || !viewing || pill?.direction !== 'below') return;
+		canvas.setAttribute('data-notice-below', '');
+		return () => canvas.removeAttribute('data-notice-below');
+	});
 	$effect(() => {
 		viewing;
 		if (!viewing) { unseen.clear(); eligible.clear(); pill = null; }
