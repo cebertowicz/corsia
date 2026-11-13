@@ -83,7 +83,8 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   let captured = page;
   let open: ((page: Page, state?: string) => Promise<void>) | undefined;
   const breakpoints = scanBreakpoints(path.resolve('src'));
-  const widths = selectedWidths ?? captureWidths(breakpoints);
+  const only = (process.env.CONTACT_SHEET_WIDTHS ?? '').split(',').map(Number).filter(Boolean);
+  const widths = selectedWidths ?? captureWidths(breakpoints).filter(width => !only.length || only.includes(width));
   const groups: string[] = [];
   // A scenario may export `states` (names of the screen states it seeds); each is captured at every width into its own folder.
   const states: string[] = Array.isArray(scenario.states) && scenario.states.length ? scenario.states : [''];

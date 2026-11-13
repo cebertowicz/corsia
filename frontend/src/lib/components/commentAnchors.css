@@ -31,6 +31,8 @@
 /* A stack of threads on the same text is nested highlights, and the innermost paints over the ones around it. While any thread in the stack is unread, the read highlights around or inside it draw nothing of their own, so the unread wash and underline show whole, in their own colours, at any depth. */
 .cm-comment-anchor[data-unread] .cm-comment-anchor:not([data-unread]),
 .cm-comment-anchor:not([data-unread]):has(.cm-comment-anchor[data-unread]) { background-color: transparent; border-bottom-style: none; }
+/* A stack of read threads is nested read highlights whose washes and rules add up to a saturated block that looks louder than any unread one. The outermost read highlight paints the wash once, the same amber as a single read thread; read highlights nested inside it draw nothing of their own, unless one is the focused or landed thread, which keeps its stronger mark. */
+.cm-comment-anchor:not([data-unread]) .cm-comment-anchor:not([data-unread], .cm-comment-focused, .chat-reply-mark-landed) { background-color: transparent; border-bottom-style: none; }
 /* Forced colours drop the wash, the shadow and the border colours: a thick double rule in the system highlight colour plus an outline keep an unread highlight different from a read one (a thin plain rule). */
 @media (forced-colors: active) {
 	.cm-comment-anchor[data-unread] { border-bottom: var(--space-1) double Highlight; outline: 1px solid Highlight; outline-offset: -1px; }

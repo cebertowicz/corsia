@@ -19,6 +19,8 @@
 		rows.push({ id: `s${depth}-last`, text: `Stack of ${depth}, only the last thread unread: please recheck the rollout window before Friday and tell the owner.`, quote: 'rollout window', count: depth, unread: [depth - 1] });
 	}
 	rows.push({ id: 's7-mid', text: 'Stack of 7, threads 3 and 5 unread: please recheck the rollout window before Friday and tell the owner.', quote: 'rollout window', count: 7, unread: [2, 4] });
+	rows.push({ id: 'solo-read', text: 'One thread, read: please recheck the rollout window before Friday and tell the owner.', quote: 'rollout window', count: 1, unread: [] });
+	rows.push({ id: 's3-read', text: 'Stack of 3, all read: please recheck the rollout window before Friday and tell the owner.', quote: 'rollout window', count: 3, unread: [] });
 	rows.push({ id: 's7-allread', text: 'Stack of 7, all read: please recheck the rollout window before Friday and tell the owner.', quote: 'rollout window', count: 7, unread: [] });
 	rows.push({ id: 'press7', text: 'Land the announcement with every channel on the same day, and tell each partner team before the public post goes out so nobody hears it second hand.', quote: 'every channel on the same day', count: 7, unread: [1, 4] });
 	const stamp = (n: number) => new Date(Date.UTC(2026, 10, 11, 18, n)).toISOString();
