@@ -1,6 +1,7 @@
 """A commit in flight on the live store never blocks another connection to it."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -36,7 +37,7 @@ def test_existing_rollback_journal_store_converts_on_open(tmp_path):
 
 
 @pytest.mark.parametrize("table", ["live", "mirror"])
-def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table):
+def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table, caplog):
     path = tmp_path / "state.sqlite"
     LiveStore(path)
     with sqlite3.connect(path, isolation_level=None) as db:
@@ -46,9 +47,43 @@ def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table)
     data = bytearray(path.read_bytes())
     data[(root - 1) * size:root * size] = b"\xa5" * size
     path.write_bytes(bytes(data))
-    LiveStore(path)  # a refusal or not is the store's business; its bytes are not
+    with caplog.at_level(logging.WARNING, logger="doceditor.live_store_journal"):
+        LiveStore(path)  # the open itself must not rewrite the damaged bytes
     assert path.read_bytes() == bytes(data)
+    assert [r.getMessage().split(": ", 1)[1].split(" (")[0] for r in caplog.records] == ["quick_check failed"]
     assert sorted(entry.name for entry in tmp_path.iterdir()) == ["state.sqlite"]
+
+
+class _BusyOnCheck:
+    """A connection whose integrity check meets SQLITE_BUSY, as if another writer held the store."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, sql, *args):
+        if "quick_check" in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return self._connection.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_busy_integrity_check_keeps_rollback_mode_logs_once_and_converts_next_open(tmp_path, monkeypatch, caplog):
+    path = tmp_path / "state.sqlite"
+    LiveStore(path)
+    with sqlite3.connect(path, isolation_level=None) as db:
+        db.execute("PRAGMA journal_mode=DELETE")
+    connect = LiveStore._connect
+    with monkeypatch.context() as patched:
+        patched.setattr(LiveStore, "_connect", lambda self: _BusyOnCheck(connect(self)))
+        with caplog.at_level(logging.WARNING, logger="doceditor.live_store_journal"):
+            store = LiveStore(path)  # no exception escapes the open
+        assert store._read("PRAGMA journal_mode")[0][0] == "delete"
+    warnings = [r.getMessage() for r in caplog.records]
+    assert len(warnings) == 1
+    assert str(path) in warnings[0] and "busy, will convert on next open" in warnings[0]
+    assert LiveStore(path)._read("PRAGMA journal_mode")[0][0] == "wal"
 
 
 @pytest.mark.parametrize("operation", ["read", "connect_for_write_check"])

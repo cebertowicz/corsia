@@ -102,7 +102,7 @@ class LiveStore:
                 "INSERT OR IGNORE INTO meta(singleton,store_id) VALUES (1, ?)", (str(uuid4()),)))
             self._store_id = self._read("SELECT store_id FROM meta WHERE singleton=1")[0][0]
             with closing(self._connect()) as connection:
-                enter_wal(connection)
+                enter_wal(connection, self.path)
         except sqlite3.Error as exc:
             raise StoreRefused(str(exc)) from exc
 
