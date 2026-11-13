@@ -17,6 +17,32 @@ async function capture(page: Page, stage: string) {
   if (directory) await page.screenshot({ path: `${directory}/${stage}-${page.viewportSize()?.width}.png`, animations: 'disabled' });
 }
 
+/** Scroll the transcript to its end, where the last row sits above the composer; returns where the row and composer are. */
+async function lastRowClear(page: Page) {
+  return page.locator('.messages [data-message-id]').last().evaluate(async (node) => {
+    // The transcript keeps a composer-high gap under its last row once scrolled to its end.
+    let scroller = node.parentElement;
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    return { bottom: Math.round(box.bottom), composerTop: floater ? Math.round(floater.top) : null };
+  });
+}
+
+async function expectLastRowClear(page: Page) {
+  const { bottom, composerTop } = await lastRowClear(page);
+  expect(bottom).toBeLessThanOrEqual(composerTop ?? Infinity);
+}
+
+/** Scroll the commented message to the middle of the transcript so its highlight shows, then capture. */
+async function captureHighlight(page: Page, row: any, stage: string) {
+  await row.evaluate((node: HTMLElement) => node.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(150);
+  await capture(page, stage);
+}
+
 async function comment(page: Page, id: string, quote: string, note: string) {
   await page.evaluate(({ id, quote }) => {
     const body = document.querySelector<HTMLElement>(`[data-message-id="${id}"] .long-message-body`)!;
@@ -84,8 +110,8 @@ async function queueComments(page: Page, request: any, title: string, count: num
   return { thread, row, cids };
 }
 
-async function answerReadsInItsThread(page: Page, row: any, quote: string, answer: string) {
-  const surface = await openCommentThread(row, page, quote);
+async function answerReadsInItsThread(page: Page, row: any, quote: string, answer: string, how: { tap?: boolean } = {}) {
+  const surface = await openCommentThread(row, page, quote, how);
   await expect(surface.getByText(answer)).toBeVisible();
   return surface;
 }
@@ -155,11 +181,14 @@ test('an answer written into the reply never streams into chat', async ({ page, 
   await capture(page, 'after');
 });
 
-for (const width of [1440, 900, 393]) test(`a turn made only of answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
+for (const width of [1440, 900, 393]) test.describe(`answers-only turn at ${width}`, () => {
+test.use({ viewport: { width, height: width === 393 ? 852 : 1000 }, hasTouch: width === 393, isMobile: width === 393 });
+test(`a turn made only of answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
   test.skip(test.info().project.name !== 'chromium-desktop', 'Sets its own widths');
-  await page.setViewportSize({ width, height: width === 393 ? 852 : 1000 });
   const { thread, row, cids } = await queueComments(page, request, 'Answers only turn', 1);
+  // The highlight while no answer has come, to read beside the one an unread answer leaves.
+  await captureHighlight(page, row, 'highlight-no-answer');
   const answer = 'Only an answer.';
   await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}`, completion_gate: 'answers-only' }]);
   const blocks = () => page.locator('.messages [data-work-block]');
@@ -177,6 +206,7 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
     return Boolean(stepId) && !rows.some((m: any) => m.id === stepId);
   }, { timeout: 30_000 }).toBe(true);
   await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  await captureHighlight(page, row, 'highlight-unread-answer');
   // Once it ends no line is left for it: the one folded line counts the step it lists when opened (#2602).
   await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(0);
   const labels = await blocks().evaluateAll((nodes) => nodes.map((node) => (node.querySelector('.fold-toggle') as HTMLElement).innerText));
@@ -192,6 +222,7 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
   expect(opened).toBe(1);
   expect(live.ids).not.toContain(stepId);
   expect(await chatText(page)).not.toContain(answer);
+  await expectLastRowClear(page);
   await capture(page, 'answers-only-live');
   await page.reload();
   if (narrow(page)) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -203,6 +234,9 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
   const reloaded = await drawn();
   expect(reloaded.ids).toEqual(live.ids);
   expect(reloaded.folds).toEqual(live.folds);
+  await expectLastRowClear(page);
   await capture(page, 'answers-only-reloaded');
-  await answerReadsInItsThread(page, row, quotes[0], answer);
+  await answerReadsInItsThread(page, row, quotes[0], answer, { tap: width === 393 });
+  await capture(page, 'thread-open');
+});
 });
