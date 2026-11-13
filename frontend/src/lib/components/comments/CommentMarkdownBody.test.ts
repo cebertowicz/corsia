@@ -67,6 +67,19 @@ describe('CommentMarkdownBody', () => {
 		expect(reveal.classList.contains('clamped')).toBe(true);
 	});
 
+	it('shows an unread body whole, in a margin preview too; a read preview clamps', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: LONG, preview: true, unread: true } });
+		flushSync();
+		expect(host.querySelector('.ct-markdown-reveal')!.classList.contains('whole')).toBe(true);
+		unmount(component);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: 'A short read comment', preview: true } });
+		flushSync();
+		expect(host.querySelector('.ct-markdown-reveal')!.classList.contains('whole')).toBe(false);
+	});
+
 	it('watches the reveal box as well as the text, so a preview clamp that changes with the card is measured again', () => {
 		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 		host = document.createElement('div');
