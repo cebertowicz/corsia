@@ -31,7 +31,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
 4. **Break the work down.** From steps 1–3, write three short tables. Mark a row that doesn't apply to this project as not applicable; never fill it in to complete the table.
    - **Roles and recurring tasks:** each kind of work and who does it today. Each recurring task gets its steps, who does each, and where the person is asked.
-   - **Sources:** each place the work lives (step 2, question 3). For each: how fresh its data is and how CORSIA can read it (a connected tool, an event, a scheduled read, or not at all), and what is lost when it can't.
+   - **Sources:** each place the work lives (step 2, question 3). For each: how fresh its data is and how CORSIA can read it (a connected app, an event, a scheduled read, or not at all), and what is lost when it can't.
    - **How it could go wrong:** where coordination is likely to fail (a handoff, a stale source, a decision nobody owns, work nobody checks), each with how the project will catch or prevent it.
 
    The Sources and How-it-could-go-wrong tables are drafts of the charter's canonical-sources table, input inventory and standing risks (SKILL step 2): once the person agrees, write each row there once and keep no second copy.
