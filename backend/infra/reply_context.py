@@ -21,15 +21,24 @@ from infra.failure_reference import new_error_reference
 
 logger = logging.getLogger(__name__)
 
+# Drop reasons that mean the place a comment quotes is no longer in its chat, so no resend can store it.
+_QUOTE_GONE = frozenset({"invalid_seq", "invalid_offsets", "not_agent_message", "invalid_root"})
+
 
 class RejectedComments(ValueError):
     """Submitted comments failed admission; ``positions`` are 1-based, empty when unknown.
 
-    Its text is shown to the person: which comments, and what to do. The
-    composer keeps the draft when a send is refused.
+    Its text is shown to the person in chat's composer: which comments, and what to do. The
+    composer keeps the draft when a send is refused. ``cause`` names the failure for a
+    surface that words it itself: ``comment_check_failed`` (a system failure, logged under
+    ``reference``), ``comment_quote_gone`` or ``comment_invalid``.
     """
 
-    def __init__(self, positions: list[int], *, reference: str | None = None):
+    def __init__(self, positions: list[int], *, reference: str | None = None, quote_gone: bool = False):
+        self.reference = reference
+        self.cause = (
+            "comment_check_failed" if reference else "comment_quote_gone" if quote_gone else "comment_invalid"
+        )
         if reference:
             super().__init__(
                 "Couldn’t check your comments, so nothing was sent. Your message and comments "
@@ -71,7 +80,9 @@ def require_every_comment(raw: object, stored: dict | None, dropped: list[dict] 
     }
     missing = [position for position in range(1, len(submitted) + 1) if position not in kept]
     if missing:
-        raise RejectedComments(missing)
+        reasons = {item["reason"] for item in dropped or [] if item["field"] == "comments"
+                   and item.get("index", -1) + 1 in missing}
+        raise RejectedComments(missing, quote_gone=bool(reasons & _QUOTE_GONE))
 
 
 def has_comment_candidates(raw: object) -> bool:

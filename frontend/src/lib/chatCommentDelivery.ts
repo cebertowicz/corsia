@@ -1,3 +1,4 @@
+import { SvelteSet } from 'svelte/reactivity';
 import type { ChatComment } from '$lib/stores/threads';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { deliveryPresentation, readMessageDeliveryState, type DeliveryPresentation, type MessageDeliveryState } from '$lib/messageDelivery';
@@ -15,6 +16,14 @@ export type EndedSend = {
 
 const ENDED: readonly MessageDeliveryState[] = ['failed', 'ambiguous', 'cancelled'];
 
+/** Sends whose Retry was refused for a cause no press can get past (their chat is deleted, their quote is gone). */
+const refusedForGood = new SvelteSet<string>();
+
+/** This send's Retry was refused for good: it keeps its label but offers no Retry it can't honour. */
+export function retryRefusedForGood(messageId: string): void {
+	refusedForGood.add(messageId);
+}
+
 function retryControl(state: MessageDeliveryState, noun: 'comment' | 'reply'): RetryControl | null {
 	if (state === 'ambiguous') return { label: 'Retry anyway', title: `This may send the ${noun} twice if the provider received it before the connection failed` };
 	return state === 'failed' ? { label: 'Retry', title: `Send this ${noun} again` } : null;
@@ -24,7 +33,8 @@ function ended(messageId: string, note: string, createdAt: string, root: boolean
 	const state = readMessageDeliveryState(rawState);
 	if (!state || !ENDED.includes(state)) return null;
 	const delivery = deliveryPresentation({ delivery_state: state, delivery_error: error ?? null }, false);
-	return delivery && { messageId, note, createdAt, root, delivery, retry: retryControl(state, root ? 'comment' : 'reply') };
+	const retry = refusedForGood.has(messageId) ? null : retryControl(state, root ? 'comment' : 'reply');
+	return delivery && { messageId, note, createdAt, root, delivery, retry };
 }
 
 /**

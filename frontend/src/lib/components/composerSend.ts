@@ -1,12 +1,14 @@
 import { get } from 'svelte/store';
 import { emitProductEvent } from '$lib/product_events';
 import { CommentSendRefused, unknownSendFailure, type ChatComment } from '$lib/chatCommentAnchors';
+import { retryRefusedForGood } from '$lib/chatCommentDelivery';
 import { adoptCommentThreads } from '$lib/chatCommentRefresh';
 import { apiFetch } from '$lib/api/request';
-import { plainErrorText } from '$lib/plainError';
-import { reasoningEffort } from '$lib/stores/threads';
+import { findModelById, workspaceModels } from '$lib/stores/models';
+import { reasoningEffort, threads } from '$lib/stores/threads';
 import { toasts } from '$lib/stores/toast';
 import { viewingDocumentForThread } from '$lib/stores/documentViewport';
+import { canEditCheckpointWindow } from './v7/modelWarning';
 
 /** What a send asks the runtime to do with the turn in flight. */
 export type ComposerDeliveryIntent = 'apply_now' | 'queue_after_turn';
@@ -47,12 +49,40 @@ function refuse(cause: ReplySendBlock, noun: 'comment' | 'reply'): never {
  */
 const unsettledPosts = new Map<string, string>();
 
+/**
+ * Whether the person can raise this chat's model's context window in its details, by the model details' own rule
+ * read from the catalog row: an external server's model, a harness's (its label is editable), or oMLX's.
+ */
+function windowEditable(threadId: string): boolean {
+	const row = findModelById(get(workspaceModels), get(threads).find(thread => thread.id === threadId)?.model);
+	return !!row && canEditCheckpointWindow(!!row.litellm_model?.startsWith('external@'), !!row.runs_on, row.provider ?? '');
+}
+
+/**
+ * What the comment's box (`sent`) or a Retry's toast (`retried`) says for a refusal the route names. Each known
+ * cause has its own line (COPY-STANDARD C11); `final` when no press can get past it, so no Retry is offered.
+ * Any other failure is one the person can only retry, so it carries the reference it is logged under (C10).
+ * Only the box keeps the text, so only a box line says so.
+ */
+export function commentFailure(detail: unknown, reference: unknown, noun: 'comment' | 'reply', act: 'sent' | 'retried', threadId: string): { text: string; final: boolean } {
+	const kept = act === 'sent' ? ' Your text stays here to copy.' : '';
+	if (detail === 'chat_not_found') return { text: `This chat is deleted, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
+	if (detail === 'comment_quote_gone') return { text: `The text this ${noun} quotes isn’t in the chat, so this ${noun} couldn’t be ${act}.${kept}`, final: true };
+	if (detail === 'comment_model_cap') {
+		const next = windowEditable(threadId) ? 'Choose another model or raise its context window in the model’s details, then try again.' : 'Choose another model, then try again.';
+		return { text: `This chat’s model has too small a context window to answer, so this ${noun} couldn’t be ${act}. ${next}`, final: false };
+	}
+	const generic = act === 'sent' ? unknownSendFailure(noun) : `Couldn’t retry this ${noun}. Try again.`;
+	return { text: typeof reference === 'string' && reference ? `${generic} Reference: ${reference}` : generic, final: false };
+}
+
 /** Read the post's answer: the commented rows' threads as they now stand, or the sentence the box shows. */
-async function adoptPosted(response: Response, threadId: string, noun: 'comment' | 'reply'): Promise<void> {
+async function adoptPosted(response: Response, threadId: string, noun: 'comment' | 'reply', act: 'sent' | 'retried'): Promise<void> {
 	const result = await response.json().catch(() => null);
-	// No press can send it now, so the box offers no Retry (final); the text stays for the person to copy.
-	if (!response.ok && result?.detail === 'chat_not_found') throw new CommentSendRefused(`This chat is deleted, so this ${noun} couldn’t be sent. Your text stays here to copy.`, true);
-	if (!response.ok) throw new CommentSendRefused(plainErrorText(result?.detail, unknownSendFailure(noun)));
+	if (!response.ok) {
+		const failure = commentFailure(result?.detail, result?.reference, noun, act, threadId);
+		throw new CommentSendRefused(failure.text, failure.final);
+	}
 	adoptCommentThreads(threadId, Array.isArray(result?.messages) ? result.messages : []);
 }
 
@@ -85,7 +115,7 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
 		});
 	} catch { refuse('notAccepted', noun); }
-	await adoptPosted(response, threadId, noun);
+	await adoptPosted(response, threadId, noun, 'sent');
 	unsettledPosts.delete(key);
 	// Counted once the server holds it: a refused press, or a press again after a lost answer, is not another comment.
 	emitComposerSend(threadId, '', 0, [comment]);
@@ -93,17 +123,19 @@ export async function postChatComment(reply: ChatComment, threadId: string | nul
 
 /**
  * Retry a comment, or a reply, whose delivery ended undelivered: the server posts its comments again in its
- * place, as one input however often it is pressed. A refusal says so where chat says it for a message.
+ * place, as one input however often it is pressed. A refusal says why in a toast, in the comment's words; one
+ * no press can get past takes that comment's Retry away.
  */
 export async function retryChatComment(threadId: string, messageId: string, noun: 'comment' | 'reply'): Promise<void> {
-	const failure = `Couldn’t retry this ${noun}. Try again.`;
 	try {
 		const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/chat-comments`, {
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retry_of: messageId }),
 		});
-		await adoptPosted(response, threadId, noun);
+		await adoptPosted(response, threadId, noun, 'retried');
 	} catch (error) {
-		toasts.show(error instanceof CommentSendRefused && error.message !== unknownSendFailure(noun) ? error.message : failure, 'error');
+		const refused = error instanceof CommentSendRefused;
+		if (refused && error.final) retryRefusedForGood(messageId);
+		toasts.show(refused ? error.message : `Couldn’t retry this ${noun}. Try again.`, 'error');
 	}
 }
 

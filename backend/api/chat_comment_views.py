@@ -11,7 +11,9 @@ from infra.chat_comment_answers import has_comment_cid
 from infra.chat_comment_index import attach_comments, comment_only
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
+from infra.failure_reference import ReferencedHTTPException, new_error_reference
 from infra.queries import get_thread_for_user
+from infra.send_types import SendRejected
 
 router = APIRouter(prefix="/api", tags=["chat-comments"])
 
@@ -78,6 +80,33 @@ def _settled(thread_id: str, message_id: str) -> bool:
     return row is not None and row[0] in ('delivered', 'cancelled')
 
 
+def _failed(status: int, code: str, reference: str | None = None) -> ReferencedHTTPException:
+    """A failure the person can only retry, malformed requests included: a system failure (COPY-STANDARD C10).
+
+    The API's error handler logs it under its reference, with the chained cause, and the box shows that reference.
+    """
+    return ReferencedHTTPException(status, code, reference or new_error_reference())
+
+
+def _refused(exc: SendRejected) -> HTTPException:
+    """The code a comment's box or Retry toast words for an input refused before it was stored.
+
+    One code per known cause (C11). The refusal's own text is written for chat's composer, so it never passes.
+    """
+    from infra.input_admission import CHECKPOINT_CONFIGURATION_IMPOSSIBLE
+
+    cause = exc.metadata.get('cause')
+    if cause == 'comment_check_failed':
+        return _failed(500, cause, exc.metadata.get('reference'))
+    if cause == 'comment_quote_gone':
+        return HTTPException(400, cause)
+    if cause == CHECKPOINT_CONFIGURATION_IMPOSSIBLE:
+        return HTTPException(409, 'comment_model_cap')
+    if exc.status_code == 404:
+        return HTTPException(404, 'chat_not_found')
+    return _failed(exc.status_code, 'comment_not_sent')
+
+
 def _owned_thread(user_id: str, thread_id: str):
     db = get_db()
     try:
@@ -120,14 +149,14 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
     if thread_row is None:
         raise HTTPException(404, 'chat_not_found')
     from infra.execution_class import is_subagent
-    from infra.send_service import SendRejected, send_thread_input
+    from infra.send_service import send_thread_input
 
     subagent = is_subagent(thread_row)
     if body.retry_of:
         return await _retry(user['id'], thread_id, body.retry_of)
     input_id = body.input_id.strip()
     if not input_id or body.comment is None:
-        raise HTTPException(400, 'comment_missing')
+        raise _failed(400, 'comment_missing')
     metadata: dict = {'reply_context': {'comments': [body.comment]}}
     if body.viewing_document is not None:
         metadata['viewing_document'] = body.viewing_document
@@ -144,13 +173,11 @@ async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depe
         # so the box closes on it rather than offering a second post of the same text.
         stored = exc.input_undeliverable and await run_read(lambda: _posted(user['id'], thread_id, input_id))
         if not stored:
-            # Refused before it was stored. The refusal's own text is written for chat's composer (a message,
-            # numbered comments, steps that box offers), so this box gets a code and shows its generic line.
-            raise HTTPException(exc.status_code, 'comment_not_sent') from exc
+            raise _refused(exc) from exc
         return stored
     result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
     if result is None:
-        raise HTTPException(500, 'comment_not_stored')
+        raise _failed(500, 'comment_not_stored')
     return result
 
 
@@ -165,20 +192,22 @@ async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
     from api.thread_inbox_actions import retry_thread_delivery_now
 
     if not await run_read(lambda: _is_comment_input(thread_id, message_id)):
-        raise HTTPException(409, 'comment_not_retryable')
+        raise _failed(409, 'comment_not_retryable')
     try:
         retried = await retry_thread_delivery_now(thread_id, message_id, user_id)
     except HTTPException as exc:
         # Only a comment that settled stands; any other refusal, such as a chat that can't take
-        # input now, is the Retry's failure and says why.
+        # input now, is the Retry's failure and says why, by the same codes a post's refusal uses.
         if exc.status_code != 409 or not await run_read(lambda: _settled(thread_id, message_id)):
-            raise
+            refusal = exc.__cause__
+            raise (_refused(refusal) if isinstance(refusal, SendRejected)
+                   else _failed(exc.status_code, 'comment_not_sent')) from exc
         retried = {}
     # A queued comment is driven in place, an ended one gets its copy, and a delivered or cancelled one stands.
     copy = retried.get('revived_message_id') or message_id
     result = await run_read(lambda: _posted(user_id, thread_id, copy))
     if result is None:
-        raise HTTPException(500, 'comment_not_stored')
+        raise _failed(500, 'comment_not_stored')
     return result
 
 

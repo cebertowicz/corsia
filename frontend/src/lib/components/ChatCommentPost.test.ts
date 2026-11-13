@@ -1,9 +1,11 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, expect, it, vi } from 'vitest';
-import { activeThreadId, messages } from '$lib/stores/threads';
+import { activeThreadId, messages, threads } from '$lib/stores/threads';
+import { workspaceModels } from '$lib/stores/models';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
-import { postChatComment, retryChatComment } from './composerSend';
+import { endedSends } from '$lib/chatCommentDelivery';
+import { commentFailure, postChatComment, retryChatComment } from './composerSend';
 import { CommentSendRefused, type ChatComment } from '$lib/chatCommentAnchors';
 import { toasts } from '$lib/stores/toast';
 import Host from './ChatCommentSelectionPickHost.test.svelte';
@@ -65,6 +67,7 @@ afterEach(() => {
 	component = null; messages.set([]); activeThreadId.set(null); host?.remove();
 	for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	vi.mocked(emitProductEvent).mockClear();
+	threads.set([]); workspaceModels.set([]);
 	for (const on of [anchor, second]) chatCommentDrafts.dropRoot('thread', 'm1', { ...on, quote: '', anchor_prefix: '', anchor_suffix: '' });
 	Reflect.deleteProperty(Range.prototype, 'getClientRects'); vi.unstubAllGlobals();
 });
@@ -177,11 +180,12 @@ it('posts to the chat comment route and shows the stored comment in its thread, 
 	expect(get(messages)[0].chat_comments).toEqual([stored]);
 });
 
-it('keeps the text with the server\'s own sentence when the route refuses the post', async () => {
-	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: 'This chat is closed. Your comment stays here.' }) })));
+// The box speaks only in the comment's own words: prose written for another surface never reaches it.
+it('keeps the text with the generic sentence and its reference when the route names no known cause', async () => {
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: 'This chat can’t take input now. Your message stays in the composer.', reference: 'ref-7' }) })));
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post();
-	expect(host.querySelector('[role="alert"]')?.textContent).toBe('This chat is closed. Your comment stays here.');
+	expect(host.querySelector('[role="alert"]')?.textContent).toBe('Couldn’t send this comment. Try again. Reference: ref-7');
 	expect(box()?.value).toBe('Keep my comment');
 	expect(get(messages).map(row => row.id)).toEqual(['m1']);
 });
@@ -213,14 +217,19 @@ it('counts no composer send for a post the server refuses', async () => {
 	expect(sentEvents()).toEqual([]);
 });
 
-// Known refusal codes: only a deleted chat has its own sentence, and no Retry since no press can send it;
-// a malformed post, or one refused before it was stored, keeps the generic one with Retry.
+// Each known cause has its own sentence; a deleted chat or a gone quote offers no Retry since no press can get past
+// it. Any other failure, a malformed post included, keeps the generic sentence with Retry and the reference it is
+// logged under; a known cause's sentence carries none.
 it.each([
 	['chat_not_found', 'This chat is deleted, so this comment couldn’t be sent. Your text stays here to copy.', false],
-	['comment_missing', 'Couldn’t send this comment. Try again.', true],
-	['comment_not_sent', 'Couldn’t send this comment. Try again.', true],
+	['comment_quote_gone', 'The text this comment quotes isn’t in the chat, so this comment couldn’t be sent. Your text stays here to copy.', false],
+	['comment_model_cap', 'This chat’s model has too small a context window to answer, so this comment couldn’t be sent. Choose another model, then try again.', true],
+	['comment_check_failed', 'Couldn’t send this comment. Try again. Reference: ref-1', true],
+	['comment_not_stored', 'Couldn’t send this comment. Try again. Reference: ref-1', true],
+	['comment_missing', 'Couldn’t send this comment. Try again. Reference: ref-1', true],
+	['comment_not_sent', 'Couldn’t send this comment. Try again. Reference: ref-1', true],
 ])('keeps the text with the sentence for %s', async (detail, sentence, retry) => {
-	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail }) })));
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail, reference: 'ref-1' }) })));
 	setup(reply => postChatComment(reply, 'thread', false, true));
 	await openBox(); await post();
 	expect(host.querySelector('[role="alert"]')?.textContent).toBe(sentence);
@@ -230,13 +239,55 @@ it.each([
 	expect(host.querySelector('[role="dialog"]')?.textContent).toContain('text');
 });
 
+// A Retry's toast names the same causes; only the box keeps the text, so no toast line says it does.
 it.each([
-	['chat_not_found', 'reply', 'This chat is deleted, so this reply couldn’t be sent. Your text stays here to copy.'],
-	['comment_not_retryable', 'comment', 'Couldn’t retry this comment. Try again.'],
+	['chat_not_found', 'comment', 'This chat is deleted, so this comment couldn’t be retried.'],
+	['chat_not_found', 'reply', 'This chat is deleted, so this reply couldn’t be retried.'],
+	['comment_quote_gone', 'comment', 'The text this comment quotes isn’t in the chat, so this comment couldn’t be retried.'],
+	['comment_model_cap', 'reply', 'This chat’s model has too small a context window to answer, so this reply couldn’t be retried. Choose another model, then try again.'],
+	['comment_not_retryable', 'comment', 'Couldn’t retry this comment. Try again. Reference: ref-2'],
+	['comment_not_sent', 'reply', 'Couldn’t retry this reply. Try again. Reference: ref-2'],
 ] as const)('says why a Retry refused with %s did not send the %s', async (detail, noun, sentence) => {
-	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail }) })));
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail, reference: 'ref-2' }) })));
 	await retryChatComment('thread', 'input-row', noun);
 	expect(get(toasts).map(toast => toast.message)).toEqual([sentence]);
+});
+
+it('says a Retry that got no answer failed, with no reference to give', async () => {
+	vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down'); }));
+	await retryChatComment('thread', 'input-row', 'comment');
+	expect(get(toasts).map(toast => toast.message)).toEqual(['Couldn’t retry this comment. Try again.']);
+});
+
+// The model's details let the person raise the window only for an external server's model, a harness's or oMLX's.
+it.each([
+	[{ id: 'local', litellm_model: 'external@server/model', provider: 'external' }, true],
+	[{ id: 'local', litellm_model: 'claude-code/sonnet', provider: 'anthropic', runs_on: [{ selected: true }] }, true],
+	[{ id: 'local', litellm_model: 'omlx/model', provider: 'omlx' }, true],
+	[{ id: 'local', litellm_model: 'openai/gpt', provider: 'openai' }, false],
+])('points to the model’s details for a too-small window only where they can raise it (%o)', (row, editable) => {
+	workspaceModels.set([row] as never);
+	threads.set([{ id: 'thread', model: 'local' }] as never);
+	const next = editable ? 'Choose another model or raise its context window in the model’s details, then try again.' : 'Choose another model, then try again.';
+	expect(commentFailure('comment_model_cap', null, 'comment', 'sent', 'thread')).toEqual({
+		text: `This chat’s model has too small a context window to answer, so this comment couldn’t be sent. ${next}`, final: false,
+	});
+});
+
+// After a refusal no press can get past, the comment keeps its label but loses the Retry it can't honour;
+// one it can still retry keeps it.
+it.each([
+	['chat_not_found', null],
+	['comment_quote_gone', null],
+	['comment_not_sent', 'Retry'],
+])('takes the Retry away after a Retry refused with %s only when no press can get past it', async (detail, retry) => {
+	const id = `retried-${detail}`;
+	const failed = { id: 'c1', cid: 'cid-1', user_message_id: id, quote: 'text', note: 'n', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-12T00:00:00Z', delivery_state: 'failed', delivery_error: 'x', answers: [] };
+	expect(endedSends(failed as never)[0].retry?.label).toBe('Retry');
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ detail, reference: 'ref-3' }) })));
+	await retryChatComment('thread', id, 'comment');
+	const [send] = endedSends(failed as never);
+	expect([send.delivery.failed, send.retry?.label ?? null]).toEqual([true, retry]);
 });
 
 // A comment another device already cancelled is no failure: the Retry's answer re-renders it in that state.

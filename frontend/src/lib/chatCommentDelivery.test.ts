@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatComment } from '$lib/stores/threads';
-import { endedSends, needsAttention } from './chatCommentDelivery';
+import { endedSends, needsAttention, retryRefusedForGood } from './chatCommentDelivery';
 
 const answer = (sender: string, state: string | null, author_kind: 'user' | 'agent' = 'user') => ({
 	author_kind, user_message_id: sender, cid: `${sender}-cid`, text: `${sender} text`, created_at: '2026-11-12T00:00:01Z', unread: false,
@@ -35,6 +35,16 @@ describe('ended chat comment sends', () => {
 			'This may send the comment twice if the provider received it before the connection failed',
 			'This may send the reply twice if the provider received it before the connection failed',
 		]);
+	});
+
+	it('drops the Retry, and only the Retry, of a send whose Retry was refused for good', () => {
+		const refused = { ...comment('failed', [answer('reply-refused', 'ambiguous'), answer('reply-open', 'failed')]), user_message_id: 'root-refused' } as ChatComment;
+		retryRefusedForGood('root-refused');
+		retryRefusedForGood('reply-refused');
+		expect(shown(endedSends(refused)).map(([id, , failed, retry]) => [id, failed, retry])).toEqual([
+			['root-refused', true, null], ['reply-refused', true, null], ['reply-open', true, 'Retry'],
+		]);
+		expect(needsAttention(refused)).toBe(true);
 	});
 
 	it('marks the comment for attention only where chat would put its red mark', () => {
