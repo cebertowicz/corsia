@@ -889,3 +889,75 @@ def test_counts_and_unread_rows_share_one_watermark_including_ties(isolated_db):
         assert unread() == ((0, 0), [])
     finally:
         db.close()
+
+
+def _promote_with_comments(db, artifact, *, owner='owner', name='launch-plan.md'):
+    """Retire the document with a successor, which is what moves its comments (#2555)."""
+    from registry import models
+
+    moved_to = seed_document(db, owner, name=name)
+    with write_transaction(db, scope='test_promote_move') as connection:
+        models.retire(
+            artifact, tombstone=True, cause='promoted', successor=moved_to, db=connection,
+        )
+    return moved_to
+
+
+def test_a_promote_that_carried_its_comments_hands_the_task_to_the_new_identity(isolated_db):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _root, _reply = _waiting_document(db)
+        moved_to = _promote_with_comments(db, artifact)
+        [(task, state)] = _tasks(db, artifact)
+        assert state == 'closed'
+        assert _reason(db, task) == person_comment_task.MOVED
+        assert models.successor_id(artifact, db=db) == moved_to
+        # One task for the same threads, on the document the person opens: never a second node.
+        assert _open_tasks(db, artifact) == []
+        assert len(_open_tasks(db, moved_to)) == 1
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('how', ['plan_paused', 'task_held'])
+def test_the_hand_over_waits_for_the_stop_that_spared_the_close(isolated_db, how):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _root, _reply = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_stop') as connection:
+            stop = _stop(connection, task, how)
+        moved_to = _promote_with_comments(db, artifact)
+        # The stop still holds the old task, so nothing is opened beside it.
+        assert _open_tasks(db, artifact) == [task]
+        assert _open_tasks(db, moved_to) == []
+        with write_transaction(db, scope='test_restart') as connection:
+            _restart(connection, task, how, stop)
+        assert _tasks(db, artifact) == [(task, 'closed')]
+        assert _reason(db, task) == person_comment_task.MOVED
+        assert len(_open_tasks(db, moved_to)) == 1
+    finally:
+        db.close()
+
+
+def test_a_successor_is_cleared_by_the_next_retirement_that_names_none(isolated_db):
+    """A reactivated document retired again must not point at the earlier promote's identity."""
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _root, _reply = _waiting_document(db)
+        _promote_with_comments(db, artifact)
+        assert models.successor_id(artifact, db=db)
+        db.execute("UPDATE artifact_identities SET state='active' WHERE id=?", (artifact,))
+        db.commit()
+        models.retire(artifact, tombstone=True, cause='file_gone', db=db)
+        assert models.retired_cause(artifact, db=db) == 'file_gone'
+        assert models.successor_id(artifact, db=db) is None
+    finally:
+        db.close()
