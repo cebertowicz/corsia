@@ -51,7 +51,6 @@
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
-	import type { DocOwnership } from '$lib/api/docOwnership';
 	import ReviewBar from './ReviewBar.svelte';
 	import { createReviewBarState } from '$lib/reviewBarState.svelte';
 	import { toasts } from '$lib/stores/toast';
@@ -84,7 +83,7 @@
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
 	let freshness = $state<DocumentFreshness | null>(null);
-	let ownership = $state<DocOwnership | null>(null);
+	let ownership = $state<import('$lib/api/docOwnership').DocOwnership | null>(null);
 	const focusedComment = $derived($focusedDocComment);
 
 	let editText = $state('');
@@ -294,8 +293,7 @@
 		historyAvailable={history.available}
 		historyOpen={history.open}
 		onOpenHistory={history.toggle}
-		{freshness} {ownership}
-		onOwnershipChanged={(value) => ownership = value}
+		{freshness} {ownership} onOwnershipChanged={(value) => ownership = value}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
 		liveSession={liveSession ?? null}
