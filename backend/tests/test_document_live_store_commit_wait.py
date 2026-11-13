@@ -35,6 +35,22 @@ def test_existing_rollback_journal_store_converts_on_open(tmp_path):
     assert store._read("PRAGMA journal_mode")[0][0] == "wal"
 
 
+@pytest.mark.parametrize("table", ["live", "mirror"])
+def test_damaged_rollback_journal_store_keeps_its_bytes_on_open(tmp_path, table):
+    path = tmp_path / "state.sqlite"
+    LiveStore(path)
+    with sqlite3.connect(path, isolation_level=None) as db:
+        db.execute("PRAGMA journal_mode=DELETE")  # a store as it was written before WAL
+        size = db.execute("PRAGMA page_size").fetchone()[0]
+        root = db.execute("SELECT rootpage FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
+    data = bytearray(path.read_bytes())
+    data[(root - 1) * size:root * size] = b"\xa5" * size
+    path.write_bytes(bytes(data))
+    LiveStore(path)  # a refusal or not is the store's business; its bytes are not
+    assert path.read_bytes() == bytes(data)
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == ["state.sqlite"]
+
+
 @pytest.mark.parametrize("operation", ["read", "connect_for_write_check"])
 def test_connection_does_not_wait_for_commit_in_flight(tmp_path, operation):
     store = LiveStore(tmp_path / "state.sqlite")

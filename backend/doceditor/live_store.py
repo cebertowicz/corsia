@@ -15,6 +15,7 @@ import sqlite3
 from typing import TypeVar
 from uuid import uuid4
 
+from doceditor.live_store_journal import enter_wal
 from doceditor.live_publication_record import Publication, OwedPublication
 from doceditor.live_failure_record import FailureRecord
 
@@ -100,6 +101,8 @@ class LiveStore:
             self._transaction(lambda db: db.execute(
                 "INSERT OR IGNORE INTO meta(singleton,store_id) VALUES (1, ?)", (str(uuid4()),)))
             self._store_id = self._read("SELECT store_id FROM meta WHERE singleton=1")[0][0]
+            with closing(self._connect()) as connection:
+                enter_wal(connection)
         except sqlite3.Error as exc:
             raise StoreRefused(str(exc)) from exc
 
@@ -107,8 +110,6 @@ class LiveStore:
         connection = sqlite3.connect(self.path, timeout=1.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=1000")
-        # WAL: a commit in flight must not block other connects and reads (stored in the file).
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
