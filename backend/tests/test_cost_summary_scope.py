@@ -209,7 +209,8 @@ async def test_each_kind_of_call_carries_its_four_token_classes(scoped_costs):
     assert (checkpoint["prompt_tokens"], checkpoint["cache_creation_tokens"]) == (110, 300)
     assert (checkpoint["cache_read_tokens"], checkpoint["completion_tokens"]) == (5040, 32)
     assert (checkpoint["total_tokens"], checkpoint["unknown_token_rows"], checkpoint["api_calls"]) == (5435, 1, 3)
-    # The ledger's cache columns default to zero, so a call written without them reads as no cache use.
+    # The seed's INSERT leaves the cache columns out, so their table default of zero applies here. The ledger
+    # writer stores a missing cache figure as NULL, which the sum skips: it reads as no cache use either way.
     turn = rows["turn"]
     assert (turn["prompt_tokens"], turn["completion_tokens"], turn["unknown_token_rows"]) == (10, 5, 0)
     assert (turn["cache_creation_tokens"], turn["cache_read_tokens"]) == (0, 0)
