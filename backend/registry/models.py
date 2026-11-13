@@ -251,13 +251,21 @@ def retire(
         state = "tombstone" if tombstone else "archived"
         now = _now()
         _db.execute(
-            """UPDATE artifact_identities SET state=?, updated_at=?,
-                   metadata=CASE WHEN ? IS NULL
-                       THEN json_remove(COALESCE(NULLIF(metadata, ''), '{}'), '$.retired_cause')
-                       ELSE json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.retired_cause', ?) END
-               WHERE id=?""",
-            (state, now, cause, cause, artifact_id),
+            "UPDATE artifact_identities SET state=?, updated_at=? WHERE id=?",
+            (state, now, artifact_id),
         )
+        if cause:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_set(COALESCE(NULLIF(metadata, ''), '{}'),"
+                " '$.retired_cause', ?) WHERE id=?",
+                (cause, artifact_id),
+            )
+        else:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.retired_cause')"
+                " WHERE id=? AND json_valid(metadata) AND json_extract(metadata, '$.retired_cause') IS NOT NULL",
+                (artifact_id,),
+            )
         passive_state = "tombstoned" if tombstone else "subscriber-archived"
         _db.execute(
             """UPDATE artifact_registrations
