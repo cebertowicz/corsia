@@ -137,12 +137,12 @@
 	const heldNewComment = $derived.by(() => (seenNewComment ||= !!comment.newComment));
 	const { stamp } = createReplyStamps(() => comment, () => chatSurface, () => onViewed);
 
-	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
+	const { openThread, openFromFocus, focusQuietly } = createThreadOpen(() => comment, () => chatSurface, stamp);
+	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) focusQuietly(() => replyField?.focus({ preventScroll: true })); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	$effect(() => { if (flat && !inMargin && newestReply && el) openAtNewestReply(el, newestReply); });
 	/** A list row whose earlier replies sit behind a count row; its unread replies are always shown, so opening it marks them read like any card. */
 	const summarised = $derived(replyView === 'summary' && comment.replies.length > WHOLE_REPLIES);
-	const { openThread, openFromFocus } = createThreadOpen(() => comment, () => chatSurface, stamp);
 	// Opening reads what is unread at that moment: a chat thread its caller opened, or a document thread the person picked
 	// (a click or tap on its highlight, its marker, the jump control, its image tag), consumed by the card that shows it.
 	// A reply arriving while it stays open waits for the next press.

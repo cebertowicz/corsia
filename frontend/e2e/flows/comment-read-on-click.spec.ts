@@ -16,7 +16,7 @@ import { asAgent } from '../support/imageRegionComments';
 
 test.use({ seedPerTest: true });
 
-/** Longer than the 1.5 s on-screen dwell that used to read a reply, so a stamp from merely being seen would have been sent. */
+/** Well past any timer the comment surfaces run, so a read sent for merely being on screen would have been seen. */
 const SEEN_FOR_MS = 3_000;
 
 /** Every read stamp the page sends: a chat answer's and a document thread's both post to `…/comments/<id>/viewed`. */

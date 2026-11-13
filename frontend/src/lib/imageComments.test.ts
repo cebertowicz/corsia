@@ -6,6 +6,7 @@ vi.mock('$lib/stores/imageRegionComments', () => ({ addRegionComment: mocks.addR
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks.dismiss } }));
 
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { pickedDocComments } from '$lib/stores/docComments';
 import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
 
@@ -18,7 +19,7 @@ function controller(readOnly = false) {
 }
 const escape = () => new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 
-afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); });
+afterEach(() => { vi.clearAllMocks(); focusedDocComment.set(null); pickedDocComments.set(new Set()); });
 
 describe('image comments', () => {
 	it('names what a new comment is on', () => {
@@ -223,12 +224,13 @@ describe('image comments', () => {
 		expect(comments.listCandidateOrder).toBeNull();
 	});
 
-	it('keeps the drawer open when a tag is picked, and selects that comment there', () => {
+	it('keeps the drawer open when a tag is picked, and selects that comment there as a pick that reads it', () => {
 		const { comments } = controller();
 		comments.ui.openList(document.createElement('button'));
 		comments.pick('c3', () => null, document.createElement('button'));
 		expect(comments.ui.state).toEqual({ kind: 'list' });
 		expect(comments.selectedId).toBe('c3');
+		expect([...get(pickedDocComments)]).toEqual(['c3']);
 	});
 
 	it('opens a card the viewer was opened on beside the box it was given, not beside its tag', async () => {

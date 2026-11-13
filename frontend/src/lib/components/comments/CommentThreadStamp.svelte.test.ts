@@ -49,7 +49,7 @@ describe('chat thread read stamps', () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
-		// Longer than any read delay the chat ever had.
+		// Well past any timer the thread runs, so a read on a delay would have landed.
 		await wait(1_800);
 		expect(onViewed).not.toHaveBeenCalled();
 		expect(newMarks()).toBe(2);
@@ -127,6 +127,22 @@ describe('chat thread read stamps', () => {
 });
 
 describe('document thread stamps', () => {
+	it('reads nothing when a selected image-region card focuses its own reply field, and reads once the person moves focus there', () => {
+		const card = $state({ focused: false });
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, selectable: true, drawerCard: true, scrollOnFocus: false, get focused() { return card.focused; } } });
+		flushSync();
+		// Selected by something other than a pick (a restored tab's landing): the card puts the caret in its field, and reads nothing.
+		card.focused = true; flushSync();
+		expect(document.activeElement).toBe(host.querySelector('textarea'));
+		expect(onViewed).not.toHaveBeenCalled();
+		// The person moving focus into the field opens the thread.
+		host.querySelector('textarea')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+	});
+
 	it('keeps the New marks a picked document card opened with after the viewed stamp clears them, until the card rests again', () => {
 		const card = $state({ resting: true });
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };

@@ -1,11 +1,13 @@
 import type { CommentThreadData } from './CommentThreadData';
 
 /**
- * Opening a thread is what reads it: a press on its card, focus in its reply field, or the caller opening it (a picked
- * margin card, a popover). Being on screen reads nothing. A chat thread stamps each unread answer; a document thread
- * stamps its latest unread item.
+ * Opening a thread is what reads it: a press on its card, the person moving focus into its reply field, or the caller
+ * opening it (a picked margin card, a popover). Being on screen reads nothing, and neither does focus the thread puts in
+ * its own reply field (`focusQuietly`): that follows a selection, which may be a restored tab's landing rather than a pick.
+ * A chat thread stamps each unread answer; a document thread stamps its latest unread item.
  */
 export function createThreadOpen(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
+	let quiet = false;
 	function openThread() {
 		const current = comment();
 		const unread = new Set(current.newReplyIds ?? []);
@@ -15,9 +17,14 @@ export function createThreadOpen(comment: () => CommentThreadData, chat: () => b
 		else if (current.newComment) stamp(current.id);
 	}
 	function openFromFocus(event: FocusEvent) {
-		if ((event.target as Element).closest('textarea')) openThread();
+		if (!quiet && (event.target as Element).closest('textarea')) openThread();
 	}
-	return { openThread, openFromFocus };
+	/** Focus moved by the thread itself; `focusin` fires inside the call, so it is told apart there. */
+	function focusQuietly(focus: () => void) {
+		quiet = true;
+		try { focus(); } finally { quiet = false; }
+	}
+	return { openThread, openFromFocus, focusQuietly };
 }
 
 /**
