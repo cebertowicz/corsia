@@ -146,7 +146,7 @@ def reconcile(db, artifact_id: str) -> str | None:
         if node_id:
             _close(db, node_id, DELETED)
         return None
-    ended = _RETIRED.get(registry_models.retired_cause(artifact_id, db=db) or '') if state != 'active' else None
+    ended = _RETIRED.get(registry_models.retired_cause(artifact_id, db=db) or '')
     if ended:
         # The comments' place is gone. A close a paused plan or held task deferred finishes on its resume.
         return node_id if node_id and not _close(db, node_id, ended) else None
@@ -167,7 +167,7 @@ def reconcile(db, artifact_id: str) -> str | None:
             )
         return None
     if state != 'active':
-        # Retired for a cause that leaves the document readable (``document_retired`` closes the others).
+        # Retired for a cause that leaves the document readable (the others close above).
         return node_id
     if node_id and holder != owner_id and _close(db, node_id, moved(owner['title'] or 'another agent')):
         node_id = None

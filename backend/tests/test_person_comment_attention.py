@@ -352,6 +352,28 @@ def test_a_retirement_close_deferred_by_a_stop_finishes_when_the_stop_ends(isola
         db.close()
 
 
+def test_a_retired_cause_left_on_a_reactivated_document_does_not_close_its_task(isolated_db):
+    from registry import models
+
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact, _, _ = _waiting_document(db)
+        [task] = _open_tasks(db, artifact)
+        with write_transaction(db, scope='test_stop') as connection:
+            stop = _stop(connection, task, 'plan_paused')
+        models.retire(artifact, tombstone=False, cause='file_gone', db=db)
+        # A rehome makes the identity active again the way registry.ownership does, metadata untouched.
+        db.execute("UPDATE artifact_identities SET state='active' WHERE id=?", (artifact,))
+        db.commit()
+        assert models.retired_cause(artifact, db=db) is None
+        with write_transaction(db, scope='test_restart') as connection:
+            _restart(connection, task, 'plan_paused', stop)
+        assert _open_tasks(db, artifact) == [task]
+    finally:
+        db.close()
+
+
 def test_a_retirement_with_no_cause_keeps_its_task_and_dismiss_settles_it(isolated_db):
     from api.doc_comment_thread_views import _check_access
     from doceditor import comment_thread_views

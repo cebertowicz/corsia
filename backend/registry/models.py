@@ -102,9 +102,10 @@ def identity_state(artifact_id: str, *, db) -> str | None:
 
 
 def retired_cause(artifact_id: str, *, db) -> str | None:
-    """The ``cause`` its latest ``retire()`` was given; read only while the identity is retired."""
+    """The ``cause`` its latest ``retire()`` was given, or None while the identity is active."""
     row = db.execute(
-        "SELECT CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.retired_cause') END AS cause"
+        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
+        " THEN json_extract(metadata, '$.retired_cause') END AS cause"
         " FROM artifact_identities WHERE id=?",
         (artifact_id,),
     ).fetchone()
