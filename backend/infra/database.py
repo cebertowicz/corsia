@@ -83,7 +83,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={CONNECTION_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, faster than FULL
-        setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn, path))
+        setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn))
         conn.commit()
         apply_thread_lane(conn)
         startup_progress.watch(conn)
