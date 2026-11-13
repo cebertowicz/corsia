@@ -23,8 +23,9 @@ function predicateCalls(run: () => void): number {
 	let calls = 0;
 	SEARCHES.forEach((name, at) => {
 		const original = saved[at];
-		proto[name] = function (this: unknown[], predicate: (...args: unknown[]) => unknown, ...rest: unknown[]) {
-			return original.call(this, (...args: unknown[]) => { calls++; return predicate(...args); }, ...rest);
+		proto[name] = function (this: unknown[], ...args: unknown[]) {
+			const [predicate, ...rest] = args as [(...args: unknown[]) => unknown, ...unknown[]];
+			return original.call(this, (...inner: unknown[]) => { calls++; return predicate(...inner); }, ...rest);
 		};
 	});
 	try { run(); } finally { SEARCHES.forEach((name, at) => { proto[name] = saved[at]; }); }

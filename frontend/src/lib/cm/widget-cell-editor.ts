@@ -6,19 +6,19 @@ import {
 	CELL_SYNC, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
 import { heldText, heldToSource, runDifference, sourceToHeld, writeCellEdit } from './widget-cell-row';
-import { adjacentCell, caretAfterTable, cellBelow, tableOfCell, typingBelowFinalTable } from './widget-cell-nav';
+import { adjacentCell, caretAfterTable, cellBelow, cellLabel, tableOfCell, typingBelowFinalTable } from './widget-cell-nav';
 import { cellKeys } from './widget-cell-keys';
 import { CellPresses } from './widget-cell-presses';
 import { CELL_THEME } from './widget-cell-theme';
-import { CellLayer, cellLabel } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
 import { cellHighlight } from './theme';
 import { INLINE_MARKDOWN } from './widget-cell-markdown';
+import { cellMarksField } from './widget-cell-comment';
 
 /**
  * Editing the text of a rendered table cell where it is read.
  *
- * Clicking a drawn cell opens a small editor over that cell's own `<td>`, holding that cell's content as GFM reads it: its
+ * Clicking a drawn cell opens a small editor inside that cell's own `<td>`, holding that cell's content as GFM reads it: its
  * source between its pipes with the table's own `\|` escapes out and its pads trimmed (`widget-cell-row.ts`). Each keystroke
  * writes that content back into the row through the one serializer, `writeCellEdit`, as one transaction of the minimal
  * changes to the row, so the document keeps its single Yjs binding, its single undo manager and its single markdown parse:
@@ -26,10 +26,9 @@ import { INLINE_MARKDOWN } from './widget-cell-markdown';
  * is also how a live edit from another client reaches the cell. Formatting renders while you type because the cell parses
  * inline markdown (`widget-cell-markdown.ts`) and runs the document's own hide-syntax pass (`cellEditorExtensions`).
  *
- * The editor sits in `widget-cell-layer.ts`'s layer rather than in the `<td>` itself, because a caret cannot be placed
- * inside the document's own editing host; the cell keeps its live rendered text underneath, unseen, so the row keeps
- * growing as the text wraps. The cell is repainted from the source when the editor closes, and the table's DOM survives
- * the whole edit because `widget-table.ts` keeps it, and this `<td>`, alive across edits.
+ * The editor replaces the `<td>`'s drawn content while it is open, so it wraps, grows the row and takes the cell's look
+ * like the text it replaces. `widget-table.ts` keeps the table's DOM, and this `<td>`, alive across edits and leaves the
+ * open cell's content alone; the cell is repainted from the source when the editor closes.
  */
 
 /** A cell editor's added extensions: the hide-syntax pass (`markdown-live.ts`) and the save key (`MarkdownEditor.svelte`), as cell keys skip the doc's keymap. */
@@ -52,7 +51,6 @@ class CellEditors {
 	private editor: EditorView | null = null;
 	private wrap: HTMLElement | null = null;
 	private mounted: HTMLTableCellElement | null = null;
-	private readonly layer = new CellLayer();
 	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
 	private clickedAt: { x: number; y: number } | null = null;
 	private readonly presses: CellPresses;
@@ -60,7 +58,7 @@ class CellEditors {
 	constructor(private readonly host: EditorView) {
 		this.presses = new CellPresses(host, {
 			isOpen: () => !!this.cell,
-			inEditor: (node) => this.layer.contains(node),
+			inEditor: (node) => !!this.wrap?.contains(node),
 			opened: (at) => { this.clickedAt = at; },
 			close: () => this.close()
 		});
@@ -83,24 +81,26 @@ class CellEditors {
 		const another = !was || was.col !== cell.col || mapRowStart(update.changes, update.state.doc, was.rowStart) !== cell.rowStart;
 		const moved = another || was.from !== cell.from || was.to !== cell.to || was.tableFrom !== cell.tableFrom;
 		this.cell = cell;
-		if (another && was && this.editor) {
-			// The cell the editor is leaving goes back to being rendered text before the editor moves on to the next one.
-			const previous = drawnTableAt(this.host, was.tableFrom);
-			if (previous) repaintTableCell(previous, update.state, was);
+		const leaving = another && was && this.editor ? was : null;
+		if (leaving) {
 			this.committed();
-			this.left = was;
+			this.left = leaving;
 			this.mounted = null;
 		}
 		if (!this.editor) this.attach(cell);
 		const editor = this.editor;
 		if (!editor) return;
-		if (!this.mount(cell)) return;
-		if (moved || update.docChanged) this.syncEditor(update.state, cell, editor);
+		const mounted = this.mount(cell);
+		// The cell the editor left goes back to being rendered text once the editor is out of it.
+		const previous = leaving && drawnTableAt(this.host, leaving.tableFrom);
+		if (leaving && previous) repaintTableCell(previous, update.state, leaving);
+		if (!mounted) return;
+		if (moved || update.docChanged) this.syncEditor(update.state, cell, editor, !another);
 		if (another) this.opened = editor.state.doc.toString().trim();
 		if (moved) this.mirrorToDocument(cell, editor);
 	}
 
-	/** Puts the editor over the cell it edits. A cell the table does not draw closes: with no cell to lie over, nothing could show the caret. False when it closed. */
+	/** Puts the editor in the cell it edits, in place of the cell's drawn content. A cell the table does not draw closes, as nothing could show the caret. False when it closed. */
 	private mount(cell: OpenCell): boolean {
 		const wrap = this.wrap;
 		if (!wrap) return true;
@@ -109,15 +109,15 @@ class CellEditors {
 		const widget = drawnTableAt(this.host, cell.tableFrom);
 		const td = widget ? cellElement(widget, cell) : null;
 		if (!td) { this.close(); return false; }
-		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; this.layer.follow(); return true; }
+		if (td === this.mounted && wrap.parentElement === td) { this.clickedAt = null; return true; }
 		const hadFocus = wrap.contains(document.activeElement);
-		this.layer.open(td, wrap, this.host);
+		td.replaceChildren(wrap);
 		this.mounted = td;
-		// Named for the cell it is over, so a screen reader says which cell is being edited, and again after Tab or Enter.
+		// Named for the cell it is in, so a screen reader says which cell is being edited, and again after Tab or Enter.
 		this.editor?.contentDOM.setAttribute('aria-label', cellLabel(td));
 		// Focus is taken only once the editor is in the document — before that, focusing it does nothing — and the click
 		// that opened the cell counts as the reader asking for the caret there, at the word they clicked rather than at the
-		// start of the cell. The layer is over the cell by now, so the editor reads the click's point off its own layout.
+		// start of the cell. The editor is in the cell by now, so it reads the click's point off its own layout.
 		if (hadFocus || this.fresh) {
 			this.editor?.focus();
 			this.fresh = false;
@@ -129,12 +129,13 @@ class CellEditors {
 
 	/**
 	 * Puts the document's content of the cell into its editor where they differ. After the reader's own edit the selection goes
-	 * where that edit left it in the content as stored (`written`); for anything else it maps through the change.
+	 * where that edit left it in the content as stored (`written`); for anything else it maps through the change. A space the
+	 * reader typed at the cell's edge is kept only while the editor stays on that cell (`same`): the next cell holds its own text.
 	 */
-	private syncEditor(state: EditorState, cell: OpenCell, editor: EditorView) {
-		const current = editor.state.doc.toString(), written = this.written;
+	private syncEditor(state: EditorState, cell: OpenCell, editor: EditorView, same: boolean) {
+		const current = editor.state.doc.toString(), written = same ? this.written : null;
 		this.written = null;
-		const { text, base } = heldText(cellSource(state, cell), written?.text ?? current);
+		const { text, base } = heldText(cellSource(state, cell), same ? (written?.text ?? current) : undefined);
 		this.base = base;
 		if (current === text && !written) return;
 		const selection = written && written.text === text ? { anchor: written.anchor, head: written.head } : undefined;
@@ -212,6 +213,7 @@ class CellEditors {
 					INLINE_MARKDOWN,
 					...host.state.facet(cellEditorExtensions),
 					cellHighlight,
+					cellMarksField,
 					EditorView.lineWrapping,
 					EditorView.updateListener.of(this.fromCell),
 					cellKeys(host, {
@@ -247,7 +249,7 @@ class CellEditors {
 			// An edit the row already holds (a backslash typed in front of a pipe, which was already its escape) changes no
 			// document, so the editor is put back to the content as stored here.
 			if (changes.length) this.host.dispatch(event ? { changes, userEvent: event } : { changes });
-			else this.syncEditor(this.host.state, cell, editor);
+			else this.syncEditor(this.host.state, cell, editor, true);
 		}
 		// The reader's place is mirrored after the change, onto the cell as it then stands (a row that gained its leading pipe
 		// moved it along), never before: the document refuses a caret past what it holds yet, as after a long insertion.
@@ -272,12 +274,10 @@ class CellEditors {
 		this.editor = null;
 		this.cell = null;
 		this.left = null;
-		// The layer is reused for the next cell opened, so the closed editor's element leaves it rather than staying behind, empty.
 		this.wrap?.remove();
 		this.wrap = null;
 		this.mounted = null;
 		editor.destroy();
-		this.layer.close();
 		// The cell goes back to being rendered text — from the source as it stands now, not as it was when the cell opened.
 		const table = mounted?.closest<HTMLElement>(TABLE);
 		if (cell && table?.isConnected) repaintTableCell(table, this.host.state, cell);

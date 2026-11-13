@@ -104,11 +104,10 @@ test.describe('@flow:doc-table-cell-editing-phone @surface:documents', () => {
 		const cellBox = (await target.boundingBox())!;
 		await target.tap({ position: { x: 12, y: cellBox.height / 2 } });
 		await expect(page.locator('.cm-md-cell-editor .cm-content')).toBeFocused();
-		// Whether the open cell's editor is what shows at a point on the screen.
-		// Read once the layer has followed the cell, which it does on the next frame after the scroll.
+		// Whether the open cell's editor is what shows at a point on the screen, read once the scroll has been drawn.
 		const editorAt = (x: number, y: number) => page.evaluate(async ([x, y]) => {
 			for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
-			return !!document.elementFromPoint(x, y)?.closest('.cm-md-cell-layer');
+			return !!document.elementFromPoint(x, y)?.closest('.cm-md-cell-editor');
 		}, [x, y]);
 
 		// A swipe or trackpad scroll moves the table sideways with no press, so the cell stays open while 30px of it goes past the box's left edge.

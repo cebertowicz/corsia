@@ -22,8 +22,10 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
  * DOM selection was cleared, as it is when the comment popover's focused control is removed.
  */
 export function focusDocumentEditor(root: HTMLElement | undefined) {
-	const content = root?.querySelector<HTMLElement>('.cm-content');
-	const view = content && EditorView.findFromDOM(content);
+	// Looked up from the outer `.cm-editor`: CodeMirror finds a view from the first `.cm-content` inside what it is given,
+	// which inside the document's own content is an open table cell's editor.
+	const dom = root?.querySelector<HTMLElement>('.cm-editor');
+	const view = dom && EditorView.findFromDOM(dom);
 	if (!view) return;
 	const selection = view.state.selection.main;
 	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
@@ -36,8 +38,8 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
  * document's caret, which is still where the tap left it, opens again with the focus. Null when no cell was open.
  */
 export function closeDocumentCell(root: HTMLElement | undefined): (() => void) | null {
-	const content = root?.querySelector<HTMLElement>('.cm-content');
-	const view = content && EditorView.findFromDOM(content);
+	const dom = root?.querySelector<HTMLElement>('.cm-editor');
+	const view = dom && EditorView.findFromDOM(dom);
 	if (!view?.state.field(openCellState, false)) return null;
 	const active = document.activeElement;
 	if (active instanceof HTMLElement && active.closest(CELL_EDITOR)) active.blur();

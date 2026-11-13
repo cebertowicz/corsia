@@ -108,5 +108,5 @@ export const openCellState = StateField.define<OpenCell | null>({
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */
 export const CELL_SYNC = 'table-cell-sync';
 
-/** The class of the open cell editor's element, in a layer over the cell: an event from inside it is the editor's, not the table's. */
+/** The class of the open cell editor's element, in place of the cell's drawn content: an event from inside it is the editor's, not the table's. */
 export const CELL_EDITOR = '.cm-md-cell-editor';

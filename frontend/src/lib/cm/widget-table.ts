@@ -7,7 +7,6 @@ import { renderedFragment } from './rendered-images';
 import { blockSource, tableAt } from './widget-blocks';
 import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
 import { tableGrid, type CellSpan } from './widget-cells';
-import { CELL_EDITING } from './widget-cell-layer';
 import { type OpenCell } from './widget-cell-state';
 
 /**
@@ -77,7 +76,7 @@ const drawnSource = (src: string, span: CellSpan) => src.slice(span.rawFrom, spa
 
 /**
  * Re-renders `src` and moves into the drawn table only the cells whose source text differs from `was`, the source the node
- * holds — the cell being edited included, since its hidden text is what keeps the row the right height.
+ * holds. The open cell's content is its editor, so only its attributes follow the source until it closes.
  */
 function transplant(el: HTMLElement, src: string, images: ImageContext | null, was: string, force?: { row: number; col: number }): boolean {
 	const fresh = renderTable(src, images).querySelector('table');
@@ -97,6 +96,8 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 		const now = drawn.rows[span.row]?.cells[span.col];
 		if (!next || !now) continue;
 		if (unchanged && !forced) continue;
+		// The open cell's editor is where the document's change came from, so it keeps its content.
+		if (now.querySelector('.cm-md-cell-editor')) { copyAttributes(now, next); continue; }
 		copyCell(now, next);
 		copied = true;
 	}
@@ -116,7 +117,7 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 
 /**
  * Moves a re-rendered cell into the drawn one and keeps the drawn element. A cell's own node has to survive the keystroke
- * that changed it: the reader's editor lies over it and follows its box, and a comment anchor inside it is a live node.
+ * that changed it: the open cell's editor is mounted inside it, and a comment anchor inside it is a live node.
  * Only its attributes and its inside are replaced, which is also the smaller mutation for the browser to lay out.
  */
 function copyCell(into: HTMLTableCellElement, from: HTMLTableCellElement) {
@@ -129,16 +130,13 @@ const delimiterRow = (src: string) => src.split('\n')[1] ?? '';
 
 /** A cell's attributes only (its alignment among them), leaving its content and anything live inside it where it is. */
 function copyAttributes(into: HTMLTableCellElement, from: HTMLTableCellElement) {
-	// The marker that an editor lies over this cell belongs to the reader's place, not to the source, so it rides through
-	// the patch untouched; the layer takes it off when the cell closes or the editor moves on.
-	if (into.classList.contains(CELL_EDITING)) from.classList.add(CELL_EDITING);
 	for (const attribute of Array.from(from.attributes)) if (into.getAttribute(attribute.name) !== attribute.value) into.setAttribute(attribute.name, attribute.value);
 	for (const { name } of Array.from(into.attributes)) if (!from.hasAttribute(name)) into.removeAttribute(name);
 }
 
 /**
- * Puts a cell's rendered content back from the document's source: what a closed cell needs, since its editor lay over its
- * text while it was open and the source may have moved on underneath it.
+ * Puts a cell's rendered content back from the document's source: what a closed cell needs, since its editor replaced its
+ * drawn content while it was open.
  */
 export function repaintTableCell(el: HTMLElement, state: EditorState, cell: OpenCell) {
 	const block = tableAt(state, cell.from, cell.from + 1);

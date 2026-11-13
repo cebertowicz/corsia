@@ -4,12 +4,12 @@ import * as productEvents from '$lib/product_events';
 import { A as AUTHOR, type Rig } from './typed-reveal-rig';
 import {
 	build, cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
-	layer, mountedEditor, open, press, table, typed
+	mountedEditor, open, press, table, typed
 } from './widget-cell-rig';
 import { openCellState } from './widget-cell-state';
 
 /**
- * Editing a rendered table cell: the click opens an editor over the cell's own `<td>` whose document is that cell's
+ * Editing a rendered table cell: the click opens an editor in the cell's own `<td>` whose document is that cell's
  * content, so typing, deleting, pasting, undoing and a live edit from another client all land in the main document,
  * in the cell's range, and the table stays a table while it happens.
  */
@@ -24,14 +24,14 @@ afterEach(() => { while (rigs.length) rigs.pop()!.view.destroy(); cleanup(); doc
 const at = (offset: number) => cellFrom() + offset;
 
 describe('clicking a cell edits it where it is read', () => {
-	it('opens an editor over the cell holding that cell\'s own source, and leaves the table rendered', () => {
+	it('opens an editor in the cell holding that cell\'s own source, and leaves the table rendered', () => {
 		const r = track(open());
 		expect(table(r), 'setup: the table is rendered').not.toBeNull();
 		clicked(r);
 		expect(cellEditor(r), 'the cell editor opened').not.toBeNull();
 		expect(cellText(r), 'the cell\'s content as the table draws it, without the pads around it').toBe('Login');
-		expect(editingCell(r), 'the cell it lies over is the one clicked').toBe(cellEl(r));
-		expect(cellEl(r).contains(cellEditor(r)!.dom), 'and not inside that cell').toBe(false);
+		expect(editingCell(r), 'the cell it is in is the one clicked').toBe(cellEl(r));
+		expect(Array.from(cellEl(r).childNodes), 'and it is all the cell holds while open').toEqual([cellEditor(r)!.dom.parentElement]);
 		expect(cellEditor(r)!.dom.contains(document.activeElement), 'the click put the caret in the cell').toBe(true);
 		expect(table(r), 'the table is still a table').not.toBeNull();
 		expect(r.view.state.doc.toString(), 'nothing is written by opening').toBe(DOC);
@@ -44,7 +44,7 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(cellText(r), 'while it is open the editor is the cell\'s content').toBe('LoginXY');
 		press(r, 'Escape');
 		expect(mountedEditor(r), 'the editor is gone').toBeNull();
-		expect(layer(r), 'and so is the layer that held it').toBeNull();
+		expect(cellEl(r).querySelector('.cm-editor'), 'and the cell holds none of it').toBeNull();
 		expect(cellEl(r)!.textContent, 'the cell is rendered text again, with what was typed').toBe('LoginXY');
 	});
 
@@ -92,7 +92,7 @@ describe('clicking a cell edits it where it is read', () => {
 		press(r, 'Escape');
 		expect(emit, 'opening and leaving a cell is not an edit').not.toHaveBeenCalled();
 		clicked(r);
-		expect(layer(r)!.children, 'the closed editor left nothing behind in the layer').toHaveLength(1);
+		expect(r.view.dom.querySelectorAll('.cm-md-cell-editor'), 'the closed editor left nothing behind').toHaveLength(1);
 		typed(r, 5, 'X');
 		typed(r, 6, 'Y');
 		press(r, 'Tab');
@@ -126,7 +126,7 @@ describe('clicking a cell edits it where it is read', () => {
 		typed(r, 5, 'XY');
 		expect(table(r), 'the table widget was not thrown away').toBe(drawn);
 		expect(cellEl(r), 'the cell is the same node, still the one being edited').toBe(cell);
-		expect(mountedEditor(r), 'and the same editor still lies over it').toBe(editor);
+		expect(mountedEditor(r), 'and the same editor is still in it').toBe(editor);
 		expect(cellEl(r, 1, 1).textContent, 'the cell beside it shows the document as it stands').toBe('Done');
 	});
 });

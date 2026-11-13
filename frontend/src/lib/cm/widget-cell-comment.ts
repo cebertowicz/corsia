@@ -1,16 +1,70 @@
-import type { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
 import { tableCells } from './widget-cells';
-import { heldText, sourceToHeld } from './widget-cell-row';
+import { heldText, heldToSource, sourceToHeld } from './widget-cell-row';
+import { cellTextRange, markClasses, suggestionInsert, type CellSuggestion, type Mark } from './widget-paint';
+import { colourStyle } from './suggestion-marks';
 import { OFFER_GAP, OFFER_ROOM, offerPlace } from './offer-place';
 import { selectionIn } from './widget-selection';
 import { acrossColumn } from './comment-anchor-geometry';
 import type { WidgetSelection } from './widget-selection-types';
 
-/** A draft's text as drawn in a closed cell. */
-const PENDING = '.cm-comment-pending';
+/**
+ * The comment and suggestion marks inside the open cell's text, as that editor's own decorations: the cell's drawn content is
+ * the editor while it is open, so the paint pass (`widget-paint.ts`) leaves it alone and writes them here instead, with the
+ * same classes it paints a closed cell with. Between paints they follow the cell's typing.
+ */
+const setCellMarks = StateEffect.define<DecorationSet>();
+export const cellMarksField = StateField.define<DecorationSet>({
+	create: () => Decoration.none,
+	update: (marks, tr) => tr.effects.find((effect) => effect.is(setCellMarks))?.value ?? marks.map(tr.changes),
+	provide: (field) => EditorView.decorations.from(field)
+});
+
+class SuggestionInsert extends WidgetType {
+	constructor(readonly mark: Mark, readonly suggestion: CellSuggestion) { super(); }
+	eq(other: SuggestionInsert) { return JSON.stringify([this.mark, this.suggestion]) === JSON.stringify([other.mark, other.suggestion]); }
+	toDOM() { return suggestionInsert(this.mark, this.suggestion); }
+}
+
+/** A decoration set as its ranges, in order, for comparing what an editor holds with what it should. */
+const rangesOf = (set: DecorationSet) => {
+	const out: [number, number, unknown][] = [];
+	for (const cursor = set.iter(); cursor.value; cursor.next()) out.push([cursor.from, cursor.to, cursor.value.spec]);
+	return JSON.stringify(out);
+};
+
+/**
+ * Writes the marks of `marks` that lie inside the open cell's text into its editor; a mark over the whole cell, or across
+ * cells, stays the cell's own (`paintTable`). Only a change is sent: the marks already follow typing, and a transaction the
+ * editor does not need drops the Enter a phone holds back for a frame (CodeMirror's Android key handling).
+ */
+export function paintOpenCell(view: EditorView, marks: Mark[]) {
+	const cell = view.state.field(openCellState, false);
+	const el = cell && view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
+	const inner = el && EditorView.findFromDOM(el);
+	if (!cell || !inner) return;
+	const source = cellSource(view.state, cell), held = heldText(source, inner.state.doc.toString());
+	const start = cell.from + held.base, end = cell.from + heldToSource(held, held.text.length);
+	const at = (pos: number) => sourceToHeld(source, held, pos - cell.from);
+	const ranges: Range<Decoration>[] = [];
+	for (const mark of marks) {
+		if (mark.from < cell.from || mark.to > cell.to || (mark.from <= start && mark.to >= end && !mark.suggestion)) continue;
+		const from = at(mark.from), to = at(mark.to);
+		if (from >= to) continue;
+		const suggestion = mark.suggestion;
+		const attributes: Record<string, string> = suggestion
+			? { class: ['cm-suggestion-del', ...(mark.kind === 'focused' ? ['cm-suggestion-focus'] : [])].join(' '), style: colourStyle(suggestion.color), 'data-suggestion-id': mark.id }
+			: { class: markClasses(mark.kind).join(' '), ...(mark.kind === 'pending' ? {} : { 'data-comment-ids': mark.id }) };
+		ranges.push(Decoration.mark({ attributes }).range(from, to));
+		if (suggestion) ranges.push(Decoration.widget({ widget: new SuggestionInsert(mark, suggestion), side: 1 }).range(to));
+	}
+	const next = Decoration.set(ranges, true);
+	if (rangesOf(inner.state.field(cellMarksField)) === rangesOf(next)) return;
+	inner.dispatch({ effects: setCellMarks.of(next) });
+}
 
 /**
  * An empty cell has no text to select, so while its editor is open and still empty the Comment offer is the whole cell's,
@@ -89,7 +143,7 @@ export function cellTextRows(view: EditorView, from: number, to: number): DOMRec
 	if (!td) return null;
 	const open = openCellText(view, from, to);
 	const ends = open ? [open.inner.coordsAtPos(open.at(from), 1), open.inner.coordsAtPos(open.at(to), 1)] : [];
-	const drawn = [...(td.matches(PENDING) ? [td] : []), ...td.querySelectorAll<HTMLElement>(PENDING)].flatMap((el) => [...el.getClientRects()]);
-	const lines = (ends.every(Boolean) ? extent(ends as Extent[]) : null) ?? extent(drawn) ?? extent([td.getBoundingClientRect()])!;
+	const drawn = open ? null : cellTextRange(td, view.state.sliceDoc(block.from, block.to), cell, from - block.from, to - block.from);
+	const lines = (ends.every(Boolean) ? extent(ends as Extent[]) : null) ?? extent(drawn ? [...drawn.getClientRects()] : []) ?? extent([td.getBoundingClientRect()])!;
 	return acrossColumn(view, lines.top, lines.bottom, widget.getBoundingClientRect().right);
 }

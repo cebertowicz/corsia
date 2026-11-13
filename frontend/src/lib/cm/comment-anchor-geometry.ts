@@ -5,7 +5,8 @@ function textRight(v: EditorView): number {
 	const area = v.scrollDOM.getBoundingClientRect();
 	const span = document.createRange();
 	let right = 0;
-	for (const line of v.contentDOM.querySelectorAll('.cm-line')) {
+	// The document's own lines only, not those of an open table cell's editor inside a table.
+	for (const line of v.contentDOM.querySelectorAll(':scope > .cm-line')) {
 		span.selectNodeContents(line);
 		const drawn = span.getBoundingClientRect();
 		if (drawn.width > 0 && drawn.bottom > area.top && drawn.top < area.bottom) right = Math.max(right, drawn.right);

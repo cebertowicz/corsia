@@ -88,46 +88,21 @@ export const docTheme = EditorView.theme({
 	// wrapping (`break-spaces`) reaches a `td` and would make it take room, so a cell would end a line one word sooner than its
 	// editor and a click on the drawn word would put the caret on another. A header cell keeps `.md-content th`'s `nowrap`.
 	'.cm-md-table td': { whiteSpace: 'pre-wrap' },
-	// A cell's editor cannot sit in the cell it edits: Chromium places no caret in a contenteditable element inside
-	// CodeMirror's editing host, and a drawn cell is inside it. So the editor is held in a layer that shares the document's
-	// fonts and theme but sits outside that host, pinned over the cell (`widget-cell-layer.ts`), and the cell keeps its own
-	// text underneath, unseen, so the row keeps the height that text gives it.
-	'.cm-md-cell-layer': {
-		position: 'fixed',
-		zIndex: 40,
-		boxSizing: 'border-box',
-		// Nothing is drawn but the text and its caret: an open cell reads as the cell does at rest, as prose does under the caret.
-		cursor: 'text',
-		overflow: 'hidden',
-		// A column, so the editor's text can sit as high in the layer as the cell's sits in the row (`widget-cell-layer.ts`).
-		display: 'flex',
-		flexDirection: 'column'
-	},
-	'.cm-md-cell-layer .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
-	// The document's own theme gives a content area 40vh of bottom padding, and that rule reaches this editor too: without
-	// these, the layer is a screenful tall and covers the rows under the cell it sits on.
-	// The rest of the document's rules that reach it are undone too, so its text takes the cell's type from the layer
-	// (`widget-cell-layer.ts` copies it): the prose line height, the prose line's side padding and the prose wrapping would
-	// each wrap the editor's lines at other words than the cell's and make it taller than the row it sits in.
-	'.cm-md-cell-layer .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit' },
-	// The layer's wrapping, which `widget-cell-layer.ts` takes from the drawn cell: `pre-wrap` over a body cell, so the editor
-	// wraps at the cell's words; `pre` over a header cell, which does not wrap.
-	'.cm-md-cell-layer .cm-content': {
-		padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'inherit', overflowWrap: 'inherit', wordBreak: 'inherit'
-	},
-	'.cm-md-cell-layer .cm-line': { padding: '0' },
-	// The edited cell's own box stays drawn; only its ink and any image step aside under the editor.
-	// The marks the rendered cell draws (a link's colour, a code chip) beat the cell's own colour, so each is put away too.
-	'.cm-md-cell-editing': { color: 'transparent', textDecorationColor: 'transparent' },
-	'.cm-md-cell-editing :is(a, code, strong, em, del, s, b, i, u)': { color: 'transparent', background: 'transparent', textDecorationColor: 'transparent' },
-	// The editor draws a cell's marks as the rendered cell draws them (`app.css`, `.md-content`), so opening a cell changes nothing
-	// the reader sees: a link is coloured and not underlined, and a code span has the cell's own chip.
-	'.cm-md-cell-layer .cm-md-link': { color: 'var(--accent-text)', textDecoration: 'none' },
-	'.cm-md-cell-layer .cm-md-inline-code': {
+	// The open cell's editor sits in the cell, in place of its drawn content, and takes the cell's type and wrapping from it.
+	// It is an editing island inside the table, which the rule above makes read-only, so its content asks for editing back.
+	'.cm-md-cell-editor .cm-content, .cm-md-cell-editor .cm-content *': { WebkitUserModify: 'read-write' },
+	'.cm-md-cell-editor .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
+	'.cm-md-cell-editor .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit', fontFamily: 'inherit' },
+	'.cm-md-cell-editor .cm-content': { padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'inherit', overflowWrap: 'inherit', wordBreak: 'inherit' },
+	'.cm-md-table th .cm-md-cell-editor .cm-content': { whiteSpace: 'pre' },
+	'.cm-md-cell-editor .cm-line': { padding: '0' },
+	// The document's own link and code rules above reach the cell's editor and outrank `app.css`'s `.md-content a` and
+	// `.md-content code`, which style elements the editor does not draw; these two give the cell's marks back their look.
+	'.cm-md-cell-editor .cm-md-link': { color: 'var(--accent-text)', textDecoration: 'none' },
+	'.cm-md-cell-editor .cm-md-inline-code': {
 		fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: 'var(--text-subhead)', padding: '2px 6px', border: 'none',
 		borderRadius: 'var(--radius-2xs)', background: 'var(--bg-tertiary)'
 	},
-	'.cm-md-cell-editing img, .cm-md-cell-editing .cm-md-image, .cm-md-cell-editing .cm-md-image-note': { visibility: 'hidden' },
 	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
 	// for the comment flows, would otherwise be a second caret on the same text.
 	'&.cm-md-cell-open .cm-cursorLayer': { display: 'none' },
@@ -180,13 +155,15 @@ export const docTheme = EditorView.theme({
 	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
-/** The marks a rendered table cell draws, for the cell's own editor: bold, italic, struck-through and linked text look as they do at rest. */
+/**
+ * The marks a rendered table cell draws as `strong`, `em` and `del` elements, for the cell's own editor, whose highlighting
+ * draws classed spans that `app.css`'s element rules cannot reach. A link is coloured by `.cm-md-cell-editor .cm-md-link`.
+ */
 export const cellHighlight = syntaxHighlighting(
 	HighlightStyle.define([
 		{ tag: t.strong, fontWeight: '600' },
 		{ tag: t.emphasis, fontStyle: 'italic' },
-		{ tag: t.strikethrough, textDecoration: 'line-through' },
-		{ tag: t.link, color: 'var(--accent-text)' }
+		{ tag: t.strikethrough, textDecoration: 'line-through' }
 	])
 );
 

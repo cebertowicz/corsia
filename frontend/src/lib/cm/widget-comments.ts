@@ -10,6 +10,7 @@ import { CELL_EDITOR } from './widget-cell-state';
 import { cellClicked } from './widget-cell-click';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
+import { paintOpenCell } from './widget-cell-comment';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -47,20 +48,30 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		};
 		private frame = 0;
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
+		// What a click landed on, read before the cell editor's own click opens the cell and puts its editor in place of the
+		// drawn text the click hit: a click on a comment drawn in a cell opens that comment and the cell both.
+		private landed: { event: MouseEvent; widget: HTMLElement | null; ids: string[]; opener: HTMLElement | null } | null = null;
+		private readonly land = (event: MouseEvent) => {
+			const origin = event.target instanceof Element && !event.target.closest(CELL_EDITOR) ? event.target : null;
+			const widget = origin && widgetOf(this.view, origin);
+			this.landed = { event, widget, ids: widget && origin ? commentIdsAt(widget, origin) : [], opener: origin?.closest<HTMLElement>('[data-comment-ids]') ?? widget };
+		};
 		private readonly click = (event: MouseEvent) => {
+			const landed = this.landed?.event === event ? this.landed : null;
+			this.landed = null;
 			if (this.pointer === 'touch' && !this.touchMoved) caretToWidget(this.view, event);
 			const origin = event.target instanceof Element ? event.target : null;
-			// A click inside an open cell editor belongs to that editor: it places a caret there, and its own selection is read
-			// by `read` below like any other selection made inside the widget.
+			// A click inside an open cell editor belongs to that editor: it places a caret there and reads its own selection.
 			if (origin?.closest(CELL_EDITOR)) return;
-			const widget = origin && widgetOf(this.view, origin);
+			const widget = landed ? landed.widget : origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();
-			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
+			const ids = landed ? landed.ids : widget && origin ? commentIdsAt(widget, origin) : [];
+			const opener = (landed?.opener ?? origin?.closest<HTMLElement>('[data-comment-ids]') ?? widget)!;
 			// A whole-diagram text comment takes the click; the viewer remains reachable by keyboard and from its pins.
-			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget, event); return; }
+			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, opener, event); return; }
 			// A cell image or a diagram opens the viewer on a click, as an image in the text does; a drag across a diagram is a selection, not a click.
 			if (widget && origin && !origin.closest('a') && (drawnCellImage(origin) || selection?.isCollapsed !== false) && openWidgetImage(this.view, origin)) { event.preventDefault(); return; }
-			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget, event); return; }
+			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, opener, event); return; }
 			if ((this.pointer === 'touch' || this.recentTouch()) && (!origin || !widgetOf(this.view, origin))) { hooks.onSelect(null); return; }
 			this.tap(event);
 		};
@@ -148,6 +159,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			view.dom.addEventListener('mousedown', this.press, true);
 			document.addEventListener('selectionchange', this.listen);
 			view.dom.addEventListener('mouseup', this.listen);
+			view.dom.addEventListener('click', this.land, true);
 			view.dom.addEventListener('click', this.click);
 			view.dom.addEventListener('keydown', this.key, true);
 			view.dom.addEventListener('load', this.rendered, true);
@@ -169,6 +181,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			this.view.dom.removeEventListener('pointerdown', this.down, true);
 			this.view.dom.removeEventListener('pointermove', this.move, true);
 			this.view.dom.removeEventListener('mousedown', this.press, true);
+			this.view.dom.removeEventListener('click', this.land, true);
 			this.view.dom.removeEventListener('click', this.click);
 			this.view.dom.removeEventListener('keydown', this.key, true);
 			this.view.dom.removeEventListener('load', this.rendered, true);
@@ -182,7 +195,9 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			if (this.dragging) return;
 			const selection = document.getSelection();
 			const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-			const el = range && widgetOf(this.view, range.commonAncestorContainer);
+			// The open cell's editor sits inside the table and makes its own selections, which its own flow reads and offers.
+			const inCell = range && (range.commonAncestorContainer instanceof Element ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement)?.closest(CELL_EDITOR);
+			const el = range && !inCell && widgetOf(this.view, range.commonAncestorContainer);
 			const raised = el && range && (!range.collapsed || el.matches(TABLE)) ? selectionIn(this.view, el, range) : null;
 			// While the editor holds focus, every editor update (this selection's own pending mark, a collaborator's edit)
 			// writes the editor's caret over the browser's selection, which then reads as nothing. A selection inside a widget
@@ -230,6 +245,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 						}
 						markChangedOpenable(el, signature, this.view, this.openableSignatures);
 					}
+					paintOpenCell(this.view, marks);
 				},
 			});
 		}

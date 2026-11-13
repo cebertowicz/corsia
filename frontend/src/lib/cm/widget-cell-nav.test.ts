@@ -85,6 +85,44 @@ describe('Tab and Enter move through the table', () => {
 	});
 });
 
+describe('the next cell holds its own text, never the one it came from', () => {
+	// A space typed at a cell's edge stays while typing goes on in that cell; it is the reader's, and that cell's only.
+	const twin = (word: string) => `| H1 | H2 |\n| --- | --- |\n| ${word} | ${word} |\n| z | ${word} |`;
+
+	it("Tab from 'Done ' to a cell holding 'Done' leaves no space before what is typed next", () => {
+		const r = track(build(twin('Done')));
+		clicked(r, cellEl(r, 1, 0));
+		typed(r, 4, ' ');
+		expect(cellText(r), 'the space typed stays in its own cell').toBe('Done ');
+		press(r, 'Tab');
+		expect(openIn(r, 1, 1)).toBe(true);
+		expect(cellText(r), 'the next cell holds what it stores').toBe('Done');
+		typed(r, cellCaret(r), 'x');
+		expect(r.view.state.doc.toString()).toContain('| Donex |');
+	});
+
+	// Every combination once: 4 texts, 3 leading and 2 trailing runs of spaces, and both keys. Each builds its own editor,
+	// which takes over 100ms on a loaded machine, so the 48 of them get more than the default 5s.
+	it('for any text and edge spaces, after Tab or Enter', { timeout: 30_000 }, () => {
+		const cases = ['Done', 'a b', 'x', 'ok `c`'].flatMap((word) => [0, 1, 2].flatMap((leading) => [1, 2].flatMap((trailing) =>
+			[false, true].map((viaEnter) => ({ word, lead: ' '.repeat(leading), trail: ' '.repeat(trailing), viaEnter })))));
+		for (const { word, lead, trail, viaEnter } of cases) {
+			const r = track(build(twin(word)));
+			const [row, col] = viaEnter ? [1, 1] : [1, 0];
+			clicked(r, cellEl(r, row, col));
+			typed(r, cellText(r).length, trail);
+			typed(r, 0, lead);
+			const name = `'${lead}${word}${trail}' then ${viaEnter ? 'Enter' : 'Tab'}`;
+			expect(cellText(r), name).toBe(`${lead}${word}${trail}`);
+			press(r, viaEnter ? 'Enter' : 'Tab');
+			expect(openIn(r, viaEnter ? 2 : 1, 1), name).toBe(true);
+			expect(cellText(r), `${name}: the next cell holds what it stores`).toBe(word);
+			typed(r, cellCaret(r), 'x');
+			expect(r.view.state.doc.toString(), `${name}: what is typed lands right after its text`).toContain(`| ${word}x |`);
+		}
+	});
+});
+
 describe('a row with more cells than the header', () => {
 	// The renderer draws no cell for the third cell of the first body row, so the walk has none to stop at.
 	const WIDE = '| A | B |\n| --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 |';

@@ -228,7 +228,7 @@ for (const layout of LAYOUTS) {
 					// cell under it; the next tap places the caret where it lands.
 					await expect(page.getByText('Which way does it point now?').first(), 'the first tap closes the card').toBeHidden();
 					await settled(page);
-					await expect(target, 'and does not open the tapped cell').not.toHaveClass(/cm-md-cell-editing/);
+					await expect(target.locator('.cm-md-cell-editor'), 'and does not open the tapped cell').toHaveCount(0);
 					await frame(page, `05-${tag}-closed`);
 					await press();
 				}

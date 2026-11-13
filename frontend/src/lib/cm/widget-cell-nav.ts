@@ -1,7 +1,18 @@
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
-import { tableGrid, type CellSpan } from './widget-cells';
+import { clean, tableGrid, type CellSpan } from './widget-cells';
 import { cellAtSpan, openCellState, type OpenCell } from './widget-cell-state';
+
+/**
+ * What a screen reader calls the open cell's editor: its column's header and its body row, counted from 1, or the column's
+ * number when its header is empty. A header cell has no row of its own to name, so it is named as its column's header.
+ */
+export function cellLabel(td: HTMLTableCellElement): string {
+	const row = td.parentElement instanceof HTMLTableRowElement ? td.parentElement.rowIndex : 0, col = td.cellIndex + 1;
+	if (row === 0) return `Column ${col} header`;
+	const header = clean(td.closest('table')?.rows[0]?.cells[td.cellIndex]?.textContent ?? '');
+	return `${header || `Column ${col}`}, row ${row}`;
+}
 
 /**
  * Where Tab, Shift+Tab and Enter take the reader inside a table. The walk is over the source cells of the open cell's own
