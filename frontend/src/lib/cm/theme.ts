@@ -3,6 +3,12 @@ import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
+/**
+ * Where a phone has no margin beside a table, the Comment offer sits under it (`offerPlace`), a finger tall; the table's own
+ * bottom padding is that height plus the usual 0.6em so the offer lies in the padding and covers none of the text below.
+ */
+const OFFER_BELOW_PADDING = 'calc(var(--touch-target) + 0.6em)';
+
 export const docTheme = EditorView.theme({
 	'&': {
 		color: 'var(--text-primary)',
@@ -68,7 +74,7 @@ export const docTheme = EditorView.theme({
 	'.cm-md-link-open': { transition: 'text-decoration-color 150ms' },
 	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' }, '.cm-md-link-open:hover': { textDecorationColor: 'var(--accent)' } },
 	// A table cell is a tap target now that it edits: a finger's height.
-	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' }, '.cm-md-table td, .cm-md-table th': { height: '44px' } },
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' }, '.cm-md-table td, .cm-md-table th': { height: '44px' }, '.cm-md-table': { paddingBottom: OFFER_BELOW_PADDING } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },
@@ -157,7 +163,7 @@ export const docTheme = EditorView.theme({
 	'@media (prefers-reduced-motion: reduce)': { '.cm-scroller, .cm-scroller *': { transitionProperty: 'none !important' } },
 	// Forced colours drop shadows and washes: an unread pin is the system highlight colours as a fill, a read one keeps its own.
 	'@media (forced-colors: active)': { '.cm-image-pin[data-unread] .disc, .cm-image-pin.removed[data-unread] .disc': { forcedColorAdjust: 'none', background: 'Highlight', color: 'HighlightText', border: '1.5px solid HighlightText', boxShadow: '0 0 0 2px Highlight' } },
-	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
+	'@media (max-width: 768px)': { '&': { fontSize: '16px' }, '.cm-md-table': { paddingBottom: OFFER_BELOW_PADDING }, '.cm-md-task-control': { width: '44px', height: '44px', margin: '-9px 2px -9px -8px' } }
 });
 
 // A line the editor scrolls into view stops above the notices floating over a document's foot. The room is the scroller's own

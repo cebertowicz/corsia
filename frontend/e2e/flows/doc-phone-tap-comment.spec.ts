@@ -305,10 +305,12 @@ test.describe(`${TAG} new sign`, () => {
 
 		await highlight(page, 'conductor').tap();
 		await expectOpenOn(page, 'conductor', 'opening the card from its highlight');
-		await expect(sign(page), 'the opened comment has been seen; the other has not').toHaveCount(1);
-		await expect(page.locator('[data-comment-new]')).toHaveCount(1);
+		// The card read its thread at once (the header count says so) but its highlight keeps the unread look while the card is up, so the sign the reader came to see stays.
+		await expect(pill(page)).toHaveAccessibleName(/1 unread/);
+		await expect(sign(page), 'the opened comment keeps its sign while its card is up').toHaveCount(2);
 		await putSheetAway(page);
-		await expect(sign(page)).toHaveCount(1);
+		await expect(sign(page), 'the opened comment has been seen once its card closes; the other has not').toHaveCount(1);
+		await expect(page.locator('[data-comment-new]')).toHaveCount(1);
 		await expect(pill(page)).toHaveAccessibleName(/1 unread/);
 		await frames(page, testInfo, 'signs-after-one-seen');
 	});

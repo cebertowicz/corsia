@@ -7,11 +7,11 @@ import Popover from './Popover.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 function anchor(left = 8, top = 8): DOMRect { return new DOMRect(left, top, 10, 10); }
-function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean; width?: string; onPlace?: (card: HTMLElement) => void } = {}) {
+function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean; width?: string; ariaLabel?: string; onPlace?: (card: HTMLElement) => void } = {}) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const onClose = vi.fn(); const restoreFocus = vi.fn();
 	const children = (() => {}) as any;
-	component = mount(Popover, { target: host, props: { anchor: options.anchor ?? anchor(), open: options.open ?? true, fill: options.fill, width: options.width, onPlace: options.onPlace, onClose, restoreFocus, children } });
+	component = mount(Popover, { target: host, props: { anchor: options.anchor ?? anchor(), open: options.open ?? true, fill: options.fill, width: options.width, ariaLabel: options.ariaLabel, onPlace: options.onPlace, onClose, restoreFocus, children } });
 	flushSync(); return { onClose, restoreFocus };
 }
 beforeEach(() => {
@@ -37,6 +37,13 @@ describe('Popover', () => {
 		unmount(component!); host.remove();
 		render();
 		expect(document.body.querySelector<HTMLElement>('.popover')!.style.width).toBe('');
+	});
+	it('names its dialog when given a label, and leaves it unnamed otherwise', () => {
+		render({ ariaLabel: 'Owner and supervisor' });
+		expect(document.body.querySelector('.popover')!.getAttribute('aria-label')).toBe('Owner and supervisor');
+		unmount(component!); host.remove();
+		render();
+		expect(document.body.querySelector('.popover')!.hasAttribute('aria-label')).toBe(false);
 	});
 	it('uses the subtle border token on the elevated surface', () => {
 		const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Popover.svelte'), 'utf8');

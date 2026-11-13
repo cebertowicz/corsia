@@ -641,15 +641,19 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		const requester = root.querySelector<HTMLElement>('.rb-who')!.getBoundingClientRect();
 		const ask = root.querySelector<HTMLElement>('.rb-ask')!.getBoundingClientRect();
 		const comments = root.querySelector<HTMLElement>('.comment-status')!;
+		const ownership = document.querySelector<HTMLElement>('[data-ownership-row]')?.getBoundingClientRect().height ?? 0;
 		return {
 			firstBodyY: firstLine.top,
+			ownershipRowHeight: ownership,
 			capsuleHeight: capsule.height,
 			leadRow: { requesterWidth: requester.width, askWidth: ask.width },
 			commentsPillName: comments.getAttribute('aria-label'),
 		};
 	});
 	if (mode === 'phone') {
-		expect(measurements.firstBodyY, 'the first document line stays in the approved phone reading area').toBeLessThanOrEqual(240);
+		// The phone header holds the title rows (240px) and, below them, the owner and supervisor items as one touch row (at most 56px).
+		expect(measurements.ownershipRowHeight, 'the owner and supervisor row is one touch row').toBeLessThanOrEqual(56);
+		expect(measurements.firstBodyY, 'the first document line sits below the title rows and the one owner and supervisor row').toBeLessThanOrEqual(240 + 56);
 		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
 		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
 		const leadAsk = bar(page).locator('.rb-ask');
@@ -665,7 +669,9 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		await bar(page).locator('.rb-line').click();
 		await expect(bar(page).locator('.rb-ask-full')).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
 		await expect(bar(page).locator('.rb-who')).toBeVisible();
-		await expect(page.locator('.identity-age')).toContainText(`Owner: ${doc.title}`);
+		const owner = page.locator('[data-ownership-row] [data-role="owner"]');
+		await expect(owner).toBeVisible();
+		expect(await owner.getAttribute('aria-label'), 'the owner item names the owner in full').toContain(`: ${doc.title}`);
 		await expect(page.locator('.identity-age')).toContainText(/as of \w+ \d+/);
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
 	}
