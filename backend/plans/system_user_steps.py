@@ -10,7 +10,9 @@ Opening is idempotent on the caller's key within that thread's plan, through
 the plan's own mutation receipts (``plans.receipts``): one primary-key read,
 however long the plan's history. The agent's selected task, if any, gains a dependency on the step, so the plan
 carries the wait: settling or closing the step wakes that task through the
-dependency path, and a paused plan stays paused until resume.
+dependency path, and a paused plan stays paused until resume. With no selected
+task nothing depends on the step, yet the agent was still told to end its turn
+and wait, so the step's own end is news to it (``plans.wake_currency``).
 
 Settling accepts only a step this module opened (its receipt), so it
 can never mark an agent's own work done. Such a step has no parent, which is
@@ -26,10 +28,14 @@ Both join the caller's write transaction when there is one.
 
 from __future__ import annotations
 
+import logging
+
 import plans.errors as errors
 import plans.receipts as receipts
 import plans.service as service
 from plans.plan_write import transaction
+
+log = logging.getLogger(__name__)
 
 #: The verifier prefix a system settlement records; the pane names CORSIA.
 VERIFIER_PREFIX = "system:"
@@ -81,6 +87,8 @@ def open_user_step(
             dependencies.add_dependency(
                 waiting, node.id, actor_id=None, provenance=provenance, db=connection,
             )
+        log.info("%s opened step %s in %s's plan; %d task(s) wait on it",
+                 provenance, node.id, thread_id, len(selected))
         return node.id
 
 
@@ -90,8 +98,7 @@ def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> boo
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
-        opened = connection.execute(_OPENED_SQL, _opened_params(node["plan_id"], node_id)).fetchone()
-        if opened is None:
+        if not opened(connection, node["plan_id"], node_id):
             raise errors.PlanInputError("settle_user_step settles only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
@@ -102,7 +109,16 @@ def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> boo
             {"db": connection, "actor_id": None, "provenance": provenance},
             evidence=evidence,
         )
+        waiting = connection.execute(
+            "SELECT COUNT(*) FROM plan_node_dependencies WHERE depends_on_node_id=?", (node_id,),
+        ).fetchone()[0]
+        log.info("%s settled step %s; %d task(s) waited on it", provenance, node_id, waiting)
         return True
+
+
+def opened(db, plan_id: str, node_id: str) -> bool:
+    """Whether this module opened that node: one primary-key range seek on the plan's receipts."""
+    return db.execute(_OPENED_SQL, _opened_params(plan_id, node_id)).fetchone() is not None
 
 
 def _opened_params(plan_id: str, node_id: str) -> tuple:

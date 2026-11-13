@@ -1,9 +1,9 @@
 """System code opens a step for the person in an agent's plan and settles it when done.
 
 The shared browser's password guard is the first caller: a password page opens
-one step per page visit, the agent's current task waits on it, and the step
+one step per page visit, the agent's current task (if any) waits on it, the step
 settles when the guard observes the sign-in, with the system (not the agent,
-not the person) on the record.
+not the person) on the record, and its end wakes the agent either way.
 """
 
 from __future__ import annotations
@@ -286,6 +286,52 @@ def test_the_persons_own_ending_releases_and_wakes_the_waiting_task(db, operatio
         "SELECT id FROM messages WHERE thread_id=? AND id LIKE 'plan-wake:%'", ("owner",),
     ).fetchall()}
     assert wake.format(task=mine.id, revision=row(db, mine.id)["revision"], step=step) in wakes
+
+
+def _closed_wake(db, step: str):
+    return db.execute(
+        "SELECT content, continuation_condition FROM messages WHERE thread_id=? AND id LIKE ?",
+        ("owner", f"plan-wake:task_closed:{step}:%"),
+    ).fetchone()
+
+
+@pytest.mark.parametrize("ending", ["system", "mark_done", "close_node"])
+def test_a_step_opened_with_no_selected_task_still_wakes_the_agent_when_it_ends(db, ending):
+    """The agent was told to end its turn and wait, and nothing else in its plan can wake it."""
+    from plans import wake_currency
+
+    plan = owner_plan(db)
+    step = _open(db)
+    assert _prerequisites(db, step) == [] and db.execute("SELECT COUNT(*) FROM plan_node_dependencies").fetchone()[0] == 0
+
+    if ending == "system":
+        assert _settle(db, step) is True
+    else:
+        params = close_params(db, ending, step)
+        plan_update(db, plan.id, ending, {**params, "reason": "Not now"} if ending == "close_node" else params,
+                    actor=HUMAN)
+
+    wake = _closed_wake(db, step)
+    assert wake is not None
+    assert "Enter your password in the shared browser (example.com)" in wake["content"]
+    # The same predicate decides again when a Turn would claim the wake.
+    assert wake_currency.is_current("owner", json.loads(wake["continuation_condition"]), db=db)
+
+
+def test_an_agent_asked_person_task_closing_with_nothing_to_do_wakes_no_one(db):
+    """Only a step the system opened is news on its own; other closed tasks keep the actionable-work rule."""
+    plan = owner_plan(db)
+    asked = service.add_node(
+        plan.id, kind="task", title="Sign the form", acceptance_criteria="Signed",
+        assignee="user", actor_id=OWNER.audit_id, provenance="test", db=db,
+    )
+    db.commit()
+
+    plan_update(db, plan.id, "close_node", {**close_params(db, "close_node", asked.id), "reason": "Not now"},
+                actor=HUMAN)
+
+    assert row(db, asked.id)["state"] == "closed"
+    assert _closed_wake(db, asked.id) is None
 
 
 def test_an_empty_key_is_refused(db):
