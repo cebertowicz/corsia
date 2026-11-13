@@ -38,8 +38,8 @@ export async function postReconciled(
 
 
 export const docComments = writable<Record<string, DocComment[]>>({});
-/** Threads brought into view by an explicit unread navigation. */
-export const arrivedDocComments = writable<Set<string>>(new Set());
+/** Threads the person just picked to read (a click or tap on a highlight, a marker, the jump control, an image tag); the card that shows one stamps it read and removes it. */
+export const pickedDocComments = writable<Set<string>>(new Set());
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
 export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
 export const commentLoads = writable<Record<string, CommentLoad>>({});

@@ -136,11 +136,18 @@
 		if (!recorded.includes(messageId)) recorded.push(messageId);
 	}
 	const unreadNow = (comment: { answers: Array<{ author_kind?: string; unread?: boolean }> }) => comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
-	// Opening a thread reads it at once; its highlight keeps the unread look until the sheet or card is closed, so the sign the reader came to see does not vanish under them.
+	// Opening a thread reads it at once; its highlight keeps the unread look until the popover or sheet closes, or its picked margin card is let go, so the sign the reader came to see does not vanish under them.
 	const heldUnread = new Set<string>();
+	const openCommentId = $derived(viewing?.commentId ?? (marginComments ? selectedCommentId : null));
 	$effect(() => {
-		if (!viewing) { if (heldUnread.size) { heldUnread.clear(); untrack(schedule); } return; }
-		for (const comment of viewedMessage?.chat_comments ?? []) if (unreadNow(comment)) heldUnread.add(comment.id);
+		const open = openCommentId;
+		const released = [...heldUnread].filter(id => id !== open);
+		if (released.length) { for (const id of released) heldUnread.delete(id); untrack(schedule); }
+		if (!open) return;
+		for (const message of $messages) {
+			if (message.thread_id !== threadId) continue;
+			for (const comment of message.chat_comments ?? []) if (comment.id === open && unreadNow(comment)) heldUnread.add(comment.id);
+		}
 	});
 	function paint() {
 		const root = messageRoot();
@@ -337,11 +344,11 @@
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
 		<AdaptiveDrawer bind:panel={sheet} ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
+			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} opened keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
 		<Popover anchor={threadAnchor} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
+			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} opened /></div>
 		</Popover>
 	{/if}
 {/if}

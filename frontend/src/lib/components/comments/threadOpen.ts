@@ -1,11 +1,15 @@
 import type { CommentThreadData } from './CommentThreadData';
 
-/** Select the latest unread item when a person opens a document thread. */
+/**
+ * Opening a thread is what reads it: a press on its card, focus in its reply field, or the caller opening it (a picked
+ * margin card, a popover). Being on screen reads nothing. A chat thread stamps each unread answer; a document thread
+ * stamps its latest unread item.
+ */
 export function createThreadOpen(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {
 	function openThread() {
-		if (chat()) return;
 		const current = comment();
 		const unread = new Set(current.newReplyIds ?? []);
+		if (chat()) { for (const id of unread) stamp(id); return; }
 		const last = [...current.replies].reverse().find((reply) => reply.id && unread.has(reply.id));
 		if (last?.id) stamp(last.id);
 		else if (current.newComment) stamp(current.id);

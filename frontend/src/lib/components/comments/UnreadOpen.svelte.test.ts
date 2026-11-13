@@ -1,11 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import CommentThread from './CommentThread.svelte';
-import { arrivedDocComments } from '$lib/stores/docComments';
+import { pickedDocComments } from '$lib/stores/docComments';
 import { get } from 'svelte/store';
 
 let component: Record<string, unknown> | undefined;
-afterEach(() => { if (component) unmount(component); component = undefined; arrivedDocComments.set(new Set()); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
+afterEach(() => { if (component) unmount(component); component = undefined; pickedDocComments.set(new Set()); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
 it('keeps a resolved unread thread expanded until it is opened', async () => {
 	vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -39,41 +39,36 @@ it('marks an unread top-level comment only when its card is opened', async () =>
 	expect(onViewed).toHaveBeenCalledWith('root', 'root');
 });
 
-it('stamps a chip arrival only after its card becomes visible, independent of other surfaces', async () => {
-	let visible!: () => void;
-	vi.stubGlobal('IntersectionObserver', class {
-		constructor(private callback: IntersectionObserverCallback) {}
-		observe(target: Element) { visible = () => this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
-		disconnect() {} unobserve() {}
-	});
+it('stamps a picked thread at once, with no wait for it to come into view, and only once', async () => {
+	vi.stubGlobal('IntersectionObserver', undefined);
 	const host = document.createElement('div'); document.body.append(host);
 	const onViewed = vi.fn().mockResolvedValue(undefined);
 	component = mount(CommentThread, { target: host, props: { comment: { id: 'c', anchor: '', author: 'agent', text: 'note', at: '', resolved: false, replies: [], newComment: true }, onViewed } });
 	flushSync();
-	arrivedDocComments.set(new Set(['c']));
-	const unrelated = document.createElement('div'); unrelated.setAttribute('data-popover', ''); document.body.append(unrelated); unrelated.remove();
+	expect(onViewed).not.toHaveBeenCalled();
+	pickedDocComments.set(new Set(['other']));
 	flushSync();
 	expect(onViewed).not.toHaveBeenCalled();
-	visible(); flushSync();
+	pickedDocComments.set(new Set(['c']));
+	flushSync();
 	await Promise.resolve();
 	expect(onViewed).toHaveBeenCalledTimes(1);
 	expect(onViewed).toHaveBeenCalledWith('c', 'c');
-	expect(get(arrivedDocComments).size).toBe(0);
-	visible(); flushSync();
+	expect(get(pickedDocComments).size).toBe(0);
+	document.dispatchEvent(new Event('visibilitychange')); flushSync();
 	expect(onViewed).toHaveBeenCalledTimes(1);
 });
 
-it('keeps an arrival unread without an observer until the card is opened', async () => {
+it('stamps a thread picked before its card is drawn, once the card shows it', async () => {
 	vi.stubGlobal('IntersectionObserver', undefined);
-	arrivedDocComments.set(new Set(['c']));
+	pickedDocComments.set(new Set(['c']));
 	const host = document.createElement('div'); document.body.append(host);
 	const onViewed = vi.fn().mockResolvedValue(undefined);
 	component = mount(CommentThread, { target: host, props: { comment: { id: 'c', anchor: '', author: 'agent', text: 'note', at: '', resolved: false, replies: [], newComment: true }, onViewed } });
 	flushSync();
-	expect(onViewed).not.toHaveBeenCalled();
-	host.querySelector<HTMLElement>('.ct')!.click();
 	await Promise.resolve();
 	expect(onViewed).toHaveBeenCalledWith('c', 'c');
+	expect(get(pickedDocComments).size).toBe(0);
 });
 
 it('retries a failed stamp on the next opening', async () => {
