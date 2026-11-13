@@ -25,8 +25,8 @@
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
-	/** A field that scrolls with its card (a suggestion's) is kept in view while it holds focus, so typing never takes it below the card's visible edge. */
-	let focused = $state(false);
+	/** A field that scrolls with its card (not pinned) is kept in view while it is being typed in, so a growing field never goes below the card's visible edge; opening on it moves nothing. */
+	let typing = $state(false);
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
@@ -72,7 +72,7 @@
 <div class="ct-compose open" class:unpinned={!pinned} data-autosize-sticky>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={{ enabled: keepVisible || (!pinned && focused), whole: wholeCard }} onfocus={() => (focused = true)} onblur={() => (focused = false)} bind:value use:autosize={value} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={{ enabled: keepVisible || (!pinned && typing), whole: wholeCard }} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
