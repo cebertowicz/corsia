@@ -18,8 +18,9 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
+from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
-from registry.shared_principals import WriteAuthority, artifact_owner
+from registry.shared_principals import WriteAuthority
 from registry.shared_target import SharedTarget
 from registry.document_ownership import document_write_authority
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
@@ -688,31 +689,6 @@ def promote_file(
         db.close()
 
 
-def _recovery_shared_target(target: Path, row: dict, *, workspace: Path, db) -> SharedTarget:
-    """Rebuild the policy decision already persisted in an interrupted intent."""
-    actor = str(row["actor_thread_id"])
-    scope_id = "workspace"
-    for project in db.execute("SELECT id FROM projects").fetchall():
-        project_root = resolve_project_root(workspace, project["id"], db=db)
-        if project_root is not None and target.is_relative_to(
-            project_root.resolve(strict=False)
-        ):
-            scope_id = str(project["id"])
-            break
-    category_root = target.parent
-    artifact = service.find_file_identity(str(target), db=db)
-    owner = artifact_owner(str(artifact["id"]), db=db) if artifact is not None else None
-    return SharedTarget(
-        target,
-        category_root,
-        category_root / "INDEX.md",
-        bool(row["created_parent"]),
-        scope_id,
-        actor_principal=str(owner or actor),
-        owner_thread_id=str(owner) if owner else None,
-    )
-
-
 def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
     target, stage, backup, source, claim = _validated_intent_paths(
         row, workspace=workspace, db=db,
@@ -756,7 +732,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
         raise RuntimeError(
             f"Durable write intent {row['id']} does not match its target bytes."
         )
-    shared = _recovery_shared_target(target, row, workspace=workspace, db=db)
+    shared = recovery_shared_target(target, row, workspace=workspace, db=db)
     try:
         artifact = _register_applied(
             shared,
