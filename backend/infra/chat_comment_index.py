@@ -6,7 +6,7 @@ import json
 import sqlite3
 
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
-from infra.delivery_retry import newest_attempt_delivery
+from infra.delivery_retry import DELIVERY_COLUMNS, newest_attempt_delivery
 
 
 # The blanks the 189 -> 190 data step trims in SQL (char(32,9,10,13,11,12)); str.strip() alone also drops
@@ -109,22 +109,21 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
     if not sender_ids:
         return
     senders = db.execute(
-        "SELECT id,metadata,delivery_state,delivery_error,write_outcome,active_turn_id FROM messages "
+        f"SELECT id,metadata,{','.join(DELIVERY_COLUMNS)} FROM messages "
         "WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
         (thread_id, json.dumps(sender_ids)),
     ).fetchall()
     comments = {}
     # A comment is its input: it shows the delivery of that input's newest Retry copy, so a failure stays in
     # its thread with Retry until a copy is delivered, including where the copy got a thread of its own.
-    # A queued input also carries what tells a hold from a send in flight, so its thread can say it is held.
-    for sender_id, metadata, delivery_state, delivery_error, write_outcome, active_turn_id in senders:
-        if delivery_state in ('failed', 'ambiguous'):
-            delivery_state, delivery_error = newest_attempt_delivery(db, thread_id, sender_id, delivery_state, delivery_error)
+    # It carries the delivery columns chat reads off a row, all from that one row, so its thread shows what
+    # chat would show for it.
+    for sender_id, metadata, *columns in senders:
+        delivery = dict(zip(DELIVERY_COLUMNS, columns))
+        if delivery['delivery_state'] in ('failed', 'ambiguous'):
+            delivery = newest_attempt_delivery(db, thread_id, sender_id, delivery)
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
-            comments[(sender_id, comment['cid'])] = {
-                **comment, 'delivery_state': delivery_state, 'delivery_error': delivery_error,
-                'write_outcome': write_outcome, 'active_turn_id': active_turn_id,
-            }
+            comments[(sender_id, comment['cid'])] = {**comment, **delivery}
     threads = {}
     for target, sender, cid, created, _, _, _, root_sender, _, _ in rows:
         comment = comments.get((sender, cid))
@@ -143,8 +142,7 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
             threads[key]['answers'].append({
                 'author_kind': 'user', 'user_message_id': sender, 'cid': cid,
                 'text': comment['note'], 'created_at': created, 'unread': False,
-                'delivery_state': comment['delivery_state'], 'delivery_error': comment['delivery_error'],
-                'write_outcome': comment['write_outcome'], 'active_turn_id': comment['active_turn_id'],
+                **{column: comment[column] for column in DELIVERY_COLUMNS},
             })
             replies_added.add((sender, cid))
         if answer_id and text is not None:

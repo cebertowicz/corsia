@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatComment } from '$lib/stores/threads';
 import { unsentSends, needsAttention, retryRefusedForGood } from './chatCommentDelivery';
 
@@ -75,6 +75,12 @@ describe('held chat comment sends', () => {
 
 	it('shows a hold with no comment wording by its label alone', () => {
 		expect(titled(unsentSends(held('project_cloud_off')))).toEqual([['Switch to a local model to send', 'Switch to a local model to send', false, null]]);
+	});
+
+	it('shows a hold chat has no copy for as chat labels it, with no Retry', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		expect(titled(unsentSends(held('some_new_hold')))).toEqual([['Waiting to send', 'Waiting to send', false, null]]);
+		warn.mockRestore();
 	});
 
 	it('shows a send parked on a CORSIA defect as Not sent, marked and with Retry', () => {

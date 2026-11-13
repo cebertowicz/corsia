@@ -3,6 +3,7 @@ import type { ChatComment } from '$lib/stores/threads';
 import type { Delivery } from '$lib/chatCommentTypes';
 import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 import { deliveryPresentation, readMessageDeliveryState, type DeliveryPresentation, type MessageDeliveryState } from '$lib/messageDelivery';
+import { ACCOUNT_HOLD_COPY, NO_MODEL_SELECTED, SELECTED_MODEL_UNAVAILABLE } from '$lib/messageDeliveryCopy';
 
 /** The Retry chat offers a person's message in this state (UserMessageBubble), or null where it offers none; its title names the comment or reply. */
 export type RetryControl = { label: 'Retry' | 'Retry anyway'; title: string };
@@ -17,23 +18,18 @@ export type UnsentSend = {
 
 const ENDED: readonly MessageDeliveryState[] = ['failed', 'ambiguous', 'cancelled'];
 
-/** Chat's labels for a queued input that waits on something other than a send in flight. */
-const HELD_LABELS: ReadonlySet<DeliveryPresentation['label']> = new Set([
-	'Choose a model to send', 'Waiting for account', 'Waiting for model', 'Switch to a local model to send', 'Waiting for checkpoint', 'Waiting to send', 'Not sent',
-]);
-
 type Noun = 'comment' | 'reply';
 
 /**
- * The hint for a held comment or reply. Chat's own hints speak of "your message"; these name the comment or
- * reply. A hold with no wording of its own for comments shows its label alone.
+ * The hint for a queued comment or reply chat shows a state for, by the hold's cause. Chat's own hints speak of
+ * "your message"; these name the comment or reply. A cause with no wording of its own for comments shows its label.
  */
-function heldTitle(label: DeliveryPresentation['label'], noun: Noun): string {
-	if (label === 'Choose a model to send') return `This ${noun} is waiting for a model. Choose one for this chat to send it.`;
-	if (label === 'Waiting for account') return `This ${noun} sends when the account is available.`;
-	if (label === 'Waiting for model') return `This ${noun} sends when the model is available.`;
-	if (label === 'Not sent') return `Couldn’t send this ${noun}. Try again.`;
-	return label;
+function queuedTitle(shown: DeliveryPresentation, cause: string | null | undefined, noun: Noun): string {
+	if (shown.failed) return `Couldn’t send this ${noun}. Try again.`;
+	if (cause === NO_MODEL_SELECTED) return `This ${noun} is waiting for a model. Choose one for this chat to send it.`;
+	if (cause === SELECTED_MODEL_UNAVAILABLE) return `This ${noun} sends when the model is available.`;
+	if (cause && Object.hasOwn(ACCOUNT_HOLD_COPY, cause)) return `This ${noun} sends when the account is available.`;
+	return shown.label;
 }
 
 /** Sends whose Retry was refused for a cause no press can get past (their chat is deleted, their quote is gone). */
@@ -46,8 +42,8 @@ export function retryRefusedForGood(messageId: string): void {
 
 function retryControl(state: MessageDeliveryState, delivery: DeliveryPresentation, noun: Noun): RetryControl | null {
 	if (state === 'ambiguous') return { label: 'Retry anyway', title: `This may send the ${noun} twice if the provider received it before the connection failed` };
-	// A queued send parked on a CORSIA defect moves only when the person retries it; Retry drives it in place.
-	return state === 'failed' || delivery.label === 'Not sent' ? { label: 'Retry', title: `Send this ${noun} again` } : null;
+	// A queued send chat marks as needing the person moves only when they retry it; Retry drives it in place.
+	return state === 'failed' || (state === 'queued' && delivery.failed) ? { label: 'Retry', title: `Send this ${noun} again` } : null;
 }
 
 function unsent(messageId: string, note: string, createdAt: string, root: boolean, send: Delivery): UnsentSend | null {
@@ -58,9 +54,11 @@ function unsent(messageId: string, note: string, createdAt: string, root: boolea
 		delivery_state: state, delivery_error: send.delivery_error ?? null, write_outcome: send.write_outcome ?? null,
 		active_turn_id: send.active_turn_id ?? null, delivering_reason: send.delivering_reason ?? null, metadata: {},
 	}, false);
-	// A queued send in flight shows in its thread as a sent one; only a held one says so.
-	if (!shown || (state === 'queued' && !HELD_LABELS.has(shown.label))) return null;
-	const delivery = state === 'queued' ? { ...shown, title: heldTitle(shown.label, noun) } : shown;
+	if (!shown) return null;
+	// A queued send shows in its thread as a sent one while it is on its way. It shows chat's state once the server
+	// has proved no write happened (it is held) or chat marks it as needing the person.
+	if (state === 'queued' && send.write_outcome !== 'proved_no_write' && !shown.failed) return null;
+	const delivery = state === 'queued' ? { ...shown, title: queuedTitle(shown, send.delivery_error, noun) } : shown;
 	const retry = refusedForGood.has(messageId) ? null : retryControl(state, delivery, noun);
 	return { messageId, note, createdAt, root, delivery, retry };
 }
