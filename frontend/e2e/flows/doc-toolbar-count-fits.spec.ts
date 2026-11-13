@@ -434,7 +434,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 	await page.setViewportSize({ width: 430, height: 900 });
 	await installWorkspace(page, threadId, [doc], 0);
 	await openThread(page, threadId, title);
-	await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+	await expect(page.locator('.document-header .comment-status')).toContainText('120 comments');
 	await expect(page.locator('.document-header .resolved-tool')).toHaveText('Resolved · 3');
 	await expect(page.locator('.document-header .history-tool')).toBeVisible();
 	if (FRAMES) mkdirSync(FRAMES, { recursive: true });
@@ -450,7 +450,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		const measured = await measureTools(page);
 		const names = measured.controls.map((control) => control.name);
 		expect.soft(names, `${label}: the count, Resolved, Deliver immediately, Request review and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'request', 'history']));
-		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
 		expectLayout(measured, label);
 		rowsSeen.push([width, measured.rows]);
 		if (FRAMES && [380, 381, 393].includes(width)) await page.screenshot({ path: path.join(FRAMES, `history-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, Math.ceil(measured.tools.bottom + 60)) } });
