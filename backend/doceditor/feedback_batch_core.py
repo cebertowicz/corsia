@@ -130,3 +130,93 @@ def add_comment_item(
         db, batch_id, author_kind=author_kind, delivery_policy=delivery_policy, now=now, item_delta=1,
     )
     return True
+
+
+def count_items(db, batch_id: str) -> int:
+    """How many items a batch holds: its comment items plus its one coalesced edit item.
+
+    ``feedback_reopens.discard_open_item`` counts the same two sets when it decides whether a batch
+    still has anything to deliver; a batch is never emptied by deleting one of them alone.
+    """
+    return db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_batch_items WHERE batch_id=?", (batch_id,)
+    ).fetchone()[0] + db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,)
+    ).fetchone()[0]
+
+
+def _carry_edit_item(db, *, from_batch_id: str, into_batch_id: str) -> None:
+    """Move a batch's coalesced edit item, or fold it into the one the other batch already holds.
+
+    The row cascade-deletes with its batch, so it is always carried before a batch is deleted. Where
+    both sides have one, the joined batch keeps the baseline and the diff it already had -- that is
+    what the recipient has not seen yet -- and takes the later saved text, the summed save count and
+    the later time, so the newest text is never the one lost.
+    """
+    moving = db.execute(
+        "SELECT * FROM doc_feedback_edit_items WHERE batch_id=?", (from_batch_id,)
+    ).fetchone()
+    if moving is None:
+        return
+    held = db.execute(
+        "SELECT * FROM doc_feedback_edit_items WHERE batch_id=?", (into_batch_id,)
+    ).fetchone()
+    if held is None:
+        db.execute(
+            "UPDATE doc_feedback_edit_items SET batch_id=? WHERE batch_id=?", (into_batch_id, from_batch_id)
+        )
+        return
+    later_is_newer = str(moving["last_at"]) > str(held["last_at"])
+    newest = moving if later_is_newer else held
+    db.execute(
+        """UPDATE doc_feedback_edit_items
+           SET latest_sha256=?, latest_text=?, save_count=?, last_at=? WHERE batch_id=?""",
+        (
+            newest["latest_sha256"], newest["latest_text"],
+            int(moving["save_count"]) + int(held["save_count"]),
+            max(str(moving["last_at"]), str(held["last_at"])), into_batch_id,
+        ),
+    )
+    db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (from_batch_id,))
+
+
+def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
+    """Carry this document's feedback batches to the identity that replaces it; returns how many.
+
+    One open batch per author, document, recipient and lane is the only key two documents share
+    (``idx_doc_feedback_batches_open``), so the batch that is already open on the target stays the
+    recipient's one batch for that author: the moved batch's comment items and its edit item join
+    it, its count is retaken from what the batch now holds, and the earlier closing time is kept so
+    nothing that was due sooner is made to wait. Any other batch just changes document.
+    """
+    moved = 0
+    for source in db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE artifact_id=?", (from_artifact_id,)
+    ).fetchall():
+        open_target = db.execute(
+            """SELECT * FROM doc_feedback_batches
+               WHERE artifact_id=? AND state='open' AND author_kind=? AND author_id=?
+                 AND recipient_id=? AND delivery_policy=?""",
+            (to_artifact_id, source["author_kind"], source["author_id"], source["recipient_id"],
+             source["delivery_policy"]),
+        ).fetchone() if str(source["state"]) == "open" else None
+        if open_target is None:
+            db.execute(
+                "UPDATE doc_feedback_batches SET artifact_id=? WHERE id=?", (to_artifact_id, source["id"])
+            )
+        else:
+            db.execute(
+                """INSERT OR IGNORE INTO doc_feedback_batch_items(batch_id, comment_id, event, event_at, event_by)
+                   SELECT ?, comment_id, event, event_at, event_by FROM doc_feedback_batch_items
+                   WHERE batch_id=?""",
+                (open_target["id"], source["id"]),
+            )
+            _carry_edit_item(db, from_batch_id=str(source["id"]), into_batch_id=str(open_target["id"]))
+            db.execute(
+                """UPDATE doc_feedback_batches SET closes_at=?, item_count=?, updated_at=? WHERE id=?""",
+                (min(str(source["closes_at"]), str(open_target["closes_at"])),
+                 count_items(db, str(open_target["id"])), utc_now(), open_target["id"]),
+            )
+            db.execute("DELETE FROM doc_feedback_batches WHERE id=?", (source["id"],))
+        moved += 1
+    return moved

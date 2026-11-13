@@ -1,6 +1,6 @@
 // A promoted document's comment task: when promote moves the document's identity, the task follows it and opens the
-// document with its comments; when promote has to leave the source behind, the task closes instead of opening to an
-// unavailable document.
+// document with its comments; when the promoted identity cannot be the source's own, the comments and the task move
+// onto the new identity instead of being left on the retired one.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { expect } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
 
 const repo = path.resolve(process.cwd(), '..');
-const PROMOTED = "This document is in another place, and its comments can’t be shown there. CORSIA keeps them.";
+const MOVED = 'This document is in another place, and its comments are there with it.';
 
 for (const editedOnDisk of [false, true]) test(`comment task after promote, edited on disk first: ${editedOnDisk}`, async ({ page, request }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'promote is the same at every width; the main spec covers the row at each');
@@ -45,7 +45,10 @@ for (const editedOnDisk of [false, true]) test(`comment task after promote, edit
 	// An edit on disk outside a registered write leaves the recorded hash stale, so promote can't carry the identity
 	// over: it tombstones the source and registers the copy as a new document.
 	if (editedOnDisk) appendFileSync(source, '\nEdited outside CORSIA.');
-	const promoted = seed('promote', artifactId, threadId) as { shared: string; source_state: string };
+	const promoted = seed('promote', artifactId, threadId) as {
+		shared: string; source_state: string; source_comments: number; carried_comments: number;
+		comments_before: number; comment_task: string | null;
+	};
 	expect([promoted.shared === artifactId, promoted.source_state]).toEqual(editedOnDisk ? [false, 'tombstone'] : [true, 'active']);
 	const node = await (await request.get(`/api/plans/${planId}/nodes/${task.id}`, { headers: auth })).json();
 
@@ -55,10 +58,16 @@ for (const editedOnDisk of [false, true]) test(`comment task after promote, edit
 	await expect(steps).toBeVisible({ timeout: 30_000 });
 	const row = steps.getByRole('listitem').filter({ hasText: name });
 	if (editedOnDisk) {
-		// Closed with its own reason, and no row is left asking the person to open a document that isn't there.
-		expect([node.state, node.status_reason]).toEqual(['closed', PROMOTED]);
+		// The comments came along, so the old task closes as moved and nothing here asks the person to open
+		// a document that isn't there; the ask and the threads now live on the promoted identity.
+		expect([node.state, node.status_reason]).toEqual(['closed', MOVED]);
 		await expect(row).toHaveCount(0);
-		await page.screenshot({ path: testInfo.outputPath('fallback-plan.png') });
+		expect([promoted.comments_before > 0, promoted.carried_comments, promoted.source_comments])
+			.toEqual([true, promoted.comments_before, 0]);
+		const carried = await (await request.get(`/api/artifacts/${promoted.shared}/comments?${query}`)).json();
+		expect(carried.comments.length).toBe(promoted.comments_before);
+		expect(promoted.comment_task, 'the promoted document carries the person’s comment task').toBeTruthy();
+		await page.screenshot({ path: testInfo.outputPath('moved-comments.png') });
 		return;
 	}
 	expect(node.state).toBe('pending');

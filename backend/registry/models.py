@@ -112,6 +112,17 @@ def retired_cause(artifact_id: str, *, db) -> str | None:
     return row["cause"] if row else None
 
 
+def successor_id(artifact_id: str, *, db) -> str | None:
+    """The identity ``retire()`` handed this document to, or None while the identity is active."""
+    row = db.execute(
+        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
+        " THEN json_extract(metadata, '$.successor_id') END AS successor"
+        " FROM artifact_identities WHERE id=?",
+        (artifact_id,),
+    ).fetchone()
+    return row["successor"] if row else None
+
+
 def find_identity_by_external_ids(
     integration: str,
     type: str,
@@ -226,14 +237,19 @@ def retire(
     *,
     tombstone: bool = False,
     cause: str | None = None,
+    successor: str | None = None,
     db=None,
 ) -> None:
     """Retire an artifact as archived or tombstoned.
 
-    ``cause``: "file_gone" (its file left the disk) or "promoted" (a promote tombstoned it, and its comments
-    did not follow) closes its person's comment task with that cause's reason. Other retirements (an ended
-    session) leave that task open. The cause is kept on the identity, so a close that a paused plan or a
-    held task defers can finish when it resumes; each retirement replaces it.
+    ``cause``: "file_gone" (its file left the disk) or "promoted" (a promote tombstoned it) closes its
+    person's comment task with that cause's reason. Other retirements (an ended session) leave that task
+    open. The cause is kept on the identity, so a close that a paused plan or a held task defers can
+    finish when it resumes; each retirement replaces it.
+
+    ``successor`` names the identity the document moved to, kept the same way: a promote passes it, and
+    the comments move there in this transaction so a person's threads follow the document, not the
+    tombstone (``doceditor.comment_transfer``, and ``plans.person_comment_task`` for its task).
     """
     with write_transaction(db, scope="retire_artifact") as _db:
         row = _db.execute(
@@ -265,6 +281,22 @@ def retire(
             _db.execute(
                 "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.retired_cause')"
                 " WHERE id=? AND json_valid(metadata) AND json_extract(metadata, '$.retired_cause') IS NOT NULL",
+                (artifact_id,),
+            )
+        if successor:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_set(COALESCE(NULLIF(metadata, ''), '{}'),"
+                " '$.successor_id', ?) WHERE id=?",
+                (successor, artifact_id),
+            )
+            # Naming a successor moves the document's comments here, so the two commit together or not at all.
+            from doceditor.comment_transfer import move_to_artifact
+
+            move_to_artifact(_db, source_artifact_id=artifact_id, target_artifact_id=successor)
+        else:
+            _db.execute(
+                "UPDATE artifact_identities SET metadata=json_remove(metadata, '$.successor_id')"
+                " WHERE id=? AND json_valid(metadata) AND json_extract(metadata, '$.successor_id') IS NOT NULL",
                 (artifact_id,),
             )
         passive_state = "tombstoned" if tombstone else "subscriber-archived"

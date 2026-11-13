@@ -1646,3 +1646,425 @@ async def test_corsia_write_and_edit_tools_use_durable_shared_seam(
     artifact_id = json.loads(multiple)["artifact"]["id"]
     # The write runs off the loop, but the socket nudge must come from the loop.
     assert announced == [(artifact_id, True)] * 3
+
+
+def _working_text(text: str, *, stale: bool) -> str:
+    """The file's bytes: ``stale`` adds an edit made outside CORSIA, which no registered write recorded."""
+    return text + ("\nEdited outside CORSIA.\n" if stale else "")
+
+
+def _working_file(durable_scope, name, *, stale=False):
+    """One file in the thread's working tray, registered by a write, plus what it holds on disk.
+
+    A promote can carry a registered identity to the shared path, which keeps the document's id and
+    everything keyed on it. ``stale`` edits the file outside CORSIA first, so the recorded digest no
+    longer matches and the promote must tombstone the source and register a new identity instead: the
+    case that used to strand the person's comments (#2555).
+    """
+    from core.workspace_layout import resolve_thread_working_root
+    from registry import service
+
+    workspace, project_root, thread_id, db = durable_scope
+    source_root = resolve_thread_working_root(project_root, thread_id)
+    source_root.mkdir(parents=True, exist_ok=True)
+    source = source_root / name
+    text = _working_text("Launch plan details for review.\n", stale=stale)
+    source.write_text("Launch plan details for review.\n", encoding="utf-8")
+    identity = service.register_write_strict(thread_id, str(source), db=db)
+    if stale:
+        source.write_text(text, encoding="utf-8")
+    db.commit()
+    return workspace, project_root, thread_id, db, source, str(identity["id"]), text
+
+
+def _promote(workspace, thread_id, db, source):
+    from registry import durable_writes
+
+    receipt = durable_writes.promote_file(
+        source, "planning", thread_id=thread_id, project_id="project-alpha",
+        workspace=workspace, description="Promoted launch plan",
+    )
+    return str(receipt["artifact"]["id"])
+
+
+def _seed_comment_state(db, artifact_id, thread_id):
+    """One person thread with a reply and a read stamp, one suggestion for the person, two queued writes, one review."""
+    from doceditor import feedback_batches, comments, writer_turns
+    from doceditor.feedback_state import mark_thread_viewed
+    from infra.database import write_transaction
+    from doc_feedback_helpers import add_comment
+
+    user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+    root, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+    reply, _ = add_comment(db, artifact_id, author_id=thread_id, parent_id=root["id"])
+    with write_transaction(db, scope="test_seed_suggestion") as connection:
+        # Tagged for the person, so it stays their business after the thread above is read.
+        row, created = comments.create_with_status(
+            artifact_id, body="Please review", author="Reviewer", author_kind="agent",
+            author_thread_id=thread_id, anchor_text="Launch plan", from_off=0, to_off=11,
+            replacement="Revised plan", tagged_user_id=user_id, client_id="suggestion-1", db=connection,
+        )
+        feedback_batches.record_comment(
+            connection, row, created=created, delivery_policy=feedback_batches.IMMEDIATE,
+        )
+    suggestion = row
+    with write_transaction(db, scope="test_read_one_thread") as connection:
+        mark_thread_viewed(connection, user_id, artifact_id, root["id"], reply["id"])
+    for line_id, root_id in (
+        ("line-thread", root["id"]),
+        ("line-section", writer_turns.section_key(artifact_id, "## Build order")),
+    ):
+        db.execute(
+            """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (line_id, root_id, artifact_id, thread_id, user_id, "[]", "2026-11-13T00:00:00+00:00"),
+        )
+    db.execute(
+        """INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,reviewer_thread_id,
+               client_ids,state,created_at)
+           VALUES ('review-before-promote',?,'agent',?,?,?,'handed_back','2026-11-13T00:00:00+00:00')""",
+        (artifact_id, thread_id, thread_id, '["client-1"]'),
+    )
+    db.commit()
+    return user_id, root, reply, suggestion
+
+
+def test_promotion_carries_the_comment_state_onto_the_new_identity(durable_scope):
+    """#2555: the promoted document holds every thread, read stamp, queued write and review, same ids."""
+    from doceditor import writer_turns
+    from registry import models
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "carry.md", stale=True,
+    )
+    user_id, root, reply, suggestion = _seed_comment_state(db, source_id, thread_id)
+
+    promoted_id = _promote(workspace, thread_id, db, source)
+    assert promoted_id != source_id
+
+    # Every comment reads back on the promoted identity with the anchor it was placed on.
+    assert {
+        str(row["id"]): (str(row["artifact_id"]), row["anchor_text"], row["from_off"], row["to_off"])
+        for row in db.execute("SELECT id,artifact_id,anchor_text,from_off,to_off FROM doc_comments").fetchall()
+    } == {
+        root["id"]: (promoted_id, "quoted source", 0, 13),
+        reply["id"]: (promoted_id, None, None, None),
+        suggestion["id"]: (promoted_id, "Launch plan", 0, 11),
+    }
+    assert db.execute(
+        "SELECT seen_reply_id FROM doc_comment_thread_views WHERE user_id=? AND root_id=?",
+        (user_id, root["id"]),
+    ).fetchone()[0] == reply["id"]
+    assert sorted(
+        (str(row["artifact_id"]), str(row["root_id"]))
+        for row in db.execute("SELECT artifact_id,root_id FROM doc_comment_writer_line").fetchall()
+    ) == sorted([
+        (promoted_id, root["id"]),
+        (promoted_id, writer_turns.section_key(promoted_id, "## Build order")),
+    ])
+    assert db.execute("SELECT artifact_id FROM doc_feedback_batches").fetchone()[0] == promoted_id
+    assert db.execute(
+        "SELECT artifact_id FROM doc_review_requests WHERE id='review-before-promote'"
+    ).fetchone()[0] == promoted_id
+    assert models.identity_state(source_id, db=db) == "tombstone"
+    assert models.retired_cause(source_id, db=db) == "promoted"
+    assert models.successor_id(source_id, db=db) == promoted_id
+    # The person's one task follows the document: the old one closes saying the comments moved, the
+    # promoted document holds the ask, and no second node for the same threads is left open.
+    from plans import person_comment_task
+
+    closed = db.execute(
+        """SELECT n.id, n.state, p.owner_id FROM plan_node_artifact_links l
+           JOIN plan_nodes n ON n.id=l.node_id JOIN plans p ON p.id=n.plan_id
+           WHERE l.provenance=? AND l.artifact_id=?""",
+        (person_comment_task.PROVENANCE, source_id),
+    ).fetchall()
+    assert [str(row["state"]) for row in closed] == ["closed"]
+    assert db.execute(
+        "SELECT json_extract(payload_json,'$.reason') FROM plan_node_events"
+        " WHERE node_id=? AND json_extract(payload_json,'$.reason') IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+        (closed[0]["id"],),
+    ).fetchone()[0] == person_comment_task.MOVED
+    open_tasks = db.execute(
+        """SELECT n.id, n.assignee FROM plan_node_artifact_links l JOIN plan_nodes n ON n.id=l.node_id
+           WHERE l.provenance=? AND l.artifact_id=? AND n.state NOT IN
+               ('closed','accepted','rejected','failed')""",
+        (person_comment_task.PROVENANCE, promoted_id),
+    ).fetchall()
+    assert [str(r[1]) for r in open_tasks] == ["user"]
+    assert db.execute(
+        "SELECT COUNT(*) FROM plan_node_artifact_links WHERE provenance=?", (person_comment_task.PROVENANCE,),
+    ).fetchone()[0] == 2
+
+
+def test_a_promotion_that_keeps_the_identity_leaves_the_comments_where_they_are(durable_scope):
+    """The other promote path: the same id moves, so nothing is tombstoned, moved or superseded."""
+    from registry import models
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "carried.md")
+    _user_id, root, _reply, _suggestion = _seed_comment_state(db, source_id, thread_id)
+
+    assert _promote(workspace, thread_id, db, source) == source_id
+    assert models.identity_state(source_id, db=db) == "active"
+    assert models.successor_id(source_id, db=db) is None
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=?", (source_id,),
+    ).fetchone()[0] == 3
+    assert db.execute(
+        "SELECT root_id FROM doc_comment_writer_line WHERE id='line-section'",
+    ).fetchone()[0] == f"section:{source_id}:## Build order"
+
+
+def test_a_commentless_promotion_touches_no_comment_rows_and_still_records_the_successor(
+    durable_scope,
+):
+    from registry import models
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "quiet.md", stale=True,
+    )
+    promoted_id = _promote(workspace, thread_id, db, source)
+
+    for table in ("doc_comments", "doc_comment_writer_line", "doc_feedback_batches", "doc_review_requests"):
+        assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+    assert models.identity_state(source_id, db=db) == "tombstone"
+    assert models.successor_id(source_id, db=db) == promoted_id
+
+
+def _shared_target(durable_scope, name, *, body="Already on the shared document."):
+    """The identity the promote is headed for, already holding a comment of its own.
+
+    Registered, then its file is removed: that is how a shared path keeps an identity with comments
+    while the promote's own destination check still passes — the stale identity an earlier document
+    at that path leaves behind.
+    """
+    from registry import service
+    from doc_feedback_helpers import add_comment
+
+    _workspace, project_root, thread_id, db = durable_scope
+    target = project_root / "shared" / "planning" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    identity = service.register_write_strict(thread_id, str(target), db=db)
+    own, _ = add_comment(db, str(identity["id"]), author_kind="user", author_id=None, author="Steve")
+    target.unlink()
+    db.commit()
+    return str(identity["id"]), own
+
+
+def _open_batch(db, batch_id, artifact_id, *, author_id, recipient_id, comment_ids, closes_at):
+    """An open feedback batch for one agent's comments to one person, holding ``comment_ids``."""
+    db.execute(
+        """INSERT INTO doc_feedback_batches(id,artifact_id,author_kind,author_id,recipient_id,
+               delivery_policy,state,opened_at,last_item_at,closes_at,item_count,created_at,updated_at)
+           VALUES (?,?,'agent',?,?,'immediate','open',?,?,?,0,?,?)""",
+        (batch_id, artifact_id, author_id, recipient_id, "2026-11-13T00:00:00+00:00",
+         "2026-11-13T00:00:00+00:00", closes_at, "2026-11-13T00:00:00+00:00",
+         "2026-11-13T00:00:00+00:00"),
+    )
+    for comment_id in comment_ids:
+        db.execute(
+            "INSERT INTO doc_feedback_batch_items(batch_id,comment_id) VALUES (?,?)", (batch_id, comment_id),
+        )
+    db.execute(
+        "UPDATE doc_feedback_batches SET item_count=? WHERE id=?", (len(comment_ids), batch_id),
+    )
+    db.commit()
+
+
+def test_a_promotion_onto_a_document_that_already_has_comments_keeps_both_sets(durable_scope):
+    """Nothing is refused and nothing is lost: the target keeps its own threads and gains the moved ones."""
+    from registry import models
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "meeting.md", stale=True,
+    )
+    _user_id, root, reply, suggestion = _seed_comment_state(db, source_id, thread_id)
+    target_id, own = _shared_target(durable_scope, "meeting.md")
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    assert sorted(str(row[0]) for row in db.execute(
+        "SELECT id FROM doc_comments WHERE artifact_id=?", (target_id,),
+    ).fetchall()) == sorted([root["id"], reply["id"], suggestion["id"], own["id"]])
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=?", (source_id,),
+    ).fetchone()[0] == 0
+    assert models.successor_id(source_id, db=db) == target_id
+
+
+def test_an_open_feedback_batch_matching_one_on_the_target_merges_into_it(durable_scope):
+    """One open batch per author, document, recipient and policy: the moved items join the open one."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "batched.md", stale=True,
+    )
+    user_id, root, _reply, _suggestion = _seed_comment_state(db, source_id, thread_id)
+    target_id, own = _shared_target(durable_scope, "batched.md")
+    _open_batch(db, "batch-source", source_id, author_id=thread_id, recipient_id=user_id,
+                comment_ids=[root["id"]], closes_at="2026-11-13T00:30:00+00:00")
+    _open_batch(db, "batch-target", target_id, author_id=thread_id, recipient_id=user_id,
+                comment_ids=[own["id"]], closes_at="2026-11-13T01:00:00+00:00")
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    merged = db.execute(
+        "SELECT id,artifact_id,item_count,closes_at,state FROM doc_feedback_batches WHERE id='batch-target'"
+    ).fetchone()
+    assert (str(merged[0]), str(merged[1]), int(merged[2]), str(merged[3]), str(merged[4])) == (
+        "batch-target", target_id, 2, "2026-11-13T00:30:00+00:00", "open",
+    )
+    assert sorted(str(row[0]) for row in db.execute(
+        "SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id='batch-target'",
+    ).fetchall()) == sorted([root["id"], own["id"]])
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_batches WHERE id='batch-source'",
+    ).fetchone()[0] == 0
+    # Nothing of the moved document is left behind on the retired identity.
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_batches WHERE artifact_id=?", (source_id,),
+    ).fetchone()[0] == 0
+
+
+def test_a_section_writer_line_matching_one_on_the_target_folds_into_it(durable_scope):
+    """A queued write keyed by the document's heading joins the line already waiting for that agent."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "queued.md", stale=True,
+    )
+    _user_id, _root_comment, _reply, _suggestion = _seed_comment_state(db, source_id, thread_id)
+    target_id, _own = _shared_target(durable_scope, "queued.md")
+    heading = "## Build order"
+    user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+    db.execute(
+        """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,
+               state,saved_at,wakes)
+           VALUES ('line-on-target',?,?,?,?, '[{"body":"already waiting"}]','waiting',
+                   '2026-11-13T01:00:00+00:00',0)""",
+        (f"section:{target_id}:{heading}", target_id, thread_id, user_id),
+    )
+    db.execute(
+        """UPDATE doc_comment_writer_line SET ops='[{\"body\":\"moved over\"}]',
+               saved_at='2026-11-13T02:00:00+00:00', wakes=2
+           WHERE id='line-section'""",
+    )
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    rows = db.execute(
+        """SELECT id,root_id,ops,saved_at,wakes,state FROM doc_comment_writer_line
+           WHERE root_id=?""",
+        (f"section:{target_id}:{heading}",),
+    ).fetchall()
+    assert [str(r[0]) for r in rows] == ["line-on-target"]
+    assert rows[0]["ops"] == '[{"body": "already waiting"}, {"body": "moved over"}]'
+    assert str(rows[0]["saved_at"]) == "2026-11-13T01:00:00+00:00"
+    assert int(rows[0]["wakes"]) == 2
+    assert str(rows[0]["state"]) == "waiting"
+
+
+def _region_comment(db, artifact_id: str, *, image_src: str, number: int):
+    """One person comment placed as a numbered region on one image of a document."""
+    from doc_feedback_helpers import add_comment
+
+    row, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+    db.execute(
+        "UPDATE doc_comments SET image_src=?, region_number=? WHERE id=?", (image_src, number, row["id"])
+    )
+    db.commit()
+    return row
+
+
+def _edit_item(db, batch_id: str, *, latest_text: str, save_count: int, last_at: str) -> None:
+    """The one coalesced edit a batch holds, and the count that says it is there."""
+    db.execute(
+        """INSERT INTO doc_feedback_edit_items(batch_id,actor_display,prior_segments_diff,baseline_sha256,
+               baseline_text,latest_sha256,latest_text,save_count,first_at,last_at)
+           VALUES (?,?,'','baseline-sha','the text before','latest-sha',?,?,?,?)""",
+        (batch_id, "Steve", latest_text, save_count, last_at, last_at),
+    )
+    db.execute("UPDATE doc_feedback_batches SET item_count=item_count+1 WHERE id=?", (batch_id,))
+    db.commit()
+
+
+def test_regions_on_both_documents_are_numbered_in_order_after_a_promote(durable_scope):
+    """The numbers the person has read never change; the arriving regions follow them in order."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "plate.md", stale=True,
+    )
+    target_id, _own = _shared_target(durable_scope, "plate.md")
+    held = [_region_comment(db, target_id, image_src="img/plate.png", number=n) for n in (1, 2)]
+    arriving = [_region_comment(db, source_id, image_src="img/plate.png", number=n) for n in (1, 2)]
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    assert {str(row[0]): int(row[1]) for row in db.execute(
+        "SELECT id, region_number FROM doc_comments WHERE region_number IS NOT NULL"
+    ).fetchall()} == {
+        str(held[0]["id"]): 1, str(held[1]["id"]): 2,
+        str(arriving[0]["id"]): 3, str(arriving[1]["id"]): 4,
+    }
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=? AND region_number IS NOT NULL", (source_id,),
+    ).fetchone()[0] == 0
+
+
+def test_a_moved_batch_carries_its_coalesced_edit_into_the_open_one(durable_scope):
+    """A person's edit feedback is never lost to the cascade, and the count says what the batch holds."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "edited.md", stale=True,
+    )
+    user_id, root, _reply, _suggestion = _seed_comment_state(db, source_id, thread_id)
+    target_id, own = _shared_target(durable_scope, "edited.md")
+    _open_batch(db, "batch-source", source_id, author_id=thread_id, recipient_id=user_id,
+                comment_ids=[root["id"]], closes_at="2026-11-13T00:30:00+00:00")
+    _open_batch(db, "batch-target", target_id, author_id=thread_id, recipient_id=user_id,
+                comment_ids=[own["id"]], closes_at="2026-11-13T01:00:00+00:00")
+    _edit_item(db, "batch-source", latest_text="the moved edit", save_count=2, last_at="2026-11-13T00:20:00+00:00")
+    _edit_item(db, "batch-target", latest_text="the edit already there", save_count=1,
+               last_at="2026-11-13T00:10:00+00:00")
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    rows = db.execute("SELECT latest_text, save_count, last_at FROM doc_feedback_edit_items").fetchall()
+    assert [str(row[0]) for row in rows] == ["the moved edit"]  # the later save is the one kept
+    assert (int(rows[0][1]), str(rows[0][2])) == (3, "2026-11-13T00:20:00+00:00")
+    assert db.execute(
+        "SELECT item_count FROM doc_feedback_batches WHERE id='batch-target'",
+    ).fetchone()[0] == 3  # the two comments and the one edit the batch now holds
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_edit_items WHERE batch_id='batch-source'",
+    ).fetchone()[0] == 0
+
+
+def test_a_woken_writer_line_keeps_every_saved_write_after_a_promote(durable_scope):
+    """A woken agent still finds the text it was shown; the moved writes follow it in saved order."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "woken.md", stale=True,
+    )
+    user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+    _seeder_ids = _seed_comment_state(db, source_id, thread_id)
+    target_id, _own = _shared_target(durable_scope, "woken.md")
+    heading = "## Build order"
+    db.execute(
+        """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,
+               state,saved_at,wakes)
+           VALUES ('line-woken-on-target',?,?,?,?, '[{"body":"the write it was woken about"}]','woken',
+                   '2026-11-13T01:00:00+00:00',1)""",
+        (f"section:{target_id}:{heading}", target_id, thread_id, user_id),
+    )
+    db.execute(
+        """UPDATE doc_comment_writer_line SET ops='[{"body":"the write that moved"}]',
+               saved_at='2026-11-13T02:00:00+00:00' WHERE id='line-section'""",
+    )
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == target_id
+
+    rows = db.execute(
+        "SELECT id,ops,state,wakes FROM doc_comment_writer_line WHERE root_id=?",
+        (f"section:{target_id}:{heading}",),
+    ).fetchall()
+    assert [str(row[0]) for row in rows] == ["line-woken-on-target"]
+    assert rows[0]["ops"] == '[{"body": "the write it was woken about"}, {"body": "the write that moved"}]'
+    assert str(rows[0]["state"]) == "woken"
+    assert int(rows[0]["wakes"]) == 1

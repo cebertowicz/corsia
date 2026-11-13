@@ -346,3 +346,18 @@ def _latest(db, artifact_id: str, reviewer_thread_id: str):
     return db.execute(
         "SELECT * FROM doc_review_requests WHERE artifact_id=? AND reviewer_thread_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
         (artifact_id, reviewer_thread_id)).fetchone()
+
+
+def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
+    """Carry this document's review requests to the identity that replaces it; returns how many.
+
+    A request is an ask of one reviewer thread about one document, and nothing in it is keyed by
+    document beyond ``artifact_id`` itself: no unique index covers it, and its comments are followed
+    by id. So a request that was open before a promote is still open on the promoted document, with
+    the same reviewer, client ids and state -- including a request that was handed back, whose
+    history stays readable where the document now lives.
+    """
+    return db.execute(
+        "UPDATE doc_review_requests SET artifact_id=? WHERE artifact_id=?",
+        (to_artifact_id, from_artifact_id),
+    ).rowcount

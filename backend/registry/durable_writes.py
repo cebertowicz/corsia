@@ -238,7 +238,7 @@ def _register_applied(
             if source_identity is not None else None
         )
         if source_artifact is not None:
-            models.retire(source_artifact["id"], tombstone=True, cause="promoted", db=db)
+            models.retire(source_artifact["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
         record_post_write_events(
             shared,
             artifact,
