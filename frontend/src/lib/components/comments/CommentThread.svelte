@@ -386,14 +386,14 @@
 
 	.ct.resolved:not(.drawerCard) { padding: 0; background: none; cursor: default; gap: 0; }
 	.ct-res-meta { padding: var(--space-2) 10px 0; }
-	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
+	.ct-res-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
 	.ct-check { color: var(--green); flex-shrink: 0; }
 	.ct-cross { color: var(--text-secondary); flex-shrink: 0; }
 	.ct-res-text { flex: 1; font-size: var(--text-footnote); color: var(--text-secondary); }
 	.ct-chev { color: var(--text-tertiary); flex-shrink: 0; transition: transform var(--dur-tight); }
 	.ct-chev.open { transform: rotate(90deg); }
-	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
-	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
+	.ct-res-body { display: flex; flex-direction: column; gap: var(--space-2); padding: 2px 10px 8px; }
+	.ct-res-acts { display: flex; align-items: center; gap: var(--space-2); }
 	/* The link treatment is shared in comment-link.css. */
 	.ct-res-hint { font-size: var(--text-caption); color: var(--text-tertiary); }
 
