@@ -43,18 +43,26 @@ the jail, so Safehouse is the one sandbox. Chromium started by hand in an agent
 shell also needs `--no-sandbox`; Playwright already passes it. The backend-owned
 native tools run outside Safehouse and keep Chromium's own sandbox.
 
-Commands use the stock contract:
+On macOS, where the backend owns Chrome and attaches over CDP, a session command
+is:
 
 ```text
-AGENT_BROWSER_SOCKET_DIR=<private-dir> AGENT_BROWSER_STREAM_PORT=<reserved> <native> --session <opaque> --cdp <verified-websocket-endpoint> --json <command> ...
+AGENT_BROWSER_SOCKET_DIR=<private-dir> AGENT_BROWSER_DEFAULT_TIMEOUT=8000 AGENT_BROWSER_STREAM_PORT=<reserved> <native> --config <private-dir>/config.json --session <opaque> --cdp <verified-websocket-endpoint> [--headed] --init-script <stealth> --json <command> ...
 ```
+
+`AGENT_BROWSER_STREAM_PORT` is set only once the owned Chrome has a reserved
+stream port. On Linux, where launch stays native-owned, `--cdp` is replaced by
+`--executable-path <verified-chrome>` (also exported as
+`AGENT_BROWSER_EXECUTABLE_PATH`), the stealth Chrome arguments are passed with
+`--args`, and `CI` is removed from the client environment.
 
 Native snapshots, navigation, evaluation and screenshots are rendered back to
 readable tool strings. Failure messages and logged phase/cause labels exclude
 private session, thread, lease, environment and raw exception details. Numeric
 PIDs are not globally replaced in page content, where they may match ordinary
 prices or IDs. All inherited `AGENT_BROWSER_*` settings are removed before invoking any client,
-including `--version`; only the owned socket/stream settings are restored. An explicit
+including `--version`; CORSIA then sets its own socket directory and an 8-second daemon
+action timeout, and adds the reserved stream port only once its owned Chrome has one. An explicit
 private empty `--config` prevents home/project config discovery, including restore
 and automatic state export.
 
@@ -258,8 +266,11 @@ agent-browser process or the Chrome window it opened, then restart CORSIA, which
 clears the backend-lifetime block; one later `browser_close` also clears it when
 the producer can still acknowledge. A restart clears ownership but, like deleting
 sidecars, killing a parent PID or finding no environment markers, cannot certify
-descendant absence. Apart from the saved-profile orphan recovery below, no automatic
-foreign-process signal, directory sweep or `close --all` is a recovery path. FileNotFoundError and PermissionError at the asynchronous
+descendant absence. At startup CORSIA sweeps the other socket directories below
+`/tmp/corsia-ab-<uid>` whose owner lock is free (a dead backend's) and stops each
+verified daemon and headless Chrome recorded there, without touching profile files.
+Apart from that sweep and the saved-profile orphan recovery below, CORSIA sends no
+automatic foreign-process signal and has no `close --all`. FileNotFoundError and PermissionError at the asynchronous
 spawn boundary can follow actual execution; neither is no-effects proof.
 
 The producer acknowledgement is the stock local-CDP cleanup contract. It is not
@@ -296,4 +307,4 @@ an instance key is not an operational cleanup operation. Rollback also requires
 preserving unresolved ownership evidence and using the supported lifecycle
 procedure, never broad process killing.
 
-Checked against the code at `7a8c55d84`.
+Checked against the code at `033856bd7`.
