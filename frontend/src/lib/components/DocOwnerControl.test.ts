@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import DocOwnerControl from './DocOwnerControl.svelte';
-import { changeOwnership } from '$lib/api/docOwnership';
+import { changeOwnership, OwnershipChangeError } from '$lib/api/docOwnership';
 
 vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeof import('$lib/api/docOwnership')>()), changeOwnership: vi.fn() }));
 import type { DocOwnership } from '$lib/api/docOwnership';
@@ -94,7 +94,7 @@ describe('DocOwnerControl', () => {
 		await render(ownership(), onChange);
 		item('owner').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
-		expect(changed).toHaveBeenCalledWith('doc', 'user', 'a2');
+		expect(changed).toHaveBeenCalledWith('doc', { owner: 'user', supervisor: 'a2' });
 		expect(onChange).toHaveBeenCalledWith(next);
 		expect(picker()).toBeNull();
 	});
@@ -108,6 +108,21 @@ describe('DocOwnerControl', () => {
 		expect(item('owner').textContent).not.toContain('Change failed');
 		item('supervisor').click(); await settle();
 		expect(picker()!.textContent).toContain('Couldn’t change the supervisor. Try again.');
+	});
+	it('sends no owner for a Supervisor pick', async () => {
+		changed.mockResolvedValue(ownership());
+		await render(ownership({ owner: { kind: 'none', id: null, name: null } }));
+		item('supervisor').click(); await settle();
+		document.body.querySelector<HTMLElement>('[role="option"][aria-label="Release planning"]')!.click(); await settle();
+		expect(changed).toHaveBeenCalledWith('doc', { supervisor: expect.any(String) });
+	});
+	it('shows the server’s refusal in the picker when it sent one', async () => {
+		changed.mockRejectedValue(new OwnershipChangeError(409, 'Only an agent can own a document when more than one person uses CORSIA here.'));
+		await render(ownership());
+		item('owner').click(); await settle();
+		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
+		item('owner').click(); await settle();
+		expect(picker()!.textContent).toContain('Only an agent can own a document');
 	});
 	it('filters its list as the person types', async () => {
 		await render(ownership());

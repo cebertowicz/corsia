@@ -117,7 +117,7 @@ async function load(options: LoadOptions): Promise<void> {
 		if (!revision.writable || !await flushDraft(target)) {
 			if (isCurrent()) options.onReady({ text: existingDraft(target)?.editText ?? draft.editText,
 				artifactId: revision.artifact_id ?? draft.target.artifactId, writable: revision.writable,
-				freshness: revision.freshness, ownership: revision.ownership, revision: null, live: null });
+				freshness: revision.freshness, revision: null, live: null });
 			return;
 		}
 	}

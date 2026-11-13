@@ -23,7 +23,6 @@ from registry import service as registry_service
 from registry.file_types import image_media_type
 from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
-from registry.document_supervisor import ownership as document_ownership
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -95,7 +94,6 @@ async def revision(
                 "artifact_id": resolved_artifact_id,
                 "artifact": art,
                 "freshness": artifact_freshness(art, candidate, db=db),
-                "ownership": document_ownership(db, art, user_id=user["id"], workspace=config.WORKSPACE) if art else None,
             }
         finally:
             db.close()

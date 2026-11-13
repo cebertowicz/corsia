@@ -42,5 +42,4 @@ export interface DocRevision {
 	artifact_id: string | null;
 	artifact: ArtifactRow | null;
 	freshness: DocumentFreshness | null;
-	ownership?: DocOwnership | null;
 }

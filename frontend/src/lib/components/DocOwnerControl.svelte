@@ -4,7 +4,7 @@
 	import MiddleName from '$lib/components/MiddleName.svelte';
 	import { tick } from 'svelte';
 	import { agentOptionIndex } from '$lib/components/reviews/agentOptionKeys';
-	import { changeOwnership, type DocOwnership } from '$lib/api/docOwnership';
+	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
 	type Role = 'owner' | 'supervisor';
 	let { artifactId, ownership, onChange }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void } = $props();
@@ -32,7 +32,7 @@
 	// One agent holding both roles reads as one item; its Owner picker can still hand the supervisor role to another agent.
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
-	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.status === 'paused' ? 'Paused' : choice.status === 'usage_held' ? 'Usage held' : '' })));
+	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.status === 'paused' ? 'Paused' : '' })));
 	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
 	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '' }, ...agents]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
@@ -60,12 +60,13 @@
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;
 		try {
-			const owner = role === 'owner' ? choice.id : ownership.owner.kind === 'person' ? 'user' : ownership.owner.id ?? 'user';
 			// A supervisor the person picked stays through an owner change (the server drops it if it equals the new owner); a default one stays unset.
 			const supervisor = role === 'supervisor' ? choice.id : ownership.supervisor?.source === 'picked' ? ownership.supervisor.id : null;
-			onChange(await changeOwnership(artifactId, owner, supervisor));
-		} catch {
-			failed = { role, message: !navigator.onLine ? `Couldn’t change the ${role} because you’re offline. Reconnect and try again.` : `Couldn’t change the ${role}. Try again.` };
+			// Only an Owner pick sends an owner; a Supervisor pick leaves the owner as it is.
+			onChange(await changeOwnership(artifactId, role === 'owner' ? { owner: choice.id, supervisor } : { supervisor }));
+		} catch (error) {
+			const detail = error instanceof OwnershipChangeError && error.status < 500 ? error.detail : null;
+			failed = { role, message: !navigator.onLine ? `Couldn’t change the ${role} because you’re offline. Reconnect and try again.` : detail ?? `Couldn’t change the ${role}. Try again.` };
 		} finally { pending = null; saving = false; }
 	}
 	function saveNote(role: Role) { return pending?.role === role ? ', saving' : failed?.role === role ? ', change failed' : ''; }

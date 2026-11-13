@@ -187,3 +187,50 @@ def test_an_agent_owned_document_keeps_routing_to_its_owner(owned_document):
     assert picked.status_code == 200, picked.text
     assert picked.json()["ownership"]["supervisor"]["id"] == "agent-2"
     assert _comment_recipients(artifact_id) == ("agent-1",)
+
+
+def _set_owner(artifact_id: str, owner: str) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("UPDATE artifact_registrations SET parent_thread_id=? WHERE artifact_id=?", (owner, artifact_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_a_supervisor_pick_on_an_unowned_document_leaves_it_unowned(owned_document):
+    """A Supervisor pick sends no owner, so it never takes the document over, even with two people."""
+    client, artifact_id = owned_document
+    _add_agent("agent-2", "Research coordinator")
+    _set_owner(artifact_id, "ui")
+    assert _view(artifact_id)["owner"]["kind"] == "none"
+
+    picked = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"})
+    assert picked.status_code == 200, picked.text
+    view = picked.json()["ownership"]
+    assert view["owner"]["kind"] == "none"
+    assert view["supervisor"]["id"] == "agent-2"
+
+
+def test_another_persons_document_reads_as_missing(owned_document):
+    """The ownership change refuses a document in another person's thread, as an unknown id."""
+    from infra.database import get_db
+
+    client, artifact_id = owned_document
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO threads (id,user_id,title,agent_enabled,created_at,updated_at) "
+            "VALUES ('their-agent',?,'Their agent',1,'t','t')",
+            (SECOND_PERSON,),
+        )
+        db.commit()
+    finally:
+        db.close()
+    _set_owner(artifact_id, "their-agent")
+
+    refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
+    assert refused.status_code == 404, refused.text
+    assert _view(artifact_id)["owner"]["id"] == "their-agent"

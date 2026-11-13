@@ -27,18 +27,24 @@ def _thread(db, thread_id: str | None):
     ).fetchone()
 
 
-def _paused(db, thread_id: str) -> bool:
-    return db.execute(
-        "SELECT 1 FROM plans WHERE owner_kind='thread' AND owner_id=? AND state='paused' LIMIT 1",
-        (thread_id,),
-    ).fetchone() is not None
+def _paused_threads(db, thread_ids: list[str]) -> set[str]:
+    """The threads among ``thread_ids`` with a paused plan, in one query."""
+    if not thread_ids:
+        return set()
+    marks = ",".join("?" * len(thread_ids))
+    return {
+        str(row[0]) for row in db.execute(
+            f"SELECT DISTINCT owner_id FROM plans WHERE owner_kind='thread' AND state='paused' AND owner_id IN ({marks})",
+            thread_ids,
+        ).fetchall()
+    }
 
 
-def _status(db, row) -> str:
+def _status(row, paused: set[str]) -> str:
     """``ready``, ``paused`` or ``gone`` (archived, purged or missing)."""
     if row is None or not thread_is_available(row):
         return "gone"
-    return "paused" if _paused(db, str(row["id"])) else "ready"
+    return "paused" if str(row["id"]) in paused else "ready"
 
 
 def owner_kind(owner: str | None, metadata: dict[str, Any]) -> str:
@@ -110,19 +116,23 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) ->
     project_id = scope_row["project_id"] if scope_row is not None else None
     candidate, source = _supervisor_candidate(owner, kind, metadata, conductor)
     row = _thread(db, candidate)
-    status = _status(db, row)
-    supervisor = None if row is None else {
-        "id": str(row["id"]), "name": str(row["title"] or row["id"]), "source": source, "status": status,
-    }
-    choices = [
-        {"id": str(agent["id"]), "name": str(agent["title"] or agent["id"]), "status": _status(db, agent)}
-        for agent in db.execute(
+    agents = [
+        agent for agent in db.execute(
             f"""SELECT id,title,project_id,user_id,agent_enabled,lifecycle_state,archived_reason FROM threads
                 WHERE user_id=? AND COALESCE(agent_enabled,0)=1 AND {'project_id IS NULL' if project_id is None else 'project_id=?'}
                 ORDER BY title COLLATE NOCASE""",
             (user_id,) if project_id is None else (user_id, project_id),
         ).fetchall()
         if thread_is_available(agent)
+    ]
+    paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
+    status = _status(row, paused)
+    supervisor = None if row is None else {
+        "id": str(row["id"]), "name": str(row["title"] or row["id"]), "source": source, "status": status,
+    }
+    choices = [
+        {"id": str(agent["id"]), "name": str(agent["title"] or agent["id"]), "status": _status(agent, paused)}
+        for agent in agents
     ]
     return {
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
