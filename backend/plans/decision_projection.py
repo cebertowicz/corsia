@@ -203,8 +203,10 @@ def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
 
     Mirrors ``decision_authz.resolve``: a live `attention` link, a live review
     node, a live **source** node, a non-archived thread plan, and a live owner
-    thread. One statement bounded by the caller's batch, so the cost never grows
-    with the number of decisions ever created.
+    thread. One statement bounded by the caller's batch: it drives from the
+    (decision, source node) pairs and joins each source node by primary key,
+    pinned with ``CROSS JOIN`` so SQLite keeps that order, so the cost never grows
+    with the number of decisions ever created or the nodes in their plans.
 
     It also requires the review node to still be in the one state ``answer``
     can settle. Authorization is not the only way a question stops being
@@ -216,23 +218,26 @@ def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
     """
     if not source_nodes:
         return {}
-    marks = ",".join("?" for _ in source_nodes)
+    pairs = sorted(source_nodes.items())
     rows = db.execute(
-        f"""SELECT l.artifact_id AS artifact_id, src.id AS source_node_id
-              FROM plan_node_artifact_links l
-              JOIN plan_nodes n ON n.id = l.node_id AND n.archived_at IS NULL
-                                AND n.state = 'review_requested'
-              JOIN plans p ON p.id = n.plan_id AND p.state != 'archived'
-              JOIN threads s ON s.id = p.owner_id
-              JOIN plan_nodes src
-                ON src.plan_id = p.id AND {node_states.in_work_sql('src')}
-               AND {node_states.outside_retired_branch_sql('src')}
-             WHERE l.role = 'attention'
-               AND p.owner_kind = 'thread'
-               AND s.archived_at IS NULL AND s.purged_at IS NULL
-               AND COALESCE(s.lifecycle_state,'active') != 'archived'
-               AND l.artifact_id IN ({marks})""",
-        tuple(sorted(source_nodes)),
+        f"""WITH pair(artifact_id, source_node_id)
+                 AS (VALUES {",".join("(?, ?)" for _ in pairs)})
+            SELECT pair.artifact_id AS artifact_id, src.id AS source_node_id
+              FROM pair
+              CROSS JOIN plan_node_artifact_links l
+                      ON l.artifact_id = pair.artifact_id AND l.role = 'attention'
+              CROSS JOIN plan_nodes n ON n.id = l.node_id AND n.archived_at IS NULL
+                                     AND n.state = 'review_requested'
+              CROSS JOIN plans p ON p.id = n.plan_id AND p.state != 'archived'
+                                AND p.owner_kind = 'thread'
+              CROSS JOIN threads s ON s.id = p.owner_id
+                                  AND s.archived_at IS NULL AND s.purged_at IS NULL
+                                  AND COALESCE(s.lifecycle_state,'active') != 'archived'
+              CROSS JOIN plan_nodes src
+                      ON src.id = pair.source_node_id AND src.plan_id = p.id
+                     AND {node_states.in_work_sql('src')}
+                     AND {node_states.outside_retired_branch_sql('src')}""",
+        tuple(value for pair in pairs for value in pair),
     ).fetchall()
     live = {(row["artifact_id"], row["source_node_id"]) for row in rows}
     return {
