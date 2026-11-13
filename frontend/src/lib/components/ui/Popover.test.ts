@@ -336,4 +336,24 @@ describe('Popover', () => {
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));
 	});
+	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
+		const { fromStore, writable } = await import('svelte/store');
+		const cover = writable(false);
+		const covered = fromStore(cover);
+		const onClose = vi.fn();
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(Popover, { target: host, props: { anchor: anchor(), open: true, get covered() { return covered.current; }, onClose, children: (() => {}) as any } });
+		flushSync();
+		const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface().inert).toBe(false));
+		cover.set(true); flushSync();
+		expect(surface().inert).toBe(true);
+		expect(surface().style.visibility).toBe('hidden');
+		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+		expect(onClose).not.toHaveBeenCalled();
+		cover.set(false); flushSync();
+		await vi.waitFor(() => expect(surface().inert).toBe(false));
+		expect(surface().style.visibility).toBe('');
+	});
 });
