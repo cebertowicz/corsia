@@ -85,13 +85,38 @@ VISIBLE_CONTENT_JOIN = "LEFT JOIN chat_visible_content cv ON cv.message_id=m.id"
 VISIBLE_CONTENT = "COALESCE(cv.content, m.content)"
 
 
+# The rule behind ``metadata.chat_drawn = false``, which ``place_answers`` stamps once as it saves a
+# step: the step placed answers, no chat text is left, and it has no reasoning or tool calls. Every
+# reader reads the flag; the 190 -> 191 data step reads these same fields in SQL, pinned to
+# ``draws_nothing`` by tests/test_migration_190_to_191_chat_drawn.py.
+def _has_items(value: object) -> bool:
+    return isinstance(value, list) and bool(value)
+
+
+def draws_nothing(visible_text: str, metadata: dict | None) -> bool:
+    """Whether a step that placed answers draws nothing in chat."""
+    meta = metadata if isinstance(metadata, dict) else {}
+    return not visible_text and not (
+        meta.get("reasoning") not in (None, "", False, 0) or _has_items(meta.get("llm_tool_calls"))
+        or _has_items(meta.get("tool_calls")) or _has_items(meta.get("tool_hints"))
+    )
+
+
+# SQL for "this message row is stamped as drawing nothing", for a table aliased as given.
+def chat_not_drawn_sql(column: str = "metadata") -> str:
+    return f"COALESCE((CASE WHEN json_valid({column}) THEN json_type({column}, '$.chat_drawn') END) = 'false', 0)"
+
+
 def saved_answer_fields(db: sqlite3.Connection, thread_id: str, message_ids: list[str]) -> dict[str, dict]:
     """The chat text saved for each answering message, and the cids its comment threads show."""
     fields = {
-        message_id: {"chat_answer_cids": [], "chat_visible_content": content}
-        for message_id, content in db.execute(
-            "SELECT message_id,content FROM chat_visible_content "
-            "WHERE message_id IN (SELECT value FROM json_each(?)) AND thread_id=?",
+        message_id: {
+            "chat_answer_cids": [], "chat_visible_content": content, **({"chat_drawn": False} if not drawn else {}),
+        }
+        for message_id, content, drawn in db.execute(
+            f"SELECT v.message_id,v.content,NOT {chat_not_drawn_sql('m.metadata')} "
+            "FROM chat_visible_content v LEFT JOIN messages m ON m.id=v.message_id "
+            "WHERE v.message_id IN (SELECT value FROM json_each(?)) AND v.thread_id=?",
             (json.dumps(message_ids), thread_id),
         )
     }
@@ -130,8 +155,13 @@ def has_comment_cid(metadata: str | None, cid: str) -> bool:
 
 def place_answers(
     db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
+    metadata: dict | None = None,
 ) -> None:
-    """Index known comments, and save the chat text left without them, with the assistant message."""
+    """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
+
+    This is the one writer of ``metadata.chat_drawn``: a step that placed answers and has nothing left
+    for chat is stamped ``false`` here, in the transaction that saves it.
+    """
     if role != "assistant" or "[c" not in content:
         return
     placed = []
@@ -152,7 +182,13 @@ def place_answers(
             )
             placed.append(cid)
     if placed:
-        save_visible_content(db, message_id, thread_id, visible_answer_content(content, placed))
+        visible = visible_answer_content(content, placed)
+        save_visible_content(db, message_id, thread_id, visible)
+        if draws_nothing(visible, metadata):
+            db.execute(
+                "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),'$.chat_drawn',json('false')) WHERE id=?",
+                (message_id,),
+            )
 
 
 def save_visible_content(db: sqlite3.Connection, message_id: str, thread_id: str, content: str) -> None:

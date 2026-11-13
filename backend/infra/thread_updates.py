@@ -29,7 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, strip_answer_tags
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, chat_not_drawn_sql, strip_answer_tags
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -238,6 +238,9 @@ def latest_by_thread_with_attention(
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
                  WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
+                   -- A step stamped `chat_drawn: false` draws nothing in chat, so its update shows no preview.
+                   AND NOT (source_kind = 'message' AND EXISTS (
+                       SELECT 1 FROM messages x WHERE x.id = source_id AND {chat_not_drawn_sql('x.metadata')}))
                  GROUP BY thread_id
             )
             SELECT {columns}, {VISIBLE_CONTENT} AS message_content,

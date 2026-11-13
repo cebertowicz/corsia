@@ -1,6 +1,7 @@
 import { parseWsTimestamp } from '../time';
 import type { Message } from '../stores/threads';
 import type { TurnIdentity } from './turnState';
+import { withChatDrawn } from './messageProjection';
 
 export function frameIdentity(data: any): TurnIdentity | null {
 	return typeof data?.turn_id === 'string' && Number.isInteger(data?.turn_order)
@@ -43,7 +44,7 @@ export function stepTextMessage(data: any, threadId: string, reasoningBuffer: st
 		role: 'assistant',
 		content: data.content,
 		toolHints: data.metadata?.tool_hints?.length > 0 ? data.metadata.tool_hints : undefined,
-		metadata: data.metadata,
+		metadata: withChatDrawn(data.metadata, data),
 		created_at: data.created_at,
 		seq: typeof data.seq === 'number' ? data.seq : undefined,
 		...(Array.isArray(data.chat_answer_cids) && typeof data.chat_visible_content === 'string'

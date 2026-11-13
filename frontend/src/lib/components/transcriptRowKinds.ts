@@ -65,8 +65,13 @@ export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
 }
 
-/** The one frontend test for a never-drawn row; the twin of the backend's `NEVER_DRAWN_FILTER`. */
+/**
+ * The one frontend test for a never-drawn row; the twin of the backend's `NEVER_DRAWN_FILTER`.
+ * An assistant step stamped `chat_drawn: false` by the server answered comments and has nothing
+ * left for chat; this reads the stamp and never works that out from the row.
+ */
 export function isNeverDrawn(message: TranscriptMessage): boolean {
+	if (message.role === 'assistant') return message.metadata?.chat_drawn === false;
 	return message.role === 'system' && (NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message))
 		|| NEVER_DRAWN_EVENT_TYPES.has(String(message.metadata?.event_type ?? '')));
 }

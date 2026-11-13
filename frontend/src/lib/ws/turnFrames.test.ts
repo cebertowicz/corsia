@@ -13,4 +13,10 @@ describe('stepTextMessage', () => {
 		expect(row.content).toBe('Intro\n\n[c1');
 		expect(row).not.toHaveProperty('chat_visible_content');
 	});
+
+	it('keeps the stamp of a step that draws nothing in its metadata', () => {
+		const frame = { message_id: 'm', content: '[c1.1] answer', created_at: 't', metadata: { step_type: 'text' }, chat_answer_cids: ['c1.1'], chat_visible_content: '', chat_drawn: false };
+		expect(stepTextMessage(frame, 'thread', '').metadata).toEqual({ step_type: 'text', chat_drawn: false });
+		expect(stepTextMessage({ ...frame, chat_drawn: undefined }, 'thread', '').metadata).toEqual({ step_type: 'text' });
+	});
 });
