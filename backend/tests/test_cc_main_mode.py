@@ -95,6 +95,8 @@ async def _feed_main(
     if admission.batch is None:
         raise AssertionError(f"test input did not start Turn {turn_id}")
     kwargs.setdefault("preadmitted_turn", admission.batch.identity)
+    if kwargs.pop("fenced_write", False):
+        kwargs.update(_fenced_write(admission.batch))
     kwargs.setdefault("persist_input_once", _no_persist)
     kwargs.setdefault(
         "mark_accepted", lambda: settle_test_input(admission.batch),
@@ -120,6 +122,53 @@ async def _feed_main(
         with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": explicit_home}):
             return await rt.feed_main(thread_id, text, target=target, **kwargs)
     return await rt.feed_main(thread_id, text, target=target, **kwargs)
+
+
+def _fenced_write(batch) -> dict:
+    """Wire the input's write evidence as production does: the attempt starts before the write."""
+    from infra.input_writes import begin_batch_write, settle_batch_write
+    from infra.provider_write_evidence import ProviderWriteEvidence
+    from infra.time import utc_now_iso
+
+    evidence = ProviderWriteEvidence()
+    attempt_id = f"test-write:{batch.turn_id}"
+
+    async def begin() -> None:
+        begin_batch_write(batch, attempt_id=attempt_id, started_at=utc_now_iso())
+
+    async def settle() -> None:
+        settle_batch_write(attempt_id, outcome="ambiguous" if evidence.ambiguous else "accepted")
+
+    return {
+        "persist_input_once": begin, "mark_accepted": evidence.mark_accepted,
+        "mark_ambiguous": evidence.mark_ambiguous, "settle_delivery": settle,
+        "transfer_delivery_to_turn": evidence.transfer_to_turn,
+    }
+
+
+def _record_terminals_over_unresolved_writes(monkeypatch) -> list[str]:
+    """Record each Turn terminal refused because its input's write had no outcome."""
+    from infra import thread_driver
+
+    original = thread_driver.settle_unwritten_turn_inputs
+    refused: list[str] = []
+
+    def recorded(connection, turn_id, **kwargs):
+        try:
+            return original(connection, turn_id, **kwargs)
+        except RuntimeError as error:
+            refused.append(str(error))
+            raise
+
+    monkeypatch.setattr(thread_driver, "settle_unwritten_turn_inputs", recorded)
+    return refused
+
+
+def _write_outcome(db, turn_id: str) -> str | None:
+    row = db.execute(
+        "SELECT write_outcome FROM messages WHERE delivery_attempt_id=?", (f"test-write:{turn_id}",),
+    ).fetchone()
+    return None if row is None else row["write_outcome"]
 
 
 async def _feed(
@@ -994,21 +1043,15 @@ class TestLoudFailure:
         monkeypatch.setattr(
             cc_write_confirmation, "confirm_frame_drain", drain_after_claude_closed_stdin,
         )
-        accepted: list[str] = []
-        settle = settle_test_input
-
-        def settle_once(batch):
-            accepted.append(batch.turn_id)
-            settle(batch)
-
-        monkeypatch.setattr(sys.modules[__name__], "settle_test_input", settle_once)
         casts: list[tuple[str, dict]] = []
+        turn_id = str(uuid.uuid4())
         await _feed_main(
             "main-1",
             "resume after a closed pipe",
             binary=fake_claude_reject_resume_once,
             claude_dir=str(tmp_path / "claude"),
             broadcast=lambda sid, m: casts.append((sid, m)),
+            turn_id=turn_id, fenced_write=True,
         )
 
         assert await _wait(lambda: any(
@@ -1019,10 +1062,9 @@ class TestLoudFailure:
         )), "turn did not retry after the refused resume closed stdin"
         assert len(drains) == 2
         # Only the redelivery drained, so it alone proves the input's delivery.
-        assert len(accepted) == 1
+        assert _write_outcome(main_db, turn_id) == "accepted"
         live = rt._LIVE.get("main-1")
         assert live.session.session_id != cc_sid
-        assert not live.input_delivery_unproven
         await rt.retire("main-1")
 
     @pytest.mark.asyncio
@@ -1051,6 +1093,181 @@ class TestLoudFailure:
         assert live is None or live.input_delivery_unproven
         if live is not None:
             await rt.retire("main-1")
+
+    async def _unread_write_awaiting_verdict(self, main_db, tmp_path, monkeypatch, binary):
+        """Feed a native resume whose drain loses the closed pipe, then park in the verdict wait."""
+        import subagents.cc_runtime as rt
+        from subagents import cc_write_confirmation
+
+        launches, cc_sid = _seed_native_resume(main_db, tmp_path, monkeypatch)
+
+        async def drain_lost(writer, on_accepted):
+            raise ConnectionResetError("Connection lost")
+
+        monkeypatch.setattr(cc_write_confirmation, "confirm_frame_drain", drain_lost)
+        self.refused_terminals = _record_terminals_over_unresolved_writes(monkeypatch)
+        waiting = _track_resume_verdict_wait(monkeypatch)
+        turn_id = str(uuid.uuid4())
+        casts: list[tuple[str, dict]] = []
+        feed = asyncio.create_task(_feed_main(
+            "main-1", "never drained", binary=binary, claude_dir=str(tmp_path / "claude"),
+            broadcast=lambda sid, m: casts.append((sid, m)), turn_id=turn_id, fenced_write=True,
+        ))
+        await asyncio.wait_for(waiting.wait(), timeout=15)
+        live = rt._LIVE.get("main-1")
+        return feed, live, turn_id, cc_sid, launches, casts
+
+    @staticmethod
+    def _turn_status(main_db, turn_id: str) -> str:
+        return main_db.execute(
+            "SELECT status FROM active_turns WHERE id=?", (turn_id,),
+        ).fetchone()["status"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("held_wake_drives")
+    async def test_an_unread_write_whose_exit_is_no_refusal_ends_the_turn_unverified(
+        self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
+    ):
+        feed, live, turn_id, _, launches, _ = await self._unread_write_awaiting_verdict(
+            main_db, tmp_path, monkeypatch, fake_claude_resume_hangs,
+        )
+        try:
+            await live.session._on_exit(1, "Claude Code crashed\n")
+            with pytest.raises(ConnectionResetError):
+                await asyncio.wait_for(feed, timeout=15)
+            assert _write_outcome(main_db, turn_id) == "ambiguous"
+            assert not self.refused_terminals
+            assert self._turn_status(main_db, turn_id) == "error"
+            assert launches == [1]
+        finally:
+            if not feed.done():
+                feed.cancel()
+            await live.session.terminate()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("held_wake_drives")
+    async def test_stop_while_an_unread_write_awaits_its_verdict_ends_the_turn(
+        self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
+    ):
+        import subagents.cc_runtime as rt
+
+        feed, live, turn_id, _, launches, _ = await self._unread_write_awaiting_verdict(
+            main_db, tmp_path, monkeypatch, fake_claude_resume_hangs,
+        )
+        try:
+            await asyncio.wait_for(rt.stop("main-1", expected_turn_id=turn_id), timeout=15)
+            with contextlib.suppress(ConnectionResetError):
+                await asyncio.wait_for(feed, timeout=15)
+            assert _write_outcome(main_db, turn_id) == "ambiguous"
+            assert not self.refused_terminals
+            assert self._turn_status(main_db, turn_id) != "running"
+            assert not rt._LIVE.lock("main-1").locked()
+            assert launches == [1]
+        finally:
+            if not feed.done():
+                feed.cancel()
+            if live.session is not None:
+                await live.session.terminate()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("held_wake_drives")
+    async def test_cancel_after_a_refusal_of_an_unread_write_still_ends_the_turn(
+        self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
+    ):
+        import subagents.cc_runtime as rt
+        from subagents import cc_startup_process
+
+        tasks: list[asyncio.Task] = []
+        original_settle = cc_startup_process.settle_resume_verdict
+
+        def settle_then_cancel(live, verdict):
+            settled = original_settle(live, verdict)
+            if verdict is not None:  # cancel as the refusal hands over its terminal
+                tasks[0].cancel()
+            return settled
+
+        monkeypatch.setattr(cc_startup_process, "settle_resume_verdict", settle_then_cancel)
+        feed, live, turn_id, cc_sid, launches, casts = await self._unread_write_awaiting_verdict(
+            main_db, tmp_path, monkeypatch, fake_claude_resume_hangs,
+        )
+        tasks.append(feed)
+        try:
+            await live.session._on_exit(1, f"No conversation found with session ID: {cc_sid}\n")
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(feed, timeout=15)
+            assert await _wait(lambda: any(
+                (m.get("message", {}).get("metadata") or {}).get("type") == "cc_error"
+                for _, m in casts
+            )), "a cancelled feed must still end the refused Turn visibly"
+            assert _write_outcome(main_db, turn_id) == "ambiguous"
+            assert not self.refused_terminals
+            assert self._turn_status(main_db, turn_id) == "error"
+            assert not rt._LIVE.lock("main-1").locked()
+            assert launches == [1]
+        finally:
+            if not feed.done():
+                feed.cancel()
+            if live.session is not None:
+                await live.session.terminate()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("held_wake_drives")
+    async def test_stop_after_a_refusal_of_an_unread_write_ends_without_rebuild(
+        self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
+    ):
+        from subagents import cc_feed
+
+        original_wait = cc_feed._await_resume_verdict
+
+        async def stop_after_the_verdict(live, verdict):
+            finish = await original_wait(live, verdict)
+            live.checkpoint_wait_scope.request_stop()  # Stop lands before the redelivery
+            return finish
+
+        monkeypatch.setattr(cc_feed, "_await_resume_verdict", stop_after_the_verdict)
+        feed, live, turn_id, cc_sid, launches, _ = await self._unread_write_awaiting_verdict(
+            main_db, tmp_path, monkeypatch, fake_claude_resume_hangs,
+        )
+        try:
+            await live.session._on_exit(1, f"No conversation found with session ID: {cc_sid}\n")
+            await asyncio.wait_for(feed, timeout=15)
+            assert _write_outcome(main_db, turn_id) == "ambiguous"
+            assert not self.refused_terminals
+            assert self._turn_status(main_db, turn_id) != "running"
+            assert launches == [1], "Stop must not rebuild the refused resume"
+        finally:
+            if not feed.done():
+                feed.cancel()
+            if live.session is not None:
+                await live.session.terminate()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("held_wake_drives")
+    async def test_a_failed_rebuild_after_a_refusal_of_an_unread_write_ends_the_turn(
+        self, main_db, fake_claude_resume_hangs, tmp_path, monkeypatch
+    ):
+        from subagents.cc_feed_transition import CCFeedTransition
+
+        async def rebuild_fails(self, live):
+            raise RuntimeError("rebuild failed")
+
+        monkeypatch.setattr(CCFeedTransition, "rebuild_rejected_resume", rebuild_fails)
+        feed, live, turn_id, cc_sid, launches, _ = await self._unread_write_awaiting_verdict(
+            main_db, tmp_path, monkeypatch, fake_claude_resume_hangs,
+        )
+        try:
+            await live.session._on_exit(1, f"No conversation found with session ID: {cc_sid}\n")
+            with pytest.raises(RuntimeError, match="rebuild failed"):
+                await asyncio.wait_for(feed, timeout=15)
+            assert _write_outcome(main_db, turn_id) == "ambiguous"
+            assert not self.refused_terminals
+            assert self._turn_status(main_db, turn_id) == "error"
+            assert launches == [1]
+        finally:
+            if not feed.done():
+                feed.cancel()
+            if live.session is not None:
+                await live.session.terminate()
 
     @pytest.mark.asyncio
     async def test_stop_during_resume_verdict_wait_ends_turn_without_rebuild(
