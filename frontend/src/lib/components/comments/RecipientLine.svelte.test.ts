@@ -21,8 +21,8 @@ describe('RecipientLine', () => {
 	});
 
 	it('says nobody gets it in its own sentence', () => {
-		render({ names: [], none: 'No one gets this reply.' });
-		expect(host.textContent).toContain('No one gets this reply.');
+		render({ names: [], none: 'No agent gets this reply.' });
+		expect(host.textContent).toContain('No agent gets this reply.');
 	});
 
 	it('has no control of its own while it names someone', () => {

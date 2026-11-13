@@ -53,7 +53,7 @@ describe('CommentThread', () => {
 			expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Release lane']);
 			unmount(component!); host.remove();
 			render(thread({ replyGoesTo: [] }));
-			expect(host.querySelector('.rl')?.textContent).toContain('No one gets this reply.');
+			expect(host.querySelector('.rl')?.textContent).toContain('No agent gets this reply.');
 		});
 		it('is absent where the caller does not know who gets a reply', () => {
 			render(thread());

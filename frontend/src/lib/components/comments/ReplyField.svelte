@@ -79,7 +79,7 @@
 			</button>
 		{/if}
 	</Field>
-	{#if goesTo}<RecipientLine names={[...new Set([...goesTo, ...tagNames])]} none="No one gets this reply." />{/if}
+	{#if goesTo}<RecipientLine names={[...new Set([...goesTo, ...tagNames])]} none="No agent gets this reply." />{/if}
 </div>
 
 <style>

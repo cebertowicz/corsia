@@ -69,7 +69,7 @@
 			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 		</Field>
 	</div>
-	{#if goesTo}<RecipientLine {names} none="No one gets these comments." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}
+	{#if goesTo}<RecipientLine {names} none="No agent gets this comment." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
 		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
