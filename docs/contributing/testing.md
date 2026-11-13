@@ -30,4 +30,4 @@ CORSIA does not run pull request reviews itself and posts no review status on a 
 
 - A finding is evidence, not authority: verify it against the current code, then fix it or explain why it does not apply.
 
-Checked against the code at `310115261`.
+Checked against the code at `19224c45b`.
