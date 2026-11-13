@@ -64,6 +64,18 @@ for (const panes of ['open', 'closed'] as const) test(`every comment on one phra
 		await expect(surface).toBeVisible();
 		const text = await surface.innerText();
 		reached = NOTES.filter((note) => text.includes(note));
+		// A phone's sheet leaves the pressed phrase visible above it.
+		if (phone) {
+			await expect.poll(async () => {
+				const box = await mark.boundingBox(), sheet = await surface.boundingBox();
+				return !!box && !!sheet && box.y >= 0 && box.y + box.height <= sheet.y;
+			}, { message: 'the pressed phrase is above the sheet' }).toBe(true);
+		}
+		// A row's Reply opens that comment alone, titled as one, with Back to the list.
+		await surface.locator('[data-reply-comment]').first().click();
+		await expect(page.getByRole('dialog', { name: 'Comment thread' })).toBeVisible();
+		await page.getByRole('button', { name: 'Back to the list of comments' }).click();
+		await expect(page.getByRole('dialog', { name: `${NOTES.length} comments` })).toBeVisible();
 	} else {
 		// Wide with no pane open: the margin column holds a card for each comment.
 		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
