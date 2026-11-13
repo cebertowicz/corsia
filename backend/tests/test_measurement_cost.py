@@ -54,6 +54,17 @@ def test_api_equivalent_is_pure_and_unknown_never_zero():
     assert price_identity("omlx@local/qwen3.8-flash") is None
 
 
+def test_current_subscription_identities_price_at_their_published_rates():
+    # Each bucket at one million tokens, so the result is the sum of the four published rates.
+    million = (1_000_000,) * 4
+    assert api_equivalent("claude-code/claude-fable-5-2", *million) == pytest.approx(8 + 40 + 10 + 0.20)
+    assert api_equivalent("claude-code/claude-sonnet-5-5", *million) == pytest.approx(2 + 10 + 2.5 + 0.10)
+    assert api_equivalent("codex/gpt-6.1-terra", *million) == pytest.approx(1 + 5 + 1.25 + 0.05)
+    assert api_equivalent("codex/gpt-6.1-terra", *million, long_context=True) == pytest.approx(2 + 7.5 + 2.5 + 0.10)
+    # Haiku 5.5's higher tier starts at 100K input, below the ledger's only tier split, so it stays unknown.
+    assert price_identity("claude-code/claude-haiku-5-5") is None
+
+
 def test_an_external_identity_prices_only_on_its_own_clouds_regional_list():
     # The same open-weight id served by a self-hosted or another cloud server has no list rate.
     assert price_identity("external@self/qwen3.8-flash") is None

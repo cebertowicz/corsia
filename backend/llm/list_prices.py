@@ -81,14 +81,18 @@ class ListPrice:
 LIST_PRICES: tuple[ListPrice, ...] = (
     ListPrice("claude-opus-5-5", 4, 5, 0.20, 20, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-opus-5", 5, 6.25, 0.50, 25, ANTHROPIC_PRICING, "2026-10-07"),
-    ListPrice("claude-sonnet-5-5", 2, 2.5, 0.20, 10, ANTHROPIC_PRICING, "2026-10-07"),
+    ListPrice("claude-fable-5-2", 8, 10, 0.20, 40, ANTHROPIC_PRICING, "2026-11-13"),
+    ListPrice("claude-sonnet-5-5", 2, 2.5, 0.10, 10, ANTHROPIC_PRICING, "2026-11-13"),
     ListPrice("claude-sonnet-5", 2, 2.5, 0.20, 10, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-fable-5-1", 10, 12.5, 0.25, 50, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-fable-5", 10, 12.5, 1, 50, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-haiku-4-5-20251001", 1, 1.25, 0.10, 5, ANTHROPIC_PRICING, "2026-10-07"),
+    # claude-haiku-5-5 stays unpriced: its higher tier starts at 100,000 input
+    # tokens, and the ledger's input tier splits only at OpenAI's 272K bound.
     # OpenAI Standard short and long vectors. Long context is >272K input
     # tokens; cache-write ``None`` is unavailable publicly, not $0.
     ListPrice("gpt-6.1-sol", 2, 2.5, 0.10, 10, OPENAI_PRICING, "2026-10-07", 4, 5, 0.20, 15),
+    ListPrice("gpt-6.1-terra", 1, 1.25, 0.05, 5, OPENAI_PRICING, "2026-11-13", 2, 2.5, 0.10, 7.5),
     ListPrice("gpt-6-sol", 2, 2.5, 0.20, 10, OPENAI_PRICING, "2026-10-07", 4, 5, 0.40, 15),
     ListPrice("gpt-5.6-sol", 4, 5, 0.40, 20, OPENAI_PRICING, "2026-10-07", 8, 10, 0.80, 30),
     ListPrice("gpt-5.6-terra", 2, 2.5, 0.20, 12, OPENAI_PRICING, "2026-10-07", 4, 5, 0.40, 18),
