@@ -1,7 +1,9 @@
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { tableAt } from './widget-blocks';
-import { clean, tableGrid, type CellSpan } from './widget-cells';
-import { cellAtSpan, openCellState, type OpenCell } from './widget-cell-state';
+import { clean, tableCells, tableGrid, type CellSpan } from './widget-cells';
+import { cellAtSpan, cellSource, cellWrite, openCellAt, type OpenCell } from './widget-cell-state';
+import { heldText, heldToSource, sourceOffset, sourceToHeld, writeCellEdit } from './widget-cell-row';
 
 /**
  * What a screen reader calls the open cell's editor: its column's header and its body row, counted from 1, or the column's
@@ -73,12 +75,13 @@ function belowTable(state: EditorState, at: number): { above: number; onBlock: b
  * row (or, past the header's width, as a cell that is never drawn), and a paragraph right under that line joins it. That
  * line can also be the start of a heading, list item, blockquote or fence that ends the table with no blank line, where a
  * typed character turns the block's first line into a row. So the text goes in with a blank line above it, and a blank
- * line below it when a block follows, leaving the table and that block as they were. The separators are added only when something is typed, pasted or composed there with no cell open, never
- * when the reader only arrives, so arriving changes nothing in the document; they go in the same transaction as the text,
- * so one undo takes all of it out.
+ * line below it when a block follows, leaving the table and that block as they were. The separators are added only when
+ * something is typed, pasted or composed there, never when the reader only arrives, so arriving changes nothing in the
+ * document; they go in the same transaction as the text, so one undo takes all of it out. A cell's own write into its row
+ * (`cellWrite`) is left alone: it keeps the row a row, even where the row ends the document.
  */
 export const typingBelowTable = EditorState.transactionFilter.of((tr) => {
-	if (!tr.docChanged || !tr.isUserEvent('input') || tr.startState.field(openCellState, false)) return tr;
+	if (!tr.docChanged || !tr.isUserEvent('input') || tr.annotation(cellWrite)) return tr;
 	const state = tr.startState;
 	let at = -1, insert = '', count = 0;
 	tr.changes.iterChanges((fromA, toA, _fromB, _toB, text) => { count++; if (fromA === toA) { at = fromA; insert = text.toString(); } });
@@ -108,6 +111,43 @@ export const typingBelowTable = EditorState.transactionFilter.of((tr) => {
 		scrollIntoView: tr.scrollIntoView,
 		...(event ? { userEvent: event } : {})
 	};
+});
+
+/** The drawn cell nearest document position `pos`, in the table whose source holds it: the cell holding it, or the closest. Null outside every table. */
+function nearestCell(state: EditorState, pos: number): OpenCell | null {
+	const block = tableAt(state, pos, pos);
+	if (!block) return null;
+	let nearest: OpenCell | null = null, gap = Infinity;
+	for (const span of tableGrid(state.sliceDoc(block.from, block.to))) {
+		if (span.padded) continue;
+		const cell = cellAtSpan(block.from, span), away = Math.max(cell.from - pos, pos - cell.to, 0);
+		if (away < gap) { nearest = cell; gap = away; }
+	}
+	return nearest;
+}
+
+/**
+ * Text typed in the document's own editor while its caret is in a table's source: the cell was left by a click outside the
+ * document, or a card gave the keyboard back to the document. The table is drawn in place of its source, so the browser
+ * has no caret to show there and puts the text after the table, as a paragraph, or as a row that pulls the paragraph below
+ * into the table. It goes into the cell nearest the caret instead, written into the row as the cell's editor writes it,
+ * and that cell opens with the caret after it, so the rest of the typing goes there too.
+ */
+export const typingInTableSource = EditorView.inputHandler.of((view, _from, _to, text) => {
+	const { main } = view.state.selection;
+	const cell = !view.composing && main.empty ? nearestCell(view.state, main.head) : null;
+	if (!cell) return false;
+	const line = view.state.doc.lineAt(cell.rowStart), source = cellSource(view.state, cell), held = heldText(source);
+	const at = sourceToHeld(source, held, Math.min(Math.max(main.head, cell.from), cell.to) - cell.from), edited = heldToSource(held, at);
+	const write = writeCellEdit(line.text, cell.col, held.text.slice(0, at) + text + held.text.slice(at), { from: edited, to: edited });
+	// The written cell's source is its content between one space each side.
+	const span = tableCells(write.row).find((item) => item.col === cell.col);
+	const caret = line.from + (span ? span.rawFrom + 1 + sourceOffset(write.text, write.at(at + text.length)) : write.row.length);
+	view.dispatch({
+		changes: write.changes.map((change) => ({ ...change, from: line.from + change.from, to: line.from + change.to })),
+		selection: { anchor: caret }, effects: openCellAt.of(cell), annotations: cellWrite.of(true), userEvent: 'input.type'
+	});
+	return true;
 });
 
 /** The table block the open cell is in, for leaving it. */
