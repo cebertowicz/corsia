@@ -330,7 +330,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await commentOnRegion(page, 'The header crowds the logo');
 		await expect(tag(page, 1)).toBeVisible();
 		// The comment is held for the image: the bar's Send is its one sender, and the document's header has none for it.
-		await expect(viewerSend(page)).toHaveText('Send 1 comment');
+		await expect(viewerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await page.keyboard.press('Escape');
 		await expectBarFits(page);
 		await shoot(page, testInfo, 'doc-1440-03-viewer-pending', true);
@@ -367,7 +367,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await closeDocumentDrawer(page);
 		await holdOneDocumentComment(page);
 		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
-		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-1440-06c-header-send', true);
 		const sent = await sendByKeyboard(page, headerSend(page), async () => {
@@ -400,7 +400,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 
 		await commentOnRegion(page, 'Tap target too small');
 		// The comment is held for the image: the bar's Send is its one sender.
-		await expect(viewerSend(page)).toHaveText('Send 1 comment');
+		await expect(viewerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await page.keyboard.press('Escape');
 		// Every bar control keeps a 44 px target; the comments pill can reflow inside the screen.
 		for (const control of await bar(page).locator('button').all()) {
@@ -424,7 +424,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		// A comment made in the document is held for its owner: the header's Send, whole inside the screen, sends it.
 		await closeDocumentDrawer(page);
 		await holdOneDocumentComment(page);
-		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, 'doc-393-05c-header-send', true);
 		await sendByKeyboard(page, headerSend(page));
@@ -498,12 +498,12 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await commentOnRegion(page, 'The header crowds the logo');
 		await page.keyboard.press('Escape');
 		// The image's own Send sits in the viewer bar; the document's header shows none for it.
-		await expect(viewerSend(page)).toHaveText('Send 1 comment');
+		await expect(viewerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await expectBarFits(page);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
 		await holdOneDocumentComment(page);
-		await expect(headerSend(page)).toHaveText('Send 1 comment');
+		await expect(headerSend(page).locator('.send-full')).toHaveText('Send 1 comment');
 		await expect(headerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, `doc-${width}-09-header-send`, true);
 
