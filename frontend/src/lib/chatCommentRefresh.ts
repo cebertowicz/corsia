@@ -6,6 +6,16 @@ import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 import { apiFetch } from '$lib/api/request';
 
+/** Show the server's comment threads on the loaded rows they name; a row not loaded here has nothing to show them on. */
+export function adoptCommentThreads(threadId: string, fresh: Message[]): void {
+	if (!fresh.length) return;
+	const byId = new Map(fresh.map(row => [row.id, row]));
+	messages.update(currentRows => currentRows.map(row => {
+		const next = row.thread_id === threadId ? byId.get(row.id) : undefined;
+		return next ? { ...row, chat_comments: next.chat_comments ?? [], chat_visible_content: next.chat_visible_content, chat_answer_cids: next.chat_answer_cids } : row;
+	}));
+}
+
 /** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;
@@ -32,9 +42,8 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
 		const lastAssistant = [...rows].reverse().find(row => row.role === 'assistant');
 		const answerIds = comments.length ? [] : [...new Set<string>(stepIds.length ? stepIds : lastAssistant ? [lastAssistant.id] : [])];
-		// The loaded page cannot answer this. This socket never receives the added-message
-		// frame for its own send, and the commented row may not be loaded on this page at all,
-		// so only the server's own answer about the turn's rows proves a comment was answered.
+		// The loaded page cannot answer this. A comment's own row never reaches chat, and the commented
+		// row may not be loaded on this page at all, so only the server's own answer about the turn's rows proves a comment was answered.
 		if (!answerIds.length && !comments.length) return;
 		const current = ++generation;
 		const sequence = beginChatReplyAttentionRead();
@@ -48,9 +57,7 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 			const namedTargets = (answers.replies ?? []).map(item => item.detail.destination.id);
 			const targetIds = [...new Set([...knownTargets.map(row => row.id), ...namedTargets])];
 			const targetRows = await read(threadId, targetIds);
-			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;
-			const byId = new Map(refreshed.map(row => [row.id, row]));
 			if (!comments.length) {
 				const existing = new Set(rows.flatMap(row =>
 					(row.chat_comments ?? []).flatMap(comment => comment.answers.filter(answer => answer.author_kind === 'agent').map(answer => `${comment.id}:${answer.assistant_message_id}:${answer.cid}`))));
@@ -60,15 +67,15 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 					if (!existing.has(key)) { existing.add(key); announce(comment.quote); }
 				}
 			}
-			messages.update(currentRows => currentRows.map(row => {
-				const fresh = row.thread_id === threadId ? byId.get(row.id) : undefined;
-				return fresh ? { ...row, chat_comments: fresh.chat_comments ?? [], chat_visible_content: fresh.chat_visible_content, chat_answer_cids: fresh.chat_answer_cids } : row;
-			}));
+			adoptCommentThreads(threadId, [...answers.rows, ...targetRows.rows]);
 			const replies = targetRows.replies ?? answers.replies;
 			if (replies !== null) setChatReplyAttention(threadId, replies, sequence);
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
-	const stops = [on('turn_complete', frame => refresh(frame)), on('message_added', frame => {
+	// A comment or reply posted, retried or delivered names the rows it is on; the server keeps it on their threads.
+	const stops = [on('turn_complete', frame => refresh(frame)), on('chat_comments_changed', frame => {
+		if (Array.isArray(frame?.target_seqs) && frame.target_seqs.length) void refresh(frame, frame.target_seqs.map((seq: number) => ({ seq })));
+	}), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;
 		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
 		// An update can answer comments while its turn keeps running; show them in their threads now.

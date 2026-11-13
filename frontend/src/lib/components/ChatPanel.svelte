@@ -334,7 +334,7 @@
 			onRetryFirstLoad={retryFirstPage}
 		/>
 		{#if commentMargin.shown && $activeThreadId}
-			<ChatMarginColumn threadId={$activeThreadId} scroller={messagesEl ?? null} selectedId={commentMargin.selectedId} onSelect={(id) => commentMargin.selectedId = id} onSendReply={(reply) => inputBarRef?.sendReply(reply)} composer={commentMargin.composer} />
+			<ChatMarginColumn threadId={$activeThreadId} scroller={messagesEl ?? null} selectedId={commentMargin.selectedId} onSelect={(id) => commentMargin.selectedId = id} onSendReply={(reply) => inputBarRef ? inputBarRef.sendReply(reply) : Promise.reject(new Error('Cannot send reply: no composer'))} composer={commentMargin.composer} />
 		{/if}
 		</div>
 		{#if isDraggingOver}

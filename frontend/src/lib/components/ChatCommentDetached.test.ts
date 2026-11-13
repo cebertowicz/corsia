@@ -40,7 +40,7 @@ function mountTranscript(quote: string, onSendReply = vi.fn(), activityFirst = f
 			target: host.querySelector('#message')!,
 			props: { msg: row, expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {} },
 		}),
-		mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply } }),
+		mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', onSendReply } }),
 	];
 	flushSync();
 	return {

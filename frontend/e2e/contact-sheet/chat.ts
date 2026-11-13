@@ -1,6 +1,6 @@
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
-import { injectMessage, seedMockResponses } from '../support/mock';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { injectMessage, seedMockResponses, waitForThreadReply } from '../support/mock';
 import { commentEditor, commentEditorClosed, commentOnMessage } from '../support/chatComments';
 
 export const scrollAnchor = '.user-bubble';
@@ -58,17 +58,19 @@ export async function seed(page: Page, request: APIRequestContext) {
     await expect(target.locator('.cm-comment-anchor').first()).toBeVisible();
     await expect(target.locator('button.model-chip .model-chip-name')).toHaveText('Claude Sonnet 5.5');
   }
-  // The person's comments are written on a desktop window, then delivered with a message, as they are in use.
+  // The person's comments are written on a desktop window; each posts from its own box and starts the turn that answers it.
   const captureSize = page.viewportSize();
   await page.setViewportSize({ width: 1440, height: 900 });
   await openAppPastLanding(page);
   await sidebarThread(page, title).click();
   await waitForWsConnected(page);
+  const border = 'A darker grey border (the divider colour) passes in both themes; I will apply it.';
+  await seedMockResponses(request, [{ content: border }]);
   const table = await commentOn(page, ids[5], 'a stronger border colour', 'Which colour, and does it pass contrast in both themes?');
+  await waitForThreadReply(request, thread, border);
+  await seedMockResponses(request, [{ content: 'The control is a button in the tab order, so Tab reaches it.' }]);
   const closing = await commentOn(page, last, 'return to the latest message', 'Is that control reachable by keyboard?');
-  await seedMockResponses(request, [{ content: 'A darker grey border (the divider colour) passes in both themes; I will apply it. The control is a button in the tab order, so Tab reaches it.' }]);
-  await chatComposer(page).fill('Two notes on the review.');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await waitForThreadReply(request, thread, 'The control is a button in the tab order, so Tab reaches it.');
   await commentOnMessage(table, 'a stronger border colour');
   await commentOnMessage(closing, 'return to the latest message');
   if (captureSize) await page.setViewportSize(captureSize);

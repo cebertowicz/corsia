@@ -29,7 +29,6 @@
 	import { MessageListScrollControl } from './messageListScrollControl';
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
-	import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
 	let { messagesEl = $bindable(), layoutRoot = undefined, userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		/** The panel holding this transcript's composer, when the transcript is not its direct child (it sits beside the comment margin). */
@@ -143,10 +142,9 @@
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
-	const placedEnvelopes = $derived(suppressibleCommentEnvelopes($messages, renderedThreadId));
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
 			buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
-				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placedEnvelopes),
+				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
 			(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
 			{
 				focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
@@ -310,7 +308,6 @@
 	<!-- Every transcript row, live work included, renders through the body's Focus classification. -->
 		<MessageListBody
 			{transcriptEntries}
-			{placedEnvelopes}
 			{pendingEntries}
 			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
 			{expandedTools}

@@ -8,6 +8,8 @@ import sqlite3
 
 import pytest
 
+from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+
 
 # Keep this unit test isolated from api.__init__ and its unrelated provider stack.
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
@@ -45,6 +47,8 @@ def _db() -> sqlite3.Connection:
     conn.execute(
         "CREATE TABLE active_turns (id TEXT, thread_id TEXT, status TEXT, started_at TEXT, ended_at TEXT, error TEXT)"
     )
+    # A page never draws a comment-only input, which this table marks.
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
     return conn
 
 
