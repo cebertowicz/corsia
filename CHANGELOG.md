@@ -12,6 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
+- A comment card in a document no longer hides behind the Workspace panel: with the panel open, the card sits beside its text. On a narrower window, the panel sits beside either the chat or the document instead of squeezing both. A reply you are writing keeps its text and cursor when you open or close the panel.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
