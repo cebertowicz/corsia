@@ -35,4 +35,4 @@ Without the workflow installed, neither status appears.
 
 - A finding is evidence, not authority: verify it against the current code, then fix it or explain why it does not apply.
 
-Checked against the code at `19224c45b`.
+Checked against the code at `702e54716`.
