@@ -89,6 +89,15 @@ def agreed(db, root_id: str) -> bool:
     return bool(people) and people <= comment_acks.acknowledgers(db, root_id)
 
 
+def _ask_raised_to_person(db, comment: dict[str, Any]) -> bool:
+    """Whether an open ask raised to the agent's person carries this document's comments to them."""
+    from plans.public import covering_asks
+
+    row = db.execute("SELECT user_id FROM threads WHERE id=?", (comment.get("author_thread_id"),)).fetchone()
+    artifact_id = str(comment["artifact_id"])
+    return bool(row and row["user_id"] and covering_asks(db, [artifact_id], str(row["user_id"]))[artifact_id])
+
+
 def recipients(
     db, comment: dict[str, Any], *, document_owner_only: bool = False,
 ) -> tuple[str, ...]:
@@ -107,6 +116,10 @@ def recipients(
     root_id = str(root["id"] if root else comment["id"])
     tagged = set(comment.get("tagged_agent_ids") or ())
     resolved = {owner, *tagged}
+    if comment.get("tagged_user_id"):
+        resolved.add(USER_AUTHOR_ID)
+    if comment["author_kind"] == "agent" and _ask_raised_to_person(db, comment):
+        resolved.add(USER_AUTHOR_ID)
     if root is not None:
         resolved.add(_recipient_for_author(root))
         resolved.update(_agent_authors(db, root_id))

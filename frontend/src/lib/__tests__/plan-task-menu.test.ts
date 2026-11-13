@@ -5,6 +5,12 @@ import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
 
+const { dismissCommentAttention } = vi.hoisted(() => ({ dismissCommentAttention: vi.fn() }));
+vi.mock('$lib/api/docs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/docs')>()),
+	dismissCommentAttention,
+}));
+
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -172,6 +178,41 @@ describe('PlanTree task context menu', () => {
 		expect(menu()!.querySelector('[role="alert"]')!.textContent).toContain('only it resumes it');
 	});
 
+	it('keeps a Done refusal’s own words on a row that also carries comments', async () => {
+		const row = mountTree({
+			user_actions: ['mark_done'],
+			comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 0, system_task: false },
+		}, async () => 'The agent set this task aside, and only it resumes it.');
+
+		rightClick(row);
+		await settle();
+		expect(labels()).toEqual(['Mark done', 'Dismiss all']);
+		(menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement).click();
+		await settle();
+
+		expect(menu()!.querySelector('[role="alert"]')!.textContent).toBe('The agent set this task aside, and only it resumes it.');
+	});
+
+	it('says a failed Dismiss all failed to dismiss', async () => {
+		dismissCommentAttention.mockRejectedValueOnce(new Error('offline'));
+		const onAction = vi.fn();
+		const row = mountTree({
+			user_actions: ['mark_done'],
+			comment_attention: { artifact_id: 'doc', comments: 2, suggestions: 0, system_task: true },
+		}, onAction);
+
+		rightClick(row);
+		await settle();
+		expect(labels()).toEqual(['Dismiss all']);
+		(menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement).click();
+		await settle();
+		await settle();
+
+		expect(dismissCommentAttention).toHaveBeenCalledWith('doc');
+		expect(onAction).not.toHaveBeenCalled();
+		expect(menu()!.querySelector('[role="alert"]')!.textContent).toBe('Couldn’t dismiss comments. Try again.');
+	});
+
 	it('stops a long-press from also selecting text on touch screens', () => {
 		const row = mountTree({ user_actions: ['pause_node', 'close_node'] }, vi.fn());
 
@@ -224,6 +265,25 @@ describe('PlanTree task context menu', () => {
 		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
 		body.click();
 		expect(toggled).not.toHaveBeenCalled();
+	});
+
+	it('swallows the long-press tap that lands on the item opened under the finger, then takes the next tap', async () => {
+		vi.useFakeTimers();
+		const onAction = vi.fn().mockResolvedValue(null);
+		const row = mountTree({ user_actions: ['pause_node', 'close_node'] }, onAction);
+
+		row.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true, clientX: 10, clientY: 10 }));
+		vi.advanceTimersByTime(501);
+		flushSync();
+		const first = () => menu()!.querySelector('[role="menuitem"]') as HTMLButtonElement;
+		row.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', bubbles: true }));
+		first().click();
+		expect(onAction).not.toHaveBeenCalled();
+		expect(menu()).not.toBeNull();
+
+		first().dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', bubbles: true }));
+		first().click();
+		expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: expect.any(String) }), 'pause_node');
 	});
 
 	it('cancels the long-press when the finger lifts early or moves', async () => {

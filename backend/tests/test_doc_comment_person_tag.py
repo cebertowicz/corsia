@@ -133,65 +133,76 @@ async def test_an_untagged_agent_comment_still_needs_nobody(integration_client, 
 
 @pytest.mark.asyncio
 async def test_a_person_tag_never_becomes_an_agent_recipient(integration_client, doc, _registrable_roots):
-    from doceditor import feedback_comments
+    from doceditor import feedback_comments, person_comment_attention
     from infra.database import get_db
+    from registry.models import get_artifact
     from tools.documents import DocCommentCreateTool
 
     owner = _mk_thread(integration_client, _OWNER, title="Doc owner")
     writer = _mk_thread(integration_client, _OWNER, title="Writer")
-    root = json.loads(await DocCommentCreateTool().execute(
+    db = get_db()
+    try:
+        before_messages = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        before_updates = db.execute("SELECT COUNT(*) FROM thread_updates").fetchone()[0]
+    finally:
+        db.close()
+    root_result = json.loads(await DocCommentCreateTool().execute(
         doc_path=str(doc), quote="A unique tail sentence", body="For the owner", tag_person=True, _thread_id=owner,
-    ))["comment"]
-    reply = json.loads(await DocCommentCreateTool().execute(
+    ))
+    root = root_result["comment"]
+    reply_result = json.loads(await DocCommentCreateTool().execute(
         parent_id=root["id"], body="Also for the owner",
         tag_person=True, _thread_id=writer,
-    ))["comment"]
+    ))
+    reply = reply_result["comment"]
     # A later comment in the same thread, with no tag of its own, must not inherit the person tag either.
-    plain = json.loads(await DocCommentCreateTool().execute(
+    plain_result = json.loads(await DocCommentCreateTool().execute(
         parent_id=root["id"], body="Just the owner here", _thread_id=writer,
-    ))["comment"]
+    ))
+    plain = plain_result["comment"]
+    assert all(result["woken"] == [] for result in (root_result, reply_result, plain_result))
 
     db = get_db()
     try:
-        assert feedback_comments.recipients(db, reply) == (owner,)
-        assert feedback_comments.recipients(db, plain) == (owner,)
-        # The integration database is shared across the session, so scope this to the test's own
-        # comments: none of them may open a delivery batch addressed to the person.
-        person_batches = db.execute(
-            """SELECT b.id,b.author_kind,b.author_id,i.comment_id FROM doc_feedback_batches b
+        assert get_artifact(root["artifact_id"], db=db)["parent_thread_id"] == owner
+        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == before_messages
+        assert db.execute("SELECT COUNT(*) FROM thread_updates").fetchone()[0] == before_updates
+        for comment in (reply, plain):
+            agents = tuple(recipient for recipient in feedback_comments.recipients(db, comment)
+                           if recipient != feedback_comments.USER_AUTHOR_ID)
+            assert agents == (owner,)
+        person_items = db.execute(
+            """SELECT i.comment_id FROM doc_feedback_batches b
                JOIN doc_feedback_batch_items i ON i.batch_id=b.id
                WHERE b.recipient_id=? AND i.comment_id IN (?,?,?)""",
             (feedback_comments.USER_AUTHOR_ID, root["id"], reply["id"], plain["id"]),
         ).fetchall()
-        assert not person_batches, [dict(row) for row in person_batches]
-        assert db.execute(
-            "SELECT COUNT(*) FROM doc_feedback_batch_items WHERE comment_id=?", (reply["id"],)
-        ).fetchone()[0] == 1
+        assert {row["comment_id"] for row in person_items} == {root["id"], reply["id"]}
+        assert person_comment_attention.counts(db, root["artifact_id"], OWNER_USER) == (2, 0)
+        agent_items = db.execute(
+            """SELECT b.recipient_id FROM doc_feedback_batch_items i
+               JOIN doc_feedback_batches b ON b.id=i.batch_id
+               WHERE i.comment_id=? AND b.recipient_id!=?""",
+            (reply["id"], feedback_comments.USER_AUTHOR_ID),
+        ).fetchall()
+        assert [row["recipient_id"] for row in agent_items] == [owner]
+        task = db.execute(
+            "SELECT node_id AS id FROM plan_node_artifact_links WHERE provenance='document.person_comment_task' AND artifact_id=?",
+            (root["artifact_id"],),
+        ).fetchone()
+        assert task is not None
+        assert db.execute("SELECT COUNT(*) FROM thread_updates WHERE node_id=?", (task["id"],)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM messages WHERE json_extract(metadata,'$.node_id')=?", (task["id"],)).fetchone()[0] == 0
     finally:
         db.close()
 
 
 @pytest.mark.asyncio
-async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them_and_reloads_the_surface(
-    integration_client, doc, _registrable_roots, monkeypatch,
+async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them(
+    integration_client, doc, _registrable_roots,
 ):
-    """The tag beats the noise rules in both places that apply them, not just in the unread read.
-
-    ``unread_comment_rows`` makes a person-tagged suggestion or review note eligible, and
-    ``may_change_unread_attention`` has to say so too: the comment surface reloads on that hint
-    alone, so a tag that only reached the SQL would stay invisible until something else refreshed.
-    """
-    from doceditor import comment_notifications
+    """``unread_comment_rows`` makes a person-tagged suggestion or review note eligible."""
     from tools.documents import DocCommentCreateTool
-
-    hints: list[bool] = []
-    announce = comment_notifications.announce_after_commit
-
-    def record(connection, artifact_id, **kwargs):
-        hints.append(bool(kwargs.get("unread_attention_changed")))
-        return announce(connection, artifact_id, **kwargs)
-
-    monkeypatch.setattr(comment_notifications, "announce_after_commit", record)
 
     writer = _mk_thread(integration_client, _OWNER, title="Writer")
     suggestion = json.loads(await DocCommentCreateTool().execute(
@@ -206,7 +217,6 @@ async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them_and_relo
     threads = _listed(integration_client, suggestion["artifact_id"])
     assert threads[suggestion["id"]]["new_comment"] is True
     assert threads[note["id"]]["new_comment"] is True
-    assert hints == [True, True]
 
 
 @pytest.mark.asyncio

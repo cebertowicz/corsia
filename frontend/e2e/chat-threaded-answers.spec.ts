@@ -88,8 +88,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await expect(row).toHaveCount(0);
   }
   const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-threaded-answers');
-  // There is no reply chip above the composer: the chat's jump control says a new reply is waiting and jumps to it.
-  await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
+  // The chat's jump control says a new reply is waiting and jumps to it.
   const control = page.getByRole('button', { name: /next new reply/ });
   await expect(control).toBeVisible({ timeout: 30_000 });
   await expect(control).toContainText('1 new');

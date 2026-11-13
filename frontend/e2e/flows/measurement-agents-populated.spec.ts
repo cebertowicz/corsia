@@ -100,7 +100,7 @@ async function openMeasurement(page: import('@playwright/test').Page, project: {
 	await loginByUrl(page, { waitForComposer: false });
 	await openSettings(page);
 	// Below 768px the rail is a drawer that closed itself when Settings opened.
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	// The Agents table belongs to a project's scope, reached from the page's Showing select.
 	await expect(page.getByRole('region', { name: /Agents table/ })).toHaveCount(0);

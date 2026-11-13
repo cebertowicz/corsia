@@ -27,6 +27,14 @@ def _check_access(artifact_id: str, user_id: str) -> None:
         db.close()
 
 
+@router.post("/artifacts/{artifact_id}/comments/dismiss-all")
+async def dismiss_comment_attention(artifact_id: str, user: dict = Depends(require_user_header_only)):
+    """Clear comment attention while leaving suggestions undecided."""
+    await run_in_db(_check_access, artifact_id, user["id"])
+    await run_in_db(comment_thread_views.dismiss_all, user["id"], artifact_id)
+    return {"dismissed": True}
+
+
 @router.post("/artifacts/{artifact_id}/comments/{root_id}/viewed")
 async def mark_comment_thread_viewed(
     artifact_id: str, root_id: str, body: CommentThreadViewed,
