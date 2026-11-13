@@ -173,7 +173,7 @@ for (const [width, height, project] of layouts) {
 			// Accept flushes the live draft first (DocCommentSurface); that flush's file rename is refused once.
 			await refuseLiveFaultOnce(request, document.artifactId, 'rename');
 			await row.getByRole('button', { name: /^Accept(:|$)/ }).click();
-			await expect(row.getByRole('alert')).toHaveText("Couldn't save the document before accepting this suggestion");
+			await expect(row.getByRole('alert')).toHaveText('Couldn’t save the document before accepting this suggestion. Try again.');
 			expect(decisions, 'a refused flush never sends the decision').toBe(0);
 			await expect(page.getByText(/^Not saved to the file:/)).toBeVisible();
 			await expect(page.getByRole('button', { name: 'Copy text', exact: true })).toBeVisible();

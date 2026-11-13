@@ -203,7 +203,7 @@ describe('a suggestion card and the text it replaces', () => {
 	});
 
 	it.each([
-		{ failure: 'the save before it', setup: () => mocks.flushDraft.mockResolvedValue(false), message: "Couldn't save the document before accepting this suggestion" },
+		{ failure: 'the save before it', setup: () => mocks.flushDraft.mockResolvedValue(false), message: 'Couldn’t save the document before accepting this suggestion. Try again.' },
 		{ failure: 'no answer from the server', setup: () => mocks.decideSuggestion.mockRejectedValue(new TypeError('Failed to fetch')), message: 'Couldn’t accept this suggestion. Try again.' },
 		{ failure: 'a refusal that is not about the text', setup: () => mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('Only the owner can decide', 400)), message: 'Only the owner can decide' },
 	])('leaves a card attached after an accept that failed on $failure, and keeps the reason', async ({ setup, message }) => {

@@ -49,7 +49,9 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		// A field that scrolls with its card and has grown taller than the card's scroller cannot be shown whole: its bottom edge (the line being typed, the border and Send) is what stays in view, and the card alone scrolls.
 		const tooTall = owner !== null && !fits && !blockFits && block !== null && block.classList.contains('unpinned');
 		const scrolled = tooTall ? block! : target;
-		scrolled.style.scrollMarginBottom = scrolled === whole || !covered ? '' : `${covered}px`;
+		// Written only when it changes: a write inside the watched subtree is a mutation that schedules the next reveal.
+		const margin = scrolled === whole || !covered ? '' : `${covered}px`;
+		if (scrolled.style.scrollMarginBottom !== margin) scrolled.style.scrollMarginBottom = margin;
 		if (typeof scrolled.scrollIntoView === 'function') scrolled.scrollIntoView({ block: tooTall ? 'end' : 'nearest' });
 	};
 	const schedule = () => {

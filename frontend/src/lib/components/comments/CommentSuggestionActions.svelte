@@ -17,7 +17,7 @@
 	const named = (verb: string) => (name ? `${verb}: ${name}` : verb);
 	/** Why Accept is off, said on the screen as well as in its tooltip: a touch screen has no tooltip. */
 	const cantAccept = $derived(textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
-	const cantAcceptShort = $derived(textChanged ? 'Can’t accept: the text has changed.' : 'Can’t accept: its text is gone.');
+	const cantAcceptShort = $derived(textChanged ? 'Can’t accept: the text doesn’t match.' : 'Can’t accept: the text isn’t in the document.');
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && (orphaned || textChanged))) return;
 		decisionBusy = decision;
