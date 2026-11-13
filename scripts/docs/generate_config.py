@@ -74,7 +74,6 @@ DOCUMENTED = {
     "CORSIA_PRE_MIGRATION_BACKUPS_KEEP": "Sets how many pre-migration backups to keep.",
     "CORSIA_PYTHON": "Selects the Python executable used by the launcher.",
     "CORSIA_RESTART_JITTER_SECONDS": "Sets the random delay applied to restart timing, in seconds.",
-    "CORSIA_REVIEWER_MAX_TURNS": "Sets the maximum reviewer turns.",
     "CORSIA_SERVICE_LABEL": "Sets the service label.",
     "CORSIA_SERVICE_MANAGER": "Selects the service manager.",
     "CORSIA_SERVICE_PATH": "Overrides the executable search path used for the service.",

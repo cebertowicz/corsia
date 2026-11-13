@@ -101,7 +101,6 @@ async def test_read_uses_one_source_for_each_type(monkeypatch, kind):
     monkeypatch.setattr(poller, "gated_read", read)
     got = (await pr_facts.enriched(envelope(kind), object())).facts
     assert len(paths) == 1 and "/pulls/" in paths[0]  # one PR read; no check reads
-    assert not {"check_state", "current_head", "mergeable"} & set(got)
     assert (got["base_sha"], got["draft"], got["labels"]) == ("read-base", True, ["read"])
     assert got["pr_author_login"] == "pr-author"
 

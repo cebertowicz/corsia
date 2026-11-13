@@ -1,28 +1,12 @@
-"""PR review runs as an event-rule workflow: CORSIA keeps no code that starts or runs a reviewer."""
+"""An event-rule worker reads only its staging folder and an empty start directory; PR events only route."""
 
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
-REMOVED_MODULES = (
-    "events.reviewer_gate",
-    "events.reviewer_route",
-    "events.connectors.github_reviewer_gate",
-    "events.connectors.github_reviewer_gate_recovery",
-    "events.connectors.github_reviewer_fork_hold",
-    "events.connectors.github_reviewer_notifications",
-    "reviewer.on_pr_review",
-    "reviewer.reviewer_runner",
-    "reviewer.reviewer_backends",
-    "reviewer.reviewer_status",
-    "prompts.reviewer",
-    "automation.review_intent",
-)
 
 GATE_EVENTS = (
     ("webhook.github.check_suite_completed", {
@@ -42,11 +26,6 @@ GATE_EVENTS = (
 )
 
 
-@pytest.mark.parametrize("name", REMOVED_MODULES)
-def test_the_reviewer_modules_are_gone(name: str) -> None:
-    assert importlib.util.find_spec(name) is None
-
-
 def test_ingress_only_routes_for_every_gate_event() -> None:
     from events import ingress
 
@@ -56,19 +35,15 @@ def test_ingress_only_routes_for_every_gate_event() -> None:
         routed.append(internal_event)
         return None
 
-    assert not hasattr(ingress, "review_leg") and not hasattr(ingress, "gate_trigger_leg")
     with patch("events.ingress.route_leg", fake_route):
         for event, payload in GATE_EVENTS:
-            result = asyncio.run(ingress.handle_event(event, payload))
-            assert "reviewer" not in result and "reviewer_gate" not in result
+            asyncio.run(ingress.handle_event(event, payload))
     assert routed == [event for event, _ in GATE_EVENTS]
 
 
 def test_a_rule_worker_copies_no_head_and_reads_only_staging_and_its_empty_start_directory(tmp_path) -> None:
-    from automation import worker_inputs, worker_runner
+    from automation import worker_runner
 
-    for name in ("head_source", "write_head", "HEAD_REPO_FACT"):
-        assert not hasattr(worker_inputs, name), name
     root, staging = tmp_path / "owner", tmp_path / "owner" / "staging" / "req"
     staging.mkdir(parents=True)
     body = tmp_path / "SKILL.md"

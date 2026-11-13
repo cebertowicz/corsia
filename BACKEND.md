@@ -36,7 +36,7 @@ subagents/*                  ← provider runtime continuity; may call infra/run
 registry/*                   ← observes canonical messages/tools and projects registry rows into artifact/document views
 memory/*                     ← infra DB + llm helpers; jobs call into memory, not the reverse
 tools/*                      ← tools.base/registry + infra config/sandbox as needed
-reviewer/*                  ← helpers shared with the host-access lease reviewer
+reviewer/*                  ← host-access lease reviewer, plus the gh call helper that core/ and events/connectors/ also use
 ```
 
 ## External MCP tools

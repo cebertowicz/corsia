@@ -72,7 +72,6 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | `CLAUDE_BIN` | — | Selects the Claude executable. | `backend/core/fork_render.py` |
 | `CODEX_HOME` | — | Selects the Codex home directory. | `backend/subagents/codex_env.py`, `backend/tools/mcp_import.py` |
 | `CORSIA_AGENT_BROWSER_VERSION_RANGE` | — | Sets the accepted agent-browser version range. | `backend/host_access/browser_cli.py` |
-| `CORSIA_REVIEWER_MAX_TURNS` | — | Sets the maximum reviewer turns. | `backend/reviewer/failures.py` |
 | `LITELLM_LOCAL_MODEL_COST_MAP` | — | Controls the local LiteLLM model cost map. | `backend/main.py` |
 
 ## Evaluation

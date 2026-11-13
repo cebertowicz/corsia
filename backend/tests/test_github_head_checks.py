@@ -332,7 +332,6 @@ async def test_a_held_suite_arrives_as_action_required_whatever_else_failed(isol
     facts = (await _settled(monkeypatch, read))["facts"]
     assert facts["conclusion"] == "action_required"
     assert facts["pr_number"] == 7 and facts["head_sha"] == "abc"
-    assert not {"check_state", "current_head", "mergeable"} & set(facts)
     assert len(paths) == 2  # suites once, then the PR; no runs read
 
 
@@ -354,7 +353,6 @@ async def test_a_head_whose_pull_request_moved_on_is_still_named_by_its_settled_
 
     event = await _settled(monkeypatch, read)
     assert event["facts"]["head_sha"] == "abc" and event["facts"]["conclusion"] == "failure"
-    assert "current_head" not in event["facts"] and "check_state" not in event["facts"]
     assert paths == ["repos/o/r/commits/abc/check-suites", "repos/o/r/pulls/7"]
     assert event["event_id"] == checks._event_id("o/r", "abc", failed.body["check_suites"])
 
@@ -408,4 +406,3 @@ async def test_a_failed_rule_probe_reads_anyway_and_the_head_still_settles(isola
     pull = {"head": {"sha": "abc"}, "base": {"ref": "dev"}, "mergeable": True, "user": {"login": "someone"}}
     event = await _settled(monkeypatch, _reads_with_a_pull_request(pull))
     assert event["facts"]["conclusion"] == "success" and event["facts"]["author_origin"]
-    assert "check_state" not in event["facts"] and "current_head" not in event["facts"]

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reviewer.failures import cc_max_turns
 from subagents.cc_stream import CCStreamSession
 from subagents.codex_app_server import CodexAppServerSession
 from subagents.codex_env import governed_codex_model_catalog_path

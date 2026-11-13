@@ -1,7 +1,7 @@
 # Reviewer evaluation defaults and operator notes.
 #
-# CORSIA no longer selects or runs a review model itself: review runs as a
-# workflow that does its own GitHub reads, so nothing here drives a live gate.
+# Local and cloud reviewer settings kept for evaluation runs; no live
+# pull request gate reads this file.
 #
 # The historical CI-flow proposal remains in
 # docs/design/e2e-test-tiering-and-mock-infrastructure.md; it is not runtime or

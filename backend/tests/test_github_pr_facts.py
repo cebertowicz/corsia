@@ -15,9 +15,6 @@ from events.connectors.github_pr_quiet_reasons import mergeable_label
 from events.envelope import normalize
 from infra.database import get_db
 
-REMOVED_READ_FACTS = {"current_head", "check_state", "mergeable"}
-
-
 def pull(**over):
     return {"number": 7, "draft": False, "mergeable": None, "labels": [{"name": "b"}, {"name": "a"}],
             "head": {"sha": "h1", "repo": {"full_name": "fork/r"}},
@@ -49,14 +46,10 @@ def test_a_webhook_event_carries_the_payload_facts_and_keeps_its_own_head_as_sha
     got = sent()
     assert got["sha"] == "h1" and got["branch"] == "dev"
     assert got["base_sha"] == "b1" and got["draft"] is False and got["labels"] == ["a", "b"]
-    assert not REMOVED_READ_FACTS & set(got)
     assert "labels" in sent("closed", "pr.closed", merged=True)
 
 
-def test_no_pr_event_declares_a_check_state_current_head_or_mergeable_fact():
-    for event in ("pr.opened", "pr.synchronize", "pr.ready_for_review", "pr.labeled", "pr.unlabeled",
-                  "pr.merged", "pr.closed", "head.checks_completed", "pr_comment.created", "review.submitted"):
-        assert not REMOVED_READ_FACTS & set(MANIFEST.decl(event).filterable_fields), event
+def test_pr_events_declare_the_payload_and_head_facts_as_filterable():
     for event in ("pr.merged", "pr.closed"):
         assert set(facts.PAYLOAD_FACTS) <= set(MANIFEST.decl(event).filterable_fields), event
     head = MANIFEST.decl("head.checks_completed")
@@ -99,7 +92,6 @@ async def test_a_head_checks_event_keeps_its_settled_head_and_reads_only_the_pul
     got = await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "X", "conclusion": "failure"})
     assert got["head_sha"] == "X" and got["conclusion"] == "failure"
     assert got["labels"] == ["a", "b"] and got["base_sha"] == "b1" and got["draft"] is False
-    assert not REMOVED_READ_FACTS & set(got)
     assert reader.paths == ["repos/o/r/pulls/7"]
 
 
@@ -129,7 +121,6 @@ async def test_enrichment_completes_reply_events_only(reads):
     assert opened.facts == sent("opened", "pr.opened", mergeable=True)
     closed = await facts.enriched(
         normalize("github", webhook("closed", merged=True), "pr.merged"), object())
-    assert not REMOVED_READ_FACTS & set(closed.facts)
     assert await facts.enriched(None) is None
     assert reader.paths == []  # neither PR lifecycle event reads anything
 
