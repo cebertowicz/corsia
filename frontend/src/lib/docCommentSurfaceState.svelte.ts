@@ -19,7 +19,8 @@ export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: stri
 /**
  * Return focus to the document's editor. CodeMirror's own focus() re-applies its selection without scrolling;
  * a bare element focus() makes WebKit put the caret at the start of the editable and scroll there once the
- * DOM selection was cleared, as it is when the comment popover's focused control is removed.
+ * DOM selection was cleared, as it is when the comment popover's focused control is removed. With a table cell open, the
+ * focus goes to that cell's editor: the document's caret is then in the table's source, which is drawn over and takes no typing.
  */
 export function focusDocumentEditor(root: HTMLElement | undefined) {
 	// Looked up from the outer `.cm-editor`: CodeMirror finds a view from the first `.cm-content` inside what it is given,
@@ -27,6 +28,9 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
 	const dom = root?.querySelector<HTMLElement>('.cm-editor');
 	const view = dom && EditorView.findFromDOM(dom);
 	if (!view) return;
+	const cell = view.state.field(openCellState, false) && view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
+	const cellView = cell && EditorView.findFromDOM(cell);
+	if (cellView) { cellView.focus(); return; }
 	const selection = view.state.selection.main;
 	if (!selection.empty) view.dispatch({ selection: { anchor: selection.head }, annotations: Transaction.userEvent.of('select.doc-comment') });
 	view.focus();

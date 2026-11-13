@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Compartment, EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import * as productEvents from '$lib/product_events';
 import { A as AUTHOR, type Rig } from './typed-reveal-rig';
 import {
-	build, cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
+	build, cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key, LINE,
 	mountedEditor, open, press, table, typed
 } from './widget-cell-rig';
 import { openCellState } from './widget-cell-state';
@@ -359,5 +360,33 @@ describe('a rewrite of the region around the open cell', () => {
 		});
 		expect(r.view.state.field(openCellState)?.col).toBe(0);
 		expect(cellText(r)).toBe('Mail');
+	});
+});
+
+/**
+ * Text the browser typed into the document's own editor, as CodeMirror takes it in: offered to the editor's input handlers
+ * first, and otherwise inserted where the browser put it (`from`).
+ */
+function typedInDocument(r: Rig, from: number, text: string) {
+	const view = r.view;
+	const insert = () => view.state.update({ changes: { from, insert: text }, selection: { anchor: from + text.length }, userEvent: 'input.type' });
+	if (!view.state.facet(EditorView.inputHandler).some((handler) => handler(view, from, from, text, insert))) view.dispatch(insert());
+}
+
+describe('typing in the document while its caret is in a table\'s source', () => {
+	// The table is drawn in place of its source, so the browser has no caret to show there and puts the typed text after the
+	// table, on the line under its last row: as a paragraph there, or, with nothing between, as a row that pulls the paragraph
+	// below into the table.
+	it('goes into the cell nearest the caret and opens it, leaving the table and the paragraph under it as they were', () => {
+		const r = track(open());
+		r.view.dispatch({ selection: { anchor: at(3) } });
+		expect(r.view.state.field(openCellState), 'setup: no cell is open').toBeNull();
+		const under = DOC.indexOf(LINE) + LINE.length + 1;
+		typedInDocument(r, under, 'zq');
+		expect(r.view.state.doc.toString(), 'zq is in the cell, at the caret, and nothing else changed').toBe(DOC.replace('Login', 'Lozqgin'));
+		expect(cellText(r), 'the cell opened').toBe('Lozqgin');
+		expect(cellCaret(r), 'with its caret after what was typed').toBe(4);
+		expect(cellEditor(r)!.dom.contains(document.activeElement), 'and the keyboard in it').toBe(true);
+		expect(r.text.toString()).toBe(r.view.state.doc.toString());
 	});
 });
