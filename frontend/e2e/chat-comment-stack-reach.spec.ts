@@ -5,17 +5,19 @@ import { commentEditor, commentEditorClosed } from './support/chatComments';
 
 /**
  * A comment is never out of reach. Three comments on one phrase of a chat message are nested highlights; every one of them must
- * be reachable from the transcript at 1440 (a card each in the margin column) and on a phone (through the highlight's press).
- * The unread paint of a stack only colours it, so this holds whatever it draws.
+ * be reachable from the transcript wherever it is read: pressing the highlight opens a list of all three (a phone's sheet, or the
+ * popover at 1440 with the sidebar and Workspace panel open, which leaves the canvas too narrow for the margin column), and with
+ * both panes closed the margin column holds a card for each. The unread paint of a stack only colours it, so this holds whatever it draws.
  */
 
 const QUOTE = 'selected phrase';
 const NOTES = ['Stack note 1', 'Stack note 2', 'Stack note 3'];
 
-test('every comment on one phrase is reachable from the transcript', async ({ page, request }, info) => {
+for (const panes of ['open', 'closed'] as const) test(`every comment on one phrase is reachable from the transcript (panes ${panes})`, async ({ page, request }, info) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
-	test.setTimeout(180_000);
 	const phone = info.project.name.includes('mobile');
+	test.skip(phone && panes === 'closed', 'A phone has no margin column and no panes to close');
+	test.setTimeout(180_000);
 	const title = `Stack reach ${crypto.randomUUID()}`;
 	const thread = await createSession(request, title);
 	await injectMessage(request, thread, { role: 'assistant', content: 'Earlier context.\n\n'.repeat(24), metadata: { for_user: true } }, TEST_TOKEN);
@@ -55,14 +57,17 @@ test('every comment on one phrase is reachable from the transcript', async ({ pa
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 
 	let reached: string[] = [];
-	if (phone) {
-		await mark.tap();
-		const surface = page.getByRole('dialog', { name: 'Comment thread' });
+	if (phone || panes === 'open') {
+		// The press on the highlight is the path here: it opens the list of every comment on the phrase.
+		if (phone) await mark.tap(); else await mark.click();
+		const surface = page.getByRole('dialog', { name: `${NOTES.length} comments` });
 		await expect(surface).toBeVisible();
 		const text = await surface.innerText();
 		reached = NOTES.filter((note) => text.includes(note));
 	} else {
-		// Wide: the margin column holds a card for each comment.
+		// Wide with no pane open: the margin column holds a card for each comment.
+		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 		await expect(page.locator('.chat-margin .chat-margin-card')).toHaveCount(NOTES.length);
 		const text = await page.locator('.chat-margin').innerText();
 		reached = NOTES.filter((note) => text.includes(note));

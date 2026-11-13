@@ -239,7 +239,7 @@
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))), var(--drawer-text-cap, 100dvh));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))), var(--drawer-text-cap));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -249,8 +249,10 @@
 	}
 	.drawer-panel {
 		--drawer-drag-y: 0px;
+		/* The room a phone sheet leaves for the text it was opened from; capSheetAboveText sets it inline on the panel. */
+		--drawer-text-cap: 100dvh;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))), var(--drawer-text-cap, 100dvh));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))), var(--drawer-text-cap));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
