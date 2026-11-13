@@ -71,9 +71,9 @@ test('@surface:doc-send-on-close keeps its header whole beside a long owner name
 	await expect(page.locator('[data-drawer-unsent]'), 'the removed drawer footer is gone').toHaveCount(0);
 
 	// Request review shares a row with the comment count and the header Send, whatever the owner's name.
-	const layout = await page.evaluate(() => {
+	// The Send button is found by its accessible name ("Send 1 comment to <owner>"), the same way a person using a screen reader finds it.
+	const layout = await headerSend(page).evaluate((send) => {
 		const row = (selector: string) => document.querySelector<HTMLElement>(`.document-header ${selector}`)!.getBoundingClientRect();
-		const send = [...document.querySelectorAll<HTMLElement>('.document-header button')].find((button) => /^Send \d+ comments?$/.test(button.textContent?.trim() ?? ''))!;
 		const label = document.createRange();
 		label.selectNodeContents(send);
 		return {
