@@ -51,6 +51,14 @@ export function closeDocumentCell(root: HTMLElement | undefined): (() => void) |
 	};
 }
 
+/**
+ * On a phone the card a tap in a table cell opened is a modal sheet: the cell under it closes, leaving no caret beneath it,
+ * and closing the sheet (a key typed, Escape, Close) opens it again at the tapped place, as prose gets its caret back.
+ */
+export function closeCellUnderSheet(commentUI: Pick<ReturnType<typeof createCommentSurfaceState>, 'sheetUp' | 'state' | 'returnFocusTo'>, root: () => HTMLElement | undefined) {
+	$effect(() => { const reopen = commentUI.sheetUp && commentUI.state?.kind === 'thread' && commentUI.state.fromText && closeDocumentCell(root()); if (reopen) commentUI.returnFocusTo(reopen); });
+}
+
 /** The canvas width (px) at which the text keeps at least 45 characters beside the 308 px margin column. */
 export const MARGIN_MIN = 660;
 
