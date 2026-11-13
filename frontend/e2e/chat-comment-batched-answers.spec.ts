@@ -102,10 +102,13 @@ for (const count of [1, 2]) test(`${count} queued comment(s): an answer sent mid
   ]);
   let updateId = '';
   await expect.poll(async () => {
-    const row = (await messages(request, thread)).find(m => m.role === 'assistant' && m.content === update);
-    updateId = row?.id ?? '';
-    return row?.chat_visible_content;
-  }, { timeout: 30_000 }).toBe('');
+    const rows = await messages(request, thread);
+    const placed = rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+      .find((a: any) => a.author_kind === 'agent' && a.text === answers[0]);
+    updateId = placed?.assistant_message_id ?? '';
+    // The server never sends a step that draws nothing: the update is in no page read.
+    return Boolean(updateId) && !rows.some((m: any) => m.id === updateId);
+  }, { timeout: 30_000 }).toBe(true);
   // While the Turn still runs, the update adds no chat row and each answer reads in its own thread.
   await expect(page.locator(`[data-message-id="${updateId}"]`)).toHaveCount(0);
   expect(await chatText(page)).not.toContain(answers[0]);
@@ -150,4 +153,42 @@ test('an answer written into the reply never streams into chat', async ({ page, 
   await answerReadsInItsThread(page, row, quotes[0], answer);
   expect(await chatText(page)).not.toContain('Streamed answer');
   await capture(page, 'after');
+});
+
+for (const width of [1440, 900, 393]) test(`a turn made only of answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  test.skip(test.info().project.name !== 'chromium-desktop', 'Sets its own widths');
+  await page.setViewportSize({ width, height: width === 393 ? 852 : 1000 });
+  const { thread, row, cids } = await queueComments(page, request, 'Answers only turn', 1);
+  const answer = 'Only an answer.';
+  await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}` }]);
+  let stepId = '';
+  await expect.poll(async () => {
+    const rows = await messages(request, thread);
+    stepId = rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+      .find((a: any) => a.author_kind === 'agent' && a.text === answer)?.assistant_message_id ?? '';
+    return Boolean(stepId) && !rows.some((m: any) => m.id === stepId);
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  // What chat draws: the same rows and the same fold labels live and after a reload, none of them the answer.
+  const drawn = async () => ({
+    ids: await page.locator('.messages [data-message-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-message-id'))),
+    folds: await page.locator('.messages .fold-toggle').allInnerTexts(),
+  });
+  await expandWork(page);
+  const live = await drawn();
+  expect(live.ids).not.toContain(stepId);
+  expect(await chatText(page)).not.toContain(answer);
+  await capture(page, 'answers-only-live');
+  await page.reload();
+  if (narrow(page)) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await sidebarThread(page, 'Answers only turn').click();
+  await waitForWsConnected(page);
+  await expect(page.locator('.messages [data-message-id]').first()).toBeVisible();
+  await expandWork(page);
+  const reloaded = await drawn();
+  expect(reloaded.ids).toEqual(live.ids);
+  expect(reloaded.folds).toEqual(live.folds);
+  await capture(page, 'answers-only-reloaded');
+  await answerReadsInItsThread(page, row, quotes[0], answer);
 });
