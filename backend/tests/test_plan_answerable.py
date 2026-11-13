@@ -1,8 +1,9 @@
-"""`decision_projection.answerable` reads one row per decision, with the old result.
+"""`decision_projection.answerable` settles each decision on the one source node it names.
 
-The reference below is the statement as it shipped before it joined each decision's
-own source node: every in-work node of the plan, once per decision, with
-membership tested in Python. The new statement must return exactly what it returns.
+A decision is answerable only while its attention link is live, its review node is
+in `review_requested`, the named source node is in work and outside a retired branch
+of the same plan, the thread plan is not archived and the owner thread is live. The
+statement drives from the caller's batch and reaches each source node by primary key.
 """
 from __future__ import annotations
 
@@ -11,38 +12,10 @@ import json
 import pytest
 
 import plans.service as service
-from plans import activity_projection, decision_projection, node_states
+from plans import decision_projection
 from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_plan_activity_decision_facts import _body
-from tests.test_plan_activity_index import _actor, _task, db  # noqa: F401
-
-
-def _reference_answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
-    if not source_nodes:
-        return {}
-    marks = ",".join("?" for _ in source_nodes)
-    rows = db.execute(
-        f"""SELECT l.artifact_id AS artifact_id, src.id AS source_node_id
-              FROM plan_node_artifact_links l
-              JOIN plan_nodes n ON n.id = l.node_id AND n.archived_at IS NULL
-                                AND n.state = 'review_requested'
-              JOIN plans p ON p.id = n.plan_id AND p.state != 'archived'
-              JOIN threads s ON s.id = p.owner_id
-              JOIN plan_nodes src
-                ON src.plan_id = p.id AND {node_states.in_work_sql('src')}
-               AND {node_states.outside_retired_branch_sql('src')}
-             WHERE l.role = 'attention'
-               AND p.owner_kind = 'thread'
-               AND s.archived_at IS NULL AND s.purged_at IS NULL
-               AND COALESCE(s.lifecycle_state,'active') != 'archived'
-               AND l.artifact_id IN ({marks})""",
-        tuple(sorted(source_nodes)),
-    ).fetchall()
-    live = {(row["artifact_id"], row["source_node_id"]) for row in rows}
-    return {
-        artifact_id: (artifact_id, source_node_id) in live
-        for artifact_id, source_node_id in source_nodes.items()
-    }
+from tests.test_plan_activity_index import _task, db  # noqa: F401
 
 
 def _decision(db, plan_id: str, thread_id: str, name: str, *, source_id: str | None,
@@ -115,34 +88,20 @@ def _source_of(db, artifact_id: str) -> str:
     return json.loads(row["metadata"])["plan_decision"]["source_node_id"]
 
 
-def test_answerable_matches_the_reference_statement_on_every_source_situation(db):
+def test_answerable_on_every_source_situation(db):
     batch = _seed_decisions(db)
-    expected = _reference_answerable(db, batch)
 
-    assert decision_projection.answerable(db, batch) == expected
-    assert expected["live"] is True and expected["accepted"] is True
-    assert expected["failed"] is True
-    assert not any(expected[name] for name in (
-        "closed", "archived", "retired", "other_plan", "absent",
-        "review_active", "review_closed", "archived_owner"))
-    # A decision naming a live node of its own plan other than the one it was drafted
-    # from is a different identity: pairing is by the named node, as before.
-    other_node = next(source for name, source in batch.items() if name == "accepted")
-    swapped = {"live": other_node, "accepted": batch["live"]}
-    assert decision_projection.answerable(db, swapped) == _reference_answerable(db, swapped)
+    assert decision_projection.answerable(db, batch) == {
+        "live": True, "accepted": True, "failed": True,
+        "closed": False, "archived": False, "retired": False,
+        "other_plan": False, "absent": False,
+        "review_active": False, "review_closed": False, "archived_owner": False,
+    }
+    # Pairing is by the node each decision names: swapping two live names changes nothing.
+    swapped = {"live": batch["accepted"], "accepted": batch["live"]}
+    assert decision_projection.answerable(db, swapped) == {"live": True, "accepted": True}
+    assert decision_projection.answerable(db, {"live": batch["closed"]}) == {"live": False}
     assert decision_projection.answerable(db, {}) == {}
-
-
-def test_workspace_activity_read_keeps_its_revision_token(db, monkeypatch):
-    _seed_decisions(db)
-    after = activity_projection.read_workspace(actor=_actor(), db=db)
-    monkeypatch.setattr(decision_projection, "answerable", _reference_answerable)
-    before = activity_projection.read_workspace(actor=_actor(), db=db)
-
-    assert before["revision_token"] == after["revision_token"]
-    assert {k: v for k, v in before.items() if k != "as_of"} == {
-        k: v for k, v in after.items() if k != "as_of"}
-    assert after["attention"]["awaiting_count"] > 0
 
 
 def test_answerable_drives_from_the_batch_and_joins_source_by_primary_key(db):
