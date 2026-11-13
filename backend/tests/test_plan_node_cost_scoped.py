@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import pytest
-
-from plans import mutations, node_cost, node_cost_scoped, service
+from plans import mutations, node_cost, node_cost_scoped, node_time, service
 from tests.test_plan_node_time_rollup import (  # noqa: F401  (db is the fixture)
     T0, _phase, _task, _turn, _watch, db,
 )
@@ -178,19 +176,20 @@ def test_working_seconds_rolls_a_nested_delegation_and_matches_the_full_plan_per
         assert lean[node_id] == full[node_id]["rolled"]["execution"]["seconds"], node_id
 
 
-def test_own_many_timed_no_longer_takes_working_only(db):
-    """The working-only read is its own private function, not a mode of the public one."""
+def test_the_working_only_read_returns_the_working_spans_of_the_full_read(db):
+    """Reading Working alone gives each node the same Working span the full own-facts read does, and no waiting."""
     plan = service.ensure_plan("thread", "owner", db=db)
     node = _task(db, plan.id, "Only")
+    quiet = _task(db, plan.id, "No Turns")
     _turn(db, node, 0, 10)
+    _turn(db, node, 5, 20)
     db.commit()
     now = T0 + timedelta(minutes=60)
-    with pytest.raises(TypeError):
-        node_cost.own_many_timed([node.id], db=db, working_only=True)
-    spans = node_cost._own_many_working_timed([node.id], db=db, now=now)
-    own, full_spans = node_cost.own_many_timed([node.id], db=db, now=now)
+    spans = node_cost._own_many_working_timed([node.id, quiet.id], db=db, now=now)
+    own, full_spans = node_cost.own_many_timed([node.id, quiet.id], db=db, now=now)
     assert spans == {node.id: {"working": full_spans[node.id]["working"], "waiting": []}}
-    assert own[node.id]["execution"]["seconds"] == 10 * 60
+    assert own[node.id]["execution"]["seconds"] == 25 * 60  # the Turns add; the span is their union
+    assert node_time.seconds(spans[node.id])[0] == 20 * 60
 
 
 def test_a_scoped_initiative_with_a_same_plan_split_sibling_equals_the_full_plan_figure(db):

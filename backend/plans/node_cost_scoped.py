@@ -135,20 +135,16 @@ def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
         _, totals, plan_spans = node_cost._roll_plans_with_totals(
             shape["tree"], shape["child_nodes"], own, shape["child_attached"], spans,
         )
-    rolled, _span = node_cost._rollup_one_plan(
-        shape["rows"], own, shape["carried"],
-        {child: totals[child] for child in set(shape["carried"].values())}, spans, plan_spans,
+    rolled = node_cost._rollup_one_plan(
+        own, shape["carried"], {child: totals[child] for child in set(shape["carried"].values())},
+        node_span_roll.shape_spans(shape, spans, plan_spans),
     )
     return {node_id: node_cost._settled(rolled[node_id]) for node_id in shape["ids"]}
 
 
 def _working(shape: dict, spans: dict) -> dict[str, int]:
     """Each asked node's rolled working seconds from its loaded shape and the read own spans: ``_roll``'s spans alone."""
-    plan_spans = {}
-    if shape["carried"]:
-        plan_spans = node_span_roll.rolled_plan_spans(shape["tree"], shape["child_nodes"], shape["child_attached"], spans)
-    children, order = node_span_roll.forest(shape["rows"])
-    carried = node_span_roll.carried_spans(order, children, shape["carried"], spans, plan_spans)
+    carried = node_span_roll.shape_spans(shape, spans).carried
     return {node_id: node_time.seconds(carried[node_id])[0] for node_id in shape["ids"]}
 
 
