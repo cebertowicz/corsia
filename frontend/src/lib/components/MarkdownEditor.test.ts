@@ -232,6 +232,33 @@ describe('MarkdownEditor edits', () => {
 			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
 		});
 
+		it('a press held for over half a second on a comment opens it when the pointer goes up, as before', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			await new Promise<void>((resolve) => setTimeout(resolve, 600));
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+		});
+
+		it('a press that drags into a text selection opens no comment', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+			view.dispatch({ selection: { anchor: 8, head: 14 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			expect(view.state.selection.main.empty).toBe(false);
+		});
+
 		it('where cards open as the phone sheet, keys that carry the caret into a comment before the tap is read open nothing', async () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });
