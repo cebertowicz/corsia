@@ -581,10 +581,15 @@ def test_coverage_splits_the_same_tasks_by_how_each_was_created(section, db) -> 
     coverage = read()["coverage"]
     origins = {(row["provenance"], row["follow_up"]): (row["all_tasks"], row["under_workflow"])
                for row in coverage["by_origin"]}
-    assert origins[("document.feedback_batch", False)] == (2, 0)
-    assert origins[("document.review_request", False)] == (1, 0)
-    assert origins[("tool.plans", True)] == (1, 0)
-    assert origins[(None, False)] == (2, 0)
+    # Every row exactly, so workflow membership credited to the wrong origin fails here, not only a sum.
+    assert origins == {
+        ("document.feedback_batch", False): (2, 0),
+        ("document.review_request", False): (1, 0),
+        ("tool.plans", True): (1, 0),
+        (None, False): (2, 0),
+        ("plans.workflow_run", False): (7, 7),
+        ("plans.workflow_run", True): (1, 1),
+    }
     assert sum(total for total, _ in origins.values()) == coverage["all_tasks"] == 14
     assert sum(under for _, under in origins.values()) == coverage["under_workflow"] == 8
     # Largest share outside workflows first, so the reader sees what holds the share down.
