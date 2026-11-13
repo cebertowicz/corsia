@@ -212,7 +212,7 @@ const surfaceUp = (page: Page, want: { of: string | null; composer: boolean }) =
  * comes back with the same draft and caret at the same place in the comment. The card is expected to sit clear of the
  * panel while it is open, not under it.
  */
-async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1], form: keyof typeof writing, width: number, by: 'mouse' | 'keyboard') {
+async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1], form: keyof typeof writing, width: number, by: 'mouse' | 'keyboard' | 'shortcut') {
 	await page.setViewportSize({ width, height: 900 });
 	await seedDocument(page, request, true);
 	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
@@ -226,9 +226,11 @@ async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1]
 	const before = await activeField(page);
 	expect(before.tag, `the ${form} form should hold the caret before the panel opens (${JSON.stringify(before)})`).toBe('TEXTAREA');
 	expect(before.panel, `the panel is closed before the trip (${JSON.stringify(before)})`).toBeNull();
-	// Open the panel with the mouse, or by focusing the toggle and pressing Enter from the field.
+	// Open the panel with the mouse, with its shortcut from the field, or by focusing the toggle and pressing Enter.
 	if (by === 'mouse') {
 		await toggle.click();
+	} else if (by === 'shortcut') {
+		await page.keyboard.press('ControlOrMeta+Backslash');
 	} else {
 		// Safari's Tab moves between fields only: from a reply it goes into the next thread's reply, which is the reader
 		// choosing that field. Option-Tab is its key for every control, the way a keyboard reader reaches a button there.
@@ -243,7 +245,8 @@ async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1]
 		.toMatchObject({ found: true, up: true, clear: true });
 	const openState = await surfaceUp(page, before);
 	expect(openState.value, `the ${form} draft is unchanged while the panel is open (${JSON.stringify(openState)})`).toBe(before.value);
-	await toggle.click();
+	if (by === 'shortcut') await page.keyboard.press('ControlOrMeta+Backslash');
+	else await toggle.click();
 	await page.waitForTimeout(600);
 	await expect.poll(() => activeField(page), { timeout: 15_000, message: `focus, and the same ${form} field with its draft, are back after the panel closes` })
 		.toMatchObject({ tag: 'TEXTAREA', of: before.of, composer: before.composer });
@@ -260,7 +263,7 @@ async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1]
 
 for (const form of ['list', 'pin', 'draft'] as const) {
 	for (const width of [1360, 1100] as const) {
-		for (const by of ['mouse', 'keyboard'] as const) {
+		for (const by of ['mouse', 'keyboard', 'shortcut'] as const) {
 			test(`keeps the ${form} comment form up through the panel, with its draft and caret, by ${by}, at ${width}`, async ({ page, request }) => {
 				test.setTimeout(120_000);
 				await panelTrip(page, request, form, width, by);
@@ -268,6 +271,77 @@ for (const form of ['list', 'pin', 'draft'] as const) {
 		}
 	}
 }
+
+/**
+ * Tabbing on through the comments is the reader moving on: the panel's trip hands focus to no reply they only passed
+ * through on the way, and their own draft stays where they left it.
+ */
+for (const width of [1360, 1100] as const) {
+	test(`hands focus to no reply the reader tabbed past, at ${width}`, async ({ page, request }) => {
+		test.setTimeout(120_000);
+		await page.setViewportSize({ width, height: 900 });
+		await seedDocument(page, request, true);
+		const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+		if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
+		await page.waitForTimeout(1500);
+		const input = await writing.list.open(page);
+		await input.click();
+		await input.pressSequentially('Half-typed');
+		const before = await activeField(page);
+		expect(before.tag, `the reply holds the caret before the walk (${JSON.stringify(before)})`).toBe('TEXTAREA');
+		// Tab on until focus has passed another thread's reply and gone into a later thread's card.
+		let passed: string | null = null, now: string | null = null;
+		for (let i = 0; i < 40 && !(passed && now && now !== passed); i++) {
+			await page.keyboard.press('Tab');
+			const at = await page.evaluate(() => {
+				const el = document.activeElement;
+				return { reply: !!el?.matches('.ct-input'), of: el?.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null };
+			});
+			if (at.reply && at.of && at.of !== before.of) passed = at.of;
+			now = passed ? at.of : null;
+		}
+		expect(passed && now && now !== passed, `the walk passed another thread's reply (${passed}) and went on into a later card (${now})`).toBeTruthy();
+		await toggle.focus();
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(1800);
+		await toggle.focus();
+		await page.keyboard.press('Enter');
+		await page.waitForTimeout(2400);
+		const after = await activeField(page);
+		expect(after.tag === 'TEXTAREA' && after.of !== before.of, `focus went to another thread's reply after the trip (${JSON.stringify(after)})`).toBe(false);
+		await expect(page.locator(`[data-thread-id="${before.of}"] .ct-input`).first()).toHaveValue('Half-typed');
+	});
+}
+
+/** Writing on in the same reply while the panel is open: the caret comes back where the reader left it last, not at the open. */
+test('brings the caret back where the reader left it while the panel was open', async ({ page, request }) => {
+	test.setTimeout(120_000);
+	await page.setViewportSize({ width: 1360, height: 900 });
+	await seedDocument(page, request, true);
+	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+	if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
+	await page.waitForTimeout(1500);
+	const input = await writing.list.open(page);
+	await input.click();
+	await input.pressSequentially('Half-typed');
+	await page.keyboard.press('ArrowLeft');
+	await page.keyboard.press('ArrowLeft');
+	const before = await activeField(page);
+	await toggle.click();
+	await page.waitForTimeout(600);
+	await expect.poll(() => surfaceUp(page, before), { timeout: 15_000 }).toMatchObject({ found: true, up: true, clear: true });
+	const reply = page.locator(`[data-thread-id="${before.of}"] .ct-input`).first();
+	await reply.click();
+	await page.keyboard.press('End');
+	await page.keyboard.type(' more');
+	await toggle.click();
+	await page.waitForTimeout(600);
+	await expect.poll(() => activeField(page), { timeout: 15_000 }).toMatchObject({ tag: 'TEXTAREA', of: before.of });
+	await page.waitForTimeout(1800);
+	const after = await activeField(page);
+	expect(after.value).toBe('Half-typed more');
+	expect(after.caret, `the caret is where the reader left it with the panel open (${JSON.stringify(after)})`).toBe('Half-typed more'.length);
+});
 
 /** The reader leaving the surface to write is moving on: the panel's close does not pull the surface back. */
 test('leaves focus in the document when the reader clicks into the text as the panel closes', async ({ page, request }) => {

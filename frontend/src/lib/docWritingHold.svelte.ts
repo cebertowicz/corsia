@@ -2,8 +2,11 @@ import { onDestroy } from 'svelte';
 import { writable } from 'svelte/store';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 
-/** The reader's place in a comment field: where to find that field again in whichever form the surface takes, and the caret they left. */
-type WritingPlace = { where: string; caret: [number, number] | null };
+/**
+ * The reader's place in a comment field: where to find that field again in whichever form the surface takes, the caret
+ * they left, and the part of the surface it belongs to (its thread's card, or the new-comment composer).
+ */
+type WritingPlace = { where: string; caret: [number, number] | null; home: string };
 
 /**
  * How long a place is re-placed after the panel closes: as long as the shell is still easing the width back and the
@@ -44,9 +47,15 @@ const caretOf = (field: HTMLElement): [number, number] | null => field instanceo
 function placeOf(target: EventTarget | null): WritingPlace | null {
 	const field = target instanceof HTMLElement && !target.closest('.leaving') ? target : null;
 	const card = field?.matches('.ct-input') ? field.closest<HTMLElement>('[data-thread-id]') : null;
-	if (field && card) return { where: `[data-thread-id="${CSS.escape(card.getAttribute('data-thread-id') ?? '')}"] .ct-input`, caret: caretOf(field) };
-	return field?.matches('.composer [data-drawer-autofocus]') ? { where: '.composer [data-drawer-autofocus]', caret: caretOf(field) } : null;
+	if (field && card) {
+		const home = `[data-thread-id="${CSS.escape(card.getAttribute('data-thread-id') ?? '')}"]`;
+		return { where: `${home} .ct-input`, caret: caretOf(field), home };
+	}
+	return field?.matches('.composer [data-drawer-autofocus]') ? { where: '.composer [data-drawer-autofocus]', caret: caretOf(field), home: '.composer' } : null;
 }
+
+/** A thread's card or the new-comment composer: the parts of the surface a reader writes in. */
+const SURFACE_PART = '[data-thread-id], .composer';
 
 /**
  * Hands the reply or comment field the reader was writing in back across one trip of the Workspace panel, with the
@@ -54,8 +63,10 @@ function placeOf(target: EventTarget | null): WritingPlace | null {
  * form — the column beside the text, or the sheet over it — and even where the form is kept, focus has gone out to
  * the panel's own control to open it and nothing brings it back.
  *
- * The place is only carried when focus left the field for the panel's own control: focus anywhere else is the reader
- * moving on, and nothing is held for it. While the panel is open nothing is pulled back into the document.
+ * The place is carried when the panel moves while focus is in the field (its keyboard shortcut, or a press that does not
+ * move focus), or when focus left the field for the panel's own control crossing only that field's own card and the
+ * app's controls: focus anywhere else — another field, another thread's card — is the reader moving on, and nothing is
+ * held for it. While the panel is open nothing is pulled back into the document.
  *
  * Call it while a comment surface component initialises. `live` is the selector of the form the surface is in now,
  * which is where writing is placed back: the surface's own element cannot answer that, because a form on its way out
@@ -150,16 +161,24 @@ export function holdWritingPlace(live: () => string | null) {
 			if (!place) {
 				if (toPanelControl(target)) { carried ??= left; return; }
 				// Another field, or the document's text, is the reader moving on: nothing is carried and nothing is placed.
-				if (target?.closest('input, textarea, select, [contenteditable="true"], .cm-content')) { left = null; letGo(); }
+				if (target?.closest('input, textarea, select, [contenteditable="true"], .cm-content')) { left = null; letGo(); return; }
+				// Into another thread's card: the reader went on through the comments, and the place they left is not where
+				// they are now. Carrying it would hand focus to a field they only passed through on the way.
+				const part = target?.closest(SURFACE_PART);
+				if (left && part && !part.matches(left.home)) left = null;
 				return;
 			}
 			left = null;
 			// They chose a place to write that is not the one being carried: that one is theirs.
+			if (carried && place.where !== carried.where) carried = null;
 			if (pending && place.where !== pending.where) { carried = null; pending = null; stopTrying(); }
 		};
 		const onFocusOut = (event: FocusEvent) => {
 			const place = placeOf(event.target);
-			if (place && !pressAway) left = place;
+			if (!place || pressAway) return;
+			left = place;
+			// Still writing in the place being carried, with the panel open: carry the caret where it is now.
+			if (carried?.where === place.where) carried = place;
 		};
 		// A press outside the comment surface is the reader moving on: another pane, another field, the document. Going to
 		// the panel's toggle by keyboard crosses the app's other controls, so only a press says they left, and the toggle
@@ -185,7 +204,13 @@ export function holdWritingPlace(live: () => string | null) {
 
 	// Watched on the store itself, not through an effect: the panel's move rebuilds the surface around the writing,
 	// and the hand-back must not depend on which component instance happens to be alive or when it re-renders.
+	// The panel's keyboard shortcut moves it without focus leaving the field: the field the reader is in when it moves is
+	// the place. The store answers at once on subscribing, which is no move at all.
+	let subscribed = false;
 	const stopWatchingPanel = paneCollapsed.subscribe((nowClosed) => {
+		const here = subscribed ? placeOf(document.activeElement) : null;
+		subscribed = true;
+		if (here) carried = here;
 		if (nowClosed) carryBack();
 		else { pending = null; stopTrying(); }
 	});

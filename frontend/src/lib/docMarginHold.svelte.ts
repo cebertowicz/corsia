@@ -1,7 +1,7 @@
 import { onDestroy } from 'svelte';
 import { fromStore } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
-import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { isPaneShortcut, paneCollapsed } from '$lib/stores/paneCollapsed';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
 import { placeAnchorAt } from '$lib/documentReadingPlace';
 
@@ -103,7 +103,9 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const timer = setTimeout(() => observer.disconnect(), 1500);
 		// Keep the opening anchor for the return unless the reader acts elsewhere in the meantime.
 		const takeOver = (event: Event) => {
-			if (event.target instanceof Element && event.target.closest('[aria-label="Toggle panel"]')) return;
+			// The panel's own control and its shortcut (its modifier goes down first) are the trip, not the reader acting elsewhere.
+			const shortcut = isPaneShortcut(event) || (event instanceof KeyboardEvent && (event.key === 'Meta' || event.key === 'Control'));
+			if (shortcut || (event.target instanceof Element && event.target.closest('[aria-label="Toggle panel"]'))) return;
 			panelPlace = null;
 			stopHold?.();
 		};

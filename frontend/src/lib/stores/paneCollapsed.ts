@@ -2,6 +2,9 @@ import { writable } from 'svelte/store';
 
 export const paneCollapsed = writable(false);
 
+/** The pane's keyboard shortcut, Cmd-\ (Ctrl-\ off the Mac). */
+export const isPaneShortcut = (event: Event): boolean => event instanceof KeyboardEvent && (event.metaKey || event.ctrlKey) && event.key === '\\';
+
 /** While true the pane takes a new width at once instead of easing to it. */
 export const paneSnapping = writable(false);
 
