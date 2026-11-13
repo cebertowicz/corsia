@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3204,
+      "bytes": 3614,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
+      "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
     },
     {
       "bytes": 389,
@@ -340,6 +340,18 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
+      "bytes": 7573,
+      "kind": "skill",
+      "path": "skills/instruction-review/SKILL.md",
+      "sha256": "7266e64e274eb692fb19a2220fa0246d3fc3b89eba8d1403f986ea276ab61eaa"
+    },
+    {
+      "bytes": 5358,
+      "kind": "skill",
+      "path": "skills/instruction-review/corsia.yaml",
+      "sha256": "343db1c2738e5a36d0c8caf1ac42bf9c5c17ca1426b543b2022ae3e124721946"
+    },
+    {
       "bytes": 3634,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
@@ -406,10 +418,10 @@
       "sha256": "e4d87199e693df821fe3e68e08b4fea751f2bd6ee4a29a2103f2a61358806937"
     },
     {
-      "bytes": 4996,
+      "bytes": 5471,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "71424ad46a0ed871d8049eb26deace2edb8813fcbcd6468d12b769c5f6a3c35e"
+      "sha256": "bdff5dbba57c49a7b33e591396d8a8e35845c5267dc199b041ecc069b27e5f7a"
     }
   ],
   "version": "v1"

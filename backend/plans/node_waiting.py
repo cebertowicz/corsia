@@ -45,6 +45,8 @@ Interval = tuple[float, float]
 
 def union(intervals: list[Interval]) -> list[Interval]:
     """Sorted, non-overlapping intervals covering the same time; empty ones drop."""
+    if len(intervals) < 2:  # nothing to merge: the roll calls this per node, mostly with none or one
+        return [(intervals[0][0], intervals[0][1])] if intervals and intervals[0][1] > intervals[0][0] else []
     merged: list[Interval] = []
     for start, end in sorted(item for item in intervals if item[1] > item[0]):
         if merged and start <= merged[-1][1]:
@@ -65,6 +67,8 @@ def intersect(left: list[Interval], right: list[Interval]) -> list[Interval]:
 def subtract(left: list[Interval], right: list[Interval]) -> list[Interval]:
     """The time in ``left`` that ``right`` does not cover."""
     result: list[Interval] = []
+    if not left:
+        return result
     cuts = union(right)
     for start, end in union(left):
         cursor = start

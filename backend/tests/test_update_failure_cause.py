@@ -12,6 +12,8 @@ import pytest
 from fastapi import HTTPException
 from infra.account_validation import AccountError
 
+pytestmark = pytest.mark.usefixtures("newer_build_available")
+
 
 @pytest.mark.asyncio
 async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db, monkeypatch):

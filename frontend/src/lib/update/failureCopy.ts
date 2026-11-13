@@ -1,6 +1,16 @@
 /** What a failed update says: one plain sentence per cause, and what state CORSIA is in. */
 
 import type { ClientVerdict, UpdateFailure, UpdateOperation } from './model';
+import type { UpdateStatus } from './types';
+
+/**
+ * The version of the process that is running, for every surface that words a failure. `running_version` is read once when
+ * that process starts; `current_version` is what is on disk, and an update replaces that before the restart. A service that
+ * is down has no reading: the last one may belong to a process that has since gone.
+ */
+export function runningVersionOf(status: UpdateStatus | null | undefined, serviceDown = false): string | null {
+	return serviceDown ? null : (status?.running_version ?? null);
+}
 
 function parseDetail(detail: string | null | undefined): Record<string, unknown> {
 	try {
@@ -51,12 +61,22 @@ export interface FailureCopy {
 // Only where nothing was touched: the disk check and a download that never advanced the checkout.
 const RAN_ON = 'CORSIA kept running and nothing was changed.';
 // A failed pull can update Git's tracking refs, but not the checked-out code.
-const CODE_UNCHANGED = "CORSIA kept running and your code wasn't changed.";
-// The checkout may already hold the new version, so this claims only what is certain.
-const KEPT_VERSION = 'CORSIA is still running the version it had.';
+const CODE_UNCHANGED = "CORSIA kept running and your code wasn’t changed.";
+// The version is the running process's, captured when it started. Without one this claims only what is certain.
+function stillOn(version: string | null | undefined): string {
+	return version ? `CORSIA is still on ${version}.` : "CORSIA’s version didn’t change.";
+}
+// For a version that may be neither the old one nor the target, so "still" could be false.
+function onVersion(version: string): string {
+	return `CORSIA is on ${version}.`;
+}
+
+function wrongVersionHeadline(running: string, target: unknown): string {
+	return typeof target === 'string' && target ? `CORSIA is on ${running}, not ${target}.` : onVersion(running);
+}
 
 function refusal(headline: string, body: string, retryLabel: string | null): FailureCopy {
-	return { title: "Update didn't start", headline, body, toastLine: null, retryLabel };
+	return { title: "Couldn’t start the update", headline, body, toastLine: null, retryLabel };
 }
 
 function stopped(headline: string, body: string): FailureCopy {
@@ -72,7 +92,7 @@ function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
 	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. Free up space, then select Retry. ${RAN_ON}` : `Free up space, then select Retry. ${RAN_ON}`;
 	return {
-		title: "Update didn't start",
+		title: "Couldn’t start the update",
 		headline: 'Not enough disk space for a safety backup.',
 		body,
 		toastLine: disk ? `Needs ${Math.max(1, disk.neededGb - disk.freeGb)} GB more free space` : null,
@@ -81,10 +101,10 @@ function diskCopy(detail: string | null): FailureCopy {
 }
 
 /** One plain sentence per failure code; the stored summary when there is no code. */
-export function failureCopy(failure: UpdateFailure): FailureCopy {
+export function failureCopy(failure: UpdateFailure, runningVersion?: string | null): FailureCopy {
 	if (failure.client?.kind === 'version_mismatch') {
 		return {
-			title: "The update didn't finish",
+			title: 'Update failed',
 			headline: 'The update finished, but CORSIA still shows the old version.',
 			body: failure.client.message,
 			toastLine: null,
@@ -93,7 +113,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 	}
 	if (failure.client) {
 		return {
-			title: "Update didn't start",
+			title: "Couldn’t start the update",
 			headline: failure.client.message,
 			body: '',
 			toastLine: null,
@@ -105,57 +125,57 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return diskCopy(failure.detail);
 		case 'fetch_failed':
 			return {
-				title: "Update didn't start",
-				headline: "Couldn't download the update.",
+				title: "Couldn’t start the update",
+				headline: "Couldn’t download the update.",
 				body: RAN_ON,
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'build_failed':
 			return {
-				title: "Update didn't start",
-				headline: "Couldn't build the update.",
-				body: KEPT_VERSION,
+				title: "Couldn’t start the update",
+				headline: "Couldn’t build the update.",
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'update_refused':
 			return {
-				title: "Update didn't finish",
-				headline: "Update didn't finish",
-				body: parseDetail(failure.detail).backend_healthy === true ? KEPT_VERSION : '',
+				title: 'Update failed',
+				headline: parseDetail(failure.detail).backend_healthy === true ? stillOn(runningVersion) : runningVersion ? onVersion(runningVersion) : stillOn(null),
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'launch_failed':
 			return {
-				title: "Update didn't finish",
-				headline: "Couldn't start the restart.",
-				body: 'CORSIA is still running.',
+				title: 'Update failed',
+				headline: "Couldn’t start the restart.",
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'version_unverified':
 			return {
-				title: "Update didn't finish",
-				headline: "Couldn't confirm the new version.",
-				body: "The update's last check didn't pass, so CORSIA can't tell which version is running.",
+				title: "Couldn’t confirm the update",
+				headline: runningVersion ? onVersion(runningVersion) : "CORSIA can’t tell which version is running.",
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'wrong_version_running':
 			return {
-				title: "Update didn't finish",
-				headline: 'CORSIA started a different version.',
-				body: "It isn't the version this update was for.",
+				title: 'Update failed',
+				headline: runningVersion ? wrongVersionHeadline(runningVersion, parseDetail(failure.detail).target_version) : "Couldn’t start the new version.",
+				body: '',
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'rolled_back':
 			return {
-				title: "Update didn't finish",
-				headline: "Couldn't start the new version.",
-				body: KEPT_VERSION,
+				title: 'Update failed',
+				headline: "Couldn’t start the new version.",
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
@@ -163,36 +183,36 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: 'Update cancelled',
 				headline: 'The update was cancelled before CORSIA restarted.',
-				body: KEPT_VERSION,
+				body: stillOn(runningVersion),
 				toastLine: null,
 				retryLabel: 'Retry',
 			};
 		case 'drain_failed':
-			return stopped("Your agents didn't reach a safe stopping point in time.", KEPT_VERSION);
+			return stopped("Your agents didn’t reach a safe stopping point in time.", stillOn(runningVersion));
 		case 'update_timed_out':
-			return stopped('The update took too long to download and build.', KEPT_VERSION);
+			return stopped('The update took too long to download and build.', stillOn(runningVersion));
 		case 'prepare_failed':
-			return stopped("Couldn't prepare the update.", KEPT_VERSION);
+			return stopped("Couldn’t prepare the update.", stillOn(runningVersion));
 		case 'index_locked':
 			return refusal(
-				"Another program is using CORSIA's files.",
+				"Another program is using CORSIA’s files.",
 				`Wait for it to finish, then select Retry. If it doesn’t clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
 				'Retry',
 			);
 		case 'checkout_detached':
-			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
+			return refusal("This copy of CORSIA can’t update itself because it isn’t set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
 			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then select Retry. ${RAN_ON}`, 'Retry');
 		case 'checkout_no_upstream':
-			return refusal(`${branchLabel(failure)} isn't set to track another branch.`, `Ask the CORSIA agent to set the branch it should track, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
+			return refusal(`${branchLabel(failure)} isn’t set to track another branch.`, `Ask the CORSIA agent to set the branch it should track, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
 		case 'checkout_diverged':
 			return refusal(`${branchLabel(failure)} and the branch it tracks have both changed.`, `Ask the CORSIA agent to combine their changes, then select Retry. ${CODE_UNCHANGED}`, 'Retry');
 		case 'restart_pending':
-			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
+			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${stillOn(runningVersion)}`, 'Restart now'), retryAction: 'restart' };
 		default:
 			// A terminal row carries no phase, so nothing here can say how far the update got.
 			return {
-				title: "Update didn't finish",
+				title: 'Update failed',
 				headline: 'The update stopped before it finished.',
 				body: '',
 				toastLine: null,

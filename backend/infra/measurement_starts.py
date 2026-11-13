@@ -74,6 +74,9 @@ _LIVE_SOURCE = {
     "first_try": "accepted_outcomes",
     "rejections_per_outcome": "accepted_outcomes",
     "asks_per_outcome": "accepted_outcomes",
+    # The workflow share is a fraction of that same task set: a task either ran under a run or it did
+    # not, and both answers exist from the first accepted outcome, so an early period is a measured zero.
+    "under_workflow_pct": "accepted_outcomes",
     # Corrections are measured from the earliest classified source (message, comment or decision answer): an earlier period had no classifier, so it is not a zero.
     "corrections_per_outcome": "classified_corrections",
     "asks_plus_corrections_per_outcome": "classified_corrections",

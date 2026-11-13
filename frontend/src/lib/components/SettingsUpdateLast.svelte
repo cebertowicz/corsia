@@ -2,6 +2,7 @@
 	import { Button } from '$lib/components/ui';
 	import type { FailureCopy } from '$lib/update/failureCopy';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
+	import { headlineParts } from '$lib/update/versionParts';
 	import { retryUpdate, updateStarting } from '$lib/update/store';
 	import type { UpdateFailure } from '$lib/update/model';
 
@@ -21,7 +22,7 @@
 <div class="service-row last-update">
 	<div class="body">
 		<span class="service-name">Last update</span>
-		<span class="headline">{copy.headline}</span>
+		<span class="headline">{#each headlineParts(copy.headline) as part}{#if part.version}<span class="version">{part.text}</span>{:else}{part.text}{/if}{/each}</span>
 		{#if copy.body}<span class="detail">{copy.body}</span>{/if}
 		{#if failure.conductorTold}<span class="detail">The CORSIA agent has been told.</span>{/if}
 		{#if hasDetails}
@@ -45,6 +46,7 @@
 	.service-name { font-size: var(--text-subhead); color: var(--text-primary); }
 	.body { flex: 1; display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--text-caption); line-height: 1.45; }
 	.headline { color: var(--amber-text); }
+	.version { white-space: nowrap; }
 	.detail { color: var(--text-tertiary); }
 	.service-actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); }
 	.service-actions > :global(.btn.ghost:last-child) { margin-right: calc(-1 * var(--button-pad-x-sm)); }
