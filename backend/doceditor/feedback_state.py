@@ -159,12 +159,6 @@ def undelivered_documents(db, keys: dict[str, set[str]]) -> list[dict[str, Any]]
     return documents
 
 
-def _audience(db, artifact):
-    from doceditor.comment_audience import document_audience
-
-    return document_audience(db, artifact)
-
-
 def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     """Project the user's durable feedback state for one document canvas."""
     artifact = registry_models.get_artifact(artifact_id, db=db)
@@ -175,7 +169,6 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     return {
         **open_counts_for_document(db, artifact_id),
         "owner_label": owner["title"] if owner else None,
-        "comment_goes_to": _audience(db, artifact),
         "undelivered_batches": undelivered_for_document(
             db,
             author_kind="user",

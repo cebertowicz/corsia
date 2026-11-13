@@ -10,7 +10,6 @@ vi.mock('$lib/api/docs', () => ({
 	fetchComments: mocks.fetchComments,
 	postComment: mocks.postComment,
 	patchComment: mocks.patchComment,
-	patchFailureOf: () => ({ cause: 'other', reference: null }),
 	persistPositions: mocks.persistPositions,
 	markCommentThreadViewed: mocks.markCommentThreadViewed,
 }));

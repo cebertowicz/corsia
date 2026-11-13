@@ -86,7 +86,7 @@ const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
 /** An unread thread's highlight names its thread, so its sign can find where the highlight ends. */
 const markOf = (range: CommentRange) => !range.unread ? (range.focused ? anchorFocused : anchor)
-	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id } });
+	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id, 'data-unread': '' } });
 
 // A suggestion with an empty quote is a pure insertion: its range is a point.
 const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to) || (!!range.point && range.from === range.to);

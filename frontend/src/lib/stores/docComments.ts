@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import {
-	fetchComments, markCommentThreadViewed, postComment, patchComment, patchFailureOf, persistPositions, type PatchFailure, type ServerComment
+	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
@@ -161,9 +161,9 @@ export async function addReply(artifactId: string, commentId: string, text: stri
 }
 
 /** Flips a flag at once and puts it back when the request fails. With `wait` the flag changes only once the request is answered: the caller shows the old state until then. Resolves true when the server took it. */
-function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'acked' | 'left', value: boolean, wait = false): Promise<true | PatchFailure> {
+function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'acked', value: boolean, wait = false): Promise<boolean> {
 	// Re-opening a thread takes back every acknowledgement on the server, so the card drops them too, not on the next load.
-	const local: Partial<DocComment> = field === 'resolved' && !value ? { resolved: false, acked: false, acknowledgedBy: [] } : field === 'left' ? { leftByYou: value } : { [field]: value };
+	const local: Partial<DocComment> = field === 'resolved' && !value ? { resolved: false, acked: false, acknowledgedBy: [] } : { [field]: value };
 	let prev: Partial<DocComment> | undefined;
 	const set = (next: Partial<DocComment>) => docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
@@ -174,10 +174,10 @@ function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'a
 		return { ...all, [artifactId]: list };
 	});
 	if (!wait) set(local);
-	return patchComment(commentId, { [field]: value }).then(() => { if (wait) set(local); return true as const; }, (e) => {
+	return patchComment(commentId, { [field]: value }).then(() => { if (wait) set(local); return true; }, (e) => {
 		console.error(`comment ${field} failed`, e);
 		if (!wait && prev) set(prev);
-		return patchFailureOf(e);
+		return false;
 	});
 }
 
@@ -192,12 +192,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 }
 
 export function resolveComment(artifactId: string, commentId: string, resolved = true, wait = false): Promise<boolean> {
-	return patchFlag(artifactId, commentId, 'resolved', resolved, wait).then((done) => done === true);
-}
-
-/** Resolves true once the server has taken it, or why it did not; the card keeps its old state until then, so the control can show it pending or failed. */
-export function leaveCommentThread(artifactId: string, commentId: string, left = true): Promise<true | PatchFailure> {
-	return patchFlag(artifactId, commentId, 'left', left, true);
+	return patchFlag(artifactId, commentId, 'resolved', resolved, wait);
 }
 
 export function ackComment(artifactId: string, commentId: string, acked = true) {

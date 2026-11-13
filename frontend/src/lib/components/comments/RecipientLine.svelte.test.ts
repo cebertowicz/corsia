@@ -25,7 +25,7 @@ describe('RecipientLine', () => {
 		expect(host.textContent).toContain('No one gets this reply.');
 	});
 
-	it('has no mute control: that lives with the card\'s other actions', () => {
+	it('has no control of its own while it names someone', () => {
 		render({ names: ['Docs lane'] });
 		expect(host.querySelector('button')).toBeNull();
 	});
@@ -38,7 +38,7 @@ describe('RecipientLine', () => {
 	});
 
 	it('says it is checking, then offers Retry when the check failed', () => {
-		render({ names: [], notice: 'loading', muted: false });
+		render({ names: [], notice: 'loading' });
 		expect(host.textContent).toContain('Checking who gets this…');
 		expect(host.querySelector('button')).toBeNull();
 		unmount(component); host.remove();

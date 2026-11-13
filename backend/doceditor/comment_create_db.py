@@ -109,12 +109,6 @@ def _record_tags(connection, request: CommentInput, row: dict) -> None:
     """Store a new comment's tags and mentions, and count a tagged post once it commits."""
     comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
     comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
-    if request.tag_person and request.parent_id:
-        # Tagging someone who left the thread brings them back into it.
-        from doceditor.comment_audience import set_person_left
-
-        parent = connection.execute("SELECT parent_id FROM doc_comments WHERE id=?", (request.parent_id,)).fetchone()
-        set_person_left(connection, str((parent[0] if parent else None) or request.parent_id), False)
     agent_tags = len(set(request.tagged_agent_ids))
     if agent_tags or request.tag_person:
         # tag_count stays what it counted before: agents. A tag of the person is its own fact.

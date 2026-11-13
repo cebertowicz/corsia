@@ -11,22 +11,19 @@ export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerCom
 
 /** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
 export class RequestRefused extends Error {
-	/** `status` and the server's `reference` (minted for a server-side failure and found in its log) are read from the answer; both are null when it names none. */
-	constructor(message: string, readonly kind: string | null, readonly status: number | null = null, readonly reference: string | null = null) {
+	constructor(message: string, readonly kind: string | null) {
 		super(message);
 	}
 }
 
-export { patchFailureOf, type PatchFailure } from './patchFailure';
-
 export async function ok(res: Response) {
 	if (!res.ok) {
 		const detail = await res.text().catch(() => '');
-		let parsed: unknown, kind: unknown, reference: unknown;
-		try { ({ detail: parsed, kind, reference } = JSON.parse(detail) ?? {}); } catch { /* Non-JSON failures keep the HTTP status below. */ }
+		let parsed: unknown, kind: unknown;
+		try { ({ detail: parsed, kind } = JSON.parse(detail) ?? {}); } catch { /* Non-JSON failures keep the HTTP status below. */ }
 		const refusal = docOpenFailure(parsed);
 		if (refusal) throw refusal;
-		throw new RequestRefused(`${res.status} ${detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null, res.status, typeof reference === 'string' ? reference : null);
+		throw new RequestRefused(`${res.status} ${detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
 }
@@ -193,7 +190,7 @@ export async function postComment(
 	return data.comment;
 }
 
-export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; left: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion; diagram_source: string }>): Promise<ServerComment> {
+export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion; diagram_source: string }>): Promise<ServerComment> {
 	const data = await ok(await apiFetch(`/api/comments/${commentId}`, {
 		sessionInAddress: true,
 		method: 'PATCH',

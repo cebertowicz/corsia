@@ -20,9 +20,8 @@ export interface ServerComment {
 	resolved: number;
 	/** Who has acknowledged the thread, in order; on a top-level comment only. `kind` user is the person. */
 	acknowledged_by?: Acknowledger[];
-	/** Agents the person's next reply wakes, and whether the person left this thread; on a top-level comment only. */
+	/** Agents the person's next reply wakes; on a top-level comment only. */
 	reply_goes_to?: { id: string; name: string }[];
-	left_by_you?: boolean;
 	replacement?: string | null;
 	insert_after?: boolean | number;
 	decision?: 'accepted' | 'rejected' | null;
@@ -60,8 +59,8 @@ export interface CommentFeedback {
 	document_held_count?: number;
 	image_held_count?: number;
 	owner_label: string | null;
-	/** Who a new comment goes to, from the same rule delivery uses. */
-	comment_goes_to?: { state: 'agent' | 'none'; id?: string; name?: string; via?: 'owner' | 'supervisor' };
+	/** Who a new comment goes to: the agent delivery wakes for it. */
+	comment_goes_to?: { state: 'agent' | 'none'; id?: string; name?: string };
 	undelivered_batches: UndeliveredBatch[];
 }
 
