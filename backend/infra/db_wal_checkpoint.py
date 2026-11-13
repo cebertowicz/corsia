@@ -35,7 +35,7 @@ class WalCheckpoint:
             if self.wal_path.stat().st_size > self.threshold_bytes:
                 # PASSIVE neither waits for readers/writers nor takes the WAL
                 # writer lock. Another checkpointer returns busy immediately.
-                with startup_progress.transaction_writes(connection):
+                with startup_progress.database_writes(connection):
                     connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
         except FileNotFoundError:
             pass  # no WAL, including an in-memory database or a completed close

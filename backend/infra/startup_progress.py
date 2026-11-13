@@ -66,8 +66,8 @@ HEARTBEAT_SECONDS = 1.0
 #: second between calls at this value. A single operation that walks a whole
 #: b-tree (``quick_check``'s page walk) makes no calls at all while it runs.
 SQLITE_PROGRESS_OPS = 100_000
-#: COMMIT/autocheckpoint does no VM callbacks. Observe only actual writes to
-#: this transaction's database/WAL; unchanged files never produce a heartbeat.
+#: COMMIT and checkpoint I/O do no VM callbacks. Observe only actual writes to
+#: the observed connection's database/WAL; unchanged files never beat.
 FILE_ACTIVITY_SECONDS = 0.5
 
 _state: dict | None = None
@@ -122,8 +122,8 @@ def watch(conn: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def transaction_writes(conn: sqlite3.Connection) -> Iterator[None]:
-    """Observe actual DB/WAL writes through startup work, including checkpoints.
+def database_writes(conn: sqlite3.Connection) -> Iterator[None]:
+    """Observe actual DB/WAL writes through a startup transaction or checkpoint.
 
     Observe only this connection's files, never logs or a timer alone. No
     SQLite calls run in the observer, which is joined as soon as the work exits.
