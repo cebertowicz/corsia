@@ -129,13 +129,20 @@ def turn(db, turn_id: str, node_id: str, *, started: str, ended: str, thread_id:
                (turn_id, thread_id, OPUS, started, ended, node_id, node_id))
 
 
-def task(db, node_id: str, plan_id: str, *, created: str, title: str = "A task outside any workflow") -> None:
-    """An accepted task that ran under no workflow, which coverage counts in the denominator only."""
+def task(db, node_id: str, plan_id: str, *, created: str, title: str = "A task outside any workflow",
+         origin: str | None = None, follows: str | None = None) -> None:
+    """An accepted task that ran under no workflow, which coverage counts in the denominator only.
+
+    ``origin`` is the provenance its writer stamps on ``node_created``; ``None`` seeds no creation event.
+    """
     with raw_plan_seed(db):
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                   "commitment_id,requirements_revision,revision,created_at,updated_at) "
-                   "VALUES (?,?,NULL,1,'task',?,'done','accepted',?,1,1,?,?)",
-                   (node_id, plan_id, title, node_id, created, created))
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,follow_up_of,order_key,kind,title,"
+                   "acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                   "VALUES (?,?,NULL,?,1,'task',?,'done','accepted',?,1,1,?,?)",
+                   (node_id, plan_id, follows, title, node_id, created, created))
+        if origin is not None:
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,created_at) "
+                       "VALUES (?,?,?,'node_created',?)", (f"created-{node_id}", node_id, origin, created))
     with raw_plan_seed(db):
         db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
                    "VALUES (?,?,'test','accepted','active','accepted',?)", (f"end-{node_id}", node_id, created))
@@ -403,7 +410,7 @@ def test_the_window_is_the_pages_current_window_and_coverage_counts_the_pages_ta
     assert section["window"] == WINDOW
     # The page's task set: every task accepted inside the window, whether or not a workflow ran it.
     # Eight of the ten sit under a run, including the failed run's accepted step and the unversioned run's.
-    assert section["coverage"] == {"under_workflow": 8, "all_tasks": 10}
+    assert headline(section["coverage"]) == {"under_workflow": 8, "all_tasks": 10}
 
 
 def test_each_workflow_is_one_entry_biggest_first_with_its_owner(section) -> None:
@@ -543,7 +550,7 @@ def test_a_selected_agent_sees_only_its_own_runs(db) -> None:
     assert [entry["ref"] for entry in only_billing["workflows"]] == [INVOICE]
     assert "root" not in json.dumps(only_billing)
     # The other agent's plan is out of this scope: its two untagged tasks leave the denominator too.
-    assert read(MeasurementScope("alpha", "root"))["coverage"] == {"under_workflow": 7, "all_tasks": 9}
+    assert headline(read(MeasurementScope("alpha", "root"))["coverage"]) == {"under_workflow": 7, "all_tasks": 9}
 
 
 def test_empty_scope_keeps_coverage_without_reading_workflow_history(db, monkeypatch) -> None:
@@ -552,8 +559,42 @@ def test_empty_scope_keeps_coverage_without_reading_workflow_history(db, monkeyp
     task(db, 'plain-only', 'plan-root', created='2026-10-01T09:00:00Z')
     monkeypatch.setattr(workflow_verdict_read, 'read_snapshot', lambda *args, **kwargs: pytest.fail('no runs to read'))
     result = read()
-    assert result['coverage'] == {'under_workflow': 0, 'all_tasks': 1}
+    assert headline(result['coverage']) == {'under_workflow': 0, 'all_tasks': 1}
     assert result['workflows'] == []
+
+
+def headline(coverage: dict[str, Any]) -> dict[str, int]:
+    """The coverage headline alone, without its split by origin."""
+    return {key: coverage[key] for key in ("under_workflow", "all_tasks")}
+
+
+def test_coverage_splits_the_same_tasks_by_how_each_was_created(section, db) -> None:
+    """Each origin counts its tasks and how many ran under a workflow; the rows sum to the headline.
+
+    The section's run steps were created by ``plans.workflow_run``; its two plain tasks carry no
+    creation event, so they read ``null``, never a guessed origin.
+    """
+    task(db, "comments-1", "plan-root", created="2026-10-10T09:00:00Z", origin="document.feedback_batch")
+    task(db, "comments-2", "plan-root", created="2026-10-11T09:00:00Z", origin="document.feedback_batch")
+    task(db, "review-1", "plan-root", created="2026-10-12T09:00:00Z", origin="document.review_request")
+    task(db, "redo-1", "plan-root", created="2026-10-13T09:00:00Z", origin="tool.plans", follows="plain-1")
+    coverage = read()["coverage"]
+    origins = {(row["provenance"], row["follow_up"]): (row["all_tasks"], row["under_workflow"])
+               for row in coverage["by_origin"]}
+    # Every row exactly, so workflow membership credited to the wrong origin fails here, not only a sum.
+    assert origins == {
+        ("document.feedback_batch", False): (2, 0),
+        ("document.review_request", False): (1, 0),
+        ("tool.plans", True): (1, 0),
+        (None, False): (2, 0),
+        ("plans.workflow_run", False): (7, 7),
+        ("plans.workflow_run", True): (1, 1),
+    }
+    assert sum(total for total, _ in origins.values()) == coverage["all_tasks"] == 14
+    assert sum(under for _, under in origins.values()) == coverage["under_workflow"] == 8
+    # Largest share outside workflows first, so the reader sees what holds the share down.
+    outside = [row["all_tasks"] - row["under_workflow"] for row in coverage["by_origin"]]
+    assert outside == sorted(outside, reverse=True)
 
 
 def test_route_returns_visible_plan_target_for_worker_run(db) -> None:
@@ -635,7 +676,160 @@ def test_the_route_answers_for_the_page_parameters_and_the_live_window(db) -> No
     assert set(body) == {"definition_version", "scope", "period", "window", "coverage", "workflows"}
     assert body["definition_version"] == 1 and body["scope"] == {"project": "all", "agent": None}
     assert body["window"] == {"from": live.latest.first, "to": live.period_end(live.latest.last)}
-    assert body["coverage"] == {"under_workflow": 1, "all_tasks": 2}
+    assert headline(body["coverage"]) == {"under_workflow": 1, "all_tasks": 2}
     (entry,) = body["workflows"]
     assert [run["run_id"] for run in entry["runs"]] == ["clock-run-in"]
     assert entry["ref"] == CLOSE and entry["owner"] is None
+
+
+def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, monkeypatch) -> None:
+    """The headline and the ``under_workflow_pct`` series are one read of one rule.
+
+    The series is asked through its own route, on the same page grain and scope, and its rows for
+    the window's periods add up to the section's own ``coverage``, so a correction to what counts as
+    running under a workflow can only ever move the two together.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import measurement
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: NOW)
+    seed()
+    section = read()
+
+    app = FastAPI()
+    app.include_router(measurement.router)
+    app.dependency_overrides[measurement.require_user] = lambda: {"id": "steve"}
+    body = TestClient(app).get(
+        "/api/measurement/series?ids=under_workflow_pct&project=all&agent=none&grain=weeks&timezone=UTC"
+    ).json()
+
+    window = resolve_grain("weeks", "UTC", now=NOW).latest
+    rows = {row["period"]: row for row in body["rows"] if row["period"] in window.periods}
+    assert headline(section["coverage"]) == {"under_workflow": 8, "all_tasks": 10}
+    assert sorted(period for period, row in rows.items() if row["n"]) == ["2026-10-05", "2026-10-12"]
+    assert sum(row["n"] for row in rows.values()) == section["coverage"]["all_tasks"]
+    assert sum((row["raw_value"] or 0) * row["n"] for row in rows.values()) == pytest.approx(
+        section["coverage"]["under_workflow"])
+
+
+def _decided(read: tuple, nodes: list[str]) -> dict[str, tuple[bool, str]]:
+    """For each node: whether ``run_roots`` made it a run, and the run ``workflow_run_of`` gives it."""
+    from core.correction_attribution import workflow_run_of
+
+    rows, roots = read
+    parents = {str(row["id"]): row["parent_id"] for row in rows}
+    root_ids = frozenset(str(row["id"]) for row in roots)
+    return {node: (node in root_ids, workflow_run_of(node, parents, root_ids)) for node in nodes}
+
+
+def _wider_roots(rows) -> set[str]:
+    """A stricter run rule than ``run_roots``: it also walks every ancestor of the follow-up source.
+
+    Not a rule the product has. It stands for any later rule that follows a row's links further than
+    today's, which the bounded read must still answer as the whole-scope read does.
+    """
+    by_id = {str(row["id"]): row for row in rows}
+
+    def carries(start: str | None, workflow: str) -> bool:
+        seen: set[str] = set()
+        while start in by_id and start not in seen:
+            if by_id[start]["workflow_ref"] == workflow:
+                return True
+            seen.add(start)
+            start = by_id[start]["parent_id"]
+        return False
+
+    return {node for node, row in by_id.items() if row["workflow_ref"]
+            and not carries(row["parent_id"], row["workflow_ref"])
+            and not carries(row["follow_up_of"], row["workflow_ref"])}
+
+
+def test_the_runs_above_some_tasks_are_read_without_the_rest_of_the_scope(db) -> None:
+    """``scoped_runs(above=...)`` reads only what is reachable from the named tasks and decides it alike.
+
+    Each task gets the run the whole-scope read gives it, and the read holds those tasks and the nodes
+    their rows link to, so it does not grow with the scope's other history. The continued phase is the
+    case only the follow-up link decides: it carries the workflow of the run it follows, which sits on
+    no chain above its step, so it must not be taken for a run.
+    """
+    from core.correction_attribution import NOT_IN_WORKFLOW
+    from core.workflow_builtin_operands import scoped_runs
+    from infra.database import get_db
+
+    seed()
+    connection = get_db()
+    try:
+        phase(connection, "close-v3-a-continued", "plan-root", created="2026-10-08T09:00:00Z")
+        with raw_plan_seed(connection):
+            connection.execute("UPDATE plan_nodes SET follow_up_of='close-v3-a' WHERE id='close-v3-a-continued'")
+        step(connection, "cont-gather", "plan-root", "close-v3-a-continued", "gather", title="Gather statements",
+             created="2026-10-08T09:10:00Z", ended="2026-10-08T09:30:00Z")
+        connection.commit()
+        tasks = ["a-gather", "c-reconcile-2", "cont-gather", "plain-1"]
+        scope = MeasurementScope("all", None)
+        whole = scoped_runs(connection, "steve", scope)
+        above = scoped_runs(connection, "steve", scope, above=tasks)
+    finally:
+        connection.close()
+
+    returned = sorted(str(row["id"]) for row in above[0])
+    runs = {node: run for node, (_, run) in _decided(whole, tasks).items()}
+    assert _decided(above, returned) == _decided(whole, returned)
+    assert runs["a-gather"] == "close-v3-a" and runs["c-reconcile-2"] == "close-v4-c"
+    assert runs["plain-1"] == NOT_IN_WORKFLOW
+    assert runs["cont-gather"] != "close-v3-a-continued"
+    assert returned == sorted([
+        "a-gather", "close-v3-a", "c-reconcile-2", "c-reconcile", "close-v4-c",
+        "cont-gather", "close-v3-a-continued", "plain-1"])
+    assert len(whole[0]) > len(above[0])
+
+
+def test_every_node_the_bounded_read_returns_is_decided_as_the_whole_scope_decides_it(db) -> None:
+    """Over many plan shapes, no rule that follows a row's links can tell the two reads apart.
+
+    Each forest hangs nodes under earlier ones, lets any node follow up any earlier one (so follow-ups
+    chain, and a source can sit under another branch) and gives some a workflow. For every node the
+    bounded read returns, ``run_roots`` and ``workflow_run_of`` answer as they do on the whole scope,
+    and so does a rule that walks further along the same links than ``run_roots`` does today.
+    """
+    import random
+
+    from core.workflow_builtin_operands import scoped_runs
+    from infra.database import get_db
+
+    seed()
+    connection = get_db()
+    try:
+        asked_by_forest = []
+        for forest in range(12):
+            rng = random.Random(forest)
+            made: list[str] = []
+            with raw_plan_seed(connection):
+                for index in range(30):
+                    node = f"forest-{forest}-{index}"
+                    parent = rng.choice(made) if made and rng.random() < 0.7 else None
+                    follows = rng.choice(made) if made and rng.random() < 0.35 else None
+                    workflow = rng.choice([CLOSE, INVOICE]) if rng.random() < 0.4 else None
+                    connection.execute(
+                        "INSERT INTO plan_nodes (id,plan_id,parent_id,follow_up_of,order_key,kind,title,"
+                        "acceptance_criteria,state,size,workflow_ref,workflow_version,commitment_id,"
+                        "requirements_revision,revision,created_at,updated_at) "
+                        "VALUES (?,'plan-root',?,?,?,'task','A node','Check','accepted','M',?,?,?,1,1,'t','t')",
+                        (node, parent, follows, index, workflow, V3 if workflow else None, node))
+                    made.append(node)
+            asked_by_forest.append(rng.sample(made, 5))
+        connection.commit()
+        scope = MeasurementScope("all", None)
+        whole = scoped_runs(connection, "steve", scope)
+        bounded = [scoped_runs(connection, "steve", scope, above=asked) for asked in asked_by_forest]
+    finally:
+        connection.close()
+
+    wider_whole = _wider_roots(whole[0])
+    for asked, above in zip(asked_by_forest, bounded):
+        returned = sorted(str(row["id"]) for row in above[0])
+        assert set(asked) <= set(returned) and len(returned) < 30
+        assert _decided(above, returned) == _decided(whole, returned)
+        assert _wider_roots(above[0]) == wider_whole & set(returned)

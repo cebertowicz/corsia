@@ -1,4 +1,4 @@
-import { closeComments, expectCommentsShown } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createComment, openLiveDocument, seedLiveDocument } from '../support/liveDocument';
@@ -76,7 +76,7 @@ for (const width of [1440, 393]) {
 		for (let step = 0; step < 3; step += 1) await page.keyboard.press('Shift+ArrowLeft');
 		await expect(button).toBeVisible();
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
-		await page.getByRole('button', { name: /^1 comment\b/ }).click();
+		await openComments(page, /^1 comment\b/);
 		await expectCommentsShown(comments);
 		await expect(button).toHaveCount(0);
 		await closeComments(comments);

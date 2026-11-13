@@ -30,17 +30,46 @@ export async function showAllThreads(drawer: Locator): Promise<void> {
 	await expect(drawer.locator('.peers > .peer')).toHaveCount(1);
 }
 
+/** The document header's comments control: on the page, or in the viewer that holds `scope`. */
+function commentsPill(scope: Page | Locator): Locator {
+	const viewer = 'goto' in scope ? scope : scope.locator('xpath=ancestor::*[.//*[contains(concat(" ", @class, " "), " comment-status ")]][1]');
+	return viewer.locator('.comment-status');
+}
+
+/**
+ * Opens the comments as a person does, and ends with them open. The control toggles, and a canvas wide enough for the margin
+ * column opens the column by itself, once per document, when its comments finish loading. That can land between reading the
+ * control's state and pressing it, and the press then closes the column it meant to open. So this converges instead of reading
+ * once: press only while the control does not report them open, and read again if it still does not. The self-opening happens at
+ * most once, so one extra press settles it. `name` is the control's accessible name (its thread count and unsent messages),
+ * checked first, so a spec that expects a count still fails when the control names a different one.
+ */
+export async function openComments(scope: Page | Locator, name?: RegExp): Promise<void> {
+	const pill = commentsPill(scope);
+	if (name) await expect(pill).toHaveAccessibleName(name);
+	await expect(async () => {
+		if ((await pill.getAttribute('aria-expanded')) !== 'true') await pill.click({ timeout: 5_000 });
+		await expect(pill).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
+	}).toPass({ timeout: 15_000 });
+}
+
 /**
  * Closes the comments as a person does. The sheet and the inline drawer have a Close button; the margin column beside a text
- * document has none and closes with the document header's comments control. A list that is already closed is left closed.
+ * document has none and closes with the document header's comments control, pressed only while it reports them open. Like
+ * `openComments`, it reads again when the column opens itself after the read, so it cannot leave it open. A list that is
+ * already closed is left closed.
  */
 export async function closeComments(scope: Page | Locator): Promise<void> {
 	if (!('goto' in scope) && !(await scope.count())) return;
 	const close = scope.getByRole('button', { name: 'Close comments', exact: true });
 	if (await close.count()) return close.click();
 	// The list's popover is drawn at the page's top level, outside its document, so it has no document above it to search.
-	const viewer = 'goto' in scope ? scope : scope.locator('xpath=ancestor::*[.//*[contains(concat(" ", @class, " "), " comment-status ")]][1]');
-	await ('goto' in scope || (await viewer.count()) ? viewer : scope.page()).locator('.comment-status').click();
+	const inViewer = 'goto' in scope || (await commentsPill(scope).count()) > 0;
+	const pill = inViewer ? commentsPill(scope) : scope.page().locator('.comment-status');
+	await expect(async () => {
+		if ((await pill.getAttribute('aria-expanded')) === 'true') await pill.click({ timeout: 5_000 });
+		await expect(pill).toHaveAttribute('aria-expanded', 'false', { timeout: 1_000 });
+	}).toPass({ timeout: 15_000 });
 }
 
 /**

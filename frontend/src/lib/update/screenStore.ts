@@ -2,7 +2,7 @@ import { tick } from 'svelte';
 import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
-import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy } from './failureCopy';
+import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf, type FailureCopy } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
@@ -150,10 +150,11 @@ function currentFailure(l: Latch, operation: UpdateOperation | null): Latch['fai
 	return l.failure;
 }
 
-function copyFor(failure: NonNullable<Latch['failure']>, operation: UpdateOperation | null): FailureCopy {
-	if (failure.verdict) return failureCopy(failureFromVerdict({ kind: 'version_mismatch', message: failure.detail ?? '' }));
-	if (operation && isFailedOperation(operation)) return failureCopy(failureFromOperation(operation));
-	return failureCopy({ code: failure.code, detail: failure.detail, summary: null, conductorTold: false, log: null });
+function copyFor(failure: NonNullable<Latch['failure']>, operation: UpdateOperation | null, serviceDown: boolean): FailureCopy {
+	const source = failure.verdict ? failureFromVerdict({ kind: 'version_mismatch', message: failure.detail ?? '' })
+		: operation && isFailedOperation(operation) ? failureFromOperation(operation)
+			: { code: failure.code, detail: failure.detail, summary: null, conductorTold: false, log: null };
+	return failureCopy(source, runningVersionOf(get(updateStatus), serviceDown));
 }
 
 /** Recompute from the existing update operation, current PID-validated file, and confirmed-version cue. */
@@ -195,8 +196,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 
 	l.failure = currentFailure(l, own);
 	if (l.failure && !currentConfirmation) {
-		const copy = copyFor(l.failure, own);
-		updateScreenView.set({ operationId: l.operationId, mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copy, serviceDown: unreachable, startupProgressUnavailable: false });
+		updateScreenView.set({ operationId: l.operationId, mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copyFor(l.failure, own, unreachable), serviceDown: unreachable, startupProgressUnavailable: false });
 		return;
 	}
 	if (currentConfirmation) {

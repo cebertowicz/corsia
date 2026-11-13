@@ -16,7 +16,7 @@
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { CaretRule, releasesPress } from '$lib/cm/caret-rule';
-	import { commentMarks, coveredByMove, highlightAtPress, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, highlightAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -192,7 +192,7 @@
 	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
 		const r = v.state.selection.main;
 		if (r.empty) {
-			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to));
+			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights, cardMode !== 'sheet') : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
 			if (!read) return;
 			onSelect?.(null);
 			const { hit, arrived } = read;

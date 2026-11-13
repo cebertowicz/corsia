@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closeComments, expectCommentsShown } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, leaveUnsent } from '../support/heldComments';
-import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
+import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled, type JourneySetup } from '../support/reviewFixtures';
 
 /**
  * The in-view review bar (DCOL-FR12.4) on the real composed canvas: an agent's raised ask on an open
@@ -171,10 +171,15 @@ test('@surface:review-bar person-step and document-review bars render at 1280px'
 const PERSON_STEP: readonly Case[] = [
 	['1280 light', 'default', 'light'], ['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'],
 ];
-/** Opens a fresh person step; each answer gets its own test, so each pays for one seed and one open. */
-async function personStep(page: Page, request: APIRequestContext, name: string, mode: Mode, theme: 'light' | 'dark') {
+/** A fresh instruction document with the person's step on it: the starting state every person-step case answers from. */
+const personStepStart = (name: string): JourneySetup<Doc> => async ({ request, mode }) => {
 	const doc = await seed(request, `${name} ${mode}`);
 	addPersonStep(doc.threadId, doc.artifactId);
+	return doc;
+};
+
+/** Opens that person step and proves the ask is on it; each answer gets its own test, so each pays for one open. */
+async function personStep(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'dark') {
 	await open(page, doc, mode, theme);
 	if (mode === 'default') await page.setViewportSize({ width: 1280, height: 900 });
 	const who = bar(page).locator('.rb-who');
@@ -188,8 +193,8 @@ async function personStep(page: Page, request: APIRequestContext, name: string, 
 	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
 }
 
-journey('mark a person step done from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
-	const button = await personStep(page, request, 'Person done', mode, theme);
+journey('mark a person step done from its instructions', PERSON_STEP, async ({ page, value: doc, info, mode, theme }) => {
+	const button = await personStep(page, doc, mode, theme);
 	await settled(page);
 	await shot(page, 'person-step-ask', info);
 	await button('Done').click();
@@ -197,11 +202,11 @@ journey('mark a person step done from its instructions', PERSON_STEP, async ({ p
 	await expect(bar(page).locator('.rb-receipt')).toBeFocused();
 	await settled(page);
 	await shot(page, 'person-step-done', info);
-});
+}, personStepStart('Person done'));
 
 // A name too long for the narrow header (1280 with the pane open) wraps onto a second line rather than truncating.
-journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
-	await personStep(page, request, 'Person with a very long agent name', mode, theme);
+journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, value: doc, info, mode, theme }) => {
+	await personStep(page, doc, mode, theme);
 	const who = bar(page).locator('.rb-who');
 	if (mode === 'default') {
 		// The split keeps re-laying out for a few hundred ms after the resize to 1280, starting after `settled` has looked for
@@ -216,19 +221,19 @@ journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, 
 		expect(tailBelowFirstLine, 'the name’s tail flows after its wrapped head').toBe(true);
 	}
 	await shot(page, 'person-step-long-name', info);
-});
+}, personStepStart('Person with a very long agent name'));
 
-journey('decline a person step from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
-	const button = await personStep(page, request, 'Person wont', mode, theme);
+journey('decline a person step from its instructions', PERSON_STEP, async ({ page, value: doc, info, mode, theme }) => {
+	const button = await personStep(page, doc, mode, theme);
 	await button('Won’t do').click();
 	await expect(bar(page).locator('.rb-receipt')).toHaveText('Won’t do');
 	await settled(page);
 	await shot(page, 'person-step-wont-do', info);
-});
+}, personStepStart('Person wont'));
 
 // A stale revision: the server refuses the answer and the bar says so, keeping the step to answer again.
-journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
-	const button = await personStep(page, request, 'Person stale', mode, theme);
+journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ page, value: doc, info, mode, theme }) => {
+	const button = await personStep(page, doc, mode, theme);
 	await page.route('**/api/plans/*/mutations', (route) => {
 		const body = route.request().postDataJSON() as { params: { expected_revision: number } };
 		body.params.expected_revision -= 1;
@@ -239,7 +244,7 @@ journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ p
 	await expect(bar(page).locator('.rb-receipt')).toHaveCount(0);
 	await settled(page);
 	await shot(page, 'person-step-conflict', info);
-});
+}, personStepStart('Person stale'));
 
 const ALL: readonly Case[] = [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
@@ -284,7 +289,7 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expectLayout(page, mode);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	// One primary on screen: the bar's Approve. The held pair has the header's Send, a secondary beside it, and its pill marks the unsent pair.
-	await expect(headerSend(page)).toHaveText('Send 2 comments');
+	await expect(headerSend(page).locator('.send-full')).toHaveText('Send 2 comments');
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
 	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 waiting for Send$/);
@@ -393,7 +398,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
 	// The pill names its comments, then what waits for Send: "2 comments, 2 waiting for Send".
-	await page.getByRole('button', { name: /^2 comments\b/ }).click();
+	await openComments(page, /^2 comments\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expectCommentsShown(drawer);
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
@@ -419,7 +424,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: /^1 comment\b/ }).click();
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
 	await expect(approve).toBeVisible();
@@ -446,7 +451,7 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await page.getByRole('button', { name: /^\d+ comments?\b/ }).click();
+		await openComments(page, /^\d+ comments?\b/);
 		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
@@ -462,7 +467,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	await open(page, doc, mode, theme);
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
-	await page.getByRole('button', { name: /^1 comment\b/ }).click();
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
@@ -486,7 +491,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await sent;
-	await page.getByRole('button', { name: /^1 comment\b/ }).click();
+	await openComments(page, /^1 comment\b/);
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByText('Sending your review…')).toBeVisible();
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
@@ -510,7 +515,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	// The header carries the held comments' one Send beside the pill's unsent dot; the drawer has no footer.
 	await expect(page.locator('.comment-status .unsent-dot')).toBeVisible();
 	const send = headerSend(page);
-	await expect(send).toHaveText('Send 6 comments');
+	await expect(send.locator('.send-full')).toHaveText('Send 6 comments');
 	await expectSenders(page, ['header: Send 6 comments']);
 	await settled(page);
 	await expect(send).toBeInViewport({ ratio: 1 });
@@ -545,7 +550,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await page.getByRole('button', { name: /^6 comments, 6 waiting for Send$/ }).click();
+	await openComments(page, /^6 comments, 6 waiting for Send$/);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expectCommentsShown(drawer);
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
@@ -603,15 +608,23 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await shot(page, 'long-name-expanded', info);
 });
 
-journey('keeps an orphan-heavy review ask compact and offers no Place again once every quote is gone', [
-	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
-	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
-	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
-], async ({ page, request, info, mode, theme }) => {
+/**
+ * A review with 22 comments whose quotes are all gone by the time the person opens it: the seeded quotes are
+ * orphaned in the database, and the ask is raised on the thread. None of it is what the case measures.
+ */
+const orphanHeavyStart: JourneySetup<Doc> = async ({ request, mode, theme }) => {
 	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`, { sharedAsOf: '2026-09-12' });
 	for (let index = 0; index < 22; index += 1) await comment(request, doc, `Unplaced comment ${index + 1}`, 1);
 	orphanComments(doc.artifactId);
 	raiseAsk(doc.threadId, doc.artifactId, 'Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+	return doc;
+};
+
+journey('keeps an orphan-heavy review ask compact and offers no Place again once every quote is gone', [
+	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
+	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
+	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
+], async ({ page, value: doc, info, mode, theme }) => {
 	await open(page, doc, mode, theme);
 	await settled(page);
 	const measurements = await page.locator('.doc').evaluate((root) => {
@@ -649,8 +662,7 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
 	}
 	// Recovery remains exercised through the comments drawer below.
-	const comments = page.locator('.comment-status');
-	await comments.click();
+	await openComments(page);
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	// Every quote is gone from the document: the cards say so.
 	// A margin card says "This text isn’t in the document"; a row in the list or sheet says "Text changed:".
@@ -659,7 +671,7 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.
 	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
 	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
-});
+}, orphanHeavyStart);
 
 /** The requester keeps its distinguishing suffix while its prefix truncates, and its box stays off the header controls. */
 async function expectNameClearOfControls(page: Page, title: string, mode: Mode, assertCollapsedPhoneAlignment = true) {

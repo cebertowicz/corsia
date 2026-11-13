@@ -97,7 +97,7 @@ def test_reaper_keeps_gitlinks_without_running_nested_git(tmp_path):
     assert status_skip_reason(repo, git_env) == 'submodule'
     assert _status_verdict(None, None, repo, 'submodule', 0, 0) == 'submodule'
     with pytest.raises(SalvageError, match='submodule'):
-        _selected(repo, git_env)
+        _selected(repo, git_env, frozenset())
     assert not marker.exists()
 
 
@@ -181,11 +181,16 @@ def test_salvage_pin_lands_in_the_repository_or_fails(tmp_path):
     assert not (copied.parent / 'foreign').exists()
 
 
-def test_reaper_removal_child_status_ignores_a_rewritten_commondir(tmp_path):
+def test_reaper_removal_and_its_recheck_ignore_a_rewritten_commondir(tmp_path):
+    from infra.worktree_reaper_probe import status_skip_reason, worktree_git_env
     from infra.worktree_reaper_remove import remove_worktree
 
-    repo, worktree, _admin, marker = worktree_with_rewritten_commondir(tmp_path)
-    assert remove_worktree(repo, worktree, 'worktree') == 'removed'
+    repo, worktree, admin, marker = worktree_with_rewritten_commondir(tmp_path)
+
+    def recheck(quarantined):
+        return status_skip_reason(quarantined, worktree_git_env(repo, admin, quarantined))
+
+    assert remove_worktree(repo, worktree, 'worktree', recheck) == 'removed'
     assert not marker.exists()
 
 

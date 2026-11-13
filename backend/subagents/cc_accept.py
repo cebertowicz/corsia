@@ -7,6 +7,7 @@ import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ from subagents.cc_process_exit import _CommittedTerminalFailure, claim_terminal
 from subagents.cc_event_context_usage import (
     consume_and_attach_terminal_context_usage,
 )
+from subagents.cc_input_settlement import settle_input_delivery, settle_unverified_input_write
+from subagents.cc_runtime_errors import ResumeVerdictOwnsWrite
 from subagents.cc_runtime_state import Broadcast, _Live, activate_bound_turn
 
 log = logging.getLogger("subagents.cc_runtime")
@@ -171,18 +174,6 @@ class _DeliveryObservation:
         live.input_delivery_unproven = True
 
 
-async def _settle_input_delivery(
-    settle_delivery: Callable[[], Awaitable[None]],
-) -> None:
-    settlement = asyncio.ensure_future(settle_delivery())
-    while not settlement.done():
-        try:
-            await asyncio.shield(settlement)
-        except asyncio.CancelledError:
-            continue
-    settlement.result()
-
-
 async def _feed_frame(
     thread_id: str,
     live: _Live,
@@ -234,7 +225,7 @@ async def _feed_frame(
         if settle_delivery is None:
             return
         try:
-            await _settle_input_delivery(settle_delivery)
+            await settle_input_delivery(settle_delivery)
         except BaseException:
             observation.distrust(live)
             raise
@@ -244,11 +235,13 @@ async def finish_unverified_input_delivery(
     thread_id: str,
     live: _Live,
     identity: TurnIdentity,
+    settle_write: Callable[[], Awaitable[None]],
     *,
     bcast: Broadcast,
     db=None,
 ) -> TurnSettlement:
-    """Close one exact turn whose triggering input lacks durable proof."""
+    """Settle one unproven input write ambiguous and close its exact turn."""
+    await settle_write()
     result = await claim_terminal(
         live, "error", _UNVERIFIED_INPUT_DELIVERY_DETAIL,
         db=db, identity=identity, defer_drive=True,
@@ -379,15 +372,14 @@ async def accept_reconstructed_input(
             raise
         cc_trust.distrust(live)
         observation.unverified = observation.unverified or not observation.accepted
-        if not observation.accepted and mark_ambiguous is not None:
-            mark_ambiguous()
+        settle = partial(
+            settle_unverified_input_write, live,
+            mark_ambiguous=None if observation.accepted else mark_ambiguous, settle_delivery=settle_delivery,
+        )
+        commit = partial(finish_unverified_input_delivery, thread_id, live, identity, settle, bcast=bcast, db=db)
+        if ResumeVerdictOwnsWrite.applies(live, observation.accepted, exc):
+            raise ResumeVerdictOwnsWrite(identity, exc, commit, settle) from exc  # the feed's verdict decides
         if observation.unverified:
-            live.input_delivery_unproven = True
-            if settle_delivery is not None:
-                await _settle_input_delivery(settle_delivery)
-            terminal = await finish_unverified_input_delivery(
-                thread_id, live, identity, bcast=bcast, db=db,
-            )
-            raise _CommittedTerminalFailure(terminal, exc) from exc
+            raise _CommittedTerminalFailure(await commit(), exc) from exc
         raise
     return identity

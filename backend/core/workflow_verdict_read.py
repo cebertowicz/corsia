@@ -256,7 +256,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
     if selected is not None:
         roots = [root for root in roots if root["workflow_ref"] in selected]
     facts: dict[str, list[CorrectionFact]] = defaultdict(list)
-    root_ids = [node["id"] for node in roots]
+    root_ids = frozenset(node["id"] for node in roots)  # a set: workflow_run_of tests membership once per fact
     attributed = attributed_facts(db) if selected is None else attributed_facts(db, node_ids=parents)
     for fact in attributed:
         run_id = workflow_run_of(fact.node_id, parents, root_ids)

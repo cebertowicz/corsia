@@ -227,7 +227,7 @@ def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
 
 
 def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
-    isolated_db, monkeypatch, tmp_path
+    isolated_db, monkeypatch, tmp_path, newer_build_available
 ):
     import asyncio
     from unittest.mock import AsyncMock
@@ -276,7 +276,7 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     monkeypatch.setattr(restart_shell.subprocess, "Popen", fake_popen)
 
     operation_id, _process = asyncio.run(
-        system_admin.launch_update({"id": "steve"}, None, "automatic", "1.2.3", port=1957)
+        system_admin.launch_update({"id": "steve"}, None, "automatic", port=1957)
     )
 
     assert len(minted_tokens) == 1
@@ -527,7 +527,7 @@ def test_due_tonight_claims_once_before_the_scheduled_launch(isolated_db, monkey
     )
     launches = []
 
-    async def launch(_user, _token, trigger, _version, *, port, claim):
+    async def launch(_user, _token, trigger, *, port, claim):
         launches.append((trigger, port))
         connection = get_db()
         try:
@@ -543,6 +543,101 @@ def test_due_tonight_claims_once_before_the_scheduled_launch(isolated_db, monkey
     assert launches == [("tonight", 1957)]
     assert asyncio.run(_run_scheduled_update_if_due(now + timedelta(minutes=5))) is None
     assert launches == [("tonight", 1957)]
+
+
+@pytest.mark.parametrize(
+    ("status", "detail"), [(409, "update_not_available"), (503, "update_check_failed")]
+)
+def test_scheduled_tick_skips_a_refused_update_without_claiming_tonight(
+    isolated_db, monkeypatch, status, detail
+):
+    """A pre-drain refusal is a skipped tick, not a failed one.
+
+    The cached check that opens the tick can say a build is available while the
+    fresh probe inside the acquire finds none. The acquire refuses before it
+    claims, so Tonight and today's record must stand for a later try, and the
+    nightly job must not report an unexpected failure.
+    """
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from api import system_admin
+    from automation import update_schedule
+    from infra import accounts, update_status
+    from infra.database import get_db
+    from infra.settings import get_update_schedule
+    from jobs import nightly
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch({"tonight": True}, now=scheduled_at, user_id="steve")
+    monkeypatch.setenv("BACKEND_PORT", "1957")
+    monkeypatch.setattr(accounts, "get_user", lambda _user_id: {"id": "steve"})
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+    )
+    tick_logs = MagicMock()
+    monkeypatch.setattr(update_schedule, "logger", tick_logs)
+    nightly_logs = MagicMock()
+    monkeypatch.setattr(nightly, "logger", nightly_logs)
+
+    async def refuse(*_args, **_kwargs):
+        raise HTTPException(status, detail)
+
+    monkeypatch.setattr(system_admin, "launch_update", refuse)
+
+    assert asyncio.run(nightly._run_scheduled_update_if_due(now)) is None
+
+    assert get_update_schedule()["tonight_at"] is not None
+    connection = get_db()
+    try:
+        assert connection.execute("SELECT COUNT(*) FROM self_restart_requests").fetchone()[0] == 0
+    finally:
+        connection.close()
+    assert update_schedule.update_attempted_today(now=now) is False
+    assert tick_logs.exception.call_count == 0
+    assert tick_logs.warning.call_count == 1
+    assert nightly_logs.exception.call_count == 0
+
+
+def test_scheduled_tick_still_reports_another_launch_failure(isolated_db, monkeypatch):
+    """Only a pre-drain refusal is a skip; any other launch failure stays visible."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from api import system_admin
+    from automation import update_schedule
+    from infra import accounts, update_status
+    from jobs import nightly
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch({"tonight": True}, now=scheduled_at, user_id="steve")
+    monkeypatch.setenv("BACKEND_PORT", "1957")
+    monkeypatch.setattr(accounts, "get_user", lambda _user_id: {"id": "steve"})
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+    )
+    nightly_logs = MagicMock()
+    monkeypatch.setattr(nightly, "logger", nightly_logs)
+
+    async def refuse(*_args, **_kwargs):
+        raise HTTPException(409, {"code": "disk_space", "needed_bytes": 13, "free_bytes": 8})
+
+    monkeypatch.setattr(system_admin, "launch_update", refuse)
+
+    assert asyncio.run(nightly._run_scheduled_update_if_due(now)) is None
+    assert nightly_logs.exception.call_count == 1
 
 
 def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, monkeypatch, tmp_path):
@@ -585,7 +680,7 @@ def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, m
     monkeypatch.setattr(update_status, "urlopen", lambda _endpoint, timeout: Response())
     launches = []
 
-    async def launch(_user, _token, trigger, _version, *, port, claim):
+    async def launch(_user, _token, trigger, *, port, claim):
         launches.append((trigger, port))
         connection = get_db()
         try:
@@ -602,7 +697,7 @@ def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, m
 
 
 @pytest.mark.asyncio
-async def test_lost_tonight_claim_creates_no_row_or_launch(isolated_db, monkeypatch):
+async def test_lost_tonight_claim_creates_no_row_or_launch(isolated_db, monkeypatch, newer_build_available):
     from pathlib import Path
     from unittest.mock import AsyncMock
 
@@ -701,10 +796,17 @@ def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
     )
     monkeypatch.setenv("BACKEND_PORT", "1957")
     monkeypatch.setattr(accounts, "get_user", lambda _user_id: {"id": "steve"})
+    # Acquisition stamps from its own fresh probe, so the stand-in carries the fields it reads.
     monkeypatch.setattr(
         update_status,
         "update_status",
-        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+        lambda _refresh: SimpleNamespace(
+            to_dict=lambda: {"available": True, "target_version": "1.2.3"},
+            available=True,
+            error=None,
+            target_version="1.2.3",
+            changes=None,
+        ),
     )
     monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
 

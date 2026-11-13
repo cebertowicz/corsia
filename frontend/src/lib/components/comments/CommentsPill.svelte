@@ -1,8 +1,8 @@
 <script lang="ts">
 	// The comments pill, one for every review surface (RSR-4): the document's header and the image viewer's bar open the
 	// same drawer. It counts the comments shown by that surface's default list, never as a bare number: with their noun, or with
-	// the comment icon alone in a header under 264px or while Send takes the noun's room under 408px (an unread count keeps its
-	// noun). It carries a dot while the person's comments and edits wait for Send. The host gives it its own button look through `class`.
+	// the comment icon alone in a header under 264px or an image bar while Send shows (an unread count keeps its noun). It carries
+	// a dot while the person's comments and edits wait for Send. The host gives it its own button look through `class`.
 	let { count, unread = 0, unsent = 0, loading = false, unknown = false, expanded = false, disabled = false, imageBadge = false, element = $bindable(), class: look = '', onOpen, ...data }: {
 		/** Comments (threads) in the default list. */
 		count: number;
@@ -52,9 +52,8 @@
 		.image-badge .count, .image-badge .count-unit, .image-badge .unread { display: none; }
 		.image-badge .unsent-dot { position: absolute; top: calc(var(--space-1) + 1px); right: var(--space-1); }
 	}
-	/* The header's one tool row with the noun is 250px ("0 comments" 108, Deliver 82, Request review 30, History 30); below that
-	   (196px when the Workspace panel overlays a 1280 window) the comment icon and count carry it. A phone header (345px) keeps the noun.
-	   An unread count keeps its noun: "3 · 3 unread" does not say what is counted. */
+	/* Below 264px (196px when the Workspace panel overlays a 1280 window) the comment icon and count carry the header's count.
+	   A phone header (345px) keeps the noun. An unread count keeps its noun: "3 · 3 unread" does not say what is counted. */
 	@container doc-header (width < 264px) {
 		.count-unit:not(.keep) { display: none; }
 	}

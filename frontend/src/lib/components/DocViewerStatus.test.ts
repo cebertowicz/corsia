@@ -313,7 +313,7 @@ describe('DocViewerStatus held comments', () => {
 		component!.sync('artifact-1', held(3, 2));
 		flushSync();
 		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''))!;
-		expect(send.textContent!.trim()).toBe('Send 3 comments');
+		expect(send.querySelector('.send-full')!.textContent!.trim()).toBe('Send 3 comments');
 		expect(send.getAttribute('aria-label')).toBe('Send 3 comments to Style');
 		const identity = host.querySelector('.document-identity')!;
 		expect(identity.contains(send)).toBe(true);
@@ -332,7 +332,7 @@ describe('DocViewerStatus held comments', () => {
 		component!.$set({ artifactId: 'artifact-1' });
 		flushSync();
 		const send = [...host.querySelectorAll('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? ''));
-		expect(send?.textContent?.trim()).toBe('Send 2 comments');
+		expect(send?.querySelector('.send-full')?.textContent?.trim()).toBe('Send 2 comments');
 	});
 
 	it('does not carry a read for another document into this one', () => {

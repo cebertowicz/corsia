@@ -238,6 +238,18 @@ def record_update_log(operation_id: str, log_path: str, *, db=None) -> bool:
         return result.rowcount == 1
 
 
+def restamp_target_version(operation_id: str, target_version: str, *, db=None) -> bool:
+    """Point one in-flight Update at the build staging left behind, not the one probed."""
+    with write_transaction(db, scope="restart_operation") as connection:
+        cur = connection.execute(
+            "UPDATE self_restart_requests SET target_version=?,updated_at=?, "
+            "changes=CASE WHEN target_version IS ? THEN changes END "
+            "WHERE id=? AND kind='update' AND status='in_flight'",
+            (target_version, _now_iso(), target_version, operation_id),
+        )
+        return cur.rowcount == 1
+
+
 def try_acquire_steering(
     requester_thread_id: str | None,
     requester_user: str | None,

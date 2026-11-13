@@ -2,6 +2,7 @@ import { test } from './support/test';
 import { expect } from '@playwright/test';
 import { seed, open, comment } from './support/reviewFixtures';
 import { beginComment } from './support/liveCommentProof';
+import { openComments } from './support/commentDrawer';
 
 const agents = [{ id: 'a', name: 'Alpha Agent', responsibility: 'Review work', requested: false, unavailable_reason: null, unavailable_text: null }];
 
@@ -18,7 +19,7 @@ for (const host of ['comment', 'reply'] as const) {
 				: route.fulfill({ json: { reviews: [], reviewers: agents, taggable_agents: agents } }));
 			await open(page, doc, info.project.name.includes('mobile') ? 'phone' : 'closed', 'light');
 			if (host === 'comment') await beginComment(page, 'Step 1: the rollout proceeds to the next ring.');
-			else await page.getByRole('button', { name: /^1 comment\b/ }).click();
+			else await openComments(page, /^1 comment\b/);
 			const input = host === 'comment'
 				? page.locator('textarea[placeholder="Comment, or @ to tag an agent"]:not([inert] *)')
 				: page.locator('.ct:not([inert] *)').filter({ hasText: 'Existing thread' }).first().locator('textarea');

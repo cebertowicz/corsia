@@ -474,7 +474,7 @@ describe('DocFeedbackStatus', () => {
 		});
 		flushSync();
 
-		expect(host.querySelector('button')!.textContent!.trim()).toBe('Send 4 comments');
+		expect(host.querySelector('button')!.querySelector('.send-full')!.textContent!.trim()).toBe('Send 4 comments');
 		expect(host.querySelector('button')!.getAttribute('aria-label')).toBe('Send 4 comments to Documents & Artifacts');
 		expect(host.textContent).toContain('3 comments not delivered: its owner is unavailable');
 		component!.sync('artifact-1', { open_count: 0, owner_label: null, undelivered_batches: [] });

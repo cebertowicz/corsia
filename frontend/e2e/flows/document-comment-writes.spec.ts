@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown } from '../support/commentDrawer';
+import { closeComments, inResolved, openResolved, replyField, resolvedList, showAllThreads, expectCommentsShown, openComments as openCommentsPill } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -43,7 +43,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^1 comment\b/ }).click();
+		await openCommentsPill(page, /^1 comment\b/);
 		await expectCommentsShown(page.getByRole('region', { name: 'Document comments', exact: true }));
 		await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	};
@@ -115,7 +115,7 @@ test('@flow:resolved-reply a person can reply to an agent on a resolved thread',
 	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	// The agent's reply is still unread after the agent resolved the thread, so the default list keeps it, open.
-	await page.getByRole('button', { name: /^1 comment, 1 unread\b/ }).click();
+	await openCommentsPill(page, /^1 comment, 1 unread\b/);
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved.getByRole('button', { name: 'Resolved · 2 messages' })).toBeVisible();
