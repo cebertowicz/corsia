@@ -80,7 +80,8 @@ describe('CommentThread', () => {
 	describe('the line under the reply field', () => {
 		it('names the agents the reply wakes, and says so when there are none', () => {
 			render(thread({ replyGoesTo: [{ id: 'a1', name: 'Docs lane' }, { id: 'a2', name: 'Release lane' }] }));
-			expect(host.querySelector('.rl')?.textContent?.replace(/\s+/g, ' ')).toContain('Goes to Docs lane and Release lane');
+			expect(host.querySelector('.rl')?.textContent).toContain('Goes to');
+			expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Release lane']);
 			unmount(component!); host.remove();
 			render(thread({ replyGoesTo: [] }));
 			expect(host.querySelector('.rl')?.textContent).toContain('No one gets this reply.');
