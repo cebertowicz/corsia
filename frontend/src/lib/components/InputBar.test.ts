@@ -39,6 +39,7 @@ import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, 
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { subagentMeta } from '$lib/stores/subagents';
 import { toasts } from '$lib/stores/toast';
+import { CommentSendRefused } from '$lib/chatCommentAnchors';
 import { applyLifecycle, applyTerminal, _resetTurnStateForTests } from '$lib/ws/turnState';
 import { stopRequestedTurns } from '$lib/ws/send';
 import { clearAllContextUsage, setContextUsage } from '$lib/stores/contextUsageByThread';
@@ -274,7 +275,7 @@ describe('InputBar send and queue preparation', () => {
 			undefined,
 			[],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 	});
 
@@ -306,7 +307,7 @@ describe('InputBar send and queue preparation', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'subagent-thread', 'hello worker', 'network/worker', [], undefined, 'apply_now', [],
+			'subagent-thread', 'hello worker', 'network/worker', [], undefined, 'apply_now',
 		);
 	});
 
@@ -327,26 +328,10 @@ describe('InputBar send and queue preparation', () => {
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it('reports counts for the comments and replies sent with a message', async () => {
-		activeThreadId.set('thread-1');
+	it('keeps typed text when the composer leaves and comes back', async () => {
+		activeThreadId.set('thread-2');
 		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
 		flushSync();
-		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
-		component.getDrafts().set('thread-2', { content: 'hello', attachments: [], comments: [{ ...anchor, id: 'comment' }, { ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
-		activeThreadId.set('thread-2'); flushSync();
-		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
-		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
-		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ comment_count: 2, reply_count: 1 }));
-		expect(wsMocks.sendMessage.mock.calls[0][6]).toHaveLength(2);
-	});
-
-	it('keeps typed text and a reply when the composer leaves and comes back', async () => {
-		activeThreadId.set('thread-1');
-		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
-		flushSync();
-		const anchor = { messageId: 'assistant', seq: 1, from_off: 0, to_off: 1, quote: 'x', anchor_prefix: '', anchor_suffix: '', note: 'note' };
-		component.getDrafts().set('thread-2', { content: '', attachments: [], comments: [{ ...anchor, id: 'reply', root_user_message_id: 'user', root_cid: 'c1' }] });
-		activeThreadId.set('thread-2'); flushSync();
 		const input = host.querySelector<HTMLElement>('[contenteditable]')!;
 		input.textContent = 'typed after the reply';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -361,7 +346,6 @@ describe('InputBar send and queue preparation', () => {
 		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 		expect(wsMocks.sendMessage.mock.calls[0][1]).toBe('typed after the reply');
-		expect(wsMocks.sendMessage.mock.calls[0][6]).toEqual([expect.objectContaining({ id: 'reply', root_cid: 'c1' })]);
 	});
 
 	it('clears the composer after the local send and keeps its draft for recovery', async () => {
@@ -375,7 +359,7 @@ describe('InputBar send and queue preparation', () => {
 				'network/model',
 				[attachment],
 				undefined,
-				'apply_now', [],
+				'apply_now',
 			);
 		expect(onAutoCreateThread).not.toHaveBeenCalled();
 		expect(productEventMock).toHaveBeenCalledWith(
@@ -467,7 +451,7 @@ describe('InputBar send and queue preparation', () => {
 			'network/model',
 			[attachment],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 	});
 
@@ -511,7 +495,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledOnce();
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought', 'network/model', [], undefined, 'apply_now',
 		);
 
 		await component.setText('first thought, clarified');
@@ -519,7 +503,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(2);
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought, clarified', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought, clarified', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -571,7 +555,7 @@ describe('InputBar send and queue preparation', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(2);
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'first thought', 'network/model-b', [], undefined, 'apply_now', [],
+			'thread-1', 'first thought', 'network/model-b', [], undefined, 'apply_now',
 		);
 	});
 
@@ -733,7 +717,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await component.setAndSend('Connect a Google account for all my projects', true);
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('Keep this draft');
 		expect(host.querySelector('.attachment-chip')).not.toBeNull();
@@ -768,7 +752,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await automaticSend;
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now', [],
+			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('Keep this draft');
 		expect(host.querySelector('.attachment-chip')).not.toBeNull();
@@ -864,7 +848,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this for a model', undefined, [], undefined, 'apply_now', [],
+			'thread-1', 'hold this for a model', undefined, [], undefined, 'apply_now',
 		);
 		expect(component.getInputText()).toBe('');
 	});
@@ -891,7 +875,7 @@ describe('InputBar model readiness at the action seam', () => {
 			'model-unavailable',
 			[],
 			undefined,
-			'apply_now', [],
+			'apply_now',
 		);
 		expect(onSend).toHaveBeenCalledOnce();
 		expect(component.getInputText()).toBe('');
@@ -937,13 +921,13 @@ describe('InputBar model readiness at the action seam', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 
 		await component.setText('ordinary send');
 		send.click();
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1027,7 +1011,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1135,7 +1119,7 @@ describe('InputBar model readiness at the action seam', () => {
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1158,7 +1142,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1209,7 +1193,7 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-armed')).toBe(false);
 		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1233,7 +1217,7 @@ describe('InputBar model readiness at the action seam', () => {
 		vi.useRealTimers();
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1263,7 +1247,7 @@ describe('InputBar model readiness at the action seam', () => {
 		vi.useRealTimers();
 
 		expect(wsMocks.sendMessage).toHaveBeenLastCalledWith(
-			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now', [],
+			'thread-1', 'ordinary send', 'network/model', [], undefined, 'apply_now',
 		);
 	});
 
@@ -1309,7 +1293,7 @@ describe('InputBar model readiness at the action seam', () => {
 		await Promise.resolve();
 
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'thread-1', 'keyboard queue', 'network/model', [], undefined, 'queue_after_turn', [],
+			'thread-1', 'keyboard queue', 'network/model', [], undefined, 'queue_after_turn',
 		);
 	});
 
@@ -1387,13 +1371,14 @@ describe('InputBar model readiness at the action seam', () => {
 
 describe('a comment reply the composer cannot send', () => {
 	const reply = { id: 'reply', messageId: 'message-1', seq: 3, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'draft reply', root_user_message_id: 'user-1', root_cid: 'c1' };
+	const chatCommentPosts = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/chat-comments'));
 	// One sentence per known cause (COPY-STANDARD C11), each saying the typed reply is kept and what to do (C9).
-	const noModel = 'This chat’s model can’t answer this reply. Your reply stays here; choose a model, then send it again.';
-	const restarting = 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.';
-	const notAccepted = 'CORSIA couldn’t send this reply because the connection is unavailable. Your reply stays here; send it again.';
+	const noModel = 'Couldn’t send this reply because this chat’s model can’t answer it. Your reply stays here; choose a model, then try again.';
+	const restarting = 'Couldn’t send this reply because CORSIA is restarting after an update. Your reply stays here; try again once CORSIA is back.';
+	const notAccepted = 'Couldn’t send this reply because the connection is unavailable. Your reply stays here; try again.';
 
 	// The thread keeps the draft when the send is refused, so the person needs the cause on screen and not only in the console.
-	it('says so while the chosen model cannot answer', () => {
+	it('says so while the chosen model cannot answer', async () => {
 		models.set([{ id: 'model-down', name: 'Down model', size: '', backend: 'local', speed: '', status: 'unavailable' }]);
 		activeModelId.set('model-down');
 		threads.set([{
@@ -1405,12 +1390,13 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(noModel);
-		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(noModel));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(noModel);
+		expect(chatCommentPosts()).toEqual([]);
 	});
 
-	it('says CORSIA is restarting while an update restart is in flight', () => {
+	it('says CORSIA is restarting while an update restart is in flight', async () => {
 		updateStatus.set({
 			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
 			available: true, checked_at: 1, error: null,
@@ -1425,25 +1411,42 @@ describe('a comment reply the composer cannot send', () => {
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(restarting);
-		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(restarting));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(restarting);
+		expect(chatCommentPosts()).toEqual([]);
 	});
 
-	it('says the reply was not accepted when the send returns nothing', () => {
+	it('says the connection is unavailable when the post cannot reach CORSIA', async () => {
 		threads.set([{
 			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
 			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
 			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
 		}]);
 		activeThreadId.set('thread-1');
-		wsMocks.sendMessage.mockReturnValue(undefined);
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(notAccepted);
-		// A reply sent from a thread is recorded like one sent from the composer, so reply_count still counts it.
+		await expect(composer.sendReply(reply)).rejects.toThrow(new CommentSendRefused(notAccepted));
+		// The box the reply was typed in shows the sentence; a toast would cover the passage it comments on.
+		expect(get(toasts).map(toast => toast.message)).not.toContain(notAccepted);
+		// Nothing was stored, so nothing is counted as sent.
+		expect(productEventMock).not.toHaveBeenCalledWith('composer', 'sent', expect.anything());
+	});
+
+	it('records a stored reply like one sent from the composer, so reply_count counts it', async () => {
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
+			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
+			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
+		}]);
+		activeThreadId.set('thread-1');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ messages: [] }) })));
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		await composer.sendReply(reply);
 		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ thread_id: 'thread-1', comment_count: 1, reply_count: 1 }));
 	});
 });

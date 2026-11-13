@@ -13,7 +13,7 @@
 	let { messageId, threadId, comments, listed, fromList, closing, narrow, anchor, bounds, panel = $bindable(null), onReply, onBack, onClose, onClosed }: {
 		messageId: string; threadId: string; comments: ChatComment[]; listed: boolean; fromList: boolean; closing: boolean; narrow: boolean;
 		anchor: ComponentProps<typeof Popover>['anchor']; bounds: ComponentProps<typeof Popover>['bounds']; panel?: HTMLElement | null;
-		onReply: (note: string) => void; onBack: () => void; onClose: () => void; onClosed: () => void;
+		onReply: (note: string) => Promise<void>; onBack: () => void; onClose: () => void; onClosed: () => void;
 	} = $props();
 
 	const name = $derived(listed ? `${comments.length} comments` : 'Comment thread');

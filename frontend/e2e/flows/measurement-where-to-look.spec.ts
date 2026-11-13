@@ -93,7 +93,7 @@ async function enter(page: Page, request: APIRequestContext, testInfo: TestInfo,
 	await page.addInitScript((setting) => localStorage.setItem('corsia_theme', setting), theme);
 	await loginByUrl(page, { waitForComposer: false });
 	await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	await expect(page.locator('.shell-header .h-title')).toHaveText('All work', { timeout: 20_000 });
 	await selectProjectScope(page, project.name);

@@ -2,7 +2,6 @@
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from doceditor.feedback_state import annotate_thread_attention, mark_thread_viewed
-from doceditor.reply_attention import unread_items
 from infra.database import get_db, write_transaction
 from infra.database_migrations import migrate_to_current
 
@@ -46,13 +45,10 @@ def test_new_agent_comment_requires_prior_person_comment_and_clears_on_open(isol
         threads = [{"id": row["id"]} for row in (old, new, suggestion)]
         annotate_thread_attention(db, "owner-token", artifact, threads)
         assert [row["new_comment"] for row in threads] == [False, True, False]
-        items = unread_items(db, "owner-token")
-        assert items[0]["detail"]["new_comment_count"] == 1
         with write_transaction(db, scope="test_unread_top_level_view") as connection:
             mark_thread_viewed(connection, "owner-token", artifact, new["id"], new["id"])
         annotate_thread_attention(db, "owner-token", artifact, threads)
         assert threads[1]["new_comment"] is False
-        assert unread_items(db, "owner-token") == []
     finally:
         db.close()
 

@@ -130,7 +130,7 @@ test('capture live workflow states', async ({ page, request }, testInfo) => {
  await expect(page.locator('.thread-plan-pane').getByRole('button', { name: /^Gather statements/ })).toBeFocused();
  await shot('17-plan-393-light');
  await page.getByRole('dialog', { name: /Plan/ }).getByRole('button', { name: 'Done', exact: true }).click();
- await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+ await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
  await expect(page.locator('aside.sidebar')).toHaveClass(/\bopen\b/);
  await page.getByRole('link', { name: 'Measurement', exact: true }).click();
  await expect(page.getByTestId('workflow-detail')).toBeVisible();
@@ -145,7 +145,7 @@ test('capture live workflow states', async ({ page, request }, testInfo) => {
  else await workerRunButton.click();
  await expect(page.locator('.thread-plan-pane').getByRole('button', { name: /^Delegated workflow/ })).toBeFocused();
  await page.getByRole('dialog', { name: /Plan/ }).getByRole('button', { name: 'Done', exact: true }).click();
- await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+ await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
  await page.getByRole('link', { name: 'Measurement', exact: true }).click();
  await expect(workerAnchor).toBeFocused();
  await page.setViewportSize({ width: 1440, height: 1000 });

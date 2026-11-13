@@ -70,6 +70,15 @@ function applyNudge(message: PlansChangedMessage) {
 function startAmbient() {
 	if (ambientStop) return;
 	const offNudge = on('plans_changed', (message: PlansChangedMessage) => applyNudge(message));
+	const offComments = on('doc_comment_changed', (message: unknown) => {
+		if (!message || typeof message !== 'object' || !('artifact_id' in message)) return;
+		const artifactId = message.artifact_id;
+		for (const rec of observers.values()) {
+			const payload = peekEntry(planKeyString(rec.key)).payload as OperatorEnvelope | null;
+			if (payload?.plans?.some((plan) => plan.nodes.some((node) =>
+				node.artifacts.some((artifact) => artifact.id === artifactId)))) void refresh(rec.key);
+		}
+	});
 	// A held reply is not a plan change, but Activity counts it among what waits on the person.
 	const offHeld = on('held_reply_changed', () => {
 		for (const rec of [...observers.values()]) {
@@ -91,6 +100,7 @@ function startAmbient() {
 	});
 	ambientStop = () => {
 		offNudge();
+		offComments();
 		offHeld();
 		offConnection();
 		offToken();

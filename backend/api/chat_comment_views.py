@@ -1,4 +1,6 @@
-"""Record when a person has seen a chat-comment answer."""
+"""Post chat comments, read their threads, and record when a person has seen an answer."""
+
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -6,9 +8,12 @@ from pydantic import BaseModel
 from doceditor.reply_attention import chat_reply_items
 from infra.auth import owns_thread, require_user_header_only
 from infra.chat_comment_answers import has_comment_cid
-from infra.chat_comment_index import attach_comments
+from infra.chat_comment_index import attach_comments, comment_only
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
+from infra.failure_reference import ReferencedHTTPException, new_error_reference
+from infra.queries import get_thread_for_user
+from infra.send_types import SendRejected
 
 router = APIRouter(prefix="/api", tags=["chat-comments"])
 
@@ -35,6 +40,174 @@ async def chat_comment_threads(thread_id: str, body: ThreadsRequest, user: dict 
     result = await run_read(lambda: _threads(user['id'], thread_id, body.message_ids))
     if result is None:
         raise HTTPException(404)
+    return result
+
+
+class PostRequest(BaseModel):
+    input_id: str = ''
+    comment: dict | None = None
+    viewing_document: dict | None = None
+    reasoning_effort: str | None = None
+    # The comment input whose delivery ended; its comments are posted again in its place.
+    retry_of: str | None = None
+
+
+def _is_comment_input(thread_id: str, message_id: str) -> bool:
+    """Whether this row is a comment-only input, the only kind this route retries."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT content,metadata FROM messages WHERE id=? AND thread_id=? AND role='user'",
+            (message_id, thread_id),
+        ).fetchone()
+    finally:
+        db.close()
+    try:
+        return row is not None and comment_only(row[0], json.loads(row[1] or '{}'))
+    except ValueError:
+        return False
+
+
+def _settled(thread_id: str, message_id: str) -> bool:
+    """Whether this input's delivery settled with no Retry to offer: it was delivered or cancelled."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT delivery_state FROM messages WHERE id=? AND thread_id=?", (message_id, thread_id),
+        ).fetchone()
+    finally:
+        db.close()
+    return row is not None and row[0] in ('delivered', 'cancelled')
+
+
+def _failed(status: int, code: str, reference: str | None = None) -> ReferencedHTTPException:
+    """A failure the person can only retry, malformed requests included: a system failure (COPY-STANDARD C10).
+
+    The API's error handler logs it under its reference, with the chained cause, and the box shows that reference.
+    """
+    return ReferencedHTTPException(status, code, reference or new_error_reference())
+
+
+def _refused(exc: SendRejected) -> HTTPException:
+    """The code a comment's box or Retry toast words for an input refused before it was stored.
+
+    One code per known cause (C11). The refusal's own text is written for chat's composer, so it never passes.
+    """
+    from infra.input_admission import CHECKPOINT_CONFIGURATION_IMPOSSIBLE
+
+    cause = exc.metadata.get('cause')
+    if cause == 'comment_check_failed':
+        return _failed(500, cause, exc.metadata.get('reference'))
+    if cause == 'comment_quote_gone':
+        return HTTPException(400, cause)
+    if cause == CHECKPOINT_CONFIGURATION_IMPOSSIBLE:
+        return HTTPException(409, 'comment_model_cap')
+    if exc.status_code == 404:
+        return HTTPException(404, 'chat_not_found')
+    return _failed(exc.status_code, 'comment_not_sent')
+
+
+def _owned_thread(user_id: str, thread_id: str):
+    db = get_db()
+    try:
+        row = get_thread_for_user(thread_id, user_id, db=db)
+        return dict(row) if row is not None else None
+    finally:
+        db.close()
+
+
+def _posted(user_id: str, thread_id: str, input_id: str) -> dict | None:
+    """The stored input's delivery, and the commented rows with their threads as they now stand."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT delivery_state,delivery_error FROM messages WHERE id=? AND thread_id=? AND role='user'",
+            (input_id, thread_id),
+        ).fetchone()
+        targets = [target for (target,) in db.execute(
+            "SELECT DISTINCT target_message_id FROM chat_comments WHERE thread_id=? AND user_message_id=?",
+            (thread_id, input_id),
+        )]
+    finally:
+        db.close()
+    if row is None:
+        return None
+    return {'message_id': input_id, 'delivery_state': row[0], 'delivery_error': row[1],
+            **(_threads(user_id, thread_id, targets) or {'messages': []})}
+
+
+@router.post('/threads/{thread_id}/chat-comments')
+async def post_chat_comment(thread_id: str, body: PostRequest, user: dict = Depends(require_user_header_only)):
+    """Post a comment, or a reply in a comment thread, as the thread's next input.
+
+    It is admitted like any input, so the agent's Turn takes it in as before, but it is
+    no chat message: its broadcast reaches chat clients as a `chat_comments_changed`
+    notice (infra/send_broadcast.py), and chat never draws its row. The response is the
+    box's whole answer. A subagent pane posts to the child thread the same way.
+    """
+    thread_row = await run_in_db(_owned_thread, user['id'], thread_id)
+    if thread_row is None:
+        raise HTTPException(404, 'chat_not_found')
+    from infra.execution_class import is_subagent
+    from infra.send_service import send_thread_input
+
+    subagent = is_subagent(thread_row)
+    if body.retry_of:
+        return await _retry(user['id'], thread_id, body.retry_of)
+    input_id = body.input_id.strip()
+    if not input_id or body.comment is None:
+        raise _failed(400, 'comment_missing')
+    metadata: dict = {'reply_context': {'comments': [body.comment]}}
+    if body.viewing_document is not None:
+        metadata['viewing_document'] = body.viewing_document
+    try:
+        await send_thread_input(
+            thread_id, thread_row, '',
+            user=user, metadata=metadata, human_origin=True, input_id=input_id,
+            native_mode='delegation' if subagent else 'event',
+            touch_thread_on_insert=True, trim_content=False,
+            reasoning_effort=None if subagent else (body.reasoning_effort or thread_row.get('reasoning_effort')),
+        )
+    except SendRejected as exc:
+        # Stored, then not delivered: the comment is in its thread with that failure and Retry,
+        # so the box closes on it rather than offering a second post of the same text.
+        stored = exc.input_undeliverable and await run_read(lambda: _posted(user['id'], thread_id, input_id))
+        if not stored:
+            raise _refused(exc) from exc
+        return stored
+    result = await run_read(lambda: _posted(user['id'], thread_id, input_id))
+    if result is None:
+        raise _failed(500, 'comment_not_stored')
+    return result
+
+
+async def _retry(user_id: str, thread_id: str, message_id: str) -> dict:
+    """Retry an ended comment through chat's own Retry, and answer with the comment in its place.
+
+    Chat's Retry owns the copy's id, follows earlier copies and handles a double press, so a
+    comment and a chat message retry the same way; a comment's copy stays out of chat. A comment
+    already delivered or cancelled, say from another device, is no failure: the answer is the
+    comment as it stands, and its thread shows that state.
+    """
+    from api.thread_inbox_actions import retry_thread_delivery_now
+
+    if not await run_read(lambda: _is_comment_input(thread_id, message_id)):
+        raise _failed(409, 'comment_not_retryable')
+    try:
+        retried = await retry_thread_delivery_now(thread_id, message_id, user_id)
+    except HTTPException as exc:
+        # Only a comment that settled stands; any other refusal, such as a chat that can't take
+        # input now, is the Retry's failure and says why, by the same codes a post's refusal uses.
+        if exc.status_code != 409 or not await run_read(lambda: _settled(thread_id, message_id)):
+            refusal = exc.__cause__
+            raise (_refused(refusal) if isinstance(refusal, SendRejected)
+                   else _failed(exc.status_code, 'comment_not_sent')) from exc
+        retried = {}
+    # A queued comment is driven in place, an ended one gets its copy, and a delivered or cancelled one stands.
+    copy = retried.get('revived_message_id') or message_id
+    result = await run_read(lambda: _posted(user_id, thread_id, copy))
+    if result is None:
+        raise _failed(500, 'comment_not_stored')
     return result
 
 
