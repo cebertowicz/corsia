@@ -11,7 +11,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, covered = false, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, clearAnchor = false, initialFocus, takeFocus = true, surfaceRole = 'dialog', ariaLabel, sideKey, keepOpenOnPointer, covered = false, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -26,7 +26,7 @@
 		onPlace?: (card: HTMLElement) => void;
 		/** Keep the surface inside this element or live rectangle instead of anywhere in the window. */
 		bounds?: Anchor;
-		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
+		/** A live rectangle the card should clear vertically: always for a `bottom` placement, otherwise when it cannot fit beside its anchor. */
 		avoidRect?: () => DOMRect | null;
 		/** Keep a thread's anchor visible while its contents grow. */
 		clearAnchor?: boolean;
@@ -36,6 +36,8 @@
 		takeFocus?: boolean;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
+		/** The dialog's accessible name, for a surface whose content does not name itself. */
+		ariaLabel?: string;
 		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
 		sideKey?: unknown;
 		/** A related control that can be used without dismissing this surface. */
@@ -101,9 +103,12 @@
 		const height = Math.min(naturalHeight, area.bottom - area.top - 2 * gap);
 		const avoided = avoidRect?.();
 		const under = placement === 'bottom-end' || (placement === 'bottom' && rect.left + width > area.right - gap) ? rect.right - width : rect.left;
+		// A card placed below or above its anchor clears the avoided rectangle on that side too.
+		const vertical = placement === 'bottom' || placement === 'bottom-end';
+		const span = vertical && avoided ? { top: Math.min(rect.top, avoided.top), bottom: Math.max(rect.bottom, avoided.bottom) } : rect;
 		const spots: Record<Side, [number, number]> = {
-			below: [under, rect.bottom + gap],
-			above: [under, rect.top - height - gap],
+			below: [under, span.bottom + gap],
+			above: [under, span.top - height - gap],
 			right: [rect.right + gap, rect.top],
 			left: [rect.left - width - gap, rect.top],
 			'avoid-below': [under, (avoided?.bottom ?? rect.bottom) + gap],
@@ -153,8 +158,8 @@
 			if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 			return;
 		}
-		const overflowsBelow = rect.bottom + gap + height > area.bottom - gap;
-		const fitsAbove = rect.top - gap - height >= area.top + gap;
+		const overflowsBelow = span.bottom + gap + height > area.bottom - gap;
+		const fitsAbove = span.top - gap - height >= area.top + gap;
 		let side: Side = 'below';
 		if (placement === 'bottom' || placement === 'bottom-end') {
 			// Below the anchor when it fits; otherwise above it.
@@ -230,7 +235,7 @@
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
 	     Clipping keeps it measurable before it is placed without inherited visibility transitions delaying focus; covered, it is hidden outright. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
 {/if}
 
 <style>
