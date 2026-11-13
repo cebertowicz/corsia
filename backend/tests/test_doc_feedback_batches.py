@@ -401,6 +401,7 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
             "document_held_count": 0,
             "image_held_count": 0,
             "owner_label": "Documents & Artifacts",
+            "comment_goes_to": {"state": "agent", "id": "owner", "name": "Documents & Artifacts", "via": "owner"},
             "undelivered_batches": [],
         }
         assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
