@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './corsia';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './corsia';
 import { injectMessage, seedMockResponses, waitForThreadReply } from './mock';
 import { commentEditor, commentEditorClosed, commentOnMessage } from './chatComments';
 
@@ -33,14 +33,13 @@ export async function commentedMessage(page: Page, request: APIRequestContext, w
 	});
 	await page.locator('.sel-comment').click();
 	await commentEditor(page).fill('A note on the phrase');
+	// The comment posts from its own box and starts the Turn that answers it; it never becomes a chat message.
+	await seedMockResponses(request, [{ content: 'Received comment' }]);
 	await page.getByRole('button', { name: 'Comment', exact: true }).click();
 	await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
 	await commentEditorClosed(page);
-	// The comment belongs to the message only once the message carrying it is delivered.
-	await seedMockResponses(request, [{ content: 'Received comment' }]);
-	await chatComposer(page).fill('Please address this');
-	await page.getByRole('button', { name: 'Send message' }).click();
 	await commentOnMessage(row, QUOTE);
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 	await waitForThreadReply(request, thread, 'Received comment');
 	return { row, narrow };
 }

@@ -156,9 +156,14 @@ CASE WHEN (CASE role
 """
 
 # A `WHERE` clause continuation that drops the rows the transcript never draws.
+# A user input whose chat text was saved as empty is a chat comment: it lives in
+# its comment thread (infra/chat_comment_index.place_comments), never in chat.
 NEVER_DRAWN_FILTER = (
     f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
     f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
+    # One primary-key lookup per user row; a bounded page never scans the table.
+    "AND NOT (role = 'user' AND EXISTS (SELECT 1 FROM chat_visible_content cv "
+    "WHERE cv.message_id = id AND cv.content = '')) "
 )
 
 

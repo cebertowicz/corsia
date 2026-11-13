@@ -36,7 +36,8 @@ export async function seed(page: Page, request: APIRequestContext) {
     await openAppPastLanding(target);
     if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
     await sidebarThread(target, title).click();
-    await expect(target.locator('.sent-comment')).toBeVisible();
+    // A stored comment reads in its thread on the highlight; the bubble shows only its own words.
+    await expect(target.locator('.messages .message.user').filter({ hasText: 'I added a note about the review.' })).toBeVisible();
     await expect(target.locator('button.model-chip .model-chip-name')).toHaveText('Claude Sonnet 5.5');
   }
   await open(page);

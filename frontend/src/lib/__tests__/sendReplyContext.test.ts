@@ -1,10 +1,8 @@
-import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { beginComposing, cancelComposing, setVisibleRows } from '../stores/replyContextCapture';
 import { subagentMeta, type SubagentRef } from '../stores/subagents';
-import { activeThreadId, messages } from '../stores/threads';
-import { visitDividers } from '../stores/threadUpdateCards';
 import { setWs } from '../ws/state';
+import { visitDividers } from '../stores/threadUpdateCards';
 import { sendMessage } from '../ws/send';
 
 function rows(threadId: string, ...seqs: number[]) {
@@ -35,31 +33,6 @@ describe('reply context send payload', () => {
 			type: 'message', thread_id: 'main',
 			reply_context: { in_view: [[3, 5, 3]], first_unread: { seq: 4, truncated: false } },
 		});
-	});
-
-	it('sends comments in the same context as the view and unread position', () => {
-		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
-		visitDividers.set({ main: { divider: { since: 's', first_seq: 4 }, failed: false } });
-		setVisibleRows(rows('main', 3, 4));
-		beginComposing('main');
-		sendMessage('main', 'answer', undefined, undefined, undefined, 'apply_now', [comment]);
-		expect(sent.at(-1)?.reply_context).toEqual({ comments: [comment], in_view: [[3, 4, 2]], first_unread: { seq: 4, truncated: false } });
-	});
-
-	it('shows the sent comments on the sender\'s own echo, with or without text', () => {
-		// The sending socket gets no message_added for its own input, so the echo is what it renders.
-		const comment = { id: 'c1', seq: 3, from_off: 2, to_off: 5, quote: 'one', anchor_prefix: 'a ', anchor_suffix: ' b', note: 'note' };
-		activeThreadId.set('main');
-		messages.set([]);
-		try {
-			sendMessage('main', '', undefined, undefined, undefined, 'apply_now', [comment]);
-			expect(get(messages).at(-1)).toMatchObject({ content: '', metadata: { reply_context: { comments: [comment] } } });
-			sendMessage('main', 'plain');
-			expect(get(messages).at(-1)?.metadata).not.toHaveProperty('reply_context');
-		} finally {
-			activeThreadId.set(null);
-			messages.set([]);
-		}
 	});
 
 	it('sends the window once: the next message starts from nothing', () => {

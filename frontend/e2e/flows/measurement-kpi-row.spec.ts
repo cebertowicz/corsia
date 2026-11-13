@@ -156,7 +156,7 @@ async function enter(page: Page, request: APIRequestContext, testInfo: TestInfo,
 	await loginByUrl(page, { waitForComposer: false });
 	await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
 	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
-	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	if (mobile) await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	if (mobile) await expect(page.locator('main.main')).not.toHaveClass(/open/);
 	await expect(page.locator('.measurement-page')).toBeVisible({ timeout: 20_000 });

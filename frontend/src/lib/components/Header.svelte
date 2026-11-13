@@ -5,6 +5,8 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { openProjectSettings as showProjectSettings, openWorkspaceSettings as showWorkspaceSettings } from '$lib/stores/settingsNavigation';
 	import { sidebarCollapsed } from '$lib/stores/ui';
+	import { listedNeedsYou } from '$lib/stores/threadPlanStates';
+	import { isMobile } from '$lib/stores/viewport';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { measurementScopeTitle } from '$lib/stores/measurementScopeTitle';
 	import { canvasHeader } from '$lib/stores/canvasHeader';
@@ -33,6 +35,8 @@
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
 	const designatedName = $derived($coordinationThreads.find((thread) => thread.id === conductorThreadId)?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
+	// A phone hides the menu, so its toggle carries the menu rows' needs-you dot.
+	const menuNeedsYou = $derived($isMobile && $listedNeedsYou);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
 	// When activeThreadId is set but activeThread is null we are loading or
@@ -146,8 +150,9 @@
 	>
 		<div class="h-leading">
 			<div class="h-zone h-left">
-				<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+				<button class="h-icon h-menu" onclick={toggleSidebar} title="Toggle sidebar" aria-label={menuNeedsYou ? 'Toggle sidebar · Needs you' : 'Toggle sidebar'}>
 					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+					{#if menuNeedsYou}<span class="needs-you-dot" data-testid="menu-needs-you-dot" aria-hidden="true"></span>{/if}
 				</button>
 				{#if isTakeover && h?.onBack}
 					<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
@@ -260,6 +265,13 @@
 		.h-back:hover { background: var(--bg-hover); color: var(--text-primary); }
 	}
 	.h-icon.active { background: var(--accent-wash); color: var(--accent-text); }
+	/* The thread row's needs-you dot (ThreadPlanStateMark), carried while a phone's menu is hidden. */
+	.h-menu { position: relative; }
+	.needs-you-dot {
+		position: absolute; top: var(--space-2); right: var(--space-2);
+		width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle);
+		background: var(--amber);
+	}
 	.h-icon:active { scale: 0.94; }
 
 	.h-back {
