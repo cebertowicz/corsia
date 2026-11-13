@@ -69,8 +69,9 @@
 				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentDrafts.get(comment.id), (text) => chatCommentDrafts.set(comment.id, text)} replyPending={!!chatCommentDrafts.reply(comment.id)?.posting} replyError={chatCommentDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); await postReply(comment, text); }}>
 				{#snippet failure()}
 				{#each unsentSends(comment) as send (send.messageId)}
-					<div class="failed-reply" role="status">
-						<CommentReplyList replies={[{ id: send.messageId, author: 'user', authorKind: 'user', text: send.note, at: formatTime(send.createdAt) }]} />
+					<div class="failed-reply" class:own={send.root} role="status">
+						<!-- The comment's own text is the thread's body above; only a reply, kept out of the delivered list, shows its text here. -->
+						{#if !send.root}<CommentReplyList replies={[{ id: send.messageId, author: 'user', authorKind: 'user', text: send.note, at: formatTime(send.createdAt) }]} />{/if}
 						<!-- Chat's label and red mark for a message in this state (UserMessageBubble). -->
 						{#if send.delivery.failed}<span class="delivery-failed-mark" title={send.delivery.title} aria-label="Needs your attention">!</span>{/if}
 						<span class="delivery-status" class:terminal={send.delivery.failed} title={send.delivery.title}>{send.delivery.label}</span>

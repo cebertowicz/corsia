@@ -18,8 +18,10 @@ test.describe.configure({ timeout: 180_000 });
 test.use({ seedPerTest: true, colorScheme: 'light', video: 'off' });
 
 const MESSAGE = 'First phrase is refused once. Second phrase fails after it is stored.';
-// The server's own words when it refuses a send because the chat's model is down.
-const REFUSAL = 'Model unavailable: the provider is not responding. Please select a different model.';
+// The route's answer for a refusal it has no named cause for (chat_comment_views._refused): a code and the reference
+// it is logged under, never chat composer prose. The box words it as a system failure with that reference.
+const REFERENCE = 'ABC234';
+const REFUSAL = `Couldn’t send this comment. Try again. Reference: ${REFERENCE}`;
 
 const UNDELIVERED = 'The accepted input did not reach a Turn.';
 
@@ -27,7 +29,7 @@ const UNDELIVERED = 'The accepted input did not reach a Turn.';
 async function refuse(page: Page, note: () => string | null) {
   await page.route(/\/api\/threads\/[^/]+\/chat-comments$/, async route => {
     const now = note();
-    if (now && (route.request().postData() ?? '').includes(now)) await route.fulfill({ status: 503, json: { detail: REFUSAL } });
+    if (now && (route.request().postData() ?? '').includes(now)) await route.fulfill({ status: 503, json: { detail: 'comment_not_sent', reference: REFERENCE } });
     else await route.fallback();
   });
 }
@@ -208,7 +210,7 @@ test('a comment stopped after its turn began writing reads uncertain and retries
   await request.post(`${backend}/api/test/mock-gates/uncertain-write/release`);
 });
 
-test('the comment popover leaves its passage uncovered, keeps focus until Escape, and keeps its text after Escape, 900', async ({ page, request }) => {
+test('the comment popover leaves its passage uncovered, keeps focus until Escape, and keeps its text after Escape, and hands focus to its highlight once posted, 900', async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name !== 'chromium-desktop', 'Requires a disposable mock instance');
   await page.setViewportSize({ width: 900, height: 900 });
   const title = 'Comment popover focus';
@@ -243,6 +245,16 @@ test('the comment popover leaves its passage uncovered, keeps focus until Escape
   await expect(commentEditor(page)).toHaveValue('Typed before tabbing');
   await commentEditor(page).press('Escape');
   await expect(popover).toHaveCount(0);
+
+  // Posting from the keyboard leaves focus on the comment's own highlight, never on the page.
+  await selectPhrase(page, id, 'Second phrase');
+  await popover.getByRole('button', { name: 'Comment', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(popover).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    return active?.matches('[data-comment-ids][role="button"]') ? active.textContent : active?.tagName;
+  })).toBe('Second phrase');
 
   // On touch the selection pill is a full target at any width.
   await touch(page);

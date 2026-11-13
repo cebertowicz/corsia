@@ -60,6 +60,16 @@ it.each([
 	const failure = host.querySelector('.failed-reply');
 	expect(failure?.textContent).toContain(label);
 	expect([...(failure?.querySelectorAll('button') ?? [])].map(button => button.textContent?.trim())).toEqual(retry ? [retry] : []);
+	// The comment's text shows once, as the thread's body, with the label under it.
+	expect(host.textContent?.split('Why?')).toHaveLength(2);
+	expect(failure?.textContent).not.toContain('Why?');
+});
+
+it('shows a held comment’s text once, with its label under it', () => {
+	activeThreadId.set('thread');
+	show([{ ...comment, delivery_state: 'queued', delivery_error: 'selected_model_unavailable', write_outcome: 'proved_no_write' } as ChatComment]);
+	expect(host.querySelector('.failed-reply')?.textContent).toContain('Waiting for model');
+	expect(host.textContent?.split('Why?')).toHaveLength(2);
 });
 
 // Retry answers with the canonical input row. That row is the comment's, not chat's: it must not reach the transcript.

@@ -2,7 +2,7 @@
 export type Delivery = {
 	delivery_state?: string | null; delivery_error?: string | null;
 	/** With `active_turn_id`, what tells a held queued input from one being sent (messageDelivery.deliveryPresentation). */
-	write_outcome?: string | null; active_turn_id?: string | null; delivering_reason?: string | null;
+	write_outcome?: 'accepted' | 'proved_no_write' | 'ambiguous' | null; active_turn_id?: string | null; delivering_reason?: string | null;
 };
 
 export type ChatCommentAnswer = {

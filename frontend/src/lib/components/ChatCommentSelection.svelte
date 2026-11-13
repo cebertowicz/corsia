@@ -290,7 +290,30 @@
 		if (!currentDraft || !threadId) return;
 		// The box stays, read-only, until the server stores the comment, then closes; a refusal keeps it open with its cause.
 		const stored = await chatCommentDrafts.postRoot(threadId, currentDraft.messageId, currentDraft.anchor, note, () => onSendReply({ id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }));
-		if (stored && draft === currentDraft) requestClose();
+		if (stored && draft === currentDraft && !closing) {
+			afterClose = () => { close(); focusPosted(currentDraft, note); };
+			closing = true;
+		}
+	}
+	/**
+	 * A posted comment has no box left to hold focus, so focus moves on to the comment: to its reply field where its
+	 * thread is on screen (its card in the margin column, picked), otherwise to its highlight, which opens the thread.
+	 * Never left on the page, where the next Tab starts from the top. Focus the person already moved stays put.
+	 */
+	function focusPosted(posted: Pick, note: string) {
+		const free = () => !document.activeElement || document.activeElement === document.body;
+		const comment = $messages.find(item => item.id === posted.messageId && item.thread_id === threadId)?.chat_comments
+			?.findLast(item => item.from_off === posted.anchor.from_off && item.to_off === posted.anchor.to_off && item.note === note);
+		if (!comment) return;
+		if (marginComments) selectedCommentId = comment.id;
+		void tick().then(() => requestAnimationFrame(() => {
+			if (!free()) return;
+			const reply = marginComments ? document.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"] textarea`) : null;
+			const row = messageRoot()?.querySelector(`[data-message-id="${CSS.escape(posted.messageId)}"]`);
+			const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
+				.find(item => item.dataset.commentIds?.split(',').includes(comment.id));
+			(reply ?? mark)?.focus({ preventScroll: true });
+		}));
 	}
 </script>
 
