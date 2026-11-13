@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3204,
+      "bytes": 3614,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
+      "sha256": "b9d954695769fc4c5345504855127d74908d3d6ed367807d39fe036a957540f3"
     },
     {
       "bytes": 389,
@@ -154,10 +154,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 9105,
+      "bytes": 9618,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "21db0bad1d49364aebca1cae521a77953615f06ae40fc7aba84105ab0d23fd4d"
+      "sha256": "d7c48c7eed05b19479fca95357d522f6a5b197de8b2a317c85df545d122177ef"
     },
     {
       "bytes": 6186,
@@ -220,10 +220,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 5753,
+      "bytes": 7206,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/project-import.md",
-      "sha256": "8b6f2c7ae15ae1c60d688880d0aa079fa1b83356ecca9e642d4645d2a5bf8aaa"
+      "sha256": "a2c87f88deb6100d69e5da9164010eff28a43cf02494ccd7e5fc79061c15ddb8"
     },
     {
       "bytes": 13679,
@@ -340,6 +340,18 @@
       "sha256": "354b18112635941b14e2dc763f928fb6ac9268f1fd92fb9908cb84cabd1ec36b"
     },
     {
+      "bytes": 7425,
+      "kind": "skill",
+      "path": "skills/instruction-review/SKILL.md",
+      "sha256": "64797f154b9c94f2399726fcfdc94e1c132c8e69d3b1d87d26567b4b6bbfe682"
+    },
+    {
+      "bytes": 5283,
+      "kind": "skill",
+      "path": "skills/instruction-review/corsia.yaml",
+      "sha256": "a6eefd2029dad9a21f57fa0c6ca19e15cf8038edbd14506c3c286570bd01862f"
+    },
+    {
       "bytes": 3634,
       "kind": "skill",
       "path": "skills/mail-host-setup/SKILL.md",
@@ -406,10 +418,10 @@
       "sha256": "e4d87199e693df821fe3e68e08b4fea751f2bd6ee4a29a2103f2a61358806937"
     },
     {
-      "bytes": 4996,
+      "bytes": 5471,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "71424ad46a0ed871d8049eb26deace2edb8813fcbcd6468d12b769c5f6a3c35e"
+      "sha256": "bdff5dbba57c49a7b33e591396d8a8e35845c5267dc199b041ecc069b27e5f7a"
     }
   ],
   "version": "v1"

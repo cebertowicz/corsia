@@ -203,6 +203,19 @@ def measurement_clock(monkeypatch):
     monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc))
 
 
+@pytest.fixture
+def newer_build_available(monkeypatch):
+    """Answer the Update feed probe with one newer build; test mode otherwise reports no check."""
+    from infra import update_status
+
+    status = update_status.UpdateStatus(
+        branch=None, current_sha=None, remote_sha=None, commits_behind=None, available=True,
+        checked_at=0.0, error=None, current_version="1.0.0", target_version="1.0.1", changes=None,
+    )
+    monkeypatch.setattr(update_status, "update_status", lambda force=False: status)
+    return status
+
+
 @pytest.fixture()
 def isolated_db(tmp_path, monkeypatch):
     import infra.database as db_mod

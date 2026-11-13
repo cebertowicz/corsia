@@ -11,9 +11,11 @@
 		/** A rule set elsewhere holds the choice: muted and inert, while still focusable so its description remains reachable. */
 		held?: boolean;
 		size?: 'sm' | 'md';
+		/** Adds an invisible hit area centred on the track, as large as the host sets `--toggle-hit` (the track size when it sets nothing). The button's own box stays the track size, so a label before it keeps its normal gap; the room the hit area needs after it is reserved here. */
+		touch?: boolean;
 	}
 
-	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, held = false, size = 'md' }: Props = $props();
+	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, held = false, size = 'md', touch = false }: Props = $props();
 
 	function handle() {
 		if (disabled || locked || held) return;
@@ -25,6 +27,7 @@
 	type="button"
 	class="tg {size}"
 	class:on={checked}
+	class:touch
 	class:locked
 	class:held
 	aria-disabled={held || locked || undefined}
@@ -33,7 +36,7 @@
 	aria-label={ariaLabel}
 	aria-describedby={describedBy}
 	onclick={handle}
-></button>
+>{#if touch}<span class="hit" aria-hidden="true"></span>{/if}</button>
 
 <style>
 	.tg {
@@ -67,6 +70,14 @@
 		border: 1px solid var(--text-tertiary);
 		border-radius: var(--radius-pill);
 		transition: all var(--dur-tight) var(--ease-snap);
+	}
+	/* The hit area reaches past the track on both sides. Its start side overlaps the label, which is inert; its end side is kept free here so a neighbouring control does not take part of it. */
+	.tg.touch { margin-inline-end: calc((max(var(--w), var(--toggle-hit, 0px)) - var(--w)) / 2); }
+	.tg .hit {
+		position: absolute;
+		top: 50%; left: 50%;
+		width: max(var(--w), var(--toggle-hit, 0px)); height: max(var(--h), var(--toggle-hit, 0px));
+		transform: translate(-50%, -50%);
 	}
 	.tg::after {
 		content: '';

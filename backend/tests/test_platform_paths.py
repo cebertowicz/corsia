@@ -65,9 +65,11 @@ def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
     stage = (repo / "desktop" / "src-tauri" / "src" / "update_stage.rs").read_text()
     rust_names = re.findall(r'with_file_name\("(CORSIA\.app\.\w+)"\)', stage)
     shell_names = re.findall(r'/(CORSIA\.app\.\w+)"', app_mode)
+    # The backend reads the staged name from infra/platform_paths, so the Rust
+    # updater and the lifecycle script must agree with that one value.
     assert sorted(rust_names) == sorted(shell_names) == [
         "CORSIA.app.previous",
-        "CORSIA.app.staged",
+        paths.STAGED_BUNDLE_NAME,
     ]
 
 

@@ -24,6 +24,8 @@ _BUCKET_UPPERS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096,
                   8_192, 16_384, 32_768, 60_000)
 _FLUSH_SECONDS = 60
 _SLOW_MS = 1_000
+#: A request this slow is also logged, so it can be read where the analytics database can't.
+_LOGGED_SLOW_MS = 5_000
 _UNMATCHED_ROUTE = "<unmatched>"
 #: Recorded for a request whose caller gave up first (the handler was cancelled): the client-closed status.
 CLIENT_CLOSED = 499
@@ -228,6 +230,14 @@ class RequestTimingMiddleware:
                     timing.read_queue_ms, timing.read_execution_ms,
                     timing.bulk_queue_ms, timing.bulk_execution_ms,
                 )
+            )
+        if duration_ms > _LOGGED_SLOW_MS:
+            log.warning(
+                "slow request %s %s status=%d dur_ms=%.0f dbq_ms=%.0f db_ms=%.0f dbq_read_ms=%.0f "
+                "db_read_ms=%.0f dbq_bulk_ms=%.0f db_bulk_ms=%.0f response_bytes=%s",
+                key[1], route, status, duration_ms, timing.queue_ms, timing.execution_ms,
+                timing.read_queue_ms, timing.read_execution_ms, timing.bulk_queue_ms,
+                timing.bulk_execution_ms, response_bytes,
             )
 
 

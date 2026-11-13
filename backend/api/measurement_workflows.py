@@ -8,8 +8,9 @@ Every field is read from the module that owns the fact, so a correction to one r
 | the run, its version, state, corrections, cost and model group | ``core.workflow_verdict_read.read_snapshot`` and ``price_snapshot`` (``Measurement``'s own price chain) |
 | whether a task ran under a workflow | ``api.measurement_workflow_share.under_workflow``, the rule the ``under_workflow_pct`` series counts by too |
 | what a task is, and the window it is counted in | ``api.measurement_queries.outcome_ctes`` with the page grain |
+| how a task was created (coverage by origin) | the ``provenance`` its plan writer stamped on its ``node_created`` event, and ``plan_nodes.follow_up_of`` |
 | a run's end, its steps and their rounds | ``plans.run_end.records`` (the ``workflow_run_ended`` record) |
-| working time | ``plans.node_cost_scoped.project``, the plan-node cost rollup's own ``execution.seconds`` |
+| working time | ``plans.node_cost_scoped.working_seconds``, the plan-node cost rollup's own rolled ``execution.seconds`` |
 | a step's title, an agent's label | the plan node's ``title``, the thread's ``title`` (as ``/agents`` labels it) |
 | the runs never compared, and where the comparison stands | ``core.workflow_verdict_read.read_snapshot`` (``WorkflowHistory.excluded``) and ``workflow_verdict_rules.compute``; a reached verdict from its own record via ``workflow_verdict_evaluator.reached_detail`` |
 
@@ -57,7 +58,7 @@ from core.workflow_verdicts import Run, parse_ts
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
-from plans.public import node_cost_project, run_end_records
+from plans.public import node_working_seconds, run_end_records
 from tools.workflow_task_fields import version_short_hash
 from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
 from api.measurement_workflow_share import under_workflow
@@ -153,18 +154,34 @@ def _priced_scope_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[s
 
 
 def _coverage(db: sqlite3.Connection, params: dict[str, Any], grain: Grain, window: Window,
-              parents: Mapping[str, str | None], root_ids: frozenset[str]) -> dict[str, int]:
-    """Tasks in the window that ran under a workflow, beside every task in the window.
+              parents: Mapping[str, str | None], root_ids: frozenset[str]) -> dict[str, Any]:
+    """Tasks in the window that ran under a workflow, beside every task in the window, and by origin.
 
     The task set is Measurement's own accepted-task read, so this headline counts the same tasks the
     page's other panels count; membership is ``under_workflow``, the rule the series counts by.
+
+    ``by_origin`` splits the same tasks by how each was created: the ``provenance`` its plan writer
+    stamped on the task's ``node_created`` event (``null`` where none is recorded) and whether it is a
+    follow-up of another node. The rows sum to the headline exactly, so the split never disagrees with it.
     """
     rows = db.execute(scope_cte() + outcome_ctes(grain) + """
-        SELECT id FROM outcome_rows WHERE period IN (SELECT value FROM json_each(:periods))
+        SELECT o.id AS id, n.follow_up_of IS NOT NULL AS follow_up,
+          (SELECT e.provenance FROM plan_node_events e WHERE e.node_id=o.id AND e.event='node_created'
+           ORDER BY e.created_at LIMIT 1) AS provenance
+        FROM outcome_rows o JOIN plan_nodes n ON n.id=o.id
+        WHERE o.period IN (SELECT value FROM json_each(:periods))
     """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))}).fetchall()
-    tasks = [str(row["id"]) for row in rows]
-    return {"under_workflow": sum(under_workflow(task, parents, root_ids) for task in tasks),
-            "all_tasks": len(tasks)}
+    origins: dict[tuple[str | None, bool], list[int]] = {}
+    for row in rows:
+        tally = origins.setdefault((row["provenance"], bool(row["follow_up"])), [0, 0])
+        tally[0] += 1
+        tally[1] += under_workflow(str(row["id"]), parents, root_ids)
+    # Most tasks outside a workflow first: what holds the share down reads first.
+    ordered = sorted(origins.items(), key=lambda item: (item[1][1] - item[1][0], item[0][0] or "", item[0][1]))
+    return {"under_workflow": sum(under for _, (_, under) in ordered), "all_tasks": len(rows),
+            "by_origin": [{"provenance": provenance, "follow_up": follow_up, "all_tasks": total,
+                           "under_workflow": under}
+                          for (provenance, follow_up), (total, under) in ordered]}
 
 
 def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: Grain,
@@ -377,10 +394,4 @@ def _step_titles(db: sqlite3.Connection, node_ids: Iterable[str]) -> dict[str, s
 
 def _working_seconds(db: sqlite3.Connection, run_ids: list[str]) -> dict[str, float]:
     """Each run's own working time, from the cost rollup that records it (subtree and carried plans)."""
-    _own, rolled, _initiatives, _ledger = node_cost_project([], run_ids, (), db=db)
-    found = {}
-    for run_id, figures in rolled.items():
-        execution = figures.get("execution") or {}
-        if execution.get("seconds") is not None:
-            found[str(run_id)] = float(execution["seconds"])
-    return found
+    return {str(run_id): float(seconds) for run_id, seconds in node_working_seconds(run_ids, db=db).items()}

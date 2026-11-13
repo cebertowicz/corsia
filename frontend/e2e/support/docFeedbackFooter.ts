@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { openComments } from './commentDrawer';
 import { TEST_TOKEN } from './corsia';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -60,7 +61,7 @@ export async function leaveUserCommentsUnsent(request: APIRequestContext, artifa
 
 /** Open the comments drawer from the header pill ("N threads, …") and return its unsent-messages footer. */
 export async function openUnsentFooter(page: Page): Promise<Locator> {
-	await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+	await openComments(page, /^\d+ threads?\b/);
 	return page.getByRole('region', { name: 'Document comments' }).locator('[data-drawer-unsent]');
 }
 

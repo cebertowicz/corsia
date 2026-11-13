@@ -41,7 +41,7 @@ def _git_output(worktree: Path, git_env: dict[str, str], args: list[str]) -> byt
     return result.stdout
 
 
-def _selected(worktree: Path, git_env: dict[str, str]) -> list[Path]:
+def _selected(worktree: Path, git_env: dict[str, str], generated: frozenset[str]) -> list[Path]:
     index = _git_output(worktree, git_env, ["ls-files", "--stage", "-z"])
     if any(record.startswith(b"160000 ") for record in index.split(b"\0")):
         raise SalvageError("worktree contains a submodule")
@@ -71,7 +71,7 @@ def _selected(worktree: Path, git_env: dict[str, str]) -> list[Path]:
         # the named cache directories the repository ignores.
         ignored = record.startswith("! ")
         name = record[2:]
-        if (ignored and _is_disposable(name)) or in_tool_output(Path(name)):
+        if (ignored and _is_disposable(name, generated)) or in_tool_output(Path(name)):
             continue
         path = worktree / name
         if name.endswith("/") and not path.is_symlink():
@@ -90,13 +90,13 @@ def _selected(worktree: Path, git_env: dict[str, str]) -> list[Path]:
                         dirs.remove(directory)
                         selected.append(child.relative_to(worktree))
                     elif is_tool_output_dir(child) or (
-                        ignored and _is_disposable(relative + "/")
+                        ignored and _is_disposable(relative + "/", generated)
                     ):
                         dirs.remove(directory)
                 selected.extend(
                     (root / filename).relative_to(worktree) for filename in files
                     if not (ignored and _is_disposable(
-                        (root / filename).relative_to(worktree).as_posix()
+                        (root / filename).relative_to(worktree).as_posix(), generated,
                     ))
                 )
         else:
@@ -106,11 +106,13 @@ def _selected(worktree: Path, git_env: dict[str, str]) -> list[Path]:
 
 def salvage_worktree(
     repo: Path, worktree: Path, admin: Path, name: str, now: float, origin: Path,
+    generated: frozenset[str] = frozenset(),
 ) -> Path:
     """Copy tracked changes and non-disposable scratch, or remove the partial copy.
 
     ``worktree`` is the quarantined tree being read, ``admin`` its verified admin
-    directory (quarantine does not move it), and ``origin`` where it lived.
+    directory (quarantine does not move it), ``origin`` where it lived, and
+    ``generated`` the repository's ``generated_trees``.
     """
     git_env = worktree_git_env(repo, admin, worktree)
     day = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
@@ -137,7 +139,7 @@ def salvage_worktree(
         if patch:
             (destination / "changes.patch").write_bytes(patch)
         skipped: list[str] = []
-        for relative in _selected(worktree, git_env):
+        for relative in _selected(worktree, git_env, generated):
             source = worktree / relative
             if not (source.is_symlink() or source.is_file()):
                 skipped.append(relative.as_posix())  # a socket or FIFO holds no work

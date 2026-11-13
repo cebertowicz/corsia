@@ -70,6 +70,21 @@ afterEach(() => {
 });
 
 describe('image pins', () => {
+	it('marks a pin whose thread has something unopened, named for it, and leaves a read pin plain', async () => {
+		const { view } = mount(`${IMAGE}\n`, replaced(new Image(0, IMAGE.length, true), 0, IMAGE.length));
+		const pin = (id: string, number: number, unread?: 'comment' | 'reply'): CommentRange => ({ from: 0, to: IMAGE.length, id, region: true, pin: { region: { ...point, x: number / 4 }, number, color: '#3366ff' }, ...(unread ? { unread } : {}) });
+		await show(view, [pin('c1', 1, 'reply'), pin('c2', 2, 'comment'), pin('c3', 3)]);
+		const [reply, comment, read] = pins(view);
+		expect(reply.hasAttribute('data-unread')).toBe(true);
+		expect(reply.getAttribute('aria-label')).toBe('Comment 1, new reply');
+		expect(comment.getAttribute('aria-label')).toBe('Comment 2, new comment');
+		expect(read.hasAttribute('data-unread')).toBe(false);
+		expect(read.getAttribute('aria-label')).toBe('Comment 3');
+		// Read again once the thread is read: the mark leaves with the unread state.
+		await show(view, [pin('c1', 1), pin('c2', 2), pin('c3', 3)]);
+		expect(pins(view).some((p) => p.hasAttribute('data-unread'))).toBe(false);
+	});
+
 	it('draws each pin on the image in the text where the image viewer places it, numbered and in its author colour', async () => {
 		const { view } = mount(`${IMAGE}\n`, replaced(new Image(0, IMAGE.length, true), 0, IMAGE.length));
 		await show(view, [{ from: 0, to: IMAGE.length, id: 'c1', region: true, pin: { region: point, number: 1, color: '#3366ff' } }]);

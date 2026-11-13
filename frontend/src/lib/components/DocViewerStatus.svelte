@@ -184,8 +184,10 @@
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools document-status-row">
+			<!-- Two groups, the only places the cluster may break: what is being sent and counted, then how it is delivered and reviewed. -->
+			<span class="tool-group tool-send">
 			{#if artifactId}
-				<!-- Send belongs to this compact tool row with the comment count, delivery preference, and review action. -->
+				<!-- Send belongs to this tool cluster with the comment count, delivery preference, and review action. -->
 				<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} {activityRoot} lane="document-held" /></span>
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
@@ -193,17 +195,26 @@
 			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
+			</span>
+			<span class="tool-group tool-more">
 			{#if artifactId}
-				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
-					<span>Deliver immediately</span>
-					<Toggle size="sm" checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+				<span class="tool-group tool-deliver">
+					<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
+						<span>Deliver immediately</span>
+						<Toggle size="sm" touch checked={$deliverCommentsImmediately} onchange={changeImmediateDelivery} ariaLabel="Deliver comments immediately" />
+					</span>
 				</span>
+			{/if}
+			<span class="tool-group tool-review">
+			{#if artifactId}
 				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
 			{/if}
 			{#if historyAvailable && onOpenHistory}<button type="button" class="doc-tool history-tool" aria-label="History" title="History" aria-expanded={historyOpen} onclick={onOpenHistory}>
 				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>
 				<span class="label">History</span>
 			</button>{/if}
+			</span>
+			</span>
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
@@ -279,42 +290,27 @@
 	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
-	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+	/* The cluster keeps one row while it fits and wraps inside the header when it cannot, whatever it holds: a held sender, a reason, Reload, a long count. */
+	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; align-items: center; gap: var(--space-1); }
+	/* The cluster breaks only where content does not fit, in this order: between [Send · count] and the rest; inside the rest, between [Deliver immediately · switch] and [reviewers · Request review · History]; and, only when [Send · count] alone is wider than the header, between Send and the count. The label never leaves its switch, and the reviewers, Request review and History stay on one row. */
+	.tool-group { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); max-inline-size: 100%; }
+	.tool-deliver, .tool-review { flex-wrap: nowrap; }
+	.tool-review:not(:has(:global(*))) { display: none; }
 	/* Send holds the identity line at compact widths; the existing tool cluster is the element that yields and wraps. */
 	.feedback-controls { flex: none; min-width: max-content; }
+	/* The label sits the chip padding from the switch at every width: the switch's touch size is a hit area inside the switch, so it never moves the label. */
 	.delivery-toggle { display: inline-flex; align-items: center; gap: var(--chip-inline-padding); color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; }
 	@container doc-header (max-width: 32.5rem) {
-		/* Keep the approved compact row; a held sender may wrap rather than leave the canvas. */
-		.document-tools { flex-wrap: nowrap; align-items: center; gap: 0; }
-		.document-tools:has(:global(.sending-now)) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
-		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
-		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
-	}
-	@media (max-width: 768px) {
-		@container doc-header (width < 408px) {
-			/* A phone's 99 and 100+ counts, and a reviewer group that overflows into "+N", need the shorter visible preference label so Send stays whole in one row; the accessible name and 44px target stay unchanged. */
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle { gap: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span { font-size: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
-		}
+		.document-tools, .tool-group { gap: 0; }
 	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }
 		.document-title { display: none; }
-		/* Keep the approved visible delivery label; compact tool padding yields before any label does. */
+		/* The delivery label is the full "Deliver immediately" at every width; at phone width only the tool padding and the switch's hit area change, and the cluster wraps between its groups when one row cannot hold it. */
 		.document-header :global(.doc-tool) { min-height: var(--touch-target); padding: 0 var(--space-2); }
-		.delivery-toggle { min-height: var(--touch-target); }
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
+		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
 		.stale-control ~ .save-ghost { display: none; }
-		/* Reload is the one action a changed file needs, so while it shows the row wraps within the header, as a held sender's does, rather than push Reload past the left edge. */
-		.document-tools:has(.stale-control) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
 	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
 	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
@@ -326,7 +322,7 @@
 	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
 	@container doc-header (width < 408px) {
-		/* The compact toolbar remains one row even when the review surface occupies the header. */
+		/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. */
 		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
 		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	}
@@ -336,8 +332,9 @@
 		.history-tool svg { display: block; }
 		.history-tool .label { display: none; }
 	}
+	/* Wherever the switch has its 44px target the switch's row is that tall, so the target sits inside the row and never over Send, the count or the document: a window up to 768px wide can still have a canvas wider than 600px, where the other tools are 28px. */
 	@media (max-width: 768px) {
-		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }
+		.delivery-toggle { min-height: var(--touch-target); --toggle-hit: var(--touch-target); }
 	}
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
