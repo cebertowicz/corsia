@@ -199,10 +199,8 @@
 			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
 			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
 			const stacked = hit && click ? highlightsAtPress(v, click, curHighlights).filter((h) => !h.suggestion) : [];
-			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) {
-				// Two or more threads on the pressed text open as a list of them, the way their margin marker does.
-				focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click, true);
-			} else if (hit && opens && v.coordsAtPos(r.from)) {
+			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click, true);  // two or more threads on the pressed text open as a list, as their margin marker does
+			else if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {

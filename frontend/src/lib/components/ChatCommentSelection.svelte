@@ -9,11 +9,10 @@
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
-	import ChatCommentThreads from './ChatCommentThreads.svelte';
+	import ChatThreadSheet from './ChatThreadSheet.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
-	import { capSheetAboveText, SHEET_GAP } from '$lib/sheetClearance';
-	import { restingTop } from '$lib/cm/visible-region';
+	import { createChatSheetReveal } from '$lib/chatSheetReveal.svelte';
 	import type { MarginComposer } from '$lib/docMarginSource';
 	import './commentAnchors.css';
 
@@ -41,54 +40,9 @@
 	const viewedComment = $derived(viewedMessage?.chat_comments?.find(comment => comment.id === viewing?.commentId));
 	const listedComments = $derived(viewing?.listed ? (viewing.list ?? []).flatMap(id => viewedMessage?.chat_comments?.find(comment => comment.id === id) ?? []) : []);
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
-	// The list's title and the sheet's name: how many comments the list holds; one comment's sheet is titled Comment. A thread opened from the list says Back in the header's leading slot.
-	const listing = $derived(!!viewing?.listed);
 	const fromList = $derived(!!viewing?.list && !viewing.listed);
-	const sheetName = $derived(listing ? `${viewing?.list?.length ?? 0} comments` : 'Comment thread');
-	/** The sheet's visible title: the list's name, or Comment for one comment. The dialog keeps its name "Comment thread" (existing specs find it by it). */
-	const sheetTitle = $derived(listing ? sheetName : 'Comment');
-	// Moving between the list and one of its threads keeps focus in the sheet: into a thread it lands on Back, back to the list it returns to that thread's Reply.
-	let shownMode: 'list' | 'thread' | null = null;
-	$effect(() => {
-		const mode = viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, id = viewing?.commentId;
-		untrack(() => {
-			const previous = shownMode; shownMode = mode;
-			if (previous === 'list' && mode === 'thread') void tick().then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>('.thread-back')?.focus()));
-			else if (previous === 'thread' && mode === 'list') void tick().then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-reply-comment="${id}"]`)?.focus()));
-		});
-	});
 	let sheetPanel = $state<HTMLElement | null>(null);
-	/** The line the person pressed, kept so a sheet that opens over the transcript can lift it clear. */
-	let press: { el: HTMLElement; line: number } | null = null;
-	// A sheet over the transcript covers its lower part. It rises only as far as leaves the pressed highlight above it (up to three lines of it, else the pressed line), and the transcript is lifted to put that text there, with scroll room added below when it ends under the sheet. Opening and any later resize of the sheet only ever lift text it newly covers.
-	$effect(() => {
-		const panel = sheetPanel, root = messageRoot();
-		if (!panel || !root) return;
-		const padding = root.style.paddingBottom;
-		const lift = () => {
-			const el = press?.el;
-			if (!el?.isConnected || !panel.isConnected) return;
-			const rects = [...el.getClientRects()];
-			const pressed = rects[Math.min(press!.line, rects.length - 1)];
-			if (!pressed) return;
-			const first = rects[0], last = rects[rects.length - 1];
-			const whole = last.bottom - first.top <= 3 * pressed.height;
-			const text = whole ? { top: first.top, bottom: last.bottom } : { top: pressed.top, bottom: pressed.bottom };
-			const regionTop = root.getBoundingClientRect().top;
-			capSheetAboveText(panel, { height: text.bottom - text.top, regionTop });
-			const top = restingTop(panel) ?? panel.getBoundingClientRect().top;
-			if (text.top >= top + panel.offsetHeight) return;
-			const over = text.bottom + SHEET_GAP - top;
-			if (over <= 0) return;
-			const room = root.scrollHeight - root.clientHeight - root.scrollTop;
-			if (room < over) root.style.paddingBottom = `calc(${getComputedStyle(root).paddingBottom} + ${Math.ceil(over - room)}px)`;
-			root.scrollTop += over;
-		};
-		const frame = requestAnimationFrame(lift);
-		const observer = new ResizeObserver(() => requestAnimationFrame(lift));
-		observer.observe(panel);
-		return () => { cancelAnimationFrame(frame); observer.disconnect(); root.style.paddingBottom = padding; };
-	});
+	const sheetReveal = createChatSheetReveal(() => sheetPanel, messageRoot, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	let buttonWidth = $state(0);
@@ -336,7 +290,7 @@
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
 			const rows = [...hit.getClientRects()];
-			press = { el: hit, line: Math.max(0, rows.findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom)) };
+			sheetReveal.notePress(hit, Math.max(0, rows.findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom)));
 			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
 			const ids: string[] = [];
 			for (let el: HTMLElement | null | undefined = hit; el && root.contains(el); el = el.parentElement?.closest<HTMLElement>('[data-comment-ids]')) for (const id of el.dataset.commentIds?.split(',') ?? []) if (id && !ids.includes(id)) ids.push(id);
@@ -411,25 +365,8 @@
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}
-{#snippet backButton()}<button type="button" class="thread-back" aria-label="Back to the list of comments" onclick={() => { if (viewing) viewing = { ...viewing, listed: true }; }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg><span>Back</span></button>{/snippet}
-{#snippet threadsBody(keep: boolean)}
-	{#if viewing?.listed}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={listedComments} />
-	{:else if viewing && viewedComment}<ChatCommentThreads messageId={viewing.messageId} threadId={threadId!} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible={keep} />{/if}
-{/snippet}
 {#if viewing && (viewing.listed ? listedComments.length > 0 : viewedComment) && threadId && !open}
-	{#if narrow}
-		<AdaptiveDrawer bind:panel={sheetPanel} ariaLabel={sheetName} heading={sheetTitle} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			{@render threadsBody(true)}
-		</AdaptiveDrawer>
-	{:else}
-		<Popover anchor={threadAnchor} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label={sheetName}>
-				{#if listing}<h2 class="thread-list-title">{sheetName}</h2>{/if}
-				{#if fromList}{@render backButton()}{/if}
-				{@render threadsBody(false)}
-			</div>
-		</Popover>
-	{/if}
+	<ChatThreadSheet bind:panel={sheetPanel} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
 {/if}
 {#snippet composerBody()}
 	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
@@ -454,9 +391,5 @@
 {/if}
 
 <style>
-	/* The way back to the list: the Back of the other drill-in screens (chevron and the word), a touch-sized target. */
-	.thread-back { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch-target); min-width: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
-	.thread-back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.thread-list-title { margin: 0; padding: var(--space-1) var(--space-3) 0; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.comment-dialog { display: flex; flex-direction: column; min-height: 0; }
 </style>
