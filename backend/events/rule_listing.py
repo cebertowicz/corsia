@@ -29,7 +29,7 @@ def _shaped(row: sqlite3.Row) -> dict[str, Any]:
 
 
 # Shared with explain: global rule outcomes belong to the project of the calling chat.
-OUTCOME_SCOPE = "(r.scope=? OR (r.scope=? AND t.project_id=?))"
+OUTCOME_SCOPE = "(r.scope=? OR (r.scope=? AND t.id IS NOT NULL AND t.project_id IS ?))"
 OUTCOME_JOINS = " JOIN event_rules r ON r.id=d.rule_id LEFT JOIN threads t ON t.id=d.thread_id "
 
 
@@ -46,7 +46,7 @@ def _stats(db: sqlite3.Connection, ids: list[str], now: str, project_id: str | N
             "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions d {OUTCOME_JOINS} WHERE d.rule_id IN ({marks}) "
             f"AND {OUTCOME_SCOPE} GROUP BY d.rule_id",
-            (since, since, since, *ids, rules.rule_scope(project_id) if project_id else '',
+            (since, since, since, *ids, rules.rule_scope(project_id),
              observe_rules.SHIPPED_SCOPE, project_id),
         ).fetchall()
     }
@@ -70,8 +70,6 @@ def _with_stats(db: sqlite3.Connection, found: list[sqlite3.Row], now: str,
 def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> list[dict[str, Any]]:
     """The project's rules of both kinds (disabled ones only within retention), last action, and
     24h wakes, script starts and skipped runs."""
-    if not project_id:
-        return []
     cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
     found = db.execute(
         "SELECT * FROM event_rules WHERE scope=? AND (enabled=1 OR updated_at>=?) "

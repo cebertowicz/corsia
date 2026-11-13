@@ -1,4 +1,5 @@
 """Workspace event rules follow the same routing and account reach as project rules."""
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -16,6 +17,7 @@ from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
 from infra.delegation_scope import WORKSPACE_SCOPE_ID
 from tests.event_routing_helpers import mk_session
+from tools.event_rules import EventRulesTool
 
 
 def _write(sql, *args):
@@ -46,12 +48,12 @@ def _agent(name, project=None):
 
 
 def _rule(name, writer, project=None):
-    _write('INSERT INTO event_rules (id, created_at, updated_at, scope, connector, event_type, '
-           '"match", action, "to", mode, origin, created_by, authority_ref) '
-           "VALUES (?, '2026-11-13', '2026-11-13', ?, 'gmail', 'email.received', ?, "
-           "'deliver', ?, 'wake', ?, ?, 'self')", name, rules.rule_scope(project),
-           json.dumps([{'field': 'from_domain', 'op': 'eq', 'value': 'example.com'}]),
-           f'thread:{writer}', f'agent:{writer}', writer)
+    response = asyncio.run(EventRulesTool().execute(
+        _thread_id=writer, operation='create', connector='gmail', event_type='email.received',
+        match=[{'field': 'from_domain', 'op': 'eq', 'value': 'example.com'}], mode='wake'))
+    assert not response.startswith(('Refused:', 'Error:')), response
+    rule = json.loads(response)
+    _write('UPDATE event_rules SET id=? WHERE id=?', name, rule['id'])
 
 
 def _account(mode, outside=False):

@@ -54,15 +54,13 @@ def intake_refusals(db: sqlite3.Connection, *, project_id: str | None, event_typ
 
     A producer is a thread, or ``script:<schedule id>``, which belongs to its schedule's owner thread.
     """
-    if not project_id:
-        return []
     since = (datetime.now(timezone.utc) - rules.RETENTION).isoformat()
     rows = db.execute(
         "SELECT r.event_id, r.event_type, r.refusal_code, r.producer, r.origin, r.at "
         "FROM event_intake_records r "
         "LEFT JOIN automation_schedules s ON r.producer LIKE 'script:%' AND s.id=substr(r.producer, 8) "
         "JOIN threads t ON t.id=COALESCE(s.thread_id, r.producer) "
-        "WHERE r.outcome='refused' AND r.event_type=? AND r.at>=? AND t.project_id=? "
+        "WHERE r.outcome='refused' AND r.event_type=? AND r.at>=? AND t.project_id IS ? "
         "ORDER BY r.id DESC LIMIT ?",
         (event_type, since, project_id, limit),
     ).fetchall()
