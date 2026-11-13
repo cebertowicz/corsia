@@ -128,7 +128,9 @@ export async function expectCaretLineVisible(card: Locator, field: Locator) {
 			const overflowY = getComputedStyle(parent).overflowY;
 			if (!/(auto|scroll|hidden|clip)/.test(overflowY)) continue;
 			const box = parent.getBoundingClientRect();
-			if (bottom > box.bottom + 1 || (bottom - top <= box.height && top < box.top - 1)) return `field ${Math.round(top)}-${Math.round(bottom)} outside ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			// What a sticky Accept and Reject row covers at the box's bottom is not room: a field taller than the rest shows only its bottom edge above that row.
+			const pinned = [...parent.querySelectorAll<HTMLElement>('[data-pin-bottom]')].filter((row) => getComputedStyle(row).position === 'sticky').reduce((sum, row) => sum + row.offsetHeight, 0);
+			if (bottom > box.bottom + 1 || (bottom - top <= box.height - pinned && top < box.top - 1)) return `field ${Math.round(top)}-${Math.round(bottom)} outside ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
 			top = Math.max(top, box.top);
 			bottom = Math.min(bottom, box.bottom);
 			if (send && (send.top < box.top - 1 || send.bottom > box.bottom + 1)) return `Send ${Math.round(send.top)}-${Math.round(send.bottom)} outside ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
