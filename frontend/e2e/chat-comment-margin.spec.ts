@@ -2,7 +2,7 @@ import { expect, test } from './support/test';
 import type { Locator, Page } from '@playwright/test';
 import { openCommentThread, settleHighlight } from './support/chatComments';
 import { commentedMessage, QUOTE } from './support/chatCommentedMessage';
-import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from './support/discussionVisible';
+import { expectDiscussionReachableByScroll, expectFieldAndSendUsable, expectNoCardScroller, expectReachableByOuterScroll } from './support/discussionVisible';
 
 
 /**
@@ -111,16 +111,24 @@ for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark']
 	await openMarginCard(row, card);
 	const input = card.getByPlaceholder('Reply…');
 	const send = card.getByRole('button', { name: 'Send reply' });
+	// The field grows with its text and never scrolls itself, and nothing in the card scrolls; the transcript holding the
+	// card is the one scroller. Send stays in the transcript's view, clear of the header and the chat composer, and the
+	// card never runs past the window's sides.
 	const check = async () => {
-		await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
+		await expectNoCardScroller(card);
+		await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight <= field.clientHeight + 1)).toBe(true);
 		await expect(send).toBeVisible();
-		for (const element of [card, send]) await expect.poll(() => element.evaluate(el => {
+		await expect.poll(() => send.evaluate(el => {
 			const box = el.getBoundingClientRect(), scroller = el.closest<HTMLElement>('.messages')!;
 			const view = scroller.getBoundingClientRect();
 			const inset = parseFloat(getComputedStyle(scroller).getPropertyValue('--input-bar-height')) || 100;
 			const headerBottom = document.querySelector('.shell-header')!.getBoundingClientRect().bottom;
-			return { left: Math.max(0, -box.left), right: Math.max(0, box.right - innerWidth), top: Math.max(0, Math.max(view.top, headerBottom) - box.top), bottom: Math.max(0, box.bottom - view.bottom + inset) };
-		})).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+			return { top: Math.max(0, Math.max(view.top, headerBottom) - box.top), bottom: Math.max(0, box.bottom - view.bottom + inset) };
+		})).toEqual({ top: 0, bottom: 0 });
+		await expect.poll(() => card.evaluate(el => {
+			const box = el.getBoundingClientRect();
+			return { left: Math.max(0, -box.left), right: Math.max(0, box.right - innerWidth) };
+		})).toEqual({ left: 0, right: 0 });
 		await send.click({ trial: true });
 	};
 	for (let i = 0; i < 40; i++) {
@@ -130,15 +138,23 @@ for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark']
 	await check();
 	await page.screenshot({ path: info.outputPath('typed-chat-margin-reply.png'), animations: 'disabled' });
 
-	await input.fill(Array.from({ length: 40 }, (_, i) => `long chat reply line ${i}`).join('\n'));
+	// Replaced by a paste, as a person does it (select all, paste): the browser reveals the caret after the paste. `fill`
+	// would select through `select()`, which scrolls to the field's top, and insert without that reveal.
+	await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+	await page.evaluate(text => navigator.clipboard.writeText(text), Array.from({ length: 40 }, (_, i) => `long chat reply line ${i}`).join('\n'));
+	await input.press('ControlOrMeta+A');
+	await input.press('ControlOrMeta+V');
+	await expect.poll(() => input.inputValue()).toMatch(/^long chat reply line 0\n[\s\S]*line 39$/);
 	await check();
 	await page.screenshot({ path: info.outputPath('long-chat-margin-reply.png'), animations: 'disabled' });
 
 	await send.click();
 	await expect(card).toContainText('long chat reply line 0');
 	await input.fill(Array.from({ length: 40 }, (_, i) => `second margin reply ${i}`).join('\n'));
-	await expectDiscussionVisible(card, 'A note on the phrase');
-	await expectDiscussionVisible(card, 'long chat reply line 0');
+	// Scrolling the transcript up reaches the comment and the first reply; nothing inside the card scrolls.
+	await expectNoCardScroller(card);
+	await expectReachableByOuterScroll(card, 'A note on the phrase');
+	await expectReachableByOuterScroll(card, 'long chat reply line 0');
 	await page.screenshot({ path: info.outputPath(`${width}-${theme}-second-margin-reply.png`), animations: 'disabled' });
 	await send.click();
 	await expect(card).toContainText('second margin reply 0');
@@ -195,15 +211,12 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 	await expect(input).toBeFocused();
 	await expect(thread).toContainText('pasted reply 0');
 	await input.fill(Array.from({ length: 40 }, (_, i) => `second chat reply ${i}`).join('\n'));
-	// At 420 tall the popover cannot hold the thread beside the field: field and Send stay pinned and clickable and
-	// the thread is reachable by scrolling inside the card. At 900 there is room, so both lines must show.
-	if (height === 420) {
-		await expectFieldAndSendUsable(thread, input);
-		await expectDiscussionReachableByScroll(thread, 'typed reply 0');
-	} else {
-		await expectDiscussionVisible(thread, 'A note on the phrase');
-		await expectDiscussionVisible(thread, 'typed reply 0');
-	}
+	// A 40-line reply is taller than the popover at either height: the field's end and Send stay in view, nothing in the
+	// card scrolls, and the comment and the earlier reply are reached by scrolling the popover.
+	await expectNoCardScroller(thread.locator('.ct').first());
+	await expectFieldAndSendUsable(thread, input);
+	await expectDiscussionReachableByScroll(thread, 'A note on the phrase');
+	await expectDiscussionReachableByScroll(thread, 'typed reply 0');
 	await send.click();
 	await expect(input).toBeFocused();
 	await expect(thread).toContainText('second chat reply 0');
@@ -234,20 +247,19 @@ for (const height of [852, 420] as const) for (const theme of ['light', 'dark'] 
 	await checkReply('typed');
 
 	await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `pasted reply ${i}`).join('\n'));
-	await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight && field.scrollTop > 0 && field.clientHeight > 45)).toBe(true);
+	// The field grows to its text and never scrolls itself.
+	await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight <= field.clientHeight + 1 && field.clientHeight > 45)).toBe(true);
 	await checkReply('pasted');
 
 	await send.click();
 	await expect(thread).toContainText('pasted reply 0');
 	await input.fill(Array.from({ length: 40 }, (_, i) => `second chat reply ${i}`).join('\n'));
-	// The short drawer has no room for the thread beside the field; the tall one does.
-	if (height === 420) {
-		await expectFieldAndSendUsable(thread, input);
-		await expectDiscussionReachableByScroll(thread, 'typed reply 0');
-	} else {
-		await expectDiscussionVisible(thread, 'A note on the phrase');
-		await expectDiscussionVisible(thread, 'typed reply 0');
-	}
+	// A 40-line reply is taller than the drawer at either height: the field's end and Send stay in view, nothing in the
+	// card scrolls, and the comment and the earlier reply are reached by scrolling the drawer.
+	await expectNoCardScroller(thread.locator('.ct').first());
+	await expectFieldAndSendUsable(thread, input);
+	await expectDiscussionReachableByScroll(thread, 'A note on the phrase');
+	await expectDiscussionReachableByScroll(thread, 'typed reply 0');
 	await send.click();
 	await expect(thread).toContainText('second chat reply 0');
 

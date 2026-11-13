@@ -27,9 +27,15 @@
 		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in view by scrolling the text, which the cards ride with. Its view is the scroller's, where the reader sees the content.
 		const revealUntil = selected !== null && selected !== pickedBefore ? performance.now() + 800 : 0;
 		pickedBefore = selected;
+		const picked = () => (selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null);
+		// After the pick, a reader inside the card is kept at its end only when the card itself grew (they typed into it): one who
+		// scrolled up to read a card taller than the screen is not pulled back down when the scroller re-measures.
+		let height = -1;
 		const reveal = () => {
-			const el = selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null;
-			if (!el || !(performance.now() < revealUntil || el.contains(document.activeElement))) return;
+			const el = picked();
+			const grew = el !== null && el.offsetHeight !== height;
+			height = el?.offsetHeight ?? -1;
+			if (!el || !(performance.now() < revealUntil || (grew && el.contains(document.activeElement)))) return;
 			const shift = revealShift(el.getBoundingClientRect(), source.view?.() ?? scroller.getBoundingClientRect());
 			if (shift) scroller.scrollBy?.({ top: shift, behavior: el.contains(document.activeElement) || get(prefersReducedMotion) ? 'auto' : 'smooth' });
 		};

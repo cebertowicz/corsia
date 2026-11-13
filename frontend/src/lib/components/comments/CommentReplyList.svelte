@@ -85,7 +85,7 @@
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<NewMarker />{/if}
 			</div>
-			<CommentMarkdownBody text={reply.text} unread={isNew} taggedAgents={reply.taggedAgents} mentions={reply.mentions} taggedPerson={reply.taggedPerson} />
+			<CommentMarkdownBody text={reply.text} unread={!!reply.id && collapseReplyIds.has(reply.id)} taggedAgents={reply.taggedAgents} mentions={reply.mentions} taggedPerson={reply.taggedPerson} />
 		</div>
 	{/each}
 </div>

@@ -1,15 +1,12 @@
 <script lang="ts">
 	import { renderMentions, type TaggedAgent } from './mentionMarkup';
 	import type { MentionOccurrence } from './mentionSelection';
-	import { untrack } from 'svelte';
 	import { isLongMessageText } from '$lib/messageCollapse';
 
 	let { text, unread = false, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; unread?: boolean; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
-	// Chat's one rule for a long message decides; an unread body always shows whole, and one seen unread while mounted stays whole
-	// when its New mark clears, so nothing collapses under the person reading it.
-	let seenUnread = $state(untrack(() => unread));
-	$effect(() => { if (unread) seenUnread = true; });
-	const collapsible = $derived(!seenUnread && isLongMessageText(text));
+	// Chat's one rule for a long message decides; an unread body always shows whole. `unread` is the thread's held
+	// state (CommentThread), which stays set while the thread is mounted, so nothing collapses under the person reading it.
+	const collapsible = $derived(!unread && isLongMessageText(text));
 	let open = $state(false);
 	let clamped = $state(false);
 	let reveal: HTMLDivElement;

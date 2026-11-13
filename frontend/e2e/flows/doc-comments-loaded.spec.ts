@@ -242,9 +242,11 @@ for (const { label, view } of CASES) {
 			if (sheet) {
 				const opener = card(page, doc.longThreads[0]);
 				await opener.scrollIntoViewIfNeeded();
+				const listTop = () => page.locator(`${DRAWER} .drawer-comments`).evaluate((el) => Math.round(el.scrollTop));
+				const listTopBefore = await listTop();
 				const row = opener.getByRole('button', { name: /16 replies/ });
-				if (await row.count()) await press(row);
-				else await press(opener.locator('.ct').first());
+				if (!(await row.count())) fail('list: the long thread has no replies row to open it');
+				await press(row);
 				await settled(page);
 				await shot(page, info, label, '3-thread');
 				const back = page.locator(DRAWER).getByRole('button', { name: /^Back/ });
@@ -309,20 +311,33 @@ for (const { label, view } of CASES) {
 						const cut = await bodyCut(thread.locator('[data-discussion-original]').first());
 						if (cut) fail(`typing: the comment body is cut off while the reply grows (${cut})`);
 						await shot(page, info, label, '4c-thread-typing-comment');
-						await page.keyboard.press('Escape').catch(() => {});
-						await page.locator(DRAWER).getByPlaceholder('Reply…').last().blur().catch(() => {});
+						await reply.blur();
 						await page.setViewportSize({ width: view.width, height: view.height });
 						await settled(page);
 					}
-					if (await back.count()) {
-						await press(back);
-						await settled(page);
-						await shot(page, info, label, '5-back');
-						const after = await look(page, view.touch).catch(() => null);
-						report.back = after;
-						if (!after) fail('back: Back closed the sheet instead of returning to the list');
-						else for (const control of after.acceptAll) if (!control.reachable) fail(`back: "${control.name}" can't be reached`);
+					// Back returns to the list where it was.
+					await press(back);
+					await settled(page);
+					await shot(page, info, label, '5-back');
+					const after = (await page.locator(DRAWER).count()) ? await look(page, view.touch) : null;
+					report.back = after;
+					if (!after) fail('back: Back closed the sheet instead of returning to the list');
+					else {
+						for (const control of after.acceptAll) if (!control.reachable) fail(`back: "${control.name}" can't be reached`);
+						if (await back.count()) fail('back: the thread view is still open');
 						if (!(await page.locator(`${DRAWER} [data-comment-id]`).nth(3).count())) fail('back: the list did not come back');
+						const listTopAfter = await listTop();
+						report.backListTop = { before: listTopBefore, after: listTopAfter };
+						if (Math.abs(listTopAfter - listTopBefore) > 2) fail(`back: the list came back at ${listTopAfter}px, not where it was (${listTopBefore}px)`);
+						// Escape in the thread view goes back to the list too, and leaves the sheet open.
+						await press(row);
+						await settled(page);
+						if (!(await back.isVisible())) fail('escape: the replies row did not open the thread view again');
+						await page.keyboard.press('Escape');
+						await settled(page);
+						if (!(await page.locator(DRAWER).count())) fail('escape: Escape closed the sheet instead of returning to the list');
+						else if (await back.count()) fail('escape: Escape left the thread view open');
+						else if (!(await page.locator(`${DRAWER} [data-comment-id]`).nth(3).count())) fail('escape: the list did not come back');
 					}
 				}
 			}

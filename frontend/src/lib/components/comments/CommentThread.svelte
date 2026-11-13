@@ -69,7 +69,7 @@
 		autoFocusSelection?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
-		/** How the replies show (CommentReplyList's `view`: `all` for a thread opened on its own, `summary` for a row in the drawer's list); a summary row's replies row calls `onOpenThread`. */
+		/** How the replies show (CommentReplyList's `view`): `recent` by default (a card, popover or sheet opened at its highlight), `summary` for a row in the drawer's list, `all` for the whole thread its replies row opens. A summary row's replies row calls `onOpenThread`. */
 		replyView?: 'recent' | 'all' | 'summary';
 		onOpenThread?: (commentId: string) => void;
 		onReply?: (commentId: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
@@ -123,13 +123,15 @@
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
 	let observeTick = $state(0);
-	// Keep the collapse point stable while this thread is mounted, even as the server clears New marks.
-	// Otherwise replies would disappear from under the reader when the viewed stamp lands.
+	// What was unread while this thread is mounted stays unread for collapsing, even as the server clears New marks:
+	// the collapse point and every body's Show more read it, so nothing disappears or collapses under the reader.
 	const seenForCollapse = new Set<string>();
 	const collapseReplyIds = $derived.by(() => {
 		for (const id of comment.newReplyIds ?? []) seenForCollapse.add(id);
 		return new Set(seenForCollapse);
 	});
+	let seenNewComment = false;
+	const heldNewComment = $derived.by(() => (seenNewComment ||= !!comment.newComment));
 	const unreadKey = $derived(JSON.stringify(comment.newReplyIds ?? []));
 	const { stamp, dwellThenStamp, cancelDwell } = createReplyStamps(() => comment, () => chatSurface, () => onViewed);
 	const replyVisibility = createReplyVisibility(dwellThenStamp, (id) => cancelDwell(id), () => cancelDwell());
@@ -189,7 +191,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
-				{#if hasBody}<CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
+				{#if hasBody}<CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
@@ -202,7 +204,7 @@
 		{@render failure?.()}
 		{#if resolvedOpen}
 			<div class="ct-res-body">
-				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
+				<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 				{#if comment.replies.length}<div class="ct-reply-region" data-discussion-replies><CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} view={replyView} onOpen={onOpenThread ? () => onOpenThread(comment.id) : undefined} onNewestReplyRendered={(element) => (newestReply = element)} /></div>{/if}
 				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} wholeCard={el} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
@@ -240,13 +242,13 @@
 
 		{#if decidedOpen}
 			<div class="ct-decided"><svg class="ct-{comment.decision === 'accepted' ? 'check' : 'cross'}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={comment.decision === 'accepted' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>Suggestion {comment.decision}</div>
-			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
+			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
 			<!-- A decided card's only action is Resolve, so its card error is a refused resolve. -->
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else if isSuggestion}
-			{#if isSuggestion}<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />{/if}
+			<SuggestedEdit before={comment.insertAfter ? '' : comment.anchor} after={comment.replacement!} />
 			{#if comment.textChanged}<div class="ct-orphan">The text doesn't match this suggestion.</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces isn't in the document.</div>{/if}
-			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
+			{#if hasBody}<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>{/if}
 			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
@@ -254,7 +256,7 @@
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>{changedLabel(diagram)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
-			<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={!!comment.newComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
+			<div class="ct-original" data-discussion-original><CommentMarkdownBody text={comment.text} unread={heldNewComment} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} /></div>
 		{/if}
 
 		{#if comment.replies.length && !leaving}
