@@ -39,7 +39,7 @@ router.include_router(system_admin_router)
 # own conductor rule in update_settings.
 _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({"host_access_auto_approve", "host_access_reviewer_fallback"})
 _HUMAN_ONLY_SHARING_SETTINGS = frozenset({"live_bulletins", "usage_sharing"})
-_EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
+_EXACT_REVIEWER_MODELS = ("host_access_reviewer_model",)
 _BOOLEAN_SETTINGS = ("host_access_auto_approve", "host_access_reviewer_fallback", "usage_sharing")
 
 def _debug_version_overlay_default() -> bool:
@@ -195,14 +195,11 @@ async def get_settings(user: dict = Depends(require_user)):
 
 def _save_exact_model_defaults(body: dict) -> dict:
     """Save the no-fallback model settings in ``body``: exact runnable IDs only."""
-    from reviewer.reviewer_runner import reviewer_model_error
-
     updated = {key: body[key] for key in _EXACT_REVIEWER_MODELS if key in body}
     for key, value in updated.items():
-        if value is None and key != "reviewer_model":
+        if value is None:
             continue
-        error = (reviewer_save_error(value) if key == "host_access_reviewer_model"
-                 else reviewer_model_error(value))
+        error = reviewer_save_error(value)
         if error is not None:
             raise HTTPException(400, error)
     for key, value in updated.items():

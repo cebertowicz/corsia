@@ -139,7 +139,7 @@ def test_discovered_connector_keeps_its_referenced_model(catalog, provider, sele
     upsert_connection(type="cli", provider=provider, status="needs_auth", config=config)
     with closing(sqlite3.connect(str(catalog))) as db:
         db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('agents',?,'t')", (
-            json.dumps({"defaults": {"reviewer_model": model_id}}),
+            json.dumps({"defaults": {"host_access_reviewer_model": model_id}}),
         ))
         db.commit()
     row = upsert_connection(type="cli", provider=provider, status="available",

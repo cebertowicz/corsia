@@ -37,7 +37,7 @@ from tests.coordination_mvp.fixtures import (
 # S4 generalizes routing — it must never spread to the generic path.
 _GRANDFATHERED = frozenset({
     "github_mapper.py", "guard.py", "identity.py", "ingress.py",
-    "markers.py", "reviewer_gate.py", "reviewer_route.py", "router.py",
+    "markers.py", "router.py",
 })
 
 # The declared-data home: connector specifics (manifests, mappers) may live here.

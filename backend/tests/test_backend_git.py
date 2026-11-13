@@ -143,14 +143,6 @@ def test_shared_set_is_exactly_the_four_options():
     assert git_argv("status") == ["git", *GIT_CONFIG_ARGS, "status"]
 
 
-def test_reviewer_reader_keeps_the_same_options():
-    from reviewer import reviewer_read
-
-    assert reviewer_read._GIT_CONFIG_ARGS == GIT_CONFIG_ARGS
-    command = reviewer_read.git_argv("/tmp/g", "a" * 40, "b" * 40, "stat", [])
-    assert command[:2 + len(GIT_CONFIG_ARGS)] == ["git", "--git-dir=/tmp/g", *GIT_CONFIG_ARGS]
-
-
 def test_project_repo_runner_runs_no_hook(tmp_path):
     repo = _repo(tmp_path)
     marker = _plant_hook(repo, tmp_path)

@@ -6,8 +6,7 @@ origin ``connector``), and ``event_id`` comes from the head's check suites, neve
 from a delivery.  Its reads pass the repo-activity poller's budget and backoff
 gate, and the admission hook is on by default outside test mode. A suite held for
 approval (no runs, ``action_required``) is a settled head too. The head's
-``conclusion`` is ``github_pr_quiet_reasons.rank`` of its suites, the one ranking its
-``check_state`` also comes from.
+``conclusion`` is ``github_pr_quiet_reasons.rank`` of its suites.
 """
 from __future__ import annotations
 
