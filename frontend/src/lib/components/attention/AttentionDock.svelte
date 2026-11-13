@@ -14,9 +14,6 @@
 	 * slot (a host-access lease awaiting the user). Deferred, never hidden.
 	 */
 	import { onMount } from 'svelte';
-	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-	import { unreadItemsForThread, subscribeUnreadAttention } from './replyItems';
-	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
 	import { connectionState } from '$lib/stores/connection';
@@ -74,8 +71,6 @@
 
 	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
-	const hasUnreadItems = $derived(unreadItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
-		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
 	);
@@ -199,7 +194,6 @@
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
 		const offHeld = on('held_reply_changed', () => { void reload(); });
-		const offUnread = subscribeUnreadAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		const offActivity = watchDockActivity(TYPING_IDLE_MS, () => { lastKeydown = Date.now(); }, () => { busyTick += 1; });
@@ -223,7 +217,6 @@
 			forgetAutoOpen();
 			offNudge?.();
 			offHeld?.();
-			offUnread();
 			offConnection();
 			offToken();
 		};
@@ -239,13 +232,11 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current || hasUnreadItems}
+{#if current}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
 	>
-		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
-		{#if current}
 		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
@@ -294,7 +285,6 @@
 			<p class="dock-stale" role="status">Showing last known items.</p>
 		{/if}
 		</section>
-		{/if}
 	</div>
 {/if}
 
@@ -341,8 +331,6 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 	}
-	.attention-dock :global(.reply-chip-notice) { margin-bottom: var(--space-2); }
-	.attention-dock :global(.reply-chip-notice button),
 	.attention-dock [data-attention-dock] { pointer-events: auto; }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {

@@ -121,8 +121,22 @@ test('quiet save ordinary fast pause 1440', async ({ page, request, context }, i
 	const fixture = await seedLiveDocument(request, 'quiet-fast', '# A quiet writing pause\n\nThe header stays still.\n');
 	await openLiveDocument(page, fixture); await assertStamp(page);
 	await observeSaveCue(page);
+	// "Fast" means the save settles inside the 400 ms notice window (docSaveGhost EPISODE_NOTICE_MS); a save that takes
+	// longer is meant to say "Saving…". The real server's reply time depends on host load, so the page's clock is held
+	// while the real save round-trips, and moves only after the save has settled: the cue timer cannot fire early.
+	await page.clock.install();
+	await page.clock.pauseAt(new Date(Date.now() + 1_000));
 	await typeAtDocumentEnd(page, ' A quick addition.');
+	await page.clock.runFor(800); // past the 700 ms save debounce, short of the notice window
 	await expect.poll(() => serverText(request, fixture)).toContain('A quick addition.');
+	await expect.poll(() => page.evaluate(async source => {
+		const { docSaveActivities } = await import(/* @vite-ignore */ source);
+		let busy = true;
+		const stop = docSaveActivities.subscribe((all: any) => { busy = Object.values(all).some((a: any) => a.writeInFlight || a.resaveQueued); });
+		stop();
+		return busy;
+	}, '/src/lib/stores/docSaveQueue.ts')).toBe(false);
+	await page.clock.runFor(3_000); // past the notice window and the saved badge's lifetime
 	await expectQuietSave(page);
 	await evidence(page, info, 'fast-1440');
 });

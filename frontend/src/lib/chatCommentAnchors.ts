@@ -1,5 +1,4 @@
 import type { ChatComment as StoredComment } from '$lib/chatCommentTypes';
-import { toasts } from '$lib/stores/toast';
 
 export interface ChatComment extends ChatCommentAnchor {
 	id: string;
@@ -8,6 +7,22 @@ export interface ChatComment extends ChatCommentAnchor {
 	note: string;
 	root_user_message_id?: string;
 	root_cid?: string;
+}
+
+/**
+ * A comment or reply send that was refused; its message is the sentence the person reads in the box.
+ * `final` when no press of the box can send it (its chat is deleted), so the box offers no Retry.
+ */
+export class CommentSendRefused extends Error {
+	constructor(message: string, readonly final = false) { super(message); }
+}
+
+/** The sentence for a send that failed for a cause nobody named. */
+export const unknownSendFailure = (noun: 'comment' | 'reply') => `Couldn’t send this ${noun}. Try again.`;
+
+/** The sentence a comment's or reply's box shows for a send that threw: the refusal's own cause, or the generic one when the cause is unknown. */
+export function refusalText(error: unknown, noun: 'comment' | 'reply'): string {
+	return error instanceof CommentSendRefused ? error.message : unknownSendFailure(noun);
 }
 
 export interface ChatCommentAnchor {
@@ -23,12 +38,11 @@ export interface ChatCommentAnchor {
  * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
  * reject instead, so every thread the reply was typed in keeps it.
  */
-export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => void): void {
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => Promise<void>): Promise<void> {
 	if (!message || !comment || typeof message.seq !== 'number') {
-		toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
-		throw new Error('Comment is unavailable');
+		throw new CommentSendRefused('Couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
 	}
-	send({
+	return send({
 		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,
 		from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote,
 		anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note,

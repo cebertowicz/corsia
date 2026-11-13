@@ -200,6 +200,12 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 | `update_card.earlier_updates_expanded` | The `N earlier updates` transcript disclosure expands | frontend |
 | `thread.seen_mark` | A mark-read or mark-unread request succeeds, is refused, or fails | backend |
 
+### Documents
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `document.table_cell_edited` | The reader leaves a table cell they edited in place, with its text changed (one per cell) | frontend |
+
 ### Navigation — open timing
 
 Client-observed click-to-usable time. The server half of a slow open is already
@@ -322,6 +328,7 @@ Caller-supplied properties merge with defaults. Caller properties win on key col
 | `sidebar.update_open` | `outcome` ∈ `succeeded \| refused \| failed`; bounded `reason` ∈ `not_opened \| open_failed` on refusal or failure |
 | `update_card.plan_open` | No properties: card, thread and node identifiers and title remain out of analytics. |
 | `update_card.earlier_updates_expanded` | No properties: count, card, thread and titles remain out of analytics. |
+| `document.table_cell_edited` | No properties: cell text, position and document identifiers remain out of analytics. |
 | `thread.seen_mark` | `mark` ∈ `read \| unread`; `outcome` ∈ `succeeded \| refused \| failed`; bounded `reason` ∈ `missing \| never_opened \| internal_error` on refusal or failure |
 | `navigation.thread_open` | `click_to_first_page_ms`, `click_to_settled_ms` (null when the open never reached it); `outcome` ∈ `settled \| abandoned \| error`; `source` ∈ `sidebar \| link \| history \| other`; `artifacts_awaited` (whether the open waited on an artifact pane's list); `message_count_bucket` ∈ `0 \| 1-50 \| 51-500 \| 500+` (what the open actually loaded). No thread id, title, or content. |
 | `navigation.artifact_open` | `click_to_content_ms` (null on error or abandonment); `outcome` ∈ `settled \| abandoned \| error`; `kind` (artifact type only, e.g. `document`) |

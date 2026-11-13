@@ -27,7 +27,6 @@ export function createTaskMenu(canAct: (node: OperatorNode) => boolean) {
 		onPointerDown: menu.onPointerDown,
 		onPointerMove: menu.onPointerMove,
 		onPointerEnd: menu.onPointerEnd,
-		onClickCapture: menu.onClickCapture,
 		rowHandlers: menu.rowHandlers,
 	};
 }

@@ -1,116 +1,88 @@
-import type { ChatComment, Message } from '$lib/stores/threads';
+import { SvelteSet } from 'svelte/reactivity';
+import type { ChatComment } from '$lib/stores/threads';
+import type { Delivery } from '$lib/chatCommentTypes';
+import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
+import { deliveryPresentation, readMessageDeliveryState, type DeliveryPresentation, type MessageDeliveryState } from '$lib/messageDelivery';
+import { ACCOUNT_HOLD_COPY, NO_MODEL_SELECTED, SELECTED_MODEL_UNAVAILABLE } from '$lib/messageDeliveryCopy';
 
-/** The comment a reply send answers, as one key: its root message and comment id. */
-const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
+/** The Retry chat offers a person's message in this state (UserMessageBubble), or null where it offers none; its title names the comment or reply. */
+export type RetryControl = { label: 'Retry' | 'Retry anyway'; title: string };
 
-/**
- * Empty comment envelopes whose comments are attached to a loaded target. Placement alone does not
- * decide visibility: suppressibleCommentEnvelopes also preserves delivery and recovery controls.
- * One pass builds the keys; each envelope then
- * checks its comments against them, so the transcript asks once per change instead of rescanning per row.
- */
-export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const byId = new Map<string, Message>();
-	const retries = new Map<string, string[]>();
-	// A send still on its way is placed once its comment's thread is loaded; a delivered one once its own copy is.
-	const roots = new Set<string>();
-	const shown = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId) continue;
-		byId.set(row.id, row);
-		const from = row.metadata?.retried_from_message_id;
-		if (from) retries.set(from, [...(retries.get(from) ?? []), row.id]);
-		for (const root of row.chat_comments ?? []) {
-			const key = replyKey(root.user_message_id, root.cid);
-			if (key) { roots.add(key); shown.add(key); }
-			for (const answer of root.answers ?? []) {
-				const answerKey = answer.author_kind === 'user' ? replyKey(answer.user_message_id, answer.cid) : '';
-				if (answerKey) shown.add(answerKey);
-			}
-		}
-	}
-	const placed = new Set<string>();
-	for (const row of byId.values()) {
-		const comments = row.metadata?.reply_context?.comments;
-		if (row.role !== 'user' || row.content.trim() || !comments?.length || row.metadata?.attachments?.length) continue;
-		if (row._optimistic || row.delivery_state === 'queued' || row.delivery_state === 'failed') {
-			if (comments.every((reply: { root_user_message_id?: string; root_cid?: string }) => roots.has(replyKey(reply.root_user_message_id, reply.root_cid)))) placed.add(row.id);
-			continue;
-		}
-		// A delivered envelope counts as placed through any retry that replaced it.
-		const successors = [row.id];
-		for (let index = 0; index < successors.length; index++) {
-			for (const next of retries.get(successors[index]) ?? []) if (!successors.includes(next)) successors.push(next);
-		}
-		if (comments.every((comment: { id?: string }) => !!comment.id && successors.some(id => byId.get(id)?.metadata?.reply_context?.comments
-			?.some((copy: { id?: string; cid?: string }) => copy.id === comment.id && shown.has(replyKey(id, copy.cid)))))) placed.add(row.id);
-	}
-	return placed;
-}
-
-function supersededReplies(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const superseded = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
-		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
-	}
-	return superseded;
-}
-
-/** Placed replies still needing delivery or recovery retain their transcript controls. */
-export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
-	const placed = placedCommentEnvelopes(rows, threadId);
-	const superseded = supersededReplies(rows, threadId);
-	for (const row of rows) {
-		if (row.thread_id === threadId && (row._optimistic || row.delivery_state === 'queued'
-			|| (row.delivery_state && row.delivery_state !== 'delivered' && !superseded.has(row.id)))) placed.delete(row.id);
-	}
-	return placed;
-}
-
-const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {
-	if (seen.has(`${key}|${row.id}`)) return;
-	seen.add(`${key}|${row.id}`);
-	const list = index.get(key);
-	if (list) list.push(row); else index.set(key, [row]);
+/** A comment, or a reply in its thread, that the server stored and that is held or ended undelivered. */
+export type UnsentSend = {
+	messageId: string; note: string; createdAt: string; root: boolean;
+	/** What chat shows for a message in this state: its label, hint and whether it carries the red `!`. */
+	delivery: DeliveryPresentation;
+	retry: RetryControl | null;
 };
 
-export type ChatReplyIndex = {
-	/** Sends still awaiting delivery to this thread of this comment. */
-	pending(comment: ChatComment): Message[];
-	/** Failed sends addressed to this thread of this comment, with no later send already replacing them. */
-	failed(comment: ChatComment): Message[];
-};
+const ENDED: readonly MessageDeliveryState[] = ['failed', 'ambiguous', 'cancelled'];
+
+type Noun = 'comment' | 'reply';
 
 /**
- * Every reply send in one thread, keyed by the comment it answers, from a single pass over the loaded rows,
- * so one pass per `$messages` change answers every comment's pending and failed lists.
+ * The hint for a queued comment or reply chat shows a state for, by the hold's cause. Chat's own hints speak of
+ * "your message"; these name the comment or reply. A cause with no wording of its own for comments shows its label.
  */
-export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
-	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.
-	const superseded = supersededReplies(rows, threadId);
-	const pendingByKey = new Map<string, Message[]>();
-	const failedByKey = new Map<string, Message[]>();
-	const pendingSeen = new Set<string>();
-	const failedSeen = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || row.role !== 'user') continue;
-		const targets = row.metadata?.reply_context?.comments;
-		if (!Array.isArray(targets)) continue;
-		const sending = row._optimistic || row.delivery_state === 'queued';
-		const broken = row.delivery_state === 'failed' && !superseded.has(row.id);
-		if (!sending && !broken) continue;
-		for (const reply of targets) {
-			const key = replyKey(reply.root_user_message_id, reply.root_cid);
-			if (!key) continue;
-			if (sending) addTo(pendingByKey, key, pendingSeen, row);
-			if (broken) addTo(failedByKey, key, failedSeen, row);
-		}
+function queuedTitle(shown: DeliveryPresentation, cause: string | null | undefined, noun: Noun): string {
+	if (shown.failed) return `Couldn’t send this ${noun}. Try again.`;
+	if (cause === NO_MODEL_SELECTED) return `This ${noun} is waiting for a model. Choose one for this chat to send it.`;
+	if (cause === SELECTED_MODEL_UNAVAILABLE) return `This ${noun} sends when the model is available.`;
+	if (cause && Object.hasOwn(ACCOUNT_HOLD_COPY, cause)) return `This ${noun} sends when the account is available.`;
+	return shown.label;
+}
+
+/** Sends whose Retry was refused for a cause no press can get past (their chat is deleted, their quote is gone). */
+const refusedForGood = new SvelteSet<string>();
+
+/** This send's Retry was refused for good: it keeps its label but offers no Retry it can't honour. */
+export function retryRefusedForGood(messageId: string): void {
+	refusedForGood.add(messageId);
+}
+
+function retryControl(state: MessageDeliveryState, delivery: DeliveryPresentation, noun: Noun): RetryControl | null {
+	if (state === 'ambiguous') return { label: 'Retry anyway', title: `This may send the ${noun} twice if the provider received it before the connection failed` };
+	// A queued send chat marks as needing the person moves only when they retry it; Retry drives it in place.
+	return state === 'failed' || (state === 'queued' && delivery.failed) ? { label: 'Retry', title: `Send this ${noun} again` } : null;
+}
+
+function unsent(messageId: string, note: string, createdAt: string, root: boolean, send: Delivery): UnsentSend | null {
+	const state = readMessageDeliveryState(send.delivery_state);
+	if (!state || (state !== 'queued' && !ENDED.includes(state))) return null;
+	const noun: Noun = root ? 'comment' : 'reply';
+	const shown = deliveryPresentation({
+		delivery_state: state, delivery_error: send.delivery_error ?? null, write_outcome: send.write_outcome ?? null,
+		active_turn_id: send.active_turn_id ?? null, delivering_reason: send.delivering_reason ?? null, metadata: {},
+	}, false);
+	if (!shown) return null;
+	// A queued send shows in its thread as a sent one while it is on its way. It shows chat's state once the server
+	// has proved no write happened (it is held) or chat marks it as needing the person.
+	if (state === 'queued' && send.write_outcome !== 'proved_no_write' && !shown.failed) return null;
+	const delivery = state === 'queued' ? { ...shown, title: queuedTitle(shown, send.delivery_error, noun) } : shown;
+	const retry = refusedForGood.has(messageId) ? null : retryControl(state, delivery, noun);
+	return { messageId, note, createdAt, root, delivery, retry };
+}
+
+/**
+ * What of this comment's thread is held or was not delivered, read from the server's delivery state on the
+ * comment and on each reply the person wrote in it. Each keeps its text in the thread with chat's label for
+ * its state, and chat's Retry where chat offers one. The server reports each send's newest Retry copy, so a
+ * failure a Retry superseded leaves the comment once that copy is delivered, and comes back with Retry if the copy ends.
+ */
+export function unsentSends(comment: ChatComment): UnsentSend[] {
+	const sends = [unsent(comment.user_message_id, comment.note, comment.created_at, true, comment)];
+	for (const answer of comment.answers) {
+		if (answer.author_kind === 'user') sends.push(unsent(answer.user_message_id, answer.text, answer.created_at, false, answer));
 	}
-	const of = (index: Map<string, Message[]>) => (comment: ChatComment) => index.get(replyKey(comment.user_message_id, comment.cid)) ?? [];
-	// A comment's own send drops out once its text is recorded on that comment as a user answer; that check reads the comment's answers, not the transcript.
-	return {
-		pending: comment => of(pendingByKey)(comment).filter(row => !comment.answers?.some(answer => answer.author_kind === 'user' && answer.user_message_id === row.id)),
-		failed: of(failedByKey),
-	};
+	return sends.filter((send): send is UnsentSend => send !== null);
+}
+
+/** Whether a send in this thread needs the person, by chat's red-marker rule. */
+export function needsAttention(comment: ChatComment): boolean {
+	return unsentSends(comment).some(send => send.delivery.failed);
+}
+
+/** A reply typed in this comment's thread is on its way to the server. */
+export function replySending(comment: ChatComment): boolean {
+	return !!chatCommentDrafts.reply(comment.id)?.posting;
 }

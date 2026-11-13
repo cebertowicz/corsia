@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import Menu from '$lib/components/ui/Menu.svelte';
+	import { dismissCommentAttention } from '$lib/api/docs';
+	import { DISMISS_ALL, isCommentTask } from '$lib/components/comments/commentTask';
 
 	let {
 		node,
@@ -30,19 +32,34 @@
 	const stopsWorker = $derived(
 		node.child?.available === true && node.user_actions.some((a) => a === 'close_node' || a === 'mark_done'),
 	);
-	const items = $derived(node.user_actions.map((action) => ({
-		id: action, label: LABELS[action], danger: action === 'close_node',
-	})));
+	const items = $derived([
+		...(isCommentTask(node) ? [] : node.user_actions.map((action) => ({
+			id: action, label: LABELS[action], danger: action === 'close_node',
+		}))),
+		...(node.comment_attention ? [{ id: 'dismiss_comments', label: DISMISS_ALL, danger: false }] : []),
+	]);
 
 	/** Every action, Won't do included, is one tap: no prompt stands in front of it. */
-	async function run(action: OperatorUserAction) {
+	async function run(action: string) {
 		if (busy) return;
 		busy = true;
 		error = null;
-		const failure = await onAction(action);
+		const failure = action === 'dismiss_comments' && node.comment_attention
+			? await dismiss(node.comment_attention.artifact_id)
+			: await onAction(action as OperatorUserAction);
 		busy = false;
 		if (failure) error = failure;
 		else onClose();
+	}
+
+	/** Dismiss all has its own failure copy; Done and Won't do keep the one their action returns. */
+	async function dismiss(artifactId: string): Promise<string | null> {
+		try {
+			await dismissCommentAttention(artifactId);
+			return null;
+		} catch {
+			return 'Couldn’t dismiss comments. Try again.';
+		}
 	}
 </script>
 
@@ -54,6 +71,6 @@
 	{busy}
 	note={stopsWorker ? 'Marking this done or Won’t do also stops the agent working on it.' : null}
 	{error}
-	onSelect={(id) => run(id as OperatorUserAction)}
+	onSelect={(id) => run(id)}
 	{onClose}
 />

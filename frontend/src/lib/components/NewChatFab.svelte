@@ -2,6 +2,8 @@
 	import { uiScope, enterScope, exitScope } from '$lib/stores/uiScope';
 	import { paneOpen, paneDragging } from '$lib/stores/paneOpen';
 	import { sidebarCollapsed } from '$lib/stores/ui';
+	import { listedNeedsYou } from '$lib/stores/threadPlanStates';
+	import { isMobile } from '$lib/stores/viewport';
 	import { projectAccent } from '$lib/utils/projectColors';
 	import { fly } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
@@ -11,6 +13,9 @@
 		onNewChat?: () => void;
 		sidebarOpen?: boolean;
 	} = $props();
+
+	// The phone's FAB carries the menu rows' needs-you dot, as the menu toggle does.
+	const needsYou = $derived($isMobile && $listedNeedsYou);
 
 	const HOLD_MS = 350;
 	let scopePillsOpen = $state(false);
@@ -131,7 +136,7 @@
 		class="rail-newchat"
 		class:armed={scopePillsOpen}
 		title="New chat — hold to choose a project or workspace"
-		aria-label="New chat"
+		aria-label={needsYou ? 'New chat · Needs you' : 'New chat'}
 		aria-haspopup="menu"
 		aria-expanded={scopePillsOpen}
 		onpointerdown={fabPressStart}
@@ -147,6 +152,7 @@
 			<path d="M12 20h9" />
 			<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
 		</svg>
+		{#if needsYou}<span class="needs-you-dot" data-testid="fab-needs-you-dot" aria-hidden="true"></span>{/if}
 	</button>
 </div>
 
@@ -178,6 +184,12 @@
 	.rail-newchat:hover { transform: translateY(-1px); }
 	.rail-newchat:active { scale: 0.9; }
 	.rail-newchat.armed { transform: scale(1.04); }
+	/* ThreadPlanStateMark's needs-you dot: same token and size. */
+	.needs-you-dot {
+		position: absolute; top: var(--space-1); right: var(--space-1);
+		width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle);
+		background: var(--amber);
+	}
 
 	.scope-pills-backdrop { position: fixed; inset: 0; z-index: 9; background: transparent; border: none; }
 	.scope-pills {
