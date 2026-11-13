@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from infra.repo_flock import RepoBusyError, repo_lock
 from infra.worktree_reaper_probe import (
     WORKTREE_REMOVE_TIMEOUT_SECONDS,
     ReaperGitError,
@@ -140,7 +141,7 @@ def _drop_record(entry: Path) -> None:
     try:
         record.unlink(missing_ok=True)
     except OSError as exc:
-        # Harmless: the sweep deletes a record whose entry is gone.
+        # Harmless: the record stays, and the next sweep drops it once its entry is gone.
         logger.warning("worktree_reaper: could not drop {}: {}", record.name, exc)
 
 
@@ -191,8 +192,10 @@ def sweep_quarantine(repo: Path, budget: RunBudget) -> int:
     An entry with a copied-out record is finished (``_finish``). An entry without
     one is kept whatever state it is in, and every run report lists it until a
     person acts. A record whose entry is gone is deleted, unless Git still
-    registers that entry: then it is finished. ``budget`` is checked before each
-    entry, and each finished entry counts as one removal.
+    registers that entry: then it is finished. Each finish changes Git's worktree
+    registry, so it runs under the repository lock, and the sweep stops when
+    another Git mutator holds it. ``budget`` is checked before each entry, and
+    each finished entry counts as one removal.
     """
     root = quarantine_root(repo)
     if not root.is_dir() or root.is_symlink():
@@ -208,14 +211,17 @@ def sweep_quarantine(repo: Path, budget: RunBudget) -> int:
             except (OSError, ReaperGitError):
                 gone = False  # Unknown: keep the record for the next sweep.
             if gone:
-                record.unlink(missing_ok=True)
+                _drop_record(entry)
                 continue
         elif not is_copied_out(entry):
             continue
         if budget.exhausted():
             break
         try:
-            done = _finish(repo, entry)
+            with repo_lock(repo):
+                done = _finish(repo, entry)
+        except RepoBusyError:
+            break  # The next pass finishes the rest.
         except (OSError, ReaperGitError) as exc:
             logger.warning("worktree_reaper: could not finish entry {}: {}", entry.name, exc)
             done = False
