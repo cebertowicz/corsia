@@ -2096,3 +2096,41 @@ def test_a_moved_writer_line_and_batch_keep_what_their_owners_already_had(durabl
         "SELECT latest_text, save_count FROM doc_feedback_edit_items WHERE batch_id='batch-moving'",
     ).fetchone()
     assert (str(edit[0]), int(edit[1])) == ("the saved edit", 2)
+
+
+def test_a_moved_section_line_shows_the_promoted_path_and_still_settles_as_posted(durable_scope):
+    """A saved edit names the file by the path its agent used; after a promote the wake shows the promoted path.
+
+    The repeat of that call equals the saved one, so it still settles `posted_as_is`. A saved suggestion
+    names no file, so it is carried unchanged.
+    """
+    import json
+
+    from doceditor import writer_turns
+    from doceditor.writer_line_text import wake_text
+    from registry import models
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+        durable_scope, "saved-calls.md", stale=True,
+    )
+    _seed_comment_state(db, source_id, thread_id)
+    edit = {"tool": "edit_file", "path": str(source),
+            "edits": [{"old_string": "a", "new_string": "b", "replace_all": False}]}
+    suggest = {"tool": "doc_comment_create", "quote": "quoted source", "near": None, "body": "why",
+               "replacement": "x", "insert_after": False}
+    ops = [{"kind": "edit", "call": edit, "base": {}}, {"kind": "suggest", "call": suggest, "base": {}}]
+    db.execute("UPDATE doc_comment_writer_line SET ops=? WHERE id='line-section'", (json.dumps(ops),))
+    db.commit()
+
+    new_id = _promote(workspace, thread_id, db, source)
+
+    new_path = models.get_artifact(new_id, db=db)["path"]
+    assert new_path != str(source)
+    row = db.execute("SELECT * FROM doc_comment_writer_line WHERE id='line-section'").fetchone()
+    assert str(row["root_id"]) == writer_turns.section_key(new_id, "## Build order")
+    saved = json.loads(row["ops"])
+    assert saved[0]["call"] == {**edit, "path": new_path}
+    assert saved[1]["call"] == suggest
+    text = wake_text(db, row)
+    assert f"edit_file on {new_path}" in text
+    assert str(source) not in text
