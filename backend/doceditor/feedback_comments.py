@@ -10,6 +10,8 @@ from doceditor.note_names import document_name
 from events.envelope import normalize
 from registry import models as registry_models
 from registry import exemption_restore
+from registry.document_supervisor import comment_recipients
+from infra import config
 
 
 def author_id(comment: dict[str, Any]) -> str:
@@ -89,31 +91,36 @@ def _ask_raised_to_person(db, comment: dict[str, Any]) -> bool:
     return bool(row and row["user_id"] and covering_asks(db, [artifact_id], str(row["user_id"]))[artifact_id])
 
 
-def recipients(
-    db, comment: dict[str, Any], *, document_owner_only: bool = False,
-) -> tuple[str, ...]:
-    """Resolve feedback recipients, or only the document owner for a user reopen.
+def artifact_recipients(db, artifact: dict[str, Any] | None) -> tuple[str, ...]:
+    """Who receives every comment on a document; with no one, ``("",)`` so a re-open still queues, visible as undelivered with no owner."""
+    return (comment_recipients(db, artifact, workspace=config.WORKSPACE) if artifact else ()) or ("",)
+
+
+def document_recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
+    """Who receives every comment on this comment's document; a re-open goes to exactly these."""
+    return artifact_recipients(db, registry_models.get_artifact(comment["artifact_id"], db=db))
+
+
+def recipients(db, comment: dict[str, Any]) -> tuple[str, ...]:
+    """Resolve feedback recipients.
 
     An agent that left the thread or acknowledged it is not woken, unless this comment tags it;
-    the document owner still gets the person's comments. The person's own acknowledgement never
-    stops replies reaching them.
+    the document's recipients still get the person's comments. The person's own acknowledgement
+    never stops replies reaching them.
     """
-    artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
-    owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
-    if document_owner_only:
-        return (owner,)
+    document = document_recipients(db, comment)
     root = _root_comment(db, comment)
     root_id = str(root["id"] if root else comment["id"])
     ask_raised = comment["author_kind"] == "agent" and _ask_raised_to_person(db, comment)
-    return _resolve(owner, comment, root, _thread_facts(db, [root_id])[root_id], ask_raised=ask_raised)
+    return _resolve(document, comment, root, _thread_facts(db, [root_id])[root_id], ask_raised=ask_raised)
 
 
 def recipients_for_replies(db, artifact: dict[str, Any], roots: list[dict[str, Any]]) -> dict[str, tuple[str, ...]]:
     """Who the person's next reply on each thread reaches, by the same rule as `recipients`, in a fixed number of reads."""
-    owner = str(artifact.get("parent_thread_id") or "")
+    document = artifact_recipients(db, artifact)
     facts = _thread_facts(db, [str(root["id"]) for root in roots])
     reply = {"author_kind": "user", "tagged_agent_ids": []}
-    return {str(root["id"]): _resolve(owner, reply, root, facts[str(root["id"])], ask_raised=False) for root in roots}
+    return {str(root["id"]): _resolve(document, reply, root, facts[str(root["id"])], ask_raised=False) for root in roots}
 
 
 def _thread_facts(db, root_ids: list[str]) -> dict[str, dict[str, set[str]]]:
@@ -148,11 +155,11 @@ def _thread_facts(db, root_ids: list[str]) -> dict[str, dict[str, set[str]]]:
 
 
 def _resolve(
-    owner: str, comment: dict[str, Any], root: dict[str, Any] | None, facts: dict[str, set[str]], *, ask_raised: bool,
+    document: tuple[str, ...], comment: dict[str, Any], root: dict[str, Any] | None, facts: dict[str, set[str]], *, ask_raised: bool,
 ) -> tuple[str, ...]:
     """The one rule for who a comment or reply reaches, given what is known about its thread."""
     tagged = set(comment.get("tagged_agent_ids") or ())
-    resolved = {owner, *tagged}
+    resolved = {*document, *tagged}
     if comment.get("tagged_user_id") or ask_raised:
         resolved.add(USER_AUTHOR_ID)
     if root is not None:
@@ -161,7 +168,7 @@ def _resolve(
     quiet = facts["left"] | (facts["acks"] - {comment_acks.PERSON})
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
-        resolved.add(owner)
+        resolved.update(document)
     resolved.discard(_recipient_for_author(comment))
     resolved.discard("")
     return tuple(sorted(resolved))

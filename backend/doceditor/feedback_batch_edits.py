@@ -19,36 +19,39 @@ def record_reopen(
     user_display: str,
     delivery_policy: str,
     now: str | None = None,
-) -> str | None:
-    """Queue a user's resolved-comment re-open through canonical recipients, in the lane the person chose.
+) -> tuple[str, ...]:
+    """Queue a user's resolved-comment re-open to the document's recipients, in the lane the person chose.
 
-    A re-opened image-region comment is image-held whatever lane was named, as when it was created.
+    It reaches the same agents a new comment on the document would. A re-opened image-region comment is
+    image-held whatever lane was named, as when it was created.
     """
     if not user_id:
-        return None
+        return ()
     delivery_policy = person_comment_lane(delivery_policy, region=comment.get("region_x") is not None)
     at = now or utc_now()
-    recipient_id, = feedback_comments.recipients(db, comment, document_owner_only=True)
-    batch_id = open_batch(
-        db,
-        author_kind="user",
-        author_id=USER_AUTHOR_ID,
-        artifact_id=str(comment["artifact_id"]),
-        recipient_id=recipient_id,
-        delivery_policy=delivery_policy,
-        now=at,
-    )
-    add_comment_item(
-        db,
-        batch_id=batch_id,
-        comment_id=str(comment["id"]),
-        author_kind="user",
-        delivery_policy=delivery_policy,
-        now=at,
-        event="reopened",
-        event_by=user_display.strip() or user_id,
-    )
-    return batch_id
+    batch_ids = []
+    for recipient_id in feedback_comments.document_recipients(db, comment):
+        batch_id = open_batch(
+            db,
+            author_kind="user",
+            author_id=USER_AUTHOR_ID,
+            artifact_id=str(comment["artifact_id"]),
+            recipient_id=recipient_id,
+            delivery_policy=delivery_policy,
+            now=at,
+        )
+        add_comment_item(
+            db,
+            batch_id=batch_id,
+            comment_id=str(comment["id"]),
+            author_kind="user",
+            delivery_policy=delivery_policy,
+            now=at,
+            event="reopened",
+            event_by=user_display.strip() or user_id,
+        )
+        batch_ids.append(batch_id)
+    return tuple(batch_ids)
 
 
 def record_edit(

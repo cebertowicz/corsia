@@ -45,16 +45,16 @@ def _names(db, ids: set[str]) -> dict[str, str]:
 def annotate(db, artifact: dict[str, Any] | None, roots: list[dict[str, Any]]) -> None:
     """Give each top-level comment `reply_goes_to`, the agents a reply on it wakes.
 
-    The document's owner leads, then the others in the order they joined the thread.
+    The document's recipients (its supervisor and owner) lead, then the others in the order they joined the thread.
     """
     if artifact is None or not roots:
         return
     by_root = feedback_comments.recipients_for_replies(db, artifact, roots)
     joined = _joined_orders(db, list(by_root))
     names = _names(db, {agent for ids in by_root.values() for agent in ids})
-    owner = str(artifact.get("parent_thread_id") or "")
+    document = set(feedback_comments.artifact_recipients(db, artifact))
     for root in roots:
         root_id = str(root["id"])
         order = joined[root_id]
-        ids = sorted(by_root[root_id], key=lambda i: (i != owner, order.index(i) if i in order else len(order), i))
+        ids = sorted(by_root[root_id], key=lambda i: (i not in document, order.index(i) if i in order else len(order), i))
         root["reply_goes_to"] = [{"id": i, "name": names[i]} for i in ids if i in names]
