@@ -8,7 +8,7 @@ import type { DocOwnership } from '$lib/api/docOwnership';
 
 const agent = (id: string, name: string, status = 'ready', responsibility = '') => ({ id, name, status, responsibility });
 const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner.';
-const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here. Pick one of the agents listed.';
+const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here.';
 function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
 		owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },

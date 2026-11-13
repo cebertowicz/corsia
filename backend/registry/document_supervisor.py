@@ -36,9 +36,7 @@ log = logging.getLogger(__name__)
 SUPERVISOR_KEY = "supervisor_thread_id"
 
 # The refusal sentences the screen shows, in the payload before a pick and in the 409 after one.
-MULTI_PERSON_REFUSAL = (
-    "Only an agent can own a document when more than one person uses CORSIA here. Pick one of the agents listed."
-)
+MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
 SHARED_REFUSAL = (
     "Everyone here shares this document, so its owner and supervisor can’t be changed "
     "while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner."
