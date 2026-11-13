@@ -78,6 +78,18 @@ def _wakes(event: str = script_rule_runs.INTERRUPTED_EVENT) -> list[tuple[str, d
     return wakes
 
 
+def _person_lines() -> list[str]:
+    """The line the person sees in the chat for each interrupted-run wake."""
+    db = get_db()
+    try:
+        return [row[0] for row in db.execute(
+            "SELECT json_extract(metadata,'$.summary') FROM messages WHERE thread_id=? "
+            "AND json_extract(metadata,'$.event_type')=? ORDER BY rowid",
+            (OWNER, script_rule_runs.INTERRUPTED_EVENT)).fetchall()]
+    finally:
+        db.close()
+
+
 def test_a_run_cut_by_a_restart_fails_and_wakes_its_rules_owner_once_naming_it(cut):
     script_id = _script(cut, "cut.sh")
     rule = _rule(script_id)
@@ -91,6 +103,7 @@ def test_a_run_cut_by_a_restart_fails_and_wakes_its_rules_owner_once_naming_it(c
     assert _outcomes(rule["id"]) == [("failed", rule_runs.INTERRUPTED)]
     [(summary, details)] = _wakes()
     assert summary == "A restart stopped a script run your event rule started. It is not replayed."
+    assert _person_lines() == ["Script run stopped when CORSIA restarted"]  # the agent's line is not the person's
     assert details["runs"] == [{"rule_id": rule["id"], "event_id": event_id, "event_type": "qa.route"}]
     assert "event_rules explain" in details["next"]
     assert cut["idle_drives"] == [OWNER]
@@ -120,6 +133,7 @@ def test_two_runs_cut_by_one_restart_reach_their_owner_as_one_wake_with_each_run
 
     [(summary, details)] = _wakes()
     assert summary == "A restart stopped 2 script runs your event rules started. They are not replayed."
+    assert _person_lines() == ["2 script runs stopped when CORSIA restarted"]
     assert details["runs"] == [
         {"rule_id": first["id"], "event_id": event_id, "event_type": "qa.route", "item": "shelf/box#7"},
         {"rule_id": second["id"], "event_id": event_id, "event_type": "qa.route"},

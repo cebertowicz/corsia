@@ -26,6 +26,7 @@ from loguru import logger
 from automation import script_schedules as store
 from automation.script_github_channel import bound_repository
 from automation.script_measures import WORKSPACE_SCOPE
+from automation.script_readings import wake_owner
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
@@ -112,10 +113,11 @@ def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
     """Wake each owner once with the runs of theirs the backend lost, in the caller's write.
 
     The wake's id comes from the rows it names, never the script's one-a-day failure key,
-    so a day's earlier failure can't turn it into a note. An owner who is gone is parked.
+    so a day's earlier failure can't turn it into a note. It is sent the way every script
+    failure is (``script_readings.wake_owner``): an owner who is gone is parked, and the
+    person's line names no rule of theirs.
     """
-    from events import dead_letter
-    from events.delivery import enqueue_event_wake, start_idle_after_commit
+    from events.delivery import start_idle_after_commit
 
     by_owner: dict[str, list[Mapping[str, Any]]] = {}
     for row in ended:
@@ -128,17 +130,14 @@ def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
         summary = ("A restart stopped a script run your event rule started. It is not replayed."
                    if len(runs) == 1 else
                    f"A restart stopped {len(runs)} script runs your event rules started. They are not replayed.")
+        chip = ("Script run stopped when CORSIA restarted" if len(runs) == 1
+                else f"{len(runs)} script runs stopped when CORSIA restarted")
         details = {"runs": runs, "next": _INTERRUPTED_NEXT}
         key = ",".join(str(row["id"]) for row in rows)
-        try:
-            enqueue_event_wake(
-                owner, INTERRUPTED_EVENT, summary, details,
-                message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-rule-runs-interrupted:{owner}:{key}")),
-                db=connection,
-            )
-        except ValueError:
-            dead_letter.park(INTERRUPTED_EVENT, {**details, "summary": summary, "owner": owner},
-                             "owner_inactive", key, db=connection)
+        if not wake_owner(
+            connection, owner, INTERRUPTED_EVENT, summary, details, chip=chip, park_key=key,
+            message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-rule-runs-interrupted:{owner}:{key}")),
+        ):
             logger.warning("rule runs {} of owner {} were interrupted; the owner is unavailable", key, owner)
             continue
         start_idle_after_commit(connection, owner)
