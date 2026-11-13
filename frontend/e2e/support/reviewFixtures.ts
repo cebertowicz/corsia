@@ -109,7 +109,9 @@ export const settled = (page: Page) => page.evaluate(() => Promise.all(document.
 	.map((animation) => animation.finished.catch(() => undefined))));
 
 export type Case = readonly [label: string, mode: Mode, theme: 'light' | 'dark'];
-export type Run = (args: { page: Page; request: APIRequestContext; info: TestInfo; mode: Mode; theme: 'light' | 'dark' }) => Promise<void>;
+/** The starting state a journey begins from — seeded documents, comments and asks — built before its own budget. */
+export type JourneySetup<Value> = (args: { request: APIRequestContext; mode: Mode; theme: 'light' | 'dark' }) => Promise<Value>;
+export type Run<Value = void> = (args: { page: Page; request: APIRequestContext; info: TestInfo; mode: Mode; theme: 'light' | 'dark'; value: Value }) => Promise<void>;
 /** Deletes the threads seeded since the last call, for a spec that needs a clean database between its cases. */
 export async function deleteSeededThreads(request: APIRequestContext) {
 	for (const threadId of seededThreadIds.splice(0)) {
@@ -119,15 +121,35 @@ export async function deleteSeededThreads(request: APIRequestContext) {
 	}
 }
 
-/** One test per case; a phone case runs with a touch screen so `(pointer: coarse)` applies. */
-export function journey(name: string, cases: readonly Case[], run: Run) {
+/** The starting state is the journey's fixture work, not its subject, so it gets a budget of its own. */
+const SETUP_TIMEOUT = 120_000;
+
+/**
+ * One test per case; a phone case runs with a touch screen so `(pointer: coarse)` applies.
+ *
+ * `setup` builds the case's starting state as a fixture with `SETUP_TIMEOUT` of its own, so the test's own timeout
+ * covers the journey it asserts. That work is neither cheap nor what these journeys prove: every `raiseAsk` and
+ * `addPersonStep` starts a cold Python service (its `plans.boundary` import pulls in `litellm`, 2.2 s of the 2.9 s
+ * import), measured at 2.4–4.0 s on origin/dev 8a52ccc0e — up to 45 % of the journey's own 30 s, and the part of it
+ * that scales worst with host load.
+ */
+export function journey<Value = void>(name: string, cases: readonly Case[], run: Run<Value>, setup?: JourneySetup<Value>) {
 	for (const [label, mode, theme] of cases) {
 		test.describe(label, () => {
 			if (mode === 'phone') test.use({ hasTouch: true, isMobile: true });
-			test(`@surface:review-bar ${name} (${label})`, async ({ page, request }, info) => {
-				// The mobile project's Pixel 7 device is a coarse pointer, so it would turn a 1440 case's compact buttons into 44px ones.
-				test.skip(mode !== 'phone' && info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
-				await run({ page, request, info, mode, theme });
+			// The mobile project's Pixel 7 device is a coarse pointer, so it would turn a 1440 case's compact buttons into 44px ones.
+			// Declared, not in the body: a skipped case must not build a starting state nobody opens.
+			test.skip(() => mode !== 'phone' && test.info().project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
+			const withStart = test.extend<{ journeyStart: Value }>({
+				// The file's reset returns the backend to its seed, and the delivery preference with it, so seed after both.
+				journeyStart: [async ({ seededBackend, deliveryPreferenceOn, request }, use) => {
+					void seededBackend;
+					void deliveryPreferenceOn;
+					await use(setup ? await setup({ request, mode, theme }) : (undefined as Value));
+				}, { timeout: SETUP_TIMEOUT }],
+			});
+			withStart(`@surface:review-bar ${name} (${label})`, async ({ page, request, journeyStart }, info) => {
+				await run({ page, request, info, mode, theme, value: journeyStart });
 			});
 		});
 	}

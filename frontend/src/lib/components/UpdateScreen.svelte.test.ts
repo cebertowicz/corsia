@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import UpdateScreen from './UpdateScreen.svelte';
 import { updateScreenView } from '$lib/update/screenStore';
+import { failureCopy } from '$lib/update/failureCopy';
 import { updateStatus, type UpdateStatus } from '$lib/update/store';
 
 let component: Record<string, unknown> | null = null;
@@ -91,5 +92,38 @@ describe('UpdateScreen remote copy', () => {
 		showRemote({ operationId: 'update-1', mode, step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
 		expect(document.body.textContent).toContain('Open CORSIA on Studio Mac.');
 		expect(document.body.textContent).not.toContain('doesn’t come back');
+	});
+});
+
+describe('UpdateScreen stopped and failed states', () => {
+	const base = { operationId: 'update-1', step: 'restarting', label: 'Updating', percent: 40, estimated: false, fromVersion: '0.4.3-dev.1288', toVersion: '0.4.3-dev.1311' } as const;
+	const failed = (headline: string) => ({ title: 'Update failed', headline, body: '', toastLine: null, retryLabel: 'Retry' });
+	const region = () => document.querySelector('[role="status"]')?.textContent?.trim() ?? '';
+	const versionsLine = () => document.querySelector('.versions');
+
+	it('keeps the live region non-empty when CORSIA is stopped', () => {
+		showLocal({ ...base, mode: 'start_failed', failure: null, serviceDown: true });
+		expect(region()).toBe('CORSIA didn’t restart.');
+	});
+
+	it('says what happened in the live region for a failed update with the service down', () => {
+		showLocal({ ...base, mode: 'failed', failure: failed('x'), serviceDown: true });
+		expect(region()).toBe('Update failed.');
+	});
+
+	it('hides the versions line only when the headline already names the target', () => {
+		// The headline comes from failureCopy itself, so a wording change there fails here instead of bringing the line back silently.
+		const wrong = failureCopy({ code: 'wrong_version_running', detail: JSON.stringify({ target_version: '0.4.3-dev.1311' }), summary: null, conductorTold: false, log: null }, '0.4.3-dev.1288');
+		expect(wrong.headline).toContain('0.4.3-dev.1311');
+		showLocal({ ...base, mode: 'failed', failure: wrong, serviceDown: false });
+		expect(versionsLine()).toBeNull();
+	});
+
+	it.each([
+		['wrong_version_running without a target', 'CORSIA is on 0.4.3-dev.1288.'],
+		['build_failed', 'Couldn’t build the update.'],
+	])('keeps the versions line for %s', (_name, headline) => {
+		showLocal({ ...base, mode: 'failed', failure: failed(headline), serviceDown: false });
+		expect(versionsLine()?.textContent).toBe('0.4.3-dev.1288 → 0.4.3-dev.1311');
 	});
 });

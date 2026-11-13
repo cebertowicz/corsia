@@ -312,4 +312,4 @@ from plans.usage_cost import usage_dollars
 from plans.workflow_fields import reader_titles
 # Measurement's Workflows section: each ended run's record, and the plan-node cost rollup it reads.
 from plans.run_end import records as run_end_records
-from plans.node_cost_scoped import project as node_cost_project
+from plans.node_cost_scoped import working_seconds as node_working_seconds

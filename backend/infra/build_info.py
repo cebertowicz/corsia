@@ -69,3 +69,13 @@ def app_version(frontend: dict | None = None) -> str | None:
         return None
     described = _git_read(["describe", "--tags", "--match", "v[0-9]*"])
     return described.removeprefix("v") if described else None
+
+
+# The version of the process that is running, read once at process start. `app_version()` reads the checkout or bundle on
+# disk, which an update replaces before the restart that makes it the running one.
+_RUNNING_APP_VERSION: str | None = app_version()
+
+
+def running_app_version() -> str | None:
+    """Return the app version this process started with, never the one on disk now."""
+    return _RUNNING_APP_VERSION

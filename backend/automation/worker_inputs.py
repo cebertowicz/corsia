@@ -37,6 +37,11 @@ class StartRefused(Exception):
     """Why a start can't run; its text is what the owner is told."""
 
 
+class StartWaiting(StartRefused):
+    """A refusal the next pass may not repeat: the start goes back to the queue, and its text is
+    what the owner is told if it is still refused when the wait ends."""
+
+
 def owner_root(owner: str, project_id: str | None, db: sqlite3.Connection) -> Path:
     """The rule owner's thread root, the one its own confined children resolve."""
     from core.workspace_layout import resolve_thread_root

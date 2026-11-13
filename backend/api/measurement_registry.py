@@ -51,10 +51,28 @@ REGISTRY: dict[str, MetricDefinition] = {
     "fresh_tokens_per_outcome": MetricDefinition("tokens", "fresh_tokens_per_outcome", 20),
     # A plain total, so one call in the period is enough to state it; the in-progress period is served too, flagged partial.
     "fresh_tokens": MetricDefinition("tokens", "fresh_tokens", 1),
+    # The share of the page's accepted tasks that ran under a workflow, as a fraction like
+    # ``took_recommendation_pct``. Its one rule lives in ``api.measurement_workflow_share``, which the
+    # Workflows section's coverage headline sums over its window, so the two can never disagree.
+    "under_workflow_pct": MetricDefinition("workflows", "ratio", 20),
     "limit_hits": MetricDefinition("limits", "count", 0),
     "dollar_trend": MetricDefinition("unavailable", "usd", 0, available=False),
 }
 
+
+
+def data_start(item: MetricDefinition, source_start: str | None, start_day: str | None) -> str | None:
+    """Return the first period this id's own instrument can describe, which is where its chart begins.
+
+    A size rate divides sized work by presence time, so it starts at the later of its own start and
+    the first recorded presence; a presence-backed id starts at that presence; every other id at its
+    own start. ``start_day`` is the viewer-local day of that presence, or None when none is recorded.
+    """
+    if item.family == "size":
+        return max((start for start in (source_start, start_day) if start), default=None)
+    if item.presence_backed:
+        return start_day or source_start
+    return source_start
 
 
 def period_measured(metric: str, period: str, first_presence_period: str | None = None,

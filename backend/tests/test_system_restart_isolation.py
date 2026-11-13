@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_TOKEN
 from infra.default_port import DEFAULT_BACKEND_PORT
 
+pytestmark = pytest.mark.usefixtures("newer_build_available")
+
 
 def _valid_token() -> str:
     return OWNER_SESSION_TOKEN

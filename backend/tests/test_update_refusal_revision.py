@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+pytestmark = pytest.mark.usefixtures("newer_build_available")
+
 
 @pytest.mark.asyncio
 async def test_disk_space_failure_does_not_link_a_log_that_was_never_created(isolated_db, tmp_path, monkeypatch):
