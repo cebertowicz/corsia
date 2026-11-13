@@ -1137,6 +1137,11 @@ for (const theme of ['light', 'dark'] as const) {
 				expect(pane.ok()).toBeTruthy();
 				return JSON.stringify(await pane.json());
 			}).not.toContain(scenario.artifactId);
+			// The hand-off is pressed while its chip still stands, so the removed file is what opens: the viewer reports it
+			// unavailable and reloads the attention queue, which no longer lists it. The pane's refetch removes the same chip
+			// on its own, so the event is delivered after the press; sent before it, the chip can vanish before the click lands.
+			documentAvailable = false;
+			await chip.click();
 			// The real reconciler emits this frame after it commits. This request-context
 			// fixture has no browser WebSocket transport, so deliver the exact event to
 			// the mounted pane and prove its normal refetch removes the stale rail row.
@@ -1144,8 +1149,6 @@ for (const theme of ['light', 'dark'] as const) {
 				const { emit } = await import('/src/lib/ws/events.ts');
 				emit('artifacts_changed', { affected_thread_ids: [id] });
 			}, threadId);
-			documentAvailable = false;
-			await chip.click();
 			const removed = page.locator('.gone');
 			await expect(removed.getByText('launch-plan.md is unavailable.', { exact: true })).toBeVisible();
 			await expect(removed.getByRole('button', { name: 'Retry' })).toHaveCount(0);
