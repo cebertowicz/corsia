@@ -4,12 +4,17 @@ import NewMarker from './NewMarker.svelte';
 /** What the pinned sign says is new, as its accessible name. */
 export type NewSignName = 'New comment' | 'New reply';
 
-/** Pin the new sign over the end of a highlight, out of text flow so no line moves for it, kept visible within the scroller. */
+/**
+ * Pin the sign of a thread over its highlight, out of text flow so no line moves for it, kept visible within the scroller.
+ * An unread thread's sign is its highlight: the highlight is drawn with `data-unread` (`commentAnchors.css`), so this host
+ * draws nothing and only gives the sign its accessible name. A reply that wasn't delivered keeps a drawn red dot above the line.
+ */
 export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void, name: NewSignName = 'New reply'): () => void {
 	const host = document.createElement('span');
 	const layer = body.parentElement?.classList.contains('comment-mark-layer') ? body.parentElement : null;
 	host.dataset.highlightDot = '';
 	host.style.cssText = `position:${layer ? 'absolute' : 'fixed'};z-index:5;pointer-events:none;display:none;line-height:0`;
+	if (failedQuote === null) host.style.opacity = '0';
 	(layer ?? document.body).append(host);
 	const marker = mount(NewMarker, { target: host, props: { pinned: true, failedQuote, name } });
 	let frame = 0;
