@@ -268,8 +268,8 @@
 	/* The thread row's needs-you dot (ThreadPlanStateMark), carried while a phone's menu is hidden. */
 	.h-menu { position: relative; }
 	.needs-you-dot {
-		position: absolute; top: 6px; right: 6px;
-		width: 8px; height: 8px; border-radius: var(--radius-circle);
+		position: absolute; top: var(--space-2); right: var(--space-2);
+		width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle);
 		background: var(--amber);
 	}
 	.h-icon:active { scale: 0.94; }

@@ -186,8 +186,8 @@
 	.rail-newchat.armed { transform: scale(1.04); }
 	/* ThreadPlanStateMark's needs-you dot: same token and size. */
 	.needs-you-dot {
-		position: absolute; top: 4px; right: 4px;
-		width: 8px; height: 8px; border-radius: var(--radius-circle);
+		position: absolute; top: var(--space-1); right: var(--space-1);
+		width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle);
 		background: var(--amber);
 	}
 
