@@ -1,12 +1,11 @@
 """Removal steps for the worktree reaper: quarantine first, never half-deleted.
 
 A worktree leaves ``.worktrees/`` by one same-filesystem rename into
-``<repo>/.git/corsia-reaping/``; only then is it deleted, and without
-``--force`` so Git itself re-verifies that it is clean. A partial delete can
+``<repo>/.git/corsia-reaping/``; only then is it deleted. A partial delete can
 therefore only exist inside the quarantine, which each run finishes -- see
 ``sweep_quarantine``, which is also where a removal that ran out of time gets its
-second chance. Work the reaper never copied out of an entry is recorded on the
-entry itself, and a later pass never deletes it.
+second chance. A later pass deletes an entry Git still registers only on positive
+evidence that nothing in it is owed to anyone; without that evidence it keeps it.
 """
 
 from __future__ import annotations
@@ -34,11 +33,11 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_salvage import SalvageError
 
 QUARANTINE_DIR = "corsia-reaping"
-# Suffix of the record beside a quarantine entry that still holds work the
-# reaper never copied out of it. It is named after its entry, so listing the
-# quarantine shows which entry the reaper would not delete and why, and it is
-# written before the step that can be cut off rather than after it.
-UNSAVED_WORK_SUFFIX = ".unsaved-work"
+# Suffix of the record beside a quarantine entry that says nothing in it is owed to
+# anyone: its uncommitted work was copied out, or the checks before the move
+# cleared a forced removal. It is written only once the entry exists and that is
+# true, so it is positive evidence: losing it can strand an entry, never delete one.
+COPIED_OUT_SUFFIX = ".copied-out"
 _DIRTY_MARKERS = ("contains modified or untracked files", "is dirty")
 
 
@@ -47,13 +46,18 @@ def quarantine_root(repo: Path) -> Path:
     return repo / ".git" / QUARANTINE_DIR
 
 
+def _copied_out_record(entry: Path) -> Path:
+    return entry.with_name(entry.name + COPIED_OUT_SUFFIX)
+
+
 def _quarantine_target(repo: Path, name: str) -> Path:
+    """Pick an unused entry name; one whose record is still there is not unused."""
     root = quarantine_root(repo)
     root.mkdir(exist_ok=True)
     stamp = int(time.time())
     target = root / f"{name}-{stamp}"
     suffix = 1
-    while os.path.lexists(target):
+    while os.path.lexists(target) or os.path.lexists(_copied_out_record(target)):
         target = root / f"{name}-{stamp}-{suffix}"
         suffix += 1
     return target
@@ -96,7 +100,7 @@ def delete_quarantined(repo: Path, path: Path) -> bool:
 def quarantine_entries(repo: Path) -> list[str]:
     """Return every entry still in the quarantine; unreadable counts as one.
 
-    An unsaved-work record is not an entry: it names the entry it belongs to.
+    A copied-out record is not an entry: it names the entry it belongs to.
     """
     root = quarantine_root(repo)
     if not os.path.lexists(root):
@@ -106,48 +110,54 @@ def quarantine_entries(repo: Path) -> list[str]:
     try:
         return sorted(
             entry.name for entry in root.iterdir()
-            if not entry.name.endswith(UNSAVED_WORK_SUFFIX)
+            if not entry.name.endswith(COPIED_OUT_SUFFIX)
         )
     except OSError as exc:
         return [f"<unreadable: {exc.__class__.__name__}>"]
 
 
-def _unsaved_work_record(entry: Path) -> Path:
-    return entry.with_name(entry.name + UNSAVED_WORK_SUFFIX)
+def mark_copied_out(entry: Path) -> None:
+    """Record that nothing in ``entry`` is owed to anyone any more.
 
-
-def mark_unsaved_work(entry: Path, reason: str) -> None:
-    """Record that ``entry`` holds work the reaper never copied out of it.
-
-    The entry carries its own protection, so a pass cut off at any point leaves
-    the safe answer behind: a later sweep keeps the directory and reports it.
+    Call it only once the entry exists in the quarantine and its work is copied
+    out, or the checks found none: the sweep force-removes an entry on it.
     """
-    record = _unsaved_work_record(entry)
-    record.write_text(f"{entry.name}: {reason}\n", encoding="utf-8")
+    _copied_out_record(entry).write_text(f"{entry.name}\n", encoding="utf-8")
 
 
-def clear_unsaved_work(entry: Path) -> None:
-    """Drop the record once the entry's work is safely copied out."""
-    record = _unsaved_work_record(entry)
+def is_copied_out(entry: Path) -> bool:
+    """Return whether the reaper recorded that this entry owes nobody anything."""
+    return _copied_out_record(entry).is_file()
+
+
+def _drop_record(entry: Path) -> None:
+    """Drop an entry's record; call only once the entry itself is gone."""
+    record = _copied_out_record(entry)
     try:
-        record.unlink()
-    except FileNotFoundError:
-        pass
+        record.unlink(missing_ok=True)
     except OSError as exc:
-        # Harmless: once the entry itself is gone, the sweep deletes the record.
-        logger.warning("worktree_reaper: could not clear {}: {}", record.name, exc)
-
-
-def holds_unsaved_work(entry: Path) -> bool:
-    """Return whether the reaper stopped before this entry's work was copied out."""
-    return _unsaved_work_record(entry).exists()
+        # Harmless: the sweep deletes a record whose entry is gone.
+        logger.warning("worktree_reaper: could not drop {}: {}", record.name, exc)
 
 
 def _keep_for_a_person(entry: Path, reason: str) -> bool:
-    """Record and report an entry the reaper will not delete; always returns False."""
-    mark_unsaved_work(entry, reason)
-    logger.warning("worktree_reaper: entry {} still holds work; left for a person", entry.name)
+    """Report an entry the reaper will not delete; always returns False.
+
+    ``quarantine_entries`` lists it in every run report until a person acts.
+    """
+    logger.warning("worktree_reaper: entry {} kept for a person: {}", entry.name, reason)
     return False
+
+
+def _claimed_path(admin: Path) -> Path | None:
+    """Return the worktree path Git's registration in ``admin`` names, if readable."""
+    try:
+        raw = (admin / "gitdir").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    claimed = Path(raw)
+    # With worktree.useRelativePaths the record is relative to the admin directory.
+    return (claimed if claimed.is_absolute() else admin / claimed).resolve(strict=False).parent
 
 
 def _stranded_move(entry: Path) -> bool:
@@ -161,11 +171,7 @@ def _stranded_move(entry: Path) -> bool:
     admin = admin_dir(entry)
     if admin is None or not (admin / "gitdir").is_file():
         return False
-    try:
-        claimed = (admin / "gitdir").read_text(encoding="utf-8").strip()
-    except OSError:
-        return True
-    return Path(claimed).resolve(strict=False) != (entry / ".git").resolve(strict=False)
+    return _claimed_path(admin) != entry.resolve(strict=False)
 
 
 def _finish_stranded_move(repo: Path, entry: Path) -> bool:
@@ -174,8 +180,10 @@ def _finish_stranded_move(repo: Path, entry: Path) -> bool:
     Nothing was copied out of it, so the tree's own check decides, the same check
     that cleared it for removal in the first place: a tree with nothing unshipped
     in it is debris and goes, and one that still holds work waits for a person and
-    is reported. Repairing Git's registry by hand would be the alternative; the
-    reaper does not write it.
+    is reported. Its registration is dropped by the path Git still has for it, one
+    entry only: ``git worktree prune`` would also drop the registration of every
+    other stranded entry kept here, and the next sweep would read that entry as
+    known to Git nowhere and delete it.
     """
     admin = admin_dir(entry)
     if admin is None:
@@ -183,66 +191,91 @@ def _finish_stranded_move(repo: Path, entry: Path) -> bool:
     try:
         if status_skip_reason(entry, worktree_git_env(repo, admin, entry)) is not None:
             return _keep_for_a_person(entry, "its move was cut off before any copy")
+        claimed = _claimed_path(admin)
+        if claimed is None or os.path.lexists(claimed):
+            return _keep_for_a_person(entry, f"its registration names {claimed}, which is there")
+        # The claimed path is gone, so Git drops only the registration (git 2.53.0).
+        dropped = git(
+            repo, ["worktree", "remove", "--force", str(claimed)], git_env=common_git_env(repo),
+        )
+        if dropped.returncode != 0:
+            return _keep_for_a_person(entry, f"registration not dropped: {git_detail(dropped)}")
         if os.path.lexists(entry) and not delete_quarantined(repo, entry):
             logger.warning("worktree_reaper: stranded entry {} could not be deleted", entry.name)
             return False
-        git(repo, ["worktree", "prune"], git_env=common_git_env(repo))
         return True
     except (OSError, ReaperGitError) as exc:
         logger.warning("worktree_reaper: could not judge entry {}: {}", entry.name, exc)
         return False
 
 
-def _finish_removal(repo: Path, entry: Path) -> bool:
-    """Finish a removal an earlier pass started; False when something remains.
+def _not_a_worktree(entry: Path, output: str) -> bool:
+    """Return whether Git refused because it no longer registers ``entry`` at all.
 
-    ``--force`` is owed here because the whole set of checks ran before the entry
-    was moved in, and whatever was still unshipped was copied out or marked. An
-    entry an older build left here carries no record of its own, so the tree is
-    asked first, and only the deletions this removal caused read as debris.
+    git 2.53.0 says, for a path it has no registration for::
+
+        fatal: '<path>' is not a working tree
+    """
+    return f"'{entry}' is not a working tree" in output
+
+
+def _finish_removal(repo: Path, entry: Path) -> bool:
+    """Finish a removal an earlier pass started, on positive evidence only.
+
+    The entry is force-removed when its copied-out record says nothing in it is
+    owed, or when its tree shows nothing but the deletions a cut-off removal makes
+    and disposable output. Anything else keeps it: no record and an edit, an
+    untracked file or an unreadable tree, or any Git refusal except that Git no
+    longer registers the path, which makes it an entry known to Git nowhere.
     """
     try:
-        admin = admin_dir(entry)
-        if admin is None:
-            return False
-        if status_skip_reason(
-            entry, worktree_git_env(repo, admin, entry), allow_deletions=True,
-        ) is not None:
-            return _keep_for_a_person(entry, "left by a build that recorded nothing about its work")
+        if not is_copied_out(entry):
+            admin = admin_dir(entry)
+            if admin is None:
+                return _keep_for_a_person(entry, "no copied-out record and no readable .git")
+            reason = status_skip_reason(
+                entry, worktree_git_env(repo, admin, entry), allow_deletions=True,
+            )
+            if reason is not None:
+                return _keep_for_a_person(entry, f"no copied-out record and its tree is {reason}")
         removed = git(
             repo, ["worktree", "remove", "--force", str(entry)],
             timeout=WORKTREE_REMOVE_TIMEOUT_SECONDS, git_env=common_git_env(repo),
         )
         if removed.returncode == 0:
+            _drop_record(entry)
             return True
-        detail = git_detail(removed)
-        # Git drops the registration before it finishes deleting the tree, so a
-        # refusal often leaves a directory Git no longer knows about, with no
-        # second question left to ask it.
-        if os.path.lexists(entry) and not delete_quarantined(repo, entry):
-            logger.warning("worktree_reaper: entry {} still there: {}", entry.name, detail)
-            return False
-        git(repo, ["worktree", "prune"], git_env=common_git_env(repo))
-        return True
+        if not _not_a_worktree(entry, removed.stderr or removed.stdout):
+            # A refusal mid-delete (``failed to delete``) drops the registration
+            # anyway, so the next sweep finds the rest known to Git nowhere.
+            return _keep_for_a_person(entry, f"git refused: {git_detail(removed)}")
+        return _delete_unregistered(repo, entry)
     except (OSError, ReaperGitError) as exc:
         logger.warning("worktree_reaper: could not finish entry {}: {}", entry.name, exc)
         return False
 
 
+def _delete_unregistered(repo: Path, entry: Path) -> bool:
+    if not delete_quarantined(repo, entry):
+        return False
+    _drop_record(entry)
+    return True
+
+
 def sweep_quarantine(repo: Path) -> int:
     """Finish what earlier passes left in the quarantine; return how many went.
 
-    Every entry here passed the full set of checks in the pass that moved it in,
-    so this deletes nothing that pass had not cleared. It sorts four cases apart:
+    It sorts the entries into three cases:
 
-    * marked as holding unsaved work: left for a person, and reported by
-      ``quarantine_entries``;
     * still claimed by Git under the path it left, a move cut off before its
       registry update: the tree's own check decides, see ``_finish_stranded_move``;
-    * registered at this path: its removal was cut off mid-delete, so this is the
-      only place a later pass can finish it;
+    * registered at this path, a removal that was cut off or refused: finished
+      only on positive evidence, see ``_finish_removal``;
     * known to Git nowhere: its admin directory is gone, meaning the removal
       finished and only the directory was left.
+
+    A copied-out record whose entry is gone is deleted; that can only strand an
+    entry, because no deletion here depends on a record being absent.
     """
     root = quarantine_root(repo)
     if not root.is_dir() or root.is_symlink():
@@ -250,20 +283,16 @@ def sweep_quarantine(repo: Path) -> int:
     registered = {entry.path for entry in list_worktrees(repo)}
     removed = 0
     for entry in sorted(root.iterdir()):
-        if entry.name.endswith(UNSAVED_WORK_SUFFIX):
-            if not os.path.lexists(entry.with_name(entry.name[: -len(UNSAVED_WORK_SUFFIX)])):
-                entry.unlink(missing_ok=True)  # Its entry is gone; this is only a name now.
-            continue
-        if holds_unsaved_work(entry):
+        if entry.name.endswith(COPIED_OUT_SUFFIX):
+            if not os.path.lexists(entry.with_name(entry.name[: -len(COPIED_OUT_SUFFIX)])):
+                entry.unlink(missing_ok=True)
             continue
         if _stranded_move(entry):
             finished = _finish_stranded_move(repo, entry)
+        elif entry.resolve(strict=False) in registered:
+            finished = _finish_removal(repo, entry)
         else:
-            finished = (
-                _finish_removal(repo, entry)
-                if entry.resolve(strict=False) in registered
-                else delete_quarantined(repo, entry)
-            )
+            finished = _delete_unregistered(repo, entry)
         removed += 1 if finished else 0
     return removed
 
@@ -283,31 +312,27 @@ def remove_worktree(
     ``quarantine_pending`` (left in quarantine for the next run).
     """
     target = _quarantine_target(repo, name)
-    if salvage is not None:
-        # Everything between this move and the copy finishing can be cut off, and
-        # an entry cut off in it holds work nobody has copied out yet. The entry
-        # says so before it moves, so a later sweep cannot mistake it for debris.
-        mark_unsaved_work(target, f"moved in from {worktree} before its work was copied out")
     moved = git(repo, ["worktree", "move", str(worktree), str(target)])
     if moved.returncode != 0:
-        clear_unsaved_work(target)  # Nothing moved; there is no entry to protect.
         return "move_failed"
     if salvage is not None:
         try:
             salvage(target)
         except SalvageError:
             restored = git(repo, ["worktree", "move", str(target), str(worktree)])
-            if restored.returncode == 0:
-                clear_unsaved_work(target)  # Back with its owner, out of the sweep's way.
-            else:
-                # Still registered here, and the record written before the move
-                # stays: its work was never copied out, so the sweep keeps it.
+            if restored.returncode != 0:
+                # Registered here with no copied-out record: the sweep keeps it.
                 logger.warning(
                     "worktree_reaper: {} left in quarantine after a failed salvage; move back: {}",
                     name, git_detail(restored),
                 )
             raise
-        clear_unsaved_work(target)  # The work is copied out and pinned now.
+    if force:
+        # The removal below deletes whatever is left, and nothing left is owed: the
+        # work is copied out, or the checks found none. A non-forced removal gets
+        # no record, so a file that races in meets Git's refusal and the sweep's
+        # tree check, never a record that says it may go.
+        mark_copied_out(target)
     # Without --force Git spawns its own status in the worktree; the child
     # inherits this pin but finds its GIT_DIR through the worktree. Deleting a
     # real tree takes minutes, so this call answers to the removal timeout.
@@ -316,6 +341,7 @@ def remove_worktree(
         timeout=WORKTREE_REMOVE_TIMEOUT_SECONDS, git_env=common_git_env(repo),
     )
     if removed.returncode == 0:
+        _drop_record(target)
         return "removed"
     detail = git_detail(removed)
     restore = "not attempted"
@@ -326,9 +352,6 @@ def remove_worktree(
         if restored.returncode == 0:
             return "raced_dirty"
         restore = git_detail(restored)
-        # A file appeared and the entry could not be handed back to its owner, so
-        # it stays put with its work un-copied: the sweep must not finish it.
-        mark_unsaved_work(target, "a file appeared during removal and it could not be moved back")
     logger.warning(
         "worktree_reaper: {} left in quarantine; remove: {}; move back: {}", name, detail, restore,
     )
