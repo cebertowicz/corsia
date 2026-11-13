@@ -274,3 +274,54 @@ async def test_a_scrolled_page_hit_tests_the_target_in_document_pixels(monkeypat
     monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
     assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2")) == "ok"
     assert cdp.hit_tests == [(5 + 120, 1905 + 75)]
+
+
+def _scrolling_run(tops, commands):
+    """agent-browser on a smooth-scrolling page: each box read after scrollintoview sees the next top."""
+    reads = iter(tops)
+
+    async def run(args, timeout):
+        commands.append(tuple(args))
+        if tuple(args[:2]) == ("get", "box"):
+            top = next(reads, tops[-1])
+            return CommandResult(0, json.dumps({"data": {"x": 20, "y": top, "width": 200, "height": 30}}), "")
+        return await _run(args, timeout)
+    return run
+
+
+@pytest.mark.asyncio
+async def test_a_target_scrolled_into_view_is_hit_tested_where_the_scroll_stops(monkeypatch):
+    """scrollintoview returns while a smooth scroll still moves; a mid-scroll box hit-tests the wrong spot."""
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    commands = []
+    # Out of view, then not yet moving, then mid-scroll, then stopped where node 7's box model is.
+    run = _scrolling_run([900, 900, 420, 180, 60, 60], commands)
+    assert await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert ("scrollintoview", "@e2") in commands
+    assert cdp.hit_tests[-1] == (120, 75)
+
+
+@pytest.mark.asyncio
+async def test_a_page_still_moving_with_the_target_in_view_is_hit_tested_once_it_stops(monkeypatch):
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    commands = []
+    run = _scrolling_run([300, 140, 60, 60], commands)
+    assert await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert ("scrollintoview", "@e2") not in commands
+    assert cdp.hit_tests == [(120, 315), (120, 155), (120, 75)]
+
+
+@pytest.mark.asyncio
+async def test_a_target_that_never_stops_moving_is_read_a_bounded_number_of_times(monkeypatch):
+    cdp = FakeCdp(labelled=False)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    commands = []
+    run = _scrolling_run(list(range(500, 0, -7)), commands)
+    with pytest.raises(browser_dom_write.DomWriteRefused):
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
+    assert commands.count(("get", "box", "@e2")) == browser_dom_write._SETTLE_READS + 1
