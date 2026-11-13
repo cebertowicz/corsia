@@ -232,6 +232,9 @@ async def _accept_confirming_resume(
             if unread:
                 await asyncio.shield(unread.commit_unverified())
             raise
+        if unread and finish is None and _wait_scope(live).stop_requested:
+            await unread.settle_write()  # Stop, which waits on this lock, ends it cancelled.
+            return identity
         if unread and finish is None:  # Not a refusal: an ordinary unverified write.
             terminal = await unread.commit_unverified()
             raise _CommittedTerminalFailure(terminal, unread.error) from unread.error

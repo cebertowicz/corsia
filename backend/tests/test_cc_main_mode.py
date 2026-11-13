@@ -1156,11 +1156,11 @@ class TestLoudFailure:
         )
         try:
             await asyncio.wait_for(rt.stop("main-1", expected_turn_id=turn_id), timeout=15)
-            with contextlib.suppress(ConnectionResetError):
-                await asyncio.wait_for(feed, timeout=15)
+            await asyncio.wait_for(feed, timeout=15)
             assert _write_outcome(main_db, turn_id) == "ambiguous"
             assert not self.refused_terminals
-            assert self._turn_status(main_db, turn_id) != "running"
+            # A deliberate Stop ends the Turn cancelled, not as an unverified-delivery error.
+            assert self._turn_status(main_db, turn_id) == "cancelled"
             assert not rt._LIVE.lock("main-1").locked()
             assert launches == [1]
         finally:

@@ -26,7 +26,8 @@ class ResumeVerdictOwnsWrite(Exception):
 
     The feed's pending resume verdict decides that write: a refusal proves
     Claude never read it, so the feed redelivers it; any other verdict runs
-    ``commit_unverified``, the ordinary failed-drain terminal.
+    ``commit_unverified``, the ordinary failed-drain terminal. A Stop runs
+    only ``settle_write`` and leaves the Turn's cancelled terminal to Stop.
     """
 
     def __init__(
@@ -34,11 +35,13 @@ class ResumeVerdictOwnsWrite(Exception):
         identity: TurnIdentity,
         error: BaseException,
         commit_unverified: Callable[[], Awaitable[TerminalSettlement]],
+        settle_write: Callable[[], Awaitable[None]],
     ) -> None:
         super().__init__(str(error))
         self.identity = identity
         self.error = error
         self.commit_unverified = commit_unverified
+        self.settle_write = settle_write
 
     @staticmethod
     def applies(live: _Live, accepted: bool, error: BaseException) -> bool:
