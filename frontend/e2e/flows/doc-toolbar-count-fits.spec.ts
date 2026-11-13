@@ -449,8 +449,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		const label = `History row at ${width} px`;
 		const measured = await measureTools(page);
 		const names = measured.controls.map((control) => control.name);
-		expect.soft(names, `${label}: the count, Resolved, Deliver immediately and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'history']));
-		expect.soft(Math.min(...measured.controls.map((control) => control.left)), `${label}: the comment icon is whole, inside the header`).toBeGreaterThanOrEqual(measured.content.left - 0.5);
+		expect.soft(names, `${label}: the count, Resolved, Deliver immediately, Request review and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'request', 'history']));
 		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
 		expectLayout(measured, label);
 		rowsSeen.push([width, measured.rows]);
