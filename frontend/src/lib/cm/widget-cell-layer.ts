@@ -126,6 +126,8 @@ export class CellLayer {
 			justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
 			// A cell scrolled partly out of the table's sideways scroll or the document's scroll area is cut off there; so is its editor.
 			clipPath: clipTo(box, Math.max(box.height, el.offsetHeight), this.clippers),
+			// A cell that does not wrap (a header) gets an editor that does not either, keeping the spaces typed in it.
+			whiteSpace: style.whiteSpace === 'nowrap' ? 'pre' : 'pre-wrap',
 		};
 		for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'overflowWrap', 'wordBreak'] as const) next[property] = type[property];
 		const signature = JSON.stringify(next);

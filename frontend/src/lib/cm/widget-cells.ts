@@ -52,20 +52,41 @@ export function tableCells(src: string): CellSpan[] {
  * header, the empty cells the renderer pads it with. A padded cell has no source of its own, so its span is zero-width at
  * the row's end, where the source would gain it; every padded cell of a row sits at that offset. Only the paths that open
  * or walk drawn cells read this; anything that anchors on source reads `tableCells`.
+ *
+ * One keystroke in an open cell reads the grid of the same source several times (the open cell's lookup, the widget's
+ * shape check, the patch), so the last few grids are kept by source and shared: callers read them and never change them.
  */
 export function tableGrid(src: string): CellSpan[] {
+	const kept = grids.get(src);
+	if (kept) return kept;
+	const grid = buildGrid(src);
+	grids.set(src, grid);
+	if (grids.size > KEPT_GRIDS) grids.delete(grids.keys().next().value!);
+	return grid;
+}
+
+const KEPT_GRIDS = 4;
+const grids = new Map<string, CellSpan[]>();
+
+/** One pass over the source cells, which `tableCells` gives row by row: linear in the table's size. */
+function buildGrid(src: string): CellSpan[] {
 	const real = tableCells(src), lines: { start: number; end: number }[] = [];
 	let lineStart = 0;
-	src.split('\n').forEach((line, index) => {
+	for (const [index, line] of src.split('\n').entries()) {
 		if (index !== 1) lines.push({ start: lineStart, end: lineStart + line.length });
 		lineStart += line.length + 1;
-	});
-	const columns = real.filter((span) => span.row === 0).length, grid: CellSpan[] = [];
+	}
+	let columns = 0;
+	while (real[columns]?.row === 0) columns++;
+	const grid: CellSpan[] = [];
+	let next = 0;
 	lines.forEach(({ start, end }, row) => {
-		// A row with more cells than the header keeps those spans in the source, and the renderer draws no cell for them.
-		const spans = real.filter((span) => span.row === row && span.col < columns);
-		grid.push(...spans);
-		for (let col = spans.length; col < columns; col++) {
+		let drawn = 0;
+		for (; next < real.length && real[next].row === row; next++) {
+			// A row with more cells than the header keeps those spans in the source, and the renderer draws no cell for them.
+			if (real[next].col < columns) { grid.push(real[next]); drawn++; }
+		}
+		for (let col = drawn; col < columns; col++) {
 			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, rowFrom: start, padded: true });
 		}
 	});

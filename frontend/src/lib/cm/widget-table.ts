@@ -83,14 +83,14 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 	const fresh = renderTable(src, images).querySelector('table');
 	const drawn = el.querySelector('table');
 	if (!fresh || !drawn) return false;
-	const held = tableGrid(was);
+	const held = new Map(tableGrid(was).map((span) => [`${span.row}:${span.col}`, span]));
 	// The delimiter row holds each column's alignment and no cell's text, so a change to it alone moves no cell's source:
 	// it is compared as its own line, and every drawn cell takes the new alignment attributes, the empty cells the renderer
 	// pads a short row with included, which have no source cell of their own.
 	const realigned = delimiterRow(src) !== delimiterRow(was);
 	let copied = false;
 	for (const span of tableGrid(src)) {
-		const before = held.find((item) => item.row === span.row && item.col === span.col);
+		const before = held.get(`${span.row}:${span.col}`);
 		const unchanged = before && !before.padded === !span.padded && drawnSource(was, before) === drawnSource(src, span);
 		const forced = force && span.row === force.row && span.col === force.col;
 		const next = fresh.rows[span.row]?.cells[span.col];

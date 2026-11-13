@@ -84,10 +84,10 @@ export const docTheme = EditorView.theme({
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
-	// A cell wraps as its editor does (`pre-wrap`, below): a space at a line's end hangs past it. The document's own wrapping
-	// (`break-spaces`) would make it take room, so a cell would end a line one word sooner than its editor and a click on
-	// the drawn word would put the caret on another.
-	'.cm-md-table td, .cm-md-table th': { whiteSpace: 'pre-wrap' },
+	// A body cell wraps as its editor does (`pre-wrap`, below): a space at a line's end hangs past it. The document's own
+	// wrapping (`break-spaces`) reaches a `td` and would make it take room, so a cell would end a line one word sooner than its
+	// editor and a click on the drawn word would put the caret on another. A header cell keeps `.md-content th`'s `nowrap`.
+	'.cm-md-table td': { whiteSpace: 'pre-wrap' },
 	// A cell's editor cannot sit in the cell it edits: Chromium places no caret in a contenteditable element inside
 	// CodeMirror's editing host, and a drawn cell is inside it. So the editor is held in a layer that shares the document's
 	// fonts and theme but sits outside that host, pinned over the cell (`widget-cell-layer.ts`), and the cell keeps its own
@@ -110,9 +110,10 @@ export const docTheme = EditorView.theme({
 	// (`widget-cell-layer.ts` copies it): the prose line height, the prose line's side padding and the prose wrapping would
 	// each wrap the editor's lines at other words than the cell's and make it taller than the row it sits in.
 	'.cm-md-cell-layer .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit' },
-	// `pre-wrap`, as the drawn cell wraps: a space at a line's end hangs past it, so the editor wraps at the cell's words.
+	// The layer's wrapping, which `widget-cell-layer.ts` takes from the drawn cell: `pre-wrap` over a body cell, so the editor
+	// wraps at the cell's words; `pre` over a header cell, which does not wrap.
 	'.cm-md-cell-layer .cm-content': {
-		padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'pre-wrap', overflowWrap: 'inherit', wordBreak: 'inherit'
+		padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'inherit', overflowWrap: 'inherit', wordBreak: 'inherit'
 	},
 	'.cm-md-cell-layer .cm-line': { padding: '0' },
 	// The edited cell's own box stays drawn; only its ink and any image step aside under the editor.

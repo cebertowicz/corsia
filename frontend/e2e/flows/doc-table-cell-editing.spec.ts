@@ -168,5 +168,25 @@ for (const layout of LAYOUTS) {
 			expect(Math.abs((await wordTop()) - atRest), 'opening the cell leaves its word at the same height').toBeLessThanOrEqual(1);
 			await frame(page, `07-tall-row-${at}-open`);
 		});
+
+		test('a header cell stays on one line, closed and open', async ({ page }) => {
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			const wrapping = () => page.evaluate(() => {
+				const table = document.querySelector('.cm-md-table table')!;
+				const editor = document.querySelector('.cm-md-cell-editor .cm-content');
+				return {
+					th: [...new Set([...table.querySelectorAll('th')].map((th) => getComputedStyle(th).whiteSpace))],
+					td: [...new Set([...table.querySelectorAll('td')].map((td) => getComputedStyle(td).whiteSpace))],
+					editor: editor ? getComputedStyle(editor).whiteSpace : null
+				};
+			});
+			expect(await wrapping(), 'with no cell open, header cells keep the rendered table\'s nowrap').toEqual({ th: ['nowrap'], td: ['pre-wrap'], editor: null });
+			const header = cell(page, 0, 0), height = (await header.boundingBox())!.height;
+			if (layout.project === 'chromium-mobile') await header.tap(); else await header.click();
+			await editorInCell(page, header);
+			expect(await wrapping(), 'an open header cell\'s editor does not wrap either').toEqual({ th: ['nowrap'], td: ['pre-wrap'], editor: 'pre' });
+			expect((await header.boundingBox())!.height, 'opening the header leaves its row the same height').toBe(height);
+		});
 	});
 }
