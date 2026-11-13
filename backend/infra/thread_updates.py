@@ -24,13 +24,13 @@ while the dot is the mark a row shows, never under a Failed or owed word.
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, chat_not_drawn_sql, strip_answer_tags
+from infra.chat_comment_answers import VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, chat_not_drawn_sql
 from infra.thread_update_asks import ask_sql, asks_user_sql
+from infra.thread_update_summary import _summary
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
 from infra.visit_divider import divider_from_row
@@ -150,69 +150,6 @@ def _public(row: sqlite3.Row | tuple) -> dict:
     }
 
 
-_INLINE_MARKDOWN = (
-    re.compile(r"!?\[([^\]]+)\]\([^)]+\)"),
-    re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*"),
-    re.compile(r"__(?=\S)(.+?)(?<=\S)__"),
-    re.compile(r"~~(?=\S)(.+?)(?<=\S)~~"),
-    re.compile(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)"),
-    re.compile(r"(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])"),
-    re.compile(r"`(?=\S)(.+?)(?<=\S)`"),
-)
-
-
-def _strip_inline_markdown(line: str) -> str:
-    """Remove bounded inline Markdown while preserving ordinary punctuation."""
-    previous = None
-    while line != previous:
-        previous = line
-        for pattern in _INLINE_MARKDOWN:
-            line = pattern.sub(r"\1", line)
-    return line
-
-
-def _first_readable_line(content: object) -> str | None:
-    """The first non-code line of a marked message, without common Markdown chrome."""
-    if not isinstance(content, str):
-        return None
-    in_fence = False
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if line.startswith(("```", "~~~")):
-            in_fence = not in_fence
-            continue
-        if in_fence or not line:
-            continue
-        line = re.sub(r"^(?:(?:#{1,6}|[-+*]|\d+[.)])\s+|>\s*)+", "", line)
-        line = re.sub(r"^\[[ xX]\]\s+", "", line)
-        line = _strip_inline_markdown(line).strip()
-        if line:
-            return line
-    return None
-
-
-
-def _summary(update: dict, message_content: object) -> str | None:
-    """A stored event's sidebar preview; lifecycle text comes only from its snapshot."""
-    if update["kind"] == "marked":
-        return _first_readable_line(strip_answer_tags(message_content))
-    title = update["title"]
-    if not title:
-        return None
-    labels = {
-        "done": "Completed",
-        "done_follow_up": "Completed",
-        "closed": "Closed",
-        "failed": "Failed",
-        "blocked": "Blocked",
-    }
-    label = labels.get(update["kind"])
-    if label is None:
-        return None
-    suffix = " · Follow-up added" if update["kind"] == "done_follow_up" else ""
-    return f"{label}: {title}{suffix}"
-
-
 def latest_by_thread_with_attention(
     db: sqlite3.Connection, thread_ids: list[str],
 ) -> tuple[dict[str, dict], dict[str, dict]]:
@@ -238,14 +175,11 @@ def latest_by_thread_with_attention(
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
                  WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
-                   -- A step stamped `chat_drawn: false` draws nothing in chat, so the sidebar shows no preview for it.
-                   AND NOT (source_kind = 'message' AND EXISTS (
-                       SELECT 1 FROM messages x WHERE x.id = source_id AND {chat_not_drawn_sql('x.metadata')}))
                  GROUP BY thread_id
             )
             SELECT {columns}, {VISIBLE_CONTENT} AS message_content,
                    selected.display_key, selected.attention_key,
-                   {row_key} AS row_key
+                   {row_key} AS row_key, {chat_not_drawn_sql('m.metadata')} AS not_drawn
               FROM selected
               CROSS JOIN thread_updates u INDEXED BY idx_thread_updates_thread_time
                 ON u.thread_id=selected.thread_id
@@ -256,18 +190,48 @@ def latest_by_thread_with_attention(
     ).fetchall()
     display: dict[str, dict] = {}
     attention: dict[str, dict] = {}
+    stamped: list[str] = []  # threads whose newest update is a step stamped `chat_drawn: false`
     width = len(_COLUMNS.split(","))
     for row in rows:
         update = _public(tuple(row)[:width])
         update["summary"] = _summary(update, row["message_content"])
-        if row["row_key"] == row["display_key"]:
+        if row["row_key"] == row["display_key"] and not row["not_drawn"]:
             display[update["thread_id"]] = update
+        elif row["row_key"] == row["display_key"]:
+            stamped.append(update["thread_id"])
         if row["row_key"] == row["attention_key"]:
             attention[update["thread_id"]] = update
+    for thread_id in stamped:
+        fallback = _latest_drawn(db, thread_id)
+        if fallback is not None:
+            display[thread_id] = fallback
     return (
         {thread_id: display[thread_id] for thread_id in ids if thread_id in display},
         {thread_id: attention[thread_id] for thread_id in ids if thread_id in attention},
     )
+
+
+def _latest_drawn(db: sqlite3.Connection, thread_id: str) -> dict | None:
+    """The newest update whose step chat draws: a step stamped `chat_drawn: false` shows no sidebar preview.
+
+    Read only for a thread whose newest update is such a step, and it stops at the first drawn row. The
+    update dot never reads this: attention keeps counting the stamped step.
+    """
+    columns = ",".join(f"u.{column}" for column in _COLUMNS.split(","))
+    row = db.execute(
+        f"""SELECT {columns}, {VISIBLE_CONTENT} AS message_content
+              FROM thread_updates u INDEXED BY idx_thread_updates_thread_time
+              LEFT JOIN messages m ON m.id=u.source_id AND u.source_kind='message'
+              {VISIBLE_CONTENT_JOIN}
+             WHERE u.thread_id=? AND u.kind != 'person_step' AND NOT {chat_not_drawn_sql('m.metadata')}
+             ORDER BY u.created_at DESC, u.id DESC LIMIT 1""",
+        (thread_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    update = _public(tuple(row)[:len(_COLUMNS.split(","))])
+    update["summary"] = _summary(update, row["message_content"])
+    return update
 
 
 def latest_by_thread(db: sqlite3.Connection, thread_ids: list[str]) -> dict[str, dict]:

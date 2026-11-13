@@ -141,3 +141,44 @@ def test_a_stamped_for_user_step_broadcasts_the_stamp_it_was_saved_with(db):
     _step(db, "update-with-text", "Done.\n\n[c1.1] Moved.", {"for_user": True})
     projected = project_input_message(read_input_broadcast_row("update-with-text", db=db))
     assert "chat_drawn" not in projected and "chat_drawn" not in projected["metadata"]
+
+
+def test_a_tool_call_appended_to_a_stamped_step_clears_the_stamp(db):
+    """A Codex text step is saved first and tool calls are appended to the same row later: a step with a tool call draws."""
+    from subagents.assistant_step_tool_append import append_tool_use_locked
+
+    _step(db, "text-then-tool", "[c1.1] Moved.", {"provider_turn_id": "p1"})
+    assert _flag(db, "text-then-tool") is False
+    append_tool_use_locked(
+        THREAD, "text-then-tool", turn_id=None, tool_id="t1", name="read_file", arguments={}, hint="Reading",
+        provider_turn_id="p1", db=db)
+    db.commit()
+    assert _flag(db, "text-then-tool") == "unset"
+    messages, *_rest = _page(db)
+    assert "text-then-tool" in {m["id"] for m in messages}
+
+
+def test_the_sidebar_preview_skips_a_stamped_step_but_the_update_dot_still_counts_it(db):
+    from infra.thread_updates import latest_by_thread_with_attention, record_marked
+
+    _step(db, "answer-only", "[c1.1] Moved.", {"for_user": True})
+    record_marked(db, thread_id=THREAD, message_id="target", node_id=None, created_at="2026-01-01T00:00:00")
+    record_marked(db, thread_id=THREAD, message_id="answer-only", node_id=None, created_at="2026-01-02T00:00:00")
+    db.commit()
+    display, attention = latest_by_thread_with_attention(db, [THREAD])
+    assert display[THREAD]["message_id"] == "target"
+    assert attention[THREAD]["message_id"] == "answer-only"
+
+
+def test_an_ask_hold_maps_to_the_latest_step_chat_draws(db):
+    from api.thread_cards import _turn_step
+
+    for message_id, text, extra, seq in (
+        ("worked", "", {"turn_id": "turn-1", "tool_hints": ["Reading"], "llm_tool_calls": [{"id": "t1"}]}, 2),
+        ("answer-only", "[c1.1] Moved.", {"turn_id": "turn-1"}, 3),
+    ):
+        db.execute("UPDATE threads SET next_message_seq=? WHERE id=?", (seq, THREAD))
+        insert_message(THREAD, "assistant", text, extra, msg_id=message_id, db=db, created_at="2026-01-02")
+    db.commit()
+    assert _flag(db, "answer-only") is False
+    assert _turn_step(db, THREAD, "turn-1", "2026-01-03") == "worked"
