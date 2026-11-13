@@ -187,7 +187,12 @@ export function scrollToRange(view: EditorView, from: number, to: number, origin
 				write: ({ box, band, scroller }, current) => {
 					if (done) return;
 					widget.reveal(current);
-					if (box) scroller.scrollTop += box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
+					if (!box) return;
+					const move = box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
+					// A cell near the end of the document needs the same room below it as a line does.
+					const before = scroller.style.paddingBottom;
+					if (reveal && addRoomBelow(scroller, move) && !revealRoom.has(view)) revealRoom.set(view, { scroller, before });
+					scroller.scrollTop += move;
 				},
 			});
 			// The reader's place is taken again from where this lands.
