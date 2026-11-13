@@ -732,8 +732,8 @@ for (const theme of ['light', 'dark'] as const) {
 		await loginByUrl(page, { waitForComposer: false });
 		await selectThread(page, doc, 'default');
 		await expect(bar(page)).toContainText('Is the rollout plan right?');
-		// Identity shows as the narrow canvas's age line or the wider canvas's metadata row, whichever the visible width picks.
-		await expect(page.locator('.identity-owner:visible, .metadata-owner:visible'), 'the canvas beside the pane keeps document identity visible').toHaveText(`Owner: ${doc.title}`);
+		// Identity shows as the narrow canvas's age line or the wider canvas's owner row (its label depends on ownership), whichever the visible width picks.
+		await expect(page.locator('.identity-owner:visible, .metadata-owner:visible'), 'the canvas beside the pane keeps document identity visible').toContainText(doc.title);
 		const pane = page.locator('.pane');
 		await expect(pane).toHaveClass(/\boverlay\b/);
 		await expect(pane).not.toHaveClass(/\bcollapsed\b/);
