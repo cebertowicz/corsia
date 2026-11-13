@@ -21,13 +21,14 @@ from infra.queries import thread_available_sql
 
 def enabled_rules(
     db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
-    thread: str | None, scopes: list[str],
+    thread: str | None, scopes: list[str], workspace_scope: str,
 ) -> list[sqlite3.Row]:
-    """The enabled rules for one declared type in ``thread``'s project (scope
-    ``prefix`` + its project), else in ``scopes``: one read through the
+    """The enabled rules for one declared type in ``thread``'s scope, else in
+    ``scopes``: one read through the
     ``(connector, event_type, enabled, scope, created_at)`` index."""
     if thread is not None:
-        where, params = "scope=? || (SELECT project_id FROM threads WHERE id=?)", [prefix, thread]
+        where = "scope=(SELECT CASE WHEN project_id IS NULL THEN ? ELSE ? || project_id END FROM threads WHERE id=?)"
+        params = [workspace_scope, prefix, thread]
     elif scopes:
         where, params = f"scope IN ({','.join('?' * len(scopes))})", list(scopes)
     else:
@@ -78,7 +79,7 @@ def type_rules(connector: str, event_type: str, read_facts: Iterable[str] = ()) 
 
 def unrouted_projects(
     connector: str, event_type: str, facts: Mapping[str, Any], self_rule: bool | None = None,
-) -> frozenset[str] | None:
+) -> frozenset[str | None] | None:
     """The connector's unrouted scope for the event, should routing give it no thread.
 
     Only a writer's deliver rule to itself can fire there, so :func:`type_rules`

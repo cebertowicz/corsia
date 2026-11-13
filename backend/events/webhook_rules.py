@@ -22,7 +22,7 @@ from infra.database import get_db, write_transaction
 
 def apply_webhook_rules_sync(
     envelope: EventEnvelope, watch_event: str, targets: list[Target], *, ends_artifact: bool,
-    unrouted_projects: frozenset[str] | None = frozenset(), target_filter: Filter | None = None,
+    unrouted_projects: frozenset[str | None] | None = frozenset(), target_filter: Filter | None = None,
     skipped: tuple[str, ...] = (),
 ) -> rules.RulePlan | None:
     """Rules for one webhook event: deliver what they add, return what rides.

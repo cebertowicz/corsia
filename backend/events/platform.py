@@ -294,7 +294,7 @@ def deliver_platform_event_sync(
     event_type: str | None = None,
     *,
     repair_owner: str | None = None,
-    target_filter: Filter | None = None, unrouted_projects: frozenset[str] | None = frozenset(),
+    target_filter: Filter | None = None, unrouted_projects: frozenset[str | None] | None = frozenset(),
     db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
     """Normalize, resolve and deliver one connector event in one write transaction.
@@ -315,7 +315,7 @@ def deliver_envelope_sync(
     envelope: EventEnvelope, decl: EventTypeDecl,
     resolve: Callable[[sqlite3.Connection], list[Target]], *,
     target_filter: Filter | None = None,
-    unrouted_projects: frozenset[str] | None = frozenset(),
+    unrouted_projects: frozenset[str | None] | None = frozenset(),
     db: sqlite3.Connection | None = None,
 ) -> tuple[list[PlatformDelivery], rules.RulePlan | None]:
     """Deliver one normalized event to the targets ``resolve`` picks, then apply rules.

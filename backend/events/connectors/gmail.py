@@ -42,7 +42,7 @@ def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]
     return {**{k: raw[k] for k in keys if raw.get(k) is not None}, "author_origin": "outside"}
 
 
-def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
+def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str | None] | None:
     """Mail in a conversation no agent owns reaches agents' own rules in the projects
     its account reaches; the poller's reach filter still holds each recipient to it."""
     from connections.connected_accounts import reached_projects
