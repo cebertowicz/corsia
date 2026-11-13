@@ -58,11 +58,12 @@ async function postedOnceMore(request: APIRequestContext, thread: string, note: 
 
 /**
  * The passage being commented sits below the shell header and above the open sheet: its draft highlight (not a control) while
- * the comment is written, or, with `thread`, the highlight of the comment whose thread is open.
+ * the comment is written, or, with `thread`, the highlight of the comment whose thread is open, found by its phrase.
  */
-async function passageInView(page: Page, messageId: string, thread = false): Promise<boolean> {
+async function passageInView(page: Page, messageId: string, thread = ''): Promise<boolean> {
   return page.evaluate(([id, opened]) => {
-    const mark = document.querySelector<HTMLElement>(`[data-message-id="${id}"] ${opened ? '.cm-comment-anchor' : '.cm-comment-pending:not([role="button"])'}`);
+    const marks = [...document.querySelectorAll<HTMLElement>(`[data-message-id="${id}"] ${opened ? '.cm-comment-anchor' : '.cm-comment-pending:not([role="button"])'}`)];
+    const mark = opened ? marks.find(candidate => candidate.textContent === opened) : marks[0];
     const header = document.querySelector('.shell-header')?.getBoundingClientRect();
     const sheet = document.querySelector('[data-adaptive-drawer] .drawer-panel')?.getBoundingClientRect();
     if (!mark || !header || !sheet) return false;
@@ -217,7 +218,7 @@ test('on a phone the passage of the last message stays above the sheet after a r
   await failQueuedInput(request, thread, queued.user_message_id, UNDELIVERED);
   const failed = await openCommentThread(row, page, 'Second phrase');
   await expect(failed.locator('.failed-reply')).toContainText(`Not delivered: ${UNDELIVERED}`);
-  await expect.poll(() => passageInView(page, id, true)).toBe(true);
+  await expect.poll(() => passageInView(page, id, 'Second phrase')).toBe(true);
   await frame(failed, 'failed-thread-passage');
   await release(request, 'held-passage-393');
 });
