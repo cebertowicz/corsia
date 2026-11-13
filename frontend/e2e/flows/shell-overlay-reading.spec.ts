@@ -289,18 +289,18 @@ for (const width of [1360, 1100] as const) {
 		await input.pressSequentially('Half-typed');
 		const before = await activeField(page);
 		expect(before.tag, `the reply holds the caret before the walk (${JSON.stringify(before)})`).toBe('TEXTAREA');
-		// Tab on until focus has passed another thread's reply and gone into a later thread's card.
-		let passed: string | null = null, now: string | null = null;
-		for (let i = 0; i < 40 && !(passed && now && now !== passed); i++) {
+		// Tab on until focus has just left another thread's reply: the last field passed is that one, not the reader's.
+		let passed: string | null = null, onReply = false;
+		for (let i = 0; i < 40 && !(passed && !onReply); i++) {
 			await page.keyboard.press('Tab');
 			const at = await page.evaluate(() => {
 				const el = document.activeElement;
 				return { reply: !!el?.matches('.ct-input'), of: el?.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? null };
 			});
 			if (at.reply && at.of && at.of !== before.of) passed = at.of;
-			now = passed ? at.of : null;
+			onReply = at.reply;
 		}
-		expect(passed && now && now !== passed, `the walk passed another thread's reply (${passed}) and went on into a later card (${now})`).toBeTruthy();
+		expect(passed && !onReply, `the walk passed another thread's reply (${passed}) and went on past it`).toBeTruthy();
 		await toggle.focus();
 		await page.keyboard.press('Enter');
 		await page.waitForTimeout(1800);
@@ -422,6 +422,49 @@ test('keeps the quoted word in view with its composer beside it across the panel
 	const back = await anchorPlace(page);
 	expect(back.wordInsideScroller, `the quoted word is still on screen back at the original width (${JSON.stringify(back)})`).toBe(true);
 	expect(back.composerToWord, `the composer is still beside its word back at the original width (${JSON.stringify(back)})`).toBeLessThanOrEqual(40);
+});
+
+/**
+ * A thread opened from the list, then the panel opened: the column comes beside the narrowed text and the line the thread
+ * quotes stays in the view, not under the toolbar. The shell's move is slowed the way a busy computer slows it, which is
+ * when the line used to be measured after it had already slid above the view. (Review 9 A, F2.)
+ */
+test('keeps an open thread\'s line in view when the panel opens on a slow move', async ({ page, request, browserName }) => {
+	test.skip(browserName !== 'chromium', 'Slowing the move needs Chromium\'s animation controls.');
+	test.setTimeout(180_000);
+	await page.setViewportSize({ width: 1360, height: 900 });
+	await seedDocument(page, request, true);
+	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+	if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
+	await page.waitForTimeout(1500);
+	await closeList(page);
+	await page.getByRole('button', { name: '13 threads' }).click();
+	await page.waitForTimeout(1000);
+	// The reader looks down the whole list and back up before opening the first thread.
+	const listTo = (end: boolean) => page.locator('.canvas-comment-drawer:not(.leaving)').evaluate((drawer, end) => {
+		const list = [drawer, ...drawer.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(e).overflowY)) as HTMLElement | undefined;
+		if (list) list.scrollTop = end ? list.scrollHeight : 0;
+	}, end);
+	await listTo(true);
+	await page.waitForTimeout(500);
+	await listTo(false);
+	await page.locator('.canvas-comment-drawer:not(.leaving) [data-comment-id]').first().locator('.ct-head').click({ position: { x: 14, y: 10 } });
+	await page.waitForTimeout(800);
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Animation.enable');
+	await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.2 });
+	await toggle.click();
+	await expect.poll(() => page.locator('.canvas-comment-drawer.margin:not(.leaving)').count(), { timeout: 15_000 }).toBe(1);
+	await page.waitForTimeout(2500);
+	await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
+	const place = await page.evaluate(() => {
+		const box = (e: Element | null | undefined) => { if (!e) return null; const b = e.getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; };
+		const scroller = box(document.querySelector('.cm-scroller'));
+		const quoted = box([...document.querySelectorAll('.cm-comment-anchor')].find((e) => (e.textContent ?? '').includes('outstanding')));
+		return { scroller, quoted };
+	});
+	expect(place.quoted, 'the quoted line is drawn').not.toBeNull();
+	expect(place.quoted!.top >= place.scroller!.top - 1 && place.quoted!.bottom <= place.scroller!.bottom + 1, `the quoted line is inside the document's view (${JSON.stringify(place)})`).toBe(true);
 });
 
 /**

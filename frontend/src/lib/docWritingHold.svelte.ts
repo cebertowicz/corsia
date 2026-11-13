@@ -54,6 +54,9 @@ function placeOf(target: EventTarget | null): WritingPlace | null {
 	return field?.matches('.composer [data-drawer-autofocus]') ? { where: '.composer [data-drawer-autofocus]', caret: caretOf(field), home: '.composer' } : null;
 }
 
+/** Whether the field holds writing: one the reader only Tabbed through on the way holds none, and is no place to come back to. */
+const holdsWriting = (field: EventTarget | null) => (field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) && field.value.trim() !== '';
+
 /** A thread's card or the new-comment composer: the parts of the surface a reader writes in. */
 const SURFACE_PART = '[data-thread-id], .composer';
 
@@ -176,7 +179,7 @@ export function holdWritingPlace(live: () => string | null) {
 		const onFocusOut = (event: FocusEvent) => {
 			const place = placeOf(event.target);
 			if (!place || pressAway) return;
-			left = place;
+			if (holdsWriting(event.target)) left = place;
 			// Still writing in the place being carried, with the panel open: carry the caret where it is now.
 			if (carried?.where === place.where) carried = place;
 		};

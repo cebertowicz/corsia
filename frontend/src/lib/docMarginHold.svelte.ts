@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { isPaneShortcut, paneCollapsed } from '$lib/stores/paneCollapsed';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
 import { placeAnchorAt } from '$lib/documentReadingPlace';
+import { commentRanges } from '$lib/cm/comment-marks';
 
 /** The reader's own input, which ends a hold. */
 const TAKE_OVER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -44,10 +45,17 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 			?? (now && selectedId()
 				? bounds()?.querySelector(`.cm-comment-line[data-comment-ids*="${selectedId()}"]`)
 				: null);
-		const read = subject?.getBoundingClientRect().top;
-		const picked = read !== undefined && read > box.top && read < box.bottom;
+		// Its row counts while any of it shows: the shell's move can slide the view's top edge over the row's top for a frame,
+		// and holding the next whole row instead let the rewrap carry the quoted text up under the toolbar.
+		const seen = subject?.getBoundingClientRect();
+		const read = seen?.top;
+		const picked = read !== undefined && !!seen && seen.bottom > box.top && read < box.bottom;
 		const y = picked ? read + 2 : box.top + 4;
-		let pos = view.posAtCoords({ x, y }, false);
+		// A picked subject is held by its own text, not by the point on screen: mid-move the editor's map of the screen can lag
+		// the drawn text by rows, and the character it named then sat above the view while being held there.
+		const pending = picked && subject?.matches('.cm-comment-pending') ? subject : null;
+		const thread = picked && !pending ? view.state.field(commentRanges, false)?.find((range) => range.id === selectedId()) : undefined;
+		let pos = pending ? view.posAtDOM(pending) : thread ? view.state.doc.lineAt(thread.from).from : view.posAtCoords({ x, y }, false);
 		// A table is one block to the editor and its rows rewrap with the width: anchor a drawn row, not the table's top. The picked
 		// thread's row is the one clicked; the top row follows the reader's-place rule the editor's own holder uses, so both aim at one row.
 		const table = drawnTableAt(view, pos);
@@ -83,7 +91,11 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 			const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
 			return rect.height ? rect.top : null;
 		};
-		const offset = returningPlace?.offset ?? rowTop();
+		// A picked row is held inside the view: by the time the column opens the move may already have carried it above the
+		// view's top edge, and holding it where it was measured kept it under the toolbar.
+		const measured = rowTop();
+		const inView = (top: number | null) => top === null || !picked ? top : Math.min(Math.max(top, box.top), box.bottom - view.defaultLineHeight);
+		const offset = returningPlace?.offset ?? inView(measured);
 		if (offset === null) return;
 		panelPlace = !pane ? { view, pos, offset, table: !!row } : null;
 		const hold = (here: number | null) => { if (here !== null && Math.abs(here - offset) > 0.5) scroller.scrollTop += here - offset; };
