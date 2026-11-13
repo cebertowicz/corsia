@@ -104,7 +104,7 @@ async def rehome_artifact(token: str, body: RehomeBody):
                     "current_owner_thread_id": current_owner,
                     "requested_owner_thread_id": body.new_owner_thread_id,
                 }
-            result = models.rehome_artifact(
+            return "ok", models.rehome_artifact(
                 integration=body.integration,
                 type=body.type,
                 external_id=body.external_id,
@@ -117,14 +117,6 @@ async def rehome_artifact(token: str, body: RehomeBody):
                 metadata=body.metadata,
                 db=db,
             )
-            # A document's picked supervisor is rechecked against its new owner in the same transaction.
-            from infra import config
-            from registry.document_supervisor import clear_invalid_pick
-
-            moved = models.get_artifact(result["artifact"]["id"], db=db)
-            if moved is not None:
-                clear_invalid_pick(db, moved, workspace=config.WORKSPACE)
-            return "ok", result
 
     status, result = await run_in_db(_rehome)
     if status == "not_found":
@@ -211,7 +203,6 @@ class OwnershipBody(BaseModel):
     supervisor_thread_id: str | None = None
 
 
-RELEASED_REFUSAL = "No one owns this document right now, so its owner and supervisor can’t be changed. Reload the page to see where it is now."
 AGENT_CHOICE_REFUSAL = "Pick one of the agents listed."
 PERSON_OR_AGENT_CHOICE_REFUSAL = "Pick yourself or one of the agents listed."
 
@@ -235,12 +226,13 @@ def _refusal_for(body: OwnershipBody, current: str | None, multi_person: bool, a
 
 def _apply_change(db, artifact: dict, body: OwnershipBody, user: dict, current: str | None, workspace):
     """Make the change inside the caller's transaction; returns the changed artifact, its view and its events."""
-    from registry.document_supervisor import SUPERVISOR_KEY, clear_invalid_pick, owner_kind, ownership
-    from registry.identity_metadata import merge_identity_metadata, parse_metadata
+    from registry.document_supervisor import SUPERVISOR_KEY, checked_pick, owner_kind, ownership
+    from registry.identity_metadata import merge_identity_metadata
     from registry.shared_principals import UI_PRINCIPAL
 
     artifact_id = artifact["id"]
-    picked = parse_metadata(artifact.get("metadata")).get(SUPERVISOR_KEY)
+    # The pick the header shows before this change: the one reading routing and the header use too.
+    picked = checked_pick(db, artifact, workspace=workspace, owner=current)
     new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
     taking_over = new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL
     supervisor = body.supervisor_thread_id if "supervisor_thread_id" in body.model_fields_set else picked
@@ -257,10 +249,7 @@ def _apply_change(db, artifact: dict, body: OwnershipBody, user: dict, current: 
     if supervisor != picked:
         merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
     changed = models.get_artifact(artifact_id, db=db)
-    # A pick the new owner or scope no longer allows is cleared in the same transaction.
-    if clear_invalid_pick(db, changed, workspace=workspace):
-        changed = models.get_artifact(artifact_id, db=db)
-    final_pick = parse_metadata(changed.get("metadata")).get(SUPERVISOR_KEY)
+    final_pick = checked_pick(db, changed, workspace=workspace, owner=new_owner)
     events = []
     if new_owner != current:
         events.append(("owner_changed", {"from": owner_kind(current), "to": owner_kind(new_owner)}))
@@ -293,7 +282,7 @@ def _change_ownership(artifact_id: str, body: OwnershipBody, user: dict):
 @router.put("/artifacts/{artifact_id}/ownership")
 async def change_document_ownership(artifact_id: str, body: OwnershipBody, user: dict = Depends(require_human_user)):
     """The signed-in person changes a document's owner or supervisor."""
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL, SHARED_REFUSAL
+    from registry.document_supervisor import MULTI_PERSON_REFUSAL, RELEASED_REFUSAL, SHARED_REFUSAL
 
     status, result = await run_in_db(lambda: _change_ownership(artifact_id, body, user))
     refusals = {

@@ -16,7 +16,7 @@ from typing import Any
 
 from infra.auth import is_owner_sentinel
 from infra.queries import thread_is_available
-from registry.identity_metadata import merge_identity_metadata, parse_metadata
+from registry.identity_metadata import parse_metadata
 from registry.shared_principals import (
     UI_PRINCIPAL,
     artifact_owner,
@@ -36,6 +36,7 @@ SHARED_REFUSAL = (
     "Everyone here shares this document, so its owner and supervisor can’t be changed "
     "while more than one person uses CORSIA."
 )
+RELEASED_REFUSAL = "No one owns this document, so its owner and supervisor can’t be changed."
 
 
 def _thread(db, thread_id: str | None):
@@ -104,17 +105,19 @@ def _pick_is_valid(db, pick: str, owner: str | None, scope: tuple[str | None, st
     """Whether a stored supervisor pick still stands.
 
     It stands while one person may still change this document's supervisor, and
-    while the picked agent is an agent in the document's own scope. Every
-    ownership transition (a new owner, a moved document, a second person on
-    the install) is checked by this one reading.
+    while the picked agent is one the picker lists for the document's own scope
+    (the same ``scope_agent_rows`` query, and the same availability). A pick is
+    never deleted: it is read only through here, so every way a document can
+    move (a new owner, another scope, a second person on the install) is
+    covered, whichever path moved it, and a pick that stands again is used again.
     """
     # A released document (no owner) is no one's to share; its pick keeps routing.
     if owner is not None and not may_change(owner, multi_person=is_multi_person(db)):
         return False
     row = _thread(db, pick)
-    if row is None or not row["agent_enabled"]:
+    if row is None or not thread_is_available(row) or scope is None:
         return False
-    return scope is None or row["project_id"] == scope[0]
+    return any(str(agent["id"]) == pick for agent in scope_agent_rows(scope[0], row["user_id"], db=db, name=pick))
 
 
 def _checked_pick(db, artifact: dict[str, Any], owner: str | None, scope: Callable[[], Any]) -> str | None:
@@ -122,19 +125,9 @@ def _checked_pick(db, artifact: dict[str, Any], owner: str | None, scope: Callab
     return pick if pick and _pick_is_valid(db, pick, owner, scope()) else None
 
 
-def clear_invalid_pick(db, artifact: dict[str, Any], *, workspace: Path) -> bool:
-    """Drop a stored supervisor pick that no longer stands; report whether one was dropped.
-
-    Called inside the transaction of every write that can move ownership.
-    """
-    pick = parse_metadata(artifact.get("metadata")).get(SUPERVISOR_KEY)
-    if not pick:
-        return False
-    owner = artifact_owner(str(artifact["id"]), db=db)
-    if _checked_pick(db, artifact, owner, _lazy(lambda: _scope(db, artifact, workspace))) is not None:
-        return False
-    merge_identity_metadata(db, str(artifact["id"]), {SUPERVISOR_KEY: None})
-    return True
+def checked_pick(db, artifact: dict[str, Any], *, workspace: Path, owner: str | None) -> str | None:
+    """The stored supervisor pick if it still stands for ``owner``, else ``None``; the one reading every caller uses."""
+    return _checked_pick(db, artifact, owner, _lazy(lambda: _scope(db, artifact, workspace)))
 
 
 def _supervisor(
@@ -217,7 +210,9 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) ->
         for agent in agents
     ]
     multi_person = is_multi_person(db)
-    can_change = may_change(owner, multi_person=multi_person)
+    # The ownership PUT refuses a document that is not active, so the picker says so before a pick.
+    released = artifact.get("state", "active") != "active"
+    can_change = not released and may_change(owner, multi_person=multi_person)
     return {
         "owner": {"kind": kind, "id": owner if kind == "agent" else None,
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None,
@@ -226,7 +221,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) ->
         "can_act": status == "ready",
         "multi_person": multi_person,
         "can_change": can_change,
-        "shared_refusal": None if can_change else SHARED_REFUSAL,
+        "refusal": None if can_change else RELEASED_REFUSAL if released else SHARED_REFUSAL,
         "multi_person_refusal": MULTI_PERSON_REFUSAL if multi_person else None,
         "scope": "workspace" if project_id is None else "project",
         "choices": choices,

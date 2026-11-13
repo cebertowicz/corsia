@@ -523,17 +523,17 @@ def test_the_refusal_sentences_reach_the_screen_in_the_payload(owned_document):
 
     _client, artifact_id = owned_document
     view = _view(artifact_id)
-    assert (view["shared_refusal"], view["multi_person_refusal"]) == (None, MULTI_PERSON_REFUSAL)
+    assert (view["refusal"], view["multi_person_refusal"]) == (None, MULTI_PERSON_REFUSAL)
     _set_owner(artifact_id, "ui")
-    assert _view(artifact_id)["shared_refusal"] == SHARED_REFUSAL
+    assert _view(artifact_id)["refusal"] == SHARED_REFUSAL
     _one_person_account()
     assert _view(artifact_id)["multi_person_refusal"] is None
 
 
 def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_404(owned_document):
-    from api.registry_ownership import RELEASED_REFUSAL
     from infra.database import get_db
     from registry import ownership
+    from registry.document_supervisor import RELEASED_REFUSAL
 
     client, artifact_id = owned_document
     db = get_db()
@@ -550,6 +550,10 @@ def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_40
         db.close()
     refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
     assert (refused.status_code, refused.json()["detail"]) == (409, RELEASED_REFUSAL)
+    # The picker says so before a pick, on a single-person install and on a multi-person one.
+    assert (_view(artifact_id)["can_change"], _view(artifact_id)["refusal"]) == (False, RELEASED_REFUSAL)
+    seed_account(OTHER_USER, OTHER_TOKEN)
+    assert _view(artifact_id)["refusal"] == RELEASED_REFUSAL
 
 
 def _stored_pick(artifact_id: str):
@@ -578,29 +582,86 @@ def _pick_directly(artifact_id: str, thread_id: str) -> None:
         db.close()
 
 
-def test_a_pick_outside_the_documents_scope_is_ignored_and_cleared_on_the_next_ownership_change(owned_document):
-    """A document that moved scope keeps no pick from the old one: it neither routes nor shows, and an owner change clears it."""
+def _move_agent_to_project(thread_id: str, project_id: str | None) -> None:
     from infra.database import get_db
 
+    db = get_db()
+    try:
+        if project_id is not None:
+            db.execute("INSERT OR IGNORE INTO projects (id,name,created_at,updated_at) VALUES (?, 'Other','t','t')", (project_id,))
+        db.execute("UPDATE threads SET project_id=? WHERE id=?", (project_id, thread_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_a_pick_outside_the_documents_scope_is_ignored_everywhere_and_stands_again_when_it_is_back(owned_document):
+    """A pick is read through one rule and never deleted, so whichever path moved the document sees the same thing."""
     client, artifact_id = owned_document
     _one_person_account()
     _add_agent("agent-2", "Research coordinator")
     _pick_directly(artifact_id, "agent-2")
     assert _view(artifact_id)["supervisor"]["source"] == "picked"
 
+    _move_agent_to_project("agent-2", "p9")
+    assert (_view(artifact_id)["supervisor"] or {}).get("source") != "picked"
+    assert "agent-2" not in _comment_recipients(artifact_id)
+    assert _stored_pick(artifact_id) == "agent-2"
+
+    _move_agent_to_project("agent-2", None)
+    assert _view(artifact_id)["supervisor"]["id"] == "agent-2"
+    assert "agent-2" in _comment_recipients(artifact_id)
+
+
+def test_a_person_taking_over_keeps_the_previous_owner_as_supervisor_when_the_stored_pick_does_not_stand(owned_document, monkeypatch):
+    import api.registry_ownership as ownership_api
+
+    client, artifact_id = owned_document
+    _one_person_account()
+    _add_agent("agent-2", "Research coordinator")
+    _pick_directly(artifact_id, "agent-2")
+    _move_agent_to_project("agent-2", "p9")
+    events: list[str] = []
+    monkeypatch.setattr(ownership_api, "emit_product_event", lambda category, action, **kw: events.append(action))
+
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"}).status_code == 200
+    assert _view(artifact_id)["supervisor"]["id"] == "agent-1"
+    assert "agent-1" in _comment_recipients(artifact_id)
+    assert events == ["owner_changed", "supervisor_changed"]
+
+
+def test_a_put_that_changes_nothing_the_person_sees_emits_nothing_even_with_a_pick_that_does_not_stand(owned_document, monkeypatch):
+    import api.registry_ownership as ownership_api
+
+    client, artifact_id = owned_document
+    _one_person_account()
+    _add_agent("agent-2", "Research coordinator")
+    _pick_directly(artifact_id, "agent-2")
+    _move_agent_to_project("agent-2", "p9")
+    events: list[str] = []
+    monkeypatch.setattr(ownership_api, "emit_product_event", lambda category, action, **kw: events.append(action))
+
+    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"}).status_code == 200
+    assert events == []
+    assert _stored_pick(artifact_id) == "agent-2"
+
+
+def test_an_archived_agents_pick_does_not_stand(owned_document):
+    client, artifact_id = owned_document
+    _one_person_account()
+    _add_agent("agent-2", "Research coordinator")
+    _pick_directly(artifact_id, "agent-2")
+    assert _view(artifact_id)["supervisor"]["source"] == "picked"
+    from infra.database import get_db
+
     db = get_db()
     try:
-        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p9','Other','t','t')")
-        db.execute("UPDATE threads SET project_id='p9' WHERE id='agent-2'")
+        db.execute("UPDATE threads SET agent_enabled=0 WHERE id='agent-2'")
         db.commit()
     finally:
         db.close()
     assert (_view(artifact_id)["supervisor"] or {}).get("source") != "picked"
     assert "agent-2" not in _comment_recipients(artifact_id)
-    assert _stored_pick(artifact_id) == "agent-2"
-
-    assert client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "user"}).status_code == 200
-    assert _stored_pick(artifact_id) is None
 
 
 def test_a_pick_on_a_shared_document_stops_routing_when_the_install_becomes_multi_person(owned_document):
@@ -616,25 +677,3 @@ def test_a_pick_on_a_shared_document_stops_routing_when_the_install_becomes_mult
     assert "agent-2" not in _comment_recipients(artifact_id)
 
 
-def test_the_recheck_clears_a_pick_that_no_longer_stands_inside_the_callers_transaction(owned_document):
-    """``clear_invalid_pick`` is what the ownership PUT and the rehome endpoint call in their own transactions."""
-    import infra.config as config
-    from infra.database import get_db, write_transaction
-    from registry import models
-    from registry.document_supervisor import clear_invalid_pick
-
-    _client, artifact_id = owned_document
-    _one_person_account()
-    _add_agent("agent-2", "Research coordinator")
-    _pick_directly(artifact_id, "agent-2")
-    with write_transaction(None, scope="test_clear_pick") as db:
-        assert clear_invalid_pick(db, models.get_artifact(artifact_id, db=db), workspace=config.WORKSPACE) is False
-    db = get_db()
-    try:
-        db.execute("UPDATE threads SET agent_enabled=0 WHERE id='agent-2'")
-        db.commit()
-    finally:
-        db.close()
-    with write_transaction(None, scope="test_clear_pick") as db:
-        assert clear_invalid_pick(db, models.get_artifact(artifact_id, db=db), workspace=config.WORKSPACE) is True
-    assert _stored_pick(artifact_id) is None

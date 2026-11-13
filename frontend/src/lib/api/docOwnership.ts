@@ -8,7 +8,7 @@ export interface DocOwnership {
 	/** False on a document everyone shares while more than one person uses CORSIA: the server refuses any change. */
 	can_change: boolean;
 	/** The sentences the server refuses with, shown before a pick so the screen and the refusal read alike. */
-	shared_refusal: string | null;
+	refusal: string | null;
 	multi_person_refusal: string | null;
 	/** Where the picker's agents come from. */
 	scope: 'project' | 'workspace';

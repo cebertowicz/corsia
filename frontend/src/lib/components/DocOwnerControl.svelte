@@ -98,7 +98,7 @@
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>
-			{#if !ownership.can_change}<p class="note">{ownership.shared_refusal}</p>
+			{#if !ownership.can_change}<p class="note">{ownership.refusal}</p>
 			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
 			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
