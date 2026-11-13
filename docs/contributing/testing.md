@@ -26,12 +26,13 @@ For a PR from a fork, the **CLA** check asks each contributor to accept the [Con
 
 ## Read the review
 
-The LLM reviewer examines the diff against the project's standards and any mapped approved requirements, including security and performance. It starts after the head's other checks are green. For a fork, a maintainer must first approve GitHub's workflow runs and add the `review` label to approve that head; the label is consumed and a new head needs approval again.
+CORSIA itself runs no pull request review. A project that installs the review workflow from CORSIA's community gets the review from that workflow, which reads GitHub on its own and posts two commit statuses on the PR's head:
 
-- **qa/llm-reviewer** reports the verdict and counts of findings. A **BLOCK** is a must-fix finding: verify it against the current code, then fix it or explain why it does not apply. It prevents a passing verdict. **Different approach needed** means several findings share one cause: fix that cause, not each finding on its own.
-- **FLAG** is a possible problem that warrants attention; **NIT** is a low-risk suggestion. Both are diagnostic evidence, not automatic requests to change a clean candidate.
-- **qa/llm-reviewer-present** succeeds only once a verdict is published for that head; it does not say whether the verdict passed. Before that it can show pending, for example while an approved fork head waits for its checks. A pending or error status is not a clean review.
+- `qa/llm-reviewer` is the verdict. It is `pending` while the review waits (for checks, a maintainer or a conflict to clear) or is requested, `success` when nothing blocks or a maintainer skipped the review, `failure` when it found something that must be fixed, and `error` when the review could not finish and will retry.
+- A second status, named like the first with a `-present` suffix, is `success` once a review for that head is published.
 
-Findings appear in review threads when they can be anchored to a line, or as PR-level comments otherwise. Reply on the finding thread with the fix or your evidence if you disagree. On a later review, a finding that is no longer raised receives a reply saying so; that does not by itself prove the original concern was fixed.
+Without the workflow installed, neither status appears.
 
-Checked against the code at `310115261`.
+- A finding is evidence, not authority: verify it against the current code, then fix it or explain why it does not apply.
+
+Checked against the code at `702e54716`.

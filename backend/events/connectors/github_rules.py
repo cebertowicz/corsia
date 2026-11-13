@@ -67,7 +67,7 @@ class RuleScope:
     nothing else is read. ``unrouted_projects``: the projects tracking its
     repository, which scope rules when routing gives it no thread (``None``: the
     lookup failed). ``reads_head``: a rule for its type names a fact read from GitHub
-    (``current_head``, ``check_state``), so the envelope is completed before the gate.
+    (a reply's or settled head's PR facts), so the envelope is completed before the gate.
     """
 
     any_rule: bool = True

@@ -12,7 +12,7 @@ MODULE_GROUPS = {
     "Accounts and connections": "accounts_schema action_drafts_schema connected_accounts_schema connected_apps_schema connection_schema email_screens_schema key_store_schema vendor_account_schema",
     "Usage and measurement": "usage_schema usage_rollup_schema outcome_events_schema measure_keys_schema measurement_schema measurement_prepared",
     "Context and memory": "checkpoint_schema continuity_schema continuity_staging context_change_schema fact_extraction_schema lesson_placement_check_schema learning_schema",
-    "Settings and policy": "settings_schema project_policy_schema vendor_policy_schema reviewer_gate_schema",
+    "Settings and policy": "settings_schema project_policy_schema vendor_policy_schema",
     "Host access": "host_access_schema",
     "Providers and runtime": "limit_history_schema managed_process_schema provider_availability_schema",
     "Store internals": "db_fts sqlite-internal",

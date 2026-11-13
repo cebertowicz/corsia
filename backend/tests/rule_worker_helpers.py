@@ -32,7 +32,7 @@ _DECLARATIONS = """schema: corsia.measures/1
 namespace: qa
 events:
   qa.request:
-    attributes: {request: id, nonce: id, staging_path: id, head_repo: id, head_sha: id}
+    attributes: {request: id, nonce: id, staging_path: id, head_sha: id}
     dedupe: [nonce]
     use: route
 """

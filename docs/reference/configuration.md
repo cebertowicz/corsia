@@ -69,15 +69,10 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | `AGENT_BROWSER_ENGINE` | — | Selects the browser engine. | `backend/host_access/browser_cli.py` |
 | `AGENT_BROWSER_EXECUTABLE_PATH` | — | Selects the browser executable. | `backend/host_access/browser_cli.py` |
 | `AGENT_BROWSER_PROVIDER` | — | Selects the browser provider. | `backend/host_access/browser_cli.py` |
-| `CLAUDE_BIN` | — | Selects the Claude executable. | `backend/core/fork_render.py`, `backend/reviewer/reviewer_backends.py` |
-| `CODEX_BIN` | `'codex'` | Selects the Codex executable. | `backend/reviewer/reviewer_backends.py` |
+| `CLAUDE_BIN` | — | Selects the Claude executable. | `backend/core/fork_render.py` |
 | `CODEX_HOME` | — | Selects the Codex home directory. | `backend/subagents/codex_env.py`, `backend/tools/mcp_import.py` |
 | `CORSIA_AGENT_BROWSER_VERSION_RANGE` | — | Sets the accepted agent-browser version range. | `backend/host_access/browser_cli.py` |
-| `CORSIA_REVIEWER_FALLBACK_MODEL` | — | Selects the fallback review model. | `backend/reviewer/reviewer_runner.py` |
-| `CORSIA_REVIEWER_MAX_TURNS` | — | Sets the maximum reviewer turns. | `backend/reviewer/failures.py` |
-| `CORSIA_REVIEWER_MODEL` | — | Selects the primary review model. | `backend/reviewer/reviewer_runner.py` |
 | `LITELLM_LOCAL_MODEL_COST_MAP` | — | Controls the local LiteLLM model cost map. | `backend/main.py` |
-| `OMLX_BASE_URL` | `'http://localhost:10000'` | Sets the oMLX endpoint for the reviewer. | `backend/reviewer/reviewer_backends.py` |
 
 ## Evaluation
 
@@ -109,11 +104,11 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | `APPDATA` | — | Provides the Windows application data directory. | `backend/tools/mcp_import.py` |
 | `CUSTOM_TIKTOKEN_CACHE_DIR` | — | Selects a custom tokenization cache directory. | `backend/core/token_estimation.py` |
 | `GH_CONFIG_DIR` | — | Selects the GitHub CLI configuration directory. | `backend/connections/github_agent_home.py` |
-| `HOME` | `'/'` | Provides the home directory. | `backend/infra/git_state_cache.py`, `backend/reviewer/reviewer_read.py` |
+| `HOME` | — | Provides the home directory. | `backend/infra/git_state_cache.py` |
 | `LANG` | — | Provides locale information for region detection. | `backend/infra/os_region.py` |
 | `LC_ALL` | — | Provides locale information for region detection. | `backend/infra/os_region.py` |
 | `LOCALAPPDATA` | — | Provides the Windows local application data directory. | `backend/tools/mcp_import_agents.py` |
-| `PATH` | `'/usr/bin:/bin'` | Provides executable search paths. | `backend/cli_github.py`, `backend/reviewer/reviewer_read.py`, `backend/tools/mcp_local_transport.py`, `backend/tools/shell_sandbox.py` |
+| `PATH` | — | Provides executable search paths. | `backend/cli_github.py`, `backend/tools/mcp_local_transport.py`, `backend/tools/shell_sandbox.py` |
 | `SHELL` | — | Selects the user's shell. | `backend/cli_location.py` |
 | `TIKTOKEN_CACHE_DIR` | — | Selects the tokenization cache directory. | `backend/core/token_estimation.py` |
 | `TZ` | — | Provides the timezone for provider usage limits. | `backend/subagents/provider_usage_limits.py` |

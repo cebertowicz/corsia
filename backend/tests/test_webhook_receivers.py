@@ -203,7 +203,7 @@ async def _no_route(internal_event, payload, delivery_id=None):
 
 @pytest.mark.asyncio
 async def test_redelivered_github_delivery_id_is_dropped(receivers, client):
-    with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
+    with patch("events.ingress.route_leg", side_effect=_no_route):
         async with client:
             first = await _post_github(client, _pr_opened_payload(), "gh-delivery-1")
             again = await _post_github(client, _pr_opened_payload(), "gh-delivery-1")
@@ -213,7 +213,7 @@ async def test_redelivered_github_delivery_id_is_dropped(receivers, client):
 
 @pytest.mark.asyncio
 async def test_legacy_github_paths_answer_2xx_with_no_redirect(receivers, client):
-    with patch("events.ingress.route_leg", side_effect=_no_route), patch("events.ingress.review_leg"):
+    with patch("events.ingress.route_leg", side_effect=_no_route):
         async with client:
             plain = await _post_github(client, _pr_opened_payload(), "gh-plain", "/webhooks/github")
             slash = await _post_github(client, _pr_opened_payload(pr_number=43), "gh-slash", "/webhooks/github/")

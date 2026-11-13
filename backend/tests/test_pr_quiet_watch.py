@@ -434,8 +434,8 @@ async def test_review_missing_is_silent(gh, wakes, parked, monkeypatch, case):
 
 @pytest.mark.asyncio
 async def test_an_override_skipped_head_settles(gh, wakes, parked, monkeypatch):
-    """``qa/override-reviewer`` posts ``-present`` failure and marks the head reviewed
-    (``reviewer_gate``): the reviewer is done with it, so the watch settles it.
+    """``qa/override-reviewer`` posts ``-present`` failure and marks the head reviewed:
+    the reviewer is done with it, so the watch settles it.
     """
     _webhook()
     _owner(17)

@@ -94,8 +94,7 @@ def remove_legacy_fallback(provider: str, *, db) -> None:
             defaults = parsed.get("defaults") or {}
             if not isinstance(defaults, dict):
                 raise ValueError("agents.defaults must be an object")
-            for key in ("reviewer_model", "reviewer_fallback_model",
-                        "host_access_reviewer_model"):
+            for key in ("host_access_reviewer_model",):
                 configured = defaults.get(key)
                 if not isinstance(configured, str) or not configured.strip():
                     continue

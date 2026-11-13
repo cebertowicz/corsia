@@ -85,40 +85,6 @@ Source: `backend/infra/vendor_policy_schema.py`.
 
 Indexes: `idx_provider_policies_scope` (expression, provider_key, unique).
 
-### `reviewer_gate_approval`
-
-Source: `backend/infra/reviewer_gate_schema.py`.
-
-| Column | Type | Primary key | NOT NULL | Default | References |
-|---|---|---|---|---|---|
-| `pr_key` | TEXT | Yes | No | — | — |
-| `approved_sha` | TEXT | No | Yes | — | — |
-
-Indexes: `sqlite_autoindex_reviewer_gate_approval_1` (pr_key, unique).
-
-### `reviewer_gate_pending`
-
-Source: `backend/infra/reviewer_gate_schema.py`.
-
-| Column | Type | Primary key | NOT NULL | Default | References |
-|---|---|---|---|---|---|
-| `pr_key` | TEXT | Yes | Yes | — | — |
-| `head_sha` | TEXT | Yes | Yes | — | — |
-| `internal_event` | TEXT | No | Yes | — | — |
-
-Indexes: `sqlite_autoindex_reviewer_gate_pending_1` (pr_key, head_sha, unique).
-
-### `reviewer_gate_state`
-
-Source: `backend/infra/reviewer_gate_schema.py`.
-
-| Column | Type | Primary key | NOT NULL | Default | References |
-|---|---|---|---|---|---|
-| `pr_key` | TEXT | Yes | No | — | — |
-| `reviewed_sha` | TEXT | No | Yes | — | — |
-
-Indexes: `sqlite_autoindex_reviewer_gate_state_1` (pr_key, unique).
-
 ### `settings`
 
 Source: `backend/infra/settings_schema.py`.

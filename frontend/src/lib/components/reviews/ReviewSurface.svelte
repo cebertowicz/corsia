@@ -14,6 +14,8 @@
 	let drawerOpen = $state(true);
 	function close() { drawerOpen = false; }
 	function finishClose() { onHide(); restoreFocus(); }
+	// The popover opens below the document's owner and supervisor row, never over it, so both stay in view and reachable.
+	const ownershipRow = () => anchor?.closest('.document-header')?.querySelector<HTMLElement>('[data-ownership-row]')?.getBoundingClientRect() ?? null;
 	$effect(() => { void tick().then(() => content?.querySelector<HTMLElement>('[data-review-autofocus]')?.focus()); });
 </script>
 
@@ -25,9 +27,9 @@
 	</section>
 {/snippet}
 {#if narrow}
-	<AdaptiveDrawer fill ariaLabel="Document reviews" heading="Request review" doneLabel="Close" open={drawerOpen} onClose={close} onClosed={finishClose} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
+	<AdaptiveDrawer fill within={anchor?.closest<HTMLElement>('.leaf-body') ?? null} ariaLabel="Document reviews" heading="Request review" doneLabel="Close" open={drawerOpen} onClose={close} onClosed={finishClose} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
 {:else}
-	<Popover fill {anchor} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
+	<Popover fill {anchor} avoidRect={ownershipRow} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
 {/if}
 
 <style>

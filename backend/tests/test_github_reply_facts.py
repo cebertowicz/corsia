@@ -86,36 +86,31 @@ def test_release_first_line_only(body, expected):
 def test_marker_and_declarations():
     assert envelope("issue", REVIEW_SUMMARY_MARKER).facts["has_reviewer_marker"]
     for event in REPLY_TYPES:
-        assert set((*REPLY_FILTERABLE, *pr_facts.PAYLOAD_FACTS, *pr_facts.READ_FACTS)) <= set(MANIFEST.decl(event).filterable_fields)
+        assert set((*REPLY_FILTERABLE, *pr_facts.PAYLOAD_FACTS)) <= set(MANIFEST.decl(event).filterable_fields)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["issue", "line", "review"])
-async def test_read_uses_live_head_and_one_source_for_each_type(monkeypatch, kind):
+async def test_read_uses_one_source_for_each_type(monkeypatch, kind):
     paths = []
     async def read(_runner, _repo, path):
         paths.append(path)
-        if "/pulls/" in path:
-            body = {**PR, "head": {"sha": "live"}, "base": {"sha": "read-base"}, "draft": True,
-                    "labels": [{"name": "read"}], "user": {"login": "different"}, "mergeable": True}
-        elif "check-suites" in path:
-            body = {"check_suites": []}
-        else:
-            body = {"check_runs": [{"id": 1, "name": "ci", "status": "completed", "conclusion": "success"}], "total_count": 1}
+        body = {**PR, "head": {"sha": "live"}, "base": {"sha": "read-base"}, "draft": True,
+                "labels": [{"name": "read"}], "user": {"login": "different"}, "mergeable": True}
         return GhResponse(200, {}, body), None
     monkeypatch.setattr(poller, "gated_read", read)
     got = (await pr_facts.enriched(envelope(kind), object())).facts
-    assert got["current_head"] == "live" and got["check_state"] == "green"
-    assert any("/commits/live/" in path for path in paths)
+    assert len(paths) == 1 and "/pulls/" in paths[0]  # one PR read; no check reads
     assert (got["base_sha"], got["draft"], got["labels"]) == ("read-base", True, ["read"])
     assert got["pr_author_login"] == "pr-author"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["issue", "line", "review"])
-async def test_failed_pull_read_is_unreadable(monkeypatch, kind):
+async def test_failed_pull_read_leaves_the_reply_as_it_came(monkeypatch, kind):
     async def read(*_args):
         return None, None
     monkeypatch.setattr(poller, "gated_read", read)
-    got = (await pr_facts.enriched(envelope(kind), object())).facts
-    assert got["check_state"] == "unreadable" and "current_head" not in got
+    sent = envelope(kind)
+    got = (await pr_facts.enriched(sent, object())).facts
+    assert got == sent.facts

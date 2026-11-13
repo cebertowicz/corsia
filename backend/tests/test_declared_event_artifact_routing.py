@@ -6,6 +6,7 @@ Rule 0 routes it as it routes any event on the artifact, unless its declaration 
 from __future__ import annotations
 
 import asyncio
+import uuid
 from pathlib import Path
 
 import pytest
@@ -15,12 +16,52 @@ from events.identity import pr_external_id
 from events.intake import admit_event
 from infra.database import get_db
 from infra.measure_registry import REGISTRY, sync
-from plans.boundary import PlanActor
+from plans import service
+from plans.boundary import PlanActor, mutate
 from tests.event_routing_helpers import mk_session, register_pr
-from tests.test_reviewer_verdict_resolves_watch import REPO, _armed, _watching_verdict
 
+REPO = "owner/repo"
 DECLARER, PR_OWNER = "qg-declarer", "owner"
 FACTS = {"verdict": "clean"}
+
+
+def _artifact_id(db, external_id: str) -> str:
+    from registry import artifact_record
+
+    return str(artifact_record.identity_row_for(external_id, db=db)["id"])
+
+
+def _watching_verdict(db, actor, *, external_id: str):
+    """A task of the owner's, waiting on the PR's declared verdict event."""
+    plan = service.ensure_plan("thread", actor.thread_id, db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Await verdict",
+        acceptance_criteria="The verdict resolves this wait", db=db,
+    )
+    service.transition_node(node.id, "active", db=db)
+    db.commit()
+    mutate(
+        plan.id, "arm_watch",
+        {
+            "node_id": node.id,
+            "condition": {"type": "event", "value": "reviewer.verdict"},
+            "artifact_id": _artifact_id(db, external_id),
+            "expected_event": "reviewer.verdict",
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        },
+        actor=actor, provenance="test.verdict_watch",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+    db.commit()
+    return plan, node
+
+
+def _armed(db, node_id: str) -> int:
+    return int(db.execute(
+        "SELECT COUNT(*) FROM expected_event_watches "
+        "WHERE plan_node_id=? AND status='armed'",
+        (node_id,),
+    ).fetchone()[0])
 
 
 def _declare(db, tmp_path: Path, *, default_delivery: str | None = None, event_class: str | None = None):

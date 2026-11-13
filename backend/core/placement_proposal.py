@@ -242,7 +242,7 @@ def file_issue(
     rule: str,
     rationale: str,
 ) -> ProposalResult:
-    from reviewer.gh_api import run_gh
+    from connections.github_run import run_gh
 
     mark = marker(thread_id, entry_id, revision)
     found = run_gh([

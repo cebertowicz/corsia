@@ -11,7 +11,7 @@ read through ``github_notifications_feed.gh_get``; script reads use
 ``automation.script_github_channel``. Both ask before each call and feed
 response headers here. A limit one account sees backs off only that account's
 reads. Script reads and the quiet-PR sweep stay out of the reserve. Other
-GitHub callers (the reviewer's ``gh_api``, for example) do not consult it.
+GitHub callers (``connections.github_run.run_gh``, for example) do not consult it.
 Nothing is stored: a restart relearns the budget from the next response.
 """
 

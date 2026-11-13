@@ -96,7 +96,6 @@ async def test_a_worker_cut_short_before_its_first_turn_returns_no_result_once(w
 # trace, so a rule that retries the review is never skipped as a loop.
 @pytest.mark.asyncio
 async def test_an_orphaned_start_removes_its_inputs_and_starts_a_fresh_chain(world, monkeypatch):
-    from automation.worker_inputs import start_dir
     from events import intake, worker_starts
     from infra.database import write_transaction
 
@@ -117,12 +116,8 @@ async def test_an_orphaned_start_removes_its_inputs_and_starts_a_fresh_chain(wor
         for decision in (unmade, made):
             assert worker_starts.claim(db, decision) is not None
         worker_starts.made(db, made, "rw-cut-short", check)
-    dirs = [start_dir(world["folder"], decision) for decision in (unmade, made)]
-    for path in dirs:
-        (path / "head").mkdir(parents=True)
     await settle_all()
     assert [row[:2] for row in starts(rule)] == [("no_result", "a restart cut the start short")] * 2
-    assert not any(path.exists() for path in dirs)
     assert {(item.get("trace", ()), item["facts"]["workflow"]) for item in admitted
             if item["event_type"] == "worker.no_result"} == {
         ((), "worker-flow"), ((), "worker-flow@3")}
@@ -349,6 +344,9 @@ async def _result_on_a_prs_artifact(world, monkeypatch, took: bool):
     monkeypatch.setattr("events.connectors.github_notifications_feed.projects_tracking_github_repository",
                         lambda repository: frozenset({world["project"]}) if repository == repo
                         else frozenset())
+    # A PR webhook carries no staging_path; the worker's one read path is its staging directory.
+    monkeypatch.setattr("automation.worker_inputs.staging_dir",
+                        lambda _root, _value: str(world["staging"].resolve()))
     pr_owner = mk_session("rw-pr-owner", project_id=world["project"])
     register_pr(repo, 7, pr_owner)
     if took:
@@ -404,6 +402,8 @@ async def test_a_script_on_a_pr_result_gets_the_prs_repository_channel(world, mo
     monkeypatch.setattr("events.connectors.github_notifications_feed.projects_tracking_github_repository",
                         lambda repository: frozenset({world["project"]}) if tracked and repository == repo
                         else frozenset())
+    monkeypatch.setattr("automation.worker_inputs.staging_dir",
+                        lambda _root, _value: str(world["staging"].resolve()))
     register_pr(repo, 7, mk_session("rw-pr-owner", project_id=world["project"]))
     await _script_rule(owner_script(world, monkeypatch, "publish.sh"), "result")
     created = await atool(OWNER, operation="create", connector="github", event_type="pr.synchronize",

@@ -31,7 +31,7 @@ PRODUCTION_ROWS: dict[str, int] = {
     "thread_vendor_accounts": 3_741, "managed_process_handles": 3_310, "plans": 2_913,
     "plan_node_artifact_links": 2_518, "host_access_leases": 2_484,
     "plan_node_dependencies": 2_056, "thread_updates": 1_926, "presence_visits": 1_480,
-    "reviewer_gate_state": 1_417, "restart_wake_registrations": 1_286,
+    "restart_wake_registrations": 1_286,
     "doc_comments": 1_142, "plan_node_holds": 1_017,
 }
 

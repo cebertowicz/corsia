@@ -10,13 +10,18 @@ vi.mock('$lib/api/commentSuggestions', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api/commentSuggestions')>(), decideSuggestion: mocks.decideSuggestion,
 }));
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedDraft: mocks.seedDraft }));
-vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: mocks.loadComments }));
+vi.mock('$lib/stores/docComments', () => ({
+	docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: mocks.loadComments,
+	arrivedDocComments: { set: () => {}, subscribe: (run: (value: Set<string>) => void) => { run(new Set()); return () => {}; } },
+}));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { sidebarCollapsed } from '$lib/stores/ui';
+import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -122,6 +127,28 @@ describe('DocCommentSurface suggestions', () => {
 		expect(open.isOpen()).toBe(false);
 		expect(document.body.querySelector('[data-resolved-column], [data-popover]')).toBeNull();
 		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]')).not.toBeNull();
+	});
+
+	it('gives the column back to the picked card when a highlight is picked while the resolved list holds the place of a column at rest', () => {
+		const open = resolvedDrawerProps();
+		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const focused = fromStore(focusedDocComment);
+		surface.state = { kind: 'list' };
+		try {
+			render(Object.defineProperties({
+				get state() { return surface.state; }, get opened() { return surface.opened; }, get focusedId() { return focused.current; },
+				comments: [suggestion, { ...secondSuggestion, resolved: true }],
+			}, open.props));
+			open.set(true); flushSync();
+			expect(document.body.querySelector('[data-resolved-column]')).not.toBeNull();
+			// A highlight picked in the text: the column at rest stays a list, and its card is the picked one.
+			surface.focusComment(suggestion.id, new DOMRect(), false, true); flushSync();
+			expect(open.isOpen()).toBe(false);
+			expect(document.body.querySelector('[data-resolved-column], [data-popover]')).toBeNull();
+			expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"] .ct-input'), 'the picked card shows in the column').not.toBeNull();
+		} finally {
+			focusedDocComment.set(null);
+		}
 	});
 
 	it('keeps the resolved list open when what is shown changes without the reader opening anything', () => {

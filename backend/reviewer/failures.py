@@ -1,23 +1,17 @@
-"""Failure taxonomy for the reviewer backends.
+"""Failure taxonomy for the Claude Code CLI helpers.
 
-Owns the exception classes and error-text classification shared by the
-Claude Code and Codex reviewer backends, plus Claude Code's CLI-failure
-helpers and ``--max-turns`` budget resolution. Names are re-exported from
-``reviewer_backends`` so importers are unchanged.
+Owns the exception classes and error-text classification for a failed
+``claude -p`` run; host-access reviewer code imports ``CCUnavailableError``.
 """
 
 from __future__ import annotations
 
 import json
-import logging
-import os
 from typing import Any, NoReturn
 
 from subagents.provider_usage_limits import (
     is_provider_usage_or_quota_limit as is_usage_or_quota_limit,
 )
-
-log = logging.getLogger(__name__)
 
 
 class CCRateLimitError(Exception):
@@ -35,38 +29,6 @@ class CCMaxTurnsError(RuntimeError):
     its behavior; the dedicated type exists so the outcome is distinguishable
     in logs and gate status instead of a bare ``rc=1`` blob.
     """
-
-
-# The turn budget must not be the binding constraint. A real PR review at
-# effort=high reads the diff, then the cited files and the standards sections,
-# then composes findings; that alone is dozens of tool turns on a large diff.
-# Measured on PR #1780 (4,298 additions across 69 files) on 2026-09-16: the
-# review exhausted a budget of 30 in ~355 s (~11.5 s/turn) and stopped with
-# stop_reason=tool_use, i.e. mid-tool, still working. The Codex reviewer
-# (invoke_codex_reviewer) passes no turn cap at all — it is bounded only by the
-# shared 1800 s subprocess timeout — so a low Claude cap is an artificial
-# Claude-only failure that Codex cannot have.
-#
-# 200 puts the cap above what the shared timeout can reach (~1800 s / ~11.5 s
-# per turn ≈ 157 turns), so wall clock decides when a review stops, for both
-# backends alike. It stays finite so a pathological fast loop is still bounded.
-# Raise it further only together with the 1800 s subprocess timeout that both
-# backends pass to subprocess.run in reviewer_backends.py.
-DEFAULT_CC_MAX_TURNS = 200
-
-
-def cc_max_turns() -> str:
-    """Claude reviewer turn budget; CORSIA_REVIEWER_MAX_TURNS overrides."""
-    raw = os.environ.get("CORSIA_REVIEWER_MAX_TURNS", "").strip()
-    if raw:
-        try:
-            value = int(raw)
-        except ValueError:
-            value = 0
-        if value > 0:
-            return str(value)
-        log.warning("Ignoring invalid CORSIA_REVIEWER_MAX_TURNS=%r", raw)
-    return str(DEFAULT_CC_MAX_TURNS)
 
 
 def envelope_signals(envelope: dict[str, Any]) -> str:

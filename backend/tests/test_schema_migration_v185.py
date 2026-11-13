@@ -50,7 +50,7 @@ def _below_the_cut(db: sqlite3.Connection) -> None:
 
 
 def test_the_step_is_registered_at_184() -> None:
-    assert SCHEMA_VERSION == 190
+    assert SCHEMA_VERSION == 191
     assert MIGRATIONS[184] is migrate_184_to_185
 
 

@@ -44,7 +44,7 @@ from typing import Any
 
 from loguru import logger
 
-from automation import review_intent, worker_inputs as inputs
+from automation import worker_inputs as inputs
 from automation import worker_settings, worker_settle, worker_start_wait as wait
 from events import rule_runs, worker_starts
 from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
@@ -246,9 +246,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
             "harness": harness, "spawn_extra": spawn_extra, "settings": applied,
             "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
-            "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
-            "head": inputs.head_source(project, facts, db),
-            "intent": review_intent.attach(row, skill, db=db)}
+            "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT))}
 
 
 async def _enforce_limit(row: Mapping[str, Any]) -> None:
@@ -263,17 +261,17 @@ async def _enforce_limit(row: Mapping[str, Any]) -> None:
 
 
 def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, Any]) -> tuple[list[str], str]:
-    """The worker's read paths and brief; writes its head tree (file work, off the DB pool)."""
+    """The worker's read paths and brief. Its staging directory (when the request has one) and its
+    start's empty directory, which is always present so a worker started without staging still has the
+    read path ``untrusted`` confinement requires (``tools/delegate_task.py``) and so reads nothing."""
     dest = inputs.start_dir(found["root"], decision_id)
     dest.mkdir(parents=True, exist_ok=True)
-    if found["head"] is not None:
-        inputs.write_head(found["head"], dest)
     read_paths = [path for path in (found["staging"], str(dest)) if path]
     body = inputs.skill_body(found["skill"].body_path)
     if found.get("result_instructions"):
         body += "\n\n" + found["result_instructions"]
     task = inputs.brief(found["workflow"], body,
-                        found["schema"], read_paths, run_input.get("event") or {}, found["intent"][0])
+                        found["schema"], read_paths, run_input.get("event") or {})
     return read_paths, task
 
 
@@ -319,8 +317,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                             "settings": {**found["settings"], "started_at": datetime.now(timezone.utc).isoformat()},
                             "waited": waited,
                             "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
-                            "result_context": run_input.get("result_context"),
-                            "intent": found["intent"][1]})
+                            "result_context": run_input.get("result_context")})
 
         async def record(worker: str) -> None:
             wait.forget(row["id"])

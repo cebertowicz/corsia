@@ -421,8 +421,6 @@ class _RealDispatch:
             return None
 
         monkeypatch.setattr(ingress, "route_leg", route_leg)
-        monkeypatch.setattr(ingress, "review_leg", lambda *_args: True)
-        monkeypatch.setattr(ingress, "gate_trigger_leg", lambda *_args: True)
 
     async def finished(self) -> None:
         """Wait until every dispatch task and its done callback has run."""

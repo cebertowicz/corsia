@@ -55,8 +55,7 @@ EXCLUDED: dict[str, str] = {
         "email_screens", "held_replies", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
         "limit_observations", "managed_process_retirements", "measure_breaks", "measure_definitions", "measure_keys", "plan_ask_deferrals",
         "plan_markdown_import_issues", "plan_markdown_imports",
-        "plan_status_dirty", "project_inference_policies", "provider_availability", "reviewer_gate_approval",
-        "reviewer_gate_pending",
+        "plan_status_dirty", "project_inference_policies", "provider_availability",
         "self_caused_events",
         "vendor_account_billing_facts", "vendor_account_billing_revisions")},
 }

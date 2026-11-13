@@ -12,7 +12,7 @@ from tests.test_github_reply_facts import payload
     ("line", "webhook.github.pr_comment", "pr_comment.created"),
     ("review", "webhook.github.review_submitted", "review.submitted"),
 ])
-@pytest.mark.parametrize("field,expected", [("author", False), ("check_state", True)])
+@pytest.mark.parametrize("field,expected", [("author", False), ("draft", True)])
 async def test_reply_rule_controls_read(isolated_db, monkeypatch, kind, routed, event, field, expected):
     _rule(event, [{"field": field, "op": "present"}])
     raw = payload(kind)

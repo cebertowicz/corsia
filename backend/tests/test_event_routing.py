@@ -456,62 +456,6 @@ class TestGuard:
         assert res.outcome == RouteOutcome.SUPPRESSED
         mock_deliver.assert_not_called()
 
-class TestReviewerRehome:
-    def test_reviewer_does_not_fire_on_push(self):
-        from events import reviewer_route
-        payload = _pr_payload("o/r", 100, author="alice", author_type="User")
-        with patch("reviewer.on_pr_review.on_pr_review") as mock_review:
-            reviewer_route.run_review("webhook.github.pr_opened", payload)
-        mock_review.assert_not_called()
-
-    def test_reviewer_suppressed_for_bot_author(self):
-        from events import reviewer_route
-        payload = _pr_payload("o/r", 101, author="ci[bot]", author_type="Bot")
-        with patch("reviewer.on_pr_review.on_pr_review") as mock_review:
-            reviewer_route.run_review("webhook.github.pr_synchronize", payload)
-        mock_review.assert_not_called()
-
-    def test_non_reviewer_event_does_not_review(self):
-        from events import reviewer_route
-        with patch("reviewer.on_pr_review.on_pr_review") as mock_review:
-            reviewer_route.run_review("webhook.github.pr_merged",
-                                      _pr_payload("o/r", 102, action="closed"))
-        mock_review.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_ingress_dead_letter_leaves_reviewer_independent(self, isolated_db):
-        from events import ingress
-        with patch("events.ingress.run_review") as mock_review:
-            res = await ingress.handle_event(
-                "webhook.github.pr_opened", _pr_payload("o/r", 201), "dlv-2")
-        assert res["route_outcome"] == "dead_lettered"
-        assert res["reviewer"] == "armed"
-        mock_review.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_ingress_runs_both_legs_on_injected_pr_opened(self, isolated_db):
-        owner = _mk_session("own-ing")
-        _register_pr("o/r", 200, owner)
-
-        from events import ingress
-        from events.router import RouteOutcome
-        with patch("events.ingress.route_event") as mock_route, \
-             patch("events.ingress.run_review") as mock_review:
-            mock_route.return_value = MagicMock(
-                outcome=RouteOutcome.ACCEPTED, thread_id=owner)
-            res = await ingress.handle_event(
-                "webhook.github.pr_opened", _pr_payload("o/r", 200), "dlv-1")
-
-        assert res["route_outcome"] == RouteOutcome.ACCEPTED.value == "accepted"
-        assert res["thread_id"] == owner
-        assert res["reviewer"] == "armed"
-        mock_review.assert_called_once()
-        mock_route.assert_awaited_once_with(
-            "webhook.github.pr_opened",
-            _pr_payload("o/r", 200),
-            delivery_id="dlv-1",
-        )
-
 class TestSystemMessageLLMExclusion:
 
     def test_activity_receipt_excluded_from_llm_context(self):
@@ -592,10 +536,9 @@ class TestGithubEventClassDerivation:
         assert _github_event_class(opened) == "actionable"
         assert _github_event_class(check) == "actionable"
 
-    def test_ready_for_review_routes_to_gate_without_waking_owner(self):
+    def test_ready_for_review_does_not_wake_owner(self):
         from events.connectors.github import MANIFEST
         from events.disposition import disposition
-        from events.reviewer_route import GATE_TRIGGER_EVENTS
 
         ready = {
             "action": "ready_for_review",
@@ -605,4 +548,3 @@ class TestGithubEventClassDerivation:
         event_type = MANIFEST.classify(ready)
         assert event_type == "pr.ready_for_review"
         assert disposition("owner", MANIFEST.decl(event_type).event_class) == "digest"
-        assert "webhook.github.pr_ready_for_review" in GATE_TRIGGER_EVENTS

@@ -180,7 +180,7 @@ async def _legacy_github_client(thread_id: str, run_id: str, rule_id: str | None
 
     A bridge with one exit: Agent Substrate deletes it, the read socket, its environment
     name and ``cli_github``'s legacy branch in one change once the scripts that read through
-    it (the GitHub screen's and the review gate's) run as authenticated scripts.
+    it (the GitHub screen's) run as authenticated scripts.
     """
     stack = AsyncExitStack()
     try:
