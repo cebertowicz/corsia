@@ -14,11 +14,11 @@ _WAL_FRAMES = 1000  # SQLite's existing default autocheckpoint budget
 
 @dataclass(frozen=True)
 class WalCheckpoint:
-    wal_path: Path
+    wal_path: Path | None  # None for an in-memory database, which has no WAL
     threshold_bytes: int
 
     @classmethod
-    def configure(cls, connection: sqlite3.Connection, path: str) -> WalCheckpoint:
+    def configure(cls, connection: sqlite3.Connection) -> WalCheckpoint:
         """Defer the pooled connection's checkpoint until after admission releases."""
         page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
         threshold = 32 + _WAL_FRAMES * (page_size + 24)
@@ -27,10 +27,17 @@ class WalCheckpoint:
         # to this budget, so an old high-water file cannot defeat the size gate
         # and make every subsequent small commit checkpoint again.
         connection.execute(f"PRAGMA journal_size_limit={threshold}")
-        return cls(Path(path + "-wal"), threshold)
+        # The WAL sits beside the file SQLite actually opened, never a path
+        # string the caller passed, so a relative or aliased path cannot point
+        # the size gate at a missing file and silently stop checkpointing.
+        opened = next((filename for _, name, filename in connection.execute("PRAGMA database_list")
+                       if name == "main"), "")
+        return cls(Path(opened + "-wal") if opened else None, threshold)
 
     def run(self, connection: sqlite3.Connection) -> None:
         """Checkpoint once on growth; pinned readers keep their original snapshot."""
+        if self.wal_path is None:
+            return
         try:
             if self.wal_path.stat().st_size > self.threshold_bytes:
                 # PASSIVE neither waits for readers/writers nor takes the WAL

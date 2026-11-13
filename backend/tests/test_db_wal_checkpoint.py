@@ -98,6 +98,22 @@ def test_completed_checkpoint_does_not_make_every_small_write_checkpoint(tmp_pat
         conn.close()
 
 
+def test_a_relative_path_still_checkpoints_after_the_working_directory_moves(tmp_path, monkeypatch):
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path)
+    conn = database._make_connection("main.db")
+    conn.execute("CREATE TABLE payload(id INTEGER PRIMARY KEY, value BLOB)")
+    conn.commit()
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    seen = []
+    conn.set_trace_callback(lambda sql: seen.append(sql) if sql.startswith("PRAGMA wal_checkpoint") else None)
+    try:
+        _large_write(conn)
+        assert seen == ["PRAGMA wal_checkpoint(PASSIVE)"]
+    finally:
+        conn.close()
+
+
 def test_pinned_reader_keeps_its_snapshot_and_shutdown_still_truncates(tmp_path):
     conn = _connection(tmp_path)
     reader = sqlite3.connect(tmp_path / "main.db")
