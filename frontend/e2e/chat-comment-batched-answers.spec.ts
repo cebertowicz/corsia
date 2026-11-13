@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage, seedMockResponses } from './support/mock';
+import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { closeCommentThread, commentEditor, commentEditorClosed, openCommentThread, postedComments } from './support/chatComments';
 
 const BACKEND = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
@@ -161,7 +161,14 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
   await page.setViewportSize({ width, height: width === 393 ? 852 : 1000 });
   const { thread, row, cids } = await queueComments(page, request, 'Answers only turn', 1);
   const answer = 'Only an answer.';
-  await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}` }]);
+  await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}`, completion_gate: 'answers-only' }]);
+  const blocks = () => page.locator('.messages [data-work-block]');
+  const titled = (title: RegExp) => blocks().filter({ has: page.locator('.fold-toggle', { hasText: title }) });
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toBeVisible();
+  // While the turn runs, its answers-only step adds one working line and nothing else.
+  await expect(titled(/Working/)).toHaveCount(1);
+  await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(1);
+  await releaseMockGate(request, 'answers-only');
   let stepId = '';
   await expect.poll(async () => {
     const rows = await messages(request, thread);
@@ -170,6 +177,10 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
     return Boolean(stepId) && !rows.some((m: any) => m.id === stepId);
   }, { timeout: 30_000 }).toBe(true);
   await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  // Once it ends no line is left for it: the one folded line counts the step it lists when opened (#2602).
+  await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(0);
+  const labels = await blocks().evaluateAll((nodes) => nodes.map((node) => (node.querySelector('.fold-toggle') as HTMLElement).innerText));
+  expect(labels.map((label) => label.replace(/ · under 1 min$/, ''))).toEqual(['Context updated', 'Worked · 1 step']);
   // What chat draws: the same rows and the same fold labels live and after a reload, none of them the answer.
   const drawn = async () => ({
     ids: await page.locator('.messages [data-message-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-message-id'))),
@@ -177,6 +188,8 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
   });
   await expandWork(page);
   const live = await drawn();
+  const opened = await titled(/Worked/).locator('[data-message-id]').count();
+  expect(opened).toBe(1);
   expect(live.ids).not.toContain(stepId);
   expect(await chatText(page)).not.toContain(answer);
   await capture(page, 'answers-only-live');
@@ -186,6 +199,7 @@ for (const width of [1440, 900, 393]) test(`a turn made only of answers adds not
   await waitForWsConnected(page);
   await expect(page.locator('.messages [data-message-id]').first()).toBeVisible();
   await expandWork(page);
+  await expect(page.locator('.messages [data-message-id]')).toHaveCount(live.ids.length);
   const reloaded = await drawn();
   expect(reloaded.ids).toEqual(live.ids);
   expect(reloaded.folds).toEqual(live.folds);
