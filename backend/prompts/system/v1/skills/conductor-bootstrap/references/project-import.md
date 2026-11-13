@@ -44,6 +44,6 @@ Add these as your own plan tasks before you start, so the person can watch them:
 
    Raise `How should [project] run?` linking the draft. Options: A `Set it up this way`, B `Change something`, C `Just the charter for now, no agents yet`. On B, revise from the person's text and ask again. On C, write the charter only.
 
-7. **Set up the team** (SKILL steps 2, 3 and 5), then finish with one message: `[project] is set up. Here's what each agent will do first:` and one line per agent. If a read fails part-way, report what you read and ask one thing.
+7. **Set up the team** (SKILL steps 2, 3 and 5). A workflow or skill for an agreed recurring task is saved here, never before the person's answer in step 6, and asks them nothing the agreed tables already answer. Then finish with one message: `[project] is set up. Here's what each agent will do first:` and one line per agent. If a read fails part-way, report what you read and ask one thing.
 
 Never copy the repository's conventions or commands into CORSIA files; give its `AGENTS.md` one canonical-sources row instead: `[repo] conventions and commands | [repo path]/AGENTS.md (read before changing code in [repo]) | when the file changes`.

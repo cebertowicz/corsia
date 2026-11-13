@@ -220,10 +220,10 @@
       "sha256": "edd63f800b4cfb708964a65ad4c325e935e4585732e1419fd2b4274606646c47"
     },
     {
-      "bytes": 7043,
+      "bytes": 7207,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/project-import.md",
-      "sha256": "420376cec15b6cd8f49caf39de1ac0d169092a887e242aa27d5257a6867eaf60"
+      "sha256": "456bbde4e37ff2a28e8036a8b0209461d739579f4faf3b278ed143b544afb1d9"
     },
     {
       "bytes": 13679,
