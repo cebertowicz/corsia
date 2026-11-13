@@ -151,6 +151,15 @@ describe('DocOwnerControl', () => {
 		item('supervisor').click(); await settle();
 		expect(picker()!.textContent).toContain('There are no agents in this project to choose from.');
 	});
+	it('says it couldn’t load the agents, not that there are none, when the scope couldn’t be resolved', async () => {
+		await render(ownership({ choices: [], scope: null }));
+		item('supervisor').click(); await settle();
+		expect(picker()!.textContent).toContain('Couldn’t load the agents for this document. Reload the page to try again.');
+		expect(picker()!.textContent).not.toContain('There are no agents');
+		item('supervisor').click(); await settle();
+		item('owner').click(); await settle();
+		expect(picker()!.textContent).toContain('Couldn’t load the agents for this document. Reload the page to try again.');
+	});
 	it('filters its list as the person types', async () => {
 		await render(ownership());
 		item('supervisor').click(); await settle();

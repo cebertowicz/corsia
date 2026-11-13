@@ -102,8 +102,9 @@
 			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
 			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
-			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />
-			{:else}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
+			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
+			{#if ownership.scope === null}<p class="note">Couldn’t load the agents for this document. Reload the page to try again.</p>
+			{:else if !options.length}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
 			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
 			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">{ownership.multi_person_refusal}</p>{/if}

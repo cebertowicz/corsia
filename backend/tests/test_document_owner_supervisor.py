@@ -449,7 +449,9 @@ def test_a_scope_lookup_failure_is_logged_and_offers_nothing_the_put_would_not_h
 
     monkeypatch.setattr(supervisor, "document_project", boom)
     with caplog.at_level("WARNING", logger="registry.document_supervisor"):
-        assert _view(artifact_id)["choices"] == []
+        view = _view(artifact_id)
+    # No choices, and no scope to name, so the picker can't claim the scope has no agents.
+    assert (view["choices"], view["scope"]) == ([], None)
     assert any("resolve the scope" in record.getMessage() and record.exc_info for record in caplog.records)
     refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-1"})
     assert (refused.status_code, refused.json()["detail"]) == (400, AGENT_CHOICE_REFUSAL)

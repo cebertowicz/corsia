@@ -10,8 +10,8 @@ export interface DocOwnership {
 	/** The sentences the server refuses with, shown before a pick so the screen and the refusal read alike. */
 	refusal: string | null;
 	multi_person_refusal: string | null;
-	/** Where the picker's agents come from. */
-	scope: 'project' | 'workspace';
+	/** Where the picker's agents come from; null when the server couldn't resolve the document's scope. */
+	scope: 'project' | 'workspace' | null;
 	choices: { id: string; name: string; status: string; responsibility: string }[];
 }
 

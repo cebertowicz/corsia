@@ -200,7 +200,8 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
         "can_change": refusal is None,
         "refusal": refusal,
         "multi_person_refusal": MULTI_PERSON_REFUSAL if multi_person else None,
-        "scope": "project" if scope is not None and scope[0] is not None else "workspace",
+        # None when the scope couldn't be resolved, so the picker says it couldn't load rather than "no agents".
+        "scope": None if scope is None else "project" if scope[0] is not None else "workspace",
         "choices": choices,
     }
 
