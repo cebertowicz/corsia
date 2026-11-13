@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capSheetAboveText, SHEET_GAP } from './sheetClearance';
+import { capSheetAboveText, keptWhole, SHEET_GAP } from './sheetClearance';
 
 function sheet(backdropBottom: number): HTMLElement {
 	const backdrop = document.createElement('div');
@@ -36,5 +36,13 @@ describe('capSheetAboveText', () => {
 		const panel = document.createElement('div');
 		capSheetAboveText(panel, { height: 21, regionTop: 125 });
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+});
+
+describe('keptWhole', () => {
+	it('keeps a highlight of up to three lines whole and only the pressed line of a taller one', () => {
+		expect(keptWhole(21, 21)).toBe(true);
+		expect(keptWhole(63, 21)).toBe(true);
+		expect(keptWhole(64, 21)).toBe(false);
 	});
 });

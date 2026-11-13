@@ -24,9 +24,9 @@
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
 	const threadBounds = () => transcriptBounds(messageRoot());
-	// On a phone the sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
+	// On a phone the comment-writing sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
 	let sheet = $state<HTMLElement | null>(null);
-	$effect(() => keepAboveSheet(sheet, messageRoot, () => open ? writingRect() : threadAnchor()));
+	$effect(() => keepAboveSheet(sheet, messageRoot, writingRect));
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
@@ -220,7 +220,8 @@
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
 				if (unread) for (const wrap of wraps) wrap.dataset.unread = '';
-				if (anchor) {
+				// A thread held unread only for its open sheet keeps its drawn look; its dot and its spoken notice go with the read stamp.
+				if (anchor && (failed || sending || unreadNow(comment))) {
 					const quote = quoteLabel(comment.quote);
 					wraps[0].setAttribute('aria-label', failed ? `Your reply on ${quote} wasn’t delivered.` : sending ? `Your reply on ${quote} is sending.` : `The comment on ${quote} has a new reply.`);
 					if (failed || !sending) dotCleanups.push(placeHighlightDot(body, anchor, failed ? quote : null));

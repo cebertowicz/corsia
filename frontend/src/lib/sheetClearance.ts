@@ -1,5 +1,9 @@
 /** The page kept between the text a sheet was opened from and the sheet's top edge, and between that text and the top of the visible page. */
 export const SHEET_GAP = 16;
+/** The tallest pressed highlight, in lines, that a sheet keeps whole above itself; a taller one keeps only the pressed line. */
+const PRESS_LINES = 3;
+/** Whether a highlight `textHeight` tall is kept whole above a sheet, given the height of one line of it. One rule for the chat sheet, the document sheet and the wide card. */
+export const keptWhole = (textHeight: number, lineHeight: number): boolean => textHeight <= PRESS_LINES * lineHeight;
 /** A sheet is never capped below this, so its content stays usable; text that cannot get room above it is then partly covered. */
 const MIN_SHEET = 200;
 

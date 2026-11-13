@@ -1,5 +1,5 @@
 import { tick, untrack } from 'svelte';
-import { capSheetAboveText, SHEET_GAP } from '$lib/sheetClearance';
+import { capSheetAboveText, keptWhole, SHEET_GAP } from '$lib/sheetClearance';
 import { restingTop } from '$lib/cm/visible-region';
 
 /**
@@ -31,7 +31,7 @@ export function createChatSheetReveal(panel: () => HTMLElement | null, root: () 
 			const pressed = rects[Math.min(press!.line, rects.length - 1)];
 			if (!pressed) return;
 			const first = rects[0], last = rects[rects.length - 1];
-			const whole = last.bottom - first.top <= 3 * pressed.height;
+			const whole = keptWhole(last.bottom - first.top, pressed.height);
 			const text = whole ? { top: first.top, bottom: last.bottom } : { top: pressed.top, bottom: pressed.bottom };
 			const regionTop = scroller.getBoundingClientRect().top;
 			capSheetAboveText(sheet, { height: text.bottom - text.top, regionTop });

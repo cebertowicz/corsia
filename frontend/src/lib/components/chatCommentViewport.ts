@@ -1,8 +1,7 @@
 /** Where a commented passage can be seen in the transcript: below the shell header, above the chat composer or a comment sheet. */
 import { restingTop } from '$lib/cm/visible-region';
 import { onSheetMoved } from '$lib/docCommentDrawer';
-
-const GAP = 8;
+import { SHEET_GAP as GAP } from '$lib/sheetClearance';
 
 /** The part of the transcript a popover may cover: under the header and above the chat composer. */
 export function transcriptBounds(root: HTMLElement | null): DOMRect | null {
@@ -33,7 +32,7 @@ export function revealAboveSheet(scroller: HTMLElement | null, passage: DOMRect 
 	scroller.scrollBy({ top: delta });
 }
 
-/** Keeps the passage in view while a comment sheet is open over the transcript. Returns the stop. */
+/** Keeps the passage in view while the comment-writing sheet is open over the transcript (an opened thread's sheet is kept by `createChatSheetReveal`). Returns the stop. */
 export function keepAboveSheet(panel: HTMLElement | null, scroller: () => HTMLElement | null, passage: () => DOMRect | null): () => void {
 	return onSheetMoved(panel, opening => { if (panel) revealAboveSheet(scroller(), passage(), panel, opening); });
 }

@@ -5,7 +5,7 @@ import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
-import { SHEET_GAP } from '$lib/sheetClearance';
+import { keptWhole, SHEET_GAP } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -104,13 +104,13 @@ export const commentMarks = [
 export const MAX_SCROLL_PASSES = 8;
 const STEADY_CHECKS = 2;
 
-/** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
-/** `press-reveal` keeps the text a phone's thread sheet was opened from in the band above the sheet: no move when it is there, else it is centred in that band. */
+/**
+ * `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet.
+ * `press-reveal` keeps the text a phone's thread sheet was opened from in the band above the sheet: no move when it is there, else it is centred in that band.
+ */
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap' | 'press-reveal';
 
 const QUOTE_MARGIN = 8;
-/** The tallest pressed highlight, in lines, a sheet keeps whole above itself. */
-const PRESS_LINES = 3;
 /** The band less a small gap at its bottom edge: text meant to stay readable above a sheet leaves a little of the page between it and the sheet. */
 const clearOfSheet = (band: Box): Box => ({ top: band.top, bottom: band.bottom - SHEET_GAP });
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
@@ -127,7 +127,7 @@ function spanBoxAt(current: EditorView, from: number, to: number, widget: Return
 }
 
 /**
- * What a sheet opened from a pressed highlight keeps visible above itself: the whole highlight when it is at most `PRESS_LINES` lines tall,
+ * What a sheet opened from a pressed highlight keeps visible above itself: the whole highlight when `keptWhole` says so (at most three lines),
  * else the line that was pressed (`at`). `height` is that text's height and `regionTop` where the visible document starts, which together
  * tell the sheet how far up it may rise.
  */
@@ -137,7 +137,7 @@ export function pressSpan(view: EditorView, range: { from: number; to: number },
 	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
 	if (!whole || !line) return null;
 	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
-	return whole.bottom - whole.top <= PRESS_LINES * lineHeight
+	return keptWhole(whole.bottom - whole.top, lineHeight)
 		? { from: range.from, to: range.to, height: whole.bottom - whole.top, regionTop }
 		: { from: at, to: at, height: lineHeight, regionTop };
 }

@@ -18,7 +18,7 @@ function setup(sheetHeight: number) {
 afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ''; });
 
 describe('revealAboveSheet', () => {
-	// Space between the header (60 + 8) and the sheet resting at 852 - 300 (552 - 8): 68..544, centre 306.
+	// Space between the header (60 + 16) and the sheet resting at 852 - 300 (552 - 16): 76..536, centre 306.
 	it('brings a passage hidden under the header into the space above the sheet, centred', () => {
 		const { panel, scroller, scrollBy } = setup(300);
 		revealAboveSheet(scroller, new DOMRect(0, 20, 200, 20), panel, true);
@@ -42,6 +42,6 @@ describe('revealAboveSheet', () => {
 	it('shows a passage taller than the space from its first line', () => {
 		const { panel, scroller, scrollBy } = setup(300);
 		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 900), panel, true);
-		expect(scrollBy).toHaveBeenCalledWith({ top: 600 - 68 });
+		expect(scrollBy).toHaveBeenCalledWith({ top: 600 - 76 });
 	});
 });

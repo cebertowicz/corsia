@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { isMobile } from '$lib/stores/viewport';
+import { keptWhole } from '$lib/sheetClearance';
 import type { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import type { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 
@@ -47,7 +48,7 @@ export function clickAnchor(click: MouseEvent | undefined, live: () => DOMRect |
 	const line = clickedLine(click.target, click.clientY);
 	const from = live();
 	// A highlight of up to three lines is one thing to keep clear: the card sits against all of it, not only the pressed line (as the phone sheet keeps up to three lines above itself).
-	const whole = line && from && !(click.target instanceof Element && click.target.closest('.cm-comment-marker')) && from.top <= line.bottom && from.bottom >= line.top && from.height <= 3 * (line.bottom - line.top) ? from : null;
+	const whole = line && from && !(click.target instanceof Element && click.target.closest('.cm-comment-marker')) && from.top <= line.bottom && from.bottom >= line.top && keptWhole(from.height, line.bottom - line.top) ? from : null;
 	const top = whole ? Math.min(line!.top, whole.top) : line?.top ?? click.clientY;
 	const bottom = whole ? Math.max(line!.bottom, whole.bottom) : line?.bottom ?? click.clientY;
 	const rect = new DOMRect(click.clientX, top, 0, bottom - top);
