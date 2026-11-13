@@ -33,6 +33,9 @@ Claude Code process launch and spawn, and every cold Codex start.
   changed after collection, nothing is written (``reason=boundary-moved``)
   and the next dispatch collects against the new boundary;
 - writing a boundary drops the source bytes from every superseded record.
+  Only boundary records (checkpoint receipts and the first message) ever
+  hold them, so the drop looks those rows up by id and never reads the rest
+  of the thread while it holds the write lock.
 """
 
 from __future__ import annotations
@@ -196,6 +199,23 @@ def _checkpoint_receipt(thread_id: str, db):
     ).fetchone()
 
 
+def _superseded_sources_drop_sql() -> str:
+    """Drop source bytes from every other record of a thread that carries them.
+
+    The guard is statement text so SQLite reads only the rows in the
+    installed-boundary index; a bound key would scan the whole thread while
+    the write lock is held.
+    """
+    # learning_schema imports this module, so its guard is imported here.
+    from infra.learning_schema import installed_boundary_guard
+
+    return (
+        "UPDATE messages SET metadata=json_remove(metadata, ?) "
+        f"WHERE thread_id=? AND id<>? AND {installed_boundary_guard('metadata')} "
+        "AND json_valid(metadata)"
+    )
+
+
 def _boundary_record(thread_id: str, db) -> tuple[str, dict[str, Any], Any] | None:
     row = _checkpoint_receipt(thread_id, db) or _first_message(thread_id, db)
     if row is None:
@@ -285,11 +305,8 @@ def _retain_prepared_installed_delivery(
     )
     # Superseded boundaries keep their public map but drop their source bytes.
     db.execute(
-        "UPDATE messages SET metadata=json_remove(metadata, ?) "
-        "WHERE thread_id=? AND id<>? AND instr(metadata, ?) > 0 "
-        "AND json_valid(metadata)",
-        (f'$."{INSTALLED_SOURCES}"', delivery.thread_id, prepared.message_id,
-         INSTALLED_SOURCES),
+        _superseded_sources_drop_sql(),
+        (f'$."{INSTALLED_SOURCES}"', delivery.thread_id, prepared.message_id),
     )
     return "written"
 
