@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { forceParsing } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
@@ -278,6 +278,30 @@ describe('markdown images in the live preview', () => {
 			expect(await imageRequestAt(document.body, { from: 0, to: 6 })).toBeNull();
 			view.dom.querySelector('.cm-md-image img')!.dispatchEvent(new Event('error'));
 			expect(await imageRequestAt(document.body, { from: at, to: at + IMAGE.length })).toBeNull();
+		});
+
+		it('never takes an image inside an open cell editor, whose positions are the cell\'s, not the document\'s', async () => {
+			// The open cell draws its image with the cell editor's positions (0 onward); the document's text there is a heading.
+			class CellEditor extends WidgetType {
+				toDOM() {
+					const cell = Object.assign(document.createElement('span'), { className: 'cm-md-cell-editor' });
+					const wrap = Object.assign(document.createElement('span'), { className: 'cm-md-image' });
+					Object.assign(wrap.dataset, { from: '0', to: String(IMAGE.length), src: 'cell.png', alt: 'In a cell' });
+					const img = document.createElement('img');
+					Object.defineProperty(img, 'complete', { value: true });
+					Object.defineProperty(img, 'naturalWidth', { value: 640 });
+					wrap.append(img);
+					cell.append(wrap);
+					return cell;
+				}
+			}
+			const doc = '# Plan\n\ncell line\n\nA paragraph that runs past the cell\'s image positions.\n';
+			const at = doc.indexOf('cell');
+			views.push(new EditorView({
+				state: EditorState.create({ doc, extensions: [EditorView.decorations.of(Decoration.set([Decoration.replace({ widget: new CellEditor() }).range(at, at + 9)]))] }),
+				parent: document.body,
+			}));
+			expect(await imageRequestAt(document.body, { from: 0, to: 6 })).toBeNull();
 		});
 	});
 
