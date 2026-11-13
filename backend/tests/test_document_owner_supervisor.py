@@ -176,8 +176,8 @@ def test_a_document_the_person_owns_takes_agent_writes_as_suggestions(owned_docu
         db.close()
 
 
-def test_a_picked_supervisor_receives_an_agent_owned_documents_comments(owned_document):
-    """Comments go to the supervisor the header shows: the owning agent until another is picked."""
+def test_a_picked_supervisor_on_an_agent_owned_document_receives_comments_alongside_its_owner(owned_document):
+    """Comments go to the supervisor the header shows, and the owning agent, which can edit, keeps them too."""
     client, artifact_id = owned_document
     _add_agent("agent-2", "Research coordinator")
     assert _view(artifact_id)["supervisor"]["id"] == "agent-1"
@@ -186,7 +186,7 @@ def test_a_picked_supervisor_receives_an_agent_owned_documents_comments(owned_do
     assert picked.status_code == 200, picked.text
     view = picked.json()["ownership"]
     assert (view["owner"]["id"], view["supervisor"]["id"]) == ("agent-1", "agent-2")
-    assert _comment_recipients(artifact_id) == ("agent-2",)
+    assert _comment_recipients(artifact_id) == ("agent-1", "agent-2")
 
 
 def _set_owner(artifact_id: str, owner: str) -> None:

@@ -10,7 +10,7 @@ from doceditor.note_names import document_name
 from events.envelope import normalize
 from registry import models as registry_models
 from registry import exemption_restore
-from registry.document_supervisor import comment_recipient
+from registry.document_supervisor import comment_recipient, owner_kind
 from infra import config
 
 
@@ -101,15 +101,18 @@ def recipients(
     stops replies reaching them.
     """
     artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
-    # On a document no agent owns, its supervisor takes the owner's place.
+    # The supervisor the header shows receives them; on an agent-owned document the
+    # owning agent, the one that can edit it, keeps receiving them too.
     owner = comment_recipient(db, artifact, workspace=config.WORKSPACE) if artifact else ""
     if document_owner_only:
         return (owner,)
+    stored_owner = artifact.get("parent_thread_id") if artifact else None
+    editor = str(stored_owner) if owner_kind(stored_owner) == "agent" else ""
     author = _recipient_for_author(comment)
     root = _root_comment(db, comment)
     root_id = str(root["id"] if root else comment["id"])
     tagged = set(comment.get("tagged_agent_ids") or ())
-    resolved = {owner, *tagged}
+    resolved = {owner, editor, *tagged}
     if root is not None:
         resolved.add(_recipient_for_author(root))
         resolved.update(_agent_authors(db, root_id))
@@ -118,7 +121,7 @@ def recipients(
     quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
-        resolved.add(owner)
+        resolved.update((owner, editor))
     resolved.discard(author)
     resolved.discard("")
     return tuple(sorted(resolved))
