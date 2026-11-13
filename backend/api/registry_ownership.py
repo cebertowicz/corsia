@@ -201,6 +201,7 @@ class OwnershipBody(BaseModel):
 
 
 MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
+SHARED_REFUSAL = "Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA."
 
 
 @router.put("/artifacts/{artifact_id}/ownership")
@@ -211,6 +212,8 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
         SUPERVISOR_KEY,
         TAKEN_OVER_KEY,
         is_multi_person,
+        may_change,
+        owner_kind,
         ownership,
     )
     from registry.identity_metadata import merge_identity_metadata, parse_metadata
@@ -225,23 +228,23 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
             ):
                 return "not_found", None
             current = artifact_owner(artifact_id, db=db)
+            multi_person = is_multi_person(db)
+            if not may_change(current, multi_person=multi_person):
+                return "shared", None
             view = ownership(db, artifact, user_id=user["id"], workspace=config.WORKSPACE)
             agents = {choice["id"] for choice in view["choices"]}
             metadata = parse_metadata(artifact.get("metadata"))
             new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
-            # The person owns it only by picking themselves, or by having taken it over before;
-            # a ``ui`` fallback owner that stays is still no one's.
-            was_person = current == UI_PRINCIPAL and bool(metadata.get(TAKEN_OVER_KEY))
-            person_owned = body.owner == "user" or (body.owner is None and was_person)
+            taking_over = new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL
             # Only a new owner is checked against the choices; an owner that stays may be outside them.
             if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
                 return "bad_choice", None
             if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
                 return "bad_choice", None
-            if person_owned and not was_person and is_multi_person(db):
+            if taking_over and multi_person:
                 return "multi_person", None
             supervisor = body.supervisor_thread_id
-            if person_owned and not was_person and supervisor is None and current and current != UI_PRINCIPAL:
+            if taking_over and supervisor is None and owner_kind(current) == "agent":
                 supervisor = current
             if new_owner != current:
                 models.rehome_artifact(
@@ -250,7 +253,7 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
                     reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
                 )
             updates = {SUPERVISOR_KEY: supervisor if supervisor != new_owner else None}
-            updates[TAKEN_OVER_KEY] = (metadata.get(TAKEN_OVER_KEY) if was_person else user["id"]) if person_owned else None
+            updates[TAKEN_OVER_KEY] = user["id"] if taking_over else metadata.get(TAKEN_OVER_KEY) if new_owner == UI_PRINCIPAL else None
             if updates != {key: metadata.get(key) for key in updates}:
                 merge_identity_metadata(db, artifact_id, updates)
             changed = models.get_artifact(artifact_id, db=db)
@@ -258,11 +261,13 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
 
     status, result = await run_in_db(_change)
     if status == "not_found":
-        raise HTTPException(404, "Document not found")
+        raise HTTPException(404, "Couldn’t find this document. Reload the page to see where it is now.")
     if status == "bad_choice":
-        raise HTTPException(400, "Pick yourself or an agent in this document's scope.")
+        raise HTTPException(400, "Pick yourself or one of the agents listed.")
     if status == "multi_person":
         raise HTTPException(409, MULTI_PERSON_REFUSAL)
+    if status == "shared":
+        raise HTTPException(409, SHARED_REFUSAL)
     assert result is not None
     changed, view = result
     service.notify_changed(changed)

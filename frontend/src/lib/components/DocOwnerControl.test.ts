@@ -11,7 +11,7 @@ function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
 		owner: { kind: 'agent', id: 'a1', name: 'Release planning' },
 		supervisor: { id: 'a2', name: 'Research coordinator', source: 'picked', status: 'ready' },
-		can_act: true, multi_person: false,
+		can_act: true, multi_person: false, can_change: true,
 		choices: [agent('a1', 'Release planning'), agent('a2', 'Research coordinator')],
 		...patch,
 	};
@@ -64,6 +64,15 @@ describe('DocOwnerControl', () => {
 		item('owner').click(); await settle();
 		expect(options()).not.toContain('You');
 		expect(picker()!.textContent).toContain('Only an agent can own a document when more than one person uses CORSIA here.');
+	});
+	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
+		await render(ownership({ owner: { kind: 'person', id: null, name: null }, multi_person: true, can_change: false }));
+		for (const role of ['owner', 'supervisor'] as const) {
+			item(role).click(); await settle();
+			expect(options()).toEqual([]);
+			expect(picker()!.textContent).toContain('Everyone here shares this document');
+		}
+		expect(changed).not.toHaveBeenCalled();
 	});
 	it('reads You when the person owns the document', async () => {
 		await render(ownership({ owner: { kind: 'person', id: null, name: null } }));

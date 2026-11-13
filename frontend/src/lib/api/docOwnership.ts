@@ -5,6 +5,8 @@ export interface DocOwnership {
 	supervisor: { id: string; name: string; source: string; status: string } | null;
 	can_act: boolean;
 	multi_person: boolean;
+	/** False on a document everyone shares while more than one person uses CORSIA: the server refuses any change. */
+	can_change: boolean;
 	choices: { id: string; name: string; status: string }[];
 }
 

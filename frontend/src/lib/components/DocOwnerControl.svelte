@@ -1,5 +1,5 @@
 <script lang="ts">
-	import Popover, { anchorClearing } from '$lib/components/ui/Popover.svelte';
+	import Popover from '$lib/components/ui/Popover.svelte';
 	import AgentOptions from '$lib/components/reviews/AgentOptions.svelte';
 	import MiddleName from '$lib/components/MiddleName.svelte';
 	import { tick } from 'svelte';
@@ -19,7 +19,7 @@
 	let failed = $state<{ role: Role; message: string } | null>(null);
 	let group = $state<HTMLElement>();
 	// The picker opens below both items, so it never covers the other one when they wrap onto two lines.
-	const pickerAnchor = $derived(anchorClearing(anchor, () => group));
+	const bothItems = () => group?.getBoundingClientRect() ?? null;
 
 	const ownerName = $derived(pending?.role === 'owner' ? pending.name : ownership.owner.kind === 'person' ? 'You' : ownership.owner.kind === 'none' ? 'Not set' : ownership.owner.name ?? 'Not set');
 	const ownerId = $derived(pending?.role === 'owner' ? pending.id : ownership.owner.kind === 'person' ? 'user' : ownership.owner.id);
@@ -96,16 +96,19 @@
 	{/if}
 </span>
 
-<Popover anchor={pickerAnchor} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width="min(320px, calc(100vw - 16px))" onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
+<Popover {anchor} avoidRect={bothItems} open={picker !== null} sideKey={picker} ariaLabel={picker === 'owner' ? 'Owner' : 'Supervisor'} initialFocus=".role-picker input" placement="bottom" width="min(320px, calc(100vw - 16px))" onClose={close} {restoreFocus} keepOpenOnPointer={(target) => target instanceof Node && !!group?.contains(target)}>
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>
+			{#if !ownership.can_change}<p class="note">Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA.</p>
+			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
 			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
 			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />
 			{:else}<p class="note">There are no agents in this project to choose from.</p>{/if}
+			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
-			{#if role === 'owner' && ownership.multi_person}<p class="note">Only an agent can own a document when more than one person uses CORSIA here.</p>{/if}
+			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">Only an agent can own a document when more than one person uses CORSIA here.</p>{/if}
 			{#if role === 'supervisor' && supervisorPaused}<p class="note">This agent is paused. Comments wait until it resumes.</p>
 			{:else if role === 'supervisor' && !supervisorShown}<p class="note">No one gets comments on this document.</p>{/if}
 			{#if role === 'owner' && merged}<button type="button" class="link" onclick={pickSupervisor}>Choose a different supervisor</button>{/if}

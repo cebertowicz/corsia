@@ -176,17 +176,17 @@ def test_a_document_the_person_owns_takes_agent_writes_as_suggestions(owned_docu
         db.close()
 
 
-def test_an_agent_owned_document_keeps_routing_to_its_owner(owned_document):
-    """A supervisor picked on an agent-owned document does not take the owner's comments."""
+def test_a_picked_supervisor_receives_an_agent_owned_documents_comments(owned_document):
+    """Comments go to the supervisor the header shows: the owning agent until another is picked."""
     client, artifact_id = owned_document
     _add_agent("agent-2", "Research coordinator")
-    picked = client.put(
-        f"/api/artifacts/{artifact_id}/ownership",
-        json={"owner": "agent-1", "supervisor_thread_id": "agent-2"},
-    )
-    assert picked.status_code == 200, picked.text
-    assert picked.json()["ownership"]["supervisor"]["id"] == "agent-2"
+    assert _view(artifact_id)["supervisor"]["id"] == "agent-1"
     assert _comment_recipients(artifact_id) == ("agent-1",)
+    picked = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"})
+    assert picked.status_code == 200, picked.text
+    view = picked.json()["ownership"]
+    assert (view["owner"]["id"], view["supervisor"]["id"]) == ("agent-1", "agent-2")
+    assert _comment_recipients(artifact_id) == ("agent-2",)
 
 
 def _set_owner(artifact_id: str, owner: str) -> None:
@@ -200,18 +200,37 @@ def _set_owner(artifact_id: str, owner: str) -> None:
         db.close()
 
 
-def test_a_supervisor_pick_on_an_unowned_document_leaves_it_unowned(owned_document):
-    """A Supervisor pick sends no owner, so it never takes the document over, even with two people."""
+def test_a_ui_owner_reads_as_the_person_and_a_supervisor_pick_keeps_it(owned_document):
+    """A ``ui`` owner reads as the person's, as write authority treats it; a Supervisor pick sends no owner."""
     client, artifact_id = owned_document
+    _one_person_account()
     _add_agent("agent-2", "Research coordinator")
     _set_owner(artifact_id, "ui")
-    assert _view(artifact_id)["owner"]["kind"] == "none"
+    assert _view(artifact_id)["owner"]["kind"] == "person"
 
     picked = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"supervisor_thread_id": "agent-2"})
     assert picked.status_code == 200, picked.text
     view = picked.json()["ownership"]
-    assert view["owner"]["kind"] == "none"
+    assert view["owner"]["kind"] == "person"
     assert view["supervisor"]["id"] == "agent-2"
+    assert _comment_recipients(artifact_id) == ("agent-2",)
+
+
+@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
+def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_document, shared_owner):
+    """Everyone shares a ``ui`` or ``project:`` document, so with two people neither field changes."""
+    from api.registry_ownership import SHARED_REFUSAL
+
+    client, artifact_id = owned_document
+    _set_owner(artifact_id, shared_owner)
+    assert _view(artifact_id)["can_change"] is False
+    for change in ({"supervisor_thread_id": "agent-1"}, {"owner": "agent-1"}):
+        refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json=change)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"] == SHARED_REFUSAL
+    view = _view(artifact_id)
+    assert view["owner"]["kind"] == ("person" if shared_owner == "ui" else "none")
+    assert (view["supervisor"] or {}).get("source") != "picked"
 
 
 def test_another_persons_document_reads_as_missing(owned_document):

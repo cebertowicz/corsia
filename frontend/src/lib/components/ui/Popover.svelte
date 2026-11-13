@@ -5,12 +5,6 @@
 	export const ANCHOR_MOVED = 'popover-anchor-moved';
 	/** Where an anchor is drawn now. */
 	export const anchorRect = (value: Anchor) => typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value;
-	/** An anchor that reaches down to the bottom of `row`, so a surface placed below it never covers what the row holds. */
-	export const anchorClearing = (element: HTMLElement | null, row: () => HTMLElement | null | undefined) => (): DOMRect | null => {
-		if (!element) return null;
-		const rect = element.getBoundingClientRect(), bottom = row()?.getBoundingClientRect().bottom ?? 0;
-		return bottom > rect.bottom ? new DOMRect(rect.left, rect.top, rect.width, bottom - rect.top) : rect;
-	};
 </script>
 
 <script lang="ts">
@@ -32,7 +26,7 @@
 		onPlace?: (card: HTMLElement) => void;
 		/** Keep the surface inside this element or live rectangle instead of anywhere in the window. */
 		bounds?: Anchor;
-		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
+		/** A live rectangle the card should clear vertically: always for a `bottom` placement, otherwise when it cannot fit beside its anchor. */
 		avoidRect?: () => DOMRect | null;
 		/** Keep a thread's anchor visible while its contents grow. */
 		clearAnchor?: boolean;
@@ -107,9 +101,12 @@
 		const height = Math.min(naturalHeight, area.bottom - area.top - 2 * gap);
 		const avoided = avoidRect?.();
 		const under = placement === 'bottom-end' || (placement === 'bottom' && rect.left + width > area.right - gap) ? rect.right - width : rect.left;
+		// A card placed below or above its anchor clears the avoided rectangle on that side too.
+		const vertical = placement === 'bottom' || placement === 'bottom-end';
+		const span = vertical && avoided ? { top: Math.min(rect.top, avoided.top), bottom: Math.max(rect.bottom, avoided.bottom) } : rect;
 		const spots: Record<Side, [number, number]> = {
-			below: [under, rect.bottom + gap],
-			above: [under, rect.top - height - gap],
+			below: [under, span.bottom + gap],
+			above: [under, span.top - height - gap],
 			right: [rect.right + gap, rect.top],
 			left: [rect.left - width - gap, rect.top],
 			'avoid-below': [under, (avoided?.bottom ?? rect.bottom) + gap],
@@ -159,8 +156,8 @@
 			if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 			return;
 		}
-		const overflowsBelow = rect.bottom + gap + height > area.bottom - gap;
-		const fitsAbove = rect.top - gap - height >= area.top + gap;
+		const overflowsBelow = span.bottom + gap + height > area.bottom - gap;
+		const fitsAbove = span.top - gap - height >= area.top + gap;
 		let side: Side = 'below';
 		if (placement === 'bottom' || placement === 'bottom-end') {
 			// Below the anchor when it fits; otherwise above it.

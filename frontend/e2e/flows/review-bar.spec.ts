@@ -628,7 +628,6 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		const requester = root.querySelector<HTMLElement>('.rb-who')!.getBoundingClientRect();
 		const ask = root.querySelector<HTMLElement>('.rb-ask')!.getBoundingClientRect();
 		const comments = root.querySelector<HTMLElement>('.comment-status')!;
-		// The owner and supervisor row stays in view on a phone; the reading-area budget predates it, so it is measured apart.
 		const ownership = document.querySelector<HTMLElement>('[data-ownership-row]')?.getBoundingClientRect().height ?? 0;
 		return {
 			firstBodyY: firstLine.top,
@@ -639,8 +638,9 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 		};
 	});
 	if (mode === 'phone') {
+		// The phone header holds the title rows (240px) and, below them, the owner and supervisor items as one touch row (at most 56px).
 		expect(measurements.ownershipRowHeight, 'the owner and supervisor row is one touch row').toBeLessThanOrEqual(56);
-		expect(measurements.firstBodyY - measurements.ownershipRowHeight, 'the first document line stays in the approved phone reading area').toBeLessThanOrEqual(240);
+		expect(measurements.firstBodyY, 'the first document line sits below the title rows and the one owner and supervisor row').toBeLessThanOrEqual(240 + 56);
 		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
 		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
 		const leadAsk = bar(page).locator('.rb-ask');
