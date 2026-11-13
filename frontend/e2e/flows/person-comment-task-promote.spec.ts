@@ -65,7 +65,9 @@ for (const editedOnDisk of [false, true]) test(`comment task after promote, edit
 		expect([promoted.comments_before > 0, promoted.carried_comments, promoted.source_comments])
 			.toEqual([true, promoted.comments_before, 0]);
 		const carried = await (await request.get(`/api/artifacts/${promoted.shared}/comments?${query}`)).json();
-		expect(carried.comments.length).toBe(promoted.comments_before);
+		// The API returns threads with their replies nested, so each thread counts once plus its replies.
+		const rows = (carried.comments as { replies?: unknown[] }[]).reduce((sum, thread) => sum + 1 + (thread.replies?.length ?? 0), 0);
+		expect(rows).toBe(promoted.comments_before);
 		expect(promoted.comment_task, 'the promoted document carries the person’s comment task').toBeTruthy();
 		await page.screenshot({ path: testInfo.outputPath('moved-comments.png') });
 		return;
