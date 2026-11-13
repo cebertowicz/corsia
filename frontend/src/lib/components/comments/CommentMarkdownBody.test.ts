@@ -5,12 +5,17 @@ import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let resize: ResizeObserverCallback | undefined;
+let observed: Element[] = [];
 
+// Like the browser's, observe() refuses anything that is not an element.
 class ResizeObserverStub {
 	constructor(callback: ResizeObserverCallback) {
 		resize = callback;
 	}
-	observe() {}
+	observe(target: unknown) {
+		if (!(target instanceof Element)) throw new TypeError("Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.");
+		observed.push(target);
+	}
 	disconnect() {}
 }
 
@@ -19,6 +24,7 @@ afterEach(() => {
 	component = null;
 	host?.remove();
 	resize = undefined;
+	observed = [];
 	vi.unstubAllGlobals();
 });
 
@@ -57,6 +63,15 @@ describe('CommentMarkdownBody', () => {
 		expect(more().textContent).toBe('Show more');
 		expect(reveal.classList.contains('open')).toBe(false);
 		expect(reveal.classList.contains('clamped')).toBe(true);
+	});
+
+	it('watches the reveal box as well as the text, so a preview clamp that changes with the card is measured again', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: 'A long comment body' } });
+		flushSync();
+		expect(observed).toEqual([host.querySelector('.ct-markdown'), host.querySelector('.ct-markdown-reveal')]);
 	});
 
 	it('toggling the disclosure does not reach the card that focuses its thread', () => {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { renderMentions, type TaggedAgent } from './mentionMarkup';
+	import './comment-link.css';
 	import type { MentionOccurrence } from './mentionSelection';
 
 	let { text, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
@@ -20,6 +21,9 @@
 		}
 		const observer = new ResizeObserver(measure);
 		observer.observe(node);
+		// Its clamp changes with the card (a margin card's preview clamps sooner than the card opened), so whether it clips is measured again.
+		// The reveal box is the parent; `reveal` is not bound yet while this child mounts.
+		if (node.parentElement) observer.observe(node.parentElement);
 		requestAnimationFrame(measure);
 		return { update: measure, destroy: () => observer.disconnect() };
 	}
@@ -36,7 +40,7 @@
 {#if clamped}<button class="ct-more" onclick={(e) => { e.stopPropagation(); toggle(); }}>{open ? 'Show less' : 'Show more'}</button>{/if}
 
 <style>
-	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: 4lh; max-height: 4lh; overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
+	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: calc(var(--ct-body-lines, 4) * 1lh); max-height: calc(var(--ct-body-lines, 4) * 1lh); overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
 	.ct-markdown-reveal.clamped { -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); }
 	.ct-markdown-reveal.open { max-height: var(--ct-expanded-height); }
 	.ct-markdown { font-size: var(--text-subhead); line-height: var(--lh-snug); color: var(--text-primary); }

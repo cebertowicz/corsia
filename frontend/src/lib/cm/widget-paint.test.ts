@@ -33,21 +33,53 @@ describe('paintTable and unpaint', () => {
 	it('restore the widget exactly after painting whole cells, several rows and the whole table', () => {
 		const el = widget(), before = el.innerHTML;
 		paintTable(el, BASE, SRC, [mark('a', 'Eli'), mark('b', 'Alpha | Dana and Dana', 'focused'), { id: 'c', kind: 'pending', from: BASE, to: BASE + SRC.length }]);
-		expect(cell(el, 2, 1).classList.contains('cm-comment-anchor')).toBe(true);
+		expect(cell(el, 2, 1).querySelector('.cm-comment-wrap.cm-comment-anchor')?.textContent).toBe('Eli');
 		expect(el.classList.contains('cm-comment-block-pending')).toBe(true);
 		unpaint(el);
 		expect(el.innerHTML).toBe(before);
 		expect(el.className).toBe('cm-md-table');
 	});
 
+	it('marks a whole cell on its text, as a text comment, and only an empty cell as a cell', () => {
+		const el = widget();
+		paintTable(el, BASE, SRC, [mark('a', 'Dana and Dana')]);
+		const owner = cell(el, 1, 1);
+		expect(owner.classList.contains('cm-comment-anchor')).toBe(false);
+		expect([...owner.querySelectorAll('.cm-comment-wrap.cm-comment-anchor')].map((wrap) => wrap.textContent)).toEqual(['Dana and ', 'Dana']);
+		expect(owner.querySelector('em .cm-comment-wrap')?.getAttribute('data-comment-ids')).toBe('a');
+		cell(el, 2, 1).textContent = '';
+		paintTable(el, BASE, SRC, [mark('b', 'Eli')]);
+		expect(cell(el, 2, 1).classList.contains('cm-comment-anchor')).toBe(true);
+		expect(cell(el, 2, 1).dataset.commentIds).toBe('b');
+	});
+
+	it('marks a whole cell on its text inside a non-editable widget, leaving a diagram or non-editable part in the cell out', () => {
+		const el = widget();
+		el.setAttribute('contenteditable', 'false');
+		const eli = cell(el, 2, 1);
+		eli.insertAdjacentHTML('beforeend', '<span contenteditable="false">caption</span><svg><text>label</text></svg>');
+		paintTable(el, BASE, SRC, [mark('a', 'Eli')]);
+		expect(eli.classList.contains('cm-comment-anchor')).toBe(false);
+		expect([...eli.querySelectorAll('.cm-comment-wrap')].map((wrap) => wrap.textContent)).toEqual(['Eli']);
+	});
+
 	it('keeps every comment on one cell and on a whole table, in paint order, and never a pending mark', () => {
 		const el = widget();
 		paintTable(el, BASE, SRC, [mark('a', 'Eli'), mark('b', 'Eli'), { id: 'draft', kind: 'pending', from: BASE + SRC.indexOf('Eli'), to: BASE + SRC.indexOf('Eli') + 3 }]);
-		expect(cell(el, 2, 1).dataset.commentIds).toBe('a,b');
+		expect(cell(el, 2, 1).querySelectorAll('.cm-comment-wrap')).toHaveLength(1);
+		expect(cell(el, 2, 1).querySelector<HTMLElement>('.cm-comment-wrap')!.dataset.commentIds).toBe('a,b');
 		const whole = widget();
 		paintTable(whole, BASE, SRC, [{ id: 'a', kind: 'placed', from: BASE, to: BASE + SRC.length }, { id: 'draft', kind: 'pending', from: BASE, to: BASE + SRC.length }, { id: 'b', kind: 'focused', from: BASE, to: BASE + SRC.length }]);
 		expect(whole.dataset.commentIds).toBe('a,b');
 		expect(whole.classList.contains('cm-comment-block-pending')).toBe(true);
+	});
+
+	it('draws a cell\'s text unread when any comment on the whole cell is unread, the later one included', () => {
+		const el = widget();
+		paintTable(el, BASE, SRC, [mark('a', 'Eli'), { ...mark('b', 'Eli'), unread: true }]);
+		const wrap = cell(el, 2, 1).querySelector<HTMLElement>('.cm-comment-wrap')!;
+		expect(wrap.dataset.commentIds).toBe('a,b');
+		expect(wrap.hasAttribute('data-unread')).toBe(true);
 	});
 });
 

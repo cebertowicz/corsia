@@ -17,6 +17,7 @@
 	import { keepAboveSheet, transcriptBounds } from './chatCommentViewport';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import type { MarginComposer } from '$lib/docMarginSource';
+	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
 	import './commentAnchors.css';
 
 	let { threadId, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; onSendReply: (reply: ChatComment) => Promise<void>; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
@@ -45,7 +46,7 @@
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
-	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+	const coarse = coarsePointer();
 	const open = $derived(!!draft);
 	const target = $derived(draft?.anchor.from_off);
 	const isReply = $derived(!!draft?.root_cid);
@@ -53,7 +54,7 @@
 	let returnFocus: HTMLElement | null = null;
 	let closing = $state(false);
 	let afterClose: (() => void) | null = null;
-	const above = $derived(!!pick && !coarse && pick.rect.top > 96);
+	const place = $derived(pick ? selectionButtonPlace(pick.rect, coarse) : null);
 	const left = $derived.by(() => {
 		if (!pick) return 0;
 		const bounds = messageRoot()?.getBoundingClientRect();
@@ -265,7 +266,7 @@
 			if (!marginComments) {
 				for (const message of $messages) {
 					if (message.thread_id !== threadId) continue;
-					const stacked = ids.filter(id => message.chat_comments?.some(item => item.id === id));
+					const stacked = (message.chat_comments ?? []).filter(item => ids.includes(item.id)).map(item => item.id);
 					if (stacked.length > 1) { sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: stacked[0], list: stacked, listed: true }; return; }
 				}
 			}
@@ -348,7 +349,7 @@
 </script>
 
 {#if pick && !open}
-	<button bind:offsetWidth={buttonWidth} class="sel-comment" class:above class:below={!above} style="top:{above ? pick.rect.top - 6 : pick.rect.bottom + 6}px; left:{left}px" onmousedown={event => event.preventDefault()} onclick={() => { draft = pick; }}>
+	<button bind:offsetWidth={buttonWidth} class="sel-comment" class:above={place?.above} class:below={!place?.above} style="top:{place?.top}px; left:{left}px" onmousedown={event => event.preventDefault()} onclick={() => { draft = pick; }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}

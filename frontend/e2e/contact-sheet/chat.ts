@@ -1,45 +1,79 @@
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
-import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
-import { injectMessage } from '../support/mock';
+import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { injectMessage, seedMockResponses, waitForThreadReply } from '../support/mock';
+import { commentEditor, commentEditorClosed, commentOnMessage } from '../support/chatComments';
 
 export const scrollAnchor = '.user-bubble';
+// Each capture runs on a fresh database, so the title needs no id to be told apart.
+export const title = 'Responsive review of the document view';
+
+export const conversation: Array<[role: 'user' | 'assistant', content: string]> = [
+  ['user', 'Please review the document view at different screen sizes. In particular, check that the table stays readable and that long comments open without covering the text around them.'],
+  ['assistant', 'I opened the review document at phone, tablet and desktop widths. The table wraps its long cell and keeps the other columns identifiable. Long comments open beside the text on a wide screen and in a sheet on a phone.'],
+  ['user', 'What happens to the navigation while the document scrolls?'],
+  ['assistant', 'The navigation stays at the top of the canvas while the document scrolls under it. On a phone it tucks into the menu button, so the text gets the whole width.'],
+  ['user', 'And in the dark theme?'],
+  ['assistant', 'Labels and controls keep their contrast against the dark background. The one weak spot is the table border, which fades at the lowest brightness; I suggest a stronger border colour there.'],
+  ['user', 'Can a reader get back to the latest message after reading older context?'],
+  ['assistant', 'Yes. Scrolling up shows a control that returns to the latest message, and the composer stays in reach the whole time.'],
+];
+
+export const summary = [
+  'The review covers the document, the comment list, the navigation and the message composer across the available screen sizes.',
+  'At a narrow width the document stays readable without a sideways scroll. A long table cell wraps while the columns next to it stay identifiable, and an image keeps its proportions.',
+  'In the dark theme, labels and controls stay distinct from their backgrounds. Comments carry enough context for a reader to understand the question without reopening the whole discussion.',
+  'Compare the first and last parts of the conversation as well. The composer should stay within reach, and the reader should be able to return to the latest message after reviewing earlier context.',
+].join('\n\n');
+
+/** Comments on a phrase of a message the way a person does: selects its text, then writes on the selection menu. */
+async function commentOn(page: Page, messageId: string, phrase: string, note: string) {
+  const row = page.locator(`[data-message-id="${messageId}"]`);
+  await row.scrollIntoViewIfNeeded();
+  await row.evaluate((element, phrase) => {
+    const body = element.querySelector('.long-message-body') ?? element;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode() as Text | null;
+    while (node && !node.data.includes(phrase)) node = walker.nextNode() as Text | null;
+    if (!node) throw new Error(`"${phrase}" was not rendered`);
+    const start = node.data.indexOf(phrase);
+    const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + phrase.length);
+    const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  }, phrase);
+  await page.locator('.sel-comment').click();
+  await commentEditor(page).fill(note);
+  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await commentEditorClosed(page);
+  return row;
+}
 
 export async function seed(page: Page, request: APIRequestContext) {
-  const title = `Review conversation ${Date.now()}`;
   const thread = await createSession(request, title);
-  for (let index = 0; index < 12; index++) {
-    await injectMessage(request, thread, {
-      role: index % 2 ? 'assistant' : 'user',
-      content: index % 2
-        ? 'The review is complete. The navigation remains visible while the document scrolls, and each comment retains its original context. Please check the narrow layout and the dark theme before sharing the design.'
-        : 'Please review the document view at different screen sizes. In particular, check that the table remains readable and that long comments can be opened without covering the surrounding content.',
-      metadata: index % 2 ? { for_user: true } : {},
-    }, TEST_TOKEN);
-  }
-  await injectMessage(request, thread, {
-    role: 'assistant',
-    content: [
-      'The review covers the document, the comment drawer, the navigation rail, and the message composer across the available screen sizes.',
-      'At a narrow width the document should remain readable without requiring a horizontal scroll. A long table cell should wrap while the adjacent columns remain identifiable, and an image should keep its proportions.',
-      'In the dark theme, labels and controls should remain distinguishable from their backgrounds. Comments need enough context for a reader to understand the question without reopening the entire discussion.',
-      'Please compare the first and last parts of the conversation as well. The composer should stay accessible, and the reader should be able to return to the latest message after reviewing earlier context.',
-    ].join('\n\n'),
-    metadata: { for_user: true },
-  }, TEST_TOKEN);
-  const quote = 'Please check the narrow layout and the dark theme before sharing the design.';
-  await injectMessage(request, thread, {
-    role: 'user',
-    content: 'I added a note about the review.',
-    metadata: { reply_context: { comments: [{ id: 'c1', seq: 1, from_off: 0, to_off: quote.length, quote, anchor_prefix: '', anchor_suffix: '', note: 'Can the table remain readable on a small phone?', cid: 'c1' }] } },
-  }, TEST_TOKEN);
+  const ids: string[] = [];
+  for (const [role, content] of conversation) ids.push(await injectMessage(request, thread, { role, content, metadata: role === 'assistant' ? { for_user: true } : {} }, TEST_TOKEN));
+  const last = await injectMessage(request, thread, { role: 'assistant', content: summary, metadata: { for_user: true } }, TEST_TOKEN);
   async function open(target: Page) {
     await openAppPastLanding(target);
     if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
     await sidebarThread(target, title).click();
-    // A stored comment reads in its thread on the highlight; the bubble shows only its own words.
-    await expect(target.locator('.messages .message.user').filter({ hasText: 'I added a note about the review.' })).toBeVisible();
+    await expect(target.locator('.cm-comment-anchor').first()).toBeVisible();
     await expect(target.locator('button.model-chip .model-chip-name')).toHaveText('Claude Sonnet 5.5');
   }
+  // The person's comments are written on a desktop window; each posts from its own box and starts the turn that answers it.
+  const captureSize = page.viewportSize();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openAppPastLanding(page);
+  await sidebarThread(page, title).click();
+  await waitForWsConnected(page);
+  const border = 'A darker grey border (the divider colour) passes in both themes; I will apply it.';
+  await seedMockResponses(request, [{ content: border }]);
+  const table = await commentOn(page, ids[5], 'a stronger border colour', 'Which colour, and does it pass contrast in both themes?');
+  await waitForThreadReply(request, thread, border);
+  await seedMockResponses(request, [{ content: 'The control is a button in the tab order, so Tab reaches it.' }]);
+  const closing = await commentOn(page, last, 'return to the latest message', 'Is that control reachable by keyboard?');
+  await waitForThreadReply(request, thread, 'The control is a button in the tab order, so Tab reaches it.');
+  await commentOnMessage(table, 'a stronger border colour');
+  await commentOnMessage(closing, 'return to the latest message');
+  if (captureSize) await page.setViewportSize(captureSize);
   await open(page);
   return open;
 }

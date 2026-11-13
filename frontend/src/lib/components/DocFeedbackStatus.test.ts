@@ -187,6 +187,60 @@ describe('DocFeedbackStatus', () => {
 		expect(host.textContent).toContain('1 comment not delivered: its owner is unavailable');
 	});
 
+	it('confirms a delivered send of the shown document from another lane with the header\'s Sent mark too', async () => {
+		component!.sync('artifact-1', { open_count: 1, image_held_count: 1, owner_label: null, undelivered_batches: [] });
+		flushSync();
+		// No document Send stands in the header: the image lane is sent from its viewer, or as it closes.
+		expect(host.querySelector('button')).toBeNull();
+		await (component as any).controller().sendImage();
+		flushSync();
+		expect(host.querySelector('.sent')?.textContent?.trim()).toBe('Sent');
+		expect(host.querySelector('[role="status"]')!.textContent).toBe('1 comment sent');
+	});
+
+	it('shows Sent for a moment after the image sends while the document still holds its own, then the document Send returns', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout'] });
+		try {
+			component!.sync('artifact-1', { open_count: 3, document_held_count: 2, image_held_count: 1, owner_label: null, undelivered_batches: [] });
+			flushSync();
+			fetchMock.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+				woken: [], undelivered_batches: [], sent_count: 1, undelivered_count: 0, open_count: 2, document_held_count: 2, image_held_count: 0,
+			}), { status: 200 })));
+			await (component as any).controller().sendImage();
+			flushSync();
+			const status = () => host.querySelector('[role="status"]')!.textContent;
+			expect(status()).toBe('1 comment sent');
+			// The reader's next load still finds the document's two held: the header says Sent in its Send's place for the moment.
+			component!.sync('artifact-1', { open_count: 2, document_held_count: 2, image_held_count: 0, owner_label: null, undelivered_batches: [] });
+			flushSync();
+			expect(status()).toBe('1 comment sent');
+			expect(host.querySelector('.sent')?.textContent?.trim()).toBe('Sent');
+			expect(host.querySelector('button')).toBeNull();
+			vi.advanceTimersByTime(SENT_HOLD_MS);
+			flushSync();
+			expect(status()).toBe('');
+			expect(host.querySelector('.sent')).toBeNull();
+			expect(host.querySelector('button')?.textContent).toContain('Send 2 comments');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('stops saying what the image sent once the image lane holds again', async () => {
+		component!.sync('artifact-1', { open_count: 3, document_held_count: 2, image_held_count: 1, owner_label: null, undelivered_batches: [] });
+		flushSync();
+		fetchMock.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+			woken: [], undelivered_batches: [], sent_count: 1, undelivered_count: 0, open_count: 2, document_held_count: 2, image_held_count: 0,
+		}), { status: 200 })));
+		await (component as any).controller().sendImage();
+		flushSync();
+		expect(host.querySelector('[role="status"]')!.textContent).toBe('1 comment sent');
+		component!.sync('artifact-1', { open_count: 3, document_held_count: 2, image_held_count: 1, owner_label: null, undelivered_batches: [] });
+		flushSync();
+		expect(host.querySelector('[role="status"]')!.textContent).toBe('');
+		expect(host.querySelector('button')?.textContent).toContain('Send 2 comments');
+	});
+
 	it('shows a failed default-mode delivery with Retry in the document header, and Retry delivers it', async () => {
 		component!.sync('artifact-1', {
 			open_count: 0,

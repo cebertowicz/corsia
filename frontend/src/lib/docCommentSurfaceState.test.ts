@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
@@ -40,6 +41,44 @@ describe('comment surface state', () => {
 		expect(surface.focusComment('c1', new DOMRect())).toBe(true);
 		expect(surface.state).toEqual({ kind: 'thread', id: 'c1', fromText: true });
 		expect(get(focusedDocComment)).toBe('c1');
+	});
+
+	it('hands focus back to the caret from a margin column opened by the comments button, and to the button from a list over the text', () => {
+		let caret = 0;
+		const button = document.createElement('button');
+		document.body.append(button);
+		const wide = createCommentSurfaceState(() => { caret += 1; }, undefined, () => true);
+		wide.openList(button);
+		wide.restoreFocus();
+		expect(caret).toBe(1);
+		const narrow = createCommentSurfaceState(() => { caret += 1; }, undefined, () => false);
+		narrow.openList(button);
+		narrow.restoreFocus();
+		expect(document.activeElement).toBe(button);
+		expect(caret).toBe(1);
+		button.remove();
+	});
+
+	it('hands focus back to the jump control when it can take it, and to the text when the control refuses it on its way out', async () => {
+		const root = document.body.appendChild(document.createElement('div'));
+		const button = root.appendChild(document.createElement('div')).appendChild(document.createElement('button'));
+		button.parentElement!.setAttribute('data-doc-jump', '');
+		try {
+			const restoreEditor = vi.fn();
+			const surface = createCommentSurfaceState(restoreEditor);
+			surface.restoreReplyFocus(() => root);
+			surface.restoreFocus(); await tick(); await tick();
+			expect(document.activeElement).toBe(button);
+			expect(restoreEditor).not.toHaveBeenCalled();
+			// Leaving, the control is inert, and focus() on it does nothing.
+			button.blur();
+			button.focus = () => {};
+			surface.restoreReplyFocus(() => root);
+			surface.restoreFocus(); await tick(); await tick();
+			expect(restoreEditor).toHaveBeenCalledTimes(1);
+		} finally {
+			root.remove();
+		}
 	});
 
 	it('keeps the margin column under a new comment and goes back to it when the draft closes', () => {
@@ -133,6 +172,26 @@ describe('comment surface state', () => {
 		expect(surface.atClick).toBe(false);
 	});
 
+	it('counts what the reader opens, and not a pick let go or a resolved thread moving to the next in its stack', () => {
+		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		const button = document.createElement('button');
+		surface.focusMarker(['c1', 'c2'], button);
+		expect(surface.opened).toBe(1);
+		surface.focusRemainingThread(['c2']);
+		surface.selectMarkerThread('c1');
+		expect(surface.opened).toBe(1);
+		surface.closeAll();
+		surface.focusComment('c1', new DOMRect());
+		surface.release();
+		expect(surface.state).toEqual({ kind: 'list' });
+		expect(surface.opened).toBe(2);
+		surface.openDraft(new DOMRect());
+		surface.state = { kind: 'thread', id: 'saved' };
+		surface.closeAll();
+		surface.openList(button);
+		expect(surface.opened).toBe(5);
+	});
+
 	it('tracks the hovered suggestion without moving focus', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.hover('s1');
@@ -175,7 +234,8 @@ describe('comment surface state', () => {
 			expect(editor).toHaveBeenCalledTimes(1);
 		});
 
-		it('closes the column to the button that opened it after a draft over it was cancelled', () => {
+		// The column sits beside the text, so closing it hands focus back to the caret, not to the button that opened it.
+		it('closes the column to the caret after a draft over it was cancelled', () => {
 			const editor = vi.fn(), button = document.body.appendChild(document.createElement('button'));
 			const surface = createCommentSurfaceState(editor, undefined, () => true);
 			surface.openList(button);
@@ -184,8 +244,8 @@ describe('comment surface state', () => {
 			expect(surface.state).toEqual({ kind: 'list' });
 			surface.close();
 			surface.restoreFocus();
-			expect(document.activeElement).toBe(button);
-			expect(editor).not.toHaveBeenCalled();
+			expect(editor).toHaveBeenCalledTimes(1);
+			expect(document.activeElement).not.toBe(button);
 			button.remove();
 		});
 

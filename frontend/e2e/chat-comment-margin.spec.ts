@@ -94,15 +94,16 @@ async function capture(page: Page, stage: string) {
 test('a wide chat holds the thread as a card beside its text, and the highlight picks that card', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
 	test.setTimeout(120_000);
-	const { row } = await commentedMessage(page, request, 1440);
-	// Leave enough chat width for the margin, as in the long-reply cases below.
-	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
+	// The column opens only where it fits beside a centred transcript without moving it: at 1920 with the sidebar open and the
+	// Workspace panel closed, never at 1440 beside both.
+	const { row } = await commentedMessage(page, request, 1920);
 	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	await centerAndSettle(page, row);
 
 	// The card is in the column beside the text, at the line its comment was cut from.
 	const card = page.locator('.chat-margin .chat-margin-card');
-	await expect(card).toHaveCount(1);
+	// The column comes up once the closing panel has left, and a card stays hidden until the stack has placed it.
+	await expect(card).toBeVisible();
 	const column = await page.locator('.chat-margin').boundingBox();
 	const mark = await row.locator('.cm-comment-anchor').filter({ hasText: QUOTE }).boundingBox();
 	const box = await card.boundingBox();
@@ -121,7 +122,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
 	await page.waitForTimeout(500);
 	expect(Math.abs((await highlight.boundingBox())!.y - mark.y), 'the clicked text stays put').toBeLessThanOrEqual(2);
-	await capture(page, 'chat-margin-1440');
+	await capture(page, 'chat-margin-1920');
 
 	// Answering from the card is the flat thread's own Reply, and it reads back in the card.
 	const replyField = card.getByPlaceholder('Reply…');

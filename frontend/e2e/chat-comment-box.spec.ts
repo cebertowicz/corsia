@@ -56,16 +56,20 @@ async function postedOnceMore(request: APIRequestContext, thread: string, note: 
   await expect.poll(async () => (await posted(request, thread, note)).map(comment => comment.user_message_id !== before)).toEqual([true]);
 }
 
-/** The passage being commented (its draft highlight, which is not a control) sits below the shell header and above the open sheet. */
-async function passageInView(page: Page, messageId: string): Promise<boolean> {
-  return page.evaluate(id => {
-    const mark = document.querySelector<HTMLElement>(`[data-message-id="${id}"] .cm-comment-pending:not([role="button"])`);
+/**
+ * The passage being commented sits below the shell header and above the open sheet: its draft highlight (not a control) while
+ * the comment is written, or, with `thread`, the highlight of the comment whose thread is open, found by its phrase.
+ */
+async function passageInView(page: Page, messageId: string, thread = ''): Promise<boolean> {
+  return page.evaluate(([id, opened]) => {
+    const marks = [...document.querySelectorAll<HTMLElement>(`[data-message-id="${id}"] ${opened ? '.cm-comment-anchor' : '.cm-comment-pending:not([role="button"])'}`)];
+    const mark = opened ? marks.find(candidate => candidate.textContent === opened) : marks[0];
     const header = document.querySelector('.shell-header')?.getBoundingClientRect();
     const sheet = document.querySelector('[data-adaptive-drawer] .drawer-panel')?.getBoundingClientRect();
     if (!mark || !header || !sheet) return false;
     const rect = mark.getBoundingClientRect();
     return rect.top >= header.bottom && rect.bottom <= sheet.top;
-  }, messageId);
+  }, [messageId, thread] as const);
 }
 
 /** Make the page's primary pointer a finger (Chromium), so `(pointer: coarse)` styles apply from here on. */
@@ -163,6 +167,60 @@ for (const width of [1440, 393]) test(`a failed comment post keeps its text and 
   await expect(page.locator('.messages .message.user')).toHaveCount(0);
   await frame(failed, 'failed-retry-pressed');
   await release(request, `held-${width}`);
+});
+
+/**
+ * On a phone the sheet covers the foot of the transcript. Commenting on its last row, whose passage sits where the sheet comes
+ * up, the passage stays between the header and the sheet when a refusal grows the box and when a failed comment's thread opens.
+ */
+test('on a phone the passage of the last message stays above the sheet after a refusal and with a failed thread open, 393', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name !== 'chromium-desktop', 'Requires a disposable mock instance');
+  if (framesDirectory) fs.mkdirSync(framesDirectory, { recursive: true });
+  const frame = async (target: Parameters<typeof capture>[1], name: string) => { if (framesDirectory) await capture(page, target, `${name}-393`); };
+  await page.setViewportSize({ width: 393, height: 852 });
+  let refused: string | null = null;
+  await refuse(page, () => refused);
+  const title = 'Comment passage above sheet 393';
+  const thread = await createSession(request, title);
+  // Enough rows before it that the transcript scrolls and the message is its last row, at the end of the scroll.
+  for (let row = 0; row < 12; row++) await injectMessage(request, thread, { role: 'assistant', content: 'Earlier context.', metadata: { for_user: true } }, TEST_TOKEN);
+  const id = await injectMessage(request, thread, { role: 'assistant', content: MESSAGE, metadata: { for_user: true } }, TEST_TOKEN);
+  await seedMockResponses(request, [{ content: 'Holding the turn.', response_gate: 'held-passage-393' }, { content: 'Finished.' }]);
+  await openAppPastLanding(page);
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await sidebarThread(page, title).click();
+  await waitForWsConnected(page);
+  const row = page.locator(`[data-message-id="${id}"]`);
+  await expect(row).toBeVisible();
+  const box = page.getByRole('dialog', { name: 'New comment' });
+
+  // A refusal adds the reason and a Retry to the box, so the sheet grows; the passage still clears it.
+  refused = 'Refused once';
+  await selectPhrase(page, id, 'First phrase', false);
+  await page.locator('.sel-comment').click();
+  await commentEditor(page).fill('Refused once');
+  await expect.poll(() => passageInView(page, id)).toBe(true);
+  await box.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(box.getByRole('alert')).toHaveText(REFUSAL);
+  await expect.poll(() => passageInView(page, id)).toBe(true);
+  await frame(box, 'refused-passage');
+
+  // Stored, then failed: the comment's thread opens over the transcript and its passage is clear of it too.
+  refused = null;
+  await box.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(commentEditor(page)).toHaveCount(0);
+  await selectPhrase(page, id, 'Second phrase');
+  await commentEditor(page).fill('Fails after queued');
+  await box.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(commentEditor(page)).toHaveCount(0);
+  await expect.poll(async () => (await posted(request, thread, 'Fails after queued')).length).toBe(1);
+  const [queued] = await posted(request, thread, 'Fails after queued');
+  await failQueuedInput(request, thread, queued.user_message_id, UNDELIVERED);
+  const failed = await openCommentThread(row, page, 'Second phrase');
+  await expect(failed.locator('.failed-reply')).toContainText(`Not delivered: ${UNDELIVERED}`);
+  await expect.poll(() => passageInView(page, id, 'Second phrase')).toBe(true);
+  await frame(failed, 'failed-thread-passage');
+  await release(request, 'held-passage-393');
 });
 
 test('a comment stopped after its turn began writing reads uncertain and retries once, 1440', async ({ page, request }) => {

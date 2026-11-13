@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { keepAboveSheet, revealAboveSheet } from './chatCommentViewport';
+import { keepAboveSheet, revealAboveSheet, SHEET_SPACE } from './chatCommentViewport';
 
 function setup(sheetHeight: number) {
 	document.body.innerHTML = '<header class="shell-header"></header><div class="messages"></div><div data-adaptive-drawer><div class="drawer-panel"></div></div>';
@@ -18,7 +18,7 @@ function setup(sheetHeight: number) {
 afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ''; });
 
 describe('revealAboveSheet', () => {
-	// Space between the header (60 + 16) and the sheet resting at 852 - 300 (552 - 16): 76..536, centre 306.
+	// Space between the header (60 + 8) and the sheet resting at 852 - 300 (552 - 8): 68..544, centre 306.
 	it('brings a passage hidden under the header into the space above the sheet, centred', () => {
 		const { panel, scroller, scrollBy } = setup(300);
 		revealAboveSheet(scroller, new DOMRect(0, 20, 200, 20), panel, true);
@@ -39,23 +39,21 @@ describe('revealAboveSheet', () => {
 		expect(scrollBy).toHaveBeenCalledWith({ top: 610 - 306 });
 	});
 
-	it('adds room below the transcript when the passage cannot rise without it, and gives it back with the stop', () => {
-		const { panel, scroller, scrollBy } = setup(300);
-		Object.defineProperty(scroller, 'scrollHeight', { value: 1000 });
-		Object.defineProperty(scroller, 'clientHeight', { value: 700 });
-		scroller.scrollTop = 290;
-		scroller.style.paddingBottom = '4px';
-		const stop = keepAboveSheet(panel, () => scroller, () => new DOMRect(0, 600, 200, 20));
-		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 20), panel, true);
-		// 1000 - 700 - 290 = 10 left; the passage needs 610 - 306 = 304: 294 more.
-		expect(scroller.style.paddingBottom).toBe('298px');
+	it('keeps space at the end of the transcript as tall as the sheet, and gives it back when the sheet is gone', () => {
+		const { panel, scroller } = setup(300);
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+		const stop = keepAboveSheet(panel, () => scroller, () => new DOMRect(0, 200, 200, 20));
+		frames.splice(0).forEach(callback => callback(0));
+		expect(scroller.style.getPropertyValue(SHEET_SPACE)).toBe('300px');
 		stop();
-		expect(scroller.style.paddingBottom).toBe('4px');
+		expect(scroller.style.getPropertyValue(SHEET_SPACE)).toBe('');
+		vi.unstubAllGlobals();
 	});
 
 	it('shows a passage taller than the space from its first line', () => {
 		const { panel, scroller, scrollBy } = setup(300);
 		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 900), panel, true);
-		expect(scrollBy).toHaveBeenCalledWith({ top: 600 - 76 });
+		expect(scrollBy).toHaveBeenCalledWith({ top: 600 - 68 });
 	});
 });
