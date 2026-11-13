@@ -132,7 +132,14 @@ function hiddenAuthorLines(thread: Locator): Promise<string[]> {
 function bodyCut(body: Locator): Promise<string | null> {
 	return body.evaluate((root) => {
 		root.scrollIntoView({ block: 'start', behavior: 'instant' });
-		const vv = window.visualViewport, top = vv?.offsetTop ?? 0, bottom = top + (vv?.height ?? window.innerHeight);
+		// The view is the screen and the one scroller holding the card (the sheet, popover or column): lines past its edge are
+		// read by scrolling it. Only a box inside the card cutting a line counts.
+		const card = root.closest<HTMLElement>('.ct') ?? root;
+		let outer = card.parentElement;
+		while (outer && !/(auto|scroll)/.test(getComputedStyle(outer).overflowY)) outer = outer.parentElement;
+		const vv = window.visualViewport, screenTop = vv?.offsetTop ?? 0, screenBottom = screenTop + (vv?.height ?? window.innerHeight);
+		const held = outer?.getBoundingClientRect();
+		const top = Math.max(screenTop, held?.top ?? screenTop), bottom = Math.min(screenBottom, held?.bottom ?? screenBottom);
 		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 		for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
 			if (!node.data.trim()) continue;
@@ -144,7 +151,7 @@ function bodyCut(body: Locator): Promise<string | null> {
 				// A body taller than the view is read in turn: only lines that start inside the view are held to it.
 				if (rect.top >= bottom) return null;
 				if (rect.top < top - 1 || rect.bottom > bottom + 1) return `${line} off screen`;
-				for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+				for (let parent = node.parentElement; parent && parent !== card.parentElement; parent = parent.parentElement) {
 					if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
 					const clip = parent.getBoundingClientRect();
 					if (rect.top < clip.top - 1 || rect.bottom > clip.bottom + 1) return `${line} cut by ${parent.className || parent.tagName}`;
@@ -199,22 +206,20 @@ for (const { label, view } of CASES) {
 			if (top.wide.length) fail(`list: content past the drawer's edge (${top.wide.join(', ')})`);
 			if (top.small.length) fail(`list: touch targets under 44px (${top.small.join('; ')})`);
 
-			// A long thread in the list shows its first comment, a replies row and its newest reply only.
+			// A long thread's replies are the agents', unread to the person: every one shows, none behind a replies row.
 			const longCard = card(page, doc.longThreads[1]);
 			await longCard.scrollIntoViewIfNeeded();
 			const longReplies = await longCard.locator('.ct-reply').count();
 			report.longThreadRepliesShown = longReplies;
-			if (!column) {
-				if (longReplies > 1) fail(`list: a 16-reply thread shows ${longReplies} replies, expected only the newest`);
-				const repliesRow = longCard.getByRole('button', { name: /16 replies/ });
-				if (!(await repliesRow.count())) fail('list: a long thread has no "16 replies" row to open it');
-			}
-			// A long suggestion is clamped, with Show all.
+			if (!column && longReplies !== 16) fail(`list: a thread with 16 unread replies shows ${longReplies}, expected all 16`);
+			// A long suggestion shows whole when it fits its clamp (a wide sheet wraps it in fewer lines); past the clamp it is cut with Show all.
 			const suggestion = card(page, doc.longSuggestion);
 			await suggestion.scrollIntoViewIfNeeded();
 			const showAll = suggestion.getByRole('button', { name: 'Show all' });
 			report.suggestionHeight = Math.round((await suggestion.boundingBox())?.height ?? 0);
-			if (!(await showAll.count())) fail(`list: the 400+ character suggestion is not clamped (${report.suggestionHeight}px tall, no Show all)`);
+			const diffCut = await suggestion.locator('.ct-diff').evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+			report.suggestionClamped = diffCut;
+			if (diffCut && !(await showAll.count())) fail(`list: the 400+ character suggestion is cut with no Show all (${report.suggestionHeight}px tall)`);
 			// Long text past chat's collapse length: unread shows whole; the person's own, read, collapses with Show more.
 			const unread = card(page, doc.longUnreadThread);
 			await unread.scrollIntoViewIfNeeded();
@@ -358,6 +363,13 @@ for (const { label, view } of LONG_CASES) {
 			const report: Record<string, unknown> = { label, view };
 			const open = async (quote: string, id: string) => {
 				const anchor = page.locator('.cm-comment-anchor').filter({ hasText: quote }).first();
+				// The editor draws only the lines near its view: scroll the document down until the quote's line is drawn.
+				const scroller = page.locator('.cm-scroller').first();
+				await scroller.evaluate((el) => { el.scrollTop = 0; });
+				for (let step = 0; step < 40 && !(await anchor.count()); step++) {
+					await scroller.evaluate((el) => { el.scrollTop += el.clientHeight * 0.8; });
+					await page.waitForTimeout(50);
+				}
 				await anchor.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
 				await press(anchor);
 				// One thread opens on its own in the sheet or the popover; in the margin it is that comment's card in the column.
