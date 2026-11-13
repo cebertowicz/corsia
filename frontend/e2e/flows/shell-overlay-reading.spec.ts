@@ -77,15 +77,27 @@ test('keeps the first whole line while the panel opens and closes', async ({ pag
 	await page.mouse.wheel(0, 1085);
 	await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(500);
 	await page.waitForTimeout(600);
-	const line = page.locator('.cm-line').filter({ hasText: 'Review section 2' }).first();
-	await expect(line).toBeVisible();
-	const before = (await line.boundingBox())!.y;
+	// The first whole line is the first line that starts inside the view. Which line that is after the same scroll depends
+	// on the engine's text metrics, so it is found, not named: a named line further down sits below a paragraph that
+	// rewraps with the width, so it moves even while the first whole line holds.
+	const firstWholeLine = () => scroller.evaluate((el) => {
+		const w = window as unknown as { __firstLine?: Element };
+		const top = el.getBoundingClientRect().top;
+		w.__firstLine ??= [...el.querySelectorAll('.cm-line')].find((line) => line.getBoundingClientRect().top >= top - 0.5);
+		return { y: w.__firstLine?.getBoundingClientRect().y ?? Number.NaN, drawn: !!w.__firstLine?.isConnected };
+	});
+	const before = await firstWholeLine();
+	expect(before.drawn).toBe(true);
 	await toggle.click();
 	await page.waitForTimeout(1800);
-	expect(Math.abs((await line.boundingBox())!.y - before)).toBeLessThan(2);
+	const open = await firstWholeLine();
+	expect(open.drawn, 'the first whole line is still drawn while the panel is open').toBe(true);
+	expect(Math.abs(open.y - before.y)).toBeLessThan(2);
 	await toggle.click();
 	await page.waitForTimeout(1800);
-	expect(Math.abs((await line.boundingBox())!.y - before)).toBeLessThan(2);
+	const closed = await firstWholeLine();
+	expect(closed.drawn, 'the first whole line is still drawn after the panel closes').toBe(true);
+	expect(Math.abs(closed.y - before.y)).toBeLessThan(2);
 });
 
 test('keeps the same reply and focus when a margin list becomes a sheet', async ({ page, request }) => {
@@ -218,7 +230,9 @@ async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1]
 	if (by === 'mouse') {
 		await toggle.click();
 	} else {
-		await page.keyboard.press('Tab');
+		// Safari's Tab moves between fields only: from a reply it goes into the next thread's reply, which is the reader
+		// choosing that field. Option-Tab is its key for every control, the way a keyboard reader reaches a button there.
+		await page.keyboard.press(page.context().browser()?.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab');
 		const reached = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Toggle panel');
 		if (!reached) await toggle.focus(); // The toggle is not in the tab order from these fields; a keyboard press still reaches it.
 		await page.keyboard.press('Enter');

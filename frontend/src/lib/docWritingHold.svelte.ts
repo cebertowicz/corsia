@@ -114,6 +114,16 @@ export function holdWritingPlace(live: () => string | null) {
 		frame = requestAnimationFrame(step);
 	}
 
+	/**
+	 * The reader moved on: nothing is carried or placed, and the form is no longer held. The hold is only there for a place
+	 * being carried; kept past that, the surface goes on acting on a width the canvas has left (a margin column that is
+	 * gone), and the form it should have changed to arrives when the hold lifts as if the reader had opened it.
+	 */
+	function letGo() {
+		carried = null; pending = null; stopTrying();
+		held.set(false);
+	}
+
 	/** Takes the place being carried, if one is, and hands writing back to it. */
 	function carryBack() {
 		if (!carried) return;
@@ -140,7 +150,7 @@ export function holdWritingPlace(live: () => string | null) {
 			if (!place) {
 				if (toPanelControl(target)) { carried ??= left; return; }
 				// Another field, or the document's text, is the reader moving on: nothing is carried and nothing is placed.
-				if (target?.closest('input, textarea, select, [contenteditable="true"], .cm-content')) { left = null; carried = null; pending = null; stopTrying(); }
+				if (target?.closest('input, textarea, select, [contenteditable="true"], .cm-content')) { left = null; letGo(); }
 				return;
 			}
 			left = null;
@@ -156,9 +166,12 @@ export function holdWritingPlace(live: () => string | null) {
 		// itself and anywhere the writing lives keep the place.
 		const onPointerDown = (event: PointerEvent) => {
 			const target = event.target instanceof Element ? event.target : null;
+			// Safari and the desktop app's web view never focus a button that is clicked, so a press on the toggle is where
+			// the place is carried: the field still has focus while the press goes down.
+			if (toPanelControl(target)) carried ??= placeOf(document.activeElement) ?? left;
 			pressAway = !target?.closest('[data-doc-comments-drawer], [data-popover], [aria-label="Toggle panel"]');
 			if (!pressAway) return;
-			left = null; carried = null; pending = null; stopTrying();
+			left = null; letGo();
 		};
 		document.addEventListener('focusin', onFocusIn);
 		document.addEventListener('focusout', onFocusOut);
