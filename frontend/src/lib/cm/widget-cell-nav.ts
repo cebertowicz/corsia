@@ -135,7 +135,8 @@ function nearestCell(state: EditorState, pos: number): OpenCell | null {
  */
 export const typingInTableSource = EditorView.inputHandler.of((view, _from, _to, text) => {
 	const { main } = view.state.selection;
-	const cell = !view.composing && main.empty ? nearestCell(view.state, main.head) : null;
+	// The end of a table that ends the document is where leaving it puts the caret; typing there is `typingBelowTable`'s.
+	const cell = !view.composing && main.empty && !belowTable(view.state, main.head) ? nearestCell(view.state, main.head) : null;
 	if (!cell) return false;
 	const line = view.state.doc.lineAt(cell.rowStart), source = cellSource(view.state, cell), held = heldText(source);
 	const at = sourceToHeld(source, held, Math.min(Math.max(main.head, cell.from), cell.to) - cell.from), edited = heldToSource(held, at);
