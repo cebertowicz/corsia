@@ -115,6 +115,11 @@ export async function expectCaretLineVisible(card: Locator, field: Locator) {
 		const send = block?.querySelector('[data-send-reply]')?.getBoundingClientRect() ?? null;
 		if (rect.bottom > innerHeight + 1) return `field ${Math.round(rect.top)}-${Math.round(rect.bottom)} off screen (viewport ${innerHeight})`;
 		if (send && (send.top < -1 || send.bottom > innerHeight + 1)) return `Send ${Math.round(send.top)}-${Math.round(send.bottom)} off screen`;
+		// Nothing drawn over the field's last line or Send (a sticky Accept and Reject row, a cue): they take the tap, not what lies on them.
+		const lastLine = document.elementFromPoint(rect.left + 12, rect.bottom - 8);
+		if (!lastLine || !(block ?? el).contains(lastLine)) return `the field's last line is covered by ${(lastLine as HTMLElement | null)?.className || lastLine?.tagName}`;
+		const sendEl = block?.querySelector('[data-send-reply]') ?? null;
+		if (sendEl) { const at = sendEl.getBoundingClientRect(); const top = document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2); if (!top || !sendEl.contains(top)) return `Send is covered by ${(top as HTMLElement | null)?.className || top?.tagName}`; }
 		const scrollers: string[] = [];
 		// What each box lets through is what the next box out is asked about: a field taller than the box that scrolls it shows only its bottom edge there, and the boxes around that one are not held to the clipped-off part.
 		let top = rect.top;

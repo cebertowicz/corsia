@@ -30,7 +30,7 @@
 </script>
 
 <!-- In a popover or a one-thread sheet that scrolls, this row is what stays in view at the bottom, and the reply field scrolls with the card (`ReplyField` `pinned`): nothing sits over Accept and Reject, however short the surface. In a list of cards it is the last row of its own card and covers nothing. A failed decision shows in the same row. -->
-<div class="ct-suggestion-pin">
+<div class="ct-suggestion-pin" data-pin-bottom>
 {#if !readOnly}
 	<!-- The same icon button the comment list's Close uses (`ui/IconButton`), with its name beside the icon: a touch screen has no tooltip. The accessible name adds which suggestion it decides. While a decision is in flight the pair is disabled and the pressed one shows a spinner and "Accepting…" or "Rejecting…". On a touch screen each is a 44 px target with room between them. -->
 	<div class="ct-suggestion-actions">

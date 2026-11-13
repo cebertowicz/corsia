@@ -12,6 +12,13 @@ function scrollMargins(element: HTMLElement): number {
 	return (parseFloat(style.scrollMarginTop) || 0) + (parseFloat(style.scrollMarginBottom) || 0);
 }
 
+/** The height a sticky row at the scroller's bottom edge (a suggestion's Accept and Reject in a sheet) covers of whatever scrolls beneath it. */
+function pinnedBottom(owner: HTMLElement | null): number {
+	let covered = 0;
+	for (const row of owner?.querySelectorAll<HTMLElement>('[data-pin-bottom]') ?? []) if (getComputedStyle(row).position === 'sticky') covered += row.offsetHeight;
+	return covered;
+}
+
 /**
  * Keeps `node` scrolled into its nearest scrolling ancestor while `enabled`:
  * once on mount and again whenever the visual viewport or that scroller
@@ -35,11 +42,15 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= owner.clientHeight;
 		// A field too tall to bring its whole card along still brings the bordered block it sits in, so its border and Send are not left half under the scroller's edge.
 		const block = node.closest<HTMLElement>('[data-autosize-sticky]');
-		const blockFits = block !== null && owner !== null && block.getBoundingClientRect().height <= owner.clientHeight;
+		// What a sticky row at the scroller's bottom covers is not room: the field is brought above it, not under it.
+		const covered = pinnedBottom(owner);
+		const blockFits = block !== null && owner !== null && block.getBoundingClientRect().height <= owner.clientHeight - covered;
 		const target = fits ? whole! : blockFits ? block! : node;
 		// A field that scrolls with its card and has grown taller than the card's scroller cannot be shown whole: its bottom edge (the line being typed, the border and Send) is what stays in view, and the card alone scrolls.
 		const tooTall = owner !== null && !fits && !blockFits && block !== null && block.classList.contains('unpinned');
-		if (typeof target.scrollIntoView === 'function') (tooTall ? block! : target).scrollIntoView({ block: tooTall ? 'end' : 'nearest' });
+		const scrolled = tooTall ? block! : target;
+		scrolled.style.scrollMarginBottom = scrolled === whole || !covered ? '' : `${covered}px`;
+		if (typeof scrolled.scrollIntoView === 'function') scrolled.scrollIntoView({ block: tooTall ? 'end' : 'nearest' });
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);
