@@ -14,7 +14,7 @@ from collections.abc import Collection
 from datetime import datetime, timezone
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_cost, node_cost_initiative, node_time, service, usage_cost
+from plans import hierarchy, node_cost, node_cost_initiative, node_span_roll, node_time, service, usage_cost
 
 _CHUNK = 400
 
@@ -135,11 +135,17 @@ def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
         _, totals, plan_spans = node_cost._roll_plans_with_totals(
             shape["tree"], shape["child_nodes"], own, shape["child_attached"], spans,
         )
-    rolled, _span = node_cost._rollup_one_plan(
-        shape["rows"], own, shape["carried"],
-        {child: totals[child] for child in set(shape["carried"].values())}, spans, plan_spans,
+    rolled = node_cost._rollup_one_plan(
+        own, shape["carried"], {child: totals[child] for child in set(shape["carried"].values())},
+        node_span_roll.shape_spans(shape, spans, plan_spans),
     )
     return {node_id: node_cost._settled(rolled[node_id]) for node_id in shape["ids"]}
+
+
+def _working(shape: dict, spans: dict) -> dict[str, int]:
+    """Each asked node's rolled working seconds from its loaded shape and the read own spans: ``_roll``'s spans alone."""
+    carried = node_span_roll.shape_spans(shape, spans).carried
+    return {node_id: node_time.seconds(carried[node_id])[0] for node_id in shape["ids"]}
 
 
 def working_seconds(wanted, *, db, now: datetime | None = None) -> dict[str, int]:
@@ -147,18 +153,15 @@ def working_seconds(wanted, *, db, now: datetime | None = None) -> dict[str, int
 
     Rolled working time is the length of the union of the Turn intervals of the node's
     subtree and the plans it carries, so it reads no usage ledger, failure, waiting or
-    initiative fact. This skips those reads and the pricing; the shapes and the roll are
-    ``project``'s own.
+    initiative fact. This reads only the Turns and rolls only their spans; the shapes and
+    the span roll are ``project``'s own.
     """
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
         rolls = [_roll_shape(connection, plan_id, ids) for plan_id, ids in _by_plan(connection, wanted).items()]
         needed = sorted({node_id for shape in rolls for node_id in shape["needs"]})
-        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, working_only=True)
-    return {
-        node_id: figures["execution"]["seconds"]
-        for shape in rolls for node_id, figures in _roll(shape, own, spans).items()
-    }
+        spans = node_cost._own_many_working_timed(needed, db=connection, now=clock)
+    return {node_id: seconds for shape in rolls for node_id, seconds in _working(shape, spans).items()}
 
 
 def project(

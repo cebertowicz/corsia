@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_time, node_waiting, service, usage_cost
+from plans import hierarchy, node_span_roll, node_time, node_waiting, service, usage_cost
 from plans.status_time import parse as _parse
 
 #: Every ``active_turns.status`` the schema allows; ``_add`` keeps only these.
@@ -147,14 +147,35 @@ def _own_execution(
         )
         outcome = str(row["status"])
         fact["turns"][outcome] = fact["turns"].get(outcome, 0) + 1
-        start = _parse(row["started_at"])
-        end = _parse(row["ended_at"]) if row["ended_at"] else (now if outcome == "running" else None)
-        if start is None or end is None or end < start:
+        interval = _turn_interval(row, now)
+        if interval is None:
             fact["unknown_turns"] += 1
             continue
+        start, end = interval
         fact["seconds"] += int((end - start).total_seconds())
         found[node_id].append((start.timestamp(), end.timestamp()))
     return facts, {node_id: node_waiting.union(items) for node_id, items in found.items()}
+
+
+def _turn_interval(row, now: datetime) -> tuple[datetime, datetime] | None:
+    """One Turn's ``(start, end)``; None for an unknown Turn (no start, no end, or ended before it started)."""
+    start = _parse(row["started_at"])
+    end = _parse(row["ended_at"]) if row["ended_at"] else (now if row["status"] == "running" else None)
+    if start is None or end is None or end < start:
+        return None
+    return start, end
+
+
+def _own_many_working_timed(node_ids, *, db, now: datetime) -> dict[str, node_time.Span]:
+    """Each node's own Working span and nothing else: the merged intervals ``_own_execution`` reads.
+
+    Only ``node_cost_scoped.working_seconds`` calls it, to roll Working alone. A node with no known
+    Turn is absent; tokens, cost, failures and waiting are not read.
+    """
+    ids = sorted({str(value) for value in node_ids})
+    with service._connection(db) as connection:
+        _facts, working = _own_execution(connection, ids, now)
+    return {node_id: {"working": span, "waiting": []} for node_id, span in working.items()}
 
 
 def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dict]:
@@ -168,30 +189,21 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
 
 def own_many_timed(
     node_ids, *, db=None, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
-    working_only: bool = False,
 ) -> tuple[dict[str, dict], dict[str, node_time.Span]]:
     """``own_many`` plus each node's own time intervals, from the same reads.
 
     ``dollars`` is these nodes' ``usage_cost.usage_dollars`` when the caller already priced them;
     None prices them here.
-
-    ``working_only`` reads only the Turns: ``execution`` and the working spans are the real
-    figures; tokens, cost, recording failures and waiting stay at their empty values. Only a
-    caller reading nothing but rolled working seconds passes it (``node_cost_scoped.working_seconds``).
     """
     ids = sorted({str(value) for value in node_ids})
     if not ids:
         return {}, {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
-        if working_only:
-            usage, failures, waiting = {}, {}, {}
-            execution, working = _own_execution(connection, ids, clock)
-        else:
-            usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
-            failures = _own_failures(connection, ids)
-            execution, working = _own_execution(connection, ids, clock)
-            waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
+        usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
+        failures = _own_failures(connection, ids)
+        execution, working = _own_execution(connection, ids, clock)
+        waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
     result: dict[str, dict] = {}
     spans: dict[str, node_time.Span] = {}
     for node_id in ids:
@@ -243,50 +255,35 @@ def _attached_children(connection, plan_ids: list[str]) -> dict[str, str]:
 
 
 def _rollup_one_plan(
-    rows: list[dict], own: dict, attached: dict, child_totals: dict,
-    spans: dict, child_spans: dict,
-) -> tuple[dict[str, dict], node_time.Span]:
+    own: dict, attached: dict, child_totals: dict, span_roll: node_span_roll.SpanRoll,
+) -> dict[str, dict]:
     """Roll one plan's nodes up in a single pass, every child before its parent.
 
     Tokens, cost and Turn counts sum. Working and Waiting are wall clock, so
     each node's rolled seconds come from the union of its subtree's intervals
     (``node_time``), never from adding its children's seconds. Returns the
-    rolled costs and the merged span of the plan's top-level nodes.
+    rolled costs; ``span_roll`` is the plan's nodes' spans (``node_span_roll``).
 
     A node's parent is fixed at creation and must already exist in the same
     plan (``node_creation._validate_parent``), so the rows are a forest.
     Reversing a depth-first pre-order visits each child before its parent,
     with no recursion, so no nesting depth can overflow the interpreter stack.
     """
-    ids = {row["id"] for row in rows}
-    children: dict[str | None, list[str]] = defaultdict(list)
-    for row in rows:
-        children[row["parent_id"] if row["parent_id"] in ids else None].append(row["id"])
-    order: list[str] = []
-    stack = list(children[None])
-    while stack:
-        node_id = stack.pop()
-        order.append(node_id)
-        stack.extend(children[node_id])
+    children, order, carried = span_roll
     rolled: dict[str, dict] = {}
-    carried: dict[str, node_time.Span] = {}
-    for node_id in reversed(order):
+    for node_id in order:
         total = dict(own[node_id])
-        parts = [spans.get(node_id, node_time.empty())]
         for child_id in children[node_id]:
             total = _add(total, rolled[child_id])
-            parts.append(carried[child_id])
         if node_id in attached:
             total = _add(total, child_totals.get(attached[node_id], _empty_own()))
-            parts.append(child_spans.get(attached[node_id], node_time.empty()))
-        carried[node_id] = node_time.merge(parts)
         working, waiting = node_time.seconds(carried[node_id])
         rolled[node_id] = {
             **total,
             "execution": {**total["execution"], "seconds": working},
             "waiting": {"seconds": waiting},
         }
-    return rolled, node_time.merge([carried[node_id] for node_id in children[None]])
+    return rolled
 
 
 def project_many(plan_ids, *, db=None, now: datetime | None = None) -> dict[str, dict[str, dict]]:
@@ -359,23 +356,11 @@ def _roll_plans_with_totals(
     by_plan: dict[str, dict[str, dict]] = {}
     totals: dict[str, dict] = {}
     plan_spans: dict[str, node_time.Span] = {}
-    # Each plan is rolled only after the child plans its steps carry. An
-    # explicit stack keeps delegation depth off the interpreter stack.
-    stack = [(plan_id, False) for plan_id in tree]
-    while stack:
-        plan_id, children_done = stack.pop()
-        if plan_id in totals:
-            continue
-        rows = nodes_by_plan[plan_id]
-        carried = [attached[row["id"]] for row in rows if row["id"] in attached]
-        if not children_done:
-            stack.append((plan_id, True))
-            stack.extend((child_id, False) for child_id in carried)
-            continue
-        rolled, plan_spans[plan_id] = _rollup_one_plan(
-            rows, own, attached, {child_id: totals[child_id] for child_id in carried},
-            spans, plan_spans,
-        )
+    # Each plan is rolled only after the child plans its steps carry.
+    for plan_id, rows, carried in node_span_roll.plans_bottom_up(tree, nodes_by_plan, attached):
+        span_roll = node_span_roll.roll_spans(rows, attached, spans, plan_spans)
+        rolled = _rollup_one_plan(own, attached, {child_id: totals[child_id] for child_id in carried}, span_roll)
+        plan_spans[plan_id] = span_roll.plan
         by_plan[plan_id] = {
             node_id: {"own": _settled(own[node_id]),
                       "rolled": _settled(rolled[node_id])}
@@ -387,4 +372,3 @@ def _roll_plans_with_totals(
                 total = _add(total, rolled[row["id"]])
         totals[plan_id] = total
     return by_plan, totals, plan_spans
-
