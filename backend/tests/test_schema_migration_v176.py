@@ -22,9 +22,9 @@ def test_migrate_v175_preserves_plan_intent_and_removes_quotes():
         db.execute("PRAGMA user_version=175")
         db.commit()
 
-        assert SCHEMA_VERSION == 190 and MIGRATIONS[175] is migrate_175_to_176
+        assert SCHEMA_VERSION == 191 and MIGRATIONS[175] is migrate_175_to_176
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 175, 190)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 175, 191)
         assert db.execute("SELECT intent, acceptance_criteria FROM plan_nodes WHERE id='n'").fetchone() == ('Goal', 'Done')
         assert db.execute("SELECT name FROM sqlite_master WHERE name='plan_node_intent_words'").fetchone() is None
         assert db.execute("PRAGMA integrity_check").fetchone() == ('ok',)

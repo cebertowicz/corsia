@@ -9,7 +9,7 @@ from core.workflow_result import schema_errors
 from core.workflow_worker import worker_errors
 
 #: The keys a shared workflow may carry; install refuses any other.
-WORKFLOW_KEYS = frozenset({"steps", "result", "worker", "task_intent"})
+WORKFLOW_KEYS = frozenset({"steps", "result", "worker"})
 _WORKFLOW_STEP_KEYS = frozenset(
     {
         "id",
@@ -86,8 +86,6 @@ def validate_workflow(corsia: dict[str, Any], *, skill_name: str | None = None) 
     errors: list[str] = (
         schema_errors(workflow["result"]) if "result" in workflow else []
     ) + worker_errors(workflow)
-    if "task_intent" in workflow and not isinstance(workflow["task_intent"], bool):
-        errors.append("corsia.workflow.task_intent must be true or false")
     steps = workflow.get("steps")
     if steps is None:
         return errors
