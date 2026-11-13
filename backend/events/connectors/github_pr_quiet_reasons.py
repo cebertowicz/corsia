@@ -20,7 +20,7 @@ from typing import Any
 from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT, STATUS_PRESENCE_CONTEXT
 
 #: ``-present`` states that end the reviewer's work on a head: ``success`` once it was
-#: reviewed, ``failure`` once ``qa/override-reviewer`` skipped it (``reviewer_gate``).
+#: reviewed, ``failure`` once ``qa/override-reviewer`` skipped it.
 REVIEWER_DONE = frozenset({"success", "failure"})
 
 CI_EVENT_MISSING = "ci_event_missing"

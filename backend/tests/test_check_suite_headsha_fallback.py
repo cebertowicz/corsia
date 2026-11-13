@@ -2,9 +2,9 @@
 empty ``pull_requests`` array.
 
 Regression for the #704 failure: a green check_suite with an empty
-``pull_requests`` array stranded the PR (owner never woken, reviewer gate
-skipped). Both the router's identity resolution and the reviewer-gate route
-now share one resolver that falls back to ``/commits/{sha}/pulls``. Connector
+``pull_requests`` array stranded the PR (owner never woken). The router's
+identity resolution and connector normalization share one resolver that falls
+back to ``/commits/{sha}/pulls``. Connector
 normalization and router base-branch checks use the same event-level metadata
 path, so empty payload-local PR arrays do not create a second identity source.
 """

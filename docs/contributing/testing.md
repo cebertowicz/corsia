@@ -29,6 +29,5 @@ For a PR from a fork, the **CLA** check asks each contributor to accept the [Con
 CORSIA does not run pull request reviews itself and posts no review status on a PR. A review comes from a review workflow installed from CORSIA's community, which reads GitHub on its own.
 
 - A finding is evidence, not authority: verify it against the current code, then fix it or explain why it does not apply.
-- Findings appear in review threads when they can be anchored to a line, or as PR-level comments otherwise. Reply on the finding thread with the fix or your evidence if you disagree.
 
 Checked against the code at `310115261`.

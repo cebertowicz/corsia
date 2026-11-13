@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 
-class TestCORSIASelfCommentSuppression:
+class TestReviewMarkerCommentSuppression:
 
     def test_summary_marker_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {"body": "Review done.\n\n<!-- corsia-review-summary -->"},
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is True
 
     def test_resolved_marker_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {
@@ -22,28 +22,28 @@ class TestCORSIASelfCommentSuppression:
                 ),
             },
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is True
 
     def test_fp_marker_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {
                 "body": ":no_entry_sign: **BLOCK**\n\nBad code.\n\n<!-- corsia-review-fp: deadbeef12345678 -->",
             },
         }
-        assert _is_corsia_self_comment("webhook.github.issue_comment", payload) is True
+        assert _is_review_marker_comment("webhook.github.issue_comment", payload) is True
 
     def test_normal_comment_not_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {"body": "LGTM! Nice work."},
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is False
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is False
 
     def test_marker_mid_paragraph_not_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {
@@ -53,20 +53,20 @@ class TestCORSIASelfCommentSuppression:
                 ),
             },
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is False
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is False
 
     def test_fp_marker_mid_line_not_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {
                 "body": "See this finding: <!-- corsia-review-fp: deadbeef12 --> agree?",
             },
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is False
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is False
 
     def test_resolved_marker_in_quote_not_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "created",
             "comment": {
@@ -77,15 +77,15 @@ class TestCORSIASelfCommentSuppression:
                 ),
             },
         }
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is False
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is False
 
     def test_non_comment_event_not_suppressed(self):
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
         payload = {
             "action": "opened",
             "pull_request": {"number": 1},
         }
-        assert _is_corsia_self_comment("webhook.github.pr_opened", payload) is False
+        assert _is_review_marker_comment("webhook.github.pr_opened", payload) is False
 
     async def test_summary_marker_route_leg_not_called(self):
         from unittest.mock import AsyncMock, patch
@@ -154,7 +154,7 @@ class TestCORSIASelfCommentSuppression:
 
     def test_pr_review_comment_with_marker_suppressed_via_dispatcher(self):
         from events.github_mapper import map_github_event
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
 
         gh_payload = {
             "action": "created",
@@ -168,15 +168,15 @@ class TestCORSIASelfCommentSuppression:
             "pull_request_review_comment must map to a non-None internal event "
             "(bot-sender filter only drops when sender is a bot with a noise marker)"
         )
-        assert _is_corsia_self_comment(internal_event, gh_payload) is True, (
+        assert _is_review_marker_comment(internal_event, gh_payload) is True, (
             f"internal event '{internal_event}' produced by pull_request_review_comment "
-            "must be suppressed by _is_corsia_self_comment — "
+            "must be suppressed by _is_review_marker_comment — "
             "check that it appears in _COMMENT_EVENT_TYPES"
         )
 
     def test_issue_comment_on_pr_with_marker_suppressed_via_dispatcher(self):
         from events.github_mapper import map_github_event
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
 
         gh_payload = {
             "action": "created",
@@ -192,7 +192,7 @@ class TestCORSIASelfCommentSuppression:
         }
         internal_event = map_github_event("issue_comment", gh_payload)
         assert internal_event is not None
-        assert _is_corsia_self_comment(internal_event, gh_payload) is True
+        assert _is_review_marker_comment(internal_event, gh_payload) is True
 
     async def test_handle_event_suppressed_shape(self):
         from events.ingress import handle_event
@@ -206,22 +206,22 @@ class TestCORSIASelfCommentSuppression:
         )
         assert result["internal_event"] == "webhook.github.pr_comment"
         assert result["delivery_id"] == "test-del-1"
-        assert result["route_outcome"] == "suppressed_self_comment"
+        assert result["route_outcome"] == "suppressed_review_marker"
         assert result["thread_id"] is None
         assert "reviewer" not in result
 
     def test_reviewer_composed_summary_comment_suppressed(self):
         from events.markers import REVIEW_SUMMARY_MARKER
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
 
         body_text = "## Review\n\n2 open findings."
         summary_body = f"{body_text}\n\n{REVIEW_SUMMARY_MARKER}"
         payload = {"action": "created", "comment": {"body": summary_body}}
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is True
 
     def test_reviewer_composed_resolved_reply_suppressed(self):
         from events.markers import REVIEW_RESOLVED_MARKER
-        from events.ingress import _is_corsia_self_comment
+        from events.ingress import _is_review_marker_comment
 
         head_sha = "abcdef1234567890"
         resolved_body = (
@@ -229,7 +229,7 @@ class TestCORSIASelfCommentSuppression:
             f"{REVIEW_RESOLVED_MARKER}"
         )
         payload = {"action": "created", "comment": {"body": resolved_body}}
-        assert _is_corsia_self_comment("webhook.github.pr_comment", payload) is True, (
+        assert _is_review_marker_comment("webhook.github.pr_comment", payload) is True, (
             "Reviewer-composed resolved-reply body must be suppressed. "
             "Check that post_resolve_reply still places the marker on its own trailing line."
         )

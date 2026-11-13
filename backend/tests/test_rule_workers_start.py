@@ -123,11 +123,11 @@ def _register(world, repo: Path) -> None:
                              protect_base_checkout=False, db=db)
 
 
-# 1 (head) -- a head_repo fact is only a fact the worker sees: no head is written, so the
-# worker reads only its staging directory and the start's empty one, never its cwd or an ancestor.
+# 1 (head) -- a head_repo fact is data the worker sees: its read paths are its staging directory and
+# the start's own (empty) folder, and neither is its cwd or an ancestor of it.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sha", ["real", "0" * 40, None])
-async def test_a_head_repo_fact_starts_the_worker_without_writing_a_head(world, tmp_path, sha):
+async def test_a_head_repo_fact_is_data_and_the_worker_reads_only_staging_and_its_start_folder(world, tmp_path, sha):
     from automation import worker_runner
     from infra.database import get_db
     from infra.thread_confinement import read_dirs
@@ -143,7 +143,7 @@ async def test_a_head_repo_fact_starts_the_worker_without_writing_a_head(world, 
     staging = world["staging"].resolve()
     start = world["folder"] / "workers" / str(_decision(rule))
     assert read_dirs(worker, get_db()) == (str(staging), str(start))
-    assert start.is_dir() and list(start.iterdir()) == []  # no head tree is written
+    assert start.is_dir() and list(start.iterdir()) == []
     cwd = Path(_launch(worker)["working_dir"])
     assert cwd.name == "confined" and cwd.is_dir()
     for read in (staging, start):
