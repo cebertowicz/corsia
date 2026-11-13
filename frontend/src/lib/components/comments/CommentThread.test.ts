@@ -241,6 +241,18 @@ describe('CommentThread', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('marks unread replies read when a list row summarising a long thread is opened, as a short thread does', async () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		const replies = Array.from({ length: 7 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies, newReplyIds: ['r5', 'r6'] }), false, { onViewed, replyView: 'summary' });
+		// The row hides only the read replies; every unread one is on screen.
+		expect(host.textContent).toContain('reply 5');
+		expect(host.textContent).toContain('reply 6');
+		expect(host.textContent).not.toContain('reply 4');
+		(host.querySelector('.ct') as HTMLElement).click(); flushSync();
+		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r6'), { timeout: 3000 });
+	});
+
 	it('expanding earlier replies does not focus the thread', () => {
 		const onFocus = vi.fn();
 		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));

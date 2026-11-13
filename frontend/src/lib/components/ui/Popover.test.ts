@@ -299,7 +299,7 @@ describe('Popover', () => {
 			// The card is 170 tall and its composer ends 150 into it; the anchor bands are 134 and 114, so clamping to
 			// the anchor would cut the card below the composer and push Send out of it.
 			const pinned = surface.appendChild(document.createElement('div'));
-			pinned.setAttribute('data-autosize-sticky', '');
+			pinned.setAttribute('data-reply-composer', '');
 			pinned.getBoundingClientRect = () => new DOMRect(0, 0, 300, 150);
 			const box = surface.appendChild(document.createElement('textarea')); box.focus();
 			window.dispatchEvent(new Event('resize'));
