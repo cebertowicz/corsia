@@ -53,7 +53,6 @@ test('every comment on one phrase is reachable from the transcript', async ({ pa
 	await expect(mark).toBeVisible();
 	await expect(row.locator('.cm-comment-pending')).toHaveCount(0);
 	await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-	await page.waitForTimeout(800);
 
 	let reached: string[] = [];
 	if (phone) {
@@ -68,6 +67,5 @@ test('every comment on one phrase is reachable from the transcript', async ({ pa
 		const text = await page.locator('.chat-margin').innerText();
 		reached = NOTES.filter((note) => text.includes(note));
 	}
-	console.log(`CHATREACH ${phone ? 393 : 1440} reached ${reached.length} of ${NOTES.length}`);
 	expect(reached, 'every comment of the stack is reachable').toEqual(NOTES);
 });

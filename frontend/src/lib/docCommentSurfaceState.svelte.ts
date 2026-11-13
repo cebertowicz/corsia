@@ -105,12 +105,13 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		restoreFocus = restoreEditor;
 		return changed;
 	}
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false) {
-		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
+	/** `fromText`: several threads on text the person pressed (`stacked`): the list leaves the focus in the text, as one thread's card does. */
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false, fromText = false) {
+		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids, ...(fromText ? { fromText: true as const } : {}) };
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
-		restoreFocus = () => opener.focus();
+		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => opener.focus();
 		arrivedDocComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {

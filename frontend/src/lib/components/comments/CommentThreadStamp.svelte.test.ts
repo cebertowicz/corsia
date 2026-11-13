@@ -282,7 +282,7 @@ describe('CommentThread stamping', () => {
 		}
 	});
 
-	it('stamps both visible chat replies and keeps the collapse point stable', async () => {
+	it('stamps both visible chat replies and keeps the collapse point and the New signs stable', async () => {
 		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
 		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
 		vi.useFakeTimers();
@@ -300,20 +300,21 @@ describe('CommentThread stamping', () => {
 		await vi.advanceTimersByTimeAsync(2);
 		expect(onViewed.mock.calls).toEqual([['c1', 'r4'], ['c1', 'r5']]);
 		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(0);
+		// The viewed stamp has landed, and the signs stay on the replies the reader came to see until the card is closed.
+		expect(newMarks()).toBe(2);
 		expect(host.textContent).toContain('Show 4 earlier replies');
 		expect(host.textContent).toContain('reply r4');
 		expect(host.textContent).not.toContain('reply r0');
 	});
 
-	it('shows only the server-reported unread reply while the thread is open', () => {
+	it('shows a reply New from when it arrives until the thread is closed, even once the server reports it read', () => {
 		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
 		state.comment = { ...state.comment, replies, newReplyIds: ['r1'] };
 		render(vi.fn().mockResolvedValue(undefined));
 		expect(newMarks()).toBe(1);
 		arrive({ newReplyIds: ['r2'] });
-		expect(newMarks()).toBe(1);
+		expect(newMarks()).toBe(2);
 		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(0);
+		expect(newMarks()).toBe(2);
 	});
 });

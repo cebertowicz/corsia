@@ -56,7 +56,7 @@ describe('a click on comments drawn inside a table', () => {
 		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus), comment('b', onMarkerFocus)]);
 		(await painted()).click();
 		// The click goes on with them, so the cards open at it, as a click on one comment's text does.
-		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent), false);
 		expect(onAnchorFocus).not.toHaveBeenCalled();
 	});
 

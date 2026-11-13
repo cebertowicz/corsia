@@ -5,6 +5,7 @@ import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
+import { SHEET_GAP } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -24,7 +25,7 @@ export interface CommentRange {
 	to: number;
 	id: string;
 	focused?: boolean;
-	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
+	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent, fromText?: boolean) => void;
 	suggestion?: InlineSuggestion;
 	/** A point, not a passage: drawn as a margin marker only, with no highlight (its text was deleted, or an accepted suggestion deleted it). */
 	point?: boolean;
@@ -55,9 +56,14 @@ export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify
  * so at an end the press must also be on the highlight's side of it and on that end's own row.
  */
 export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[], tapOpensSuggestion = true): CommentRange | undefined {
+	return pickHighlight(highlightsAtPress(view, press, ranges), tapOpensSuggestion);
+}
+
+/** Every highlight under a press by the same rule, in range order: two threads on overlapping text are both there. */
+export function highlightsAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[]): CommentRange[] {
 	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
 	const onRow = (edge: { top: number; bottom: number } | null) => !edge || (press.clientY >= edge.top && press.clientY <= edge.bottom);
-	return pickHighlight(ranges.filter((r) => {
+	return ranges.filter((r) => {
 		if (r.point || at < r.from || at > r.to) return false;
 		if (at === r.to && r.to > r.from) {
 			const edge = view.coordsAtPos(r.to, -1);
@@ -68,7 +74,7 @@ export function highlightAtPress(view: EditorView, press: { clientX: number; cli
 			return onRow(edge) && press.clientX >= (edge?.left ?? -Infinity);
 		}
 		return true;
-	}), tapOpensSuggestion);
+	});
 }
 
 /**
@@ -137,34 +143,80 @@ export const MAX_SCROLL_PASSES = 8;
 const STEADY_CHECKS = 2;
 
 /** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
-export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
+/** `press-reveal` keeps the text a phone's thread sheet was opened from in the band above the sheet: no move when it is there, else it is centred in that band. */
+export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap' | 'press-reveal';
 
 const QUOTE_MARGIN = 8;
+/** The tallest pressed highlight, in lines, a sheet keeps whole above itself. */
+const PRESS_LINES = 3;
+/** The band less a small gap at its bottom edge: text meant to stay readable above a sheet leaves a little of the page between it and the sheet. */
+const clearOfSheet = (band: Box): Box => ({ top: band.top, bottom: band.bottom - SHEET_GAP });
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
 
 // Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
 const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof widgetTarget>): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
+
+/** A pressed highlight's text, from its first line to its last. A widget (a table cell, a diagram) or a point is its one box. */
+function spanBoxAt(current: EditorView, from: number, to: number, widget: ReturnType<typeof widgetTarget>): Box | null {
+	const first = boxAt(current, from, widget);
+	if (!first || widget || to <= from) return first;
+	const end = current.coordsAtPos(Math.min(to, current.state.doc.length), -1);
+	return end ? { top: first.top, bottom: Math.max(first.bottom, end.bottom) } : first;
+}
+
+/**
+ * What a sheet opened from a pressed highlight keeps visible above itself: the whole highlight when it is at most `PRESS_LINES` lines tall,
+ * else the line that was pressed (`at`). `height` is that text's height and `regionTop` where the visible document starts, which together
+ * tell the sheet how far up it may rise.
+ */
+export function pressSpan(view: EditorView, range: { from: number; to: number }, at: number): { from: number; to: number; height: number; regionTop: number } | null {
+	const length = view.state.doc.length;
+	const whole = spanBoxAt(view, Math.min(range.from, length), Math.min(range.to, length), widgetTarget(view, Math.min(range.from, length)));
+	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
+	if (!whole || !line) return null;
+	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
+	return whole.bottom - whole.top <= PRESS_LINES * lineHeight
+		? { from: range.from, to: range.to, height: whole.bottom - whole.top, regionTop }
+		: { from: at, to: at, height: lineHeight, regionTop };
+}
 
 /**
  * Whether a sheet or keyboard movement has just covered the text at `from`: the reader had it in view before, inside `before` (the
  * band as of the last movement), and the band now leaves it out. Text the reader had scrolled out of view is not covered by a movement.
  * Returns the band now, which is the next movement's `before`.
  */
-export function coveredByMove(view: EditorView, from: number, before: Box | null): { band: Box; covered: boolean } {
+export function coveredByMove(view: EditorView, from: number, before: Box | null, clear = false, to = from): { band: Box; covered: boolean } {
 	const { band } = visibleRegion(view);
-	const target = Math.min(from, view.state.doc.length), box = boxAt(view, target, widgetTarget(view, target));
-	return { band, covered: !!before && within(box, before) && !within(box, band) };
+	const target = Math.min(from, view.state.doc.length), box = spanBoxAt(view, target, to, widgetTarget(view, target));
+	return { band, covered: !!before && within(box, before) && !within(box, clear ? clearOfSheet(band) : band) };
+}
+
+const revealRoom = new WeakMap<EditorView, { scroller: HTMLElement; before: string }>();
+function addRevealRoom(view: EditorView, scroller: HTMLElement, extra: number) {
+	if (!revealRoom.has(view)) revealRoom.set(view, { scroller, before: scroller.style.paddingBottom });
+	scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + extra}px`;
+}
+/** Gives back the room a reveal added below the document once the sheet it was for is gone. */
+export function clearRevealRoom(view: EditorView) {
+	const held = revealRoom.get(view);
+	if (!held) return;
+	held.scroller.style.paddingBottom = held.before;
+	revealRoom.delete(view);
 }
 
 /** The frame watch of the jump that last moved the reader: one at a time, so a new jump retires the previous one. */
 const placedIn = new WeakMap<EditorView, () => void>();
 
-export function scrollToRange(view: EditorView, from: number, _to: number, origin: ScrollOrigin = 'navigation') {
+export function scrollToRange(view: EditorView, from: number, to: number, origin: ScrollOrigin = 'navigation') {
 	const target = Math.min(from, view.state.doc.length);
 	const widget = widgetTarget(view, target);
 	const quote = origin === 'quote-tap';
-	const boxOf = (current: EditorView) => boxAt(current, target, widget);
+	const reveal = origin === 'press-reveal';
+	// A press-reveal keeps the pressed highlight's whole text above the sheet; every other jump goes to where the text starts.
+	const boxOf = (current: EditorView) => reveal ? spanBoxAt(current, target, to, widget) : boxAt(current, target, widget);
 	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	if (reveal && !widget) { const box = boxOf(view), { band } = visibleRegion(view); if (within(box, clearOfSheet(band))) return; }
+	if (reveal && widget) { const box = boxOf(view); if (within(box, visibleRegion(view).band)) return; }
 	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
 	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
@@ -181,6 +233,18 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				},
 			});
 			// The reader's place is taken again from where this lands.
+			releasePlace(view);
+			return;
+		}
+		const box = reveal && !widget ? boxOf(view) : null;
+		if (box) {
+			// Text in the band above the sheet: its middle is the band's middle, which CodeMirror's own centring (the scroller's middle) is not.
+			const { band, scroller } = visibleRegion(view);
+			const move = box.top - (band.top + band.bottom - (box.bottom - box.top)) / 2;
+			// A line near the end of the document cannot be lifted above the sheet without room below it: the scroller gets that room while the sheet is up.
+			const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+			if (move > room) addRevealRoom(view, scroller, Math.ceil(move - room));
+			scroller.scrollTop += move;
 			releasePlace(view);
 			return;
 		}

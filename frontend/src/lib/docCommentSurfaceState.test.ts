@@ -14,6 +14,18 @@ describe('comment surface state', () => {
 		expect(get(focusedDocComment)).toBe('c1');
 	});
 
+	it('opens several threads on pressed text without taking the focus from the text', () => {
+		const restoreEditor = vi.fn();
+		const surface = createCommentSurfaceState(restoreEditor);
+		surface.focusMarker(['a', 'b'], document.createElement('span'), undefined, true, true);
+		// Picked in the text, as one thread's card is: it leaves the focus there, and what restores focus is the editor.
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b'], fromText: true });
+		surface.restoreFocus();
+		expect(restoreEditor).toHaveBeenCalled();
+		surface.focusMarker(['a', 'b'], document.createElement('button'));
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b'] });
+	});
+
 	it('keeps the comments drawer open when the caret lands in commented text', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.openList(document.createElement('button'));
