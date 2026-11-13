@@ -18,8 +18,8 @@ from typing import Any
 from doceditor import comments as store, feedback_suggestion_decisions
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_actions import (
-    DECISIONS, DocumentWriter, _record_decision_row, insertion_position, splice_suggestion, suggestion_span, suggestion_edit_span,
-    validate_decision_reason,
+    DECISIONS, DocumentWriter, _record_decision_row, accept_lock, insertion_position, splice_suggestion, suggestion_span,
+    suggestion_edit_span, validate_decision_reason,
 )
 from doceditor.comment_permissions import check_decider, owner_row
 from doceditor.doc_text import read_doc_text
@@ -30,7 +30,7 @@ from infra.db_async import run_in_db, run_off_db
 from registry import models as registry_models
 
 
-def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str | None, decision: str):
+def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str | None):
     """Load the authorized author's open suggestions on this document once."""
     db = get_db()
     try:
@@ -43,8 +43,6 @@ def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str
         rows = store.list_for_artifact(comment["artifact_id"], db=db)
         open_rows = [row for row in rows if is_pending_suggestion(row)
                      and row.get("author_thread_id") == comment.get("author_thread_id")]
-        if decision == "accept":
-            _attach_accepted_insertions(open_rows, rows)
         if not open_rows:
             raise CommentActionError(
                 "no_open_suggestions", f"No open suggestions from {comment['author']} on this document."
@@ -65,20 +63,41 @@ def _open_suggestions(artifact_id: str, user_id: str, actor_thread_id: str | Non
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
         all_rows = store.list_for_artifact(artifact_id, db=db)
         rows = [row for row in all_rows if is_pending_suggestion(row)]
-        _attach_accepted_insertions(rows, all_rows)
         return artifact, owner[1] if owner else None, rows
     finally:
         db.close()
 
 
-def _attach_accepted_insertions(rows: list[dict], all_rows: list[dict]) -> None:
-    siblings: dict[tuple, list[dict]] = {}
-    for row in all_rows:
-        if store.is_accepted_insertion(row):
-            siblings.setdefault((row["artifact_id"], row["anchor_text"]), []).append(row)
-    for row in rows:
-        if row.get("insert_after"):
-            row["_accepted_insertions"] = siblings.get((row["artifact_id"], row["anchor_text"]), [])
+def _still_open_with_siblings(artifact_id: str, rows: list[dict]) -> list[dict]:
+    """Re-read the chosen rows under the accept lock: drop any decided meanwhile, attach accepted siblings."""
+    db = get_db()
+    try:
+        return _reread_open(db, artifact_id, rows)
+    finally:
+        db.close()
+
+
+def _reread_open(db, artifact_id: str, rows: list[dict]) -> list[dict]:
+    """Read only the chosen rows, then every insertion quote's accepted siblings in one query, never the whole document.
+
+    Two queries whatever the batch; each binds one parameter per id or quote, within SQLite's 32,766.
+    """
+    if not rows:
+        return []
+    ids = [row["id"] for row in rows]
+    marks = ",".join("?" * len(ids))
+    current = {
+        found["id"]: dict(found) for found in db.execute(
+            f"SELECT * FROM doc_comments WHERE artifact_id=? AND id IN ({marks})", (artifact_id, *ids),
+        ).fetchall()
+    }
+    fresh = [{**row, **current[row["id"]]} for row in rows if row["id"] in current]
+    fresh = [row for row in fresh if is_pending_suggestion(row)]
+    insertions = [row for row in fresh if row.get("insert_after")]
+    siblings = store.accepted_insertions(artifact_id, list(dict.fromkeys(row["anchor_text"] for row in insertions)), db=db)
+    for row in insertions:
+        row["_accepted_insertions"] = siblings[row["anchor_text"]]
+    return fresh
 
 
 def _batch_text(rows: list[dict[str, Any]], document_text: str) -> tuple[str, list[str], list[dict[str, str]]]:
@@ -206,6 +225,18 @@ async def _decide_batch(
             _record_batch, [row["id"] for row in rows], decision,
             decided_by=decided_by, actor_thread_id=actor_thread_id, reason=reason)
         return {"accepted": [], "skipped": [], "text": None, "revision": None}
+    async with accept_lock(artifact["id"]):
+        return await _accept_and_record(
+            artifact, project_id, await run_in_db(_still_open_with_siblings, artifact["id"], rows),
+            decision, user_id=user_id, decided_by=decided_by, actor_thread_id=actor_thread_id, write=write,
+            reason=reason, suggestion_accept=suggestion_accept)
+
+
+async def _accept_and_record(
+    artifact: dict[str, Any], project_id: str | None, rows: list[dict[str, Any]], decision: str, *,
+    user_id: str, decided_by: str, actor_thread_id: str | None, write: DocumentWriter, reason: str | None,
+    suggestion_accept: bool,
+) -> dict[str, Any]:
     if not rows:
         return {"accepted": [], "skipped": [], "text": None, "revision": None}
     text, accepted, skipped, receipt = await _accept_batch(
@@ -241,7 +272,7 @@ async def decide_all_from_author(
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
-    artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id, decision)
+    artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id)
     if select is not None:
         rows = await select(rows)
     return await _decide_batch(

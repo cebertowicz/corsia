@@ -1,4 +1,4 @@
-import { inResolved, replyField, resolvedEntry, showAllThreads, openComments } from '../support/commentDrawer';
+import { inResolved, replyField, resolvedEntry, resolvedList, showAllThreads, openComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
@@ -102,7 +102,7 @@ for (const [width, height, project] of layouts) {
 				await writer.locator('.sel-comment').click();
 				await writer.getByPlaceholder('Comment, or @ to tag an agent').fill(`Late ${stamp}`);
 				await writer.getByRole('button', { name: 'Comment', exact: true }).last().click();
-				await expect(reader.getByRole('button', { name: /^1 thread\b/ })).toBeVisible();
+				await expect(reader.getByRole('button', { name: /^1 comment\b/ })).toBeVisible();
 			});
 
 			// The caret never moved: the next key lands right after the typed text, and focus stayed in the editor.
@@ -188,16 +188,16 @@ for (const [width, height, project] of layouts) {
 			const remote = `remote ${stamp}`;
 			await typeAtDocumentEnd(writer, remote);
 			await expect(reader.locator('.cm-content')).toContainText(remote);
-			await openComments(reader, /^2 threads\b/);
+			await openComments(reader, /^2 comments\b/);
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
 			await drawerRow(reader, red.id).getByRole('button', { name: 'Accept', exact: true }).click();
 			// A decided suggestion leaves the open cards for the Resolved list.
-			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(resolvedList(reader).locator(`[data-comment-id="${red.id}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
 			await expect(drawerRow(reader, dog.id)).toContainText("The text doesn't match this suggestion.");
 			await expect(drawerRow(reader, dog.id).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
 			await drawerRow(reader, dog.id).getByRole('button', { name: 'Reject', exact: true }).click();
-			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog.id).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(resolvedList(reader).locator(`[data-comment-id="${dog.id}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`, remote], ['brown', 'dog jumps']);
 			await reader.screenshot({ path: testInfo.outputPath(`live-overlap-decided-${width}.png`) });
 		} finally {
@@ -217,12 +217,13 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await openComments(reader, /^2 threads\b/);
+			await openComments(reader, /^2 comments\b/);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			await drawer.getByRole('button', { name: `Accept all from ${red.author}`, exact: true }).click();
-			await inResolved(drawer, () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			// The skipped note belongs to this opening of the list; on a phone, reaching "Resolved" closes the sheet, which clears it.
 			await expect(drawer.getByText('1 skipped', { exact: true })).toBeVisible();
+			await inResolved(drawer, () => expect(resolvedList(reader).locator(`[data-comment-id="${red.id}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			await expect(drawerRow(reader, dog.id).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`], ['brown', 'dog jumps']);
 		} finally {
@@ -241,7 +242,7 @@ for (const [width, height, project] of layouts) {
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
-			await openComments(reader, /^2 threads\b/);
+			await openComments(reader, /^2 comments\b/);
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			const replyId = await drawer.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }).getAttribute('data-comment-id');

@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { createComment, openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { installPaintedFrames, readPainted, type EachPaintedFrame } from '../support/paintedFrames';
 import { expectMarginColumnUp, pill, widen, type Doc } from '../support/marginCards';
+import { closeComments } from '../support/commentDrawer';
 
 /**
  * A table-heavy document stays still under the reader: a status page of wide tables whose rows wrap onto several lines.
@@ -232,8 +233,7 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 			if (cards === 'margin' || cards === 'opens') {
 				await widen(page, document as unknown as Doc);
 				if (cards === 'opens') {
-					// On the canvas the column has no heading or close button: the comments control closes it.
-					await pill(page).click();
+					await closeComments(page);
 					await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 				}
 				// The column opening holds the top line until the reader takes over; a reader scrolls with the wheel, which ends it.
@@ -278,7 +278,7 @@ test('@surface:live-document the column opening with a row cut off at the top ke
 		const page = await context.newPage();
 		await openLiveDocument(page, document, '# Briefing');
 		await widen(page, document as unknown as Doc);
-		await pill(page).click();
+		await closeComments(page);
 		await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
 		await page.locator('.cm-scroller').hover();
 		await page.mouse.wheel(0, 40);

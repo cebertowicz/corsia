@@ -26,9 +26,11 @@ function editorIn(surface: HTMLElement) {
 }
 
 /** The new-comment sheet at phone width (or a popover beside it) over a document; jsdom has no layout, so the sheet is given one. */
-function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, onRevealDraft = vi.fn(), canvasWidth = 0) {
+function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, onRevealDraft = vi.fn(), canvasWidth = 0, phone: boolean | null = null) {
 	host = document.body.appendChild(document.createElement('div'));
 	bounds = document.body.appendChild(document.createElement('div'));
+	// The header's comments control, which a list with no opener hangs from.
+	bounds.appendChild(document.createElement('button')).setAttribute('data-comments-entry', '');
 	const view = editorIn(bounds);
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
 		if (this === bounds) return new DOMRect(0, 0, canvasWidth, SCREEN);
@@ -40,7 +42,7 @@ function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, o
 	component = mount(DocCommentSurface, {
 		target: host,
 		props: {
-			state, anchor: () => new DOMRect(), bounds, narrow, comments: [], onRevealDraft,
+			state, anchor: () => new DOMRect(), bounds, narrow, phone, comments: [], onRevealDraft,
 			focusedId: null, draft: { text: 'Yes', label: '“Yes” · Delta, Status' }, onClose: vi.fn(), restoreFocus: vi.fn(),
 			onFocus: vi.fn(), onSubmit: vi.fn(), onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target, artifactId: 'artifact-1',
 		},
@@ -99,12 +101,22 @@ describe('the phone composer sheet over a commented cell', () => {
 	});
 
 	// The inline form is the margin column, and it starts where the text beside it keeps 45 characters per line (660 px), not at 900 px.
-	it('draws the list as a modal sheet on a canvas under MARGIN_MIN and as the margin column, with no scrim, from MARGIN_MIN', () => {
+	it('draws the list as a popover from the comments control on a desktop canvas under MARGIN_MIN, a modal sheet only on a phone, and the margin column, with no scrim, from MARGIN_MIN', () => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 		// Each canvas is the column for its first pass, until it is measured; that holds the reader's row, which reads a text range's rects, and jsdom has none to give.
 		Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
 		Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(0, 0, 0, 0) });
-		openSheet({ kind: 'list' }, false, vi.fn(), MARGIN_MIN - 1);
+		// A desktop canvas under the threshold, the pane a drawer (900) or not (a split): nothing dims the document.
+		for (const narrow of [false, true]) {
+			openSheet({ kind: 'list' }, narrow, vi.fn(), MARGIN_MIN - 1, false);
+			expect(document.querySelector('[data-adaptive-drawer]')).toBeNull();
+			expect(document.querySelector('[data-popover] [data-doc-comments-drawer]')).not.toBeNull();
+			unmount(component!);
+			component = null;
+			document.body.replaceChildren();
+			vi.restoreAllMocks();
+		}
+		openSheet({ kind: 'list' }, true, vi.fn(), MARGIN_MIN - 1, true);
 		expect(document.querySelector('[data-adaptive-drawer]')?.classList.contains('nonmodal')).toBe(false);
 		expect(document.querySelector('.drawer-panel')?.getAttribute('aria-modal')).toBe('true');
 		unmount(component!);

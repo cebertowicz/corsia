@@ -4,6 +4,7 @@ import { type Page, type APIRequestContext } from '@playwright/test';
 import { test, expect } from '../support/test';
 import { isolatedDb, setDebugVersionOverlay } from '../support/heldComments';
 import { scanBreakpoints, captureWidths } from './breakpoints.mjs';
+import { title as chatTitle } from './chat';
 async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'bottom') {
   await page.evaluate(({ selector, scroll }) => {
     const anchor = document.querySelector(selector);
@@ -15,6 +16,8 @@ async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'botto
       current = current.parentElement;
     }
     if (!current) throw new Error('Scenario has no scrollable content');
+    // Scroll as a reader does: their wheel ends the document's reading-line hold, which otherwise puts a bare scrollTop back.
+    current.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: scroll === 'top' ? -1 : 1 }));
     current.scrollTop = scroll === 'top' ? 0 : current.scrollHeight;
   }, { selector, scroll });
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -63,6 +66,16 @@ async function togglePanelOverlay(page: Page): Promise<{ suffix: string; caption
   return state;
 }
 
+/** A state a scenario is also captured in, at the widths it names: a picked card, a list opened, a side panel closed. */
+type Variant = { widths: number[]; apply: (page: Page) => Promise<void> };
+
+/** No test residue on screen: a seeded id, a test label, or the mock model's name. */
+async function expectNoResidue(page: Page) {
+  await expect(page.locator('.version-overlay')).toHaveCount(0);
+  await expect(page.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText(/\be2e\b|\d{13}/i);
+}
+
 async function capture(page: Page, request: APIRequestContext, name: string, output: string, selectedWidths?: number[]) {
   if (!/^[a-z0-9-]+$/.test(name) || !path.isAbsolute(output)) throw new Error('Invalid scenario or non-absolute output path');
   const scenario = await import(`./${name}.ts`);
@@ -105,9 +118,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
       open = await scenario.seed(captured, request);
       if (typeof open !== 'function') throw new Error('Scenario seed must return an open function');
     }
-    await expect(captured.locator('.version-overlay')).toHaveCount(0);
-    await expect(captured.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
-    await expect(captured.locator('body')).not.toContainText(/\be2e\b/i);
+    await expectNoResidue(captured);
     const shoot = async (suffix: string, caption: string) => {
       for (const theme of ['light', 'dark'] as const) {
         await captured.emulateMedia({ colorScheme: theme });
@@ -126,6 +137,17 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
     if (otherPanelState) {
       await shoot(otherPanelState.suffix, otherPanelState.caption);
       await captured.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+    }
+    // Each variant starts from the scenario as it opens, on a page of its own.
+    for (const [variant, { widths: at, apply }] of Object.entries((scenario.variants ?? {}) as Record<string, Variant>)) {
+      if (!at.includes(width)) continue;
+      await captured.close();
+      captured = await context.newPage();
+      await captured.setViewportSize({ width, height: 900 });
+      await open(captured, state || undefined);
+      await apply(captured);
+      await expectNoResidue(captured);
+      await shoot(`-${variant}`, ` · ${variant}`);
     }
     groups.push(`<section><h2>${state ? `${state} · ` : ''}${width}px</h2><div>${figures.join('\n')}</div></section>`);
   }
@@ -148,7 +170,7 @@ test('chat composer initializes at the captured width', async ({ page, request }
   test.setTimeout(120_000);
   const output = path.join(process.env.CONTACT_SHEET_OUT ?? '', 'regression');
   const captured = await capture(page, request, 'chat', output, [1440, 1440, 393]);
-  await expect(captured.locator('aside.sidebar').getByText(/^Review conversation \d+$/, { exact: true })).toHaveCount(1);
+  await expect(captured.locator('aside.sidebar').getByText(chatTitle, { exact: true })).toHaveCount(1);
   await captured.getByRole('button', { name: 'Attach', exact: true }).click();
   await expect(captured.locator('.mobile-attach-row')).toBeVisible();
   await captured.screenshot({ path: path.join(output, 'composer-393.png') });

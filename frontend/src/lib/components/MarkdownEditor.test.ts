@@ -134,6 +134,16 @@ describe('MarkdownEditor edits', () => {
 			expect(host.querySelector('.cm-suggestion-insert')).toBeNull();
 		});
 
+		it('takes the new sign off a highlight once its thread is read, with nothing else about it changed', () => {
+			const highlights = writable([{ from: 6, to: 11, id: 'plain', focused: true, unread: 'reply' as const }]);
+			const live = fromStore(highlights);
+			open({ get highlights() { return live.current; } });
+			expect(host.querySelector('[data-comment-new="plain"]')).not.toBeNull();
+			highlights.set([{ from: 6, to: 11, id: 'plain', focused: true }]); flushSync();
+			expect(host.querySelector('[data-comment-new]')).toBeNull();
+			expect(host.querySelector('.cm-comment-anchor.cm-comment-focused')?.textContent).toBe('brown');
+		});
+
 		it('focuses the card for a press on the insert, and for a caret in the struck text, marked as a suggestion', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [suggestion('red')], onAnchorFocus });

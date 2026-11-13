@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type ChangeDesc, type EditorState, type Text } from '@codemirror/state';
+import { Annotation, StateEffect, StateField, type ChangeDesc, type EditorState, type Text } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
 import { tableGrid, type CellSpan } from './widget-cells';
 
@@ -107,6 +107,9 @@ export const openCellState = StateField.define<OpenCell | null>({
 
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */
 export const CELL_SYNC = 'table-cell-sync';
+
+/** A change to the document that is a cell's content written into its row (`writeCellEdit`): the row stays a row, so nothing rewrites it. */
+export const cellWrite = Annotation.define<true>();
 
 /** The class of the open cell editor's element, in place of the cell's drawn content: an event from inside it is the editor's, not the table's. */
 export const CELL_EDITOR = '.cm-md-cell-editor';

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Lexer, type Tokens } from 'marked';
+import { EditorView } from '@codemirror/view';
 import type { Rig } from './typed-reveal-rig';
 import { build, cellEl, cleanup, clicked, MOD, mountedEditor, press, THREEROW } from './widget-cell-rig';
 
@@ -28,9 +29,12 @@ const leftTable = (doc: string) => {
 	expect(mountedEditor(r), 'no cell is open').toBeNull();
 	return r;
 };
+/** Text put in at the caret. Typing is offered to the editor's input handlers first, as CodeMirror does with what the browser types. */
 const type = (r: Rig, insert: string, userEvent = 'input.type') => {
-	const at = r.view.state.selection.main.head;
-	r.view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, userEvent });
+	const view = r.view, at = view.state.selection.main.head;
+	const tr = () => view.state.update({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, userEvent });
+	if (userEvent === 'input.type' && view.state.facet(EditorView.inputHandler).some((handler) => handler(view, at, at, insert, tr))) return;
+	view.dispatch(tr());
 };
 
 describe('typing after a table that ends the document', () => {

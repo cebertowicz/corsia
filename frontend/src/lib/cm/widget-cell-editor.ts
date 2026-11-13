@@ -3,10 +3,10 @@ import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { emitProductEvent } from '$lib/product_events';
 import { cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import {
-	CELL_SYNC, cellSource, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
+	CELL_SYNC, cellSource, cellWrite, closeCell, mapRowStart, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
 import { heldText, heldToSource, runDifference, sourceToHeld, writeCellEdit } from './widget-cell-row';
-import { adjacentCell, caretAfterTable, cellBelow, cellLabel, tableOfCell, typingBelowTable } from './widget-cell-nav';
+import { adjacentCell, caretAfterTable, cellBelow, cellLabel, tableOfCell, typingBelowTable, typingInTableSource } from './widget-cell-nav';
 import { CellPresses } from './widget-cell-presses';
 import { repaintTableCell } from './widget-table';
 import { cellEditorSetup } from './widget-cell-setup';
@@ -239,7 +239,7 @@ class CellEditors {
 			const event = update.transactions[update.transactions.length - 1]?.annotation(Transaction.userEvent);
 			// An edit the row already holds (a backslash typed in front of a pipe, which was already its escape) changes no
 			// document, so the editor is put back to the content as stored here.
-			if (changes.length) this.host.dispatch(event ? { changes, userEvent: event } : { changes });
+			if (changes.length) this.host.dispatch({ changes, annotations: cellWrite.of(true), ...(event ? { userEvent: event } : {}) });
 			else this.syncEditor(this.host.state, cell, editor, true);
 		}
 		// The reader's place is mirrored after the change, onto the cell as it then stands (a row that gained its leading pipe
@@ -285,7 +285,7 @@ class CellEditors {
 const cellEditing = ViewPlugin.fromClass(CellEditors);
 
 export const markdownCellEditing: Extension = [
-	openCellState, typingBelowTable,
+	openCellState, typingBelowTable, typingInTableSource,
 	cellEditing,
 	EditorView.updateListener.of((update) => update.view.plugin(cellEditing)?.settle(update)),
 ];

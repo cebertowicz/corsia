@@ -3,7 +3,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { waitForPanelsToSettle } from '../support/sidebar';
-import { closeComments, openComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown, openComments } from '../support/commentDrawer';
 
 /**
  * Activating a comment in the Comments sheet takes the reader to its text, whether they press the quote line or the
@@ -80,7 +80,7 @@ test.describe(`comment jump at ${phone.name}`, () => {
 				]);
 				await expect(page.locator('.cm-scroller')).toBeVisible();
 				await openComments(page);
-				await expect(drawer).toBeVisible();
+				await expectCommentsShown(drawer);
 				await parkInMiddle(page);
 				const id = section === 'First' ? above : below;
 				const row = drawer.locator(`[data-comment-id="${id}"]`);
@@ -107,7 +107,7 @@ test('@flow:document-comments scrolling right after the margin column opens stay
 	await expect(page.locator('.cm-scroller')).toBeVisible();
 	// The column opens by itself once, when the comments load and the canvas is already wide. The count in the control's name shows
 	// they have loaded, so that one check has run on this narrow canvas and the column will not open by itself after the panels go.
-	await expect(page.locator('.comment-status')).toHaveAccessibleName(/^2 threads\b/);
+	await expect(page.locator('.comment-status')).toHaveAccessibleName(/^2 comments\b/);
 	// The margin column needs a wide canvas: tuck both side panels away.
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	if (!(await page.locator('.pane').evaluate((element) => element.classList.contains('collapsed')))) {

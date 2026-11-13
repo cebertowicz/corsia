@@ -39,7 +39,8 @@ export function scanBreakpoints(root) {
 }
 
 export function captureWidths(boundaries) {
-  const widths = new Set([393, 1440]);
+  // A phone, a laptop with the sidebar open, and a desktop wide enough for a side column beside a centred canvas.
+  const widths = new Set([393, 1440, 1920]);
   for (const boundary of boundaries) {
     if (boundary - 1 >= 320) widths.add(boundary - 1);
     if (boundary >= 320) widths.add(boundary);

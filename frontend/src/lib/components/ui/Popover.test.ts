@@ -299,7 +299,7 @@ describe('Popover', () => {
 			// The card is 170 tall and its composer ends 150 into it; the anchor bands are 134 and 114, so clamping to
 			// the anchor would cut the card below the composer and push Send out of it.
 			const pinned = surface.appendChild(document.createElement('div'));
-			pinned.setAttribute('data-autosize-sticky', '');
+			pinned.setAttribute('data-reply-composer', '');
 			pinned.getBoundingClientRect = () => new DOMRect(0, 0, 300, 150);
 			const box = surface.appendChild(document.createElement('textarea')); box.focus();
 			window.dispatchEvent(new Event('resize'));
@@ -335,5 +335,25 @@ describe('Popover', () => {
 		await vi.waitFor(() => expect(surface().style.top).toBe('100px'));
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));
+	});
+	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
+		const { fromStore, writable } = await import('svelte/store');
+		const cover = writable(false);
+		const covered = fromStore(cover);
+		const onClose = vi.fn();
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(Popover, { target: host, props: { anchor: anchor(), open: true, get covered() { return covered.current; }, onClose, children: (() => {}) as any } });
+		flushSync();
+		const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface().inert).toBe(false));
+		cover.set(true); flushSync();
+		expect(surface().inert).toBe(true);
+		expect(surface().style.visibility).toBe('hidden');
+		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+		expect(onClose).not.toHaveBeenCalled();
+		cover.set(false); flushSync();
+		await vi.waitFor(() => expect(surface().inert).toBe(false));
+		expect(surface().style.visibility).toBe('');
 	});
 });

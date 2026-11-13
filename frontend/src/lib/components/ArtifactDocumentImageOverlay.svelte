@@ -105,7 +105,7 @@
 	{/key}
 	{#if comments}
 		<div class="viewer-band" bind:this={bottomBand}>
-			<DocBottomBand artifactId={comments.artifactId} threads={unread} root={overlayRoot} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} ignoreConfirmationId={priorConfirmation} onJump={(thread) => onReplyJump(thread.id)} />
+			<DocBottomBand artifactId={comments.artifactId} threads={unread} root={overlayRoot} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} confirmsDelivery ignoreConfirmationId={priorConfirmation} onJump={(thread) => onReplyJump(thread.id)} />
 		</div>
 	{/if}
 </div>

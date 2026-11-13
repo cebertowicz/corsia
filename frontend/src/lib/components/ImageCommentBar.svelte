@@ -15,7 +15,7 @@
 		savingMove?: boolean;
 		/** Open threads on this image. */
 		count: number;
-		/** Messages in the viewer's feedback batch (a document's, for an image in one) that are not sent yet. */
+		/** Messages in the viewer's feedback batch (a document's, for an image in one) that Send has not delivered. */
 		unsent?: number;
 		loading?: boolean;
 		listOpen?: boolean;

@@ -28,7 +28,7 @@ for (const author of ['person', 'agent'] as const) {
 		await openSuggestionDocument(page, request, TEXT, [...items(PROSE, 'Prose', author), ...items(CELL, 'Cell', author)]);
 		await expect.poll(() => page.locator('.cm-comment-anchor').count(), { timeout: 30_000 }).toBeGreaterThan(0);
 
-		for (const [label, target] of [['Prose', page.locator('.cm-line .cm-comment-anchor', { hasText: PROSE }).first()], ['Cell', page.locator('td.cm-comment-anchor', { hasText: CELL }).first()]] as const) {
+		for (const [label, target] of [['Prose', page.locator('.cm-line .cm-comment-anchor', { hasText: PROSE }).first()], ['Cell', page.locator('td .cm-comment-anchor', { hasText: CELL }).first()]] as const) {
 			await expect(target).toBeVisible();
 			if (phone) await target.tap(); else await target.click();
 			await expect.poll(() => cardText(page, phone).then((text) => text.length), { message: `a press on the ${label} stack opens a card` }).toBeGreaterThan(0);

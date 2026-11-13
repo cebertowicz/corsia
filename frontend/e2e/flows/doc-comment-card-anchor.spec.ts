@@ -130,14 +130,13 @@ async function expectBesideAnchor(page: Page, anchor: Locator, line: Locator, la
 
 /**
  * A margin card travels with its text in the column: level with the anchor's row, or, where cards cluster, stacked
- * under the card above it (8 px gap), or held at the column's top under the header while its row is scrolled above it.
- * A card near the bottom edge is not moved up to fit: it comes into view as the document scrolls.
+ * under the card above it (8 px gap). The cards sit on the canvas and scroll with it, so a card whose row is partly
+ * scrolled out of view goes with it; a card near the bottom edge comes into view as the document scrolls.
  */
 async function expectMarginCard(page: Page, anchor: Locator, line: Locator, label: string, cardLocator: Locator) {
 	await expect.poll(async () => {
 		const card = await box(cardLocator);
 		const canvas = await box(page.locator('.doc'));
-		const clip = await box(page.locator('.drawer-comments'));
 		const at = await drawnBox(anchor);
 		const row = await drawnBox(line);
 		const slack = 1;
@@ -145,13 +144,11 @@ async function expectMarginCard(page: Page, anchor: Locator, line: Locator, labe
 		const textRight = await textColumnRight(page);
 		if (card.x < textRight) return `card's left edge (${card.x}) is inside the text column, which ends at ${textRight}`;
 		if (intersects(card, at)) return `card ${JSON.stringify(card)} covers its anchor ${JSON.stringify(at)}`;
-		if (card.y < clip.y - slack || card.y > clip.y + clip.height) return `card ${JSON.stringify(card)} starts outside the column ${JSON.stringify(clip)}`;
 		const middle = row.y + row.height / 2;
 		if (card.y <= middle && card.y + card.height >= middle) return 'beside its anchor';
-		if (middle < clip.y && Math.abs(card.y - clip.y) <= 2) return 'beside its anchor';
 		const others = await page.locator('[data-margin-card]').evaluateAll((nodes) => nodes.map((node) => { const { y, height } = node.getBoundingClientRect(); return { y, bottom: y + height }; }));
 		if (others.some((other) => Math.abs(other.bottom + 8 - card.y) <= 2)) return 'beside its anchor';
-		return `card ${JSON.stringify(card)} is not level with the anchor's row ${JSON.stringify(row)}, held under the header, or stacked under another card`;
+		return `card ${JSON.stringify(card)} is not level with the anchor's row ${JSON.stringify(row)} or stacked under another card`;
 	}, { message: `${label}: the card sits beside its anchor in the margin column`, timeout: 5_000 }).toBe('beside its anchor');
 }
 
@@ -164,7 +161,7 @@ async function wheelCanvas(page: Page, deltaY: number) {
 
 /** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
 async function showMarginColumn(page: Page) {
-	await openComments(page, /^\d+ (open )?threads?/i);
+	await openComments(page, /^\d+ comments?/i);
 	await expectMarginColumnUp(page);
 }
 

@@ -109,6 +109,16 @@ function assertTypedInClickedCell(saved: string) {
 	expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
 }
 
+/** zq, typed once, is in column `col` of the table's body row, and the table, its rows and the paragraph under it are otherwise as seeded. */
+function assertTypedInCell(saved: string, col: number) {
+	expect(saved.split('zq'), `zq was typed once: ${JSON.stringify(saved)}`).toHaveLength(2);
+	const row = saved.split('\n').find((line) => line.includes('zq')) ?? '';
+	expect(row.startsWith('|') && row.endsWith('|'), `zq is in a table row, not a line of its own: ${JSON.stringify(saved)}`).toBe(true);
+	expect(row.split('|').slice(1, -1).findIndex((cell) => cell.includes('zq')), `zq is in column ${col}: ${JSON.stringify(row)}`).toBe(col);
+	expect(saved.replace('zq', ''), `the table and the paragraph under it are otherwise unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
+	expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
+}
+
 test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', () => {
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name.includes('mobile'), 'a mouse click'); });
 
@@ -139,6 +149,63 @@ test.describe('@flow:doc-table-cell-reclick-typing @surface:documents desktop', 
 		expect(saved, `XYZ is in the clicked cell's source: ${JSON.stringify(saved)}`).toMatch(new RegExp(`${CELL_ROW.replace(/[|]/g, '\\|')}[^|]*XYZ[^|]*\\|`));
 		expect(saved.replace('XYZ', ''), `the table and the line under it are otherwise unchanged: ${JSON.stringify(saved)}`).toContain(TABLE_AND_AFTER);
 		expect(saved.split('\n').filter((line) => line.startsWith('|')), 'the table kept its rows').toHaveLength(3);
+	});
+
+	// The card a click on a cell's highlight opened closes on Escape: the keyboard goes back to that cell, not to the document
+	// under the table, where the paragraph below would join the table as more rows.
+	test('Escape on a cell\'s comment card, then typing, puts the text in that cell and leaves the paragraph under the table a paragraph', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath, highlight } = await openDocument(page, { width: 1440, height: 900 });
+		await highlight.click();
+		const card = page.getByText('Which sign needs replacing?').first();
+		await expect(card).toBeVisible();
+		await settled(page);
+		await page.keyboard.press('Escape');
+		await expect(card).toBeHidden();
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 1);
+	});
+
+	// A cell left by a click outside the document, then the keyboard taken back into the document (Tab): the document's
+	// caret is still in that cell's source, so typing goes into the cell, not under the table.
+	test('after a click outside the document closes a cell, typing with the keyboard back in the document goes into that cell', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath } = await openDocument(page, { width: 1440, height: 900 });
+		await page.locator('.cm-md-table td', { hasText: 'Trailhead signs' }).click();
+		await caretInCell(page, 'setup: the click opened the cell');
+		// A plain spot beside the document, on no control: the click takes the focus out of the editor and closes the cell.
+		const spot = await page.evaluate(() => {
+			const editor = document.querySelector('.md-editor')!.getBoundingClientRect();
+			for (let y = 160; y < innerHeight - 160; y += 40) for (let x = 40; x < editor.left - 20; x += 60) {
+				const el = document.elementFromPoint(x, y);
+				if (el && !el.closest('.md-editor, button, a, input, textarea, select, [contenteditable="true"], [tabindex], [role="button"], [role="link"], label')) return { x, y };
+			}
+			return null;
+		});
+		expect(spot, 'setup: a plain spot beside the document').not.toBeNull();
+		await page.mouse.click(spot!.x, spot!.y);
+		await expect(page.locator('.cm-md-cell-editor'), 'setup: the click outside closed the cell').toHaveCount(0);
+		await page.locator(`${HOST} > .cm-scroller > .cm-content`).focus();
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 0);
+	});
+
+	// However the document's caret came to be in a table's source with no cell open (find, undo, a script), typing goes into
+	// the cell nearest it.
+	test('typing with the document\'s caret in a table\'s source and no cell open goes into the nearest cell', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const { docPath } = await openDocument(page, { width: 1440, height: 900 });
+		const at = DOC.indexOf('Replace the faded') + 3;
+		await page.locator(`${HOST} > .cm-scroller > .cm-content`).evaluate((content, at) => {
+			const view = (content as HTMLElement & { cmTile: { root: { view: { dispatch: (spec: object) => void; focus: () => void } } } }).cmTile.root.view;
+			view.dispatch({ selection: { anchor: at } });
+			view.focus();
+		}, at);
+		await settled(page);
+		await page.keyboard.type('zq');
+		assertTypedInCell(await savedAfterProseMarker(page, request, docPath), 1);
 	});
 
 	test('a press on a cell leaves the document scrolled where it was', async ({ page }) => {

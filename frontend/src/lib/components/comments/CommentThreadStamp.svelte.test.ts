@@ -306,6 +306,26 @@ describe('CommentThread stamping', () => {
 		expect(host.textContent).not.toContain('reply r0');
 	});
 
+	it('keeps the New marks a picked document card opened with after the viewed stamp clears them, until the card rests again', () => {
+		const card = $state({ resting: true });
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };
+		vi.stubGlobal('IntersectionObserver', FakeObserver);
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed: vi.fn().mockResolvedValue(undefined), inMargin: true, get hideReply() { return card.resting; } } });
+		flushSync();
+		// At rest the preview carries one New mark for its unread replies.
+		expect(newMarks()).toBe(1);
+		card.resting = false; flushSync();
+		expect(newMarks()).toBe(2);
+		// The stamp lands: the server names no new replies, and the picked card still shows which ones were new.
+		arrive({ newReplyIds: [] });
+		expect(newMarks()).toBe(2);
+		card.resting = true; flushSync();
+		expect(newMarks()).toBe(0);
+		card.resting = false; flushSync();
+		expect(newMarks()).toBe(0);
+	});
+
 	it('shows only the server-reported unread reply while the thread is open', () => {
 		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
 		state.comment = { ...state.comment, replies, newReplyIds: ['r1'] };

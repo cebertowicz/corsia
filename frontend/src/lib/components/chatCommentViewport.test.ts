@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { revealAboveSheet } from './chatCommentViewport';
+import { keepAboveSheet, revealAboveSheet, SHEET_SPACE } from './chatCommentViewport';
 
 function setup(sheetHeight: number) {
 	document.body.innerHTML = '<header class="shell-header"></header><div class="messages"></div><div data-adaptive-drawer><div class="drawer-panel"></div></div>';
@@ -37,6 +37,18 @@ describe('revealAboveSheet', () => {
 		expect(scrollBy).not.toHaveBeenCalled();
 		revealAboveSheet(scroller, new DOMRect(0, 600, 200, 20), panel, false);
 		expect(scrollBy).toHaveBeenCalledWith({ top: 610 - 306 });
+	});
+
+	it('keeps space at the end of the transcript as tall as the sheet, and gives it back when the sheet is gone', () => {
+		const { panel, scroller } = setup(300);
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+		const stop = keepAboveSheet(panel, () => scroller, () => new DOMRect(0, 200, 200, 20));
+		frames.splice(0).forEach(callback => callback(0));
+		expect(scroller.style.getPropertyValue(SHEET_SPACE)).toBe('300px');
+		stop();
+		expect(scroller.style.getPropertyValue(SHEET_SPACE)).toBe('');
+		vi.unstubAllGlobals();
 	});
 
 	it('shows a passage taller than the space from its first line', () => {

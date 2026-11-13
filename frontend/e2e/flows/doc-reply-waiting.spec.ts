@@ -218,7 +218,7 @@ async function shot(page: Page, name: string, chatRows = 4): Promise<void> {
 // The document is on screen with its text drawn and its comment count read.
 async function documentReady(page: Page): Promise<void> {
 	await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ threads?\b/ })).toBeVisible();
+	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ comments?\b/ })).toBeVisible();
 }
 
 // The frames belong to the replier's thread, not the conductor landing the app opens on.
@@ -498,7 +498,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.getByText(PASSAGES[2].reply, { exact: true })).toBeVisible();
 				await documentReady(page);
 				// This landing frame is intentionally before the 1.5 s visible dwell: marker and pill still agree.
-				await expect(page.getByRole('button', { name: '3 threads, 1 unread' })).toBeVisible();
+				await expect(page.getByRole('button', { name: '3 comments, 1 unread' })).toBeVisible();
 				await expect(page.locator('[data-doc-comments-drawer] .ct-new')).toHaveCount(1);
 				await expect.poll(() => page.locator('.cm-scroller').evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
 				await shot(page, `01-document-arrival-${theme}-${width}`);
@@ -530,16 +530,16 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.waitForTimeout(1100);
 			LATER_REPLIES.forEach((body, index) => addAgentReply(scenario.artifactId, scenario.roots[index], threadId, body));
 			await reloadComments(page, scenario.artifactId);
-			const commentsPill = page.getByRole('button', { name: '3 threads, 3 unread' });
+			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
 			await expect(commentsPill).toBeVisible();
-			await expect(commentsPill).toHaveText(/^\s*3 threads · 3 unread$/);
+			await expect(commentsPill).toHaveText(/^\s*3 comments · 3 unread$/);
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
 			// Opening the comments shows the three threads the pill counted. Hold the
 			// asynchronous viewed acknowledgements until both frames preserve that pre-read state.
 			const releaseViewedStamps = await holdViewedStamps(page);
-			await page.getByRole('button', { name: '3 threads, 3 unread' }).click();
-			await expect(page.getByText('3 open', { exact: true })).toBeVisible();
+			await page.getByRole('button', { name: '3 comments, 3 unread' }).click();
+			await expect(page.locator('[data-doc-comments-drawer] .drawer-heading h2')).toHaveText('Comments 3');
 			await expect(page.getByText(LATER_REPLIES[0], { exact: true })).toBeVisible();
 			await shot(page, `03-three-replies-${theme}-${width}`);
 			await shotRailClosed(page, `03-three-replies-${theme}-${width}-rail-closed`, width);
@@ -560,7 +560,7 @@ for (const width of [1440, 393]) {
 		await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
 		await documentReady(page);
 		await expect(page.locator('.ct-new')).toHaveCount(0);
-		await expect(page.getByRole('button', { name: '3 threads' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '3 comments', exact: true })).toBeVisible();
 		await shot(page, `00a-before-in-document-light-${width}`);
 		await page.evaluate(async (id) => {
 			const { closeArtifactTab } = await import('/src/lib/stores/artifactWorkspace.ts');

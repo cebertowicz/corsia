@@ -16,7 +16,11 @@
 	const held = $derived(lane ? feedback.heldCount(lane) : 0);
 	const undelivered = $derived(feedback.undeliveredCount(lane));
 	const summary = $derived(feedback.undeliveredSummary(lane));
-	const sentHere = $derived(lane !== null && feedback.sentLane === lane && feedback.sent > 0);
+	// A narrow bar confirms only its own lane's send; the document header confirms any send of the document it shows, since the
+	// document's canvas carries no delivery notice of its own.
+	const sentHere = $derived(lane !== null && feedback.sent > 0 && (feedback.sentLane === lane || !compact));
+	// The slot says Sent once its own lane has gone, or for a moment after the other lane went while this one still holds: then its Send returns.
+	const saysSent = $derived(held === 0 || (sentHere && feedback.sentLane !== lane));
 	let sender = $state<HTMLSpanElement>(), notSent = $state<HTMLSpanElement>();
 
 	async function send() {
@@ -38,7 +42,7 @@
      for a moment first. Leaving, the slot keeps what it last showed; a send not delivered swaps it for Retry at once. -->
 {#if lane && (held > 0 || sentHere)}
 	<span bind:this={sender} class="sending-now" class:compact in:inlineSlot out:inlineSlot={{ instant: feedback.handedToRetry }}>
-		{#if held === 0}
+		{#if saysSent}
 			<span class="sent">
 				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
 				Sent
@@ -93,7 +97,16 @@
 		.send-short.sending { opacity: 0; }
 		.sending-now > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
 	}
-	/* The image viewer's bar is no `doc-header`: its narrow Send takes the same short wording on a phone, so the count and Send share one row. */
+	/* The image viewer's bar is no `doc-header`: by its own width at any window size (a split beside chat or a phone), its Send takes
+	   the same short wording, so Back, the count and Send share one row. Same threshold as the bar's Back and count (ImageLightbox,
+	   ImageCommentLightbox). */
+	@container image-bar (width < 600px) {
+		.sending-now.compact .send-full { display: none; }
+		.sending-now.compact .send-short { display: inline; }
+		.send-short.sending { opacity: 0; }
+		.sending-now.compact > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
+	}
+	/* A phone bar takes it too. */
 	@media (max-width: 48rem) {
 		.sending-now.compact .send-full { display: none; }
 		.sending-now.compact .send-short { display: inline; }

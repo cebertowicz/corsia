@@ -73,9 +73,23 @@ export async function openDocument(page: Page, seeded: { sessionTitle: string },
 	await turnOffDocumentComments(page);
 }
 
+/** Clicks the document's image where none of its comment pins is drawn, as a person opening the image does: a pin opens its thread. */
+export async function clickDocImage(page: Page, which = 0) {
+	const img = page.locator('.cm-md-image img').nth(which);
+	await img.scrollIntoViewIfNeeded();
+	const spot = await img.evaluate((el) => {
+		const box = el.getBoundingClientRect();
+		for (const [fx, fy] of [[0.5, 0.5], [0.05, 0.95], [0.95, 0.95], [0.05, 0.05], [0.95, 0.05]]) {
+			if (document.elementFromPoint(box.left + box.width * fx, box.top + box.height * fy) === el) return { x: box.width * fx, y: box.height * fy };
+		}
+		return null;
+	});
+	expect(spot, 'part of the image is bare of pins').not.toBeNull();
+	await img.click({ position: spot! });
+}
 /** Opens the document's image in the viewer and waits until it has drawn and fitted. */
 export async function openImage(page: Page, which = 0) {
-	await page.locator('.cm-md-image img').nth(which).click();
+	await clickDocImage(page, which);
 	await expect(overlay(page)).toBeVisible();
 	const img = overlay(page).locator('.frame img');
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(DOC_IMAGE_NATURAL.width);

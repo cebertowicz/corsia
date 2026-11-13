@@ -3,6 +3,7 @@ import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { imageBarSend, sendByKeyboard } from '../support/heldComments';
+import { expectCommentsShown } from '../support/commentDrawer';
 import {
 	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,
 	sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
@@ -29,7 +30,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		const seeded = await seedImage(page, request, 'region-1440');
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 threads');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
 			await expect(commentButton(page)).toBeVisible();
 			await shoot(page, testInfo, '1440-01-open', true);
 
@@ -114,10 +115,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 
 			// The viewer's list opens on All, so its pill counts the resolved thread too.
 			// The viewer sits directly above this drawer, so its thumbnail would repeat the image and hide the first card.
-			await expect(pill(page)).toHaveAttribute('aria-label', /^3 threads(, |$)/);
+			await expect(pill(page)).toHaveAttribute('aria-label', /^3 comments(, |$)/);
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
-			await expect(drawer).toBeVisible();
+			await expectCommentsShown(drawer);
 			await pill(page).hover();
 			const activePillColor = await pill(page).evaluate((el) => getComputedStyle(el).color);
 			const inactiveZoomForPill = page.locator('.image-viewer:visible .zoom button[aria-pressed="false"]');
@@ -224,7 +225,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByRole('button', { name: 'Toggle panel' }).click();
 			await expect.poll(async () => (await viewer(page).boundingBox())!.width).toBeGreaterThan(800);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 threads');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
 			// The fit settles after the canvas widens; draw on the settled image.
 			let last = 0;
 			await expect.poll(async () => { const w = (await frame(page)).width; const settled = w === last; last = w; return settled; }).toBe(true);

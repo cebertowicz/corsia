@@ -242,7 +242,16 @@ describe('ImageLightbox', () => {
 		await loaded({ onBack: () => {}, docName: 'walkthrough.md' });
 		const labels = [...host.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim());
 		expect(labels).toEqual(['Back to walkthrough.md', 'Fit']);
-		expect(host.querySelector('.back-text')!.textContent).toBe('Back');
+		// The bar's own width picks the label (a container query jsdom does not lay out): the short label is there for a narrow bar.
+		expect(host.querySelector('.back-word')!.textContent).toBe('Back');
+		expect(host.querySelector('.back-text')!.textContent).toBe('Back to walkthrough.md');
+	});
+
+	it('labels Back with the word alone when it does not come from a named document', async () => {
+		await loaded({ onBack: () => {} });
+		expect(host.querySelector('.back-text')).toBeNull();
+		expect(host.querySelector('.back-word.only')!.textContent).toBe('Back');
+		expect(button('Back')).toBeDefined();
 	});
 
 	it('leaves room in the bar for another action, drawn before the zoom controls', async () => {

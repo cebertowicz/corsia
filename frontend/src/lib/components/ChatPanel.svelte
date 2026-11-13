@@ -55,6 +55,7 @@
 		onAutoCreateThread,
 		onOpenDocuments = () => {},
 		visibleDocumentArtifactId = null,
+		artifactPaneOpen = false,
 	}: {
 		isDraggingOver?: boolean;
 		onOpenLightbox: (url: string) => void;
@@ -62,13 +63,13 @@
 		onOpenDocuments?: (documentId?: string) => void;
 		/** The document whose own header Send is on screen, so this chat does not offer a second sender for it. */
 		visibleDocumentArtifactId?: string | null;
+		artifactPaneOpen?: boolean;
 		onAutoCreateThread?: () => Promise<void>;
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let chatCanvas = $state<HTMLDivElement | undefined>(undefined);
 	/** Whether this canvas has room for the comment margin beside its transcript, and which card is picked. */
-	const commentMargin = createChatCommentMargin(() => chatCanvas ?? null, () => $activeThreadId,
-		() => $messages.some(message => message.thread_id === $activeThreadId && !!message.chat_comments?.length));
+	const commentMargin = createChatCommentMargin(() => chatCanvas ?? null, () => artifactPaneOpen);
 	let userIsNearBottom = $state(true);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;

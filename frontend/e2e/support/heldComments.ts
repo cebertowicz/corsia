@@ -278,8 +278,12 @@ export async function sendByKeyboard(page: Page, send: Locator, whileSent?: () =
 	return request;
 }
 
-/** The toast a send raised, by its exact wording. */
+/** The toast a send raised, by its exact wording: an image viewer's band; a document says it in its header instead. */
 export const sentToast = (page: Page, text: string): Locator => page.locator('.toast').filter({ hasText: text });
+/** The document header's Sent mark, which stands where Send stood once a send of the shown document is delivered. */
+export const headerSent = (page: Page): Locator => page.locator('.document-header .sending-now .sent');
+/** The document header's spoken delivery status: what was sent, or what was not delivered. */
+export const headerSentStatus = (page: Page): Locator => page.locator('.document-header .feedback-controls [role="status"]');
 
 // ---- Fixtures ----------------------------------------------------------------------------------------------------
 

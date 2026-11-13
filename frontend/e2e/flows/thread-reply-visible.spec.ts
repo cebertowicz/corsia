@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { agentComment, reviewerSession } from '../support/liveConcurrency';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { setDebugVersionOverlay } from '../support/heldComments';
-import { expectDiscussionVisible } from '../support/discussionVisible';
+import { expectDiscussionReachableByScroll, expectNoCardScroller } from '../support/discussionVisible';
 
 
 const quote = 'target line for a reply';
@@ -29,14 +29,23 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
   const input = page.getByPlaceholder('Reply…');
   const send = page.getByRole('button', { name: 'Send reply' });
   const card = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ct ")][1]');
-  // Test the outcome after filling the available room; an eight-line cap was only the old mechanism.
+  // The field grows with its text and never scrolls itself; the card never scrolls inside itself; the caret line (the end of the text) and Send stay on screen.
+  /** Types at the end of the reply, as a person does after scrolling up to read: the product, not the test, scrolls the field's end back. */
+  const typeAtEnd = async () => {
+   await input.evaluate((field: HTMLTextAreaElement) => { field.focus({ preventScroll: true }); field.setSelectionRange(field.value.length, field.value.length); });
+   await page.keyboard.insertText('.');
+  };
   const checkOutcome = async () => {
-   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
+   await expectNoCardScroller(card);
    await expect(send).toBeVisible();
-   for (const element of [send, card]) await expect.poll(async () => {
-    const box = (await element.boundingBox())!;
+   await expect.poll(async () => {
+    const box = (await send.boundingBox())!;
     return box.y >= 0 && box.y + box.height <= height && box.x >= 0 && box.x + box.width <= width;
    }).toBe(true);
+   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => {
+    const box = field.getBoundingClientRect(), line = Number.parseFloat(getComputedStyle(field).lineHeight) || 20;
+    return box.bottom <= innerHeight + 1 && box.bottom - line >= -1;
+   })).toBe(true);
    await send.click({ trial: true });
    if (width === 900 && height === 420) {
     const anchor = page.locator('.cm-comment-anchor').filter({ hasText: quote });
@@ -58,42 +67,28 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
   await input.focus();
   await page.keyboard.insertText('\nPasted ending');
   await checkOutcome();
-  if (width === 393 && height === 420) {
-   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.clientHeight)).toBeGreaterThan(45);
-   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollTop)).toBeGreaterThan(0);
-  }
+  // Every line of the field is laid out: the field is as tall as its text.
+  await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight <= field.clientHeight + 1)).toBe(true);
   await page.screenshot({ path: info.outputPath('long-reply.png'), animations: 'disabled' });
 
   await send.click();
   await expect(page.getByText('long reply line 0')).toBeVisible();
   await input.fill(Array.from({ length: 40 }, (_, i) => `next reply line ${i}`).join('\n'));
-  await expectDiscussionVisible(card, 'Existing thread');
-  await expectDiscussionVisible(card, 'long reply line 0');
+  // The card never scrolls inside itself; the surface holding it scrolls to every line of the discussion.
+  await expectNoCardScroller(card);
+  await expectDiscussionReachableByScroll(card, 'Existing thread');
+  await expectDiscussionReachableByScroll(card, 'long reply line 0');
   await page.screenshot({ path: info.outputPath('second-filled.png'), animations: 'disabled' });
   if (width === 900 && height === 420) {
    // A long discussion must not consume the next reply's room or hide its Send button.
    await expect(input).toBeVisible();
    await input.fill(Array.from({ length: 40 }, (_, i) => `next reply line ${i}`).join('\n'));
-   // The first line of both the comment and latest reply must be in the visible discussion above the composer.
-   for (const text of ['Existing thread', 'long reply line 0']) {
-    await expect.poll(() => card.evaluate((thread, sought) => {
-     const walker = document.createTreeWalker(thread, NodeFilter.SHOW_TEXT);
-     let node: Text | null;
-     while ((node = walker.nextNode() as Text | null) && !node.data.includes(sought)) {}
-     if (!node) return false;
-     const start = node.data.indexOf(sought), range = document.createRange();
-     range.setStart(node, start); range.setEnd(node, start + sought.length);
-     const line = range.getBoundingClientRect(), popover = thread.closest('[data-popover]')!.getBoundingClientRect();
-     const composer = thread.querySelector('.ct-compose')!.getBoundingClientRect();
-     for (let parent = node.parentElement; parent && parent !== thread; parent = parent.parentElement) {
-      if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
-      const box = parent.getBoundingClientRect();
-      if (line.top < box.top || line.bottom > box.bottom) return false;
-     }
-     return line.height > 0 && line.top >= popover.top && line.bottom <= Math.min(popover.bottom, composer.top);
-    }, text)).toBe(true);
-   }
+   // The first line of both the comment and latest reply can be scrolled to in the popover; nothing inside the card scrolls.
+   await expectNoCardScroller(card);
+   for (const text of ['Existing thread', 'long reply line 0']) await expectDiscussionReachableByScroll(card, text);
    await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.clientHeight / parseFloat(getComputedStyle(field).lineHeight))).toBeGreaterThan(1.5);
+   // Reading the discussion scrolled the field away; typing at its end brings the field's end and Send back by itself.
+   await typeAtEnd();
    await expect.poll(async () => {
     const popover = (await input.locator('xpath=ancestor::*[@data-popover][1]').boundingBox())!;
     const button = (await send.boundingBox())!;
@@ -103,26 +98,11 @@ for (const [width, height, project] of [[900, 900, 'chromium-desktop'], [900, 42
    await send.click();
    await expect(page.getByText('next reply line 0')).toBeVisible();
    await input.fill(Array.from({ length: 40 }, (_, i) => `third reply line ${i}`).join('\n'));
-   const replies = card.locator('[data-discussion-replies]');
-   const lineIsInside = (sought: string) => replies.evaluate((region, text) => {
-    const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
-    let node: Text | null;
-    while ((node = walker.nextNode() as Text | null) && !node.data.includes(text)) {}
-    if (!node) return false;
-    const range = document.createRange(), start = node.data.indexOf(text);
-    range.setStart(node, start); range.setEnd(node, start + text.length);
-    const line = range.getBoundingClientRect(), box = region.getBoundingClientRect();
-    return line.top >= box.top && line.bottom <= box.bottom;
-   }, sought);
-   await expect.poll(() => lineIsInside('next reply line 0')).toBe(true);
-   // Scroll slightly past the first reply's metadata so its first text line is fully in the small region.
-   await replies.evaluate(region => { region.scrollTop = 16; });
-   await expect.poll(() => lineIsInside('long reply line 0')).toBe(true);
-   await send.click({ trial: true });
-   const original = card.locator('[data-discussion-original]');
-   await original.evaluate(region => { region.scrollTop = region.scrollHeight; });
-   await original.getByRole('button', { name: 'Show more' }).click();
-   await expect(original.getByRole('button', { name: 'Show less' })).toBeVisible();
+   // Each reply is reached by scrolling the popover; nothing inside the card scrolls.
+   await expectNoCardScroller(card);
+   for (const text of ['next reply line 0', 'long reply line 0']) await expectDiscussionReachableByScroll(card, text);
+   await typeAtEnd();
+   await expect(send).toBeInViewport({ ratio: 1 });
    await send.click({ trial: true });
   } else {
    await send.click();

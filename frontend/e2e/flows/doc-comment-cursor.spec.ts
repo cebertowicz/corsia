@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { closeComments } from '../support/commentDrawer';
+import { closeComments, expectCommentsShown } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -144,7 +144,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 }
 
 function commentsButton(count: number): RegExp {
-	return new RegExp(`^${count} thread${count === 1 ? '' : 's'}\\b`);
+	return new RegExp(`^${count} comment${count === 1 ? '' : 's'}\\b`);
 }
 
 /**
@@ -327,13 +327,14 @@ for (const motion of MOTIONS) {
 		await locateLine(page, 'qx-a-plain', true);
 		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
-		await expect(list).toBeVisible();
-		// The adaptive comments drawer overlays the document at widths where it cannot use a side column. Where it covers
-		// the place a clicked line rests at, the document cannot be clicked until it closes; elsewhere the clicks land.
+		await expectCommentsShown(list);
+		// Where the canvas has no room for the side column, the list sits over the document: a sheet on a phone, a popover from
+		// its control on a desktop. Where it covers the place a clicked line rests at, the document cannot be clicked until it
+		// closes; elsewhere the clicks land.
 		const sheetCovers = await page.evaluate((place) => {
 			const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
 			const hit = document.elementFromPoint(scroller.left + scroller.width / 2, scroller.top + scroller.height * place);
-			return !!hit?.closest('[data-adaptive-drawer]');
+			return !!hit?.closest('[data-adaptive-drawer], [data-popover]');
 		}, PLACE);
 		if (!sheetCovers) {
 			await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });

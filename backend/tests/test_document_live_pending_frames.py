@@ -122,3 +122,32 @@ async def test_recovery_hold_broadcasts_held_instead_of_pending(ownership_scope,
         assert frame["held"]["file_text"] == "outside"
         assert frame["held"]["candidate_text"] == "candidate"
         assert frame["held"]["choice_pending"] is False
+
+
+async def pending_frames(socket):
+    frames = []
+    while not socket.sent.empty():
+        frame = socket.sent.get_nowait()
+        if frame["type"] == "doc_pending":
+            frames.append(frame["pending"])
+    return frames
+
+
+@pytest.mark.asyncio
+async def test_routine_save_never_reports_pending_to_viewers(ownership_scope, tmp_path, monkeypatch):
+    async with transport(ownership_scope, tmp_path, monkeypatch) as (entry, user, connect):
+        viewer, _ = await connect()
+        actor = WriteActor(ownership_scope["owner"], "project-alpha")
+        result = await entry.lane.submit(Operation("replace", content="routine", actor=actor))
+        assert result.outcome == "landed" and result.server_saved
+        await asyncio.sleep(0.05)
+        assert True not in await pending_frames(viewer)
+
+
+@pytest.mark.asyncio
+async def test_refused_save_reports_pending_to_viewers(ownership_scope, tmp_path, monkeypatch):
+    async with transport(ownership_scope, tmp_path, monkeypatch) as (entry, user, connect):
+        viewer, _ = await connect()
+        await refuse_promotion(entry, monkeypatch, ownership_scope)
+        frame = await viewer.next("doc_pending")
+        assert frame["pending"] is True and frame["held"] is None

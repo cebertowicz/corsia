@@ -1,4 +1,6 @@
+import { fromStore } from 'svelte/store';
 import { observeCanvasWidth } from '$lib/docCommentDrawer';
+import { activeThreadId, messages } from '$lib/stores/threads';
 import type { MarginComposer } from '$lib/docMarginSource';
 
 /**
@@ -10,11 +12,14 @@ export const roomBeside = (canvasWidth: number, transcriptWidth: number, columnW
 
 /**
  * Whether a chat canvas shows the comment margin beside its transcript, and which card in that margin is picked. The
- * transcript and composer stay where they sit with no comments, so the column shows only where the canvas has free
- * space for it on the transcript's right (both widths are the app's tokens); below that a highlight opens a popover.
- * The comments themselves stay in the message store, so a panel needs only these and the composer being written.
+ * transcript and composer stay where they sit with no comments, so the column shows only while no artifact pane is open
+ * beside the chat and the canvas has free space for it on the transcript's right (both widths are the app's tokens);
+ * otherwise a highlight opens a popover.
+ * The comments themselves stay in the message store, read here for the open thread, so a panel needs only these and the composer being written.
  */
-export function createChatCommentMargin(canvas: () => HTMLElement | null, threadId: () => string | null, hasComments: () => boolean) {
+export function createChatCommentMargin(canvas: () => HTMLElement | null, paneOpen: () => boolean) {
+	const thread = fromStore(activeThreadId), rows = fromStore(messages);
+	const hasComments = () => !!thread.current && rows.current.some((message) => message.thread_id === thread.current && !!message.chat_comments?.length);
 	let fits = $state(false);
 	/** The thread whose margin card is picked, shared between the transcript's highlights and the column. */
 	let selected = $state<string | null>(null);
@@ -28,7 +33,7 @@ export function createChatCommentMargin(canvas: () => HTMLElement | null, thread
 			fits = roomBeside(width, size('--transcript-max-width'), size('--margin-column'));
 		});
 	});
-	const shown = $derived(!!threadId() && fits && hasComments());
+	const shown = $derived(!paneOpen() && fits && hasComments());
 	return {
 		get shown() { return shown; },
 		get selectedId() { return selected; },

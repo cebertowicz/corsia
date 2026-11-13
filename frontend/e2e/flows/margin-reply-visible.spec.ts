@@ -2,7 +2,7 @@ import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { SUGGESTION2, card, open } from '../support/marginCards';
 import { setDebugVersionOverlay } from '../support/heldComments';
-import { expectDiscussionVisible } from '../support/discussionVisible';
+import { expectNoCardScroller, expectReachableByOuterScroll } from '../support/discussionVisible';
 
 
 // At 900px the document split is too narrow for margin cards; the thread-popover spec covers that viewport.
@@ -21,13 +21,23 @@ for (const width of [1440] as const) for (const theme of ['light', 'dark'] as co
   await wrap.locator('.ct-head').click({ position: { x: 14, y: 10 } });
   const input = wrap.locator('textarea');
   const send = wrap.getByRole('button', { name: 'Send reply' });
-  // Check the filled view and internal scrolling, rather than the old eight-line cap.
+  // The field grows with its text and never scrolls itself, and nothing in the card scrolls; the caret line and Send
+  // stay on screen, and the card never runs past the window's sides.
   const checkOutcome = async () => {
-   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight > field.clientHeight)).toBe(true);
+   await expectNoCardScroller(wrap);
+   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => field.scrollHeight <= field.clientHeight + 1)).toBe(true);
    await expect(send).toBeVisible();
-   for (const element of [send, wrap]) await expect.poll(async () => {
-    const box = (await element.boundingBox())!;
+   await expect.poll(async () => {
+    const box = (await send.boundingBox())!;
     return box.y >= 0 && box.y + box.height <= 900 && box.x >= 0 && box.x + box.width <= width;
+   }).toBe(true);
+   await expect.poll(() => input.evaluate((field: HTMLTextAreaElement) => {
+    const box = field.getBoundingClientRect(), line = Number.parseFloat(getComputedStyle(field).lineHeight) || 20;
+    return box.bottom <= innerHeight + 1 && box.bottom - line >= -1;
+   })).toBe(true);
+   await expect.poll(async () => {
+    const box = (await wrap.boundingBox())!;
+    return box.x >= 0 && box.x + box.width <= width;
    }).toBe(true);
    await send.click({ trial: true });
   };
@@ -52,8 +62,10 @@ for (const width of [1440] as const) for (const theme of ['light', 'dark'] as co
   await send.click();
   await expect(wrap).toContainText('margin reply line 0');
   await input.fill(Array.from({ length: 40 }, (_, i) => `second margin reply ${i}`).join('\n'));
-  await expectDiscussionVisible(wrap, 'Match the intro.');
-  await expectDiscussionVisible(wrap, 'margin reply line 0');
+  // Scrolling the document reaches the comment and the first reply; nothing inside the card scrolls.
+  await expectNoCardScroller(wrap);
+  await expectReachableByOuterScroll(wrap, 'Match the intro.');
+  await expectReachableByOuterScroll(wrap, 'margin reply line 0');
   await send.click();
   await expect(wrap).toContainText('second margin reply 0');
 

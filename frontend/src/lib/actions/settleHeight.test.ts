@@ -85,7 +85,7 @@ describe('settleHeight', () => {
 		const node = panel();
 		settleHeight(node, { enabled: true });
 		const thread = document.createElement('div');
-		thread.setAttribute('data-autosize-room', '');
+		thread.setAttribute('data-comment-card', '');
 		thread.appendChild(document.createElement('textarea'));
 		node.appendChild(thread);
 		height = 400;

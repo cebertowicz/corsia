@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { agentComment, reviewerSession, suggest } from '../support/liveConcurrency';
 import { openLiveDocument, seedLiveDocument } from '../support/liveDocument';
 import { setDebugVersionOverlay } from '../support/heldComments';
-import { expectDiscussionReachableByScroll, expectDiscussionVisible, expectFieldAndSendUsable } from '../support/discussionVisible';
+import { expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../support/discussionVisible';
 
 const quote = 'target line for a reply';
 const text = Array.from({ length: 45 }, (_, i) => i === 25 ? quote : `document line ${i}`).join('\n\n');
@@ -58,8 +58,8 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 	await input.fill(Array.from({ length: 40 }, (_, i) => `second reply ${i}`).join('\n'));
 	await expectFieldAndSendUsable(card, input);
 	if (state === 'resolved') {
-		await expectDiscussionVisible(card, 'Existing thread');
-		await expectDiscussionVisible(card, 'first reply 0');
+		await expectDiscussionReachableByScroll(card, 'Existing thread');
+		await expectDiscussionReachableByScroll(card, 'first reply 0');
 		await page.evaluate(() => document.querySelector('.drawer-panel')?.getAnimations({ subtree: true }).forEach((animation) => animation.play()));
 	} else {
 		await expectDiscussionReachableByScroll(card, 'first reply 0');

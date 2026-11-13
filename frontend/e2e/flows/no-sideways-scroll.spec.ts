@@ -281,6 +281,8 @@ async function seed(
 			return route.fulfill({ json: { ...agentsBody(project, agentId, agentTitle, url), findings_state: 'flagged', findings: [finding] } });
 		}
 		if (url.pathname.endsWith('/key-figures')) return route.fulfill({ json: keyFiguresBody(project.id) });
+		// Workflow runs are real data the disposable backend can serve; the series body below is not their shape.
+		if (url.pathname.endsWith('/workflows')) return route.fallback();
 		if (url.pathname.endsWith('/where-to-look')) {
 			// One row whose agent name and action are unbroken: the Biggest changes card must wrap them.
 			const row = (subject: { id: string; name: string; kind: 'agent' | 'scope' }, latest: number, previous: number, change: number) => ({

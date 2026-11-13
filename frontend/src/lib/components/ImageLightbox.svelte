@@ -284,7 +284,8 @@
 		{#if onBack}
 			<button type="button" class="control back" onclick={onBack} aria-label={docName ? `Back to ${docName}` : 'Back'}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
-				<span class="back-text">{$isMobile || !docName ? 'Back' : `Back to ${docName}`}</span>
+				{#if docName}<span class="back-text">Back to {docName}</span>{/if}
+				<span class="back-word" class:only={!docName}>Back</span>
 			</button>
 		{/if}
 		<span class="spacer"></span>
@@ -343,7 +344,7 @@
 
 <style>
 	.lightbox { position: relative; flex: 1; min-height: 0; min-width: 0; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
-	.bar { display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 36px; padding: 0 0 6px; }
+	.bar { container: image-bar / inline-size; display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 36px; padding: 0 0 6px; }
 	.spacer { flex: 1; }
 	.zoom { display: flex; align-items: center; gap: 2px; }
 	.level { min-width: 4ch; text-align: center; font-size: var(--text-footnote); font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
@@ -364,8 +365,11 @@
 	/* Press-down tints at once, in place of the app's press scale. */
 	.lightbox :global(.control:not(:disabled):active) { scale: none; background: var(--press-bg); transition-duration: 0s; }
 	.lightbox :global(.control:focus-visible), .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.back { padding-left: 4px; max-width: 60%; }
+	/* The document's name is the one label that yields: it truncates before any bar control is pushed past the edge. */
+	.back { padding-left: 4px; max-width: 60%; min-width: 0; }
 	.back-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	/* A narrow bar shows the short label whole instead (ImageLightboxResponsive.css). */
+	.back-word:not(.only) { display: none; }
 
 	/* A neutral backdrop, so a screenshot of a UI never reads as the app around it. */
 	.viewport {

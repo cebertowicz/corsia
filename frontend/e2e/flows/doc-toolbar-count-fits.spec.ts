@@ -6,7 +6,7 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
- * The document toolbar's "N threads · N unread" count shows whole, inside the toolbar and clear of the other controls,
+ * The document toolbar's "N comments · N unread" count shows whole, inside the toolbar and clear of the other controls,
  * at 320, 360 and 393 px phones and at 900 and 1440, with one-, two- and three-digit counts. The tool cluster breaks into rows only in PE's order, and never clips, overlaps or shrinks a control.
  */
 
@@ -70,7 +70,7 @@ for (const { width, scheme, resolved } of CASES) {
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('ordinary prose');
-		await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeEnabled();
+		await expect(page.getByRole('button', { name: /^1 comment\b/ })).toBeEnabled();
 		if (FRAMES) mkdirSync(FRAMES, { recursive: true });
 
 		if (resolved) {
@@ -97,10 +97,10 @@ for (const { width, scheme, resolved } of CASES) {
 			shown.threads = threads; shown.unread = unread;
 			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
 			const pill = page.locator('.document-header .comment-status');
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
 			// A person sees the settled state: nothing may redraw the pill after the store update.
 			await page.waitForTimeout(800);
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'thread' : 'threads'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const measured = await page.evaluate(() => {
 				const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
@@ -149,7 +149,7 @@ for (const { width, scheme, resolved } of CASES) {
 }
 
 /**
- * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 threads · 45 unread" and four
+ * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 comments · 45 unread" and four
  * readers in the presence row. The tool cluster cannot shrink, so wherever the header is narrow it has to fit inside
  * it: on one row where one row can hold it, and wrapped inside the header where it cannot. Full window from 320 to
  * 1440 px (a fresh load at each phone and tablet width, one desktop load resized across the rest; the Workspace panel closed so the document has the room) and a narrow
@@ -293,9 +293,9 @@ function expectLayout(measured: Measured, label: string) {
 function expectWholeInsideOneRow(measured: Measured, label: string) {
 	expect.soft(measured.sendText, `${label}: Send's visible label is in the row, whole`).toMatch(/^Send (?:10\d comments?|99\+)$/);
 	expect.soft(measured.names.send, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
-	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 threads, 45 unread/);
+	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 comments, 45 unread/);
 	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
-	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
 	expectLayout(measured, label);
 	for (const part of measured.parts) {
 		expect.soft(part.shown && part.width > 0 && part.fits, `${label}: ${part.name} is shown and not clipped`).toBe(true);
@@ -346,7 +346,7 @@ test('@flow:doc-toolbar-count-fits @surface:documents the whole tool cluster sta
 				await expect(page.locator('.cm-content')).toContainText('A commentable document.');
 				if (!split) await page.evaluate(async () => { const { setPaneCollapsed } = await import('/src/lib/stores/paneCollapsed.ts'); setPaneCollapsed(true, true); });
 				await turnOffDocumentComments(page);
-				await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+				await expect(page.locator('.document-header .comment-status')).toContainText('120 comments');
 				await readers();
 				await expect(page.locator('.document-header .reviewer-group .more')).toHaveText('+2');
 			};
@@ -434,7 +434,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 	await page.setViewportSize({ width: 430, height: 900 });
 	await installWorkspace(page, threadId, [doc], 0);
 	await openThread(page, threadId, title);
-	await expect(page.locator('.document-header .comment-status')).toContainText('120 threads');
+	await expect(page.locator('.document-header .comment-status')).toContainText('120 comments');
 	await expect(page.locator('.document-header .resolved-tool')).toHaveText('Resolved · 3');
 	await expect(page.locator('.document-header .history-tool')).toBeVisible();
 	if (FRAMES) mkdirSync(FRAMES, { recursive: true });
@@ -450,7 +450,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		const measured = await measureTools(page);
 		const names = measured.controls.map((control) => control.name);
 		expect.soft(names, `${label}: the count, Resolved, Deliver immediately, Request review and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'request', 'history']));
-		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 threads · 45 unread$/);
+		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
 		expectLayout(measured, label);
 		rowsSeen.push([width, measured.rows]);
 		if (FRAMES && [380, 381, 393].includes(width)) await page.screenshot({ path: path.join(FRAMES, `history-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, Math.ceil(measured.tools.bottom + 60)) } });

@@ -1,3 +1,11 @@
+/* A narrow bar, by its own width at any window size (a split beside chat or a phone), shows Back's short label whole, as Send
+   shows its short form (DocFeedbackControls) and the count drops its noun (ImageCommentLightbox): one threshold for the three.
+   The accessible name keeps the document's name. */
+@container image-bar (width < 600px) {
+	.image-lightbox .bar .back { flex: none; max-width: none; }
+	.image-lightbox .bar .back-text { display: none; }
+	.image-lightbox .bar .back-word:not(.only) { display: inline; }
+}
 @media (max-width: 48rem) {
 	.image-lightbox .bar { min-height: var(--touch-target); flex-wrap: wrap; }
 	.image-lightbox .bar .control, .image-lightbox .bar .zoom { flex-shrink: 0; }
