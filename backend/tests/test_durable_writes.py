@@ -1936,15 +1936,16 @@ def test_a_promote_onto_a_document_that_holds_comments_is_refused_and_rolled_bac
     assert list(target.parent.glob(".corsia-write-*")) == []
 
 
-def test_the_refusal_names_the_stale_registration_and_what_the_agent_can_do(durable_scope):
-    """The agent is told which registration holds the comments and two ways forward, not just 'refused'."""
+def test_the_refusal_names_the_other_document_and_what_the_agent_can_do(durable_scope):
+    """The agent is told which document holds the other comments and the way forward, not just 'refused'."""
     from registry import durable_writes
     from registry.shared_write_errors import SuccessorHoldsComments
 
     workspace, _root, thread_id, db, source, source_id, _text = _working_file(
         durable_scope, "named.md", stale=True,
     )
-    target_id, _own = _shared_target(durable_scope, "named.md")
+    _seed_comment_state(db, source_id, thread_id)
+    _shared_target(durable_scope, "named.md")
 
     with pytest.raises(SuccessorHoldsComments) as refused:
         durable_writes.promote_file(
@@ -1952,12 +1953,87 @@ def test_the_refusal_names_the_stale_registration_and_what_the_agent_can_do(dura
             workspace=workspace, description="Promoted launch plan",
         )
 
-    message = str(refused.value)
-    assert "still registered to an earlier document" in message
-    assert target_id in message and "shared/planning/named.md" in message
-    assert "holds comments" in message
+    _assert_both_sides_refusal(str(refused.value), "shared/planning/named.md")
+
+
+def _assert_both_sides_refusal(message, shared_path):
+    """The refusal says only what is known: both documents have comments, they can't merge, nothing moved."""
+    assert "Couldn’t promote: this file and the document already registered at " in message
+    assert shared_path in message
+    assert "both have comments" in message and "can’t be merged" in message
+    assert "Nothing was moved and the promote is rolled back" in message
     assert "Promote to a different shared path" in message
-    assert "re-register the working file" in message
+    assert "recorded hash" not in message and "re-register" not in message
+
+
+def test_a_current_hash_and_an_occupied_shared_path_are_refused_with_the_same_words(durable_scope):
+    """The refusal does not depend on a stale hash: any registered document with comments at the path counts."""
+    from registry import durable_writes, models
+    from registry.shared_write_errors import SuccessorHoldsComments
+
+    workspace, project_root, thread_id, db, source, source_id, text = _working_file(
+        durable_scope, "current.md", stale=False,
+    )
+    _user_id, root, reply, suggestion = _seed_comment_state(db, source_id, thread_id)
+    _shared_target(durable_scope, "current.md")
+    target = project_root / "shared" / "planning" / "current.md"
+
+    with pytest.raises(SuccessorHoldsComments) as refused:
+        durable_writes.promote_file(
+            source, "planning", thread_id=thread_id, project_id="project-alpha",
+            workspace=workspace, description="Promoted launch plan",
+        )
+
+    _assert_both_sides_refusal(str(refused.value), "shared/planning/current.md")
+    assert source.read_text(encoding="utf-8") == text
+    assert not target.exists()
+    assert sorted(str(row[0]) for row in db.execute(
+        "SELECT id FROM doc_comments WHERE artifact_id=?", (source_id,),
+    ).fetchall()) == sorted([root["id"], reply["id"], suggestion["id"]])
+    assert models.successor_id(source_id, db=db) is None
+    assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+
+
+def test_a_file_without_comments_promotes_onto_a_document_that_has_them_as_it_always_did(durable_scope):
+    """The everyday update of a shared document: nothing is refused, and the target's comment state is untouched."""
+    from doceditor import writer_turns
+    from registry import models
+
+    for name, stale in (("update-current.md", False), ("update-stale.md", True)):
+        workspace, _root, thread_id, db, source, source_id, _text = _working_file(
+            durable_scope, name, stale=stale,
+        )
+        user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+        target_id, own = _shared_target(durable_scope, name)
+        from doceditor.feedback_state import mark_thread_viewed
+        from infra.database import write_transaction
+        from doc_feedback_helpers import add_comment
+
+        target_reply, _ = add_comment(db, target_id, author_id=thread_id, parent_id=own["id"])
+        with write_transaction(db, scope="test_read_target_thread") as connection:
+            mark_thread_viewed(connection, user_id, target_id, own["id"], target_reply["id"])
+        line_root = writer_turns.section_key(target_id, "## Build order")
+        db.execute(
+            """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
+               VALUES (?,?,?,?,?,'[]','2026-11-13T00:00:00+00:00')""",
+            (f"line-{name}", line_root, target_id, thread_id, user_id),
+        )
+        db.commit()
+
+        promoted_id = _promote(workspace, thread_id, db, source)
+
+        assert promoted_id == target_id, "the shared path keeps the identity it was registered under"
+        assert sorted(str(row[0]) for row in db.execute(
+            "SELECT id FROM doc_comments WHERE artifact_id=?", (target_id,),
+        ).fetchall()) == sorted([own["id"], target_reply["id"]])
+        assert db.execute(
+            "SELECT seen_reply_id FROM doc_comment_thread_views WHERE user_id=? AND root_id=?",
+            (user_id, own["id"]),
+        ).fetchone()[0] == target_reply["id"]
+        assert [(str(row[0]), str(row[1])) for row in db.execute(
+            "SELECT artifact_id, root_id FROM doc_comment_writer_line WHERE id=?", (f"line-{name}",),
+        ).fetchall()] == [(target_id, line_root)]
+        assert models.identity_state(source_id, db=db) == ("active" if source_id == promoted_id else "tombstone")
 
 
 def test_startup_recovery_rolls_back_an_applied_promote_onto_an_occupied_document(durable_scope, caplog):
