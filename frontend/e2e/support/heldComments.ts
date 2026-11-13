@@ -199,7 +199,7 @@ export function visibleSenders(page: Page): Promise<Sender[]> {
 		};
 		const found: Array<{ where: 'header' | 'image-bar' | 'chat'; label: string }> = [];
 		for (const button of document.querySelectorAll<HTMLElement>('button')) {
-			const text = button.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+			const text = (button.querySelector('.send-full') ?? button).textContent?.replace(/\s+/g, ' ').trim() ?? '';
 			if (!/^Send( all)? \d+ comments?$/.test(text)) continue;
 			const box = button.getBoundingClientRect();
 			if (box.width <= 1 || box.height <= 1 || hidden(button)) continue;
@@ -227,7 +227,7 @@ export async function watchSenders(page: Page): Promise<{ stop: () => Promise<st
 		const seen = new Set<string>();
 		const read = () => {
 			for (const button of document.querySelectorAll<HTMLElement>('button')) {
-				const text = button.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+				const text = (button.querySelector('.send-full') ?? button).textContent?.replace(/\s+/g, ' ').trim() ?? '';
 				if (!/^Send( all)? \d+ comments?$/.test(text)) continue;
 				const where = button.closest('.document-header') ? 'header'
 					: button.closest('.image-comments') ? 'image-bar'
