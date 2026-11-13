@@ -869,6 +869,38 @@ def test_a_record_swept_before_its_entry_exists_never_deletes_that_entry(repo):
     assert report.quarantine_removed == 0 and report.quarantine_entries == [entry.name]
 
 
+def test_a_record_that_cannot_be_dropped_is_kept_and_the_sweep_goes_on(repo, monkeypatch):
+    """A failed unlink of a record whose entry is gone is logged and kept for the
+    next sweep; the same pass still finishes the recorded entries after it.
+    """
+    quarantine = worktree_reaper_remove.quarantine_root(repo)
+    quarantine.mkdir()
+    record = quarantine / f"a-orphan-1{worktree_reaper_remove.COPIED_OUT_SUFFIX}"
+    record.write_text("a-orphan-1\n")
+    entry = _entry(repo, "b-done")
+    worktree_reaper_remove.mark_copied_out(entry)
+    real_unlink = Path.unlink
+
+    def refuse(self: Path, missing_ok: bool = False) -> None:
+        if self == record:
+            raise PermissionError("unlink refused")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    logged: list[str] = []
+    sink = logger.add(logged.append, format="{message}", level="WARNING")
+
+    report = _run(repo)
+
+    logger.remove(sink)
+    assert "unlink refused" in "".join(logged)
+    assert report.quarantine_removed == 1 and not entry.exists()
+    assert _quarantine(repo) == [record.name]
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    _run(repo)
+    assert _quarantine(repo) == []
+
+
 def test_a_new_entry_never_takes_the_name_of_a_record_still_there(repo, monkeypatch):
     quarantine = worktree_reaper_remove.quarantine_root(repo)
     quarantine.mkdir()
@@ -1061,6 +1093,21 @@ def test_busy_repo_lock_skips_the_repository(repo):
 
     assert _reasons(report) == {"waiting": "repo_busy"} and wt.is_dir()
     assert _run(repo).removed == 1
+
+
+def test_busy_repo_lock_holds_the_quarantine_sweep(repo):
+    """Finishing an entry edits Git's worktree registry, so it waits for the lock
+    the base-checkout fast-forward holds.
+    """
+    entry = _entry(repo, "held")
+    worktree_reaper_remove.mark_copied_out(entry)
+
+    with repo_flock.repo_lock(repo):
+        report = _run(repo)
+
+    assert report.quarantine_removed == 0 and entry.is_dir()
+    assert _record(entry).is_file()
+    assert _run(repo).quarantine_removed == 1 and not entry.exists()
 
 
 # --- orphans (unregistered leftovers under .worktrees/) --------------------
