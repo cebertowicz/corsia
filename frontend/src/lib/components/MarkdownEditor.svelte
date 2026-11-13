@@ -25,8 +25,8 @@
 	import { imagePins } from '$lib/cm/image-pins';
 	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
-	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
-	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import { selectionOffer, type SelectionOffer } from '$lib/cm/selection-offer';
+	import { cardQuoteLabel } from '$lib/cm/widget-cells';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
@@ -72,7 +72,7 @@
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
+		onSelect?: (sel: SelectionOffer | null) => void;
 		/** `click` is the press that opened it, when a pointer did; the card then opens at that point. */
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		/** A caret came to rest in text no comment covers: whatever card was picked lets go. */
@@ -107,30 +107,18 @@
 	let syncing = false;
 	let curHighlights: CommentRange[] = [];
 
-	function emitSelection(v: EditorView) {
-		if (!onSelect) return;
-		const r = v.state.selection.main;
-		if (r.empty) { onSelect(null); return; }
-		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to), { state } = v;
-		onSelect({
-			from: r.from, to: r.to, text,
-			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
-			anchor: composerAnchor(v, r.from, r.to),
-			label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
-		});
-	}
-
 	/**
 	 * Where the new-comment card sits. Once its composer is open the draft's own captured range is the answer, because
 	 * that range already follows every local and remote edit; the selection's offsets are only good until then. A range
-	 * the draft has lost keeps the card where it was last drawn, so its message stays readable.
+	 * the draft has lost keeps the card where it was last drawn, so its message stays readable. Text in a table cell (selected in
+	 * its open editor) anchors as prose does, to the lines its words are drawn on.
 	 */
 	function composerAnchor(v: EditorView, from: number, to: number): () => DOMRect | null {
 		let drawn: DOMRect | null = null;
 		return () => {
 			const range = pendingComment ? selectionRange(pendingComment) : { from, to };
 			if (!range) return drawn;
-			const rows = range.to <= v.state.doc.length ? rowsOf(v, range.from, range.to) : null;
+			const rows = range.to <= v.state.doc.length ? cellTextRows(v, range.from, range.to) ?? rowsOf(v, range.from, range.to) : null;
 			if (rows) drawn = rows;
 			return rows;
 		};
@@ -156,6 +144,9 @@
 	}
 
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
+	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
+	import { openCellState } from '$lib/cm/widget-cell-state';
+	import { cellEditorExtensions } from '$lib/cm/widget-cell-setup';
 
 	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
@@ -191,7 +182,8 @@
 
 	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
 		const r = v.state.selection.main;
-		if (r.empty) {
+		const offer = selectionOffer(v, composerAnchor);
+		if (r.empty && !offer) {
 			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights, cardMode !== 'sheet') : pickHighlight(curHighlights.filter((h) => !h.point && r.from >= h.from && r.from <= h.to), cardMode !== 'sheet'));
 			if (!read) return;
 			onSelect?.(null);
@@ -203,24 +195,24 @@
 			} else if (!hit) onCaretAway?.();
 		} else {
 			caretRule.range();
-			emitSelection(v);
+			onSelect?.(offer);
 		}
 	}
 
 	onMount(() => {
 		activeText = liveText;
 		binding = activeText ? liveDocumentBinding(activeText) : undefined;
+		// The save key is the document's in prose and in an open table cell alike; a cell's edit is in the document as it is typed.
+		const saveKey = keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => { onSave?.(); return true; } }]);
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
 			dispatchTransactions: dispatchKeepingPlace,
 			extensions: [
 				documentComp.of(binding?.extensions ?? localHistory),
-				keymap.of([
-					{ key: 'Mod-s', preventDefault: true, run: () => { onSave?.(); return true; } },
-					indentWithTab,
-					...defaultKeymap
-				]),
+				saveKey,
+				cellEditorExtensions.of(saveKey),
+				keymap.of([indentWithTab, ...defaultKeymap]),
 				markdown({ extensions: GFM }),
 				docEditorLook,
 				markdownLivePreview,
@@ -261,7 +253,10 @@
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);
 					if (u.transactions.some(releasesPress)) caretRule.released();
-					if (u.selectionSet && !caretRule.holding() && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
+					// The editor's selection is the one writer of its Comment offer, an open empty cell's whole-cell offer included: an empty cell opening or emptied raises it, its first character takes it away.
+					// The cell closing leaves the offer up, so a press on it (which closes the cell) still lands on it.
+					const offerMoved = u.selectionSet || (!!u.state.field(openCellState, false) && emptyCellKey(u.startState) !== emptyCellKey(u.state));
+					if (offerMoved && !caretRule.holding() && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
 						handleSelection(u.view, undefined, u.docChanged);
 					}
 				})

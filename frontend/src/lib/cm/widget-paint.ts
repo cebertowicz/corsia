@@ -1,5 +1,6 @@
 import { cellElement } from './widget-blocks';
-import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
+import { clean, intersectsCell, occurrences, tableCells, type CellSpan } from './widget-cells';
+import { CELL_EDITOR } from './widget-cell-state';
 import { colourStyle } from './suggestion-marks';
 
 /** An open suggestion drawn inside a table cell: the quote struck through, the insert after it, as in body text. */
@@ -26,17 +27,26 @@ export function commentIdsAt(widget: HTMLElement, target: Element): string[] {
 	return ids;
 }
 
+/** Whether `el` is inside an open cell's editor, whose marks are its own decorations (`widget-cell-comment.ts`), never painted. */
+const inCellEditor = (el: Element) => !!el.closest(CELL_EDITOR);
+
 export function unpaint(el: HTMLElement) {
-	for (const insert of el.querySelectorAll<HTMLElement>('span.cm-suggestion-insert')) insert.remove();
-	for (const wrap of el.querySelectorAll<HTMLElement>('span.cm-comment-wrap')) wrap.replaceWith(...wrap.childNodes);
+	for (const insert of el.querySelectorAll<HTMLElement>('span.cm-suggestion-insert')) if (!inCellEditor(insert)) insert.remove();
+	const unwrapped = new Set<Node>();
+	for (const wrap of el.querySelectorAll<HTMLElement>('span.cm-comment-wrap')) {
+		if (inCellEditor(wrap) || !wrap.parentNode) continue;
+		unwrapped.add(wrap.parentNode);
+		wrap.replaceWith(...wrap.childNodes);
+	}
 	for (const marked of [el, ...el.querySelectorAll<HTMLElement>(PAINTED)]) {
+		if (marked !== el && inCellEditor(marked)) continue;
 		marked.classList.remove(...CLASSES);
 		if (marked.classList.length === 0) marked.removeAttribute('class');
 		marked.removeAttribute('data-comment-ids');
 		marked.removeAttribute('data-unread');
 		if (marked.dataset.commentAria) { marked.removeAttribute('aria-label'); marked.removeAttribute('role'); marked.removeAttribute('data-comment-aria'); }
 	}
-	el.normalize();
+	for (const parent of unwrapped) parent.normalize();
 }
 
 /** A point as the count of text characters before it in `el`. */
@@ -74,7 +84,7 @@ export function keepingSelection(el: HTMLElement, repaint: () => void) {
 	selection!.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
 }
 
-const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
+export const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
 
 /**
  * Wraps the text nodes a range holds, so a mark follows the text inside formatting.
@@ -113,7 +123,7 @@ export function wrapRange(range: Range, mark: Mark, interactivePending = false) 
 }
 
 /** The inserted text of a suggestion in a cell: drawn by CSS from an attribute, so it is neither selectable nor part of the cell's text. */
-function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLElement {
+export function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLElement {
 	const insert = document.createElement('span');
 	insert.className = ['cm-suggestion-insert', 'cm-suggestion-insert-after', ...(mark.kind === 'focused' ? ['cm-suggestion-focus'] : [])].join(' ');
 	insert.setAttribute('style', colourStyle(suggestion.color));
@@ -143,6 +153,28 @@ function cellTextNodes(cell: HTMLElement): Text[] {
 	return nodes;
 }
 
+/**
+ * The drawn text of `from`..`to` (offsets into the table's `src`) inside `span`'s drawn `cell`, or null when the drawn text
+ * does not show that part where the source has it (formatting, or the same words drawn more or less often than written).
+ */
+export function cellTextRange(cell: HTMLElement, src: string, span: CellSpan, from: number, to: number): Range | null {
+	const text = src.slice(span.from, span.to), part = src.slice(Math.max(from, span.from), Math.min(to, span.to));
+	const inSource = occurrences(text, part);
+	const index = inSource.indexOf(Math.max(from, span.from) - span.from);
+	const found = occurrences(cell.textContent ?? '', part);
+	if (index < 0 || found.length !== inSource.length || found[index] === undefined) return null;
+	const range = document.createRange();
+	const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+	let seen = 0, startSet = false;
+	for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+		const length = node.data.length;
+		if (!startSet && found[index] < seen + length) { range.setStart(node, found[index] - seen); startSet = true; }
+		if (startSet && found[index] + part.length <= seen + length) { range.setEnd(node, found[index] + part.length - seen); return range; }
+		seen += length;
+	}
+	return null;
+}
+
 export function paintTable(el: HTMLElement, base: number, src: string, marks: Mark[]) {
 	const cells = tableCells(src);
 	for (const mark of marks) {
@@ -156,26 +188,17 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;
+			// A mark inside one cell wraps the characters it covers; a mark across cells, or covering a whole cell, marks each cell's text.
 			const inside = hit.length === 1 && (from > span.from || to < span.to || !!mark.suggestion);
-			const text = src.slice(span.from, span.to), part = src.slice(Math.max(from, span.from), Math.min(to, span.to));
-			const rendered = cell.textContent ?? '';
-			const inSource = occurrences(text, part);
-			const index = inSource.indexOf(Math.max(from, span.from) - span.from);
-			const found = occurrences(rendered, part);
-			if (inside && index >= 0 && found.length === inSource.length && found[index] !== undefined) {
-				const range = document.createRange();
-				const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
-				let seen = 0, startSet = false;
-				for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-					const length = node.data.length;
-					if (!startSet && found[index] < seen + length) { range.setStart(node, found[index] - seen); startSet = true; }
-					if (startSet && found[index] + part.length <= seen + length) { range.setEnd(node, found[index] + part.length - seen); break; }
-					seen += length;
-				}
-				if (startSet) { wrapRange(range, mark); continue; }
-			}
-			// A whole cell is marked on its text, as a text comment is; only a cell with no text is marked as a cell.
-			const texts = mark.suggestion ? [] : cellTextNodes(cell);
+			// The open cell's text is its editor's, which draws such a mark itself: `paintOpenCell` writes it into `cellMarksField`
+			// (`widget-cell-comment.ts`).
+			const open = !!cell.querySelector(CELL_EDITOR);
+			if (inside && open) continue;
+			const range = inside ? cellTextRange(cell, src, span, from, to) : null;
+			if (range) { wrapRange(range, mark); continue; }
+			// A whole cell is marked on its text, as a text comment is; only a cell with no text, or an open cell (whose text is its
+			// editor's), is marked as a cell.
+			const texts = mark.suggestion || open ? [] : cellTextNodes(cell);
 			if (texts.length) {
 				for (const text of texts) {
 					// Another whole-cell comment already drew this text: it joins that mark, in paint order, as it did on the cell.

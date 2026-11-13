@@ -17,8 +17,11 @@ function run(node: HTMLElement, from: Keyframe, to: Keyframe, { direction }: Dir
 	const duration = ms('--dur-tight') * (entering ? 1 : 0.7);
 	// Svelte resumes a keyed block that is still leaving; its finished exit holds opacity 0 (fill forwards) until cancelled.
 	if (entering) node.getAnimations?.().forEach((animation) => animation.cancel());
-	node.animate(entering ? [from, to] : [to, from], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: entering ? 'none' : 'forwards' });
-	return { duration };
+	const animation = node.animate(entering ? [from, to] : [to, from], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: entering ? 'none' : 'forwards' });
+	if (entering) return { duration };
+	// With no entrance (`out:` alone) Svelte resumes a leaving element by making it interactive again (it is inert while it
+	// leaves) and resetting its exit through `tick`, so the exit's held end state goes then: the element is back as it was.
+	return { duration, tick: () => { if (!node.inert) animation.cancel(); } };
 }
 
 /** A menu fades in from its anchor (4px, 0.98 to 1); `origin` is the corner of the menu the anchor touches. */

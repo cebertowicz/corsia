@@ -9,7 +9,8 @@ import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
 import { imageOpener } from './markdown-image';
 import { markOpenable } from './widget-open';
-import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
+import { selectionIn } from './widget-selection';
+import { widgetComments, type WidgetSelection } from './widget-comments';
 
 const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
 const DOC = `intro\n\n${TABLE}\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
@@ -280,7 +281,8 @@ describe('a press inside a rendered table or diagram', () => {
 		touch('pointerdown', cellEl, 10);
 		cellEl.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, clientX: 5, clientY: 10 }));
 		expect(view.state.selection.main.head).toBe(TABLE_FROM + TABLE.indexOf('Eli'));
-		expect(events).toEqual(['select.pointer']);
+		// With the cell editor on, the tap opens the cell and the cell's own sync puts the caret where the pointer move would have.
+		expect(events).toEqual(['table-cell-sync']);
 	});
 
 	it('leaves the caret alone for a press outside the widgets or with another button', () => {
