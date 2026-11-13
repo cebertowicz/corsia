@@ -251,7 +251,7 @@ async def test_native_pane_open_writes_reach_targets_a_smooth_scroll_brings_into
 
 
 async def test_native_pane_open_writes_on_a_stale_or_off_page_ref_say_why(native_owner, monkeypatch):
-    """A ref the page re-rendered has no box until a new snapshot; a link parked off the page never comes into view."""
+    """A re-rendered ref says to take a new snapshot; a hidden element has no box; an off-page link never comes into view."""
     from host_access import browser_control
     thread = 'native-stale-ref'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
@@ -267,8 +267,12 @@ async def test_native_pane_open_writes_on_a_stale_or_off_page_ref_say_why(native
         try:
             stale = await ref('Results')
             await native_owner.run(thread, ('eval', 'rerender()'), session='existing')
-            with pytest.raises(BrowserSessionError, match='the element has no box on the page'):
+            with pytest.raises(BrowserSessionError, match='the page may have changed since your snapshot, '
+                               'so take a new snapshot and use its refs'):
                 await native_owner.run(thread, ('click', stale), session='existing')
+            with pytest.raises(BrowserSessionError, match='the element has no box on the page') as hidden:
+                await native_owner.run(thread, ('click', '#gone'), session='existing')
+            assert 'snapshot' not in str(hidden.value)
             assert await native_owner.run(thread, ('click', await ref('Results')), session='existing') == 'ok'
             assert 'results' in await native_owner.run(thread, ('get', 'title'), session='existing')
             with pytest.raises(BrowserSessionError, match='it never came into view'):
@@ -482,9 +486,11 @@ def popup_fixture():
             <li><a id="far" href="#" onclick="document.title = 'far'; return false"><span>Far link</span></a></li>'''
             + b''.join(b'<li>Row %d</li>' % row for row in range(60, 120)) + b'''
             <li><input id="search" placeholder="Search"></li></ul>''',
-        # A list the page re-renders on demand, and a copy of a link parked off the page (a hidden menu).
+        # A list the page re-renders on demand, a copy of a link parked off the page (a hidden menu),
+        # and a button that is not displayed at all.
         '/rerender': b'''<!doctype html><title>Rerender</title>
             <nav style="position: absolute; left: -9999px"><a href="#">Menu copy</a></nav>
+            <button id="gone" style="display: none">Gone</button>
             <ul id="list"><li><a href="#" onclick="document.title = 'results'; return false">Results</a></li></ul>
             <script>const html = document.querySelector('#list').innerHTML;
             function rerender() { document.querySelector('#list').innerHTML = html; return 'done'; }</script>''',

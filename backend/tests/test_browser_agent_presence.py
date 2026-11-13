@@ -361,8 +361,12 @@ async def test_a_target_scrolling_cannot_bring_into_view_is_refused_as_never_in_
 
 
 @pytest.mark.asyncio
-async def test_an_all_zero_box_is_no_box_and_is_not_hit_tested(monkeypatch):
-    """agent-browser gives an all-zero box for a ref whose node the page re-rendered since the snapshot."""
+@pytest.mark.parametrize(("selector", "reason", "text"), [
+    ("@e2", "stale_ref", "the page may have changed since your snapshot, so take a new snapshot and use its refs"),
+    ("#hidden", "no_box", "the element has no box on the page. Nothing was sent"),
+])
+async def test_an_all_zero_box_is_refused_without_a_hit_test(monkeypatch, selector, reason, text):
+    """agent-browser gives an all-zero box for a hidden element and for a ref whose node the page re-rendered."""
     cdp = FakeCdp(labelled=False)
     monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
     commands = []
@@ -373,7 +377,7 @@ async def test_an_all_zero_box_is_no_box_and_is_not_hit_tested(monkeypatch):
             return CommandResult(0, json.dumps({"data": {"x": 0, "y": 0, "width": 0, "height": 0}}), "")
         return await _run(args, timeout)
 
-    with pytest.raises(browser_dom_write.DomWriteRefused, match="has no box") as refused:
-        await browser_dom_write.shared_action(run, "ws://page.test", ("click", "@e2"))
-    assert refused.value.reason == "no_box"
-    assert cdp.hit_tests == [] and commands == [("get", "box", "@e2")]
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(run, "ws://page.test", ("click", selector))
+    assert refused.value.reason == reason and text in str(refused.value)
+    assert cdp.hit_tests == [] and commands == [("get", "box", selector)]
