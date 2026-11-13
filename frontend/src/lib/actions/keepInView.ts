@@ -24,7 +24,7 @@ function scrollMargins(element: HTMLElement): number {
  * instead of the node, so bringing a field into view never pushes the top of the
  * block it sits at the end of out of sight above and never clips the ring drawn
  * around that block; a block too tall for the scroller keeps the node-into-view
- * behaviour.
+ * behaviour, and a node itself taller than the scroller shows its end.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
@@ -32,9 +32,12 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	const owner = scroller(node);
 	const reveal = () => {
 		if (!enabled) return;
+		const room = owner?.clientHeight ?? window.visualViewport?.height ?? window.innerHeight;
 		const fits = whole !== undefined && owner !== null && whole.getBoundingClientRect().height + scrollMargins(whole) <= owner.clientHeight;
 		const target = fits ? whole! : node;
-		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' });
+		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
+		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room ? 'end' : 'nearest';
+		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
 	};
 	const schedule = () => {
 		cancelAnimationFrame(frame);

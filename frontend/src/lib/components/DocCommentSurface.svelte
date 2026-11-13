@@ -330,8 +330,8 @@
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status drawer-error" role="status"><span>Couldn't load comments. Check the connection and retry.</span><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
-	<!-- Accept all sits above the one scroller in every list form, so it is never scrolled away; it takes no room unless there is something to say. -->
-	{#if !readOnly && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
+	<!-- Accept all sits above the one scroller in every list form, so it is never scrolled away; it takes no room unless there is something to say. The thread view gives that room to its one thread; Back returns to the list's Accept all. -->
+	{#if !readOnly && !openedComment && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
 	{#if openedComment}<div class="thread-back"><button type="button" class="drawer-back" data-drawer-back onclick={backToList}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>Back</button></div>{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
