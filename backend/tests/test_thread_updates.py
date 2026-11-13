@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from infra import thread_updates
+from infra import thread_update_summary, thread_updates
 from infra.database import initialize_schema
 from plans import service
 from tests.plan_writer_authorizer import raw_plan_seed
@@ -270,7 +270,7 @@ def test_latest_display_preview_and_attention_are_independent_for_passive_outcom
     ],
 )
 def test_sidebar_summary_strips_inline_markdown_without_changing_words(content, expected):
-    assert thread_updates._first_readable_line(content) == expected
+    assert thread_update_summary._first_readable_line(content) == expected
 
 
 def test_latest_is_one_row_per_named_thread_and_reads_are_bounded(db):

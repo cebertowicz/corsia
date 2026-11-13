@@ -130,3 +130,24 @@ def add_comment_item(
         db, batch_id, author_kind=author_kind, delivery_policy=delivery_policy, now=now, item_delta=1,
     )
     return True
+
+
+def holds_rows(db, artifact_id: str) -> bool:
+    """True when this document already has feedback batches (`doceditor.comment_transfer`)."""
+    return db.execute(
+        "SELECT 1 FROM doc_feedback_batches WHERE artifact_id=? LIMIT 1", (artifact_id,)
+    ).fetchone() is not None
+
+
+def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:
+    """Carry this document's feedback batches to the identity that replaces it; returns how many.
+
+    A batch is one author's ask of one recipient about one document, and nothing in it or its items
+    is keyed by document beyond ``artifact_id`` itself. The successor holds no batch of its own, so
+    a batch that was due before a promote is due at the same time on the promoted document, with its
+    comment items, its coalesced edit item, its count and its state unchanged.
+    """
+    return db.execute(
+        "UPDATE doc_feedback_batches SET artifact_id=? WHERE artifact_id=?",
+        (to_artifact_id, from_artifact_id),
+    ).rowcount
