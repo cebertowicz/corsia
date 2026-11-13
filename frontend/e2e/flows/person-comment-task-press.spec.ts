@@ -93,7 +93,8 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await frame('1-open');
 
 	// The list of threads shows them all as New; showing them is not opening them, so the count holds.
-	await press(page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first());
+	const pill = page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first();
+	await press(pill);
 	const cards = page.getByRole('region', { name: /^Comment by / });
 	await expect(cards.first()).toBeVisible();
 	console.log(`PRESS ${width} cards: ${JSON.stringify(await cards.evaluateAll((all) => all.map((card) => [card.getAttribute('aria-label'), (card as HTMLElement).innerText.slice(0, 80)])))}`);
@@ -110,21 +111,32 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 		const toList = page.getByRole('button', { name: /^(All threads|Back)/ }).first();
 		if (await toList.isVisible().catch(() => false)) await press(toList);
 	};
+	// Below the margin's width on desktop the list is a popover, and a press outside it closes it, as the frames' panel
+	// toggle does. Each step reopens it from the pill, as the person would.
+	const showList = async () => {
+		if (!(await cards.first().isVisible().catch(() => false))) await press(pill);
+		await expect(cards.first()).toBeVisible();
+	};
 	// (a) Open one thread by pressing its card's text. The quote above it is the separate "Go to text" control, which only jumps.
 	const cardText = (card: Locator) => card.getByText('Please check this point.').first();
+	await showList();
 	await press(cardText(commentCards.first()));
 	await expectCount('card press opened thread 1', '1 comment, 2 suggestions', '3-thread-opened');
 	await back();
+	await showList();
 	// (c) Accept one suggestion in the sheet.
 	await press(accept(suggestionCards.first()));
 	await expectCount('Accept on suggestion 1', '1 comment, 1 suggestion', '4-accepted');
 	await back();
+	await showList();
 	// (c) Reject the other.
 	await press(suggestionCards.first().getByRole('button', { name: 'Reject', exact: true }));
 	await expectCount('Reject on suggestion 2', '1 comment', '5-rejected');
 	await back();
-	// (a) Open the last thread: everything is read, the task settles and its row and bar go.
-	await press(cardText(commentCards.filter({ hasText: /New/ }).first()));
+	await showList();
+	// (a) Open the last thread: everything is read, the task settles and its row and bar go. It is the second card: the
+	// first keeps its New marks while it stays picked, so a match on New would press the opened thread again.
+	await press(cardText(commentCards.nth(1)));
 	await expectCount('card press opened thread 2', null, '6-all-read');
 	await openPlan();
 	await expect(row).toHaveCount(0);
