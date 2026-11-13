@@ -1,4 +1,4 @@
-"""One normalization of GitHub label and issue-lifecycle changes, whatever source read them.
+"""One normalization of GitHub label, issue-lifecycle and pull request reopen changes, whatever source read them.
 
 The webhook translator, the repo-activity poller and the outcome mapper all call
 ``change_event`` (event rules §5.2, §5.3). The input is the webhook payload shape. The
@@ -12,8 +12,9 @@ The event_id is exact: ``IDENTITY`` below is the whole of it, with no matching w
 Which source delivered a change is settled once, by the poller reading the delivery log.
 
 Identity is per change: two labels added to one PR head are two events, and the
-same label removed and added again is two more, told apart by ``at``. Titles,
-bodies and label descriptions are never facts.
+same label removed and added again is two more, told apart by ``at``. A pull
+request reopened twice is two events for the same reason. Titles, bodies and
+label descriptions are never facts.
 """
 from __future__ import annotations
 
@@ -25,12 +26,14 @@ from events.identity_formula import compute_event_id
 
 CONNECTOR = "github"
 _LABEL_ACTIONS = ("labeled", "unlabeled")
+_PR_ACTIONS = (*_LABEL_ACTIONS, "reopened")
 _ISSUE_ACTIONS = (*_LABEL_ACTIONS, "opened", "closed", "reopened")
 #: Declared identity facts per type suffix. The connector manifest reads these, so a
 #: declaration and the id computed here cannot drift apart.
 IDENTITY: dict[str, tuple[str, ...]] = {
     "pr.labeled": ("repo", "pr_number", "label", "at"),
     "pr.unlabeled": ("repo", "pr_number", "label", "at"),
+    "pr.reopened": ("repo", "pr_number", "at"),
     "issue.labeled": ("repo", "issue_number", "label", "at"),
     "issue.unlabeled": ("repo", "issue_number", "label", "at"),
     "issue.opened": ("repo", "issue_number"),
@@ -97,7 +100,7 @@ def _shared(payload: dict[str, Any], item: dict[str, Any], number_fact: str, at:
 def _pr_change(payload: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     action, pr = payload.get("action"), _object(payload.get("pull_request"))
     at = _text(pr.get("updated_at"))
-    if action not in _LABEL_ACTIONS or at is None:
+    if action not in _PR_ACTIONS or at is None:
         return None
     facts = _shared(payload, pr, "pr_number", at)
     if facts is None:

@@ -51,6 +51,7 @@ GITHUB_ROUTED_EVENTS = {
     "pr.opened": "webhook.github.pr_opened",
     "pr.synchronize": "webhook.github.pr_synchronize",
     "pr.ready_for_review": "webhook.github.pr_ready_for_review",
+    "pr.reopened": "webhook.github.pr_reopened",
     "pr.labeled": "webhook.github.pr_labeled",
     "pr.unlabeled": "webhook.github.pr_unlabeled",
     "pr.merged": "webhook.github.pr_merged",
@@ -134,11 +135,7 @@ def _classify(raw: dict[str, Any]) -> str:
                 f"{_json_object(raw, 'repository').get('full_name')}#{pr.get('number')})"
             )
         return _PR_END_TYPES[end]
-    if action == "synchronize":
-        return "pr.synchronize"
-    if action == "ready_for_review":
-        return "pr.ready_for_review"
-    if action in ("labeled", "unlabeled"):
+    if action in ("synchronize", "ready_for_review", "reopened", "labeled", "unlabeled"):
         return f"pr.{action}"
     return "pr.opened"
 
@@ -260,8 +257,9 @@ def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
 
 
 _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version", *PAYLOAD_FACTS)
-# A label change adds the name changed, who did it and when.
-_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "actor", "at")
+# A reopen adds who did it and when; a label change adds the name changed too.
+_PR_REOPEN_FILTERABLE = (*_PR_FILTERABLE, "actor", "at")
+_PR_LABEL_FILTERABLE = (*_PR_REOPEN_FILTERABLE, "label")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
                      "minutes_since_opened", "state_reason", "author", "author_origin", "item_version")
 _CONTENT_FILTERABLE = ("repo", "author", "author_origin", "item_version")
@@ -286,15 +284,14 @@ MANIFEST = register(ConnectorManifest(
             _PR_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
-        "pr.labeled": EventTypeDecl(
-            "pr.labeled", IDENTITY["pr.labeled"],
-            _PR_LABEL_FILTERABLE, artifact_type=PR_TYPE,
-            artifact_integration=GITHUB_INTEGRATION, event_class="informational",
-            routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
-        "pr.unlabeled": EventTypeDecl(
-            "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
-            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION, event_class="informational",
-            routed_event=GITHUB_ROUTED_EVENTS["pr.unlabeled"]),
+        # A reopen is the declared way back from an end (R27), so it wakes the owner.
+        **{name: EventTypeDecl(name, IDENTITY[name], filterable, artifact_type=PR_TYPE,
+                               artifact_integration=GITHUB_INTEGRATION, event_class=event_class,
+                               routed_event=GITHUB_ROUTED_EVENTS[name])
+           for name, filterable, event_class in (
+               ("pr.labeled", _PR_LABEL_FILTERABLE, "informational"),
+               ("pr.unlabeled", _PR_LABEL_FILTERABLE, "informational"),
+               ("pr.reopened", _PR_REOPEN_FILTERABLE, "actionable"))},
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
                                  routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
