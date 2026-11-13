@@ -700,7 +700,8 @@ async function expectNameClearOfControls(page: Page, title: string, mode: Mode, 
 }
 
 
-/** At 1280 the open plan pane overlays the document instead of docking beside it, so the whole header (tools and both ask lines) ends before it rather than under it. */
+/** At 1280 the open plan pane overlays the canvas instead of docking beside it. The document is then the one visible surface and ends at the pane's edge,
+    so the whole header (tools, identity and the ask) sits beside the pane, never under it, and the ask lays itself out for the width that is left. */
 for (const theme of ['light', 'dark'] as const) {
 	test(`@surface:review-bar the header and its ask stay clear of the overlaid plan pane (1280 ${theme})`, async ({ page, request }, info) => {
 		test.setTimeout(120_000);
@@ -720,14 +721,15 @@ for (const theme of ['light', 'dark'] as const) {
 		await loginByUrl(page, { waitForComposer: false });
 		await selectThread(page, doc, 'default');
 		await expect(bar(page)).toContainText('Is the rollout plan right?');
-		await expect(page.locator('.identity-age'), 'a narrow fine-pointer canvas keeps document identity visible').toBeVisible();
+		// Identity shows as the narrow canvas's age line or the wider canvas's metadata row, whichever the visible width picks.
+		await expect(page.locator('.identity-owner:visible, .metadata-owner:visible'), 'the canvas beside the pane keeps document identity visible').toHaveText(`Owner: ${doc.title}`);
 		const pane = page.locator('.pane');
 		await expect(pane).toHaveClass(/\boverlay\b/);
 		await expect(pane).not.toHaveClass(/\bcollapsed\b/);
 		await settled(page);
 		const paneLeft = (await pane.boundingBox())!.x;
 		const header = page.locator('.document-header');
-		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'overlay inset').not.toBe('0px');
+		await expect.poll(async () => { const box = (await header.boundingBox())!; return box.x + box.width; }, 'the header ends at the overlaid pane').toBeLessThanOrEqual(paneLeft + 0.5);
 
 		const tools = page.locator('.document-tools');
 		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
@@ -741,7 +743,7 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(await hitAtCentre(control), `${await control.getAttribute('aria-label') ?? await control.textContent()} not covered`).toBe(true);
 		}
 
-		// The squeezed header keeps the full name and chevron together, then gives the question its own full-width row.
+		// Whichever arrangement the header's width picks, the full name keeps its chevron and the question keeps a visible, uncovered row, all left of the pane.
 		const who = bar(page).locator('.rb-who');
 		const question = bar(page).locator('.rb-ask');
 		await expect(who).toHaveText(`${doc.title}:`);
@@ -755,21 +757,21 @@ for (const theme of ['light', 'dark'] as const) {
 				header: header.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
 				line: getComputedStyle(document.querySelector('.rb-line')!).display,
 				avatar: box('.rb-lead > :first-child'), who: box('.rb-who'), whoScroll: who.scrollWidth, whoClient: who.clientWidth,
-				lead: box('.rb-lead'), ask: box('.rb-ask'), chevron: box('.rb-chev'), pill: box('.document-tools .comment-status'),
+				lead: box('.rb-lead'), lineBox: box('.rb-line'), ask: box('.rb-ask'), chevron: box('.rb-chev'), pill: box('.document-tools .comment-status'),
 				tools: { left: Math.min(...tools.map((rect) => rect.left)), right: Math.max(...tools.map((rect) => rect.right)), bottom: Math.max(...tools.map((rect) => rect.bottom)) },
 			};
 		});
 		await info.attach(`geometry-1280-${theme}`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
-		expect(geometry.line, 'review line rearranged for the squeezed header').toBe('grid');
-		expect(geometry.lead.top, 'name row follows the tools').toBeGreaterThanOrEqual(geometry.tools.bottom);
 		expect(geometry.chevron.top, 'chevron stays beside the asker name').toBeLessThanOrEqual(geometry.who.bottom);
-		expect(geometry.ask.top, 'question occupies the full row below the name').toBeGreaterThanOrEqual(Math.max(geometry.who.bottom, geometry.chevron.bottom) - 0.5);
+		expect(geometry.tools.right, 'tools clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
+		expect(geometry.ask.right, 'question clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(geometry.whoScroll, 'asker name not clipped').toBeLessThanOrEqual(geometry.whoClient);
-		expect(geometry.who.right, 'asker name inside its row').toBeLessThanOrEqual(geometry.lead.right);
-		expect(geometry.lead.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
+		// The ask's line box, not `.rb-lead`: the lead is a layout-less wrapper when the line stays on one row.
+		expect(geometry.who.right, 'asker name inside its row').toBeLessThanOrEqual(geometry.lineBox.right + 0.5);
+		expect(geometry.lineBox.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(await hitAtCentre(who), 'asker name not covered').toBe(true);
 		expect(await hitAtCentre(bar(page).locator('.rb-chev')), 'chevron not covered').toBe(true);
-		expect(geometry.ask.width, 'question retains a visible full-width row').toBeGreaterThan(0);
+		expect(geometry.ask.width, 'question retains a visible row').toBeGreaterThan(0);
 		expect(await hitAtCentre(question), 'question not covered').toBe(true);
 		await shot(page, `overlay-1280-${theme}-pane-open`, info);
 
