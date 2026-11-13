@@ -87,8 +87,8 @@ VISIBLE_CONTENT = "COALESCE(cv.content, m.content)"
 
 # The rule behind ``metadata.chat_drawn = false``, which ``place_answers`` stamps once as it saves a
 # step: the step placed answers, no chat text is left, and it has no reasoning or tool calls. Every
-# reader reads the flag; the 190 -> 191 data step reads these same fields in SQL, pinned to
-# ``draws_nothing`` by tests/test_migration_190_to_191_chat_drawn.py.
+# reader reads the flag; the 191 -> 192 data step reads these same fields in SQL, pinned to
+# ``draws_nothing`` by tests/test_migration_191_to_192_chat_drawn.py.
 def _has_items(value: object) -> bool:
     return isinstance(value, list) and bool(value)
 

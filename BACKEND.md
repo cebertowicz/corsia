@@ -9,17 +9,17 @@ backend/
 ├── api/                 # REST routers: sessions, delegation, files/docs, registry, models/providers, costs, system, webhooks
 ├── core/                # Native turn loop, context builder, message format/pruning, agent/tool bootstrap
 ├── doceditor/           # Revisioned markdown edits, anchors, document comments
-├── events/              # v2 event ingress/routing/delivery/dead-letter/reviewer gate
+├── events/              # v2 event ingress/routing/delivery/dead-letter
 ├── infra/               # Config/auth/db/schema/settings/state, shared send primitive, runtime truth, event mapper
 ├── jobs/                # Nightly jobs; no v1 continuation wake engine
 ├── llm/                 # Provider catalog, routing, capabilities, local/cloud provider runtimes, pricing
 ├── memory/              # Knowledge base, fact extraction, summaries
-├── prompts/             # Prompt text assembly, including reviewer prompt
+├── prompts/             # Prompt text assembly, including the artifact-review prompt
 ├── registry/            # Artifact/document registry identity, observer, pane projection
 ├── scripts/             # Shell-facing CLIs (delegate, doc)
 ├── subagents/           # Provider runtime continuity for CC/Codex/child sessions; not a product manager surface
 ├── tools/               # Tool registry + filesystem/shell/browser/web/knowledge/project/MCP tools
-├── reviewer/           # LLM reviewer gate helpers only; decorator workflow fan-out is retired
+├── reviewer/           # What host access and the PR quiet watch still import: failure text (CCUnavailableError), reviewer account choice, review status and label names
 └── ws/                  # WebSocket auth, receiver/processor/heartbeat, native/CC/Codex send ingress
 ```
 
@@ -30,13 +30,13 @@ main.py                      ← api routers + app_lifecycle lifespan
 api/*                        ← infra/auth/db/state + domain services; no business logic hidden in route glue
 ws/*                         ← infra/auth/state/send_service + core/ws turn helpers + provider runtimes
 core/*                       ← llm + tools + memory/registry helpers; native turn execution owns assistant persistence
-events/*                     ← infra event mapper/state + registry identity + reviewer gate; no decorator workflow fan-out
+events/*                     ← infra event mapper/state + registry identity; no decorator workflow fan-out
 infra/send_service.py         ← shared accepted-row validation/persistence/dispatch seam for delegation, event delivery, and native WS
 subagents/*                  ← provider runtime continuity; may call infra/runtime state, never exposes /api/subagents
 registry/*                   ← observes canonical messages/tools and projects registry rows into artifact/document views
 memory/*                     ← infra DB + llm helpers; jobs call into memory, not the reverse
 tools/*                      ← tools.base/registry + infra config/sandbox as needed
-reviewer/*                  ← reviewer-only helpers called from events/reviewer_gate.py
+reviewer/*                  ← host-access lease reviewer and the PR quiet watch; no GitHub calls (they run through connections/github_run.run_gh)
 ```
 
 ## External MCP tools

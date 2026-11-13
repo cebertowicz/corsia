@@ -73,7 +73,6 @@ async def test_lifespan_holds_new_and_recovered_calls_until_models_are_restored(
     monkeypatch.setattr(app_lifecycle, "resume_local_setup", AsyncMock())
     monkeypatch.setattr("core.devices_runtime.runtime", SimpleNamespace(restore=AsyncMock(), disable=AsyncMock()))
     monkeypatch.setattr("doceditor.live_runtime.start_documents", AsyncMock())
-    monkeypatch.setattr("events.connectors.github_reviewer_gate_recovery.recover_pending_reviews", AsyncMock())
     monkeypatch.setattr("api.usage_rollup.schedule_refresh", lambda: None)
     _seat(monkeypatch, recorded="old")
     restoring, release = asyncio.Event(), asyncio.Event()

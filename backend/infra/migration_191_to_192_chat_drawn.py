@@ -1,10 +1,10 @@
-"""Schema 190 -> 191: an assistant step that draws nothing in chat is stamped ``chat_drawn: false``.
+"""Schema 191 -> 192: an assistant step that draws nothing in chat is stamped ``chat_drawn: false``.
 
-From 191 on, ``chat_comment_answers.place_answers`` stamps the flag as it saves a step: the step
+From 192 on, ``chat_comment_answers.place_answers`` stamps the flag as it saves a step: the step
 placed answers (it has a ``chat_visible_content`` row), no chat text is left, and it has no
 reasoning or tool calls (``chat_comment_answers.draws_nothing``). This step stamps the same flag
-on the steps stored before 191, in SQL pinned to that function by
-tests/test_migration_190_to_191_chat_drawn.py. It also leaves a step alone that a comment sits on,
+on the steps stored before 192, in SQL pinned to that function by
+tests/test_migration_191_to_192_chat_drawn.py. It also leaves a step alone that a comment sits on,
 which cannot exist when a step is first saved. It rewrites only ``metadata``; no schema changes.
 
 Runs inside the runner's transaction; it never commits or rolls back.
@@ -15,7 +15,7 @@ from __future__ import annotations
 import sqlite3
 
 
-def migrate_190_to_191(conn: sqlite3.Connection) -> None:
+def migrate_191_to_192(conn: sqlite3.Connection) -> None:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"chat_visible_content", "chat_comments", "messages"} <= tables:
         return

@@ -1,11 +1,11 @@
-"""Schema 191: steps stored before 191 get the flag the writer stamps from 191 on, by the same rule."""
+"""Schema 192: steps stored before 192 get the flag the writer stamps from 192 on, by the same rule."""
 import json
 import sqlite3
 from contextlib import closing
 
 from infra.chat_comment_answers import draws_nothing
 from infra.database import initialize_schema
-from infra.migration_190_to_191_chat_drawn import migrate_190_to_191
+from infra.migration_191_to_192_chat_drawn import migrate_191_to_192
 
 
 def _step(db, message_id, visible, metadata, role="assistant"):
@@ -43,8 +43,8 @@ def test_the_data_step_stamps_exactly_what_the_writer_rule_stamps():
         initialize_schema(db)
         for message_id, (visible, meta) in cases.items():
             _step(db, message_id, visible, meta)
-        migrate_190_to_191(db)
-        migrate_190_to_191(db)
+        migrate_191_to_192(db)
+        migrate_191_to_192(db)
         stamped = {mid for mid, flag in _flags(db).items() if flag is False}
     assert stamped == {mid for mid, (visible, meta) in cases.items() if draws_nothing(visible, meta)}
     assert {"empty/no-text", "empty-reasoning/no-text", "empty-calls/no-text", "none/no-text"} <= stamped
@@ -64,7 +64,7 @@ def test_it_skips_what_never_placed_an_answer_and_rows_that_are_not_steps():
         _step(db, "answer-only", "", {})
         db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at) VALUES ('bad','thread','assistant','','not json','t')")
         db.execute("INSERT INTO chat_visible_content VALUES ('bad','thread','')")
-        migrate_190_to_191(db)
+        migrate_191_to_192(db)
         flags = _flags(db)
         assert db.execute("SELECT metadata FROM messages WHERE id='bad'").fetchone()[0] == "not json"
     assert {mid for mid, flag in flags.items() if flag is False} == {"answer-only"}
@@ -74,6 +74,6 @@ def test_it_keeps_every_other_metadata_key():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
         _step(db, "answer-only", "", {"turn_id": "t", "step_type": "text"})
-        migrate_190_to_191(db)
+        migrate_191_to_192(db)
         meta = json.loads(db.execute("SELECT metadata FROM messages").fetchone()[0])
     assert meta == {"turn_id": "t", "step_type": "text", "chat_drawn": False}

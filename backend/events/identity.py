@@ -146,7 +146,7 @@ def pr_number_from_check_suite_payload(payload: dict[str, Any]) -> int | None:
 def check_suite_pr_metadata_from_event(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Return selected check_suite PR metadata, using the head-SHA fallback.
 
-    Shared by normalization, routing, and reviewer gate identity. A check_suite
+    Shared by normalization and routing. A check_suite
     event's PR identity and branch facts must come from one selected PR, not a
     payload-local path in one caller and a head-SHA fallback in another.
 
@@ -166,7 +166,7 @@ def check_suite_pr_metadata_from_event(payload: dict[str, Any]) -> dict[str, Any
     if not repo or not head_sha:
         return selected
 
-    from reviewer.gh_helpers import get_prs_for_sha
+    from events.connectors.github_pr_lookup import get_prs_for_sha
 
     prs = get_prs_for_sha(repo, head_sha)
     if selected is not None:
