@@ -1,6 +1,7 @@
 import { onDestroy } from 'svelte';
 import { writable } from 'svelte/store';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { observeCanvasWidth } from '$lib/docCommentDrawer';
 
 /**
  * The reader's place in a comment field: where to find that field again in whichever form the surface takes, the caret
@@ -226,3 +227,45 @@ export function holdWritingPlace(live: () => string | null) {
 		pending = null;
 	});
 }
+
+/**
+ * The canvas width the surface's form is decided from. While the panel eases back and a place is being carried to it,
+ * the canvas passes through widths the layout never settles at; taking one of those rebuilds the card in another form
+ * under the writing, whose field the place is then restored to. So the width is kept at the trip's starting value and
+ * re-read when the hold lifts, which is while the place is still being re-placed. Call it while a component initialises.
+ */
+export function formWidth(bounds: () => HTMLElement | null) {
+	let width = $state(Number.POSITIVE_INFINITY);
+	let kept: number | null = null;
+	$effect(() => observeCanvasWidth(bounds(), (next) => { if (kept === null) width = next; }));
+	$effect(() => writingHeld.subscribe((holding) => {
+		if (holding) kept = width;
+		else if (kept !== null) { kept = null; const root = bounds(); if (root) width = root.getBoundingClientRect().width; }
+	}));
+	return { get value() { return width; } };
+}
+
+/**
+ * The panel takes width from the document and redraws a surface that is already up in another form (margin card,
+ * popover, sheet). That new form takes no focus: the reader asked for the panel, not for a new surface. Opening a
+ * surface is their own act and takes focus as usual, so this keys on the panel moving under a surface that is up
+ * (`surfaceKey` is '' when none is). Read by the `takeFocus` of the popovers and both sheets, which take focus when
+ * they mount. Call it while a component initialises.
+ */
+export function drawnByPanel(surfaceKey: () => string) {
+	let drawn = $state(false);
+	const key = $derived(surfaceKey());
+	$effect(() => {
+		const surfaceUp = key !== '';
+		let last: boolean | null = null;
+		const stop = paneCollapsed.subscribe((collapsed) => {
+			if (surfaceUp && last !== null && last !== collapsed) drawn = true;
+			last = collapsed;
+		});
+		return () => { drawn = false; stop(); };
+	});
+	return { get now() { return drawn; } };
+}
+
+/** A press on the panel's own control is not an outside press for a surface that is up: it stays open across the trip. */
+export const isPanelControl = toPanelControl;

@@ -4,7 +4,6 @@
 	import { createMentionSelection, type MentionOccurrence } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
-	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { Button } from './ui';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { peerFade } from '$lib/popoverMotion';
@@ -22,12 +21,12 @@
 	import { createListThreadView } from './docCommentThreadView.svelte';
 	import DocCommentThreadBack from './DocCommentThreadBack.svelte';
 	import { holdReadingLine } from '$lib/docMarginHold.svelte';
-	import { holdWritingPlace, writingHeld } from '$lib/docWritingHold.svelte';
+	import { drawnByPanel, formWidth, holdWritingPlace, isPanelControl } from '$lib/docWritingHold.svelte';
 	import { createResolvedDrawer } from '$lib/docResolvedDrawer.svelte';
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
 	import { retainUnreadList } from '$lib/docUnreadList.svelte';
-	import { byCommentNumber, clickedOpener, drawerKeys, imageDrawerMotion, observeCanvasWidth, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { byCommentNumber, clickedOpener, drawerKeys, imageDrawerMotion, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
 	import { focusStillOurs } from '$lib/actions/focusTrap';
 	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
@@ -119,19 +118,9 @@
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let filterOpen = $state(false);
 	let drawer = $state<HTMLElement>();
-	let canvasWidth = $state(Number.POSITIVE_INFINITY);
-	// The width the surface's form is decided from. While the panel eases back and a place is being carried to it, the
-	// canvas passes through widths the layout never settles at; taking one of those rebuilds the card in another form
-	// under the writing, whose field the place is then restored to. So the width is kept at the trip's starting value
-	// and re-read when the hold lifts, which is while the place is still being re-placed.
-	let heldWidth: number | null = null;
-	$effect(() => observeCanvasWidth(bounds, (width) => { if (heldWidth === null) canvasWidth = width; }));
-	$effect(() => writingHeld.subscribe((holding) => {
-		if (holding) heldWidth = canvasWidth;
-		else if (heldWidth !== null) { heldWidth = null; if (bounds) canvasWidth = bounds.getBoundingClientRect().width; }
-	}));
+	const canvasWidth = formWidth(() => bounds);
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it the list is a popover from the comments control, and only a phone dims the document with a sheet. Image viewers already decide whether their canvas is a sheet.
-	const roomForMargin = $derived(hasRoomForMargin(canvasWidth));
+	const roomForMargin = $derived(hasRoomForMargin(canvasWidth.value));
 	const sheetDrawer = $derived(image ? narrow : (phone ?? narrow));
 	/** How a card opened from the text shows: the phone sheet; else the margin column on any desktop canvas with room, cards beside their anchors; else a popover over the text. The editor reads it, so only a press opens a card over the text. */
 	const columnFits = $derived(!narrow && !image && roomForMargin); // the one margin rule: the card mode and the column both read it
@@ -154,27 +143,10 @@
 	let lastOpened: number | undefined;
 	$effect.pre(() => { const now = opened; if (lastOpened !== undefined && now !== lastOpened && untrack(() => resolvedPlace) !== 'sheet') resolvedOpen = false; lastOpened = now; });
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
-	// Writing survives the panel's trip: where the reader was writing, and where the list is up to receive it back.
-	// A card or composer is up wherever it fits (margin card, popover, sheet), so its place is carried from any of them.
-	holdWritingPlace(() => surfaceState === null ? null
-		: margin ? '.canvas-comment-drawer.margin:not(.leaving)'
-			: surfaceState.kind !== 'list' ? 'body'
-				: sheetDrawer ? '.canvas-comment-drawer.sheet' : null);
-	// The panel takes width from the document and redraws a card that is already up in another form (margin card, popover,
-	// sheet). That new form takes no focus: the reader asked for the panel, not for a new surface. Opening a surface is
-	// their own act and it takes focus as usual, so the rule keys on the panel moving under a surface that is up.
-	// Honoured by the `takeFocus` of the popover and of both sheets, which take focus when they mount.
-	const surfaceKey = $derived(surfaceState === null ? '' : `${surfaceState.kind}:${'id' in surfaceState ? surfaceState.id : ''}`);
-	let drawnByThePanel = $state(false);
-	$effect(() => {
-		const surfaceUp = surfaceKey !== '';
-		let lastCollapsed: boolean | null = null;
-		const stop = paneCollapsed.subscribe((collapsed) => {
-			if (surfaceUp && lastCollapsed !== null && lastCollapsed !== collapsed) drawnByThePanel = true;
-			lastCollapsed = collapsed;
-		});
-		return () => { drawnByThePanel = false; stop(); };
-	});
+	// Writing survives the panel's trip, carried back into whichever form the card, composer or list is up in now (margin, popover, sheet).
+	holdWritingPlace(() => surfaceState === null ? null : margin ? '.canvas-comment-drawer.margin:not(.leaving)' : surfaceState.kind !== 'list' ? 'body'
+		: sheetDrawer ? '.canvas-comment-drawer.sheet' : image ? null : '.canvas-comment-drawer.list-pop');
+	const panelDrawn = drawnByPanel(() => surfaceState === null ? '' : `${surfaceState.kind}:${'id' in surfaceState ? surfaceState.id : ''}`);
 	let detent = $state<'full' | 'half'>('full');
 	/** The list's thread view: one thread whole in the same sheet or drawer, with Back to the list where it was. */
 	const threadView = createListThreadView(() => drawer);
@@ -375,19 +347,19 @@
 		</div>{/key}</div>
 	</div>
 {/snippet}
-{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!drawnByThePanel && !(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => (target instanceof Element && !!target.closest('[aria-label="Toggle panel"]')) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
+{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!panelDrawn.now && !(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => isPanelControl(target) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
 
 {#if surfaceState || sheet.closing}
 	{#if margin && surfaceState}
 		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} takeFocus={!drawnByThePanel} ariaLabel="Document comments" initialFocusSelector={focusedId && replyDrafts[focusedId] ? `[data-comment-id="${CSS.escape(focusedId)}"] .ct-input` : focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} takeFocus={!panelDrawn.now} ariaLabel="Document comments" initialFocusSelector={focusedId && replyDrafts[focusedId] ? `[data-comment-id="${CSS.escape(focusedId)}"] .ct-input` : focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list' && !image && !columnFits}
 		<!-- Below the column's threshold on a desktop canvas: a popover from the comments control, so nothing is dimmed or covered but the list itself. -->
-		<Popover anchor={listEntry} placement="bottom-end" {bounds} fill {covered} takeFocus={!drawnByThePanel} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => (target instanceof Element && !!target.closest('[aria-label="Toggle panel"]')) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
+		<Popover anchor={listEntry} placement="bottom-end" {bounds} fill {covered} takeFocus={!panelDrawn.now} open={true} {onClose} {restoreFocus} onPlace={revealPicked} keepOpenOnPointer={(target) => isPanelControl(target) || (target instanceof Node && !!listEntry?.contains(target))}><section class="canvas-comment-drawer list-pop" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></Popover>
 	{:else if surfaceState?.kind === 'list' && image}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={escapeList} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} takeFocus={!drawnByThePanel} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{#if sheet.state.kind === 'thread'}<div class="sheet-thread" data-sheet-thread>{@render content()}</div>{:else}{@render content()}{/if}</AdaptiveDrawer>
+	{:else if cardMode() === 'sheet' && sheet.state}<AdaptiveDrawer fill={sheet.state.kind === 'draft'} bind:panel={draftSheet} takeFocus={!panelDrawn.now} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : null} doneLabel="Close" opaque followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{#if sheet.state.kind === 'thread'}<div class="sheet-thread" data-sheet-thread>{@render content()}</div>{:else}{@render content()}{/if}</AdaptiveDrawer>
 	{:else if surfaceState && surfaceState.kind !== 'list' && !forColumn}{@render cardPopover()}{/if}
 {/if}
 <!-- On a phone its own sheet over the document pane (`within` the leaf body, as the comment sheet is), never inside the comment sheet. -->
