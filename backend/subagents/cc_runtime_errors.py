@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from typing import Callable
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Callable
 
 from infra.turn_errors import insert_turn_error
 from infra.send_broadcast import broadcast_stored_message
 from llm.error_cause import cause_fields
+
+if TYPE_CHECKING:
+    from core.turn_core import TerminalSettlement, TurnIdentity
+    from subagents.cc_runtime_state import _Live
 
 
 class CCLiveTurnBusy(RuntimeError):
@@ -14,6 +19,35 @@ class CCLiveTurnBusy(RuntimeError):
 
 class CCPreparedDestinationStale(RuntimeError):
     """The provider boundary no longer matches the preflight payload."""
+
+
+class ResumeVerdictOwnsWrite(Exception):
+    """Claude closed stdin before a native resume's frame drained.
+
+    The feed's pending resume verdict decides that write: a refusal proves
+    Claude never read it, so the feed redelivers it; any other verdict runs
+    ``commit_unverified``, the ordinary failed-drain terminal.
+    """
+
+    def __init__(
+        self,
+        identity: TurnIdentity,
+        error: BaseException,
+        commit_unverified: Callable[[], Awaitable[TerminalSettlement]],
+    ) -> None:
+        super().__init__(str(error))
+        self.identity = identity
+        self.error = error
+        self.commit_unverified = commit_unverified
+
+    @staticmethod
+    def applies(live: _Live, accepted: bool, error: BaseException) -> bool:
+        """An unaccepted write lost to a closed pipe while a resume verdict is pending."""
+        return (
+            not accepted
+            and live.resume_verdict is not None
+            and isinstance(error, (BrokenPipeError, ConnectionResetError))
+        )
 
 
 def is_resume_not_found(stderr: str) -> bool:

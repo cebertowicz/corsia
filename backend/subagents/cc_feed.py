@@ -11,12 +11,13 @@ from typing import TYPE_CHECKING, cast
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 from subagents.cc_accept import (
-    ResumeVerdictOwnsWrite, TerminalSettlement, accept_reconstructed_input,
+    TerminalSettlement, accept_reconstructed_input,
     require_owned_accept_db,
 )
 from subagents.cc_destination import build_cc_user_frame
 from subagents.cc_feed_transition import CCFeedTransition, replace_if_required
-from subagents.cc_runtime_errors import CCLiveTurnBusy
+from subagents.cc_resume_redelivery import DeferredFinish as _DeferredFinish, redeliver_rejected_resume
+from subagents.cc_runtime_errors import CCLiveTurnBusy, ResumeVerdictOwnsWrite
 from subagents.cc_runtime_helpers import _default_broadcast
 from subagents.cc_runtime_state import Broadcast, _LIVE, _Live
 from subagents.cc_process_exit import _CommittedTerminalFailure
@@ -176,9 +177,6 @@ def _awaits_resume_verdict(live: _Live) -> bool:
     )
 
 
-_DeferredFinish = Callable[[], Awaitable[None]]
-
-
 def _wait_scope(live: _Live) -> CheckpointWaitScope:
     return cast("CheckpointWaitScope", live.checkpoint_wait_scope)
 
@@ -208,41 +206,6 @@ async def _await_resume_verdict(
     return cast("_DeferredFinish | None", verdict.result() if verdict.done() else None)
 
 
-async def _redeliver_rejected_resume(
-    transition: CCFeedTransition,
-    live: _Live,
-    identity: TurnIdentity,
-    finish: _DeferredFinish,
-    acceptance: _FeedAcceptance,
-    *,
-    first_write_unproven: bool,
-) -> TurnIdentity:
-    """Deliver the same input in the same Turn after Claude refused it unread.
-
-    A first write that never drained settled no delivery evidence, so this
-    redelivery is the write that proves (or fails) the input's delivery.
-    """
-    if _wait_scope(live).stop_requested:
-        await finish()
-        return identity
-    try:
-        replacement, frame, identity = await transition.rebuild_rejected_resume(live)
-    except BaseException:
-        if _LIVE.get(transition.thread_id) is live and live.corsia_turn == identity:
-            await finish()
-        raise
-    proves = first_write_unproven
-    return await accept_reconstructed_input(
-        transition.thread_id, replacement, frame, turn_id=identity.turn_id,
-        bcast=transition.bcast, preadmitted_turn=identity,
-        input_message_id=acceptance.input_message_id,
-        mark_accepted=acceptance.mark_accepted if proves else None,
-        mark_ambiguous=acceptance.mark_ambiguous if proves else None,
-        settle_delivery=acceptance.settle_delivery if proves else None,
-        settle_delivery_terminal=acceptance.settle_delivery_terminal if proves else None,
-    )
-
-
 async def _accept_confirming_resume(
     transition: CCFeedTransition,
     live: _Live,
@@ -258,33 +221,29 @@ async def _accept_confirming_resume(
     try:
         try:
             identity = await _record_and_accept(transition, live, acceptance)
-        except ResumeVerdictOwnsWrite as closed:
-            # Claude closed stdin before the drain; its verdict decides the write.
+        except ResumeVerdictOwnsWrite as closed:  # Claude closed stdin before the drain
             unread, identity = closed, closed.identity
-        if unread is None and (
-            identity is None or _LIVE.get(transition.thread_id) is not live
-        ):
+        if not unread and (identity is None or _LIVE.get(transition.thread_id) is not live):
             return identity
         waited = True
         try:
             finish = await _await_resume_verdict(live, verdict)
         except BaseException:
-            if unread is not None:
+            if unread:
                 await asyncio.shield(unread.commit_unverified())
             raise
+        if unread and finish is None:  # Not a refusal: an ordinary unverified write.
+            terminal = await unread.commit_unverified()
+            raise _CommittedTerminalFailure(terminal, unread.error) from unread.error
     finally:
         live.resume_verdict = None
         # A refusal handed over while accepting has no rebuild; end it here.
         if not waited and verdict.done() and verdict.result() is not None:
             await asyncio.shield(verdict.result()())
     if finish is None:
-        if unread is not None:
-            terminal = await unread.commit_unverified()
-            raise _CommittedTerminalFailure(terminal, unread.error) from unread.error
         return identity
-    return await _redeliver_rejected_resume(
-        transition, live, identity, finish, acceptance,
-        first_write_unproven=unread is not None,
+    return await redeliver_rejected_resume(
+        transition, live, identity, finish, acceptance, first_write_unproven=bool(unread),
     )
 
 

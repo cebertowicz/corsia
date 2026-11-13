@@ -7,6 +7,7 @@ import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from subagents.cc_process_exit import _CommittedTerminalFailure, claim_terminal
 from subagents.cc_event_context_usage import (
     consume_and_attach_terminal_context_usage,
 )
+from subagents.cc_runtime_errors import ResumeVerdictOwnsWrite
 from subagents.cc_runtime_state import Broadcast, _Live, activate_bound_turn
 
 log = logging.getLogger("subagents.cc_runtime")
@@ -32,26 +34,6 @@ BeforeProviderWrite = Callable[
 _UNVERIFIED_INPUT_DELIVERY_DETAIL = (
     "Claude Code input delivery could not be verified; provider output was discarded."
 )
-
-
-class ResumeVerdictOwnsWrite(Exception):
-    """Claude closed stdin before a native resume's frame drained.
-
-    The feed's pending resume verdict decides the write: a refusal proves
-    Claude never read it, so the feed redelivers it; any other verdict
-    commits the unverified delivery exactly as an ordinary failed drain.
-    """
-
-    def __init__(
-        self,
-        identity: TurnIdentity,
-        error: BaseException,
-        commit_unverified: Callable[[], Awaitable[TurnSettlement]],
-    ) -> None:
-        super().__init__(str(error))
-        self.identity = identity
-        self.error = error
-        self.commit_unverified = commit_unverified
 
 
 def require_owned_accept_db(db) -> None:
@@ -267,8 +249,15 @@ async def finish_unverified_input_delivery(
     *,
     bcast: Broadcast,
     db=None,
+    mark_ambiguous: Callable[[], None] | None = None,
+    settle_delivery: Callable[[], Awaitable[None]] | None = None,
 ) -> TurnSettlement:
-    """Close one exact turn whose triggering input lacks durable proof."""
+    """Settle one unproven input write ambiguous and close its exact turn."""
+    if mark_ambiguous is not None:
+        mark_ambiguous()
+    live.input_delivery_unproven = True
+    if settle_delivery is not None:
+        await _settle_input_delivery(settle_delivery)
     result = await claim_terminal(
         live, "error", _UNVERIFIED_INPUT_DELIVERY_DETAIL,
         db=db, identity=identity, defer_drive=True,
@@ -397,27 +386,15 @@ async def accept_reconstructed_input(
     except BaseException as exc:
         if not observation.write_observed:
             raise
-
-        async def commit_unverified() -> TurnSettlement:
-            if not observation.accepted and mark_ambiguous is not None:
-                mark_ambiguous()
-            live.input_delivery_unproven = True
-            if settle_delivery is not None:
-                await _settle_input_delivery(settle_delivery)
-            return await finish_unverified_input_delivery(
-                thread_id, live, identity, bcast=bcast, db=db,
-            )
-
         cc_trust.distrust(live)
         observation.unverified = observation.unverified or not observation.accepted
-        if (
-            not observation.accepted
-            and live.resume_verdict is not None
-            and isinstance(exc, (BrokenPipeError, ConnectionResetError))
-        ):
-            raise ResumeVerdictOwnsWrite(identity, exc, commit_unverified) from exc
-        if not observation.unverified:
-            raise
-        terminal = await commit_unverified()
-        raise _CommittedTerminalFailure(terminal, exc) from exc
+        commit = partial(
+            finish_unverified_input_delivery, thread_id, live, identity, bcast=bcast, db=db,
+            mark_ambiguous=None if observation.accepted else mark_ambiguous, settle_delivery=settle_delivery,
+        )
+        if ResumeVerdictOwnsWrite.applies(live, observation.accepted, exc):
+            raise ResumeVerdictOwnsWrite(identity, exc, commit) from exc  # the feed's verdict decides
+        if observation.unverified:
+            raise _CommittedTerminalFailure(await commit(), exc) from exc
+        raise
     return identity
