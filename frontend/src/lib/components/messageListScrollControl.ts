@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
+import { SHEET_SPACE } from './chatCommentViewport';
 
 /** Keeps transcript scrolling separate from the component's rendering and landing state. */
 export class MessageListScrollControl {
@@ -61,7 +62,9 @@ export class MessageListScrollControl {
 		this.#savedBottomOffset = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
 	}
 
+	/** Puts the transcript back against its bottom edge after the keyboard moved it. An open comment sheet owns the transcript's place (it keeps the passage above itself), so nothing is put back while one is open. */
 	restoreBottomOffset(): void {
+		if (this.element()?.style.getPropertyValue(SHEET_SPACE)) return;
 		this.beginProgrammaticScroll(() => {
 			const el = this.element();
 			if (!el) return;
