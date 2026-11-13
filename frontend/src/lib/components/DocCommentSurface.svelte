@@ -18,6 +18,8 @@
 	import DocMarginStack from './DocMarginStack.svelte';
 	import DocCommentDrawerHeading from './DocCommentDrawerHeading.svelte';
 	import DocResolvedComments from './DocResolvedComments.svelte';
+	import { createListThreadView } from './docCommentThreadView.svelte';
+	import DocCommentThreadBack from './DocCommentThreadBack.svelte';
 	import { holdReadingLine } from '$lib/docMarginHold.svelte';
 	import { createResolvedDrawer } from '$lib/docResolvedDrawer.svelte';
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
@@ -144,24 +146,8 @@
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
 	let detent = $state<'full' | 'half'>('full');
 	/** The list's thread view: one thread whole in the same sheet or drawer, with Back to the list where it was. */
-	let openedThread = $state<string | null>(null);
-	const openedComment = $derived(!margin && surfaceState?.kind === 'list' && openedThread ? comments.find((comment) => comment.id === openedThread) ?? null : null);
-	let listScrollTop = 0;
-	const listScroller = () => drawer?.querySelector<HTMLElement>('.drawer-comments') ?? null;
-	function openThreadView(id: string) {
-		listScrollTop = listScroller()?.scrollTop ?? 0;
-		openedThread = id;
-		void tick().then(() => { const list = listScroller(); if (list) list.scrollTop = 0; drawer?.querySelector<HTMLElement>('[data-drawer-back]')?.focus({ preventScroll: true }); });
-	}
-	function backToList() {
-		const id = openedThread;
-		openedThread = null;
-		void tick().then(() => {
-			const list = listScroller();
-			if (list) list.scrollTop = listScrollTop;
-			drawer?.querySelector<HTMLElement>(`[data-comment-id="${id}"] .ct-open-thread`)?.focus({ preventScroll: true });
-		});
-	}
+	const threadView = createListThreadView(() => drawer);
+	const openedComment = $derived(!margin && surfaceState?.kind === 'list' && threadView.id ? comments.find((comment) => comment.id === threadView.id) ?? null : null);
 	const draftTags = createMentionSelection();
 	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
 	$effect(() => { if (!draft) draftTags.clear(); });
@@ -248,7 +234,7 @@
 	});
 	$effect(() => {
 		if (surfaceState?.kind !== 'list') return;
-		filter = 'all'; filterOpen = false; navigationNotice = ''; detent = 'full'; openedThread = null;
+		filter = 'all'; filterOpen = false; navigationNotice = ''; detent = 'full'; threadView.reset();
 		void tick().then(() => {
 			const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
 			// An image's drawer opens at the selected comment instead (the effect below).
@@ -280,7 +266,7 @@
 	function drawerMotion(node: Element, options: { leaving: boolean }) { return imageDrawerMotion(node, options, isImage); }
 	function closeDrawer() { const modal = sheet.modalOpen; onClose(); if (!modal) restoreFocus(); }
 	/** Escape in the thread view goes back to the list; in the list it closes. */
-	function escapeList() { if (openedComment) backToList(); else closeDrawer(); }
+	function escapeList() { if (openedComment) threadView.back(); else closeDrawer(); }
 	// In the margin Escape lets a picked card go and focus goes back to where it came from (the caret, from the text); the column stays.
 	function escapeColumn() { if (!margin) { closeDrawer(); return; } onRelease?.(); restoreFocus(); }
 	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5; in the margin the card leaves the column by itself and the column stays up), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
@@ -327,7 +313,7 @@
 
 {#snippet imageHead(row: unknown[])}<DocCommentImageHead {row} {images} />{/snippet}
 {#snippet threadList(items: DocComment[], reply?: boolean, inMargin?: boolean, underTextChanged?: boolean, flat?: boolean, replyView: 'recent' | 'all' | 'summary' = 'recent')}
-	<CommentList {replyView} onOpenThread={replyView === 'summary' ? openThreadView : undefined} {replyTags} {underTextChanged} {flat} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+	<CommentList {replyView} onOpenThread={replyView === 'summary' ? threadView.open : undefined} {replyTags} {underTextChanged} {flat} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 {/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
 {#snippet acceptAllBar()}
@@ -350,7 +336,7 @@
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 	<!-- Accept all sits above the one scroller in every list form outside the margin (there it is the column's head card), so it is never scrolled away; it takes no room unless there is something to say. The thread view gives that room to its one thread; Back returns to the list's Accept all. -->
 	{#if !margin && !readOnly && !openedComment && (decisions.authorsWithOpenSuggestions.length || decisions.outcome.skipped.length || decisions.outcome.acceptAllError)}<div class="list-accept-all">{@render acceptAllBar()}</div>{/if}
-	{#if openedComment}<div class="thread-back"><button type="button" class="drawer-back" data-drawer-back onclick={backToList}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>Back</button></div>{/if}
+	{#if openedComment}<DocCommentThreadBack onBack={threadView.back} />{/if}
 	<div class="drawer-comments" class:in-margin={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
@@ -408,9 +394,4 @@
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
 	.list-accept-all { flex: none; padding: 0 0 var(--space-1) var(--space-1); }
-	.thread-back { flex: none; }
-	.drawer-back { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--space-6); padding: 0 var(--space-1); border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
-	.drawer-back:hover { color: var(--text-primary); }
-	.drawer-back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .drawer-back { min-height: var(--touch-target); } }
 </style>
