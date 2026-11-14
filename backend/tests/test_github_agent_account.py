@@ -526,6 +526,34 @@ def test_person_without_own_github_gets_a_ready_agents_account(agent, monkeypatc
     assert probes  # still looking, so a personal sign-in made later is caught
 
 
+@pytest.mark.asyncio
+async def test_unchecked_login_is_named_to_the_person_on_check_and_connect(agent, monkeypatch):
+    # Nothing here shows the person's own login, so only they can tell the agents' login isn't theirs.
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    monkeypatch.setattr(github_agent, "request_probe", lambda: None)
+    _set_person(None, status="needs_auth", no_own_login=True)
+    _signed_in()
+    tool = GitHubAgentAccountTool()
+    checked = json.loads(await tool.execute(action="check"))
+    assert checked["account"]["own_login_checked"] is False and "next" not in checked["account"]
+    assert f"@{BOT}" in checked["next"] and checked["next"].endswith("call sign_out")
+    connected = json.loads(await tool.execute(action="connect"))
+    assert connected["next"] == checked["next"]
+    status = json.loads(await tool.execute(action="status"))
+    assert status["own_login_checked"] is False and "next" not in status  # named once, not on every read
+
+
+@pytest.mark.asyncio
+async def test_checked_login_needs_no_naming(agent):
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    _signed_in()
+    _ready_view()
+    checked = json.loads(await GitHubAgentAccountTool().execute(action="check"))
+    assert "next" not in checked and "own_login_checked" not in checked["account"]
+
+
 def test_needs_auth_from_a_failed_check_is_not_proof_of_no_own_github(agent, monkeypatch):
     # Startup writes needs_auth when its probe fails; the person may well be signed in.
     monkeypatch.setattr(github_agent, "request_probe", lambda: None)

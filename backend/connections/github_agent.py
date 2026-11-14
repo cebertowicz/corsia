@@ -89,6 +89,7 @@ class AgentAccountView:
     binary: str | None = None
     login: str | None = None
     user_id: int | None = None
+    unconfirmed: bool = False  # ready with no own login to compare: only the person can tell
 
     @property
     def ready(self) -> bool:
@@ -154,10 +155,7 @@ def _verify(binary: str, home: str) -> Verified | Failed:
 
 
 def _verify_and_store(key: tuple, binary: str, home: str) -> None:
-    """Verify, then store the answer under the key it started with, before the future completes.
-
-    A soft failure never drops a verified answer.
-    """
+    """Store the answer under its starting key before the future completes; a soft failure keeps a verified one."""
     try:
         result = _verify(binary, home)
     except Exception as exc:  # noqa: BLE001 - a crashed verification is an unknown answer
@@ -256,7 +254,7 @@ def _resolve(db, *, wait: float | None) -> AgentAccountView:
         return replace(base, state="needs_auth" if entry.definite else "unverified", cause=entry.cause)
     if same_login(entry.login, person):
         return replace(base, state="wrong_account", cause="person_account")
-    return replace(base, state="ready", login=entry.login, user_id=entry.user_id)
+    return replace(base, state="ready", login=entry.login, user_id=entry.user_id, unconfirmed=person is None)
 
 
 def view(db=None) -> AgentAccountView:
@@ -270,12 +268,14 @@ def verify_now(db=None) -> AgentAccountView:
 
 
 def source_state(account: AgentAccountView) -> dict:
-    """The model-source row: the state, a named cause, and the login once verified."""
+    """The model-source row: the state, a named cause, the login once verified, and whether it was compared."""
     shown: dict = {"state": account.state}
     if account.cause is not None:
         shown["cause"] = account.cause
     if account.ready:
         shown["login"] = account.login
+    if account.ready and account.unconfirmed:
+        shown["own_login_checked"] = False
     return shown
 
 
@@ -311,7 +311,6 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     command.
     """
     return {} if account.absent else _identity_env(account)
-
 
 
 def script_view() -> AgentAccountView:

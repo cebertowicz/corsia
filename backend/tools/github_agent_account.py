@@ -36,11 +36,19 @@ def _account_row(account_id: str | None) -> dict | None:
     return get_account(account_id) if account_id is not None else None
 
 
-async def _status(*, verify: bool = False) -> dict[str, Any]:
+async def _status(*, verify: bool = False, announce: bool = False) -> dict[str, Any]:
+    """The account's state; ``announce`` adds the step that names an unchecked login to the person."""
     from connections import github_agent
 
     account = await (run_off_db(github_agent.verify_now) if verify else run_in_db(github_agent.view))
-    return github_agent.source_state(account) | {"account_id": account.account_id}
+    shown = github_agent.source_state(account) | {"account_id": account.account_id}
+    if announce and account.ready and account.unconfirmed:
+        # Nothing on this computer shows the person's own login, so only they can tell it isn't theirs.
+        shown["next"] = (
+            f"tell the person: \"Your agents now act on GitHub as @{account.login}. If that's your own "
+            "GitHub account, tell me and I'll sign it out.\" If they say it is theirs, call sign_out"
+        )
+    return shown
 
 
 async def _install() -> dict[str, Any]:
@@ -64,7 +72,7 @@ async def _connect() -> dict[str, Any]:
 
     account = await run_in_db(github_agent.view)
     if account.state == "ready":
-        return await _status()
+        return await _status(announce=True)
     if account.cause == "multiple_accounts":
         return await _status()
     account_id = account.account_id
@@ -91,7 +99,10 @@ async def _check() -> dict[str, Any]:
             shown["signin"] = _signin_with_next(await account_controls.check_signin(account.account_id))
         except AccountError:
             pass  # no sign-in in this process: the account's own state answers
-    return shown | {"account": await _status(verify=True)}
+    account_state = await _status(verify=True, announce=True)
+    # A step the account needs is read at the top, like a sign-in's.
+    step = {"next": account_state.pop("next")} if "next" in account_state else {}
+    return shown | {"account": account_state} | step
 
 
 async def _sign_out() -> dict[str, Any]:
