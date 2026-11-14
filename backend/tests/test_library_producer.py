@@ -246,7 +246,10 @@ def test_producer_withdrawal_wakes_the_registered_owner_once(isolated_db, tmp_pa
 
 
 _CHILD_ENTRYPOINT = "CORSIA_LIBRARY_PRODUCER_CHILD_ENTRYPOINT"
-_CHILD_TIMEOUT_SECONDS = 12
+# Hang guard only. The child bounds every wait itself (about 17 s in total) and fails with a
+# message naming the step, so this outer limit must cover pytest start-up plus those waits
+# on a loaded host. A shorter limit measures host speed, not the producer.
+_CHILD_TIMEOUT_SECONDS = 60
 
 
 def _run_pool_lifetime_child(entrypoint: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
@@ -268,7 +271,9 @@ def _run_pool_lifetime_child(entrypoint: str, tmp_path: Path) -> subprocess.Comp
             env=environment, capture_output=True, text=True, timeout=_CHILD_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as error:
-        pytest.fail(f"{entrypoint} producer child exceeded its {_CHILD_TIMEOUT_SECONDS}s hard timeout: {error}")
+        streams = (error.stdout, error.stderr)
+        output = "".join(s.decode(errors="replace") if isinstance(s, bytes) else (s or "") for s in streams)
+        pytest.fail(f"{entrypoint} producer child hung past its {_CHILD_TIMEOUT_SECONDS}s guard:\n{output[-4000:]}")
 
 
 @pytest.mark.parametrize("entrypoint", ("daily", "requested"))
