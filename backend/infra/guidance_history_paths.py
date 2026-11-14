@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Appended to a file's last commit when its working copy differs: two drafts can share it.
@@ -73,10 +74,27 @@ def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
     return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
 
 
-def find_commit(repo: Path, trailer: str, path: Path) -> str | None:
+# Slack below ``since`` for a clock stepped back between the stored stamp and the commit.
+_SINCE_SLACK_SECONDS = 3600
+
+
+def find_commit(repo: Path, trailer: str, path: Path, since: str | None = None) -> str | None:
+    """The newest commit on ``path`` whose message carries ``trailer``; None when there is none.
+
+    A miss walks history back to ``since`` (a stored UTC timestamp, naive or aware), or all of it
+    when ``since`` is None. Each commit walked costs a tree diff, so an unbounded miss grows with
+    the history and can outlast the Git timeout."""
     from infra.guidance_git import _git
 
-    found = _git(repo, "log", "-1", "--format=%H", "--fixed-strings", f"--grep={trailer}", "--", str(path), ok=(0, 128))
+    bound = []
+    if since is not None:
+        stamp = datetime.fromisoformat(since)
+        stamp = stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+        bound = [f"--since=@{int(stamp.timestamp()) - _SINCE_SLACK_SECONDS}"]
+    found = _git(
+        repo, "log", "-1", "--format=%H", *bound, "--fixed-strings", f"--grep={trailer}", "--", str(path),
+        ok=(0, 128),
+    )
     return found.strip() or None
 
 
