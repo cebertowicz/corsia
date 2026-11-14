@@ -306,6 +306,22 @@ def test_the_wake_lists_the_pile_inside_two_kilobytes(db):
     assert f"+{omitted} more: plan_read(section='later')" in content
 
 
+def test_review_wake_bulk_close_uses_the_real_plan_boundary(db):
+    plan = owner_plan(db)
+    pile = _pile_below(db, plan.id, 3)
+    _arm(db, plan.id, DUE)
+    _sweep(db)
+    assert "close_node node_ids" in _wakes(db)[0]["content"]
+
+    ids = [node["id"] for node in pile]
+    result = plan_update(db, plan.id, "close_node", {
+        "node_ids": ids, "reason": "No longer needed",
+    })
+    assert [entry["node_id"] for entry in result["closed"]] == ids
+    assert result["refused"] == []
+    assert all(row(db, node_id)["state"] == "closed" for node_id in ids)
+
+
 def test_the_wake_names_the_three_moves_it_offers(db):
     plan = owner_plan(db)
     _below_cut(db, plan.id, "Someday", reason="Not before the launch cut")
