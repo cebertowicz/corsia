@@ -131,16 +131,19 @@ def apply_moved_file_recovery(
             actor_thread_id=actor_thread_id,
             db=connection,
         )
+        by_promote = plan.by_promote
         models.record_artifact_change(
             artifact_id=identity["id"],
             internal_event="relocated",
             external_id=move["target_external_id"],
             summary=(
+                f"`{identity['path']}` was promoted to `{move['target_path']}` by the promote tool; it is still yours."
+                if by_promote else
                 f"`{identity['path']}` was moved to `{move['target_path']}` "
                 "outside the file tools; it is still yours."
             ),
             provenance={
-                "reason": "moved_outside_tools",
+                "reason": "promoted" if by_promote else "moved_outside_tools",
                 "source_path": identity["path"],
                 "target_path": move["target_path"],
             },

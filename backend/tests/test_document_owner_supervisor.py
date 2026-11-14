@@ -353,6 +353,30 @@ def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_documen
     assert (view["supervisor"] or {}).get("source") != "picked"
 
 
+@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
+def test_one_persons_owner_pick_leaves_a_shared_document_reachable_by_the_other(owned_document, shared_owner):
+    """One of two people tries to give a shared document their own agent; it stays shared, so the other still reaches it."""
+    from infra.auth import may_access_artifact
+    from infra.database import get_db
+    from registry import models
+    from registry.document_supervisor import SHARED_REFUSAL
+
+    client, artifact_id = owned_document
+    url = f"/api/artifacts/{artifact_id}/ownership"
+    _set_owner(artifact_id, shared_owner)
+    picked = client.put(url, json={"owner": "agent-1"})
+    assert (picked.status_code, picked.json()["detail"]) == (409, SHARED_REFUSAL)
+    db = get_db()
+    try:
+        assert may_access_artifact(models.get_artifact(artifact_id, db=db)["parent_thread_id"], SECOND_PERSON, db=db)
+    finally:
+        db.close()
+    # The other person reaches the document (a missing one answers 404) and meets the same refusal.
+    client.app.dependency_overrides[require_human_user] = lambda: {"id": SECOND_PERSON, "token_kind": "session"}
+    other = client.put(url, json={"owner": "agent-1"})
+    assert (other.status_code, other.json()["detail"]) == (409, SHARED_REFUSAL)
+
+
 def test_another_persons_document_reads_as_missing(owned_document):
     """The ownership change refuses a document in another person's thread, as an unknown id."""
     from infra.database import get_db

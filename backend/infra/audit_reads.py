@@ -13,9 +13,10 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
+from infra.audit_plan_activity import plan_activity
 
 AUDIT_METRICS = (
-    "checkpoint_health", "lease_reviews", "seat_usage", "stored_message_pressure"
+    "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure"
 )
 MAX_WINDOW = timedelta(days=7)
 MAX_ROWS = 50
@@ -195,7 +196,7 @@ def _read_audit_metric(
 ) -> dict:
     """Read one fixed metric after binding the actor to its owned project."""
     if metric not in AUDIT_METRICS:
-        raise AuditReadError("invalid_metric", "Choose checkpoint_health, lease_reviews, seat_usage, or stored_message_pressure.")
+        raise AuditReadError("invalid_metric", "Choose checkpoint_health, lease_reviews, plan_activity, seat_usage, or stored_message_pressure.")
     start, end = _window(metric, since, until)
     if not actor_thread_id:
         raise AuditReadError("scope_denied", "An authenticated caller thread is required.")
@@ -225,7 +226,11 @@ def _read_audit_metric(
                 raise AuditReadError(
                     "scope_denied", "Audit reads require a caller-owned thread in a project."
                 )
-            rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
+            if metric == "plan_activity":
+                assert start is not None and end is not None
+                rows = plan_activity(db, actor["user_id"], start, end)
+            else:
+                rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
             if time.monotonic() >= deadline:
                 raise _timeout_error(metric, since)
             db.execute("RELEASE scoped_audit_read")
@@ -235,7 +240,7 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "caller_user" if metric == "seat_usage" else "caller_user_and_project",
+        "scope": "caller_user" if metric in {"seat_usage", "plan_activity"} else "caller_user_and_project",
         "window": [start, end] if start is not None else None,
         "rows": rows,
     }
