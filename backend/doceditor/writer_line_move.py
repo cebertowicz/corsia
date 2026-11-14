@@ -50,6 +50,11 @@ def repoint_lines(db, *, artifact_id: str, old_path: str, new_path: str) -> int:
     the tools) changes only the path, so no line is re-keyed; the wake still asks the agent to repeat a
     saved call, and that call must name the file where it now is. `registry.relocate` calls this from the
     one writer of an identity's path move.
+
+    Cost: one scan of this table by `artifact_id` (no index covers it) per actual path move, never per
+    save, then one UPDATE per changed row. A row exists only while an agent waits in line and `settle`
+    deletes it, so the rows read are the agents waiting on this one document. `holds_rows` and
+    `move_identity` in this file scan the table the same way.
     """
     changed = 0
     for row in db.execute("SELECT id, ops FROM doc_comment_writer_line WHERE artifact_id=?", (artifact_id,)).fetchall():
