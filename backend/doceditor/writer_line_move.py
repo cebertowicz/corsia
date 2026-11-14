@@ -1,9 +1,10 @@
-"""The writer-line owner's identity re-key for a promote.
+"""The writer-line owner's identity moves: the re-key for a promote, and the path repoint for any move.
 
 Lives beside `writer_line`, whose rules it does not touch: no line is admitted, settled,
 served or dropped here, and a moved line keeps its place in line, its saved text and its
-delivery state. The file is separate because `writer_line.py` sits at its size ratchet and
-this is a re-key. `doceditor.comment_transfer` calls `move_identity` from
+delivery state. The file is separate because `writer_line.py` sits at its size ratchet.
+`move_identity` is the re-key (a line changes identity); `repoint_lines` re-keys nothing
+(a line keeps its identity and its saved call is pointed at the file's new path). `doceditor.comment_transfer` calls `move_identity` from
 `registry.models.retire`, so the moved lines commit with the tombstone and the successor link,
 and only after it has proved the successor holds no comment state of its own -- which is why
 nothing here merges two lines or re-orders anyone.
@@ -51,10 +52,11 @@ def repoint_lines(db, *, artifact_id: str, old_path: str, new_path: str) -> int:
     saved call, and that call must name the file where it now is. `registry.relocate` calls this from the
     one writer of an identity's path move.
 
-    Cost: one scan of this table by `artifact_id` (no index covers it) per actual path move, never per
-    save, then one UPDATE per changed row. A row exists only while an agent waits in line and `settle`
-    deletes it, so the rows read are the agents waiting on this one document. `holds_rows` and
-    `move_identity` in this file scan the table the same way.
+    Cost: no index covers `artifact_id`, so the SELECT reads every row of this table, the waiting lines
+    of all documents, once per actual path move and never per save; only this document's rows are
+    matched and then updated, one UPDATE each. A row exists only while an agent waits in line and
+    `settle` deletes it, so the table's size is the number of agents waiting across all documents.
+    `holds_rows` and `move_identity` in this file scan the table the same way.
     """
     changed = 0
     for row in db.execute("SELECT id, ops FROM doc_comment_writer_line WHERE artifact_id=?", (artifact_id,)).fetchall():
