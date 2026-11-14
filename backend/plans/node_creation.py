@@ -258,6 +258,14 @@ def _creation_values(
     )
 
 
+def _mark_born_later(connection: sqlite3.Connection, plan_id: str, node_id: str) -> None:
+    """Mark the new task Later and arm its plan's first review."""
+    from plans import later_review
+
+    service.touch_node(connection, node_id, later=1)
+    later_review.arm(connection, plan_id)
+
+
 def create_node(
     connection: sqlite3.Connection,
     plan_id: str,
@@ -312,15 +320,7 @@ def create_node(
     _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
                      intent, intent_node_id)
     if later:
-        # Born below the cut. The flag goes through the one revision writer rather
-        # than joining the creation insert's three migration-shaped column lists;
-        # it is ranking, so no aggregate is re-derived for it.
-        service.touch_node(connection, node_id, later=1)
-        # A plan born with its first Later task reviews the pile a week from now
-        # (``plans.later_review``); a plan already armed keeps its own weekday.
-        from plans import later_review
-
-        later_review.arm(connection, plan_id)
+        _mark_born_later(connection, plan_id, node_id)
     from plans.conductor_add import ADD_PROVENANCE, coordinator_kind
 
     service._event(
