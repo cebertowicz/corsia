@@ -16,6 +16,8 @@ from infra.product_events import emit_product_event
 log = logging.getLogger(__name__)
 REPROBE_AFTER_INPUT = 0.5
 REPROBE_EVERY = 2.0
+# Why a step's row closes when its browser session ends first; the agent's wake carries it.
+SESSION_ENDED_REASON = "The shared browser closed before this task was finished."
 Kind = Literal["password", "person"]
 
 
@@ -144,6 +146,8 @@ async def step_event(thread_id: str, event: Event, *,
             _stop_reprobe(step)
             _steps.pop(thread_id, None)
             step.ended(thread_id)
+            if decision.end == "unsettled":
+                await _close_unfinished(step)
             if decision.answer is not None:
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
@@ -291,6 +295,22 @@ async def _settle_step(thread_id: str, step: BrowserStep) -> None:
         evidence=step.settlement_evidence, provenance=step.provenance,
     )
     await _emit(f"{step.event_prefix}_settled", thread_id)
+
+
+async def _close_unfinished(step: BrowserStep) -> None:
+    """Close the row of a step its session outlived, so the agent that hit it hears it didn't finish.
+
+    Teardown and session replacement never depend on plans (R1/R2): a failed write is logged, not raised.
+    """
+    if step.node_id is None:
+        return
+    try:
+        await asyncio.to_thread(
+            _plan_write, "close_user_step", step.node_id,
+            reason=SESSION_ENDED_REASON, provenance=step.provenance,
+        )
+    except Exception:
+        log.warning("browser step %s stays open after its session ended", step.node_id, exc_info=True)
 
 
 def _plan_write(operation: str, *args: object, **kwargs: object) -> str | None:
