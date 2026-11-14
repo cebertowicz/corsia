@@ -22,6 +22,7 @@ from tests.test_worktree_reaper import (  # noqa: F401  (fixtures)
     FakeProbe,
     _add,
     _admin,
+    _age,
     _age_all,
     _age_tree,
     _git,
@@ -79,6 +80,31 @@ def test_a_settled_workers_unfinished_worktree_is_removed_after_its_work_is_copi
     assert report.removed == 1 and not wt.exists()
     assert [item.name for item in report.salvaged] == [f"{SETTLED}-task"]
     assert report.discarded == []
+
+
+def test_a_settled_workers_clean_worktree_is_removed_without_a_salvage_copy(repo, owners):
+    wt = _add(repo, f"{SETTLED}-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 1 and not wt.exists()
+    assert report.salvaged == [] and report.discarded == [f"{SETTLED}-task"]
+    assert not (repo.parent / f"{repo.name}-salvage").exists()
+    assert _git(repo, "for-each-ref", "refs/corsia-salvage/").strip() == ""
+
+
+def test_a_gone_workers_worktree_with_a_file_edited_within_the_hour_is_kept(repo, owners):
+    # Git's files and the tree root are old; one file deep in the tree is not.
+    wt = _unfinished(repo, f"{GONE}-task")
+    _age_all(repo, wt, 2 * HOUR)
+    (wt / "ro" / "kept").write_text("still being finished\n")
+    _age(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+    assert _reasons(report) == {f"{GONE}-task": "recent"}
 
 
 def test_a_name_no_thread_matches_keeps_the_ordinary_checks(repo, owners):
@@ -150,6 +176,27 @@ def test_a_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
         target = wt / name
         shutil.rmtree(target) if target.is_dir() else target.unlink()
     (wt / "CLAUDE.md").write_text("x\n")
+    _age_tree(wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.orphan_removed == 1 and not wt.exists()
+
+
+def test_a_live_owners_full_tree_git_has_forgotten_is_kept(repo, owners):
+    # `git worktree prune` can drop the record of a tree that is still in use.
+    wt = _add(repo, f"{LIVE}-task")
+    shutil.rmtree(_admin(wt))
+    _age_tree(wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.orphan_removed == 0 and wt.is_dir()
+
+
+def test_a_gone_owners_full_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
+    wt = _add(repo, f"{GONE}-task")
+    shutil.rmtree(_admin(wt))
     _age_tree(wt, 2 * HOUR)
 
     report = _run(repo)

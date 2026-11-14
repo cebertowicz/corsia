@@ -27,7 +27,9 @@ from infra.worktree_reaper_probe import (
     status_skip_reason,
     worktree_git_env,
 )
-from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
+from infra.worktree_reaper_scan import (
+    Candidate, Orphan, idle_since, newest_tree_mtime, owner_thread,
+)
 
 
 # A worktree whose owning worker is gone leaves once idle this long, uncommitted
@@ -117,12 +119,29 @@ class CheckContext:
     def gone_owner_verdict(
         self, candidate: Candidate, idle: float, *, fresh: bool = False,
     ) -> str | RemovalVerdict | None:
-        """DISCARD or SALVAGE for an idle worktree of a gone owner; None when the rule does not apply."""
+        """DISCARD or SALVAGE for an idle worktree of a gone owner; None when the rule does not apply.
+
+        Idle means nothing anywhere in the tree changed for the hour, not only
+        Git's files: someone may be finishing the work in an editor. A tree with
+        nothing uncommitted is discarded even for a settled worker, since its
+        branch keeps every commit and a salvage copy would hold nothing.
+        """
         if self.now - idle < GONE_OWNER_IDLE_SECONDS:
             return None
         verdict = self.owner_verdict(candidate.owner_thread, fresh=fresh)
         if verdict is None:
             return None
+        newest = newest_tree_mtime(candidate.path)
+        if newest is None:
+            return "unreadable"
+        if self.now - newest < GONE_OWNER_IDLE_SECONDS:
+            return "recent"
+        if verdict is RemovalVerdict.SALVAGE:
+            status = _status_reason(self, candidate, False)
+            if status == "status_error":
+                return status
+            if status is None:
+                verdict = RemovalVerdict.DISCARD
         if fresh:
             self.probe.refresh()
         return self.probe.skip_reason(candidate.path) or verdict
@@ -347,6 +366,15 @@ def _forgotten_by_git(repo: Path, path: Path) -> bool:
     return not os.path.lexists(target)
 
 
+def _is_shell(path: Path) -> bool:
+    """Whether ``path`` holds only files, as a removal leaves behind; a working tree has directories."""
+    try:
+        with os.scandir(path) as entries:
+            return not any(entry.is_dir(follow_symlinks=False) for entry in entries)
+    except OSError:
+        return False
+
+
 def orphan_skip_reason(
     ctx: CheckContext, orphan: Orphan, threshold_seconds: float,
 ) -> tuple[str | None, float | None]:
@@ -355,15 +383,20 @@ def orphan_skip_reason(
     An orphan is deleted only when it has no ``.git`` entry, Git does not
     list it, nothing anywhere inside changed for the threshold, and no live
     process uses it. A ``.git`` file that points at this repository's own
-    worktree records, at one that no longer exists, does not keep it: Git has
-    already forgotten that tree, so it is what a removal left behind and goes
-    once idle for ``GONE_OWNER_IDLE_SECONDS``. Every check reads live state, so
-    it doubles as the recheck.
+    worktree records, at one that no longer exists, does not keep a tree Git
+    has already forgotten when either it is a shell a removal left behind (no
+    subdirectory) or its owner is gone; it then goes once idle for
+    ``GONE_OWNER_IDLE_SECONDS``. A full tree whose record was pruned while its
+    owner lives keeps its ``.git`` entry's protection. Every check reads live
+    state, so it doubles as the recheck.
     """
     path = orphan.path
     if path.is_symlink():
         return "symlink", None
-    forgotten = _forgotten_by_git(ctx.repo, path)
+    forgotten = _forgotten_by_git(ctx.repo, path) and (
+        _is_shell(path)
+        or ctx.owner_verdict(owner_thread(orphan.name), fresh=True) is not None
+    )
     if not forgotten and os.path.lexists(path / ".git"):
         return "git_entry_present", None
     if forgotten:
