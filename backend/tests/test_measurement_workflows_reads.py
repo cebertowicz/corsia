@@ -77,6 +77,18 @@ def test_the_model_read_uses_the_node_index_without_statistics(db) -> None:  # n
     assert "idx_llm_usage_session" not in plan
 
 
+def test_the_cost_read_probes_the_node_index_once_per_chain_row_without_statistics(db) -> None:  # noqa: F811
+    """Each chain row's calls are one probe of the node index, never a pass over the whole usage table."""
+    from api.measurement_model_cost import _cost_sql
+    from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
+
+    db.execute(CHAIN_DDL)
+    assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat1'").fetchone()
+    details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE))]
+    usage = [detail for detail in details if detail.startswith(("SEARCH u ", "SCAN u"))]
+    assert usage == ["SEARCH u USING INDEX idx_llm_usage_plan_node (plan_node_id=?)"], details
+
+
 # The two usage reads as one grouping over every call, as they were before each call set was grouped on its own.
 _ONE_GROUPING_MODELS = f"""
     SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
