@@ -234,8 +234,9 @@ from plans.review_requests import (
 )
 from plans.service import add_node, transition_node
 
-# A step the system opens for the person and settles when it sees it done (host_access/browser).
-from plans.system_user_steps import open_user_step, settle_user_step
+# A step the system opens for the person, settles when it sees it done, and closes
+# when it can no longer finish (host_access/browser).
+from plans.system_user_steps import close_user_step, open_user_step, settle_user_step
 
 # Lesson trial and captured-hypothesis reviews (core/lesson_*).
 from plans.lesson_review_history import read_batch as lesson_review_history

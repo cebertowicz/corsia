@@ -23,7 +23,12 @@ refuses on a pause or hold, the person's own pause included, because the
 person has done the step. A step already settled, closed or archived is left
 alone. The row reads ``Marked by CORSIA`` (``plans.closure.settled_reasons``).
 
-Both join the caller's write transaction when there is one.
+Closing is the other system ending, for a step that can no longer finish (its
+browser session ended): the person's Won't do through the same writer, with the
+caller's reason, which the agent's wake carries (``plan_wake.notify_closed``).
+The same receipt and already-ended rules apply.
+
+All three join the caller's write transaction when there is one.
 """
 
 from __future__ import annotations
@@ -94,25 +99,38 @@ def open_user_step(
 
 def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> bool:
     """Settle the person's step as done; False when it had already ended."""
+    return _end(db, node_id, "mark_done", {}, provenance, evidence=evidence)
+
+
+def close_user_step(db, node_id: str, *, reason: str, provenance: str) -> bool:
+    """Close the person's step unfinished, saying why; False when it had already ended."""
+    reason = str(reason).strip()
+    if not reason:
+        raise errors.PlanInputError("close_user_step needs a reason")
+    return _end(db, node_id, "close_node", {"reason": reason}, provenance)
+
+
+def _end(db, node_id: str, operation: str, params: dict, provenance: str, **word) -> bool:
     from plans import user_settle
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
         if not opened(connection, node["plan_id"], node_id):
-            raise errors.PlanInputError("settle_user_step settles only a step open_user_step opened")
+            raise errors.PlanInputError(f"{operation} ends only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
         user_settle.settle(
-            "mark_done",
-            {"node_id": node_id, "expected_revision": node["revision"]},
+            operation,
+            {"node_id": node_id, "expected_revision": node["revision"], **params},
             f"{VERIFIER_PREFIX}{provenance}",
             {"db": connection, "actor_id": None, "provenance": provenance},
-            evidence=evidence,
+            **word,
         )
         waiting = connection.execute(
             "SELECT COUNT(*) FROM plan_node_dependencies WHERE depends_on_node_id=?", (node_id,),
         ).fetchone()[0]
-        log.info("%s settled step %s; %d task(s) waited on it", provenance, node_id, waiting)
+        log.info("%s %s step %s; %d task(s) waited on it", provenance,
+                 "settled" if operation == "mark_done" else "closed", node_id, waiting)
         return True
 
 

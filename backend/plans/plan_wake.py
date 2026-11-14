@@ -344,8 +344,12 @@ def notify_closed(
     one revision two contradictory instructions. ``OPEN_TASK_STATES`` is
     already the definition of work still in its executor's hands, so this
     reuses it rather than deciding the question a second way.
+
+    A closed task's whole content is why it closed, so its reason travels
+    with the wake, bounded like a returned step's evidence.
     """
-    from plans import node_order
+    from plans import closure, node_order
+    from plans.close_next_bounds import bounded
     from prompts import plan_wakes as wakes
 
     if not executor or executor == causing_executor:
@@ -355,6 +359,7 @@ def notify_closed(
     node = _node(db, node_id)
     if node["state"] in node_order.OPEN_TASK_STATES or not announced(db, node_id):
         return
+    reason = closure.settled_reasons(db, [node]).get(str(node_id))
     append(
         db,
         recipient=executor,
@@ -365,6 +370,7 @@ def notify_closed(
         content=with_next(
             db, plan_id, executor,
             wakes.WAKE_TASK_CLOSED.format(title=str(node["title"])),
+            **({"reason": bounded(reason, RETURNED_EVIDENCE_MAX_BYTES)} if reason else {}),
         ),
     )
 

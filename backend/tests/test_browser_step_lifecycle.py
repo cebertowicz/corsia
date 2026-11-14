@@ -120,7 +120,12 @@ async def test_session_end_never_settles_and_agent_close_is_refused(plan, monkey
         assert THREAD not in owner._sessions
         page.show("visit-two")
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",), session="session-two")
-    assert row(db, original["id"])["state"] == "pending"
+    # Never done: the row closes unfinished, with why, so the agent waiting on it hears it.
+    assert row(db, original["id"])["state"] == "closed"
+    reason = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND new_state='closed'", (original["id"],),
+    ).fetchone()["payload_json"]
+    assert lifecycle.SESSION_ENDED_REASON in reason
     assert THREAD not in lifecycle._steps
     assert not any(event.endswith("_settled") for event in plan["events"])
     assert not browser_control.password_page(THREAD)
