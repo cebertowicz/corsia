@@ -1,6 +1,7 @@
 import { parseUTC } from '$lib/time';
 import { pruneReplacedRows } from './messageReplacements';
 import { mergeMessageDelivery } from '$lib/stores/threads';
+import { keepReadAnswers } from '$lib/chatCommentTypes';
 
 export interface HistoryMessage {
 	id?: string;
@@ -153,6 +154,7 @@ function mergeAdoptedRow(existing: any, incoming: any): any {
 	if (incoming?.cards !== undefined || existing?.cards !== undefined) {
 		merged.cards = incoming?.cards;
 	}
+	if (incoming?.chat_comments) merged.chat_comments = keepReadAnswers(existing?.chat_comments, incoming.chat_comments);
 	const priorMeta = existing?.metadata;
 	const nextMeta = incoming?.metadata;
 	if (priorMeta && typeof priorMeta === 'object' && nextMeta && typeof nextMeta === 'object') {
