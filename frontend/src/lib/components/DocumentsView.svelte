@@ -16,7 +16,7 @@
 	import {
 		docLibrary, docSources, docActivity, skillDocs, pendingCount,
 		libraryLoading, libraryError, loadLibrary,
-		dirDescription, secondaryDocumentText, type DocEntry
+		dirDescription, secondaryDocumentParts, type DocEntry
 	} from '$lib/stores/docLibrary';
 	import { docLens, selectedDocId, type DocLens } from '$lib/stores/documentsSurface';
 	import LinkRepoModal from './LinkRepoModal.svelte';
@@ -354,7 +354,8 @@
 		<div class="row-main">
 			<span class="row-name">{showPath ? e.path : e.name}</span>
 			{#if e.descState === 'pending' || e.description || e.ownerName}
-				<span class="row-desc" class:pending={e.descState === 'pending'}>{secondaryDocumentText(e)}</span>
+				{@const parts = secondaryDocumentParts(e)}
+				<span class="row-desc" class:pending={e.descState === 'pending'}>{#if parts.lead}<span class="row-desc-lead"><span class="row-desc-text">{parts.lead}</span>{#if parts.owner}<span class="row-desc-sep"> · </span>{/if}</span>{/if}{#if parts.owner}<span class="row-desc-owner">{parts.owner}</span>{/if}</span>
 			{/if}
 		</div>
 		{#if e.freshnessState === 'overdue'}<StatePill state="warning" size="sm" label="Overdue" />{/if}
@@ -458,7 +459,12 @@
 	.row-ico.skill { color: var(--teal); }
 	.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 	.row-name { font-size: var(--text-subhead); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.row-desc { font-size: var(--text-footnote); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.row-desc { display: flex; font-size: var(--text-footnote); color: var(--text-tertiary); overflow: hidden; white-space: nowrap; }
+	/* The description, with its separator, gives way before the owner: the owner stays whole unless it alone is wider than the row. */
+	.row-desc-lead { display: flex; min-width: 0; overflow: hidden; }
+	.row-desc-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	.row-desc-sep { flex-shrink: 0; }
+	.row-desc-owner { flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 	.row-desc.pending { color: var(--amber); font-style: italic; }
 	.row-meta { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.row-open { flex-shrink: 0; display: flex; padding: 5px; border-radius: var(--radius-xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; opacity: 0; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
