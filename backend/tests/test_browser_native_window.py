@@ -72,6 +72,33 @@ async def test_wait_retries_discovery_and_uses_actual_profile(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_screencast_that_ends_before_its_first_frame_names_its_own_error(monkeypatch):
+    # Waiting on the frame alone turned this into the budget's timeout, which hides the cause.
+    real_timeout = asyncio.timeout
+    monkeypatch.setattr(window.asyncio, 'timeout', lambda _seconds: real_timeout(1))
+    monkeypatch.setattr(window.shutil, 'which', lambda name: name)
+    monkeypatch.setattr(window, 'x_environment', lambda socket_dir: ({'DISPLAY': ':owned'}, '/actual'))
+
+    async def command(executable, *args, environment):
+        if args == ('-root', '-tree'):
+            return {'exit': 0, 'output': '  0xabc "Chrome /actual"\n'}
+        return {'exit': 0, 'output': 'Map State: IsViewable'}
+
+    class Cast:
+        def __init__(self, endpoint, send):
+            pass
+
+        async def run(self):
+            raise window.browser_screencast.BrowserSessionError("This page couldn't be shown")
+
+    monkeypatch.setattr(window, 'x_command', command)
+    monkeypatch.setattr(window.browser_screencast, 'PaneScreencast', Cast)
+    with pytest.raises(AssertionError, match="ended before its first frame: BrowserSessionError") as raised:
+        await window.wait_for_headed_window('endpoint', '/owned/sockets')
+    assert isinstance(raised.value.__cause__, window.browser_screencast.BrowserSessionError)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('phase', ['discovery', 'map', 'frame'])
 async def test_one_budget_covers_each_readiness_phase(monkeypatch, phase):
     real_timeout = asyncio.timeout
