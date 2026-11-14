@@ -15,6 +15,7 @@ END = "2026-09-21T00:00:00Z"
 def audit(isolated_db, monkeypatch):
     from infra import audit_reads
     from api.usage_rollup import definition
+    from api.audit_agent_hours import read_agent_hours
 
     monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
     with sqlite3.connect(isolated_db) as db:
@@ -31,9 +32,9 @@ def audit(isolated_db, monkeypatch):
                        [("a", "Account A"), ("b", "Account B")])
         db.execute("INSERT OR REPLACE INTO llm_usage_hourly_state(id,definition,built_through) VALUES (1,?,?)",
                    (definition(), "2026-09-21T00"))
-    def read(metric, since=START, until=END, rollup_definition=definition()):
+    def read(metric, since=START, until=END):
         return audit_reads.read_audit_metric("caller", "owner", metric, since=since, until=until,
-                                             rollup_definition=rollup_definition)
+                                             agent_hours_reader=read_agent_hours)
     return isolated_db, read
 
 
@@ -79,22 +80,60 @@ def test_real_rollup_accounts_scope_and_privacy(audit):
 
 
 def test_dirty_unbuilt_and_stale_coverage(audit):
+    from api.usage_rollup import refresh_step
     path, read = audit
+    metrics = ("agent_hours", "agent_day_levels")
     with sqlite3.connect(path) as db:
-        add_usage(db, "caller", "2026-09-20T00")
-        add_usage(db, "caller", "2026-09-20T01")
+        db.executemany("INSERT INTO llm_usage(id,thread_id,vendor_account_id,model,source,prompt_tokens,completion_tokens,"
+                       "cache_creation_tokens,cache_read_tokens,total_tokens,created_at) VALUES (?, 'caller','a','codex/x',"
+                       "'test',10,2,3,4,19,?)",
+                       [(f'u{i}', f'2026-09-20T{h:02d}:01:00') for i, h in enumerate((0, 1, 23))])
+        db.execute("DELETE FROM llm_usage_hourly_state")
+    raw = {metric: read(metric) for metric in metrics}
+    with sqlite3.connect(path) as db:
+        while refresh_step(db, datetime(2026, 9, 21, 3)):
+            pass
+    built = {metric: read(metric) for metric in metrics}
+    assert built == raw
+    with sqlite3.connect(path) as db:
         db.execute("UPDATE llm_usage_hourly_state SET built_through='2026-09-20T23'")
         db.execute("INSERT INTO llm_usage_hourly_dirty(hour) VALUES ('2026-09-20T01')")
-    result = read("agent_hours")
-    assert (result["hours_in_window"], result["hours_left_out"]) == (24, 2)
-    assert next(r for r in result["rows"] if r["row_type"] == "all")["calls"] == 1
-    day = read("agent_day_levels")
-    assert (day["days_in_window"], day["days_left_out"], day["rows"]) == (1, 1, [])
-    for definition in (None, "stale"):
-        missing = read("agent_hours", rollup_definition=definition)
-        assert missing["hours_left_out"] == 24 and missing["rows"] == []
-        missing_days = read("agent_day_levels", rollup_definition=definition)
-        assert missing_days["days_left_out"] == 1 and missing_days["rows"] == []
+    assert {metric: read(metric) for metric in metrics} == raw
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE llm_usage_hourly_state SET definition='stale'")
+    assert {metric: read(metric) for metric in metrics} == raw
+    for result in raw.values():
+        assert not {"hours_in_window", "hours_left_out", "days_in_window", "days_left_out"} & result.keys()
+    assert next(row for row in raw['agent_hours']['rows'] if row['row_type'] == 'all')['calls'] == 3
+
+
+def test_missing_reader_refuses_only_agent_metrics(audit):
+    from infra.audit_reads import AuditReadError, read_audit_metric
+    for metric in ('agent_hours', 'agent_day_levels'):
+        with pytest.raises(AuditReadError) as error:
+            read_audit_metric('caller', 'owner', metric, since=START, until=END)
+        assert error.value.category == 'unavailable'
+    assert read_audit_metric('caller', 'owner', 'seat_usage', since=START, until=END)['rows'] == []
+
+
+def test_token_classes_match_measurement(audit):
+    from api.measurement_token_sql import ROLLUP_TOKEN_CLASS_SQL
+    from api.usage_rollup import usage_source, rollup_bound
+    path, read = audit
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM llm_usage_hourly_state")
+        db.execute("INSERT INTO llm_usage(id,thread_id,model,source,prompt_tokens,completion_tokens,"
+                   "cache_creation_tokens,cache_read_tokens,total_tokens,created_at) "
+                   "VALUES ('token','caller','codex/x','test',11,3,5,7,26,'2026-09-20T00:01:00')")
+        params = {'from_ts': START[:13], 'to_ts': END[:13], 'rollup_through': rollup_bound(db, START[:13], END[:13])}
+        expressions = ','.join(f'{sql} AS {name}' for name, sql in ROLLUP_TOKEN_CLASS_SQL)
+        expected = db.execute(f'SELECT {expressions} FROM {usage_source(None)} u', params).fetchone()
+    classes = dict(zip((name for name, _ in ROLLUP_TOKEN_CLASS_SQL), expected))
+    for metric in ('agent_hours', 'agent_day_levels'):
+        rows = read(metric)['rows']
+        row = next(r for r in rows if r['row_type'] == 'all') if metric == 'agent_hours' else rows[0]
+        assert (row['prompt'], row['completion'], row['cache_write'], row['cache_read']) == (
+            classes['input'], classes['output'], classes['cache_write'], classes['cache_read'])
 
 
 def test_activity_band_edges(audit):
@@ -141,13 +180,17 @@ def test_limits_apply_to_results(audit, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tool_registry_passes_definition(audit):
+async def test_tool_registry_passes_reader_and_requests_refresh(audit, monkeypatch):
     from infra import state
     from tools.audit_reads import AuditReadTool
     from tools.registry import ToolRegistry
+    from api import usage_rollup
     path, _ = audit
+    calls = []
+    monkeypatch.setattr(usage_rollup, 'schedule_refresh', lambda: calls.append(True))
     with sqlite3.connect(path) as db:
-        add_usage(db, "caller", "2026-09-20T00")
+        db.execute("DELETE FROM llm_usage_hourly_state")
+        db.execute("INSERT INTO llm_usage(id,thread_id,model,source,created_at) VALUES ('raw','caller','codex/x','test','2026-09-20T00:01:00')")
     tool = AuditReadTool()
     assert {"agent_hours", "agent_day_levels"} <= set(tool.parameters["properties"]["metric"]["enum"])
     assert "agent_hours" in tool.description and "agent_day_levels" in tool.description
@@ -158,25 +201,31 @@ async def test_tool_registry_passes_definition(audit):
         result = json.loads(await registry.execute("audit_read", {"metric": "agent_hours", "since": START, "until": END}))
     finally:
         state._current_thread_id.reset(token)
-    assert result["hours_left_out"] == 0
+    assert calls == [True]
+    assert "hours_left_out" not in result
     assert next(r for r in result["rows"] if r["row_type"] == "all")["calls"] == 1
 
 
-def test_http_route_passes_definition(audit):
+def test_http_route_passes_reader_and_requests_refresh(audit, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from auth_fixtures import OWNER_TOKEN, OWNER_USER
     from api.audit_reads import router
+    from api import usage_rollup
     path, _ = audit
+    calls = []
+    monkeypatch.setattr(usage_rollup, 'schedule_refresh', lambda: calls.append(True))
     with sqlite3.connect(path) as db:
         db.execute("UPDATE threads SET user_id=? WHERE id='caller'", (OWNER_USER,))
-        add_usage(db, "caller", "2026-09-20T00")
+        db.execute("DELETE FROM llm_usage_hourly_state")
+        db.execute("INSERT INTO llm_usage(id,thread_id,model,source,created_at) VALUES ('raw','caller','codex/x','test','2026-09-20T00:01:00')")
     app = FastAPI()
     app.include_router(router)
     response = TestClient(app).get("/api/audit/threads/caller/metrics/agent_hours", params={"since": START, "until": END},
                                    headers={"Authorization": f"Bearer {OWNER_TOKEN}"})
     assert response.status_code == 200, response.text
-    assert response.json()["hours_left_out"] == 0
+    assert calls == [True]
+    assert "hours_left_out" not in response.json()
     assert next(r for r in response.json()["rows"] if r["row_type"] == "all")["calls"] == 1
 
 
@@ -203,5 +252,5 @@ def test_scale_through_real_reader(audit):
         began = monotonic()
         result = read(metric, until="2026-09-27T00:00:00Z")
         print(f"SCALE {total} {metric} {monotonic() - began:.4f}s")
-        assert result["hours_left_out"] == 0
+        assert "hours_left_out" not in result
         assert sum(r["calls"] for r in result["rows"] if r.get("row_type") != "all") == total

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from api.audit_agent_hours import read_agent_hours
+from api import usage_rollup
 from infra.audit_reads import AUDIT_METRICS, AuditReadError, read_audit_metric
 from infra.db_async import run_in_db
 from tools.base import Tool
@@ -36,9 +38,7 @@ class AuditReadTool(Tool):
             "model call, so one call counts the whole hour. agent_day_levels groups "
             "agent-days by kind of agent, by this project, another project or none, "
             "and by hours active that day. Both cover this user's agents in and "
-            "outside projects. Both leave out hours the hourly usage summary has "
-            "not built and count them in hours_left_out; agent_day_levels leaves "
-            "out any day with such an hour and counts it in days_left_out. "
+            "outside projects. "
             "plan_activity counts this user's plan activity across projects: agent-days, "
             "tasks created, conductor adds, stale open tasks, owed verdicts and plan_update calls; its "
             "row carries the definition of each field. "
@@ -85,7 +85,8 @@ class AuditReadTool(Tool):
         thread_id = kwargs.pop("_thread_id", None)
         kwargs.pop("_thread_project_id", None)
         kwargs.pop("_host_access_turn_identity", None)
-        from api.usage_rollup import definition
+        if kwargs.get("metric") in ("agent_hours", "agent_day_levels"):
+            usage_rollup.schedule_refresh()
 
         try:
             result = await run_in_db(
@@ -95,7 +96,7 @@ class AuditReadTool(Tool):
                     kwargs["metric"],
                     since=kwargs.get("since"),
                     until=kwargs.get("until"),
-                    rollup_definition=definition(),
+                    agent_hours_reader=read_agent_hours,
                 )
             )
         except AuditReadError as exc:

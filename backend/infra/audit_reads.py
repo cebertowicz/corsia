@@ -9,7 +9,6 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from core.measurement_token_contract import priceable_usage_predicate
 from host_access.failure_reasons import safe_rejection
-from infra.audit_agent_hours import read_agent_hours
 from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
@@ -67,6 +66,9 @@ def _timeout_error(metric: str, since: str | None) -> AuditReadError:
             "Audit read timed out; supply since and until to rank recently updated threads."
             if since is None else "Audit read timed out; narrow the activity window."
         )
+    elif metric in ("agent_hours", "agent_day_levels"):
+        detail = ("Audit read timed out; narrow the window, or retry in a few minutes: "
+                  "this read uses the hourly usage summary, which may still be catching up.")
     else:
         detail = "Audit read timed out; narrow the window."
     return AuditReadError("timeout", detail)
@@ -199,7 +201,7 @@ def _read_audit_metric(
     *,
     since: str | None = None,
     until: str | None = None,
-    rollup_definition: str | None = None,
+    agent_hours_reader=None,
 ) -> dict:
     """Read one fixed metric after binding the actor to its owned project."""
     if metric not in AUDIT_METRICS:
@@ -233,12 +235,12 @@ def _read_audit_metric(
                 raise AuditReadError(
                     "scope_denied", "Audit reads require a caller-owned thread in a project."
                 )
-            coverage = {}
             if metric in ("agent_hours", "agent_day_levels"):
                 assert start is not None and end is not None
-                rows, coverage = read_agent_hours(
-                    db, metric, actor["user_id"], actor["project_id"], start, end,
-                    rollup_definition, MAX_ROWS + 1,
+                if agent_hours_reader is None:
+                    raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.")
+                rows = agent_hours_reader(
+                    db, metric, actor["user_id"], actor["project_id"], start, end, MAX_ROWS + 1,
                 )
                 if len(rows) > MAX_ROWS:
                     raise AuditReadError("result_limit", "Audit result exceeds the fixed row limit; narrow the window.")
@@ -262,7 +264,6 @@ def _read_audit_metric(
         ),
         "window": [start, end] if start is not None else None,
         "rows": rows,
-        **coverage,
     }
     if metric == "stored_message_pressure":
         result["rank_limit"] = TOP_PRESSURE_ROWS
@@ -278,14 +279,14 @@ def read_audit_metric(
     *,
     since: str | None = None,
     until: str | None = None,
-    rollup_definition: str | None = None,
+    agent_hours_reader=None,
 ) -> dict:
     """Read a fixed metric and count success or denial without private contents."""
     metric_name = metric if metric in AUDIT_METRICS else "invalid"
     try:
         result = _read_audit_metric(
             actor_thread_id, user_id, metric, since=since, until=until,
-            rollup_definition=rollup_definition,
+            agent_hours_reader=agent_hours_reader,
         )
     except AuditReadError as exc:
         emit_product_event(
