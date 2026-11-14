@@ -21,6 +21,7 @@ import {
 	resetThreadPlanStatesForTests,
 	stopThreadPlanStates,
 	threadPlanStates,
+	watchOpenThreadPlanStates,
 	watchThreadPlanStates,
 } from './threadPlanStates';
 
@@ -238,6 +239,55 @@ describe('threadPlanStates', () => {
 		await settle();
 		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['a']]);
 		expect(get(threadPlanStates).a?.has_update).toBe(true);
+	});
+});
+
+/**
+ * The phone's plan chip reads the open thread's row state by the menu's own rule,
+ * including a thread the menu does not list (a hidden subagent's chat, another
+ * scope) — without ever moving the menu's needs-you dot.
+ */
+describe('the open thread', () => {
+	const entry = (state: string) => ({ state, label_key: null, paused: state === 'paused', attention_items: [] });
+
+	it('reads and refreshes an open thread the menu does not list, and never counts it in the menu’s dot', async () => {
+		mocks.read.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, entry(id === 'open' ? 'needs_input' : 'idle')])));
+		watchThreadPlanStates(['a']);
+		await settle();
+		watchOpenThreadPlanStates(['open']);
+		await settle();
+
+		expect(get(threadPlanStates).open?.state).toBe('needs_input');
+		expect(get(listedNeedsYou), 'an open thread off the menu does not light the menu’s dot').toBe(false);
+
+		// Pausing its item nudges only the plans owner, and refreshes the chip.
+		mocks.read.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, entry('paused')])));
+		mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id: 'open' } }] });
+		await settle();
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['open'], ['open']]);
+		expect(get(threadPlanStates).open?.state).toBe('paused');
+		expect(get(listedNeedsYou)).toBe(false);
+	});
+
+	it('stops following the thread once its chat closes', async () => {
+		mocks.read.mockResolvedValue({});
+		watchOpenThreadPlanStates(['open']);
+		await settle();
+		watchOpenThreadPlanStates([]);
+		mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id: 'open' } }] });
+		await settle();
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['open']]);
+	});
+
+	it('keeps refreshing the open thread after the menu stops watching', async () => {
+		mocks.read.mockResolvedValue({});
+		watchThreadPlanStates(['a']);
+		watchOpenThreadPlanStates(['open']);
+		await settle();
+		stopThreadPlanStates();
+		mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id: 'open' } }] });
+		await settle();
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['a'], ['open'], ['open']]);
 	});
 });
 

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
+	import { isYourMove } from '$lib/components/threadRowMark';
 	import { isMobile } from '$lib/stores/viewport';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import type { OperatorKey } from '$lib/stores/planKeys';
+	import { threadPlanStates, watchOpenThreadPlanStates } from '$lib/stores/threadPlanStates';
 	import { hasFolded } from './planFoldLevels';
 	import ThreadPlanPane from './ThreadPlanPane.svelte';
 	import PlanHeadControls from './PlanHeadControls.svelte';
@@ -23,8 +25,22 @@
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	// A plan whose work has all folded reads 0/0 but still has steps to open.
 	const visible = $derived($isMobile && !!plan && (plan.nodes.length > 0 || hasFolded(plan.folds)));
+	// The phone hides the menu, so this chip shows the menu row's own needs-you mark:
+	// the same rule on the same row state, so pausing the item lifts both together.
+	const needsYou = $derived(isYourMove($threadPlanStates[threadId]));
+	const chipLabel = $derived(plan && plan.progress.open > 0
+		? `Open plan — ${plan.progress.open} left`
+		: 'Open plan — all work complete');
 	let open = $state(false);
 	let openedFor = $state<string | null>(null);
+
+	// The menu may not list this thread at all (a hidden subagent's chat, another
+	// scope), so the store reads its row state for this chip; the menu's dot is
+	// derived from its listed set and stays untouched.
+	$effect(() => {
+		watchOpenThreadPlanStates([threadId]);
+		return () => watchOpenThreadPlanStates([]);
+	});
 
 	$effect(() => {
 		if (threadId === openedFor) return;
@@ -58,10 +74,9 @@
 {#if visible && plan}
 	<button
 		class="plan-progress-chip press-tint"
+		class:needs-you={needsYou}
 		type="button"
-		aria-label={plan.progress.open > 0
-			? `Open plan — ${plan.progress.open} left`
-			: 'Open plan — all work complete'}
+		aria-label={needsYou ? `${chipLabel} · Needs you` : chipLabel}
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		onclick={() => (open = true)}
@@ -122,6 +137,15 @@
 		background: var(--accent);
 		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 13%, transparent);
 	}
+	/*
+	 * The menu row's own needs-you colours (ThreadPlanStateMark's dot and word), so
+	 * the chip and the row it stands for read as one fact.
+	 */
+	.plan-progress-chip.needs-you .progress-mark {
+		background: var(--amber);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 13%, transparent);
+	}
+	.plan-progress-chip.needs-you b { color: var(--amber-text); }
 	.plan-progress-chip:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 3px;

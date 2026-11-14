@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get, type Writable } from 'svelte/store';
-import type { OperatorNode } from '$lib/api/plans';
+import type { OperatorNode, ThreadPlanStateEntry } from '$lib/api/plans';
 import { planFoldFields } from './fixtures/planFolds';
 
 let mount: typeof import('svelte').mount;
@@ -12,6 +14,7 @@ let activeThreadId: Writable<string | null>;
 let token: Writable<string | null>;
 let SidebarAttentionList: typeof import('$lib/components/SidebarAttentionList.svelte').default;
 let threadPlanStates: typeof import('$lib/stores/threadPlanStates').threadPlanStates;
+let listedNeedsYou: typeof import('$lib/stores/threadPlanStates').listedNeedsYou;
 let resetPlanRuntimeForTests: typeof import('$lib/stores/plans.svelte').resetPlanRuntimeForTests;
 let resetObserversForTests: typeof import('$lib/stores/planQuery.svelte').resetObserversForTests;
 let operatorNode: (over?: Partial<OperatorNode>) => OperatorNode;
@@ -64,7 +67,7 @@ beforeEach(async () => {
 	({ mount, tick, flushSync, unmount } = await import('svelte'));
 	({ activeThreadId } = await import('$lib/stores/threads'));
 	({ token } = await import('$lib/stores/auth'));
-	({ threadPlanStates } = await import('$lib/stores/threadPlanStates'));
+	({ threadPlanStates, listedNeedsYou } = await import('$lib/stores/threadPlanStates'));
 	SidebarAttentionList = (await import('$lib/components/SidebarAttentionList.svelte')).default;
 	({ resetPlanRuntimeForTests } = await import('$lib/stores/plans.svelte'));
 	({ resetObserversForTests } = await import('$lib/stores/planQuery.svelte'));
@@ -139,10 +142,17 @@ describe('PlanDrawerControl attention-item click', () => {
 	});
 
 	it('on a cold thread, opens the drawer at once and focuses the row once the plan arrives after the click', async () => {
-		let answer!: () => void;
+		// The chip also asks for this thread's row state, so every request held by this
+		// stub lands together once the cold load resolves; the plan read stays the held one.
+		let held: Array<() => void> = [];
 		vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
-			answer = () => resolve({ ok: true, status: 200, json: async () => envelope(), headers: { get: () => '"r1"' } });
+			held.push(() => resolve({ ok: true, status: 200, json: async () => envelope(), headers: { get: () => '"r1"' } }));
 		})));
+		const answer = () => {
+			const pending = held;
+			held = [];
+			for (const resolve of pending) resolve();
+		};
 		activeThreadId.set('t0');
 		await renderPhone(async (threadId) => activeThreadId.set(threadId));
 		expect(host.querySelector('.plan-progress-chip')).toBeNull();
@@ -236,5 +246,100 @@ describe('PlanDrawerControl attention-item click', () => {
 		await settle();
 
 		expect(document.querySelector('[data-adaptive-drawer]')?.textContent).toContain('That task isn’t in this plan.');
+	});
+});
+
+/**
+ * The chip goes orange while the thread owes the person by the left menu's own rule
+ * (`isYourMove` on the store's row state), so pausing the item lifts the chip and
+ * the menu's dot together.
+ */
+describe('PlanDrawerControl needs-you chip', () => {
+	function rowState(state: ThreadPlanStateEntry['state']): ThreadPlanStateEntry {
+		return {
+			state,
+			label_key: null,
+			paused: state === 'paused',
+			attention_items: state === 'needs_input' ? [{ kind: 'decision', title: 'Choose a model', node_id: 'node-1' }] : [],
+		};
+	}
+
+	/** The phone chip alone, with the open thread t1's row state set to `state` (null: nothing read yet). */
+	async function renderChip(state: ThreadPlanStateEntry['state'] | null): Promise<HTMLButtonElement> {
+		serve(envelope());
+		threadPlanStates.set(state === null ? {} : { t1: rowState(state) });
+		components.push(mount(PlanDrawerControl, { target: host, props: { threadId: 't1' } }));
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('.plan-progress-chip');
+		expect(chip, 'the chip renders for a plan with open work').not.toBeNull();
+		return chip!;
+	}
+
+	it.each(['needs_input', 'blocked_on_you'] as const)('marks the chip as the person’s move for %s', async (state) => {
+		const chip = await renderChip(state);
+		expect(chip.classList.contains('needs-you')).toBe(true);
+		expect(chip.getAttribute('aria-label')).toBe('Open plan — 1 left · Needs you');
+	});
+
+	it.each(['paused', 'idle', 'moving', 'waiting', 'failed'] as const)('leaves the chip as it is for %s', async (state) => {
+		const chip = await renderChip(state);
+		expect(chip.classList.contains('needs-you')).toBe(false);
+		expect(chip.getAttribute('aria-label')).toBe('Open plan — 1 left');
+	});
+
+	it('leaves the chip as it is with no row state read yet', async () => {
+		const chip = await renderChip(null);
+		expect(chip.classList.contains('needs-you')).toBe(false);
+		expect(chip.getAttribute('aria-label')).toBe('Open plan — 1 left');
+	});
+
+	it('lifts the mark when the item is paused, without a reload', async () => {
+		const chip = await renderChip('needs_input');
+		expect(chip.classList.contains('needs-you')).toBe(true);
+
+		threadPlanStates.set({ t1: rowState('paused') });
+		await settle();
+		expect(chip.classList.contains('needs-you')).toBe(false);
+		expect(chip.getAttribute('aria-label')).toBe('Open plan — 1 left');
+	});
+
+	it('asks the store for the open thread’s row state without moving the menu’s dot', async () => {
+		serve(envelope());
+		threadPlanStates.set({ t1: rowState('needs_input') });
+		components.push(mount(PlanDrawerControl, { target: host, props: { threadId: 't1' } }));
+		await settle();
+
+		const stateReads = vi.mocked(fetch).mock.calls.map(([input]) => String(input))
+			.filter((url) => url.includes('/api/plans/operator/thread-states'));
+		expect(
+			stateReads.some((url) => url.includes('ids=t1')),
+			`the chip’s thread is read like a menu row; reads seen: ${stateReads.join(' , ')}`,
+		).toBe(true);
+		// Reading it must not put it on the menu: the menu's dot is the listed set's own.
+		expect(get(listedNeedsYou)).toBe(false);
+	});
+});
+
+/**
+ * jsdom applies no component CSS (`css` is off in the vitest config), so the colour
+ * itself is guarded on the authored rule, the way `fab-elevation.test.ts` and
+ * `design-tokens.test.ts` guard what only the stylesheet carries.
+ */
+describe('PlanDrawerControl needs-you colours', () => {
+	const css = readFileSync(resolve(__dirname, '../components/plans/PlanDrawerControl.svelte'), 'utf8');
+
+	/** The declarations of exactly one authored rule, comments removed. */
+	function declarations(selector: string): string {
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const rule = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css.replace(/\/\*[\s\S]*?\*\//g, ''));
+		expect(rule, `no authored rule for ${selector}`).not.toBeNull();
+		return rule![1];
+	}
+
+	it('paints the dot and the count with the menu’s needs-you tokens', () => {
+		const mark = declarations('.plan-progress-chip.needs-you .progress-mark');
+		expect(mark).toContain('background: var(--amber);');
+		expect(mark).toContain('box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 13%, transparent);');
+		expect(declarations('.plan-progress-chip.needs-you b')).toContain('color: var(--amber-text);');
 	});
 });

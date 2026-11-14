@@ -2,7 +2,8 @@
  * The chat list's plan state per thread (#2220). The server derives every
  * state by the plan header's rule; this store only holds the last reading.
  *
- * One batched read covers the listed threads. It is refreshed for the threads a
+ * One batched read covers the listed threads and the thread whose chat is open on a
+ * surface that hides the menu (the phone's plan chip). It is refreshed for the threads a
  * `plans_changed`, `thread_updates_changed`, `host_access_changed` or `held_reply_changed` nudge
  * names (the update dot's seen state, an access request), and in full on
  * reconnect and on sign-in. A failed read keeps the last reading, and the next
@@ -39,6 +40,14 @@ let listed = new Set<string>();
 const listedIds = writable<ReadonlySet<string>>(listed);
 
 /**
+ * The thread whose chat is open on a surface that hides the menu (the phone's plan
+ * chip). Its row is read and refreshed like a listed one, so that surface shows the
+ * menu's own rule for a thread the menu may not list at all; it never joins
+ * `listed`, so the menu's needs-you dot is unaffected.
+ */
+let openChats = new Set<string>();
+
+/**
  * Whether any thread the menu lists shows its needs-you mark. On a phone the menu
  * is hidden, so the controls that open it carry the same dot.
  */
@@ -47,6 +56,25 @@ export const listedNeedsYou = derived(
 	([states, ids]) => [...ids].some((id) => isYourMove(states[id])),
 );
 let stopAmbient: (() => void) | null = null;
+
+/** Whether the store keeps this thread's reading current: the menu lists it, or its chat is open. */
+function isTracked(id: string): boolean {
+	return listed.has(id) || openChats.has(id);
+}
+
+function trackedIds(): string[] {
+	return [...new Set([...listed, ...openChats])];
+}
+
+/** Nudges, reconnect and sign-in reads run while the menu lists threads or a chat is open. */
+function syncAmbient(): void {
+	if (listed.size > 0 || openChats.size > 0) stopAmbient ??= startAmbient();
+	else {
+		stopAmbient?.();
+		stopAmbient = null;
+	}
+}
+
 /** Under the server's per-read cap, and short enough for any URL limit. */
 const CHUNK = 100;
 /** Threads named since the read that is out started; the next read covers them all. */
@@ -93,44 +121,44 @@ async function loadChunk(ids: string[]): Promise<void> {
 	});
 }
 
-/** The listed threads a nudge's `thread_ids` names; anything else is ignored. */
-function namedListed(value: unknown): string[] {
+/** The tracked threads a nudge's `thread_ids` names; anything else is ignored. */
+function namedTracked(value: unknown): string[] {
 	const named = Array.isArray(value) ? value : [];
-	return [...new Set(named.filter((id): id is string => typeof id === 'string' && listed.has(id)))];
+	return [...new Set(named.filter((id): id is string => typeof id === 'string' && isTracked(id)))];
 }
 
 function startAmbient(): () => void {
 	const offNudge = on('plans_changed', (message: PlansChangedMessage) => {
 		const named = message.plans
-			.filter((change) => change.owner.kind === 'thread' && listed.has(change.owner.id))
+			.filter((change) => change.owner.kind === 'thread' && isTracked(change.owner.id))
 			.map((change) => change.owner.id);
 		void load([...new Set(named)]);
 	});
 	// An update, a visit or a Mark read/unread changes only the named threads' dots.
 	const offUpdatesNudge = on('thread_updates_changed', (message: { thread_ids?: unknown }) => {
-		void load(namedListed(message?.thread_ids));
+		void load(namedTracked(message?.thread_ids));
 	});
 	// A lease is not a plan mutation, but its awaiting-user state shares the
 	// same batched row projection. Re-read the threads its nudge names; a nudge
 	// naming none (the server could not resolve them) re-reads every listed row.
 	const offHostAccessNudge = on('host_access_changed', (message: { thread_ids?: unknown }) => {
-		void load(message?.thread_ids === undefined ? [...listed] : namedListed(message.thread_ids));
+		void load(message?.thread_ids === undefined ? trackedIds() : namedTracked(message.thread_ids));
 	});
 	// A held reply puts a hold on its sender's row: re-read the threads the nudge names.
 	const offHeldNudge = on('held_reply_changed', (message: { thread_ids?: unknown }) => {
-		void load(namedListed(message?.thread_ids));
+		void load(namedTracked(message?.thread_ids));
 	});
 	let wasConnected = get(connectionState) === 'connected';
 	const offConnection = connectionState.subscribe((state) => {
 		const connected = state === 'connected';
-		if (connected && !wasConnected) void load([...listed]);
+		if (connected && !wasConnected) void load(trackedIds());
 		wasConnected = connected;
 	});
 	let lastToken = get(token);
 	const offToken = token.subscribe((value) => {
 		if (value === lastToken) return;
 		lastToken = value;
-		void load([...listed]);
+		void load(trackedIds());
 	});
 	return () => {
 		offNudge();
@@ -147,24 +175,39 @@ export function watchThreadPlanStates(threadIds: string[]): void {
 	const added = threadIds.filter((id) => !listed.has(id));
 	listed = new Set(threadIds);
 	listedIds.set(listed);
-	stopAmbient ??= startAmbient();
+	syncAmbient();
 	void load(added);
 }
 
-/** Re-read named listed threads now, e.g. after this device marked one read or unread. */
+/**
+ * Follow the thread whose chat is open where the menu is hidden (the phone's plan
+ * chip), so it shows the menu's own needs-you rule for a thread the menu may not
+ * list. Only threads new to this set are read at once.
+ */
+export function watchOpenThreadPlanStates(threadIds: string[]): void {
+	// A thread the menu already lists needs no extra read; its row is already kept current.
+	const added = threadIds.filter((id) => !openChats.has(id) && !listed.has(id));
+	openChats = new Set(threadIds);
+	syncAmbient();
+	void load(added);
+}
+
+/** Re-read named threads the store keeps current, e.g. after this device marked one read or unread. */
 export function reloadThreadPlanStates(threadIds: string[]): void {
-	void load(threadIds.filter((id) => listed.has(id)));
+	void load(threadIds.filter(isTracked));
 }
 
 export function stopThreadPlanStates(): void {
-	stopAmbient?.();
-	stopAmbient = null;
 	listed = new Set();
 	listedIds.set(listed);
+	syncAmbient();
 }
 
 export function resetThreadPlanStatesForTests(): void {
 	stopThreadPlanStates();
+	openChats = new Set();
+	stopAmbient?.();
+	stopAmbient = null;
 	pending = new Set();
 	draining = null;
 	threadPlanStates.set({});
