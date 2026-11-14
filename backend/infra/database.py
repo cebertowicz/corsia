@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -40,6 +43,20 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # with zero in-process lock refusals after deploy), and no later than
 # 2026-10-23. Must never grow into retries, recovery, or suppression -- log only.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
+_HOLD_PLUMBING_FILES = frozenset({os.path.normcase(__file__), os.path.normcase(contextlib.__file__)})
+
+
+def _hold_callers() -> str:
+    """The nearest four frames that held a slow write, skipping context-manager plumbing: one
+    scope can cover many operations (every plan write is ``plan_service``)."""
+    frames: list[str] = []
+    frame = sys._getframe(1)
+    while frame is not None and len(frames) < 4:
+        code = frame.f_code
+        if os.path.normcase(code.co_filename) not in _HOLD_PLUMBING_FILES:
+            frames.append(f"{os.path.basename(code.co_filename)}:{frame.f_lineno}:{code.co_name}")
+        frame = frame.f_back
+    return " < ".join(frames) or "unknown"
 
 
 def _finish_write_hold(scope: str, started_at: float | None) -> None:
@@ -47,7 +64,10 @@ def _finish_write_hold(scope: str, started_at: float | None) -> None:
         return
     held_for = time.monotonic() - started_at
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
-        log.warning("SQLite write transaction held: scope=%s held=%.3fs", scope, held_for)
+        log.warning(
+            "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
+            scope, held_for, _hold_callers(),
+        )
 
 
 def is_lock_refusal(error: BaseException) -> bool:

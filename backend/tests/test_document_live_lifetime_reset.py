@@ -182,6 +182,11 @@ async def test_corrupt_open_answers_non_live_with_the_reason_without_changing_by
     scope = ownership_scope
     manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
     await manager.evict(entry.artifact_id, entry, can_evict=lambda: True)
+    # Eviction keeps an undrained publisher running on the store; let it finish so
+    # no SQLite connection is still open when the bytes are replaced below.
+    publisher = manager.publishers.get(entry.live.store.path)
+    if publisher is not None and publisher.task is not None:
+        await publisher.task
     original = b"corrupt SQLite evidence"
     entry.live.store.path.write_bytes(original)
     socket = Socket()
