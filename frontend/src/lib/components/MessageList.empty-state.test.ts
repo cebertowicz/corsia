@@ -4,6 +4,7 @@ import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threa
 import { _resetTurnStateForTests, applyLifecycle, applyTerminal } from '$lib/ws/turnState';
 import { coreSettings, type CoreSettings } from '$lib/stores/settings';
 import { threadPlanStates } from '$lib/stores/threadPlanStates';
+import { checkpointsByThread } from '$lib/stores/checkpoints';
 import { PAUSED_AT_USAGE_LIMIT, PLAN_LIMIT_REASON } from '$lib/stores/overageSetting';
 import type { RunStub } from '$lib/focusRuns';
 import MessageList from './MessageList.svelte';
@@ -58,6 +59,7 @@ afterEach(() => {
 	messages.set([]);
 	coreSettings.set(null);
 	threadPlanStates.set({});
+	checkpointsByThread.set(new Map());
 	_resetTurnStateForTests();
 });
 
@@ -193,5 +195,33 @@ describe('a sent input the server holds hides the wait face (EW8)', () => {
 	it('shows no chip while a queued input waits, though this tab holds no pending id', () => {
 		waitingAfterTerminalTurn([reply, queued]);
 		expect(host.textContent).not.toContain('CI on PR #1193');
+	});
+});
+
+describe('a chat whose only content sits outside the transcript entries', () => {
+	it('does not greet over a Focus wake that awaits its Retry', () => {
+		coreSettings.set({ features: { focus_mode: true } } as unknown as CoreSettings);
+		messages.set([{
+			id: 'wake-1', thread_id: THREAD_ID, role: 'system', content: 'Retry this wake',
+			created_at: '2026-11-14T18:00:00Z', seq: 1, delivery_state: 'failed', delivery_revision: 1,
+			metadata: { type: 'context_event', event_disposition: 'wake', summary: 'Retry this wake' },
+		}] as never);
+		renderList();
+
+		expect(host.querySelectorAll('[data-wake-retry]')).toHaveLength(1);
+		expect(greeting()).toBeNull();
+	});
+
+	it('does not greet over a checkpoint row', () => {
+		checkpointsByThread.set(new Map([[THREAD_ID, {
+			checkpoints: [{
+				id: 'cp-1', trigger: 'manual', mode: 'warm', status: 'running',
+				writerModel: 'local', error: null, startedAt: '2026-11-14T18:00:00Z',
+			}],
+			loading: false, error: null,
+		}]]));
+		renderList();
+
+		expect(greeting()).toBeNull();
 	});
 });

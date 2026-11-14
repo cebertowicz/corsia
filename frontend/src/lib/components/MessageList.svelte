@@ -228,6 +228,12 @@
 		if (!messagesEl || !onLoadOlder) return false;
 		return requestOlderIfTop({ hasMore: hasMoreMessages, loading: loadingOlderMessages, error: olderLoadFailed }, messagesEl.scrollTop, loadOlderForVisibleEntry);
 	}
+	// What the body draws besides the transcript: Focus wakes awaiting a Retry, and the checkpoint row.
+	const retryRows = $derived(focusMode ? messageRows.filter(needsWakeRetry) : []);
+	const bodyCheckpoint = $derived(revealingOpening ? null : transcriptCheckpoint);
+	// The greeting claims the chat is empty, so it gates on everything the body draws.
+	const bodyDrawsContent = $derived(transcriptEntries.length > 0 || pendingEntries.length > 0
+		|| retryRows.length > 0 || (!!bodyCheckpoint && !!renderedThreadId));
 	const loadOlderForVisibleEntry = () => onLoadOlder?.(focusMode ? visibleEntryContinuation(() => transcriptEntries) : undefined);
 	function onMessagesScroll() {
 		if (!messagesEl || ignoreScrollEvents) return;
@@ -301,7 +307,7 @@
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			<span>Loading this chat…</span>
 		</div>
-	{:else if transcriptEntries.length === 0 && pendingEntries.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
+	{:else if !bodyDrawsContent && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />
@@ -309,7 +315,7 @@
 		<MessageListBody
 			{transcriptEntries}
 			{pendingEntries}
-			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
+			{retryRows}
 			{expandedTools}
 			{expandedReasoning}
 			onToggleToolBlock={toggleToolBlock}
@@ -319,7 +325,7 @@
 			threadId={renderedThreadId}
 			{renderedStreaming}
 			liveRollup={revealingOpening ? undefined : focusLive.current}
-			checkpoint={revealingOpening ? null : transcriptCheckpoint}
+			checkpoint={bodyCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
 			historyComplete={historyComplete ?? !(hasMoreMessages || firstLoadPending || firstLoadFailed)}
