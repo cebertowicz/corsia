@@ -208,6 +208,8 @@ def _superseded_sources_drop_sql() -> str:
     mentions the key (tool output quoting it), and SQLite rewrites every row
     an UPDATE matches even when ``json_remove`` changes nothing, so the
     ``json_type`` check limits the write to rows that really carry the key.
+    ``json_type`` raises on malformed text and SQLite does not order AND terms,
+    so the ``CASE`` makes ``json_valid`` run first.
     Parameters: ``?1`` key path, ``?2`` thread id, ``?3`` kept record id.
     """
     # learning_schema imports this module, so its guard is imported here.
@@ -216,7 +218,7 @@ def _superseded_sources_drop_sql() -> str:
     return (
         "UPDATE messages SET metadata=json_remove(metadata, ?1) "
         f"WHERE thread_id=?2 AND id<>?3 AND {installed_boundary_guard('metadata')} "
-        "AND json_valid(metadata) AND json_type(metadata, ?1) IS NOT NULL"
+        "AND CASE WHEN json_valid(metadata) THEN json_type(metadata, ?1) END IS NOT NULL"
     )
 
 

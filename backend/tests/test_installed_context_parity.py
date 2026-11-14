@@ -350,6 +350,7 @@ def test_drop_writes_only_rows_that_carry_the_sources_key():
         ("old", 1, json.dumps({INSTALLED_SOURCES: ["bytes"], "map": 1})),
         ("tool", 2, mention),
         ("kept", 3, json.dumps({INSTALLED_SOURCES: ["bytes"], "map": 3})),
+        ("malformed", 4, '{"' + INSTALLED_SOURCES + '": ['),
     ]
     db.executemany("INSERT INTO messages VALUES (?,'t',?,?)", rows)
     writes = []
@@ -365,6 +366,7 @@ def test_drop_writes_only_rows_that_carry_the_sources_key():
 
     assert writes == ["old"]
     assert stored["tool"] == mention
+    assert stored["malformed"] == rows[3][2]
     assert INSTALLED_SOURCES not in json.loads(stored["old"])
     assert INSTALLED_SOURCES in json.loads(stored["kept"])
     assert any(INSTALLED_BOUNDARY_INDEX in step for step in plan), plan
