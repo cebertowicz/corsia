@@ -22,7 +22,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from loguru import logger
 
@@ -195,6 +199,7 @@ async def _run_job_safely() -> None:
     await _run_workflow_verdicts_safely()
     await _run_kpi_thresholds_safely(run_date)
     await _reap_worktrees_safely()
+    await _update_history_graph_safely()
 
 
 async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | None:
@@ -264,6 +269,88 @@ async def _reap_worktrees_safely() -> None:
         await asyncio.to_thread(reap_all_idle)
     except Exception:
         logger.exception("nightly_job: worktree reaper failed")
+
+
+_HISTORY_GRAPH_TIMEOUT = 300
+_HISTORY_GRAPH_FILTERS = 100_000
+
+
+def _graph_filters_computed(stderr: bytes) -> int | None:
+    """Read Git's trace counter; an absent counter is not proof of completion."""
+    for line in stderr.splitlines():
+        try:
+            event = json.loads(line)
+            if event.get("category") == "commit-graph" and event.get("key") == "filter-computed":
+                return int(event["value"])
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+    return None
+
+
+def _update_history_graph() -> None:
+    """Bound Git's work and report progress without blocking document saves."""
+    from infra.backend_git import git_argv
+    from infra.config import WORKSPACE
+    from infra.guidance_git import workspace_repository
+    from infra.guidance_states import history_is_off
+
+    started = time.monotonic()
+    count = "unknown"
+    try:
+        repo, reason = workspace_repository(Path(WORKSPACE))
+        if repo is None:
+            if history_is_off(reason):
+                logger.info("nightly_job: history graph outcome=off commits={} elapsed_ms={:.0f}", count, (time.monotonic() - started) * 1000)
+            else:
+                logger.warning("nightly_job: history graph outcome=unavailable commits={} elapsed_ms={:.0f}: {}", count, (time.monotonic() - started) * 1000, reason)
+            return
+        remaining = _HISTORY_GRAPH_TIMEOUT - (time.monotonic() - started)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("rev-list", _HISTORY_GRAPH_TIMEOUT)
+        git = git_argv("-C", str(repo), "-c", "commit.gpgsign=false", "-c", "safe.bareRepository=explicit")
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        count = subprocess.run(
+            [*git, "rev-list", "--count", "--all"],
+            check=True, capture_output=True, timeout=remaining, env=env,
+        ).stdout.decode().strip()
+        remaining = _HISTORY_GRAPH_TIMEOUT - (time.monotonic() - started)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("commit-graph", _HISTORY_GRAPH_TIMEOUT)
+        args = [*git, "commit-graph", "write", "--reachable", "--changed-paths",
+                "--split=replace", f"--max-new-filters={_HISTORY_GRAPH_FILTERS}"]
+        with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env={**env, "GIT_TRACE2_EVENT": "1"}) as process:
+            try:
+                _, stderr = process.communicate(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                    raise RuntimeError("Git did not stop after SIGTERM; its graph lock may need attention")
+                raise
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, args, stderr=stderr)
+        computed = _graph_filters_computed(stderr)
+        if computed is None:
+            logger.warning("nightly_job: history graph outcome=unknown commits={} filters=unknown elapsed_ms={:.0f}", count, (time.monotonic() - started) * 1000)
+            return
+        outcome = "still filling" if computed >= _HISTORY_GRAPH_FILTERS else "complete"
+        logger.info("nightly_job: history graph outcome={} commits={} filters={} elapsed_ms={:.0f}", outcome, count, computed, (time.monotonic() - started) * 1000)
+    except subprocess.TimeoutExpired:
+        logger.warning("nightly_job: history graph outcome=stopped at bound commits={} filters=unknown elapsed_ms={:.0f}", count, (time.monotonic() - started) * 1000)
+    except Exception:
+        logger.exception("nightly_job: history graph outcome=failed commits={} filters=unknown elapsed_ms={:.0f}", count, (time.monotonic() - started) * 1000)
+
+
+async def _update_history_graph_safely() -> None:
+    """Keep path-limited history reads fast without holding up saves."""
+    try:
+        await asyncio.to_thread(_update_history_graph)
+    except Exception:
+        logger.exception("nightly_job: history graph update failed")
 
 
 async def nightly_job_loop() -> None:
