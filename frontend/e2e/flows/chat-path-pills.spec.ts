@@ -76,11 +76,11 @@ test('@surface:chat-cards a workspace-relative path in a project chat opens in o
 test('@surface:chat-cards a chat link that cannot open says why in its own tab with no toast; a link with no tab still toasts', async ({ page, request }, info) => {
 	const phone = info.project.name.includes('mobile');
 	const width = phone ? 393 : 1440;
-	const { stamp, projectId, planning } = await newProject(request, 'Link failures');
+	const { stamp, projectId, planning, workspace } = await newProject(request, 'Link failures');
 	fs.mkdirSync(path.join(planning, 'notes'), { recursive: true });
 	fs.writeFileSync(path.join(planning, 'notes', 'proposal.md'), '# Proposal\n\nBody.\n');
 	const row = await openChatMessage(page, request, phone, projectId, stamp,
-		'The proposal: [Proposal](notes/proposal.md). Also [Missing](notes/missing.md) and [Old copy](ftp://files.example.invalid/proposal.md).');
+		'The proposal: [Proposal](notes/proposal.md). Also [Missing](notes/missing.md), [Elsewhere](notes/elsewhere.md) and [Old copy](ftp://files.example.invalid/proposal.md).');
 	const press = (text: string) => row.locator('.md-content a', { hasText: new RegExp(`^${text}$`) }).click();
 	const documentToasts = page.getByRole('status').filter({ hasText: 'linked workspace document' });
 
@@ -122,4 +122,18 @@ test('@surface:chat-cards a chat link that cannot open says why in its own tab w
 		return !!top && el.contains(top);
 	})).toBe(true);
 	await evidence(page, `chat-link-error-${width}-mocked`);
+
+	// No file under the project, and the read from the workspace root fails: a failed read with Retry, never 'no file'.
+	await page.unroute(/\/api\/files\/revision/);
+	const fromWorkspaceRoot = path.join(workspace, 'notes', 'elsewhere.md');
+	await page.route(/\/api\/files\/revision/, (route) => (
+		new URL(route.request().url()).searchParams.get('path') === fromWorkspaceRoot
+			? route.fulfill({ status: 500, body: 'read failed' }) : route.continue()));
+	await press('Elsewhere');
+	const elsewhere = page.getByText("Couldn't open elsewhere.md.");
+	await expect(elsewhere).toBeInViewport();
+	await expect(elsewhere.locator('..').getByRole('button', { name: 'Retry' })).toBeVisible();
+	await expect(page.getByText('There’s no file at this link.')).toHaveCount(0);
+	await expect(documentToasts).toHaveCount(0);
+	await evidence(page, `chat-link-other-root-error-${width}-mocked`);
 });

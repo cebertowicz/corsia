@@ -94,6 +94,8 @@ interface LinkRouted {
 	result: 'external' | 'document' | 'settings' | 'thread' | 'error';
 	target: LinkOpenTarget;
 	reason?: LinkOpenFailure;
+	/** This press joined an open already in flight; that open reports the outcome. */
+	joined?: true;
 }
 
 function failed(target: LinkOpenTarget, reason: LinkOpenFailure): LinkRouted {
@@ -134,7 +136,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 	const link = { href, projectId: deps.projectId() };
 	// The press shows its tab loading before any request: the roots and revision reads can wait on the database.
 	const loadingTab = deps.openLoading(threadId, link, defaultTabTitle(targetPath(href) ?? href));
-	if (loadingTab === null) return { result: 'document', target: 'workspace_document' };
+	if (loadingTab === null) return { result: 'document', target: 'workspace_document', joined: true };
 	return openLinkedDocument(link, threadId, loadingTab, deps);
 }
 
@@ -169,11 +171,13 @@ export async function retryLinkTab(threadId: string, loadingTab: string, link: A
 
 /**
  * Routes one rendered-markdown target to an external browser or the artifact leaf.
- * Reports one `link.open` event per call: target class, outcome and a bounded
- * failure reason only; never the href, a path, a title or error text.
+ * Reports one `link.open` event per open: target class, outcome and a bounded
+ * failure reason only; never the href, a path, a title or error text. A press on
+ * a link still loading starts no open and reports nothing.
  */
 export async function resolveLinkTarget(href: string, deps: LinkResolverDeps): Promise<'external' | 'document' | 'settings' | 'thread' | 'error'> {
-	const { result, target, reason } = await routeLinkTarget(href, deps);
+	const { result, target, reason, joined } = await routeLinkTarget(href, deps);
+	if (joined) return result;
 	emitProductEvent('link', 'open', reason
 		? { target, outcome: 'failed', reason }
 		: { target, outcome: 'succeeded' });

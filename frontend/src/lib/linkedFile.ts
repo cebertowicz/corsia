@@ -1,7 +1,7 @@
 // Which workspace file a rendered link names. The server turns a message's text into
 // reference cards with a Python port of this path logic (backend/registry/path_cards.py).
 
-import type { DocRevision, ScopeRoot } from '$lib/api/docs';
+import { RequestRefused, type DocRevision, type ScopeRoot } from '$lib/api/docs';
 import { withoutLineSuffix } from '$lib/cm/markdown-link';
 
 export function targetPath(href: string): string | null {
@@ -49,7 +49,8 @@ export interface LinkedFileReads {
 /**
  * The linked file and its revision, resolved from the scope's root first. In a project,
  * a relative link with no file there is tried once from the workspace root, through the
- * same revision route and its scope check; a refusal there means the same as no file.
+ * same revision route and its scope check; its scope refusal means the same as no file.
+ * Any other failure of that read is a failed read, not a missing file, and is thrown.
  */
 export async function linkedFile(href: string, reads: LinkedFileReads, projectId: string | null): Promise<{ path: string; revision: DocRevision } | null> {
 	const own = workspacePath(href, await reads.fetchRoots(projectId));
@@ -61,7 +62,13 @@ export async function linkedFile(href: string, reads: LinkedFileReads, projectId
 	try {
 		const revision = await reads.fetchRevision(other, projectId);
 		return revision.exists ? { path: other, revision } : null;
-	} catch {
-		return null;
+	} catch (error) {
+		if (isScopeRefusal(error)) return null;
+		throw error;
 	}
+}
+
+// The revision route's only 400 is its scope refusal (backend/api/files_revision.py).
+function isScopeRefusal(error: unknown): boolean {
+	return error instanceof RequestRefused && error.message.startsWith('400 ');
 }

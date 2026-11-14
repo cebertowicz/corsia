@@ -4,6 +4,7 @@ import AssistantMessage from '$lib/components/AssistantMessage.svelte';
 import { renderMarkdown } from '$lib/markdown';
 import vectors from '../../../testdata/link-target-vectors.json';
 import * as productEvents from '$lib/product_events';
+import { RequestRefused } from '$lib/api/docs';
 import { installLinkTargetResolver, resolveLinkTarget, type LinkResolverDeps } from './linkTargetResolver';
 
 const ROOTS = [{
@@ -213,8 +214,9 @@ describe('chat links written from either root', () => {
 	const PROJECT = [{ id: 'planning', label: 'Project', kind: 'workspace' as const, path: '/ws/projects/p' }];
 	const WORKSPACE = [{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws' }];
 	const roots = vi.fn((projectId: string | null) => Promise.resolve(projectId ? PROJECT : WORKSPACE));
-	const revisions = (files: string[], refused: string[] = []) => vi.fn((path: string) => {
-		if (refused.includes(path)) return Promise.reject(new Error('400 Path is outside this scope\'s roots'));
+	const revisions = (files: string[], refused: string[] = [], failing: string[] = []) => vi.fn((path: string) => {
+		if (refused.includes(path)) return Promise.reject(new RequestRefused('400 {"detail":"Path is outside this scope\'s roots"}', null));
+		if (failing.includes(path)) return Promise.reject(new RequestRefused('500 Internal Server Error', null));
 		const exists = files.includes(path);
 		return Promise.resolve({ exists, path: exists ? path : null, revision: exists ? 'rev' : null, size: 1, writable: true, artifact_id: null });
 	});
@@ -251,6 +253,19 @@ describe('chat links written from either root', () => {
 		expect(vi.mocked(d.failLoading).mock.calls).toEqual([['thread-1', 'loading-1', 'unavailable']]);
 		expect(d.showError).not.toHaveBeenCalled();
 		expect(vi.mocked(d.openArtifact)).not.toHaveBeenCalled();
+	});
+
+	it('shows a failed workspace-root read as a failed read with Retry, never as no file', async () => {
+		const events = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
+		try {
+			const d = deps({ fetchRoots: roots, fetchRevision: revisions([], [], ['/ws/shared/b.md']) });
+			expect(await resolveLinkTarget('shared/b.md', d)).toBe('error');
+			expect(vi.mocked(d.failLoading).mock.calls).toEqual([['thread-1', 'loading-1', 'error']]);
+			expect(events.mock.calls).toEqual([['link', 'open', { target: 'workspace_document', outcome: 'failed', reason: 'open_failed' }]]);
+			expect(d.showError).not.toHaveBeenCalled();
+		} finally {
+			events.mockRestore();
+		}
 	});
 });
 
@@ -322,6 +337,10 @@ describe('link.open product event', () => {
 		const calls = await route(href, overrides as Partial<LinkResolverDeps>);
 		expect(calls).toEqual([['link', 'open', payload]]);
 		expect(JSON.stringify(calls)).not.toMatch(SENSITIVE);
+	});
+
+	it('emits nothing for a press on a link still loading: the first press reports the outcome', async () => {
+		expect(await route('shared/linked.md', { openLoading: vi.fn(() => null) })).toEqual([]);
 	});
 });
 
