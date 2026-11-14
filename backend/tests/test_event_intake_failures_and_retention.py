@@ -12,7 +12,7 @@ from automation.script_readings import RunReport
 from events import intake, intake_errors, rule_declarations, rules
 from infra.database import get_db
 from tests.test_event_emit import emit_world  # noqa: F401 - fixture
-from tests.test_event_intake import OWNER, _admit, intake_world  # noqa: F401 - fixture
+from tests.test_event_intake import OWNER, _admit, _every_rule, intake_world  # noqa: F401 - fixture
 from tools.event_rules import EventRulesTool
 
 
@@ -41,6 +41,7 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
 ):
     schedule = _schedule(intake_world, tmp_path)
     monkeypatch.setattr("events.intake.admit_event", _raising(exc))
+    monkeypatch.setattr(script_runner, "_ADMIT_PAUSE_SECONDS", (0, 0, 0))
     report = asyncio.run(script_runner._admit_events(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="r1"),
     ))
@@ -51,6 +52,106 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
     assert "same event id" not in message
     assert report.status == "error" and report.error == message
     assert [signal.kind for signal in report.signals] == ["error"] and message in report.signals[0].summary
+
+
+_LOCKED = "database is locked: write admission for admit_event waited 30s"
+_LINE = {"type": "qa.route", "facts": {"code": "ok"}}
+
+
+def _flaky_intake(monkeypatch, outcomes: list[str]):
+    """The real intake behind a write queue that fails as ``outcomes`` says, one entry per try.
+
+    ``refuse`` raises before the intake runs; ``land-then-fail`` lets the real intake commit and
+    then raises, so the caller sees a failure for a line that was taken; ``take`` is the real intake.
+    """
+    real, seen = intake.admit_event, []
+
+    async def admit(**kwargs):
+        seen.append(kwargs["event_id"])
+        outcome = outcomes[len(seen) - 1] if len(seen) <= len(outcomes) else "take"
+        if outcome == "refuse":
+            raise sqlite3.OperationalError(_LOCKED)
+        result = await real(**kwargs)
+        if outcome == "land-then-fail":
+            raise sqlite3.OperationalError(_LOCKED)
+        return result
+
+    monkeypatch.setattr("events.intake.admit_event", admit)
+    monkeypatch.setattr(script_runner, "_ADMIT_PAUSE_SECONDS", (0, 0, 0))
+    return seen
+
+
+def _route_rows(db, event_id: str) -> list[tuple]:
+    return [tuple(row) for row in db.execute(
+        "SELECT rule_id, outcome FROM event_route_decisions WHERE event_id=? ORDER BY id", (event_id,))]
+
+
+@pytest.mark.parametrize("outcomes", [
+    ["refuse", "refuse", "take"],
+    ["land-then-fail", "take"],
+    ["refuse", "land-then-fail", "refuse", "take"],
+])
+def test_a_line_the_intake_could_not_take_is_sent_again_under_one_id_and_routed_once(
+    intake_world, tmp_path, monkeypatch, outcomes,
+):
+    _every_rule(intake_world, rule_id="self-wake", destination=OWNER)
+    schedule = _schedule(intake_world, tmp_path)
+    once = _admit(event_id="control-1")  # what one taken line leaves behind, through the same intake
+    seen = _flaky_intake(monkeypatch, outcomes)
+
+    report = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=[_LINE], run_id="r1"), (), None,
+    ))
+
+    event_id = f"script:{schedule.id}:r1:0"
+    assert once.accepted and report.status == "ok" and report.error is None and not report.signals
+    assert seen == [event_id] * len(outcomes)
+    accepted = intake_world.execute(
+        "SELECT COUNT(*) FROM event_intake_records WHERE event_id=? AND outcome='accepted'", (event_id,),
+    ).fetchone()[0]
+    assert accepted == 1
+    assert _route_rows(intake_world, event_id) == _route_rows(intake_world, "control-1") != []
+
+
+@pytest.mark.parametrize(("rule_decision_id", "fix"), [
+    (None, script_runner._RERUN_FIX),
+    (7, script_runner._RULE_RUN_FIX),
+])
+def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
+    intake_world, tmp_path, monkeypatch, rule_decision_id, fix,
+):
+    schedule = _schedule(intake_world, tmp_path)
+    seen = _flaky_intake(monkeypatch, ["refuse"] * 20)
+
+    report = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=[_LINE, _LINE, _LINE], run_id="r1"), (), rule_decision_id,
+    ))
+
+    tries = len(script_runner._ADMIT_PAUSE_SECONDS) + 1
+    prefix = f"script:{schedule.id}:r1:"
+    # The first line uses every try; the intake is then known down, so the others get one each.
+    assert seen == [f"{prefix}0"] * tries + [f"{prefix}1", f"{prefix}2"]
+    message = "event line refused: " + intake_errors.format_event_error(
+        "intake_unreachable", "event intake is unavailable", fix)
+    assert report.status == "error" and report.error == message
+    assert ("Run the script again" in message) == (rule_decision_id is None)
+
+
+def test_a_defect_inside_the_intake_is_never_sent_again(intake_world, tmp_path, monkeypatch):
+    schedule = _schedule(intake_world, tmp_path)
+    calls: list[str] = []
+
+    async def admit(**kwargs):
+        calls.append(kwargs["event_id"])
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("events.intake.admit_event", admit)
+    report = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=[_LINE], run_id="r1"),
+    ))
+
+    assert calls == [f"script:{schedule.id}:r1:0"] and report.status == "error"
+    assert "internal_error" in (report.error or "")
 
 
 def test_run_claimed_returns_and_records_an_error_when_the_intake_raises(intake_world, tmp_path, monkeypatch):
