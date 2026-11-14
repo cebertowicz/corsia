@@ -112,7 +112,9 @@ def parse_status(code: int, stdout: bytes) -> tuple[bool | None, dict[str, str]]
     fatal error or an unreadable report proves nothing and is unknown, never signed out.
     The facts carry the login and where ``gh`` found its token. Not signed in with a login
     still listed (a rejected token, a timed-out check), the facts carry that login alone:
-    the account exists even though it can't be used now.
+    the account exists even though it can't be used now. Signed out with no facts means no
+    github.com account is listed at all; an account listed without a readable login (an
+    environment token whose check failed) is unknown, since the person may have one.
     """
     if code != 0:
         return None, {}
@@ -121,22 +123,22 @@ def parse_status(code: int, stdout: bytes) -> tuple[bool | None, dict[str, str]]
         hosts = report["hosts"]
     except (ValueError, KeyError, TypeError):
         return None, {}
-    if hosts == {}:
-        return False, {}
-    try:
-        entries = hosts["github.com"]
-    except (KeyError, TypeError):
-        return False, {}
-    listed = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
-    for entry in listed:
+    if not isinstance(hosts, dict):
+        return None, {}
+    entries = hosts.get("github.com", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        return None, {}
+    for entry in entries:
         if entry.get("active") is True:
             login, source = entry.get("login"), entry.get("tokenSource")
             if entry.get("state") == "success" and isinstance(login, str) and LOGIN.match(login):
                 return True, {"login": login, "token_source": source if isinstance(source, str) else ""}
             break
-    known = next((entry["login"] for entry in listed
+    known = next((entry["login"] for entry in entries
                   if isinstance(entry.get("login"), str) and LOGIN.match(entry["login"])), None)
-    return False, {"login": known} if known else {}
+    if known:
+        return False, {"login": known}
+    return (None, {}) if entries else (False, {})
 
 
 def signin_prompt(output: str) -> dict[str, str] | None:

@@ -18,9 +18,11 @@ CUSTOM = "/opt/custom/gh"
 STATUS = ("auth", "status", "--hostname", "github.com", "--active", "--json", "hosts")
 
 
-def _report(answer: int | str) -> bytes:
-    """``gh``'s JSON report: 0 is the person signed in as ``person``, 1 is signed out, and a
-    string is ``person`` listed with that failed token state."""
+def _report(answer: int | str | bytes) -> bytes:
+    """``gh``'s JSON report: 0 is the person signed in as ``person``, 1 is signed out, a
+    string is ``person`` listed with that failed token state, and bytes are the report itself."""
+    if isinstance(answer, bytes):
+        return answer
     if answer == 1:
         return b'{"hosts":{}}'
     return json.dumps({"hosts": {"github.com": [{
@@ -91,6 +93,38 @@ def test_a_definite_answer_is_stored_with_the_resolved_binary_and_config(gh, ans
     row = _row()
     assert row["status"] == status
     assert row["config"] == config
+
+
+_LISTED_WITHOUT_LOGIN = [
+    # An environment token whose check failed: gh lists it with no stored username.
+    {"github.com": [{"active": True, "state": "error", "login": "", "tokenSource": "GH_TOKEN"}]},
+    {"github.com": [{"active": True, "state": "timeout", "tokenSource": "GITHUB_TOKEN"}]},
+    {"github.com": "person"},
+    {"github.com": ["person"]},
+]
+
+
+@pytest.mark.parametrize("hosts", _LISTED_WITHOUT_LOGIN)
+def test_an_account_listed_without_a_readable_login_is_unknown_not_no_own_github(gh, hosts):
+    from connections import refresh_github_connection
+    from connections.github_agent_home import parse_status
+
+    report = json.dumps({"hosts": hosts}).encode()
+    assert parse_status(0, report) == (None, {})
+    gh.answer[0] = report
+    before = _row()
+    assert refresh_github_connection(keep_row_on_failed_probe=True) is False
+    assert _row() == before
+    refresh_github_connection()  # startup keeps its classification
+    assert _row()["status"] == "needs_auth" and "no_own_login" not in _row()["config"]
+
+
+@pytest.mark.parametrize("report", [b'{"hosts":{}}', b'{"hosts":{"github.com":[]}}',
+                                    b'{"hosts":{"ghe.example.com":[{"login":"x"}]}}'])
+def test_only_no_github_com_account_listed_is_signed_out_with_no_login(report):
+    from connections.github_agent_home import parse_status
+
+    assert parse_status(0, report) == (False, {})
 
 
 def test_a_signed_out_answer_keeps_the_last_known_login(gh):
