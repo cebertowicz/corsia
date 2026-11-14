@@ -495,36 +495,74 @@ async def test_tagged_closing_text_places_no_answer_and_is_nudged_once(db, monke
     assert effects.drives.count(_THREAD) == 1
 
 
-@pytest.mark.asyncio
-async def test_a_sent_update_does_not_hide_a_tagged_closing_answer_from_the_nudge(db, monkeypatch) -> None:
-    # A post_update that answers nothing is a reply to the message, yet a comment answer tagged in the
-    # closing words was never placed: the nudge still comes, naming it, so the answer is not lost.
-    import infra.reply_not_visible_wake as wake
+def _chat_rows(db) -> int:
+    return db.execute("SELECT count(*) FROM messages WHERE thread_id=?", (_THREAD,)).fetchone()[0]
 
-    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+
+@pytest.mark.asyncio
+async def test_a_sent_update_plus_tagged_closing_text_places_the_answer_with_no_nudge_and_no_chat_text(db) -> None:
+    # An update was sent, so the Turn is answered: the answer tagged only in closing text goes to its
+    # comment thread as it did before this rule. No wake, no woken-turn words, no new chat message.
     cid = _comment_on(db, "")
     _say(db, "Moved the meeting.", for_user=True)
-    closing = f"[{cid}] Yes, Friday is skipped."
-    _say(db, closing)
+    closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    rows = _chat_rows(db)
 
     effects = await _end(db)
 
-    (nudge,) = _nudges(db)
-    # They were sent an update, so the nudge asks only about the unsent answer and never says no reply is visible.
-    assert nudge["content"].endswith(
-        nudge_text("1:19", None, [(cid, "Yes, Friday is skipped.")], replied=True))
-    assert "No reply is visible" not in nudge["content"]
-    assert effects.drives.count(_THREAD) == 1
-    assert _placed(db) == []
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+    assert _chat_rows(db) == rows
+    assert not _for_user(db, closing)
+    assert _placed(db) == [("m1", cid, closing)]
+    stored = db.execute(
+        "SELECT v.content,json_extract(m.metadata,'$.chat_drawn') FROM messages m "
+        "JOIN chat_visible_content v ON v.message_id=m.id WHERE m.id=?", (closing,),
+    ).fetchone()
+    assert tuple(stored) == ("", 0)  # the words went only to the thread; chat draws nothing
 
 
-async def _nudged_after_a_sent_update(db, monkeypatch) -> tuple[str, str]:
-    """An untagged update was sent and an answer tagged only in closing words; the nudge woke turn t2."""
+@pytest.mark.asyncio
+async def test_that_placement_tells_the_page_to_re_read_the_comment(db, monkeypatch) -> None:
+    import infra.state as state
+
+    cid = _comment_on(db, "")
+    db.execute("UPDATE messages SET metadata=json_set(metadata,'$.reply_context',json(?)) WHERE id='m1'",
+               (json.dumps({"comments": [{"cid": cid, "seq": 7}]}),))
+    db.commit()
+    _say(db, "Moved the meeting.", for_user=True)
+    _say(db, f"[{cid}] Yes, Friday is skipped.")
+    frames: list[dict] = []
+    monkeypatch.setattr(state, "broadcast_to_thread", lambda thread_id, payload, **_kw: frames.append(payload))
+
+    await _end(db)
+
+    assert {"type": "chat_comments_changed", "thread_id": _THREAD, "target_seqs": [7]} in frames
+
+
+@pytest.mark.asyncio
+async def test_a_later_turn_end_places_nothing_twice(db, monkeypatch) -> None:
+    import infra.state as state
+
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    frames: list[dict] = []
+    monkeypatch.setattr(state, "broadcast_to_thread", lambda thread_id, payload, **_kw: frames.append(payload))
+
+    await _end(db)
+
+    assert _placed(db) == [("m1", cid, closing)]
+    assert frames == []
+
+
+async def _woken_without_an_update(db, monkeypatch) -> tuple[str, str]:
+    """Only tagged closing text; the nudge woke turn t2."""
     import infra.reply_not_visible_wake as wake
 
     monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
     cid = _comment_on(db, "")
-    _say(db, "Moved the meeting.", for_user=True)
     closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
     await _end(db)
     _take_nudge(db, "t2")
@@ -532,45 +570,34 @@ async def _nudged_after_a_sent_update(db, monkeypatch) -> tuple[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_a_woken_turn_that_writes_plain_text_after_a_sent_update_has_its_answer_placed(db, monkeypatch) -> None:
-    # The settle of the woken turn runs the fallback although an update was sent: the answer is not lost.
-    cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
-    plain = _say(db, "Noted.", turn="t2")
+async def test_a_woken_turn_that_then_sends_an_update_has_the_pending_answer_placed(db, monkeypatch) -> None:
+    cid, closing = await _woken_without_an_update(db, monkeypatch)
+    _say(db, "Moved the meeting.", turn="t2", for_user=True)
 
     await _end(db, turn="t2")
 
-    assert _for_user(db, plain)
     assert _placed(db) == [("m1", cid, closing)]
-
-
-@pytest.mark.asyncio
-async def test_a_woken_turn_that_answers_no_reply_after_a_sent_update_places_nothing(db, monkeypatch) -> None:
-    _cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
-    _say(db, "NO_REPLY", turn="t2")
-
-    await _end(db, turn="t2")
-
-    assert _placed(db) == []
     assert not _for_user(db, closing)
 
 
 @pytest.mark.asyncio
-async def test_a_stopped_woken_turn_after_a_sent_update_has_its_answer_placed(db, monkeypatch) -> None:
-    cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
-
-    await _stop(db, "t2")
-
-    assert _placed(db) == [("m1", cid, closing)]
-
-
-@pytest.mark.asyncio
 async def test_a_woken_turn_that_sends_the_answer_is_settled_as_sent(db, monkeypatch) -> None:
-    cid, _closing = await _nudged_after_a_sent_update(db, monkeypatch)
+    cid, _closing = await _woken_without_an_update(db, monkeypatch)
     sent = _say(db, f"[{cid}] Yes, Friday is skipped.", turn="t2", for_user=True)
 
     await _end(db, turn="t2")
 
     assert _placed(db) == [("m1", cid, sent)]
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_stopped_after_sending_an_update_has_the_pending_answer_placed(db, monkeypatch) -> None:
+    cid, closing = await _woken_without_an_update(db, monkeypatch)
+    _say(db, "Moved the meeting.", turn="t2", for_user=True)
+
+    await _stop(db, "t2")
+
+    assert _placed(db) == [("m1", cid, closing)]
 
 
 def test_the_tagged_steps_read_at_a_turn_end_are_bounded(db) -> None:

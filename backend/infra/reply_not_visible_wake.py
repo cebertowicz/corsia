@@ -115,11 +115,6 @@ def _replied_after(
     ).fetchone() is not None
 
 
-def _fully_answered(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any]) -> bool:
-    """A message was sent for the person after theirs, and no tagged answer of the Turn is left unsent."""
-    return _replied_after(db, thread_id, person) and not _pending_answers(db, thread_id, person["seq"], None)
-
-
 def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
     """True when ``turn_id`` ran a nudge and the message it was about now shows a reply."""
     nudge = db.execute(
@@ -167,12 +162,12 @@ def _hidden_answer_steps(
 
 
 def _pending_answers(
-    db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None,
+    db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None, before_seq: int | None = None,
 ) -> list[tuple[str, str]]:
     """(comment id, first line of its answer) for answers tagged in hidden steps, each comment once;
     a comment the person already has an answer to is not pending."""
     pending: dict[str, str] = {}
-    for row in _hidden_answer_steps(db, thread_id, after_seq, exclude_id):
+    for row in _hidden_answer_steps(db, thread_id, after_seq, exclude_id, before_seq):
         for cid, user, text in placeable_answers(db, str(row["id"]), thread_id, str(row["content"]), row["seq"]):
             if not has_answer(db, thread_id, user, cid):
                 pending.setdefault(cid, (text.strip().splitlines() or [""])[0].strip()[:80])
@@ -182,6 +177,35 @@ def _pending_answers(
 def _woken_about(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row):
     """The hidden words the nudge was sent about: the last ones between the message and it."""
     return _last_hidden(db, thread_id, person["seq"], nudge["seq"])
+
+
+def _place_hidden_answers(
+    db: sqlite3.Connection, thread_id: str, person_seq: int, exclude_id: str | None = None,
+    before_seq: int | None = None,
+) -> list[int]:
+    """Place the answers tagged in hidden steps after the person's message, newest step first (a comment
+    keeps its first answer); their text stays out of chat. Returns the seqs of the comments answered."""
+    from infra.chat_comment_answers import answered_comment_seqs
+
+    steps = [str(step["id"]) for step in _hidden_answer_steps(db, thread_id, person_seq, exclude_id, before_seq)]
+    for step_id in steps:
+        place_flipped_answers(db, thread_id, step_id, hidden_step=True)
+    return answered_comment_seqs(db, thread_id, steps)
+
+
+def _place_unsent_answers(
+    db: sqlite3.Connection, thread_id: str, person_seq: int, before_seq: int | None = None,
+) -> None:
+    """A message was sent for the person, so answers tagged only in hidden text go to their comment
+    threads, as before this rule: no wake, no chat text, one answer per comment."""
+    from infra.send_broadcast import broadcast_comments_changed
+    from infra.write_effects import after_commit
+
+    if not _pending_answers(db, thread_id, person_seq, None, before_seq):
+        return
+    seqs = _place_hidden_answers(db, thread_id, person_seq, None, before_seq)
+    if seqs:
+        after_commit(db, lambda: broadcast_comments_changed(thread_id, seqs))
 
 
 def _show_hidden_words(
@@ -194,7 +218,6 @@ def _show_hidden_words(
     stays out of chat and the page re-reads the answered comment threads.
     """
     from infra import thread_updates
-    from infra.chat_comment_answers import answered_comment_seqs
     from infra.send_broadcast import broadcast_comments_changed, broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
 
@@ -204,13 +227,7 @@ def _show_hidden_words(
         (row["id"],),
     )
     place_flipped_answers(db, thread_id, str(row["id"]))
-    earlier = [
-        str(step["id"])
-        for step in _hidden_answer_steps(db, thread_id, person_seq, str(row["id"]), before_seq)
-    ]
-    for step_id in earlier:
-        place_flipped_answers(db, thread_id, step_id, hidden_step=True)
-    answered_seqs = answered_comment_seqs(db, thread_id, earlier)
+    answered_seqs = _place_hidden_answers(db, thread_id, person_seq, str(row["id"]), before_seq)
     thread_updates.record_marked(
         db, thread_id=thread_id, message_id=str(row["id"]), node_id=None,
         created_at=str(row["created_at"]),
@@ -233,7 +250,8 @@ def _settle_nudged_turn(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row,
 ) -> None:
     """At the nudged Turn's end: NO_REPLY stays hidden; any other last words show."""
-    if _fully_answered(db, thread_id, person):
+    if _replied_after(db, thread_id, person):
+        _place_unsent_answers(db, thread_id, person["seq"])
         logger.info("focus.nudge_settled thread={} result=sent", thread_id)
         return
     # A woken Turn that wrote nothing (it errored first) leaves the words it was woken about.
@@ -275,13 +293,11 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     hidden = _last_hidden(db, thread_id, person["seq"])
     from infra.onboarding_events import first_run_message_id
 
-    replied = _replied_after(db, thread_id, person)
-    words = (_unseen(db, thread_id, hidden) or None) if hidden is not None and not replied else None
-    quoted = str(hidden["id"]) if hidden is not None and not replied else None
-    pending = _pending_answers(db, thread_id, person["seq"], quoted)
+    words = (_unseen(db, thread_id, hidden) or None) if hidden is not None else None
+    pending = _pending_answers(db, thread_id, person["seq"], str(hidden["id"]) if hidden is not None else None)
     text = (
         first_run_nudge_text(words) if person["id"] == first_run_message_id(thread_id)
-        else nudge_text(_clock(str(person["created_at"])), words, pending, replied=replied)
+        else nudge_text(_clock(str(person["created_at"])), words, pending)
     )
     try:
         enqueue_event_wake(
@@ -318,8 +334,9 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
         return False  # The person stopped the Turn their message started.
     if status == "running" and person["active_turn_id"] != ending_turn:
         return False  # A later Turn is answering it; that Turn's end decides.
-    if _fully_answered(db, thread_id, person):
-        return False
+    if _replied_after(db, thread_id, person):
+        _place_unsent_answers(db, thread_id, person["seq"])
+        return False  # Sent for them; answers tagged only in hidden text still reach their threads.
     if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.
     return _queue_nudge(db, thread_id, person)
@@ -360,7 +377,10 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
     try:
         with write_transaction(db, scope="reply_not_visible_stop") as connection:
             nudged = _nudged_by(connection, thread_id, turn_id) if _focus_on(connection) else None
-            if nudged is None or _fully_answered(connection, thread_id, nudged[0]):
+            if nudged is None:
+                return
+            if _replied_after(connection, thread_id, nudged[0]):
+                _place_unsent_answers(connection, thread_id, nudged[0]["seq"], nudged[1]["seq"])
                 return
             own = _last_hidden(connection, thread_id, nudged[1]["seq"])
             if own is not None and str(own["content"]).strip() == NO_REPLY:
