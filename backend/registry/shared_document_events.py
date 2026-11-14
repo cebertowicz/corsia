@@ -145,8 +145,13 @@ def report_owner_write(
     and feedback batch; a refused write that landed anyway becomes
     ``ownership_bypass_write``, and the returned notice tells the writer to
     suggest instead. Returns None when the writer needs no notice.
+
+    A write whose known bytes are unchanged is no edit and reports nothing, as
+    ``note_content_edit`` treats an equal digest.
     """
     if authority is None or not authority.reaches_owner:
+        return None
+    if before is not None and after is not None and before == after:
         return None
     if prepared is None and after is not None:
         prepared = prepare_owner_report(authority, artifact, path=path, before=before, after=after, db=db)
