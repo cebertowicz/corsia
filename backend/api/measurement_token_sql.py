@@ -55,3 +55,11 @@ _KEY_INPUT = "".join([f"({_KEY_TOTAL}", *(f" - COALESCE(u.{column}, 0)" for colu
 _KEY_INPUT_UNKNOWN = "".join([f"CASE WHEN ({FRESH_TOKEN_UNKNOWN_SQL}) = 1", *(f" OR u.{column} IS NULL" for column in _KEY_PARTS.values()), " THEN 1 ELSE 0 END"])
 TOKEN_FIGURE_SQL = (("total", _KEY_TOTAL, FRESH_TOKEN_UNKNOWN_SQL), ("input", _KEY_INPUT, _KEY_INPUT_UNKNOWN), *(
     (name, f"COALESCE(u.{column}, 0)", f"CASE WHEN u.{column} IS NULL THEN 1 ELSE 0 END") for name, column in _KEY_PARTS.items()))
+# The class lines again, summed over hourly usage groups (``api.usage_rollup``), which keep each part's sum and the
+# fresh sum but no single call to rebuild a total from. Input is ``_KEY_INPUT`` summed: the fresh sum less the two
+# fresh parts recorded. A read of the hourly groups and the key figures therefore split one set of calls the same way.
+ROLLUP_TOKEN_CLASS_SQL = (
+    ("input", ROLLUP_TOKEN_SUM_SQL + "".join(
+        f" - COALESCE(SUM(u.{column}), 0)" for name, column in _KEY_PARTS.items() if name != "cache_read")),
+    *((name, f"COALESCE(SUM(u.{column}), 0)") for name, column in _KEY_PARTS.items()),
+)
