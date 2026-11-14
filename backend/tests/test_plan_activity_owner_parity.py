@@ -134,6 +134,28 @@ def test_watch_cause_classification_and_header_parity(db, watch_kind):
     assert row["progress"]["liveness"] == "waiting"
 
 
+@pytest.mark.parametrize("watch_kind", ["plain", "scheduled", "blocked"])
+def test_person_task_check_back_has_compact_full_parity(db, watch_kind):
+    """An agent's check-back keeps the person's task theirs in both reads; a blocker wait does not (#2631)."""
+    plan = service.ensure_plan("thread", "moving", db=db)
+    task = _task(plan.id, "Sign in", db=db, assignee="user")
+    db.execute("""INSERT INTO expected_event_watches
+        (id,owner_thread_id,plan_id,plan_node_id,condition_type,condition_value,status,armed_at,created_at,updated_at)
+        VALUES ('watch','moving',?,?,'deadline','2030-01-01T00:00:00+00:00','armed','t','t','t')""", (plan.id, task.id))
+    payload: dict = {"watch_id": "watch"}
+    if watch_kind == "blocked":
+        payload["blocked"] = {"owner_kind": "external", "owner_id": "peer", "reason": "Wait"}
+    if watch_kind == "scheduled":
+        payload["scheduled"] = {"reason": "Later"}
+    if watch_kind != "plain":
+        db.execute("""INSERT INTO plan_node_events(id,node_id,event,provenance,payload_json,created_at)
+            VALUES ('armed',?,'watch_armed','test',?,'t')""", (task.id, json.dumps(payload)))
+    detailed, row = assert_header_parity(db, plan.id)
+    asks = watch_kind != "blocked"
+    assert detailed["nodes"][0]["requires_user_action"] is asks
+    assert row["display"]["label_key"] == ("needs_you" if asks else "waiting")
+
+
 def test_mixed_offset_deadlines_and_invalid_history_use_parsed_chronology(db):
     plan = service.ensure_plan("thread", "moving", db=db)
     task = _task(plan.id, "Historic deadlines", db=db)
