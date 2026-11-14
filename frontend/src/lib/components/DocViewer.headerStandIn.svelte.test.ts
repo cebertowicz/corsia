@@ -39,11 +39,13 @@ let stop: () => void;
 const docs: Y.Doc[] = [];
 /** What the next load of notes answers; null holds it until `answerNotes` runs. */
 let answerNotes: ((ownership: DocOwnership | null) => void) | null = null;
+/** Fails the held load of notes the way a broken load does. */
+let failNotes: (() => void) | null = null;
 const owner = () => host.querySelector<HTMLButtonElement>('[data-ownership-row] button.item[data-role="owner"]');
 const ownerLabel = () => owner()?.getAttribute('aria-label') ?? null;
 
 beforeEach(() => {
-	answerNotes = null;
+	answerNotes = null; failNotes = null;
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue(null);
 	connectionState.set('connected');
@@ -81,7 +83,7 @@ async function returnToNotes() {
 	api.fetchContent.mockImplementation(async (path: string) => {
 		if (path.includes('other')) return { text: texts.other, writable: true, artifact: { id: 'other' }, freshness: null };
 		if (!answerNotes) return { text: texts.notes, writable: true, artifact: { id: 'notes' }, freshness: null, ownership: ownedBy('Release planning') };
-		return new Promise(resolve => { const held = answerNotes; answerNotes = (ownership) => { held?.(ownership); resolve({ text: texts.notes, writable: true, artifact: { id: 'notes' }, freshness: null, ownership: ownership ?? undefined }); }; });
+		return new Promise((resolve, reject) => { failNotes = () => reject(new Error('500 server error')); const held = answerNotes; answerNotes = (ownership) => { held?.(ownership); resolve({ text: texts.notes, writable: true, artifact: { id: 'notes' }, freshness: null, ownership: ownership ?? undefined }); }; });
 	});
 	const props = $state({ target: notes });
 	host = document.createElement('div'); document.body.appendChild(host);
@@ -115,5 +117,13 @@ describe('the owner and supervisor row on a tab return', () => {
 		expect(ownerLabel()).toBe('Owner: Release planning');
 		answerNotes!(null);
 		await vi.waitFor(() => expect(ownerLabel()).toBeNull());
+	});
+
+	it('goes when the load fails, so its pickers do not stay waiting', async () => {
+		await returnToNotes();
+		expect(ownerLabel()).toBe('Owner: Release planning');
+		failNotes!();
+		await vi.waitFor(() => expect(ownerLabel()).toBeNull());
+		expect(host.querySelectorAll('[data-ownership-row] button.item').length).toBe(0);
 	});
 });

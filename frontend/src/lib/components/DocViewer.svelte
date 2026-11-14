@@ -249,7 +249,7 @@
 				onUnavailable: () => signal({ status: 'unavailable' }),
 			})
 				.catch((e) => {
-					if (seq !== loadSeq) return;
+					if (seq !== loadSeq) return; freshness = null; ownership = null; headerStandIn = false; // no answer confirms no row
 					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
 						fail: (failure) => { openRefusal = failure.refusal; docState = failure.state;
 							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
