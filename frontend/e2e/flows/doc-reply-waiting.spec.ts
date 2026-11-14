@@ -532,7 +532,16 @@ for (const theme of ['light', 'dark'] as const) {
 			await reloadComments(page, scenario.artifactId);
 			const commentsPill = page.getByRole('button', { name: '3 comments, 3 unread' });
 			await expect(commentsPill).toBeVisible();
-			await expect(commentsPill).toHaveText(/^\s*3 comments · 3 unread$/);
+			// Up to 600 px of canvas the pill is the icon and "3 unread" alone (the row stays one line); wider, the whole count shows. The
+			// container query reads the canvas's content width, so it is measured the same way.
+			const canvasWidth = await commentsPill.evaluate((pill) => {
+				let canvas: HTMLElement | null = pill.parentElement;
+				while (canvas && !getComputedStyle(canvas).containerName.split(' ').includes('doc-canvas')) canvas = canvas.parentElement;
+				if (!canvas) return Infinity;
+				const style = getComputedStyle(canvas);
+				return canvas.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+			});
+			await expect(commentsPill).toHaveText(canvasWidth > 600 ? /^\s*3 comments · 3 unread$/ : /^\s*3 unread$/, { useInnerText: true });
 			await shot(page, `02-later-reply-passive-${theme}-${width}`);
 
 			// Opening the comments shows the three threads the pill counted. Hold the
