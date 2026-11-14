@@ -31,7 +31,7 @@ from core import lesson_files
 from core.skills_registry import skill_context_sources
 from tests.project_ref_helpers import select_workspace
 from tests.test_checkpoint_placement import _add, _drain, _log, _mark, _raw, _repo
-from tests.test_continuity_staging import _connect, _db, _seed_thread, _tool_db
+from tests.test_continuity_staging import _db, _seed_thread, _tool_db
 
 THREAD = "owner"
 PROVENANCE = "lesson.trial_review"
@@ -51,6 +51,7 @@ class Env:
 
 @pytest.fixture
 def env(tmp_path, monkeypatch) -> Env:
+    import infra.database as database
     from core import placement_worker
 
     workspace = _repo(tmp_path)
@@ -61,7 +62,19 @@ def env(tmp_path, monkeypatch) -> Env:
     _seed_thread(db, THREAD)
     db.execute("UPDATE threads SET title='Lane', agent_enabled=1 WHERE id=?", (THREAD,))
     db.commit()
-    monkeypatch.setattr("infra.database.get_db", lambda: _connect(str(path)))
+    # As the shared test database does: a running server's file is already in write-ahead
+    # logging, and the switch cannot happen inside a tool's write.
+    db.execute("PRAGMA journal_mode=WAL")
+
+    def reconfigure() -> None:
+        # Point the real opener at this database; never replace infra.database.get_db.
+        # A module first imported during a test binds whatever get_db is then and keeps
+        # it after the patch is undone: a replacement that opens this test's temporary
+        # file fails every later test in the process that reaches that module (#2695).
+        monkeypatch.setattr("infra.config.DB_PATH", path)
+        monkeypatch.setattr("infra.database.DB_PATH", path)
+
+    database.shutdown_pool(reconfigure)
     return Env(
         workspace, workspace / ".threads" / THREAD, db, _tool_db(path, monkeypatch),
         placement_worker, monkeypatch,
@@ -602,13 +615,8 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(
     env: Env,
 ) -> None:
-    import infra.database as database
-    from infra import checkpoint_install_preflight, checkpoint_queries
     from infra.checkpoints import create_running
     from tests.test_continuity_staging import _capture_install, _request
-
-    assert checkpoint_install_preflight.get_db is not database.get_db
-    assert checkpoint_queries.get_db is not database.get_db
 
     complete = _entry(env)
     held = _entry(env, SAID, "always search the history first")

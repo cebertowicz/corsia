@@ -1,23 +1,13 @@
 import type { CommentThreadData } from './CommentThreadData';
 
-// Chat answers retain their visible dwell; document threads stamp when the person opens the card.
-const VIEWED_DWELL_MS = 1_500;
-
-/** Record which of a mounted thread's replies the person has seen: chat answers one by one after their dwell, document threads as a watermark. */
+/**
+ * Record which of a mounted thread's replies the person has read. Only opening the thread reads it (`threadOpen`):
+ * chat answers are stamped one by one, document threads as a watermark.
+ */
 export function createReplyStamps(comment: () => CommentThreadData, chat: () => boolean, onViewed: () => ((commentId: string, replyId: string) => Promise<void>) | undefined) {
 	// Plain variable: the newest reply this mounted thread has stamped, so a repeat callback cannot stamp it twice.
 	let lastStamped: string | null = null;
 	const stampedReplies = new Set<string>();
-	const dwellTimers = new Map<string, number>();
-	const dwelled = new Set<string>();
-	let stampTimer: number | null = null;
-	function cancelDwell(replyId?: string) {
-		for (const [id, timer] of dwellTimers) {
-			if (!replyId || id === replyId) { window.clearTimeout(timer); dwellTimers.delete(id); }
-		}
-		if (!replyId && stampTimer !== null) { window.clearTimeout(stampTimer); stampTimer = null; }
-	}
-	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		const current = comment();
 		const record = onViewed();
@@ -26,6 +16,7 @@ export function createReplyStamps(comment: () => CommentThreadData, chat: () => 
 			if (stampedReplies.has(replyId)) return;
 			stampedReplies.add(replyId);
 			record(current.id, replyId).catch((err) => {
+				// A failed stamp leaves the reply unread; the next opening retries it.
 				stampedReplies.delete(replyId);
 				console.warn('Could not record the viewed reply', err);
 			});
@@ -44,34 +35,5 @@ export function createReplyStamps(comment: () => CommentThreadData, chat: () => 
 			if (lastStamped === replyId) lastStamped = previous;
 		});
 	}
-	function advanceStamp() {
-		stampTimer = null;
-		const current = comment();
-		const unread = new Set(current.newReplyIds ?? []);
-		if (chat()) {
-			for (const replyId of unread) if (dwelled.has(replyId)) stamp(replyId);
-			return;
-		}
-		let through: string | undefined;
-		for (const reply of current.replies) {
-			if (!reply.id || !unread.has(reply.id)) continue;
-			if (!dwelled.has(reply.id)) break;
-			through = reply.id;
-		}
-		if (through) stamp(through);
-	}
-	function dwellThenStamp(replyId: string) {
-		if (document.visibilityState !== 'visible' || dwellTimers.has(replyId)) return;
-		if (dwelled.has(replyId)) {
-			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
-			return;
-		}
-		dwellTimers.set(replyId, window.setTimeout(() => {
-			dwellTimers.delete(replyId);
-			dwelled.add(replyId);
-			// Coalesce replies that finish their dwell together into one watermark update.
-			if (stampTimer === null) stampTimer = window.setTimeout(advanceStamp, 0);
-		}, VIEWED_DWELL_MS));
-	}
-	return { stamp, dwellThenStamp, cancelDwell };
+	return { stamp };
 }

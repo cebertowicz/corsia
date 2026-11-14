@@ -88,7 +88,7 @@ def _registration_kind(existing) -> str:
     return "rebind"
 
 
-def _upsert_identity(
+def upsert_identity(
     db,
     *,
     integration: str,
@@ -216,7 +216,7 @@ def _prepare_identity_registration(
     insert_retention = retention or (
         RETENTION_EPHEMERAL if retention_default else RETENTION_DURABLE
     )
-    identity, inserted = _upsert_identity(
+    identity, inserted = upsert_identity(
         db,
         integration=integration,
         artifact_type=artifact_type,

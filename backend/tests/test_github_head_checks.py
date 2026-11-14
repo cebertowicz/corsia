@@ -170,6 +170,36 @@ async def test_sink_failure_is_logged_and_clears_both_maps(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_a_locked_intake_is_retried_under_the_same_event_id(monkeypatch):
+    import sqlite3
+
+    async def read(*_args):
+        return response(), None
+
+    class LockedOnceSink(Sink):
+        async def admit_event(self, **event):
+            self.events.append(event)
+            if len(self.events) == 1:
+                raise sqlite3.OperationalError("database is locked: write admission for admit_event waited 30s")
+            return SimpleNamespace(refusal=None)
+
+    forgotten = []
+
+    async def forget(*key):
+        forgotten.append(key)
+
+    monkeypatch.setattr(poller, "gated_read", read)
+    monkeypatch.setattr(checks.pending, "forget", forget)
+    sink = LockedOnceSink()
+    agg = aggregator(sink)
+    agg.observe(payload())
+    await finish(agg)
+    assert len(sink.events) == 2 and sink.events[0]["event_id"] == sink.events[1]["event_id"]
+    assert forgotten == [("o/r", "abc")]  # admitted, so not kept for a restart
+    assert not agg._tasks and not agg._facts
+
+
+@pytest.mark.asyncio
 async def test_refusal_logged_without_optional_none_facts(monkeypatch, caplog):
     async def read(*_args):
         return response(), None

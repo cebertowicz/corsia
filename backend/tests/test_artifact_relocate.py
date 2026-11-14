@@ -75,6 +75,32 @@ class TestRelocateSuccess:
         assert not source.exists()
         assert target.read_text() == "content"
 
+    def test_saved_calls_follow_the_file_to_its_new_path(self, workspace_zone):
+        """A wake asks the agent to repeat a saved call, so it must name the file where it now is."""
+        import json
+
+        db = get_db()
+        sid = _mk_session(db)
+        source, target = _paths(workspace_zone)
+        art = _register_file(db, sid, source)
+        user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (sid,)).fetchone()[0])
+        ops = [
+            {"call": {"path": str(source), "old_string": "Launch", "new_string": "Ship"}},
+            {"call": {"path": str(workspace_zone / "other.md"), "old_string": "a", "new_string": "b"}},
+        ]
+        db.execute(
+            """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
+               VALUES ('line-relocated','root-relocated',?,?,?,?,'2026-11-13T00:00:00+00:00')""",
+            (art["id"], sid, user_id, json.dumps(ops)),
+        )
+        db.commit()
+
+        relocate_artifact(art["id"], str(target), actor_thread_id=sid, db=db)
+
+        saved = json.loads(db.execute("SELECT ops FROM doc_comment_writer_line WHERE id='line-relocated'").fetchone()[0])
+        assert saved[0]["call"] == {"path": str(target.resolve()), "old_string": "Launch", "new_string": "Ship"}
+        assert saved[1]["call"]["path"] == str(workspace_zone / "other.md")
+
     def test_updates_external_id_without_creating_a_duplicate_identity(
         self, workspace_zone,
     ):

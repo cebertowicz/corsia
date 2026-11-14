@@ -23,6 +23,43 @@ jobs:
       GIT_CONFIG_NOSYSTEM: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The key scan below reads the pull request's own commits.
+          fetch-depth: 0
+
+      # A key committed in any of this pull request's commits blocks the
+      # merge, so it never reaches what installs pull. Each commit is
+      # scanned on its own, so a later commit that removes or marks the line
+      # does not clear it. A real key: revoke it (the branch is already
+      # public), then rewrite the branch so no commit holds it. A false
+      # match: add the fingerprint the report prints to .gitleaksignore, or
+      # end the line with a `gitleaks:allow` comment in the commit that adds
+      # it. This step sits in an already-required job so every pull request
+      # runs it; a failure is annotated "Committed key found".
+      - name: No committed keys (gitleaks)
+        if: github.event_name == 'pull_request'
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          tarball="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL --retry 3 -o "$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $tarball" | sha256sum --check --strict
+          tar -xzf "$tarball" -C "$RUNNER_TEMP" gitleaks
+          # Exit 2 means a key was found; any other failure is the tool's own.
+          rc=0
+          "$RUNNER_TEMP/gitleaks" git . --no-banner --redact --exit-code 2 \
+            --log-opts="${BASE_SHA}..${HEAD_SHA}" || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            msg="A commit in this pull request holds a key. A later commit does not clear it; see the comment above this step in docs-drift.yml."
+            echo "::error title=Committed key found::${msg}"
+            printf '## Committed key found\n\n%s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$rc"
 
       - uses: actions/setup-python@v5
         with:
