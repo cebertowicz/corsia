@@ -1,16 +1,14 @@
 // Email draft: the comment jump control follows the body that scrolls (#2483). A draft lets its CodeMirror scroller grow to the whole
 // text and scrolls `.doc-body.email-scroll` around it, so the control has to judge a highlight against that body.
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createSession, loginByUrl, sidebarThread, TEST_TOKEN } from '../support/corsia';
 import { fresh, markEmailDraft, mockEmailDraftContext } from '../support/emailDraftContext';
+import { isolatedDb } from '../support/heldComments';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const RUN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 const ANCHOR = 'The north trailhead lot is where the crew meets at eight.';
 const PARAGRAPHS = Array.from({ length: 40 }, (_, i) => i === 19
@@ -47,14 +45,9 @@ test('@surface:doc-jump-control email draft: the control shows for a highlight s
 	const rootId = (await root.json()).comment.id as string;
 	// An agent's answer on the reader's comment is what makes it unread.
 	const now = new Date().toISOString();
-	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), [
-		'-c', [
-			'import sqlite3, sys',
-			'c = sqlite3.connect(sys.argv[1])',
-			"c.execute(\"INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, 'Maya Chen', 'agent', ?, 'Eight works.', ?, ?)\", sys.argv[2:7])",
-			'c.commit()',
-		].join('\n'), path.join(process.env.CORSIA_E2E_STATE_DIR!, 'corsia.db'), artifactId, rootId, threadId, now, now,
-	], { cwd: repoRoot, encoding: 'utf8' });
+	isolatedDb([
+		"connection.execute(\"INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, 'Maya Chen', 'agent', ?, 'Eight works.', ?, ?)\", sys.argv[2:7])",
+	], artifactId, rootId, threadId, now, now);
 
 	await mockEmailDraftContext(page, () => fresh());
 	await markEmailDraft(page, docPath);
