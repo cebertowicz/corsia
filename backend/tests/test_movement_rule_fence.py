@@ -82,12 +82,25 @@ async def test_project_worker_brief_receives_filtered_report(world, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_workspace_writer_cannot_author_rules(world):
-    from infra.database import get_db
-    db = get_db()
-    db.execute("UPDATE threads SET project_id=NULL WHERE id=?", (OWNER,))
+async def test_rule_written_outside_projects_gets_no_project_report(world):
+    """An agent in no project can write the rule; a project's report never reaches it."""
+    from events.movement_report import deliver_movement_report_sync
+
+    db, report, private, own = report_with_other_project(world)
+    outside = 'rw-outside'
+    db.execute("INSERT INTO threads (id, user_id, title, model, project_id, created_at, updated_at) "
+               "VALUES (?, 'user-1', 'Outside', 'claude-code/sonnet', NULL, 't', 't')", (outside,))
     db.commit()
-    result = await atool(OWNER, operation='create', connector='measurement', event_type='measurement.movement_digest',
-                         action='deliver', match=[{'field': 'scope', 'op': 'present'}])
-    assert isinstance(result, str)
-    assert 'Rules cover a project' in result
+    rule = await atool(outside, operation='create', connector='measurement',
+                       event_type='measurement.movement_digest', action='deliver',
+                       match=[{'field': 'scope', 'op': 'present'}])
+    assert isinstance(rule, dict), rule
+    deliver_movement_report_sync(report, db=db)
+    assert starts(rule['id']) == []
+    reached = db.execute(
+        "SELECT (SELECT COUNT(*) FROM context_change_journal WHERE object_id=?) + "
+        "(SELECT COUNT(*) FROM messages WHERE thread_id=?)", (outside, outside)).fetchone()[0]
+    assert reached == 0
+    owner = db.execute("SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
+                       "AND object_id=?", (OWNER,)).fetchone()
+    assert own in owner['summary'] and private not in owner['summary']

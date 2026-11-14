@@ -169,6 +169,8 @@ export interface OperatorNode {
 	title: string;
 	description: string | null;
 	comment_attention?: CommentAttention;
+	/** An open step the person completes in a shared browser: the thread whose browser it is in. */
+	browser_thread_id?: string;
 	/** Open steps in this plan that this user-assigned step releases. */
 	waiting_on: string[];
 	acceptance_criteria: string;

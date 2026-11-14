@@ -13,7 +13,7 @@ const AGENT_NAMES = ['Research coordinator', 'Community outreach', 'Garden volun
  * scope with a few more agents ("Community outreach" has a paused plan). Returns `open(page)`, which opens the
  * document beside that agent's chat, and the ids a spec needs to move the document into another ownership state.
  */
-export async function seedOwnedDocument(page: Page, request: APIRequestContext) {
+export async function seedOwnedDocument(page: Page, request: APIRequestContext, heading = 'Project planning') {
 	const owner = await createSession(request, 'Release planning');
 	const agents: string[] = [];
 	for (const name of AGENT_NAMES) agents.push(await createSession(request, name));
@@ -37,7 +37,7 @@ export async function seedOwnedDocument(page: Page, request: APIRequestContext) 
 		['Scope', 'Begin with shared beds, a tool store and a clear path through the garden.'],
 		['Next steps', 'Share the planting plan and invite neighbours to the first session.'],
 	].map(([title, body]) => `## ${title}\n\n${body}`).join('\n\n');
-	const created = await request.put('/api/files/content', { params, data: { path: docPath, text: `# Project planning\n\n${sections}\n`, thread_id: owner, description: 'Planning document', create: true } });
+	const created = await request.put('/api/files/content', { params, data: { path: docPath, text: `# ${heading}\n\n${sections}\n`, thread_id: owner, description: 'Planning document', create: true } });
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const artifact = (await created.json()).artifact.id as string;
 	isolatedDb([
