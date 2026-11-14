@@ -8,6 +8,7 @@ from history.projection import in_read_snapshot
 from infra.focus_rows import NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL
 from infra.turn_errors import apply_error_next_steps
 from infra.queries import get_thread_for_user
+from infra.id_bind_chunk import id_chunks
 from core.message_display import llm_to_display
 from api.thread_turn_summaries import page_turn_summaries
 from infra.message_activity import DISPLAY_ROW_SELECT
@@ -89,13 +90,18 @@ def _project_delivery_intents(
     ]
     if not message_ids:
         return
-    placeholders = ",".join("?" for _ in message_ids)
-    rows = db.execute(
-        "SELECT id AS message_id,delivery_intent FROM messages "
-        "WHERE thread_id=? AND id IN (" + placeholders + ")",
-        [thread_id, *message_ids],
-    ).fetchall()
-    intents = {str(row["message_id"]): str(row["delivery_intent"]) for row in rows}
+    # A page with no `limit` displays every row of the thread, so the ids are
+    # sought in chunks: one statement never binds more than
+    # `IDS_PER_STATEMENT` of them, and the chunks share one id set.
+    intents: dict[str, str] = {}
+    for chunk in id_chunks(message_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        for row in db.execute(
+            "SELECT id AS message_id,delivery_intent FROM messages "
+            "WHERE thread_id=? AND id IN (" + placeholders + ")",
+            [thread_id, *chunk],
+        ).fetchall():
+            intents[str(row["message_id"])] = str(row["delivery_intent"])
     for row in display_msgs:
         metadata = row.get("metadata")
         if isinstance(metadata, dict):

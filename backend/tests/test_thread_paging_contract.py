@@ -16,6 +16,7 @@ import sqlite3
 import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.id_bind_chunk import IDS_PER_STATEMENT
 
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
@@ -353,3 +354,54 @@ def test_bounded_page_queries_seek_indexes_without_sorting_the_thread():
         )
         if "role = 'tool'" in sql:
             assert any("idx_messages_tool_lineage" in step for step in plan), (sql, plan)
+
+
+def test_unbounded_read_projects_queue_beyond_the_bindable_variable_limit():
+    """A page with no `limit` displays the whole thread, so the queue projection
+    cannot bind one variable per displayed id in one statement.
+
+    A lowered connection limit stands in for a thread whose displayed rows are
+    that much larger than one statement may bind.
+    """
+    thread = _Thread()
+    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, IDS_PER_STATEMENT + 10)
+    ids = [f"m{n}" for n in range(2 * IDS_PER_STATEMENT + 1)]
+    for mid in ids:
+        thread.add(mid, "user")
+    queued = ids[-1]  # past the first chunk of displayed ids
+    thread.conn.execute(
+        "UPDATE messages SET delivery_intent='queue_after_turn' WHERE id=?", (queued,),
+    )
+
+    page, has_more, oldest = page_messages(thread.conn, _SID, limit=None, before=None)
+
+    assert has_more is False and oldest == ids[0]
+    assert [row["id"] for row in page] == ids
+    assert [
+        row["id"] for row in page if (row["metadata"] or {}).get("delivery_intent")
+    ] == [queued]
+    by_id = {row["id"]: row for row in page}
+    assert by_id[queued]["metadata"] == {"delivery_intent": "queue_after_turn"}
+    assert by_id[ids[0]]["metadata"] is None
+
+
+def test_large_page_fetches_lineage_beyond_the_bindable_variable_limit():
+    """`limit` bounds a page by whatever the caller asks for, so the lineage
+    fetch cannot bind one variable per anchor in one statement either."""
+    thread = _Thread()
+    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, IDS_PER_STATEMENT + 10)
+    steps = [f"s{n}" for n in range(2 * IDS_PER_STATEMENT + 1)]
+    for n, step in enumerate(steps):
+        thread.step(step, f"c{n}")
+        # Half the children carry no authoritative step id, so both lineage
+        # lookups run over the whole page.
+        if n % 2:
+            thread.result(f"r{n}", f"c{n}", f"out {n}", step=step)
+        else:
+            thread.result(f"r{n}", f"c{n}", f"out {n}")
+
+    page, _, _ = page_messages(thread.conn, _SID, limit=len(steps), before=None)
+
+    assert [row["id"] for row in page] == steps
+    assert _results(page[0]) == ["out 0"]
+    assert _results(page[-1]) == [f"out {len(steps) - 1}"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.stop_causes import PLAN_LIMIT_REASON
+from infra.id_bind_chunk import id_chunks
 from infra.message_activity import ACTIVITY_ROW_SQL, ACTIVITY_SQL
 from infra.time import utc_storage_iso_to_api
 
@@ -30,23 +31,33 @@ def page_turn_summaries(db, thread_id: str, display: list[dict]) -> dict[str, di
     turn_ids = page_turn_ids(display)
     if not turn_ids:
         return {}
-    marks = ",".join("?" for _ in turn_ids)
-    activity_rows = db.execute(
-        "SELECT json_extract(metadata, '$.turn_id') AS turn_id, "
-        f"SUM({ACTIVITY_SQL}) AS activity_count "
-        "FROM messages INDEXED BY idx_messages_turn_calls "
-        f"WHERE thread_id=? AND {ACTIVITY_ROW_SQL} "
-        f"AND json_extract(metadata, '$.turn_id') IN ({marks}) "
-        "GROUP BY json_extract(metadata, '$.turn_id')",
-        [thread_id, *turn_ids],
-    ).fetchall()
-    activity_by_turn = {str(row["turn_id"]): int(row["activity_count"]) for row in activity_rows}
-    turns = db.execute(
-        "SELECT id,status,started_at,ended_at,error FROM active_turns "
-        f"WHERE thread_id=? AND id IN ({marks})",
-        [thread_id, *turn_ids],
-    ).fetchall()
-    return {str(row["id"]): _summary(row, activity_by_turn.get(str(row["id"]), 0)) for row in turns}
+    # A page with no `limit` hands over every Turn of the thread, so both reads
+    # seek a chunk of Turn ids at a time. Each Turn falls in exactly one chunk,
+    # so a Turn's activity count is read before its own summary is built.
+    activity_by_turn: dict[str, int] = {}
+    summaries: dict[str, dict] = {}
+    for chunk in id_chunks(turn_ids):
+        marks = ",".join("?" for _ in chunk)
+        params = [thread_id, *chunk]
+        for row in db.execute(
+            "SELECT json_extract(metadata, '$.turn_id') AS turn_id, "
+            f"SUM({ACTIVITY_SQL}) AS activity_count "
+            "FROM messages INDEXED BY idx_messages_turn_calls "
+            f"WHERE thread_id=? AND {ACTIVITY_ROW_SQL} "
+            f"AND json_extract(metadata, '$.turn_id') IN ({marks}) "
+            "GROUP BY json_extract(metadata, '$.turn_id')",
+            params,
+        ).fetchall():
+            activity_by_turn[str(row["turn_id"])] = int(row["activity_count"])
+        for row in db.execute(
+            "SELECT id,status,started_at,ended_at,error FROM active_turns "
+            f"WHERE thread_id=? AND id IN ({marks})",
+            params,
+        ).fetchall():
+            summaries[str(row["id"])] = _summary(
+                row, activity_by_turn.get(str(row["id"]), 0),
+            )
+    return summaries
 
 
 def _summary(row, activity_count: int) -> dict:
