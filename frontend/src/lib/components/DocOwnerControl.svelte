@@ -21,7 +21,7 @@
 	// The picker opens below both items, so it never covers the other one when they wrap onto two lines.
 	const bothItems = () => group?.getBoundingClientRect() ?? null;
 
-	const ownerName = $derived(pending?.role === 'owner' ? pending.name : ownership.owner.kind === 'person' ? 'You' : ownership.owner.kind === 'none' ? 'Not set' : ownership.owner.name ?? 'Not set');
+	const ownerName = $derived(pending?.role === 'owner' ? pending.name : ownership.owner.label);
 	const ownerId = $derived(pending?.role === 'owner' ? pending.id : ownership.owner.kind === 'person' ? 'user' : ownership.owner.id);
 	// A paused supervisor keeps its name with the list's Paused mark; one that is gone reads "Not set".
 	const supervisorId = $derived(pending?.role === 'supervisor' ? pending.id : ownership.supervisor?.id ?? null);
@@ -32,9 +32,9 @@
 	// One agent holding both roles reads as one item; its Owner picker can still hand the supervisor role to another agent.
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
-	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.status === 'paused' ? 'Paused' : '' })));
+	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
 	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
-	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '' }, ...agents]);
+	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
 
@@ -67,13 +67,13 @@
 			failed = { role, message: !navigator.onLine ? `Couldn’t change the ${role} because you’re offline. Reconnect and try again.` : detail ?? `Couldn’t change the ${role}. Try again.` };
 		} finally { pending = null; saving = false; }
 	}
-	function saveNote(role: Role) { return pending?.role === role ? ', saving' : failed?.role === role ? ', change failed' : ''; }
+	function saveNote(role: Role) { return pending?.role === role ? ', saving' : failed?.role === role ? ', couldn’t change' : ''; }
 	// The second Owner picker route: when one agent holds both roles, the merged item's picker offers the supervisor role separately.
 	function pickSupervisor() { const button = anchor; picker = null; if (button) void tick().then(() => open('supervisor', button)); }
 </script>
 
 {#snippet status(role: Role)}
-	{#if pending?.role === role}<span class="note-inline">Saving…</span>{:else if failed?.role === role}<span class="failure">Change failed</span>{/if}
+	{#if pending?.role === role}<span class="note-inline">Saving…</span>{:else if failed?.role === role}<span class="failure">Couldn’t change</span>{/if}
 {/snippet}
 {#snippet chevron()}
 	<svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
@@ -98,15 +98,16 @@
 	{#if picker}
 		{@const role = picker}
 		<div class="role-picker" data-role={role}>
-			{#if !ownership.can_change}<p class="note">Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA.</p>
+			{#if !ownership.can_change}<p class="note">{ownership.refusal}</p>
 			{:else}
 			<label for={`${role}-choice`}>{role === 'owner' ? 'Owner' : 'Supervisor'}</label>
 			<input id={`${role}-choice`} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${role}-options`} aria-activedescendant={matches.length ? `${role}-options-option-${matches[Math.min(active, matches.length - 1)].id}` : undefined} aria-describedby={failed?.role === role ? `${role}-error` : undefined} placeholder="Search agents" autocomplete="off" value={search} oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys} />
-			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />
-			{:else}<p class="note">There are no agents in this project to choose from.</p>{/if}
+			{#if options.length}<AgentOptions id={`${role}-options`} label={role === 'owner' ? 'Owners' : 'Supervisors'} {matches} active={Math.min(active, matches.length - 1)} {choose} compact />{/if}
+			{#if ownership.scope === null}<p class="note">Couldn’t load the agents for this document. Reload the page to try again.</p>
+			{:else if !options.length}<p class="note">There are no agents in this {ownership.scope} to choose from.</p>{/if}
 			{/if}
 			{#if failed?.role === role}<p id={`${role}-error`} class="failure" role="status">{failed.message}</p>{/if}
-			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">Only an agent can own a document when more than one person uses CORSIA here.</p>{/if}
+			{#if role === 'owner' && ownership.multi_person && ownership.can_change}<p class="note">{ownership.multi_person_refusal}</p>{/if}
 			{#if role === 'supervisor' && supervisorPaused}<p class="note">This agent is paused. Comments wait until it resumes.</p>
 			{:else if role === 'supervisor' && !supervisorShown}<p class="note">No one gets comments on this document.</p>{/if}
 			{#if role === 'owner' && merged}<button type="button" class="link" onclick={pickSupervisor}>Choose a different supervisor</button>{/if}

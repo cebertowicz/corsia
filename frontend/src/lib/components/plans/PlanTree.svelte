@@ -19,7 +19,7 @@
 	import PlanRowActions from './PlanRowActions.svelte';
 	import type { ScheduledView } from './planDisplay';
 	import { carriedByParent, rolledLive } from './planLiveStep';
-	import { personStepInstructionsDocument } from './nodeDetailsText';
+	import { doTarget, openStep } from '$lib/personStepChip';
 	import PlanRowDetails from './PlanRowDetails.svelte';
 	import PlanTaskMenuHost from './PlanTaskMenuHost.svelte';
 	import { createTaskMenu } from './taskMenu.svelte';
@@ -183,7 +183,7 @@
 <!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
 {#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
 		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
-		{@const instructions = personStepInstructionsDocument(node)}
+		{@const step = doTarget(node)}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
@@ -199,16 +199,16 @@
 			aria-current={currentNodeIds.includes(node.id) ? 'step' : undefined}
 		>
 			<!-- The row body is the details disclosure (a person step with an instructions
-			     document opens it instead): status, title and subline are one control. A branch's
+			     document or a shared browser opens that instead): status, title and subline are one control. A branch's
 			     done/total count and chevron are its separate expand control, a sibling. -->
 			<button
 				class="row-body"
 				type="button"
-				aria-expanded={instructions ? undefined : detailsExpanded(node.id)}
-				aria-controls={instructions ? undefined : rowControls.detailsId(node.id)}
+				aria-expanded={step.kind === 'details' ? detailsExpanded(node.id) : undefined}
+				aria-controls={step.kind === 'details' ? rowControls.detailsId(node.id) : undefined}
 				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
-				title={instructions ? 'Open instructions' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
-				onclick={() => instructions ? onOpenArtifact(instructions, node.title) : reveal.byRequest(() => toggleDetails(node.id))}
+				title={step.kind === 'document' ? 'Open instructions' : step.kind === 'browser' ? 'Open browser' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
+				onclick={() => step.kind === 'document' ? onOpenArtifact(step.artifact, node.title) : openStep(null, step, node.title) || reveal.byRequest(() => toggleDetails(node.id))}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}

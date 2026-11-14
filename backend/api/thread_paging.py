@@ -89,11 +89,10 @@ def _project_delivery_intents(
     ]
     if not message_ids:
         return
-    placeholders = ",".join("?" for _ in message_ids)
     rows = db.execute(
         "SELECT id AS message_id,delivery_intent FROM messages "
-        "WHERE thread_id=? AND id IN (" + placeholders + ")",
-        [thread_id, *message_ids],
+        "WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
+        [thread_id, json.dumps(message_ids)],
     ).fetchall()
     intents = {str(row["message_id"]): str(row["delivery_intent"]) for row in rows}
     for row in display_msgs:
