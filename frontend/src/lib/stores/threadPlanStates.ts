@@ -114,6 +114,7 @@ async function loadChunk(ids: string[]): Promise<void> {
 	threadPlanStates.update((current) => {
 		const next = { ...current };
 		for (const id of ids) {
+			if (pending.has(id)) continue; // A nudge invalidated this reading while it was out.
 			// A thread dropped while its read was out keeps no reading nothing will refresh.
 			if (!isTracked(id)) continue;
 			if (states[id]) next[id] = states[id];

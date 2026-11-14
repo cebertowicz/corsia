@@ -252,6 +252,10 @@ def _insert_delivered_message(
             sequence,
         ),
     )
+    if role == "assistant":
+        from infra.message_update_seen import record_assistant
+
+        record_assistant(db, message_id, thread_id, created_at)
     place_answers(db, message_id, thread_id, role, content, sequence, created_at, metadata)
 
 

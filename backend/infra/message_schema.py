@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.delivery_states import INPUT_DELIVERY_STATES, sql_state_literals
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 
 MESSAGE_SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS messages (
@@ -60,4 +61,5 @@ MESSAGE_SCHEMA_SQL = f"""
         seq INTEGER
     );
     {CHAT_COMMENT_SCHEMA_SQL}
+    {MESSAGE_UPDATE_SCHEMA_SQL}
 """

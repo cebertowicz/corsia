@@ -16,6 +16,7 @@ from infra.send_broadcast import broadcast_message_rows
 from infra.time import utc_now_iso
 from tools.artifact_tool_helpers import causal_turn_id
 from tools.base import Tool
+from tools.post_update_text import replacement_args, refuse
 from tools.catalog_entries import POST_UPDATE_ATTENTION_GUIDANCE, POST_UPDATE_SUMMARY
 
 log = logging.getLogger(__name__)
@@ -164,58 +165,51 @@ def _running_turn_model_metadata(
     }
 
 
-def _persist_update(
-    thread_id: str,
-    text: str,
-    node_id: str | None,
-    idempotency_key: str | None,
-    turn_id: str,
-) -> tuple[str, bool, str]:
-    """Write one update, or return its durable prior receipt on a safe retry.
+def _persist_update(thread_id, text, node_id, idempotency_key, turn_id, replace=(), replace_reason=None):
+    """Write a complete replacement and its exact receipt under one write transaction."""
+    from contextlib import ExitStack
+    from infra.message_update_seen import snapshot
+    from infra.message_update_state import apply_replacement, register, unseen_updates, validate_targets
+    from tools.post_update_text import result_text
+    from tools.post_update_retry import replay_result
 
-    The message and its ``marked`` update record commit together at one
-    timestamp, or neither does. Returns the message id, whether it was a
-    replay, and the thread's user for the after-commit nudge. The transcript
-    scans run first, outside the write lock; the locked pass re-reads only the
-    rows committed since, so a concurrent same-key write is still seen.
-    """
     ahead = _read_ahead(thread_id, idempotency_key, turn_id)
-    with write_transaction(None, scope="post_update") as db:
-        owner = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
-        if owner is None:
-            raise ValueError("the calling thread no longer exists; the update was not saved")
-        user_id = str(owner["user_id"])
-        if node_id is not None and not _own_plan_node(db, thread_id, node_id):
-            raise ValueError(
-                "node_id is not an open or settled node in your plan; omit it or pass a node from plan_read"
-            )
-        if idempotency_key is not None:
-            prior = _resolve_newest(
-                db, _KEYED_SQL, thread_id, idempotency_key, ahead.first_unread, ahead.prior_id,
-            )
-            if prior is not None:
-                prior_metadata = json.loads(prior["metadata"] or "{}")
-                if prior["content"] != text or prior_metadata.get("node_id") != node_id:
-                    raise ValueError(
-                        "idempotency_key was already used for a different update; pass a new key"
-                    )
-                return str(prior["id"]), True, user_id
-
-        metadata: dict[str, Any] = {"for_user": True, "turn_id": turn_id}
-        metadata.update(_running_turn_model_metadata(db, thread_id, turn_id, ahead))
-        if node_id is not None:
-            metadata["node_id"] = node_id
-        if idempotency_key is not None:
-            metadata[_IDEMPOTENCY_METADATA_KEY] = idempotency_key
-        created_at = utc_now_iso()
-        message_id = insert_message(
-            thread_id, "assistant", text, metadata, db=db, created_at=created_at,
-        )
-        thread_updates.record_marked(
-            db, thread_id=thread_id, message_id=message_id, node_id=node_id,
-            created_at=created_at,
-        )
-        return message_id, False, user_id
+    with ExitStack() as stack:
+        with write_transaction(None, scope="post_update") as db:
+            owner = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+            if owner is None:
+                raise ValueError("The calling chat no longer exists.")
+            user_id = str(owner["user_id"])
+            if idempotency_key is not None:
+                prior = _resolve_newest(db, _KEYED_SQL, thread_id, idempotency_key,
+                                        ahead.first_unread, ahead.prior_id)
+                if prior is not None:
+                    saved = replay_result(db, prior, text, node_id, replace, replace_reason)
+                    return str(prior["id"]), True, user_id, saved
+            if node_id is not None and not _own_plan_node(db, thread_id, node_id):
+                raise ValueError("node_id is not a node in your plan; omit it or use a node from plan_read.")
+            live = stack.enter_context(snapshot(user_id, thread_id))
+            now = utc_now_iso()
+            validate_targets(db, thread_id, user_id, replace, live, now)
+            metadata = {"for_user": True, "turn_id": turn_id,
+                        **_running_turn_model_metadata(db, thread_id, turn_id, ahead)}
+            if node_id is not None:
+                metadata["node_id"] = node_id
+            if idempotency_key is not None:
+                metadata[_IDEMPOTENCY_METADATA_KEY] = idempotency_key
+            if replace:
+                metadata["post_update_replace"] = list(replace)
+                metadata["post_update_replace_reason"] = replace_reason
+            message_id = insert_message(thread_id, "assistant", text, metadata, db=db, created_at=now)
+            register(db, message_id, thread_id, "post_update", node_id)
+            apply_replacement(db, thread_id, message_id, replace, replace_reason, now)
+            thread_updates.record_marked(db, thread_id=thread_id, message_id=message_id,
+                                         node_id=node_id, created_at=now)
+            rows = unseen_updates(db, thread_id, user_id, message_id, live, now)
+            saved = result_text(message_id, replace, rows, thread_id)
+            db.execute("UPDATE message_update_state SET result_text=?,result_chars=? WHERE message_id=?",
+                       (saved, len(saved), message_id))
+            return message_id, False, user_id, saved
 
 
 class PostUpdateTool(Tool):
@@ -250,6 +244,14 @@ class PostUpdateTool(Tool):
                     "type": "string",
                     "description": "Optional stable retry key for this one update.",
                 },
+                "replace": {
+                    "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": True,
+                    "description": "Your own unseen update ids in this chat to replace together; omit for a new subject.",
+                },
+                "replace_reason": {
+                    "type": "string", "enum": ["corrects", "updates"],
+                    "description": "Required with replace: corrects a wrong claim, or updates the same subject.",
+                },
             },
             "required": ["text"],
         }
@@ -258,39 +260,45 @@ class PostUpdateTool(Tool):
         """Persist and broadcast one validated update for the current thread."""
         thread_id = kwargs.get("_thread_id")
         if not isinstance(thread_id, str) or not thread_id:
-            return "Error: the calling thread could not be resolved"
+            return refuse("The calling chat could not be resolved.")
         text = _clean_text(kwargs.get("text"))
         if text is None:
-            return "Error: text must be non-empty after trimming"
+            return refuse("text must be non-empty after trimming.")
         if len(text) > _MAX_TEXT_LENGTH:
-            return f"Error: text must be at most {_MAX_TEXT_LENGTH:,} characters"
+            return refuse(f"text must be at most {_MAX_TEXT_LENGTH:,} characters; put longer detail in a linked document.")
         turn_id = causal_turn_id(kwargs)
         if not turn_id:
-            return "Error: the calling Turn could not be resolved; the update was not saved"
+            return refuse("The calling turn could not be resolved.")
         node_id = _clean_text(kwargs.get("node_id")) if "node_id" in kwargs else None
         if "node_id" in kwargs and node_id is None:
-            return "Error: node_id must be non-empty when passed; omit it or pass a node from plan_read"
+            return refuse("node_id must be non-empty when passed; omit it or use a node from plan_read.")
         idempotency_key = (
             _clean_text(kwargs.get("idempotency_key"))
             if "idempotency_key" in kwargs
             else None
         )
         if "idempotency_key" in kwargs and idempotency_key is None:
-            return "Error: idempotency_key must be non-empty when passed"
+            return refuse("idempotency_key must be non-empty when passed.")
         try:
-            message_id, duplicate, user_id = await run_in_db(
-                partial(_persist_update, thread_id, text, node_id, idempotency_key, turn_id),
+            replace, replace_reason = replacement_args(kwargs)
+            message_id, duplicate, user_id, saved = await run_in_db(
+                partial(_persist_update, thread_id, text, node_id, idempotency_key, turn_id, replace, replace_reason),
             )
         except ValueError as exc:
-            return f"Error: {exc}"
+            return refuse(str(exc))
         except Exception as exc:
-            return f"Error: update could not be saved ({type(exc).__name__})"
+            return refuse(f"The update transaction failed ({type(exc).__name__}); retry with the same idempotency_key.")
         if not duplicate:
             log.info("post_update.sent thread=%s turn=%s", thread_id, turn_id)
             thread_updates.notify_changed(user_id, [thread_id])
             try:
-                await broadcast_message_rows(thread_id, (message_id,))
+                if replace:
+                    from infra.send_broadcast import broadcast_replacement
+
+                    await broadcast_replacement(thread_id, message_id, replace)
+                else:
+                    await broadcast_message_rows(thread_id, (message_id,))
             except Exception:
                 # The committed message remains visible after reload.
                 log.warning("post_update broadcast failed for message %s", message_id, exc_info=True)
-        return f"Update saved as message {message_id}."
+        return saved

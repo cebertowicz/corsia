@@ -1,4 +1,6 @@
 import { get } from 'svelte/store';
+import { pruneReplacedRows } from '../messageReplacements';
+import { handleReplacementFrame } from './replacementFrame';
 import {
 	messages,
 	upsertVisibleThread,
@@ -50,10 +52,10 @@ function reconcileCorrelatedMessage(
 		: existing
 			? { ...mergeMessageDelivery(existing, incoming), typewriterPos: existing.typewriterPos }
 			: incoming;
-	return [
+	return pruneReplacedRows([
 		...current.filter(message => message !== existing && message.id !== incoming.id),
 		reconciled,
-	];
+	]);
 }
 
 function reconcileQueuedInputReceipt(data: any): void {
@@ -90,6 +92,7 @@ function reconcileQueuedInputReceipt(data: any): void {
 export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOwner = () => true) {
 	if (FORWARDED_TYPES.has(data.type)) { emit(data.type, data); return; }
 	switch (data.type) {
+		case 'messages_replaced': handleReplacementFrame(data); break;
 		case 'subagent_spawned': {
 			if (data.child_thread_id) {
 				registerSubagent(data.thread_id, data.child_thread_id, data.name || 'subagent', data.provider || 'cc', 'running');

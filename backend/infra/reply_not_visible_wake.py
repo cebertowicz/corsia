@@ -190,6 +190,9 @@ def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row)
         "WHERE id=?",
         (row["id"],),
     )
+    from infra.message_update_state import register
+
+    register(db, str(row["id"]), thread_id, "reminder_fallback")
     thread_updates.record_marked(
         db, thread_id=thread_id, message_id=str(row["id"]), node_id=None,
         created_at=str(row["created_at"]),

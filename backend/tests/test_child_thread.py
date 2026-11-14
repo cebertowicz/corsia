@@ -142,9 +142,12 @@ def child_db(tmp_path, monkeypatch):
         """
     )
     from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+    from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
+    from infra.presence_schema import PRESENCE_SCHEMA_SQL
     from infra.vendor_policy_schema import VENDOR_SUBSCRIPTION_SCHEMA_SQL
 
     conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(PRESENCE_SCHEMA_SQL + MESSAGE_UPDATE_SCHEMA_SQL)
     conn.executescript(VENDOR_SUBSCRIPTION_SCHEMA_SQL)
     _add_canonical_message_columns(conn, _ACCOUNT_HOLD_MESSAGE_COLUMNS)
     # Every row below is persisted BY a Turn that is still running. A declared

@@ -89,6 +89,7 @@ def fresh_db(tmp_path, monkeypatch):
         """
     )
     from infra.connection_schema import CONNECTION_SCHEMA_SQL
+    from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
     from infra.project_policy_schema import PROJECT_INFERENCE_POLICY_TABLE_SQL
     from infra.schema import SCHEMA_SQL
     from infra.vendor_account_schema import VENDOR_ACCOUNT_SCHEMA_SQL
@@ -96,7 +97,7 @@ def fresh_db(tmp_path, monkeypatch):
 
     model_ddl = "CREATE TABLE IF NOT EXISTS models" + SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS models", 1)[1].split(";", 1)[0] + ";"
     conn.executescript(model_ddl + CONNECTION_SCHEMA_SQL + VENDOR_ACCOUNT_SCHEMA_SQL + VENDOR_POLICY_SCHEMA_SQL
-                       + PROJECT_INFERENCE_POLICY_TABLE_SQL + ";")
+                       + PROJECT_INFERENCE_POLICY_TABLE_SQL + ";" + MESSAGE_UPDATE_SCHEMA_SQL)
     for column in ("target_model TEXT", "delivery_attempt_id TEXT", "write_started_at TEXT", "input_order INTEGER"):
         conn.execute("ALTER TABLE messages ADD COLUMN " + column)
     for provider in ("claude-code", "codex"):

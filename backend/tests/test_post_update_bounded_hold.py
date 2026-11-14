@@ -15,7 +15,7 @@ TURN = TurnIdentity(turn_id="turn-1", turn_order=1)
 
 
 def _message_id(result: str) -> str:
-    return result.removeprefix("Update saved as message ").removesuffix(".")
+    return result.splitlines()[0].removeprefix("Update saved as message ").removesuffix(".")
 
 
 def _own_node(db):
@@ -150,7 +150,7 @@ async def test_same_key_with_different_text_is_refused(deleg_db, tool):
         _host_access_turn_identity=TURN,
     )
 
-    assert result == "Error: idempotency_key was already used for a different update; pass a new key"
+    assert result == "Error: Nothing was saved. idempotency_key already belongs to a different call; use a new key."
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
 
 
@@ -162,8 +162,8 @@ async def test_unknown_node_is_refused_and_writes_nothing(deleg_db, tool):
     )
 
     assert result == (
-        "Error: node_id is not an open or settled node in your plan; "
-        "omit it or pass a node from plan_read"
+        "Error: Nothing was saved. node_id is not a node in your plan; "
+        "omit it or use a node from plan_read."
     )
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
 

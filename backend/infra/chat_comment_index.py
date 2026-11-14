@@ -60,6 +60,11 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
             (thread_id, user_message_id, comment['cid'], created_at,
              comment.get('root_user_message_id'), comment.get('root_cid'), thread_id, comment['seq']),
         )
+    if comments and (metadata or {}).get('sender_kind') != 'agent':
+        db.execute("UPDATE message_update_state SET seen_at=?,seen_reason='comment' "
+                   "WHERE seen_at IS NULL AND message_id IN "
+                   "(SELECT target_message_id FROM chat_comments WHERE user_message_id=?)",
+                   (created_at, user_message_id))
     stored = db.execute("SELECT content FROM messages WHERE id=?", (user_message_id,)).fetchone() if comments else None
     if stored is not None and comment_only(stored[0], metadata):
         db.execute(

@@ -184,6 +184,38 @@ Source: `backend/infra/held_replies_schema.py`.
 
 Indexes: `idx_held_replies_idempotency` (sender_thread_id, recipient_thread_id, idempotency_key, partial unique), `idx_held_replies_user_state` (user_id, state, created_at), `sqlite_autoindex_held_replies_1` (id, unique).
 
+### `message_update_nodes`
+
+Source: `backend/infra/message_update_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `message_id` | TEXT | Yes | Yes | — | — |
+| `node_id` | TEXT | Yes | Yes | — | — |
+
+Indexes: `sqlite_autoindex_message_update_nodes_1` (message_id, node_id, unique).
+
+### `message_update_state`
+
+Source: `backend/infra/message_update_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `message_id` | TEXT | Yes | No | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `posted_at` | TEXT | No | Yes | — | — |
+| `update_kind` | TEXT | No | No | — | — |
+| `presence_at_post` | TEXT | No | Yes | — | — |
+| `seen_at` | TEXT | No | No | — | — |
+| `seen_reason` | TEXT | No | No | — | — |
+| `replaced_by` | TEXT | No | No | — | — |
+| `replaced_at` | TEXT | No | No | — | — |
+| `replace_reason` | TEXT | No | No | — | — |
+| `result_text` | TEXT | No | No | — | — |
+| `result_chars` | INTEGER | No | No | — | — |
+
+Indexes: `idx_message_update_replaced_by` (replaced_by), `idx_message_update_thread` (thread_id, posted_at, message_id), `idx_message_update_unseen` (thread_id, posted_at), `sqlite_autoindex_message_update_state_1` (message_id, unique).
+
 ### `messages`
 
 Source: `backend/infra/message_schema.py`.

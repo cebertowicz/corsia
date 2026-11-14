@@ -12,6 +12,7 @@ import sqlite3
 
 import api.thread_paging as paging
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 
 _SID = "sess-route"
 
@@ -31,7 +32,7 @@ def _db() -> sqlite3.Connection:
         "id TEXT, thread_id TEXT, turn_order INTEGER, status TEXT)"
     )
     # A page never draws a comment-only input, which this table marks.
-    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL + MESSAGE_UPDATE_SCHEMA_SQL)
     conn.execute(
         "INSERT INTO messages (id,thread_id,role,content,created_at,seq) "
         "VALUES ('m1',?,'user','hello','2026-06-12T00:00:01',10)",
