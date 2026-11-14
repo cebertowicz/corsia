@@ -554,7 +554,7 @@ test('plan copy: task details, read-only discussion, task menu, empty pane, acti
 					const { default: Component } = await load('/src/lib/components/plans/PlanNodeDetails.svelte');
 					const item = node({ title: 'Review task' });
 					if (selected === 6) item.execution = { ...item.execution, attempt_count: 1, attempts: [{ id: 'a', ordinal: 1, executor: { thread_id: 'agent', label: 'Agent' }, requirements_revision: 1, selected_at: 'earlier', released_at: 'later', release_reason: 'executor_changed' }] };
-					item.node_cost = { own: { ...item.node_cost.own, waiting: { seconds: 600 } }, rolled: { ...item.node_cost.rolled, waiting: { seconds: 18180 } } };
+					item.node_cost = { own: { ...item.node_cost.own, waiting: { settled_seconds: 600, open_starts: [] } }, rolled: { ...item.node_cost.rolled, waiting: { settled_seconds: 18180, open_starts: [] } } };
 					mount(Component, { target: host, props: { node: item, id: 'details' } });
 				}
 				flushSync();
