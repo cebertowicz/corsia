@@ -17,6 +17,7 @@ from registry.shared_principals import (
     is_scope_conductor_for_shared_path,
     is_shared_document_path,
     owner_label,
+    person_owner_label,
 )
 
 
@@ -165,15 +166,24 @@ def artifact_freshness(
     *,
     db,
     now: datetime | None = None,
+    multi_person: bool | None = None,
 ) -> dict[str, Any] | None:
-    """Return a display-ready freshness payload for one shared artifact."""
+    """Return a display-ready freshness payload for one shared artifact.
+
+    A person's screen passes ``multi_person`` (``document_supervisor.is_multi_person``,
+    read once per request) and gets the owner as ``person_owner_label`` words it;
+    an agent's read leaves it out and keeps ``owner_label``'s wording.
+    """
     if artifact is None or not is_shared_document_path(path, workspace=_workspace(), db=db):
         return None
     owner = artifact_owner(str(artifact["id"]), db=db)
     if owner is None:
         return None
     value = freshness(path, artifact.get("metadata"), now or datetime.now(timezone.utc))
-    value["owner_name"] = owner_label(owner, db=db)
+    value["owner_name"] = (
+        owner_label(owner, db=db) if multi_person is None
+        else person_owner_label(owner, db=db, multi_person=multi_person)
+    )
     return value
 
 

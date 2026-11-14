@@ -192,7 +192,11 @@ def ready(connection: sqlite3.Connection) -> bool:
         return True
     # The statement form: a table-valued ``pragma_table_info(...)`` traces as ``PRAGMA table_info='...'``,
     # which a lane's write classifier reads as a PRAGMA assignment.
-    found = any(row[1] == "sub_open" for row in connection.execute("PRAGMA table_info(plan_nodes)"))
+    # Read every row: ``any`` stops early, and a statement left stepping pins this
+    # connection's read snapshot for as long as anything (a traceback, a stack sampler)
+    # keeps the cursor alive, so the job's next BEGIN IMMEDIATE fails with BUSY_SNAPSHOT.
+    columns = connection.execute("PRAGMA table_info(plan_nodes)").fetchall()
+    found = any(row[1] == "sub_open" for row in columns)
     if found:
         _READY[connection] = version
     return found
