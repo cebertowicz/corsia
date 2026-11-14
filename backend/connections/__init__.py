@@ -59,10 +59,11 @@ PINNED_HARNESSES = ("claude-code", "codex")
 
 
 def stored_binary(provider: str, binary: str | None) -> str:
-    """The ``binary`` a connection row keeps; for a pinned CLI never a bare PATH name.
+    """The ``binary`` a connection row keeps; for a pinned CLI, where its copy is or will be.
 
-    A missing pinned copy stores where it will be installed, so no launch reader can
-    fall back to the person's copy on PATH.
+    A missing pinned copy stores where it will be installed, so no launch reader falls
+    back to the person's copy on PATH. Only a machine with no pin for its architecture
+    keeps the bare name.
     """
     if binary:
         return binary

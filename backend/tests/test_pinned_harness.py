@@ -7,6 +7,7 @@ import io
 import json
 import tarfile
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,7 @@ def test_every_supported_machine_has_a_sha512_pin_for_both_clis():
 def test_a_sha512_pin_installs_read_only_and_reads_installed(monkeypatch, tmp_path):
     payload = _claude_archive()
     pin = _sha512_pin(monkeypatch, payload)
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_a, **_k: _Response(payload))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: _Response(payload))
     root = tmp_path / "runtimes"
 
     executable = managed_runtime.ensure_runtime("claude-code", root=root)
@@ -72,7 +73,7 @@ def test_a_sha512_pin_installs_read_only_and_reads_installed(monkeypatch, tmp_pa
 def test_a_tampered_archive_is_refused_and_nothing_is_installed(monkeypatch, tmp_path):
     _sha512_pin(monkeypatch, _claude_archive())
     tampered = _claude_archive(b"#!/bin/sh\necho something else\n")
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_a, **_k: _Response(tampered))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: _Response(tampered))
     root = tmp_path / "runtimes"
 
     with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="checksum"):
@@ -86,7 +87,7 @@ def test_an_offline_first_run_leaves_the_cli_not_installed_with_no_fallback(monk
     from connections import binary_from_config, stored_binary
 
     _sha512_pin(monkeypatch, _claude_archive())
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen",
+    monkeypatch.setattr(urllib.request, "urlopen",
                         lambda *_a, **_k: (_ for _ in ()).throw(urllib.error.URLError("offline")))
     monkeypatch.setattr("shutil.which", lambda name, *_a, **_k: f"/usr/local/bin/{name}")
     root = tmp_path / "runtimes"
@@ -117,7 +118,7 @@ def test_existing_sha256_runtime_markers_stay_valid(monkeypatch, tmp_path):
 def test_older_versions_are_removed_and_the_current_one_kept(monkeypatch, tmp_path):
     payload = _claude_archive()
     _sha512_pin(monkeypatch, payload, version="2.0.0")
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_a, **_k: _Response(payload))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: _Response(payload))
     root = tmp_path / "runtimes"
     old = root / "claude-code" / "1.9.0" / "arm64"
     old.mkdir(parents=True)
@@ -200,6 +201,59 @@ def test_startup_schedules_the_install_off_its_path_and_tests_fetch_nothing(monk
     app_startup_runtime._schedule_pinned_harness_install()
 
     assert len(submitted) == (1 if scheduled else 0)
+
+
+@pytest.mark.parametrize(("in_use", "installs"), [(True, True), (False, False)])
+def test_a_recheck_installs_a_missing_copy_for_a_vendor_in_use(monkeypatch, in_use, installs):
+    """A failed startup download or a moved pin recovers on the next re-check, without a restart."""
+    from connections import pinned_harness, source_state
+
+    present = []
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path",
+                        lambda kind, **_k: Path("/pinned/claude") if present else None)
+    monkeypatch.setattr(pinned_harness, "vendor_in_use", lambda vendor, **_k: in_use)
+    monkeypatch.setattr(pinned_harness, "install_pinned", lambda vendor: present.append(vendor) or Path("/pinned/claude"))
+    monkeypatch.setattr(source_state, "record_install", lambda provider: "/pinned/claude" if present else None)
+    refreshed = []
+
+    async def refresh(provider, **kwargs):
+        refreshed.append(kwargs["binary"])
+
+    monkeypatch.setattr("connections.harness_models.refresh_provider", refresh)
+
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(source_state, "run_in_db", inline)
+    monkeypatch.setattr("infra.db_async.run_in_db", inline)
+    asyncio.run(source_state.check_harness_source("claude-code"))
+
+    assert present == (["claude-code"] if installs else [])
+    assert refreshed == (["/pinned/claude"] if installs else [])
+
+
+def test_a_recheck_whose_download_fails_records_not_installed(monkeypatch, caplog):
+    """Offline, a re-check still records the row, so the other sources' results stand."""
+    from connections import pinned_harness, source_state
+
+    monkeypatch.setattr(pinned_harness, "vendor_in_use", lambda vendor, **_k: True)
+
+    def offline(_vendor):
+        raise managed_runtime.ManagedRuntimeDownloadError("download failed: URLError")
+
+    monkeypatch.setattr(pinned_harness, "install_pinned", offline)
+    recorded = []
+    monkeypatch.setattr(source_state, "record_install", lambda provider: recorded.append(provider))
+
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(source_state, "run_in_db", inline)
+    monkeypatch.setattr("infra.db_async.run_in_db", inline)
+    with caplog.at_level("WARNING", logger=source_state.log.name):
+        asyncio.run(source_state.check_harness_source("claude-code"))
+    assert recorded == ["claude-code"]
+    assert "could not set up CORSIA's claude-code copy" in caplog.text
 
 
 def test_a_startup_install_failure_is_logged_and_startup_continues(monkeypatch, caplog):

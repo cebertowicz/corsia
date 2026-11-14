@@ -43,25 +43,36 @@ def vendor_in_use(vendor: str, *, db=None) -> bool:
     return any(account["state"] == "signed_in" for account in list_accounts(provider=vendor, db=db))
 
 
+async def install_if_used(vendor: str) -> bool:
+    """Install the pinned copy when it is missing and this install uses the vendor.
+
+    True when a copy was installed now. A failed download raises ``ManagedRuntimeError``.
+    """
+    from infra.db_async import run_in_db
+    from tools.managed_runtime import installed_runtime_path
+
+    if installed_runtime_path(vendor) is not None or not await run_in_db(vendor_in_use, vendor):
+        return False
+    await asyncio.to_thread(install_pinned, vendor)
+    return True
+
+
 async def install_used_harnesses() -> None:
     """After startup, off its path: install the pinned copy for each vendor in use.
 
     A copy installed now is recorded on its row and its accounts' catalogs are read,
     since startup discovery ran without it. A failure is logged and leaves the row
     ``not_installed``; nothing retries here. The next start, the Install button, or
-    the next re-check tries again.
+    the next re-check (``check_harness_source``) tries again.
     """
     from connections.source_state import check_harness_source
-    from infra.db_async import run_in_db
     from tools.managed_runtime import installed_runtime_path
 
     for vendor in PINNED_HARNESSES:
         try:
-            had_copy = installed_runtime_path(vendor) is not None
-            if not had_copy and not await run_in_db(vendor_in_use, vendor):
-                continue
-            await asyncio.to_thread(install_pinned, vendor)  # an installed copy only drops older versions
-            if not had_copy:
+            if installed_runtime_path(vendor) is not None:
+                await asyncio.to_thread(install_pinned, vendor)  # an installed copy only drops older versions
+            elif await install_if_used(vendor):
                 await check_harness_source(vendor)
         except Exception as exc:  # the row says not installed
             log.warning("could not set up CORSIA's %s copy: %s", vendor, exc)

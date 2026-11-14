@@ -12,7 +12,6 @@ import stat
 import tarfile
 import tempfile
 import threading
-import urllib.request  # noqa: F401  tests patch urllib.request.urlopen through this module
 import zipfile
 from collections.abc import Callable
 

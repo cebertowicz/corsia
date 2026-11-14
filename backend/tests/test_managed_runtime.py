@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import tarfile
 import urllib.error
+import urllib.request
 import zipfile
 
 import pytest
@@ -50,7 +51,7 @@ def test_checksum_mismatch_is_a_runtime_download_failure(monkeypatch, tmp_path):
     from tools import managed_runtime
 
     _pin(monkeypatch, b"expected")
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"wrong"))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"wrong"))
 
     with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="checksum"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
@@ -62,7 +63,7 @@ def test_refused_runtime_download_is_a_runtime_download_failure(monkeypatch, tmp
     from tools import managed_runtime
 
     _pin(monkeypatch, _node_archive())
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.URLError("offline")))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.URLError("offline")))
 
     with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="download failed"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
@@ -74,7 +75,7 @@ def test_http_error_runtime_download_is_a_runtime_download_failure(monkeypatch, 
     from tools import managed_runtime
 
     _pin(monkeypatch, _node_archive())
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.HTTPError("https://example.test", 503, "unavailable", {}, None)))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.HTTPError("https://example.test", 503, "unavailable", {}, None)))
 
     with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="HTTPError"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
@@ -86,7 +87,7 @@ def test_timeout_runtime_download_is_a_runtime_download_failure(monkeypatch, tmp
     from tools import managed_runtime
 
     _pin(monkeypatch, _node_archive())
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
 
     with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="TimeoutError"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
@@ -99,7 +100,7 @@ def test_finder_path_uses_the_pinned_npx(monkeypatch, tmp_path):
 
     payload = _node_archive()
     _pin(monkeypatch, payload)
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(payload))
 
     command = Path(managed_runtime.command_path("npx", path="/usr/bin:/bin:/usr/sbin:/sbin", root=tmp_path / "runtimes"))
 
@@ -182,7 +183,7 @@ def test_invalid_read_only_install_is_replaced(monkeypatch, tmp_path):
     final.mkdir(parents=True)
     (final / ".corsia-runtime.json").write_text("{}", encoding="utf-8")
     managed_runtime._make_read_execute_only(final)
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(payload))
 
     executable = managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
 
@@ -210,7 +211,7 @@ def test_concurrent_installs_share_one_runtime_download(monkeypatch, tmp_path):
             assert release_download.wait(timeout=5)
         return _Response(payload)
 
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", delayed_download)
+    monkeypatch.setattr(urllib.request, "urlopen", delayed_download)
     root = tmp_path / "runtimes"
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(managed_runtime.ensure_runtime, "node", root=root)
@@ -229,7 +230,7 @@ def test_download_byte_cap_is_reported(monkeypatch, tmp_path):
     from tools import runtime_download
 
     monkeypatch.setattr(runtime_download, "_MAX_DOWNLOAD_BYTES", 3)
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"four"))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"four"))
 
     with pytest.raises(managed_runtime.ManagedRuntimeError, match="byte limit"):
         managed_runtime._download("https://example.invalid/archive", tmp_path / "download")

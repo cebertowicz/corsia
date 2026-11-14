@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.request
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -357,7 +358,7 @@ def _real_codex_download(monkeypatch, root: Path, stream: _Stream) -> None:
     pin = managed_runtime.RuntimePin("9.9.9", "https:" "//registry.test/codex.tgz", "", "tar.gz", "package/codex", "0" * 128)
     monkeypatch.setitem(managed_runtime.RUNTIME_PINS, "codex", {"arm64": pin})
     monkeypatch.setattr(managed_runtime, "machine_key", lambda: "arm64")
-    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_a, **_k: stream)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: stream)
     isolated = managed_runtime.ensure_runtime  # the test-wide guard; it runs the real install given a root
     monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda kind, **kwargs: isolated(kind, root=root, **kwargs))
 
