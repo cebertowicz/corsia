@@ -54,13 +54,33 @@ def _thread_notes(db, thread_id):
 
 def _document_changes(db, artifact_id):
     return [
-        row["summary"]
+        (row["summary"], row["actor_thread_id"])
         for row in db.execute(
-            "SELECT summary FROM context_change_journal WHERE object_kind='artifact' "
+            "SELECT summary,actor_thread_id FROM context_change_journal WHERE object_kind='artifact' "
             "AND object_id=? AND change_kind='promote_undone' ORDER BY seq",
             (artifact_id,),
         ).fetchall()
     ]
+
+
+def _history(source, target, thread_id, why, where, *, parked=False):
+    """What the document's history says: third person, since its readers did not make the promote."""
+    beside = "A newer file was already at the source path, so the file was kept beside it. " if parked else ""
+    return (
+        f"The promote of `{source}` to `{target}` by thread {thread_id} was undone when CORSIA "
+        f"restarted. {why} {beside}The file is at `{where}`."
+    )
+
+
+def _digest_rows(db, thread_id, source_id):
+    """The journal rows this thread's next digest carries for the promoted document."""
+    from infra.passive_relevant import relevant_changes
+
+    top = db.execute("SELECT MAX(seq) FROM context_change_journal").fetchone()[0]
+    rows, _cut = relevant_changes(
+        db, thread_id=thread_id, user_id="user", project_id=None, after=0, through=top,
+    )
+    return [r for r in rows if r["object_id"] in (source_id, thread_id)]
 
 
 def test_an_undo_that_a_restart_interrupted_is_told_to_the_agent(durable_scope, monkeypatch):
@@ -100,7 +120,11 @@ def test_an_undo_that_a_restart_interrupted_is_told_to_the_agent(durable_scope, 
     )
     assert details["file_now_at"] == str(source)
     assert details["reoffer_unwritten"] is True
-    assert _document_changes(db, source_id) == [summary]
+    assert _document_changes(db, source_id) == [
+        (_history(source, target, thread_id, "It was interrupted by a restart before it finished.", source), thread_id),
+    ]
+    # The promoting agent hears it once, from its own note, not again from the document's history.
+    assert [r["summary"] for r in _digest_rows(db, thread_id, source_id)] == [summary]
 
 
 def test_a_rollback_for_comments_on_both_documents_is_told_to_the_agent(durable_scope):
@@ -129,7 +153,10 @@ def test_a_rollback_for_comments_on_both_documents_is_told_to_the_agent(durable_
     assert summary.startswith(f"Your promote of `{source}` to `{target}` was undone when CORSIA restarted. ")
     assert "both have comments" in summary and "Nothing was moved" in summary
     assert summary.endswith(f"Your file is at `{source}`.")
-    assert _document_changes(db, source_id) == [summary]
+    [(history, actor)] = _document_changes(db, source_id)
+    assert actor == thread_id and not history.startswith("Your")
+    assert history.startswith(f"The promote of `{source}` to `{target}` by thread {thread_id} ")
+    assert "both have comments" in history and history.endswith(f"The file is at `{source}`.")
 
 
 def test_a_claim_parked_beside_a_newer_file_is_told_to_the_agent(durable_scope):
@@ -163,7 +190,15 @@ def test_a_claim_parked_beside_a_newer_file_is_told_to_the_agent(durable_scope):
         f"source path, so your file was kept beside it. Your file is at `{parked}`."
     )
     assert details["file_now_at"] == str(parked)
-    assert _document_changes(db, source_id) == [summary]
+    assert _document_changes(db, source_id) == [
+        (
+            _history(
+                source, target, thread_id, "It was interrupted by a restart before it finished.",
+                parked, parked=True,
+            ),
+            thread_id,
+        ),
+    ]
 
 
 def test_a_staged_promote_with_no_newer_file_says_nothing(durable_scope):

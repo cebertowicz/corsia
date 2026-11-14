@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 INTERRUPTED = "It was interrupted by a restart before it finished."
 PARKED = "A newer file was already at the source path, so your file was kept beside it."
+PARKED_IN_HISTORY = "A newer file was already at the source path, so the file was kept beside it."
 
 
 def recovery_path(source: Path, intent_id: str) -> Path:
@@ -43,9 +44,17 @@ def announce_undone_promote(db, row: dict, *, why: str, source: Path, target: Pa
     """
     intent_id = str(row["id"])
     where = file_now_at(source, intent_id)
+    thread_id = str(row["actor_thread_id"])
+    parked = f"{PARKED} " if where != source else ""
     summary = (
         f"Your promote of `{source}` to `{target}` was undone when CORSIA restarted. {why} "
-        f"{PARKED + ' ' if where != source else ''}Your file is at `{where}`."
+        f"{parked}Your file is at `{where}`."
+    )
+    # The document's history is read by every agent that follows the document and by the person,
+    # none of whom made the promote, so it says whose promote it was instead of "your".
+    history = (
+        f"The promote of `{source}` to `{target}` by thread {thread_id} was undone when CORSIA "
+        f"restarted. {why} {PARKED_IN_HISTORY + ' ' if where != source else ''}The file is at `{where}`."
     )
     details = {
         "intent_id": intent_id,
@@ -59,16 +68,18 @@ def announce_undone_promote(db, row: dict, *, why: str, source: Path, target: Pa
         identity = service.find_file_identity(str(source), db=db)
         with write_transaction(db, scope="promote_recovery_notice") as connection:
             append_thread_context_note(
-                connection, thread_id=str(row["actor_thread_id"]), summary=summary, details=details,
+                connection, thread_id=thread_id, summary=summary, details=details,
             )
             if identity is not None:
                 models.record_artifact_change(
                     artifact_id=identity["id"],
                     internal_event="promote_undone",
                     external_id=identity.get("external_id"),
-                    summary=summary,
+                    summary=history,
                     provenance=details,
-                    actor_thread_id=None,
+                    # The promoting agent already has the note above; naming it as the actor keeps
+                    # its digest from carrying the same event a second time.
+                    actor_thread_id=thread_id,
                     db=connection,
                 )
     except Exception:
