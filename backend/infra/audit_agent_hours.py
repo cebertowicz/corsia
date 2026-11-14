@@ -95,7 +95,8 @@ def read_agent_hours(db: sqlite3.Connection, metric: str, user_id: str, project_
             ", per_day AS (SELECT thread_id,substr(hour,1,10) AS day,kind,location, "
             "count(DISTINCT hour) AS hours, " + _TOKEN_SUMS +
             " FROM scoped GROUP BY thread_id,day,kind,location), "
-            "banded AS (SELECT *,CASE WHEN hours<=2 THEN '1-2' WHEN hours<=6 THEN '3-6' "
+            "banded AS (SELECT kind,location,hours,calls,prompt,completion,cache_write,cache_read, "
+            "CASE WHEN hours<=2 THEN '1-2' WHEN hours<=6 THEN '3-6' "
             "WHEN hours<=12 THEN '7-12' WHEN hours<=18 THEN '13-18' ELSE '19-24' END AS band "
             "FROM per_day) SELECT kind,location,band,count(*) AS agent_days,sum(hours) AS agent_hours, "
             "sum(calls) AS calls,sum(prompt) AS prompt,sum(completion) AS completion, "
