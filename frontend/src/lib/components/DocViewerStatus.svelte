@@ -34,6 +34,7 @@
 		onOpenComments,
 		freshness,
 		ownership = null,
+		headerStandIn = false,
 		onOwnershipChanged,
 		onFeedbackChanged,
 		onMarkVerified,
@@ -74,6 +75,8 @@
 		freshness: DocumentFreshness | null;
 		/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
 		ownership?: DocOwnership | null;
+		/** The row is the one this tab last showed, drawn before the load answered: its owner pickers and Mark verified wait for the load. */
+		headerStandIn?: boolean;
 		onOwnershipChanged?: (value: DocOwnership) => void;
 		onFeedbackChanged?: () => void | Promise<void>;
 		onMarkVerified?: () => Promise<void>;
@@ -232,7 +235,7 @@
 	</div>
 {#if (freshness && freshnessPresentation) || showOwnership}
 	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} data-ownership-row={showOwnership || undefined}>
-		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={(value) => onOwnershipChanged?.(value)} /></div>
 		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 		{#if freshnessPresentation?.datetime}
 			<time datetime={freshnessPresentation.datetime}>
@@ -244,7 +247,7 @@
 		{/if}
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if freshness && shouldOfferVerification(freshness)}
-			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
+			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>
 		{/if}
 		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
 	</div>

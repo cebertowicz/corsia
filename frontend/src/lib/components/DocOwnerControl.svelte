@@ -7,7 +7,8 @@
 	import { changeOwnership, OwnershipChangeError, type DocOwnership } from '$lib/api/docOwnership';
 
 	type Role = 'owner' | 'supervisor';
-	let { artifactId, ownership, onChange }: { artifactId: string; ownership: DocOwnership; onChange: (value: DocOwnership) => void } = $props();
+	/** `inert`: the row is a remembered one drawn before the load answered; the server takes a pick with no check against what is shown, so no pick is offered yet. */
+	let { artifactId, ownership, inert = false, onChange }: { artifactId: string; ownership: DocOwnership; inert?: boolean; onChange: (value: DocOwnership) => void } = $props();
 
 	// Owner and Supervisor are two controls, each with its own picker; one picker is open at a time.
 	let picker = $state<Role | null>(null);
@@ -81,14 +82,14 @@
 
 <span bind:this={group} class="ownership" role="group" aria-label="Owner and supervisor">
 	{#if merged}
-		<button type="button" class="item" data-role="owner" aria-label={`Owner and supervisor: ${ownerName}${supervisorPaused ? ', paused' : ''}`} aria-haspopup="dialog" aria-expanded={picker !== null} onclick={(event) => open('owner', event.currentTarget)}>
+		<button type="button" class="item" data-role="owner" aria-label={`Owner and supervisor: ${ownerName}${supervisorPaused ? ', paused' : ''}`} aria-haspopup="dialog" aria-expanded={picker !== null} disabled={inert} onclick={(event) => open('owner', event.currentTarget)}>
 			<span class="label">Owner and supervisor:</span><span class="name"><MiddleName name={ownerName} /></span>{#if supervisorPaused}<span class="mark">Paused</span>{/if}{@render chevron()}
 		</button>
 	{:else}
-		<button type="button" class="item" data-role="owner" aria-label={`Owner: ${ownerName}${saveNote('owner')}`} aria-haspopup="dialog" aria-expanded={picker === 'owner'} onclick={(event) => open('owner', event.currentTarget)}>
+		<button type="button" class="item" data-role="owner" aria-label={`Owner: ${ownerName}${saveNote('owner')}`} aria-haspopup="dialog" aria-expanded={picker === 'owner'} disabled={inert} onclick={(event) => open('owner', event.currentTarget)}>
 			<span class="label">Owner:</span><span class="name" class:pending={pending?.role === 'owner'}><MiddleName name={ownerName} /></span>{@render status('owner')}{@render chevron()}
 		</button>
-		<button type="button" class="item" data-role="supervisor" aria-label={`Supervisor: ${supervisorName}${supervisorPaused ? ', paused' : ''}${saveNote('supervisor')}`} aria-haspopup="dialog" aria-expanded={picker === 'supervisor'} onclick={(event) => open('supervisor', event.currentTarget)}>
+		<button type="button" class="item" data-role="supervisor" aria-label={`Supervisor: ${supervisorName}${supervisorPaused ? ', paused' : ''}${saveNote('supervisor')}`} aria-haspopup="dialog" aria-expanded={picker === 'supervisor'} disabled={inert} onclick={(event) => open('supervisor', event.currentTarget)}>
 			<span class="label">Supervisor:</span><span class="name" class:pending={pending?.role === 'supervisor'}><MiddleName name={supervisorName} /></span>{#if supervisorPaused}<span class="mark">Paused</span>{/if}{@render status('supervisor')}{@render chevron()}
 		</button>
 	{/if}
