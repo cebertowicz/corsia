@@ -95,9 +95,12 @@ async def test_released_working_document_registration_keeps_it_ownerless(
 
     assert comment["artifact_id"] == registered["id"]
     assert re_registered["id"] == registered["id"]
-    # Readers project the former owner onto a released file as archived; a
-    # write reports the writer's own active subscriber registration instead.
-    assert models.get_artifact(registered["id"])["state"] == "archived"
+    # Readers see the released file as active with the former owner's
+    # released registration; a write reports the writer's own registration.
+    reader_view = models.get_artifact(registered["id"])
+    assert (reader_view["state"], reader_view["relationship_state"]) == (
+        "active", "subscriber-recent",
+    )
     assert _written_view(re_registered) == (former_owner, "active", "subscriber-recent")
     for requester in (former_owner, commenter):
         api = integration_client.post(
