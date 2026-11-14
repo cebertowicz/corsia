@@ -380,7 +380,7 @@ def test_intake_reads_per_event(intake_world, monkeypatch, tracking):
 
     # Without rules: evaluation and the unrouted gate cost nothing.
     with patch.object(rules, "evaluate", lambda *_args, **_kwargs: None), \
-            patch("events.intake.rule_reads.unrouted_projects", lambda *_args: frozenset()):
+            patch("events.intake.rule_reads.unrouted_scopes", lambda *_args: frozenset()):
         run(emit)
         no_rules = run(emit)
         run(check)

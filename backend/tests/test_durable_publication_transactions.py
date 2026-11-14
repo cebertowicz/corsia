@@ -243,3 +243,43 @@ def test_cleanup_commit_failure_keeps_committed_publication_recoverable(
     assert target.read_bytes() == retained
     assert service.find_file_identity(str(target), db=db)["id"] == identity["id"]
     assert db.execute("SELECT COUNT(*) FROM durable_write_intents").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("fail_commit", [1, 2, 3, 4])
+def test_a_failed_promotion_commit_leaves_the_comments_on_the_source(
+    durable_scope, monkeypatch, fail_commit,
+):
+    """The comment move and the tombstone are one step: no commit means no half-moved threads (#2555)."""
+    from tests.test_durable_writes import _seed_comment_state
+
+    workspace, project, thread, db = durable_scope
+    source = _source(durable_scope)
+    original = service.register_write_strict(thread, str(source), db=db)
+    original_id = str(original["id"])
+    # An edit outside the registered write is what forces a promote to a new identity.
+    edited = b"claimed bytes\nEdited outside CORSIA.\n"
+    source.write_bytes(edited)
+    db.commit()
+    _seed_comment_state(db, original_id, thread)
+    seeded = {
+        table: db.execute(f"SELECT COUNT(*) FROM {table} WHERE artifact_id=?", (original_id,)).fetchone()[0]
+        for table in ("doc_comments", "doc_comment_writer_line", "doc_feedback_batches", "doc_review_requests")
+    }
+    assert all(seeded.values()), seeded
+    probe = ConnectionProbe(db, fail_commit=fail_commit)
+    monkeypatch.setattr(durable_writes, "get_db", lambda: probe)
+
+    with pytest.raises(sqlite3.OperationalError, match="injected publication COMMIT"):
+        _run(durable_scope, "promote", source)
+
+    assert source.read_bytes() == edited
+    assert not (project / "shared" / "planning" / source.name).exists()
+    assert models.identity_state(original_id, db=db) == "active"
+    assert models.successor_id(original_id, db=db) is None
+    for table, expected in seeded.items():
+        assert db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE artifact_id=?", (original_id,),
+        ).fetchone()[0] == expected
+        assert db.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE artifact_id<>?", (original_id,),
+        ).fetchone()[0] == 0

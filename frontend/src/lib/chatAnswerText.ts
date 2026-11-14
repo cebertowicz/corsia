@@ -1,11 +1,11 @@
 import type { Message } from '$lib/stores/threads';
+import { isNeverDrawn } from '$lib/components/transcriptRowKinds';
 
-/** Remove answer-only transcript rows while retaining other message content. */
+/** Show each answering step's chat text without its placed answers, and drop a step the server stamped as drawing nothing. */
 export function visibleChatAnswerRows(rows: Message[]): Message[] {
 	return rows.flatMap((row) => {
-		if (row.role !== 'assistant' || typeof row.chat_visible_content !== 'string') return [row];
-		const content = row.chat_visible_content;
-		if (!content && !row.reasoning && !row.toolHints?.length && !row.metadata?.tool_calls?.length && !row.chat_comments?.length && !row.cards?.length) return [];
-		return [{ ...row, content }];
+		if (row.role !== 'assistant') return [row];
+		if (isNeverDrawn(row)) return [];
+		return typeof row.chat_visible_content === 'string' ? [{ ...row, content: row.chat_visible_content }] : [row];
 	});
 }

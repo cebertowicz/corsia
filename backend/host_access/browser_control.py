@@ -16,14 +16,14 @@ log = logging.getLogger(__name__)
 
 PASSWORD_PAGE = (
     "This page asks for a password, so it is the person's to complete. They already see a notice on the "
-    "page and a task in their attention list, and your current task waits on it; end your turn. If they "
-    "decline, tell them in chat what you needed the page for and stop."
+    "page and a task in their attention list, and you get a turn once they finish or decline it; end your "
+    "turn. If they decline, tell them in chat what you needed the page for and stop."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
 PERSON_STEP = (
-    "This browser step is the person's to complete. They already see a task in their attention list, and your "
-    "current task waits on it; end your turn. If they decline, tell them in chat what you needed the page for "
-    "and stop."
+    "This browser step is the person's to complete. They already see a task in their attention list, and you "
+    "get a turn once they finish or decline it; end your turn. If they decline, tell them in chat what you "
+    "needed the page for and stop."
 )
 PASSWORD_DECLINED = (
     "The person declined to enter a password on this page. Tell them in chat what you needed the page for and stop."

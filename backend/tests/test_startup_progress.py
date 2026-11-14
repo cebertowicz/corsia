@@ -186,7 +186,7 @@ def test_a_commit_with_unchanged_files_never_beats_and_joins_on_error(tmp_path, 
     monkeypatch.setattr(startup_progress, "HEARTBEAT_SECONDS", 0.0)
     try:
         with pytest.raises(RuntimeError, match="commit stopped"):
-            with startup_progress.transaction_writes(conn):
+            with startup_progress.database_writes(conn):
                 assert checked.wait(5), "observer did not run"
                 assert read(tmp_path / "runtime")["seq"] == before
                 raise RuntimeError("commit stopped")

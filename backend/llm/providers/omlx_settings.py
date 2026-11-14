@@ -39,7 +39,7 @@ async def update_settings(_cfg: dict, _body: Any) -> dict[str, Any]:
         "ok": False,
         "message": (
             "Server-wide oMLX settings are configured via oMLX CLI flags "
-            "(--max-process-memory, --paged-ssd-cache-dir, --hot-cache-max-size). "
+            "(--memory-guard, --paged-ssd-cache-dir, --hot-cache-max-size). "
             "Use per-model settings for runtime model controls."
         ),
     }

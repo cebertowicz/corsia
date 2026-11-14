@@ -8,16 +8,25 @@ in-flight claim, the one a scheduled run takes, so at most one run of a script
 is in flight; a run whose script is busy stays queued for a later sweep. The
 queue itself is ``events.rule_runs``. The repository a run may read GitHub for is
 taken from that stored input's event here, before the script sees any of it.
+
+A run that did start and that the backend lost before it settled is a failed run, so
+its rule's owner is woken with the runs it lost; the wake commits with their rows.
 """
 
 from __future__ import annotations
 
 import json
+import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
 
 from automation import script_schedules as store
 from automation.script_github_channel import bound_repository
 from automation.script_measures import WORKSPACE_SCOPE
+from automation.script_readings import wake_owner
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
@@ -25,6 +34,13 @@ from infra.queries import get_thread, thread_is_available
 
 #: The key a rule run holds in the runner's in-flight map, beside the schedule ids.
 KEY_PREFIX = "rule:"
+#: The wake for runs the backend lost; a scheduled run's ``interrupted`` status wakes nobody.
+INTERRUPTED_EVENT = "script.interrupted"
+_INTERRUPTED_NEXT = (
+    "Nothing starts these runs again. This wake does not mean your script or rule is at fault. "
+    "If a run's work still matters, do it for its item yourself. "
+    "event_rules explain with a run's event_id shows its record."
+)
 
 
 @dataclass(frozen=True)
@@ -94,13 +110,53 @@ def _refusal(connection, row) -> tuple[Schedule | None, str | None]:
     return schedule, None
 
 
+def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
+    """Wake each owner once with the runs of theirs the backend lost, in the caller's write.
+
+    The wake's id comes from the rows it names, never the script's one-a-day failure key,
+    so a day's earlier failure can't turn it into a note. It is sent the way every script
+    failure is (``script_readings.wake_owner``): an owner who is gone is parked, and the
+    person's line names no rule of theirs.
+    """
+    from events.delivery import start_idle_after_commit
+
+    by_owner: dict[str, list[Mapping[str, Any]]] = {}
+    for row in ended:
+        by_owner.setdefault(row["thread_id"], []).append(row)
+    for owner, rows in by_owner.items():
+        runs = [{k: v for k, v in {
+            "rule_id": row["rule_id"], "event_id": row["event_id"],
+            "event_type": f"{row['connector']}.{row['event_type']}", "item": row["artifact_external_id"],
+        }.items() if v is not None} for row in rows]
+        # A row left running with no task says the run stopped, never why: a restart is one
+        # way there, a runner task that died in this process is another. Name no cause. The
+        # loss is CORSIA's either way: a script's own failure settles as a report.
+        summary = ("CORSIA lost track of a script run your event rule started and has no result for it. "
+                   "It is not replayed."
+                   if len(runs) == 1 else
+                   f"CORSIA lost track of {len(runs)} script runs your event rules started and has no result "
+                   "for them. They are not replayed.")
+        chip = ("Script run stopped before it finished" if len(runs) == 1
+                else f"{len(runs)} script runs stopped before they finished")
+        details = {"runs": runs, "next": _INTERRUPTED_NEXT}
+        key = ",".join(str(row["id"]) for row in rows)
+        if not wake_owner(
+            connection, owner, INTERRUPTED_EVENT, summary, details, chip=chip, park_key=key,
+            message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-rule-runs-interrupted:{owner}:{key}")),
+        ):
+            logger.warning("rule runs {} of owner {} were interrupted; the owner is unavailable", key, owner)
+            continue
+        start_idle_after_commit(connection, owner)
+
+
 def claim(now: str, capacity: int, live_keys: set[str], db) -> list[tuple[Schedule, RuleRun]]:
-    """End interrupted rule runs, then claim up to ``capacity`` queued ones, oldest first."""
+    """End interrupted rule runs and tell their owners, then claim up to ``capacity`` queued
+    ones, oldest first."""
     from plans.public import thread_paused_since
 
     claimed: list[tuple[Schedule, RuleRun]] = []
     with write_transaction(db, scope="script_rule_runs_claim") as connection:
-        rule_runs.interrupt(connection, live_decisions(live_keys))
+        _report_interrupted(connection, rule_runs.interrupt(connection, live_decisions(live_keys)))
         for row in rule_runs.queued(connection, capacity):
             schedule, refused = _refusal(connection, row)
             if refused is None and thread_paused_since(connection, row["thread_id"]) is not None:

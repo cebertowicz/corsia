@@ -23,14 +23,14 @@ from events.connectors.github import (
     github_routing_envelope,
     identity_from_check_pr_metadata,
 )
-from events.github_mapper import pr_terminal_state, unruled_reason
+from events.github_mapper import pr_terminal_state, reopens_artifact, unruled_reason
 from events.connectors.github_route_preparation import (
     _chip_line, prepare_route_ordered, settle_routed_delivery, summary_facts,
 )
 from infra.product_events import emit_product_event
 from infra.worktree_reaper_pr import schedule_merged_pr_reap
 from registry import models as registry_models
-from registry.pr_lifecycle import record_pull_request_ended
+from registry.pr_lifecycle import record_pull_request_ended, record_pull_request_reopened
 
 _CHECK_EVENTS = CHECK_SUITE_COMPLETED_EVENTS
 
@@ -311,6 +311,10 @@ def _record_source_facts_db(
     payload: dict[str, Any],
 ) -> bool:
     """Persist source facts and report whether the loop must schedule a merged-PR reap."""
+    if reopens_artifact(internal_event):
+        # The registry clears the recorded close and gives the owner its row back in one write.
+        record_pull_request_reopened(identity.integration, identity.type, identity.external_id)
+        return False
     pr_state = pr_terminal_state(internal_event, payload, identity.external_id)
     if pr_state is None:
         return False

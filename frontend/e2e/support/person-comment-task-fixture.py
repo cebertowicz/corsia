@@ -120,8 +120,10 @@ try:
         from pathlib import Path
         from infra.config import WORKSPACE
         from registry import durable_writes
+        from plans import person_comment_task
 
         source = Path(db.execute('SELECT path FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0])
+        left = db.execute('SELECT COUNT(*) FROM doc_comments WHERE artifact_id=?', (artifact_id,)).fetchone()[0]
         category = Path(WORKSPACE) / 'shared' / 'documents'
         category.mkdir(parents=True, exist_ok=True)
         (category / 'INDEX.md').write_text('# Documents\n')
@@ -129,8 +131,17 @@ try:
             source, 'documents', thread_id=thread_id, project_id=None, workspace=Path(WORKSPACE),
             description='Promoted launch plan', update_trigger='When the launch plan changes', owner='user',
         )
+        shared_id = shared['artifact']['id']
         source_state = db.execute('SELECT state FROM artifact_identities WHERE id=?', (artifact_id,)).fetchone()[0]
-        print('FIXTURE_RESULT=' + json.dumps({'shared': shared['artifact']['id'], 'source_state': source_state}))
+        # Where the comments and the person's ask ended up: the promoted identity, or the tombstone.
+        stayed = db.execute('SELECT COUNT(*) FROM doc_comments WHERE artifact_id=?', (artifact_id,)).fetchone()[0]
+        carried = db.execute('SELECT COUNT(*) FROM doc_comments WHERE artifact_id=?', (shared_id,)).fetchone()[0]
+        task_id, task_plan_owner = person_comment_task._open_task(db, shared_id)
+        print('FIXTURE_RESULT=' + json.dumps({
+            'shared': shared_id, 'source_state': source_state, 'source_comments': stayed,
+            'carried_comments': carried, 'comments_before': left,
+            'comment_task': task_id, 'comment_task_plan_owner': task_plan_owner,
+        }))
     elif mode == 'agent-root':
         # An agent's own untagged comment, on a document the person neither owns nor is tagged on: it reaches
         # them only through the agent's open ask on that document.

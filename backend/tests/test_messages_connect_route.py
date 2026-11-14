@@ -164,8 +164,14 @@ async def test_sign_in_leaves_the_app_off_and_gives_the_next_step_when_messages_
     monkeypatch.setattr(messages_db, "is_mac", lambda: True)
     monkeypatch.setattr(messages_db, "CHAT_DB", tmp_path / "none.db")
     if missing == "denied":
-        def deny(_path):
-            raise PermissionError
+        real_stat = messages_db.os.stat
+
+        def deny(path, *args, **kwargs):
+            # messages_db.os is the process-wide os module: refuse only the
+            # Messages database so the test database's own stat calls still work.
+            if str(path) == str(messages_db.CHAT_DB):
+                raise PermissionError
+            return real_stat(path, *args, **kwargs)
 
         monkeypatch.setattr(messages_db.os, "stat", deny)
     if missing == "busy":

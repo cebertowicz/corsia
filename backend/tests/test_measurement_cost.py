@@ -10,7 +10,7 @@ import pytest
 from api.measurement_cost import build_cost
 from api.measurement_prepared import DDL, PREPARED_OUTCOME_NODES
 from core.measurement_scope import resolve_grain
-from llm.api_equivalent import api_equivalent, is_long_context, price_identity
+from llm.api_equivalent import api_equivalent, price_identity
 from llm.list_prices import ALIBABA_BEIJING, ALIBABA_SINGAPORE, LIST_PRICES, listing_for_host
 from model_identity_fixtures import ALIBABA_HOST, seed_external_server
 
@@ -52,6 +52,18 @@ def test_api_equivalent_is_pure_and_unknown_never_zero():
     assert price_identity("external@namespace/qwen3.8-flash", ALIBABA_SINGAPORE) == "qwen3.8-flash"
     assert price_identity("external@namespace/unlisted", ALIBABA_SINGAPORE) is None
     assert price_identity("omlx@local/qwen3.8-flash") is None
+
+
+def test_current_subscription_identities_price_at_their_published_rates():
+    # Each bucket at one million tokens, so the result is the sum of the four published rates.
+    million = (1_000_000,) * 4
+    assert api_equivalent("claude-code/claude-fable-5-2", *million) == pytest.approx(8 + 40 + 10 + 0.20)
+    assert api_equivalent("claude-code/claude-sonnet-5-5", *million) == pytest.approx(2 + 10 + 2.5 + 0.10)
+    assert api_equivalent("codex/gpt-6.1-terra", *million) == pytest.approx(1 + 5 + 1.25 + 0.05)
+    assert api_equivalent("codex/gpt-6.1-terra", *million, long_context=True) == pytest.approx(2 + 7.5 + 2.5 + 0.10)
+    haiku = "claude-code/claude-haiku-5-5"
+    assert api_equivalent(haiku, *million) == pytest.approx(0.10 + 0.50 + 0.125 + 0.01)
+    assert api_equivalent(haiku, *million, long_context=True) == pytest.approx(0.50 + 2.50 + 0.625 + 0.05)
 
 
 def test_an_external_identity_prices_only_on_its_own_clouds_regional_list():
@@ -98,10 +110,6 @@ def test_alibaba_prices_each_region_at_its_own_list_by_call_hours_and_unpublishe
 
 def test_api_equivalent_uses_the_public_per_call_input_tier_and_never_frees_an_absent_price():
     assert SOL.long_input_per_million is not None
-    assert is_long_context(272_000, 0, 0) is False
-    assert is_long_context(272_001, 0, 0) is True
-    assert is_long_context(272_000, 1, 0) is True
-    assert is_long_context(272_000, 0, 1) is True
     assert api_equivalent("codex/gpt-6.1-sol", 272_000, 1_000_000, 0, 0) == pytest.approx(
         (272_000 * SOL.input_per_million + 1_000_000 * SOL.output_per_million) / 1_000_000)
     assert api_equivalent("codex/gpt-6.1-sol", 272_001, 0, 0, 0, long_context=True) == pytest.approx(
@@ -184,6 +192,30 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
     assert result["coverage"] == {"priced_records": 3, "usage_records": 5}
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "context_tier_unproven": 1, "cache_rate_unpublished": 1}
+
+
+def test_each_identity_prices_short_only_within_its_own_long_context_bound(isolated_db):
+    from infra.database import get_db
+
+    haiku, sol, sonnet = "claude-code/claude-haiku-5-5", "codex/gpt-6.1-sol", "claude-code/claude-sonnet-5-5"
+    db = get_db()
+    try:
+        _seed(db, [
+            (haiku, CC, 100_000, 0, 0, 0, 100_000, None),            # exactly Haiku's bound: short
+            (haiku, CC, 50_000, 0, 0, 50_001, 100_001, None),        # cache input counts: past Haiku's bound
+            (haiku, CC, 300_000, 0, 0, 0, 300_000, None),            # past both bounds
+            (sol, CODEX, 150_000, 0, 0, 0, 150_000, None, "000000000000000000000001"),  # past 100K, short for Sol
+            (sol, CODEX, 272_000, 0, 0, 0, 272_000, None, "000000000000000000000002"),  # exactly Sol's bound: short
+            (sol, CODEX, 272_000, 0, 0, 1, 272_001, None, "000000000000000000000003"),  # cache input: past Sol's
+            (sonnet, CC, 900_000, 0, 0, 0, 900_000, None),          # no published long vector: never long
+        ])
+        result = build_cost(db, PARAMS)
+    finally:
+        db.close()
+    assert result["latest"]["dollars"] == pytest.approx(
+        (100_000 * 0.10 + (150_000 + 272_000) * SOL.input_per_million + 900_000 * SONNET.input_per_million) / 1_000_000)
+    assert (result["latest"]["priced_records"], result["latest"]["usage_records"]) == (4, 7)
+    assert {item["kind"]: item["records"] for item in result["excluded"]} == {"context_tier_unproven": 3}
 
 
 def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db):

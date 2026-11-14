@@ -1817,6 +1817,8 @@ async def test_the_workflow_share_series_adds_two_statements_at_most(isolated_db
 
     The counting approach is the one the Measurement tests already use (``set_trace_callback``), put on
     the connection this route opens; a third statement would mean the scope or the task set was read twice.
+    ``fetch_all``'s ``SELECT * FROM (...) LIMIT 0`` shape probes are left out of the count: a probe only
+    prepares a read for its column names and reads no rows, so it cannot read the scope or the task set again.
     """
     from api import measurement
     from infra.database import get_db
@@ -1833,9 +1835,13 @@ async def test_the_workflow_share_series_adds_two_statements_at_most(isolated_db
     seen: list[str] = []
     real_get_db = measurement.get_db
 
+    def record(statement: str) -> None:
+        if not (statement.startswith("SELECT * FROM (") and statement.endswith(") LIMIT 0")):
+            seen.append(statement)
+
     def traced_get_db():
         connection = real_get_db()
-        connection.set_trace_callback(seen.append)
+        connection.set_trace_callback(record)
         return connection
 
     monkeypatch.setattr(measurement, "get_db", traced_get_db)

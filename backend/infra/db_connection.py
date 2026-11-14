@@ -9,6 +9,8 @@ import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from infra.db_wal_checkpoint import WalCheckpoint
+
 log = logging.getLogger(__name__)
 
 _jobs = threading.local()
@@ -124,6 +126,7 @@ class PooledConnection(sqlite3.Connection):
     """
 
     db_lane: str | None = None  # set by apply_thread_lane on a read or bulk lane
+    wal_checkpoint: WalCheckpoint | None = None
 
     def cursor(self, factory=sqlite3.Cursor):
         cursor = super().cursor(factory)

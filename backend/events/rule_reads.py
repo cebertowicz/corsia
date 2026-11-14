@@ -6,7 +6,7 @@ no rule matches never pays them. The artifact's owner and lifecycle are
 routing's, never read again here. A webhook pays its one read before routing's
 ordered preparation (:func:`type_rules`), and none in it when no rule for its
 type is enabled; only with a self-rule of its type is its connector's unrouted
-scope read (:func:`unrouted_projects`). Names no connector.
+scope read (:func:`unrouted_scopes`). Names no connector.
 """
 
 from __future__ import annotations
@@ -16,18 +16,20 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from infra.database import get_db
+from infra.delegation_scope import PROJECT_SCOPE_PREFIX, WORKSPACE_SCOPE_ID
 from infra.queries import thread_available_sql
 
 
 def enabled_rules(
-    db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
+    db: sqlite3.Connection, connector: str, event_type: str,
     thread: str | None, scopes: list[str],
 ) -> list[sqlite3.Row]:
-    """The enabled rules for one declared type in ``thread``'s project (scope
-    ``prefix`` + its project), else in ``scopes``: one read through the
+    """The enabled rules for one declared type in ``thread``'s scope, else in
+    ``scopes``: one read through the
     ``(connector, event_type, enabled, scope, created_at)`` index."""
     if thread is not None:
-        where, params = "scope=? || (SELECT project_id FROM threads WHERE id=?)", [prefix, thread]
+        where = "scope=(SELECT CASE WHEN COALESCE(project_id,'')='' THEN ? ELSE ? || project_id END FROM threads WHERE id=?)"
+        params = [WORKSPACE_SCOPE_ID, PROJECT_SCOPE_PREFIX, thread]
     elif scopes:
         where, params = f"scope IN ({','.join('?' * len(scopes))})", list(scopes)
     else:
@@ -76,7 +78,7 @@ def type_rules(connector: str, event_type: str, read_facts: Iterable[str] = ()) 
     return bool(row[0]), bool(row[1]), bool(row[2])
 
 
-def unrouted_projects(
+def unrouted_scopes(
     connector: str, event_type: str, facts: Mapping[str, Any], self_rule: bool | None = None,
 ) -> frozenset[str] | None:
     """The connector's unrouted scope for the event, should routing give it no thread.

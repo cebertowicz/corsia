@@ -39,7 +39,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
         -- route: act on events. observe: register what a tool result names to its caller.
         kind TEXT NOT NULL DEFAULT 'route' CHECK (kind IN ('route', 'observe')),
         -- Only a shipped rule set's observe row applies to every project, as global.
-        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%'
+        scope TEXT NOT NULL CHECK (scope LIKE 'project:_%' OR scope = 'workspace'
                                    OR (scope = 'global' AND kind = 'observe' AND origin LIKE 'rule_set:_%')),
         connector TEXT NOT NULL,
         event_type TEXT,

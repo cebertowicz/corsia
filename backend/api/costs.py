@@ -15,6 +15,7 @@ from core.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_column
 from api.model_groups import group_spend
 from api.measurement_scope import completed_week_window
 from api.measurement_scope import scope_cte, validate_scope
+from api.measurement_token_sql import ROLLUP_TOKEN_CLASS_SQL
 from api.usage_rollup import rollup_bound, schedule_refresh, usage_source
 
 router = APIRouter(prefix="/api/costs", tags=["costs"])
@@ -186,11 +187,22 @@ def _costs_by_project(db, scope: _UsageScope):
 
 
 def _costs_by_source(db, scope: _UsageScope):
-    """Token and cost totals per call source, most expensive first."""
+    """Token and cost totals per call source, most expensive first.
+
+    The four ``*_tokens`` classes are Measurement's key-figure split (``ROLLUP_TOKEN_CLASS_SQL``), so this read and
+    the key figures give one set of calls the same classes: input is what the total leaves after the three recorded
+    parts, and a call that stored a total without its parts is all input. ``unknown_token_rows`` is the key figures'
+    count for the total: calls with no total that are also missing input, output or newly cached tokens, which
+    make the row a lower bound. Zero does not say every class is complete: a call that did not record its cache
+    re-reads, or stored only a total, is not counted. The classes sum to ``total_tokens`` only where every call
+    stored a total.
+    """
     return db.execute(
         scope.cte + "SELECT u.source as source, "
         "SUM(u.total_tokens) as total_tokens, "
         "SUM(u.cost_usd) as cost_usd, "
+        + "".join(f"{value} as {name}_tokens, " for name, value in ROLLUP_TOKEN_CLASS_SQL)
+        + "COALESCE(SUM(u.fresh_unknown_records), 0) as unknown_token_rows, "
         + _COUNTS + f"FROM {scope.usage} u "
         "GROUP BY u.source ORDER BY cost_usd DESC",
         scope.params,

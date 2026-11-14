@@ -11,6 +11,7 @@ from core.correction_attribution import attributed_facts, workflow_run_of
 from core.cost_identity import IdentityResolver
 from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
 from core.measurement_scope import MeasurementScope, scope_cte
+from infra.packed_rows import fetch_all
 
 
 def _in_window(db: sqlite3.Connection, times: list[str | None], start: str, end: str) -> set[int]:
@@ -78,11 +79,11 @@ def scoped_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope, *
     if above is not None:
         chains, bound = _REACHABLE, " AND n.id IN (SELECT id FROM reachable)"
         params = {**params, "above": json.dumps(sorted(set(above)))}
-    rows = db.execute(scope_cte() + chains + f"""
+    rows = fetch_all(db, scope_cte() + chains + f"""
         SELECT n.id,{",".join(f"n.{link}" for link in _NODE_LINKS)},n.workflow_ref,n.workflow_version,n.created_at
         FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
         WHERE p.owner_kind='thread' AND p.owner_id IN (SELECT id FROM scope_threads)
-    """ + bound, params).fetchall()
+    """ + bound, params)
     return rows, run_roots(rows)
 
 

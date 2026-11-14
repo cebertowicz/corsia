@@ -71,9 +71,9 @@ def _stored_cursor(account_id: str) -> dict:
 def _capture_deliveries(monkeypatch) -> list[dict]:
     delivered: list[dict] = []
 
-    def deliver(connector: str, raw: dict, *, target_filter=None, unrouted_projects=None, db=None):
+    def deliver(connector: str, raw: dict, *, target_filter=None, unrouted_scopes=None, db=None):
         assert connector == "gmail"
-        assert target_filter is not None and unrouted_projects is not None
+        assert target_filter is not None and unrouted_scopes is not None
         delivered.append(raw)
         return []  # designation=None is handled, not a Gmail polling error.
 

@@ -200,36 +200,43 @@ def _note(db: sqlite3.Connection, schedule: Schedule, key: str, summary: str) ->
     )
 
 
-def _wake(db: sqlite3.Connection, schedule: Schedule, signal: Signal, now: str) -> bool:
-    """Wake the owner once for this series today; a repeat becomes a note. True if woken."""
+def wake_owner(
+    db: sqlite3.Connection, owner: str, event: str, summary: str, payload: dict[str, Any],
+    *, message_id: str, chip: str, park_key: str,
+) -> bool:
+    """Wake a script's owner, or park the wake when the owner is gone. True if sent.
+
+    The one place a script's failure reaches its owner: ``summary`` is the agent's line and
+    ``chip`` the person's. The caller picks the message id, so it decides what repeats.
+    """
     from events import dead_letter
     from events.delivery import enqueue_event_wake
 
+    try:
+        enqueue_event_wake(owner, event, summary, payload, message_id=message_id, chip=chip, db=db)
+    except ValueError:
+        dead_letter.park(event, {**payload, "summary": summary, "owner": owner}, "owner_inactive", park_key, db=db)
+        return False
+    return True
+
+
+def _wake(db: sqlite3.Connection, schedule: Schedule, signal: Signal, now: str) -> bool:
+    """Wake the owner once for this series today; a repeat becomes a note. True if woken."""
     message_id = wake_message_id(schedule.id, signal.series, local_day(now))
     if _wake_exists(db, message_id):
         _note(db, schedule, signal.series or "run", signal.summary)
         return False
     payload = {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT}
-    try:
-        enqueue_event_wake(
-            schedule.thread_id, f"script.{signal.kind}", signal.summary,
-            payload,
-            message_id=message_id,
-            chip=f"Script {signal.kind.replace('_', ' ')}: {_script_name(schedule)}",
-            db=db,
-        )
-    except ValueError:
-        dead_letter.park(
-            f"script.{signal.kind}",
-            {**payload, "summary": signal.summary, "owner": schedule.thread_id},
-            "owner_inactive", schedule.id, db=db,
-        )
+    sent = wake_owner(
+        db, schedule.thread_id, f"script.{signal.kind}", signal.summary, payload, message_id=message_id,
+        chip=f"Script {signal.kind.replace('_', ' ')}: {_script_name(schedule)}", park_key=schedule.id,
+    )
+    if not sent:
         logger.warning(
             "script schedule {} owner {} unavailable; {} not delivered",
             schedule.id, schedule.thread_id, signal.kind,
         )
-        return False
-    return True
+    return sent
 
 
 def _note_due(schedule: Schedule, now: str) -> bool:

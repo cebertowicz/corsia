@@ -252,7 +252,7 @@ def _insert_delivered_message(
             sequence,
         ),
     )
-    place_answers(db, message_id, thread_id, role, content, sequence, created_at)
+    place_answers(db, message_id, thread_id, role, content, sequence, created_at, metadata)
 
 
 def _require_turn_provenance(message_id: str, role: str, metadata: dict | None) -> None:

@@ -180,6 +180,54 @@ async def test_all_includes_orphaned_usage_while_project_and_agent_scopes_exclud
     assert "missing-thread" not in {row["thread_id"] for row in agent["top_threads"]}
 
 
+@pytest.mark.asyncio
+async def test_each_kind_of_call_carries_its_four_token_classes(scoped_costs):
+    """A checkpoint's tokens are served by class, split the way Measurement's key figures split the same calls."""
+    from api.measurement_token_sql import TOKEN_FIGURE_SQL
+    from infra.database import get_db
+
+    day = f"{_window_day().isoformat()}T13:00:00Z"
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+            "cache_read_tokens,total_tokens,cost_usd,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("checkpoint-whole", "agent-child", "model-agent", 100, 20, 300, 5000, 5420, 0.5, "checkpoint", day),
+                # No total and no input figure: its recorded parts count, and the row says one call is short.
+                ("checkpoint-short", "agent-child", "model-agent", None, 7, None, 40, None, None, "checkpoint", day),
+                # A total and none of its parts: all of it is input, as in the key figures, and no call is counted short.
+                ("checkpoint-total", "agent-child", "model-agent", None, None, None, None, 900, None, "checkpoint", day),
+            ],
+        )
+        db.commit()
+        figures = ",".join(
+            f"SUM({value}) AS {name}, SUM({unknown}) AS {name}_unknown" for name, value, unknown in TOKEN_FIGURE_SQL)
+        key = dict(db.execute(
+            f"SELECT {figures} FROM llm_usage u WHERE u.source='checkpoint' AND u.thread_id='agent-child'").fetchone())
+    finally:
+        db.close()
+
+    summary = await scoped_costs.cost_summary("test-token", project="all", agent="agent", range="12w")
+    rows = {row["source"]: row for row in summary["by_source"]}
+
+    # The seeded checkpoint call (10 in, 5 out, no cache figures) plus the three above.
+    checkpoint = rows["checkpoint"]
+    assert (checkpoint["input_tokens"], checkpoint["cache_write_tokens"]) == (1010, 300)
+    assert (checkpoint["cache_read_tokens"], checkpoint["output_tokens"]) == (5040, 32)
+    assert (checkpoint["total_tokens"], checkpoint["unknown_token_rows"], checkpoint["api_calls"]) == (6335, 1, 4)
+    # One rule, two reads: the key figures over the same calls give the same classes and the same count of short calls.
+    classes = ("input", "cache_write", "cache_read", "output")
+    assert {name: checkpoint[f"{name}_tokens"] for name in classes} == {name: key[name] for name in classes}
+    assert sum(checkpoint[f"{name}_tokens"] for name in classes) == key["total"]
+    assert checkpoint["unknown_token_rows"] == key["total_unknown"]
+    # The seed's INSERT leaves the cache columns out, so their table default of zero applies here. The ledger
+    # writer stores a missing cache figure as NULL, which reads as no cache use either way.
+    turn = rows["turn"]
+    assert (turn["input_tokens"], turn["output_tokens"], turn["unknown_token_rows"]) == (10, 5, 0)
+    assert (turn["cache_write_tokens"], turn["cache_read_tokens"]) == (0, 0)
+
+
 def test_spend_and_measurement_share_the_same_completed_twelve_weeks(monkeypatch):
     from api import costs
     from api.measurement_scope import completed_week_bounds, query_params

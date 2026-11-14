@@ -610,9 +610,9 @@ async def test_rules_hold_threads_that_left_their_project(isolated_db, sent, mon
 
     assert _wakes("watcher") == [] and _notes("watcher") == []
     [held] = _decisions(rule_id=rule["id"])
-    assert (held["outcome"], held["reason"]) == ("held", "recipient outside the rule's project")
+    assert (held["outcome"], held["reason"]) == ("held", "recipient outside the rule's scope")
     [why] = (await _tool("cond", operation="explain", event_id=held["event_id"]))["decisions"]
-    assert why["explanation"].endswith("held it from watcher: recipient outside the rule's project")
+    assert why["explanation"].endswith("held it from watcher: recipient outside the rule's scope")
 
     _write("UPDATE threads SET project_id=? WHERE id='watcher'", P)
     await route(SYNC, _sync(7, 2))
@@ -650,7 +650,7 @@ async def test_r29_a_cloud_off_projects_events_reach_no_cloud_recipient_outside_
 
     assert _wakes("cloud") == [] and _notes("cloud") == [] and _digest("cloud") == []
     assert [(d["outcome"], d["reason"]) for d in _decisions(rule_id=rule["id"])] == [
-        ("held", "recipient outside the rule's project")]
+        ("held", "recipient outside the rule's scope")]
     with pytest.raises(sqlite3.IntegrityError):  # no rule scope spans projects
         _write("UPDATE event_rules SET scope='global' WHERE id=?", rule["id"])
 

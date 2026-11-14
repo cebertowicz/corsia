@@ -7,8 +7,8 @@
 	let { text, unread = false, preview = false, taggedAgents = [], mentions = [], taggedPerson = null }: { text: string; unread?: boolean; preview?: boolean; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[]; taggedPerson?: string | null } = $props();
 	// Chat's one rule for a long message decides; an unread body always shows whole. `unread` is the thread's held
 	// state (CommentThread), which stays set while the thread is mounted, so nothing collapses under the person reading it.
-	// A resting margin card's preview is not being read: it clamps at its short height until the card is picked.
-	const collapsible = $derived(preview || (!unread && isLongMessageText(text)));
+	// A read resting margin card's preview clamps at its short height until the card is picked; an unread one shows whole there too.
+	const collapsible = $derived(!unread && (preview || isLongMessageText(text)));
 	let open = $state(false);
 	let clamped = $state(false);
 	let reveal: HTMLDivElement;

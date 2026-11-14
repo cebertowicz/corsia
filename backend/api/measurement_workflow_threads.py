@@ -3,16 +3,18 @@ import json
 import sqlite3
 from typing import Any, Iterable
 
+from infra.packed_rows import fetch_all
+
 
 def agents(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[str, dict[str, Any] | None]:
     """The thread that ran each run: the owner of its plan, as ``/agents`` names a thread."""
     found: dict[str, dict[str, Any] | None] = {run_id: None for run_id in run_ids}
-    rows = db.execute("""
+    rows = fetch_all(db, """
         SELECT n.id AS run_id,p.owner_id AS id,t.title AS label FROM plan_nodes n
         JOIN plans p ON p.id=n.plan_id AND p.owner_kind='thread'
         LEFT JOIN threads t ON t.id=p.owner_id
         WHERE n.id IN (SELECT value FROM json_each(:ids))
-    """, {"ids": json.dumps(sorted(run_ids))}).fetchall()
+    """, {"ids": json.dumps(sorted(run_ids))})
     found.update({str(row["run_id"]): {"id": str(row["id"]), "label": row["label"]} for row in rows})
     return found
 
@@ -21,12 +23,12 @@ def plan_targets(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[str, di
     """Find the visible plan and its nesting step using the plan attachment owner."""
     from plans.public import attached_parent_node
 
-    rows = db.execute("""
+    rows = fetch_all(db, """
         SELECT n.id AS run_id, p.id AS plan_id, p.owner_id, t.spawned_by
         FROM plan_nodes n JOIN plans p ON p.id=n.plan_id AND p.owner_kind='thread'
         JOIN threads t ON t.id=p.owner_id
         WHERE n.id IN (SELECT value FROM json_each(:ids))
-    """, {"ids": json.dumps(sorted(run_ids))}).fetchall()
+    """, {"ids": json.dumps(sorted(run_ids))})
     result: dict[str, dict[str, str | None] | None] = {}
     by_plan: dict[str, dict[str, str | None] | None] = {}
     for row in rows:
@@ -58,7 +60,6 @@ def labels(db: sqlite3.Connection, thread_ids: Iterable[str]) -> dict[str, str |
     ids = sorted(thread_ids)
     if not ids:
         return {}
-    return {str(row["id"]): row["title"] for row in db.execute(
-        "SELECT id,title FROM threads WHERE id IN (SELECT value FROM json_each(:ids))",
-        {"ids": json.dumps(ids)},
-    ).fetchall()}
+    return {str(row["id"]): row["title"] for row in fetch_all(
+        db, "SELECT id,title FROM threads WHERE id IN (SELECT value FROM json_each(:ids))",
+        {"ids": json.dumps(ids)})}

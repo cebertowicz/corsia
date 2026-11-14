@@ -41,7 +41,7 @@ def assistant_step_payload(step: dict, *, message_id: str) -> dict:
         "metadata": step.get("metadata") or {},
         "created_at": step["created_at"],
         "seq": step.get("seq"),
-        **{key: step[key] for key in ("chat_answer_cids", "chat_visible_content") if key in step},
+        **{key: step[key] for key in ("chat_answer_cids", "chat_visible_content", "chat_drawn") if key in step},
     }
 
 

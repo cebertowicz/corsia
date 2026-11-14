@@ -214,6 +214,7 @@ class TestConnectorClassifier:
             map_github_event("pull_request", _close(True, action="opened")),
             map_github_event("pull_request", _close(True, action="synchronize")),
             map_github_event("pull_request", _close(True, action="ready_for_review")),
+            map_github_event("pull_request", _close(False, action="reopened")),
             map_github_event("pull_request", _close(True, action="labeled") | {
                 "label": {"name": LABEL_REVIEW}}),
             map_github_event("pull_request", _close(True, action="unlabeled") | {

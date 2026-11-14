@@ -118,6 +118,14 @@ async def test_accept_refuses_quote_changed_only_in_browser(ownership_scope, tmp
         await manager.close()
 
 
+async def _published(entry):
+    """Wait for the background publisher to register what the lane landed; closing first stops it unpublished."""
+    async def drained():
+        while not entry.publisher.drained:
+            await asyncio.sleep(0.01)
+    await asyncio.wait_for(drained(), 10)
+
+
 def _edit_items(scope):
     return scope["db"].execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0]
 
@@ -140,6 +148,7 @@ async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_pl
             row["id"], "accept", user_id=user_id(scope), decided_by="user", actor_thread_id=None,
             write=legacy_writer)
         assert result["accepted"] == [row["id"]]
+        await _published(entry)
         await manager.close()
         assert _edit_items(scope) == (0 if bar_accept else 1)
         if not bar_accept:
@@ -198,6 +207,7 @@ async def test_the_bars_flush_publishes_the_persons_typing_before_the_accept_so_
             row["artifact_id"], user_id=user_id(scope), decided_by="user", actor_thread_id=None,
             write=legacy_writer)
         assert result["accepted"] == [row["id"]]
+        await _published(entry)
         await manager.close()
         assert entry.live.path.read_text() == "USER a B\nsecond\n"
         items = scope["db"].execute("SELECT latest_text, save_count FROM doc_feedback_edit_items").fetchall()

@@ -62,12 +62,13 @@ export async function settleHighlight(page: Page, mark: Locator): Promise<void> 
  * chat canvas is wide enough for it, a popover on a narrower column, a drawer on a phone.
  * Returns the thread surface, so the caller can read what the thread holds.
  */
-export async function openCommentThread(row: Locator, page: Page, quote: string): Promise<Locator> {
+export async function openCommentThread(row: Locator, page: Page, quote: string, how: { tap?: boolean } = {}): Promise<Locator> {
 	const narrow = (page.viewportSize()?.width ?? 0) <= 768;
 	const mark = row.locator('.cm-comment-anchor').filter({ hasText: quote });
 	await expect(mark).toBeVisible();
 	await settleHighlight(page, mark);
-	await mark.click();
+	// A real touch tap needs a touch-enabled context; the caller asks for it where the spec runs as a phone.
+	if (how.tap) await mark.tap(); else await mark.click();
 	if (narrow) {
 		const drawer = page.getByRole('dialog', { name: 'Comment thread' });
 		await expect(drawer).toBeVisible();

@@ -16,18 +16,29 @@ from typing import Any
 from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
 from core.measurement_token_contract import TOKEN_BUCKETS, buckets_reported_sql, contract_proven_sql, total_agrees_sql
 from llm.api_equivalent import (
-    api_equivalent, has_public_long_context_price, has_unpublished_cache_rate, is_not_api_priced, price_identity,
+    api_equivalent, has_unpublished_cache_rate, is_not_api_priced, long_context_bound, price_identity,
 )
-from llm.list_prices import LIST_PRICES, OPENAI_LONG_CONTEXT_INPUT_TOKENS, listing_for_host
+from llm.list_prices import LIST_PRICES, LONG_CONTEXT_BOUNDS, listing_for_host
 from llm.network_endpoints import is_cloud_server
 
-# OpenAI's public Standard boundary is based on an individual call's input,
-# not its output or a period's aggregate. A row within the short bound is safe
-# even if it combines usage records; above it, opaque Codex receipts cannot prove tier.
-INPUT_TIER_SQL = (
-    f"CASE WHEN u.prompt_tokens+u.cache_creation_tokens+u.cache_read_tokens>{OPENAI_LONG_CONTEXT_INPUT_TOKENS} "
-    "THEN 'above_short_bound' ELSE 'short_bound' END"
-)
+# Each published long-context boundary is based on an individual call's input,
+# not its output or a period's aggregate. A row is tiered by the largest bound
+# its input exceeds ('over_<bound>', else 'short_bound'), so one split serves
+# every identity's own bound. A row within an identity's bound is safe even if it
+# combines usage records; above it, opaque receipts cannot prove the tier.
+_TIER_PREFIX = "over_"
+_CALL_INPUT = "u.prompt_tokens+u.cache_creation_tokens+u.cache_read_tokens"
+_TIER_CASES = " ".join(f"WHEN {_CALL_INPUT}>{bound} THEN '{_TIER_PREFIX}{bound}'" for bound in LONG_CONTEXT_BOUNDS)
+INPUT_TIER_SQL = f"CASE {_TIER_CASES} ELSE 'short_bound' END" if _TIER_CASES else "'short_bound'"
+
+
+def _above_long_context_bound(input_tier: str, model: str, listing: str | None) -> bool:
+    """Whether a row's input tier reaches past the identity's own long-context bound."""
+    bound = long_context_bound(model, listing)
+    exceeded = int(input_tier.removeprefix(_TIER_PREFIX)) if input_tier.startswith(_TIER_PREFIX) else 0
+    return bound is not None and exceeded >= bound
+
+
 # Providers with a published idle-hours vector bill by the call's own time, so
 # the hour is read per row, in UTC, before aggregation, against the window of
 # the price entries for the External identity the row served. The row's list is
@@ -157,8 +168,7 @@ def classify_usage_rows(rows: list[dict[str, Any]], listings: Mapping[str, str])
             continue
         reason = "no_list_price" if price_identity(model, listing) is None else (
             None if row["admission"] == "ok" else row["admission"])
-        if (reason is None and row["input_tier"] == "above_short_bound"
-                and has_public_long_context_price(model, listing)):
+        if reason is None and _above_long_context_bound(str(row["input_tier"]), model, listing):
             reason = "context_tier_unproven"
         idle_hours = bool(row.get("idle_hours"))
         buckets = tuple(int(row[bucket]) for bucket in TOKEN_BUCKETS)

@@ -24,3 +24,7 @@ class DocumentOwnershipRefused(DurableWritePolicyError):
     Final on every path: unlike workspace organization, a host-action review
     never waives it.
     """
+
+
+class SuccessorHoldsComments(DurableWritePolicyError):
+    """A promote's successor identity already holds comment state, so nothing may move onto it."""

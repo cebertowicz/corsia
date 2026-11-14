@@ -11,14 +11,16 @@ entitlements="$(cd "$(dirname "${BASH_SOURCE[0]}")/../src-tauri" && pwd -P)/Enti
 
 python_bin="$app/Contents/Resources/python/bin/python3"
 python_versioned_bin="$app/Contents/Resources/python/bin/python3.11"
+macho_list="$(mktemp)"
+trap 'rm -f "$macho_list"' EXIT
+# Written to a file first so a failed scan fails this script (set -e).
+"$(dirname "${BASH_SOURCE[0]}")/list-macho.sh" "$app/Contents" >"$macho_list"
 while IFS= read -r -d '' path; do
-  if file -b "$path" | grep -q 'Mach-O'; then
-    if [ "$path" = "$python_bin" ] || [ "$path" = "$python_versioned_bin" ]; then
-      codesign --force --options runtime --entitlements "$entitlements" --timestamp=none --sign "$identity" "$path"
-    else
-      codesign --force --options runtime --timestamp=none --sign "$identity" "$path"
-    fi
+  if [ "$path" = "$python_bin" ] || [ "$path" = "$python_versioned_bin" ]; then
+    codesign --force --options runtime --entitlements "$entitlements" --timestamp=none --sign "$identity" "$path"
+  else
+    codesign --force --options runtime --timestamp=none --sign "$identity" "$path"
   fi
-done < <(find "$app/Contents" -type f -print0)
+done <"$macho_list"
 codesign --force --options runtime --entitlements "$entitlements" --timestamp=none --sign "$identity" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"

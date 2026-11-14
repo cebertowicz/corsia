@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 #: The oldest oMLX release whose recommender CORSIA reads, the one the test
 #: recording comes from; an oMLX older than it has no recommender. The bundle
 #: ships ``omlx_release.OMLX_VERSION``, which must be this release or newer.
-#: 0.7.3's ``admin/model_recommender.py`` is byte-identical to this release's.
+#: 0.7.3's and 0.8.0rc1's ``admin/model_recommender.py`` are byte-identical to this release's.
 OMLX_RECOMMENDER_MIN = "0.7.1rc1"
 
 GIB = 1024**3

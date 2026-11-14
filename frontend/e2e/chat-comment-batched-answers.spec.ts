@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
-import { injectMessage, seedMockResponses } from './support/mock';
+import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { closeCommentThread, commentEditor, commentEditorClosed, openCommentThread, postedComments } from './support/chatComments';
 
 const BACKEND = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
@@ -15,6 +15,32 @@ const narrow = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768;
 async function capture(page: Page, stage: string) {
   const directory = process.env.CORSIA_CHAT_ANSWERS_CAPTURE_DIR;
   if (directory) await page.screenshot({ path: `${directory}/${stage}-${page.viewportSize()?.width}.png`, animations: 'disabled' });
+}
+
+/** Scroll the transcript to its end, where the last row sits above the composer; returns where the row and composer are. */
+async function lastRowClear(page: Page) {
+  return page.locator('.messages [data-message-id]').last().evaluate(async (node) => {
+    // The transcript keeps a composer-high gap under its last row once scrolled to its end.
+    let scroller = node.parentElement;
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const floater = document.querySelector('.input-floater')?.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    return { bottom: Math.round(box.bottom), composerTop: floater ? Math.round(floater.top) : null };
+  });
+}
+
+async function expectLastRowClear(page: Page) {
+  const { bottom, composerTop } = await lastRowClear(page);
+  expect(bottom).toBeLessThanOrEqual(composerTop ?? Infinity);
+}
+
+/** Scroll the commented message to the middle of the transcript so its highlight shows, then capture. */
+async function captureHighlight(page: Page, row: any, stage: string) {
+  await row.evaluate((node: HTMLElement) => node.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(150);
+  await capture(page, stage);
 }
 
 async function comment(page: Page, id: string, quote: string, note: string) {
@@ -84,8 +110,8 @@ async function queueComments(page: Page, request: any, title: string, count: num
   return { thread, row, cids };
 }
 
-async function answerReadsInItsThread(page: Page, row: any, quote: string, answer: string) {
-  const surface = await openCommentThread(row, page, quote);
+async function answerReadsInItsThread(page: Page, row: any, quote: string, answer: string, how: { tap?: boolean } = {}) {
+  const surface = await openCommentThread(row, page, quote, how);
   await expect(surface.getByText(answer)).toBeVisible();
   return surface;
 }
@@ -102,10 +128,13 @@ for (const count of [1, 2]) test(`${count} queued comment(s): an answer sent mid
   ]);
   let updateId = '';
   await expect.poll(async () => {
-    const row = (await messages(request, thread)).find(m => m.role === 'assistant' && m.content === update);
-    updateId = row?.id ?? '';
-    return row?.chat_visible_content;
-  }, { timeout: 30_000 }).toBe('');
+    const rows = await messages(request, thread);
+    const placed = rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+      .find((a: any) => a.author_kind === 'agent' && a.text === answers[0]);
+    updateId = placed?.assistant_message_id ?? '';
+    // The server never sends a step that draws nothing: the update is in no page read.
+    return Boolean(updateId) && !rows.some((m: any) => m.id === updateId);
+  }, { timeout: 30_000 }).toBe(true);
   // While the Turn still runs, the update adds no chat row and each answer reads in its own thread.
   await expect(page.locator(`[data-message-id="${updateId}"]`)).toHaveCount(0);
   expect(await chatText(page)).not.toContain(answers[0]);
@@ -150,4 +179,64 @@ test('an answer written into the reply never streams into chat', async ({ page, 
   await answerReadsInItsThread(page, row, quotes[0], answer);
   expect(await chatText(page)).not.toContain('Streamed answer');
   await capture(page, 'after');
+});
+
+for (const width of [1440, 900, 393]) test.describe(`answers-only turn at ${width}`, () => {
+test.use({ viewport: { width, height: width === 393 ? 852 : 1000 }, hasTouch: width === 393, isMobile: width === 393 });
+test(`a turn made only of answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  test.skip(test.info().project.name !== 'chromium-desktop', 'Sets its own widths');
+  const { thread, row, cids } = await queueComments(page, request, 'Answers only turn', 1);
+  // The highlight while no answer has come, to read beside the one an unread answer leaves.
+  await captureHighlight(page, row, 'highlight-no-answer');
+  const answer = 'Only an answer.';
+  await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}`, completion_gate: 'answers-only' }]);
+  const blocks = () => page.locator('.messages [data-work-block]');
+  const titled = (title: RegExp) => blocks().filter({ has: page.locator('.fold-toggle', { hasText: title }) });
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toBeVisible();
+  // While the turn runs, its answers-only step adds one working line and nothing else.
+  await expect(titled(/Working/)).toHaveCount(1);
+  await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(1);
+  await releaseMockGate(request, 'answers-only');
+  let stepId = '';
+  await expect.poll(async () => {
+    const rows = await messages(request, thread);
+    stepId = rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+      .find((a: any) => a.author_kind === 'agent' && a.text === answer)?.assistant_message_id ?? '';
+    return Boolean(stepId) && !rows.some((m: any) => m.id === stepId);
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  await captureHighlight(page, row, 'highlight-unread-answer');
+  // Once it ends no line is left for it: the one folded line counts the step it lists when opened (#2602).
+  await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(0);
+  const labels = await blocks().evaluateAll((nodes) => nodes.map((node) => (node.querySelector('.fold-toggle') as HTMLElement).innerText));
+  expect(labels.map((label) => label.replace(/ · under 1 min$/, ''))).toEqual(['Context updated', 'Worked · 1 step']);
+  // What chat draws: the same rows and the same fold labels live and after a reload, none of them the answer.
+  const drawn = async () => ({
+    ids: await page.locator('.messages [data-message-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-message-id'))),
+    folds: await page.locator('.messages .fold-toggle').allInnerTexts(),
+  });
+  await expandWork(page);
+  const live = await drawn();
+  const opened = await titled(/Worked/).locator('[data-message-id]').count();
+  expect(opened).toBe(1);
+  expect(live.ids).not.toContain(stepId);
+  expect(await chatText(page)).not.toContain(answer);
+  await expectLastRowClear(page);
+  await capture(page, 'answers-only-live');
+  await page.reload();
+  if (narrow(page)) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await sidebarThread(page, 'Answers only turn').click();
+  await waitForWsConnected(page);
+  await expect(page.locator('.messages [data-message-id]').first()).toBeVisible();
+  await expandWork(page);
+  await expect(page.locator('.messages [data-message-id]')).toHaveCount(live.ids.length);
+  const reloaded = await drawn();
+  expect(reloaded.ids).toEqual(live.ids);
+  expect(reloaded.folds).toEqual(live.folds);
+  await expectLastRowClear(page);
+  await capture(page, 'answers-only-reloaded');
+  await answerReadsInItsThread(page, row, quotes[0], answer, { tap: width === 393 });
+  await capture(page, 'thread-open');
+});
 });

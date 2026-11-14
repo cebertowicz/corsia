@@ -78,9 +78,14 @@ for (const body of ['one', 'two'] as const) for (const theme of ['light', 'dark'
 		test.setTimeout(180_000);
 		const { card, input } = await openJustOpened(page, request, 1440, 420, theme, body);
 		const suffix = `${theme}${body === 'two' ? '-two-paragraphs' : ''}`;
+		// The field eases to each new height. Under load, frames are far enough apart that two reads 120 ms apart can return the
+		// same height partway through the ease, so the height counts as settled only once the ease has also finished.
 		const settled = async () => {
 			let last = -1;
-			await expect.poll(async () => { const h = (await input.boundingBox())!.height; const same = h === last; last = h; return same; }, { intervals: [120] }).toBe(true);
+			await expect.poll(async () => {
+				const { height, easing } = await input.evaluate(node => ({ height: node.getBoundingClientRect().height, easing: node.getAnimations().some(animation => animation.playState === 'running') }));
+				const same = !easing && height === last; last = height; return same;
+			}, { intervals: [120] }).toBe(true);
 			return (await input.boundingBox())!.height;
 		};
 		const checkFrame = async (name: string) => {

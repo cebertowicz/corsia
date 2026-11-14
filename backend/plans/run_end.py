@@ -12,6 +12,7 @@ import json
 from typing import Any, Iterable
 
 import plans.service as service
+from infra.packed_rows import fetch_all
 from plans import node_states
 
 EVENT = "workflow_run_ended"
@@ -135,8 +136,8 @@ def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
     if not ids:
         return {}
     found: dict[str, dict[str, Any]] = {}
-    for row in db.execute(
-        "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event=?"
+    for row in fetch_all(
+        db, "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event=?"
         " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
         (EVENT, json.dumps(ids)),
     ):

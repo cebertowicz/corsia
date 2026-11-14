@@ -216,12 +216,12 @@ def _owner_project(conn, owner: str) -> str | None:
     return row["project_id"] if row and row["project_id"] else None
 
 
-def _unrouted_projects(event_type: str, facts: dict[str, Any]) -> frozenset[str] | None:
+def _unrouted_scopes(event_type: str, facts: dict[str, Any]) -> frozenset[str] | None:
     """A connector event routing may give no thread: its connector's unrouted scope,
     read before the write transaction because a scope lookup may run a subprocess (``None``: the lookup
     failed, so no self-rule fires)."""
     split = _split_type(event_type)
-    return rule_reads.unrouted_projects(*split, facts) if split else frozenset()
+    return rule_reads.unrouted_scopes(*split, facts) if split else frozenset()
 
 
 def _rules_matched(plan: rules.RulePlan | None) -> int:
@@ -300,7 +300,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
                 stamps: MeasureStamps | None = None, trace: tuple[str, ...] = (),
                 rule_decision_id: int | None = None) -> IntakeResult:
     # A declared type always has its declaring thread as owner; only a connector's can be unrouted.
-    projects = _unrouted_projects(event_type, facts) if origin == "connector" else frozenset()
+    scopes = _unrouted_scopes(event_type, facts) if origin == "connector" else frozenset()
     with write_transaction(None, scope="admit_event") as conn:
         row = conn.execute(
             "SELECT rules_matched FROM event_intake_records "
@@ -339,7 +339,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             envelope, resolved.declaration,
             _routing(owner, envelope),
             target_filter=target_filter,
-            unrouted_projects=projects, db=conn,
+            unrouted_scopes=scopes, db=conn,
         )
         if envelope.artifact_ref and owner:
             intake_routing.resolve_delivered_watches(conn, envelope, deliveries)

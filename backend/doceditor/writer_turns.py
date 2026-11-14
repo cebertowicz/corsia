@@ -51,6 +51,16 @@ def section_heading(key: str) -> str | None:
     return key.split(":", 2)[2] if key.startswith(_SECTION) else None
 
 
+def rekey(key: str, *, from_artifact_id: str, to_artifact_id: str) -> str:
+    """The writer turn ``key`` names, under another document identity; unchanged for a comment thread.
+
+    Only the document's own identity is in a section key, so a document that moves to another identity
+    (``doceditor.comment_transfer``) moves its queued section writes with it.
+    """
+    prefix = f"{_SECTION}{from_artifact_id}:"
+    return f"{_SECTION}{to_artifact_id}:{key[len(prefix):]}" if key.startswith(prefix) else key
+
+
 def person_holding(root_id: str) -> PersonHold | None:
     """The person whose page is on this thread, if any."""
     with _lock:
