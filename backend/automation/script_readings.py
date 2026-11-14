@@ -226,7 +226,8 @@ def _wake(db: sqlite3.Connection, schedule: Schedule, signal: Signal, now: str) 
     if _wake_exists(db, message_id):
         _note(db, schedule, signal.series or "run", signal.summary)
         return False
-    payload = {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT}
+    # A signal whose cause is not the script carries its own next step; the general one says to fix it.
+    payload = {**signal.details, "schedule_id": schedule.id, "next": signal.details.get("next", _WAKE_NEXT)}
     sent = wake_owner(
         db, schedule.thread_id, f"script.{signal.kind}", signal.summary, payload, message_id=message_id,
         chip=f"Script {signal.kind.replace('_', ' ')}: {_script_name(schedule)}", park_key=schedule.id,
