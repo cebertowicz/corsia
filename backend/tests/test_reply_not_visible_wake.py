@@ -510,9 +510,77 @@ async def test_a_sent_update_does_not_hide_a_tagged_closing_answer_from_the_nudg
     effects = await _end(db)
 
     (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", closing))  # the answer is in the quoted last words
+    # They were sent an update, so the nudge asks only about the unsent answer and never says no reply is visible.
+    assert nudge["content"].endswith(
+        nudge_text("1:19", None, [(cid, "Yes, Friday is skipped.")], replied=True))
+    assert "No reply is visible" not in nudge["content"]
     assert effects.drives.count(_THREAD) == 1
     assert _placed(db) == []
+
+
+async def _nudged_after_a_sent_update(db, monkeypatch) -> tuple[str, str]:
+    """An untagged update was sent and an answer tagged only in closing words; the nudge woke turn t2."""
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    return cid, closing
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_that_writes_plain_text_after_a_sent_update_has_its_answer_placed(db, monkeypatch) -> None:
+    # The settle of the woken turn runs the fallback although an update was sent: the answer is not lost.
+    cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
+    plain = _say(db, "Noted.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert _for_user(db, plain)
+    assert _placed(db) == [("m1", cid, closing)]
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_that_answers_no_reply_after_a_sent_update_places_nothing(db, monkeypatch) -> None:
+    _cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
+    _say(db, "NO_REPLY", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert _placed(db) == []
+    assert not _for_user(db, closing)
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_woken_turn_after_a_sent_update_has_its_answer_placed(db, monkeypatch) -> None:
+    cid, closing = await _nudged_after_a_sent_update(db, monkeypatch)
+
+    await _stop(db, "t2")
+
+    assert _placed(db) == [("m1", cid, closing)]
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_that_sends_the_answer_is_settled_as_sent(db, monkeypatch) -> None:
+    cid, _closing = await _nudged_after_a_sent_update(db, monkeypatch)
+    sent = _say(db, f"[{cid}] Yes, Friday is skipped.", turn="t2", for_user=True)
+
+    await _end(db, turn="t2")
+
+    assert _placed(db) == [("m1", cid, sent)]
+
+
+def test_the_tagged_steps_read_at_a_turn_end_are_bounded(db) -> None:
+    import infra.reply_not_visible_wake as wake
+
+    cid = _comment_on(db, "")
+    for number in range(wake._ANSWER_STEPS + 10):
+        _say(db, f"[{cid}] Answer {number}.")
+
+    assert len(wake._hidden_answer_steps(db, _THREAD, 0)) == wake._ANSWER_STEPS
 
 
 @pytest.mark.asyncio
