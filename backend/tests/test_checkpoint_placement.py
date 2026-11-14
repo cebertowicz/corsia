@@ -703,12 +703,19 @@ def test_placement_save_commits_its_path_after_recording_outside_edits(tmp_path)
     assert swept == "# Lessons\n- x\n- outside\n"
 
 
-def test_a_stopped_save_is_found_only_from_its_selection_on(tmp_path, monkeypatch) -> None:
-    """The lookup walks back to the selection, never the whole history, and reads its stamp as UTC."""
-    from infra.guidance_git import find_commit
+def _unexpected(*_args, **_kwargs) -> None:
+    raise AssertionError("the save should have been found or written")
+
+
+def test_a_stopped_save_is_resumed_only_from_its_selection_on(tmp_path, monkeypatch) -> None:
+    """A save's lookup walks back to the entry's selection, never the whole history, reading its stamp as UTC."""
+    from core.placement_save import save_placement
+    from infra.guidance_git import digest
 
     monkeypatch.setenv("TZ", "America/Los_Angeles")
+    monkeypatch.setattr("core.context_source_paths.append_context_source_change", lambda *_a, **_k: None)
     repo = _repo(tmp_path)
+    monkeypatch.setattr("infra.config.WORKSPACE", repo)
     target = repo / "context" / "LESSONS.md"
     target.parent.mkdir()
     target.write_text("- x\n")
@@ -717,10 +724,24 @@ def test_a_stopped_save_is_found_only_from_its_selection_on(tmp_path, monkeypatc
         ["git", "-C", str(repo), "commit", "-qm", "placement: written\n\nPlacement: t/1@2\n"],
         check=True, env={**os.environ, "GIT_COMMITTER_DATE": "2026-01-01T12:00:00+00:00"},
     )
-    sha = _log_sha(repo)
+    stopped = _log_sha(repo)
+
+    def save(selected_at: str) -> str | None:
+        entry = {"thread_id": "t", "entry_id": 1, "revision": 2, "selected_at": selected_at}
+        return save_placement(
+            entry, None, None, "context/LESSONS.md", target, {target: "- x\n- y\n"},
+            {target: digest("- x\n")}, [], settle=_unexpected, defer=_unexpected, refuse=_unexpected,
+            author=lambda _place: "Lane <t@a>",
+            message=lambda *_args: "placement: written\n\nPlacement: t/1@2\n", logger=None,
+        )
+
     # Stamps are naive UTC; read as local time, 12:30 would bound the walk at 20:30Z and miss.
-    assert find_commit(repo, "Placement: t/1@2", target, since="2026-01-01T12:30:00") == sha
-    assert find_commit(repo, "Placement: t/1@2", target, since="2026-01-01T14:00:00") is None
+    assert save("2026-01-01T12:30:00") == stopped
+    assert target.read_text() == "- x\n"
+    # Selected well after that commit: it is outside this selection's walk, so the save is made anew.
+    fresh = save("2026-01-01T14:00:00")
+    assert fresh not in (None, stopped)
+    assert target.read_text() == "- x\n- y\n"
 
 
 def _log_sha(repo: Path) -> str:

@@ -4,8 +4,9 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from datetime import datetime, timezone
 from pathlib import Path
+
+from infra.time import utc_storage_datetime
 
 # Appended to a file's last commit when its working copy differs: two drafts can share it.
 LOCAL_EDIT_MARK = "·dirty"
@@ -88,9 +89,7 @@ def find_commit(repo: Path, trailer: str, path: Path, since: str | None = None) 
 
     bound = []
     if since is not None:
-        stamp = datetime.fromisoformat(since)
-        stamp = stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
-        bound = [f"--since=@{int(stamp.timestamp()) - _SINCE_SLACK_SECONDS}"]
+        bound = [f"--since=@{int(utc_storage_datetime(since).timestamp()) - _SINCE_SLACK_SECONDS}"]
     found = _git(
         repo, "log", "-1", "--format=%H", *bound, "--fixed-strings", f"--grep={trailer}", "--", str(path),
         ok=(0, 128),
