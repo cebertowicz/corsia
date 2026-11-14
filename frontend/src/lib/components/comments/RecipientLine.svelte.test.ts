@@ -36,12 +36,10 @@ describe('RecipientLine', () => {
 		expect(host.querySelector('.rl-name [title]')).toBeNull();
 	});
 
-	it('carries the full list as its hover title so a cut row can still be read', () => {
+	it('keeps every name in the text, never only in a hover title', () => {
 		render({ names: ['Docs lane', 'Agent Substrate'] });
-		expect(host.querySelector('.rl-who')?.getAttribute('title')).toBe('Docs lane, Agent Substrate');
-		unmount(component); host.remove();
-		render({ names: [], none: 'No agent gets this reply.' });
 		expect(host.querySelector('.rl-who')?.hasAttribute('title')).toBe(false);
+		expect(host.querySelector('.rl-who')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Goes to Docs lane and Agent Substrate');
 	});
 
 	it('says it is checking, then offers Retry when the check failed', () => {

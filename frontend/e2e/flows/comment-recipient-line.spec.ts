@@ -12,7 +12,22 @@ const auth = { token: TEST_TOKEN };
 
 const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))).then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))));
 
-for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { name: '393', width: 393, height: 852, phone: true }]) {
+/** The line, the field and Send as the person sees them: each box inside the viewport and inside the nearest scroller that holds the reply; also where that scroller stands. */
+const visibleTogether = (page: Page) => page.evaluate(() => {
+	const pick = (selector: string) => document.querySelector(selector) as HTMLElement | null;
+	const line = pick('.ct-compose .rl');
+	const field = pick('.ct-compose textarea.ct-input');
+	const send = pick('.ct-compose [data-send-reply]');
+	let scroller: HTMLElement | null = null;
+	for (let parent = line?.parentElement ?? null; parent && !scroller; parent = parent.parentElement) if (/auto|scroll/.test(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight + 1) scroller = parent;
+	const view = scroller?.getBoundingClientRect();
+	const top = Math.max(0, view?.top ?? 0);
+	const bottom = Math.min(innerHeight, view?.bottom ?? innerHeight);
+	const inside = (el: HTMLElement | null) => { if (!el) return false; const box = el.getBoundingClientRect(); return box.top >= top - 1 && box.bottom <= bottom + 1; };
+	return { line: inside(line), field: inside(field), send: inside(send), scrollTop: scroller?.scrollTop ?? null, scrolls: !!scroller };
+});
+
+for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { name: '393', width: 393, height: 852, phone: true }, { name: '852x393', width: 852, height: 393, phone: true }, { name: '393x440', width: 393, height: 440, phone: true }, { name: '320x340', width: 320, height: 340, phone: true }]) {
 	test.describe(`recipient line ${view.name}`, () => {
 		if (view.phone) test.use({ hasTouch: true, isMobile: true });
 		test('a new comment and a reply say who gets them', async ({ page, request }, testInfo) => {
@@ -60,8 +75,17 @@ for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { 
 				const reply = page.getByPlaceholder('Reply…');
 				await reply.fill('Yes, ring two waits for ring one.');
 				await expect(line).toBeVisible();
-				const box = await line.boundingBox();
-				expect(box && box.y >= 0 && box.y + box.height <= view.height, 'the line stays in view while typing').toBeTruthy();
+
+				// A four-line reply in a short popover or sheet: the line, the field and Send are in view together, and typing on does not move the scroller.
+				await reply.fill('Yes, ring two waits for ring one.\nIt then runs the load tests.\nThe owner signs off after that.\nThen ring three starts.');
+				await settled(page);
+				await expect.poll(async () => { const seen = await visibleTogether(page); return seen.line && seen.field && seen.send; }, { message: 'line, field and Send in view together after a four-line reply' }).toBe(true);
+				const before = await visibleTogether(page);
+				await reply.pressSequentially(' Ok.');
+				await settled(page);
+				const after = await visibleTogether(page);
+				expect(after.line && after.field && after.send, 'still together after typing on').toBe(true);
+				expect(Math.abs((after.scrollTop ?? 0) - (before.scrollTop ?? 0)), 'typing on a line that already fits does not scroll').toBeLessThanOrEqual(30);
 
 				// A new comment on other text: the box names the owner before anything is sent.
 				await page.keyboard.press('Escape');

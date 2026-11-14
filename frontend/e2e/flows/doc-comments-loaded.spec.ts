@@ -66,18 +66,8 @@ function look(page: Page, touch: boolean): Promise<Look> {
 		const scrollers = all.filter((el) => visible(el) && scrolls(el)).map(name);
 		const cardScrollers = [...new Set([...container.querySelectorAll('[data-comment-id], [data-comment-id] *')].filter(scrolls).map(name))];
 		const clipped = (el: Element) => getComputedStyle(el).clipPath !== 'none';
-		// A line cut on purpose with an ellipsis (the recipient line in a short window) holds its text inside its own box: the text past that box is cut, not drawn past the drawer.
-		const cutInside = (el: Element) => {
-			for (let parent = el.parentElement; parent && parent !== container; parent = parent.parentElement) {
-				const style = getComputedStyle(parent);
-				if (style.textOverflow !== 'ellipsis' || !/hidden|clip/.test(style.overflowX)) continue;
-				const rect = parent.getBoundingClientRect();
-				return rect.right <= box.right + 1 && rect.left >= box.left - 1;
-			}
-			return false;
-		};
 		const wide = [...new Set(all.filter((el) => {
-			if (!visible(el) || clipped(el) || cutInside(el)) return false;
+			if (!visible(el) || clipped(el)) return false;
 			const rect = el.getBoundingClientRect();
 			if (rect.width < 2 || rect.height < 2) return false;
 			return rect.right > box.right + 1 || rect.left < box.left - 1 || el.scrollWidth > el.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(el).overflowX);
