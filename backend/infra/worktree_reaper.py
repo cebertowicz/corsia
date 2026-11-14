@@ -21,6 +21,7 @@ from infra.product_events import emit_product_event
 from infra.project_repo_policy import RepoPolicy, list_registered_repo_policies
 from infra.repo_flock import RepoBusyError, repo_lock
 from infra.worktree_reaper_checks import (
+    SHORT_IDLE_THRESHOLD_SECONDS,
     CheckContext,
     RemovalVerdict,
     candidate_verdict,
@@ -35,7 +36,6 @@ from infra.worktree_reaper_scan import Candidate, Orphan, scan_repo
 from infra.worktree_reaper_store import forget_pr_terminal, pr_terminal_heads, remember_pr_terminal
 
 IDLE_THRESHOLD_SECONDS = 7 * 86400
-PUBLISHED_IDLE_THRESHOLD_SECONDS = 86400
 MAX_REMOVALS_PER_RUN = 100
 RUN_BUDGET_SECONDS = 600.0
 METRIC_ITEM_CAP = 50
@@ -152,7 +152,7 @@ def _remove_candidate(
         with repo_lock(repo):
             verdict = recheck_before_removal(
                 ctx, candidate, IDLE_THRESHOLD_SECONDS, expected_head, merged=merged,
-                short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
+                short_threshold_seconds=SHORT_IDLE_THRESHOLD_SECONDS,
             )
             def clear(quarantined: Path) -> str | None:
                 if verdict is RemovalVerdict.DISCARD:  # the owner is purged; nothing is copied out
@@ -270,7 +270,7 @@ def _walk_candidates(
         expected_head = pr_sha if mode == "pr_terminal" else deferred.get(str(candidate.path))
         verdict = candidate_verdict(
             ctx, candidate, IDLE_THRESHOLD_SECONDS, merged=merged,
-            short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
+            short_threshold_seconds=SHORT_IDLE_THRESHOLD_SECONDS,
         )
         if isinstance(verdict, str) and mode == "pr_terminal" and head is not None:
             # Blocked at merge time (a live process, a Git lock, uncommitted
