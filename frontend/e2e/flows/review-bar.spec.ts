@@ -93,17 +93,35 @@ for (const width of [1280, 1440, 393] as const) for (const theme of ['light', 'd
 		await expect(bar(page).locator('.rb-receipt')).toHaveText('Done');
 	});
 });
+/** A phone held sideways (852x393): the review line must not stack into a second row there, whatever the pane does; it keeps the one-row layout the short screen has room for. The numbers go to the PR body. */
+for (const [width, height, mode] of [[852, 393, 'closed'], [852, 393, 'phone'], [393, 852, 'phone'], [375, 667, 'phone']] as const) test.describe(`delivery header ${width}x${height} ${mode}`, () => {
+	test.use({ hasTouch: true, isMobile: true });
+	test('long person name: the header height and its share of the viewport', async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'chromium-desktop', 'sizes are set per case on the desktop project');
+		const doc = await seed(request, 'Person with a very long agent name closed');
+		addPersonStep(doc.threadId, doc.artifactId);
+		await open(page, doc, mode, 'light');
+		await page.setViewportSize({ width, height }); await settled(page);
+		await page.waitForTimeout(500);
+		const header = await page.locator('.document-header').evaluate((el) => ({ height: Math.round(el.getBoundingClientRect().height), stacked: el.classList.contains('rb-stack') }));
+		const share = Math.round(header.height / height * 1000) / 10;
+		console.info('HEADER_NUMBERS', JSON.stringify({ width, height, mode, ...header, share }));
+		info.annotations.push({ type: 'header-height', description: `${width}x${height} ${mode}: ${header.height}px, ${share}% of the viewport, ${header.stacked ? 'stacked' : 'one row'}` });
+		if (height <= 420) expect(header.stacked, 'a short viewport keeps the one-row review line').toBe(false);
+	});
+});
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
 	const canvas = () => page.locator('.document-canvas, .image-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
 	if (mode === 'closed') {
-		// The pane's width transition resizes the canvas, and the bar's one-row layout is a container query on that width:
+		// The pane's width transition resizes the canvas, and the header's one-row or stacked layout is decided from that width:
 		// measure only once the transition has finished, never mid-way.
 		await page.locator('.pane').evaluate((pane) => Promise.all(pane.getAnimations().map((animation) => animation.finished)));
 		await expect.poll(canvas).toBeGreaterThan(600);
 	}
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
-	// A 16ch ask gets a full-width ellipsized row once the 408px review-line budget cannot fit it with the name and tools.
+	// The review line keeps its floors (the asker, a 16-character ask, the chevron) whatever the tools beside it take: when the header cannot
+	// hold them beside the tools as drawn, the header stacks and the ask gets a full-width row; when it can, the line is one row.
 	// A collapsed phone ask instead keeps just its requester and disclosure in the compact header row.
 	const line = page.locator('.document-header .review-bar.ask .rb-line');
 	if (await line.count()) {
@@ -111,31 +129,38 @@ async function expectLayout(page: Page, mode: Mode) {
 			const style = getComputedStyle(el);
 			return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 		});
-		test.info().annotations.push({ type: 'header-content-width', description: `${mode}: ${header}` });
+		const stacked = await page.locator('.document-header').evaluate((el) => el.classList.contains('rb-stack'));
+		test.info().annotations.push({ type: 'header-content-width', description: `${mode}: ${header} ${stacked ? 'stacked' : 'one row'}` });
 		const collapsedPhone = mode === 'phone' && await line.getAttribute('aria-expanded') === 'false';
-		const fallback = header < 408 && !collapsedPhone;
-		expect(await line.evaluate((el) => getComputedStyle(el).display), `review line at a ${header}px header`).toBe(fallback ? 'grid' : 'flex');
-		if (fallback) {
-			const rows = await line.evaluate((el) => {
-				const rect = (selector: string) => el.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
-				const who = rect('.rb-who'), ask = rect('.rb-ask'), chevron = rect('.rb-chev');
-				const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;font:inherit;white-space:pre'; probe.textContent = '0'.repeat(16); el.append(probe);
-				const sixteenCh = probe.getBoundingClientRect().width; probe.remove();
-				return { who, ask, chevron, sixteenCh };
-			});
-			expect(rows.chevron.top, 'the chevron stays with the full asker name').toBeLessThanOrEqual(rows.who.bottom + 0.5);
-			expect(rows.ask.top, 'the ask gets the row below the asker').toBeGreaterThanOrEqual(Math.max(rows.who.bottom, rows.chevron.bottom) - 0.5);
-			expect(rows.ask.width, 'the ask keeps about 16 characters').toBeGreaterThanOrEqual(rows.sixteenCh - 1);
+		const measured = await line.evaluate((el) => {
+			const rect = (selector: string) => el.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+			const who = rect('.rb-who'), ask = rect('.rb-ask'), chevron = rect('.rb-chev');
+			const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;font:inherit;white-space:pre'; probe.textContent = '0'.repeat(16); el.append(probe);
+			const sixteenCh = probe.getBoundingClientRect().width; probe.remove();
+			const bar = el.closest('.review-bar')!.getBoundingClientRect();
+			return { who, ask, chevron, sixteenCh, bar, display: getComputedStyle(el).display };
+		});
+		if (stacked && !collapsedPhone) {
+			expect(measured.display, `review line at a ${header}px header, stacked`).toBe('grid');
+			expect(measured.chevron.top, 'the chevron stays with the asker name').toBeLessThanOrEqual(measured.who.bottom + 0.5);
+			expect(measured.ask.top, 'the ask gets the row below the asker').toBeGreaterThanOrEqual(Math.max(measured.who.bottom, measured.chevron.bottom) - 0.5);
+			expect(measured.ask.width, 'the ask keeps about 16 characters').toBeGreaterThanOrEqual(measured.sixteenCh - 1);
+		} else if (!stacked) {
+			// One row: the line, its ask and the chevron are one line (the bar is no taller than two rows), and the ask still has its 16 characters.
+			expect(measured.display, `review line at a ${header}px header, one row`).toBe('flex');
+			expect(measured.bar.height, 'the bar is one line').toBeLessThanOrEqual(64);
+			expect(measured.ask.width, 'the ask keeps about 16 characters beside the tools').toBeGreaterThanOrEqual(measured.sixteenCh - 1);
 		}
 	}
 	const box = (await bar(page).boundingBox())!;
+	const headerStacked = (await page.locator('.document-header').count()) > 0 && await page.locator('.document-header').evaluate((el) => el.classList.contains('rb-stack'));
 	const buttons = await bar(page).locator('.btn').evaluateAll((els) =>
 		els.map((el) => { const r = el.getBoundingClientRect(); return { h: r.height, w: r.width, right: r.right }; }));
 	expect(buttons.length).toBeGreaterThanOrEqual(2);
 	if (mode === 'closed') {
 		await expect(bar(page).locator('.rb-narrow')).toBeHidden();
-		// The slim integrated ask row reserves its status/action line; it is not the old one-line floating card.
-		expect(box.height, 'integrated ask row').toBeLessThanOrEqual(64);
+		// The slim integrated ask row reserves its status/action line; it is not the old one-line floating card. Stacked, the header gives the ask its own row by design.
+		if (!headerStacked) expect(box.height, 'integrated ask row').toBeLessThanOrEqual(64);
 	}
 	if (mode === 'phone') {
 		for (const button of buttons) expect(button.h, 'touch target').toBeGreaterThanOrEqual(44);
@@ -700,7 +725,10 @@ async function expectNameClearOfControls(page: Page, title: string, mode: Mode, 
 		return { who: whoRect, tail: tailRect, head: { scrollWidth: head.scrollWidth, clientWidth: head.clientWidth }, tailVisible: tailRect.width > 0 && tailRect.left >= whoRect.left - 0.5 && tailRect.right <= whoRect.right + 0.5 && tailRect.top >= whoRect.top - 0.5 && tailRect.bottom <= whoRect.bottom + 0.5 };
 	});
 	expect(truncation.tailVisible, `the distinguishing suffix stays visible within the requester box: ${JSON.stringify(truncation)}`).toBe(true);
-	expect(truncation.head.scrollWidth, 'the requester prefix truncates before its preserved suffix').toBeGreaterThan(truncation.head.clientWidth);
+	// Beside the tools the name is cut to its floor and truncates before its suffix; stacked, the name has the whole row and is cut only if it still does not fit.
+	const stackedHeader = await page.locator('.document-header').evaluate((el) => el.classList.contains('rb-stack')).catch(() => false);
+	if (stackedHeader) expect(truncation.head.scrollWidth, 'a stacked name shows whole or truncates before its suffix').toBeGreaterThanOrEqual(truncation.head.clientWidth);
+	else expect(truncation.head.scrollWidth, 'the requester prefix truncates before its preserved suffix').toBeGreaterThan(truncation.head.clientWidth);
 	const boxes = await page.evaluate(() => {
 		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
 		return {

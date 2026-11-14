@@ -56,8 +56,8 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 		card = resolved;
 	}
 	const second = Array.from({ length: 40 }, (_, i) => `second reply ${i}`);
-	// A suggestion's reply scrolls with its card, so it is typed a line at a time: after each line the field is inside the popover's visible box and shows its last line, and Accept and Reject still take a tap.
-	if (state === 'suggestion') for (let line = 1; line <= second.length; line++) {
+	// A suggestion's reply scrolls with its card, so it grows in steps from one line to forty: after each step the field is inside the popover's visible box and shows its last line, and Accept and Reject still take a tap.
+	if (state === 'suggestion') for (const line of [1, 2, 4, 8, 16, 24, 32, 40]) {
 		await input.fill(second.slice(0, line).join('\n'));
 		await expectFieldAndSendUsable(card, input);
 	} else await input.fill(second.join('\n'));
