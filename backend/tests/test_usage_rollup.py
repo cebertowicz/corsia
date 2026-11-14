@@ -423,6 +423,8 @@ def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
         "migration_99_to_100_usage_rollup.py": False,
         # adds Measurement-only boundaries and an index; it does not mutate a rollup grain or value.
         "migration_146_to_147_measure_breaks.py": False,
+        # The turn index changes no usage rows or rollup values.
+        "migration_192_to_193_llm_usage_turn_index.py": False,
     }
     pattern = re.compile(r"\bllm_usage\b")
     found = set()
