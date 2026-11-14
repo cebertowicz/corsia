@@ -169,9 +169,16 @@ def _init_isolated_db_schema():
     # and signed in, so a test reaching the Codex connection gate would pass or
     # fail with the host's login state (#2975). The session database instead
     # gets the same deterministic available rows the per-test databases seed.
+    from pathlib import Path
+
+    from tools import managed_runtime
+
     with pytest.MonkeyPatch.context() as seed_probe:
         seed_probe.setattr(shutil, "which", lambda name, *_a, **_k: name)
         seed_probe.setattr(connections, "_gh_status", lambda _binary: (True, None))
+        # Claude Code and Codex resolve to CORSIA's pinned copies, not PATH.
+        seed_probe.setattr(managed_runtime, "installed_runtime_path",
+                           lambda kind, **_k: Path({"claude-code": "claude", "codex": "codex"}.get(kind, kind)))
         init_db()
     # A token authenticates only if it is a row, so the session database needs
     # the accounts the suite signs in as before any authenticated route is
@@ -179,6 +186,31 @@ def _init_isolated_db_schema():
     from auth_fixtures import seed_test_accounts
     seed_test_accounts()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_host_pinned_harness(monkeypatch, tmp_path_factory):
+    """CORSIA's own Claude Code and Codex copies live in the host's cache; no test reads or writes them.
+
+    Their lookups default to a fresh empty folder per test, so one test's install never
+    reaches the next. No test downloads them: an install without the test's own root
+    fails as a download failure would. Other pinned runtimes keep their own tests' roots.
+    """
+    from connections import PINNED_HARNESSES
+    from tools import managed_runtime
+
+    empty = tmp_path_factory.mktemp("no-host-pinned-harness")
+    for name in ("installed_runtime_path", "pinned_executable_path", "remove_other_versions", "ensure_runtime"):
+        real = getattr(managed_runtime, name)
+
+        def isolated(kind, *args, root=None, _real=real, _name=name, **kwargs):
+            if root is None and kind in PINNED_HARNESSES:
+                if _name == "ensure_runtime":
+                    raise managed_runtime.ManagedRuntimeDownloadError("tests never download CORSIA's CLI copies")
+                root = empty
+            return _real(kind, *args, root=root, **kwargs)
+
+        monkeypatch.setattr(managed_runtime, name, isolated)
 
 
 @pytest.fixture(autouse=True)

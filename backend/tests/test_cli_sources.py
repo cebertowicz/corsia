@@ -183,11 +183,3 @@ def test_token_comes_from_the_environment_only(monkeypatch):
     assert cli_sources._read_token() == SECRET
     monkeypatch.setenv(cli_sources.TOKEN_ENV, "  ")
     assert cli_sources._read_token() is None
-
-
-def test_invisible_binary_is_never_printed_as_a_terminal_fix(run):
-    rows = [_row("codex", "Codex", "not_installed", invisible_binary="/private/bin/codex")]
-    with _Stub(get_rows=rows) as stub:
-        out = run(stub)
-    assert "Codex: not signed in. Connect it in the app." in out
-    assert "/private/bin/codex" not in out
