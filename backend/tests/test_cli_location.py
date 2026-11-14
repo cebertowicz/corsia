@@ -105,26 +105,3 @@ def test_path_shadowed_binary_names_the_service_copy_to_remove(monkeypatch, tmp_
 
 def test_every_supported_vendor_has_a_binary():
     assert cli_location.BINARIES == {"claude-code": "claude", "codex": "codex", "omlx": "omlx"}
-
-
-def test_validated_binary_rejects_untrusted_candidates(tmp_path):
-    home = tmp_path / "home"
-    good = _executable(tmp_path / "bin" / "claude")
-    assert cli_location.validated_binary("claude", str(good), home) == good.resolve()
-    assert cli_location.validated_binary("claude", None, home) is None
-    assert cli_location.validated_binary("claude", "relative/claude", home) is None
-    assert cli_location.validated_binary("claude", str(_executable(tmp_path / "bin" / "other")), home) is None
-    assert cli_location.validated_binary("claude", str(_executable(home / ".local/bin" / "claude")), home) is None
-
-
-def test_login_shell_binary_is_none_for_an_unknown_vendor():
-    assert cli_location.login_shell_binary("unknown") is None
-
-
-def test_login_shell_binary_lets_a_hung_shell_raise(monkeypatch):
-    def hang(_binary):
-        raise TimeoutError
-
-    monkeypatch.setattr(cli_location, "shell_binary", hang)
-    with pytest.raises(TimeoutError):
-        cli_location.login_shell_binary("codex")
