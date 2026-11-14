@@ -153,6 +153,80 @@ def test_conductor_add_records_kind_at_creation(db, actor, expected):
     assert json.loads(event["payload_json"])["conductor_kind"] == expected
 
 
+def test_plan_activity_counts_real_conductor_adds_and_unique_receipts(db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import sys
+    from infra.audit_reads import _plan_activity
+
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    _add(db, plan.id, PROJECT_CONDUCTOR)
+    monkeypatch.setattr(sys.modules[__name__], "_init_messages_fts", lambda _db: None)
+    _add(db, plan.id, WORKSPACE_CONDUCTOR)
+    now = datetime.now(timezone.utc)
+    db.executemany(
+        "INSERT INTO plan_mutation_receipts "
+        "(plan_id,mutation_id,actor_id,operation,request_fingerprint,result_json,created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        [(plan.id, key, "lane", operation, "x" * 64, "{}", now.isoformat())
+         for operation, key in (
+             ("attach_spawned_thread", "delegate_task-attach-child-node"),
+             ("attach_spawned_thread", "delegate_send-attach-child-node"),
+             ("start", "first-run-start:lane"),
+             ("archive_node", "first-run-app-reconcile:lane:node"),
+             ("reorder", "first-run-app-order:lane:node:1"),
+             ("decision_draft", "decision-draft-key"),
+             ("answer_worker_needs", "answer-needs-key"),
+         )],
+    )
+    row = _plan_activity(db, "user", (now - timedelta(hours=1)).isoformat(),
+                         (now + timedelta(hours=1)).isoformat())[0]
+    assert {(a["conductor_kind_as_of_read"], a["kind_basis"], a["outcome"], a["n"])
+            for a in row["conductor_adds"]} == {
+        ("project", "recorded", "open_7_days_or_less", 1),
+        ("workspace", "recorded", "open_7_days_or_less", 1),
+    }
+    assert row["plan_update_calls"] == 2
+
+
+def test_plan_activity_reports_archived_conductor_add_separately(db):
+    from datetime import datetime, timedelta, timezone
+    from infra.audit_reads import _plan_activity
+
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    node = _add(db, plan.id, PROJECT_CONDUCTOR)
+    _mutate(db, plan.id, "archive_node", {"node_id": node["id"], "expected_revision": node["revision"]})
+    now = datetime.now(timezone.utc)
+    row = _plan_activity(db, "user", (now - timedelta(hours=1)).isoformat(),
+                         (now + timedelta(hours=1)).isoformat())[0]
+    assert [(item["outcome"], item["n"]) for item in row["conductor_adds"]] == [("archived", 1)]
+
+
+def test_plan_activity_counts_stale_watched_and_archived_owner(db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from infra.audit_reads import _plan_activity
+
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=9)).isoformat()
+    monkeypatch.setattr(service, "_now", lambda: old)
+    plan = service.ensure_plan("thread", "lane", db=db)
+    node = service.add_node(plan.id, kind="task", title="wait", acceptance_criteria="done", db=db)
+    db.commit()
+    _mutate(db, plan.id, "arm_watch", {
+        "node_id": node.id, "condition": {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"},
+        "expected_event": "ready", "expected_revision": node.revision,
+    })
+    from core.thread_lifecycle import set_user_archive_state
+    from infra.database import write_transaction
+    db.commit()
+    with write_transaction(db, scope="test_archive_owner"):
+        set_user_archive_state(db, "lane", archived=True)
+    row = _plan_activity(db, "user", (now - timedelta(days=1)).isoformat(),
+                         now.isoformat())[0]
+    assert row["stale_open_tasks"] == [{"archived": 1, "armed_watch": 1, "n": 1}]
+
+
 def test_coordinator_inserts_and_reorders_only_top_level(db):
     plan = service.ensure_plan("thread", "lane", db=db)
     first = service.add_node(plan.id, kind="phase", title="First", acceptance_criteria="Done", db=db)
