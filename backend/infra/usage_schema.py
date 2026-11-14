@@ -5,6 +5,8 @@ from __future__ import annotations
 from infra.limit_history_schema import LIMIT_HISTORY_SCHEMA_SQL
 from infra.usage_rollup_schema import USAGE_ROLLUP_SQL
 
+LLM_USAGE_TURN_INDEX = "CREATE INDEX IF NOT EXISTS idx_llm_usage_turn ON llm_usage(turn_id) WHERE turn_id IS NOT NULL"
+
 USAGE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS model_pricing (
         id TEXT PRIMARY KEY,
@@ -55,6 +57,7 @@ USAGE_SCHEMA_SQL = """
              AND plan_usage_role IS NOT NULL)
         )
     );
+    """ + LLM_USAGE_TURN_INDEX + """;
     CREATE INDEX IF NOT EXISTS idx_llm_usage_session
         ON llm_usage(thread_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_llm_usage_commitment

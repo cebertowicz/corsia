@@ -6,12 +6,14 @@ import { changeOwnership, OwnershipChangeError } from '$lib/api/docOwnership';
 vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeof import('$lib/api/docOwnership')>()), changeOwnership: vi.fn() }));
 import type { DocOwnership } from '$lib/api/docOwnership';
 
-const agent = (id: string, name: string, status = 'ready') => ({ id, name, status });
+const agent = (id: string, name: string, status = 'ready', responsibility = '') => ({ id, name, status, responsibility });
+const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner.';
+const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here.';
 function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
-		owner: { kind: 'agent', id: 'a1', name: 'Release planning' },
+		owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },
 		supervisor: { id: 'a2', name: 'Research coordinator', source: 'picked', status: 'ready' },
-		can_act: true, multi_person: false, can_change: true,
+		can_act: true, multi_person: false, can_change: true, refusal: null, multi_person_refusal: null, scope: 'project',
 		choices: [agent('a1', 'Release planning'), agent('a2', 'Research coordinator')],
 		...patch,
 	};
@@ -60,26 +62,27 @@ describe('DocOwnerControl', () => {
 		expect(picker()!.dataset.role).toBe('supervisor');
 	});
 	it('does not offer You when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ multi_person: true }));
+		await render(ownership({ multi_person: true, multi_person_refusal: MULTI }));
 		item('owner').click(); await settle();
 		expect(options()).not.toContain('You');
-		expect(picker()!.textContent).toContain('Only an agent can own a document when more than one person uses CORSIA here.');
+		expect(picker()!.textContent).toContain(MULTI);
 	});
 	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ owner: { kind: 'person', id: null, name: null }, multi_person: true, can_change: false }));
+		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'Everyone' }, multi_person: true, can_change: false, refusal: SHARED, choices: [] }));
+		expect(item('owner').textContent).toContain('Everyone');
 		for (const role of ['owner', 'supervisor'] as const) {
 			item(role).click(); await settle();
 			expect(options()).toEqual([]);
-			expect(picker()!.textContent).toContain('Everyone here shares this document');
+			expect(picker()!.textContent).toContain(SHARED);
 		}
 		expect(changed).not.toHaveBeenCalled();
 	});
 	it('reads You when the person owns the document', async () => {
-		await render(ownership({ owner: { kind: 'person', id: null, name: null } }));
+		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } }));
 		expect(item('owner').getAttribute('aria-label')).toBe('Owner: You');
 	});
 	it('reads Not set for an owner that is not set', async () => {
-		await render(ownership({ owner: { kind: 'none', id: null, name: null } }));
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'Not set' } }));
 		expect(item('owner').textContent).toContain('Not set');
 	});
 	it('merges the two when one agent holds both roles, and its picker still reaches the supervisor', async () => {
@@ -97,7 +100,7 @@ describe('DocOwnerControl', () => {
 		expect(item('supervisor').querySelector('.mark')!.textContent).toBe('Paused');
 	});
 	it('saves as soon as a name is picked, sending only the owner', async () => {
-		const next = ownership({ owner: { kind: 'person', id: null, name: null } });
+		const next = ownership({ owner: { kind: 'person', id: null, name: null, label: 'You' } });
 		changed.mockResolvedValue(next);
 		const onChange = vi.fn();
 		await render(ownership(), onChange);
@@ -107,31 +110,66 @@ describe('DocOwnerControl', () => {
 		expect(onChange).toHaveBeenCalledWith(next);
 		expect(picker()).toBeNull();
 	});
-	it('says Change failed on the item whose save failed, and what to retry in its picker', async () => {
+	it('says Couldn’t change on the item whose save failed, and what to retry in its picker', async () => {
 		changed.mockRejectedValue(new Error('no'));
 		await render(ownership());
 		item('supervisor').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="Release planning"]')!.click(); await settle();
-		expect(item('supervisor').getAttribute('aria-label')).toContain('change failed');
-		expect(item('supervisor').textContent).toContain('Change failed');
-		expect(item('owner').textContent).not.toContain('Change failed');
+		expect(item('supervisor').getAttribute('aria-label')).toContain('couldn’t change');
+		expect(item('supervisor').textContent).toContain('Couldn’t change');
+		expect(item('owner').textContent).not.toContain('Couldn’t change');
 		item('supervisor').click(); await settle();
 		expect(picker()!.textContent).toContain('Couldn’t change the supervisor. Try again.');
 	});
 	it('sends no owner for a Supervisor pick', async () => {
 		changed.mockResolvedValue(ownership());
-		await render(ownership({ owner: { kind: 'none', id: null, name: null } }));
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'Not set' } }));
 		item('supervisor').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="Release planning"]')!.click(); await settle();
 		expect(changed).toHaveBeenCalledWith('doc', { supervisor: expect.any(String) });
 	});
 	it('shows the server’s refusal in the picker when it sent one', async () => {
-		changed.mockRejectedValue(new OwnershipChangeError(409, 'Only an agent can own a document when more than one person uses CORSIA here.'));
+		changed.mockRejectedValue(new OwnershipChangeError(409, MULTI));
 		await render(ownership());
 		item('owner').click(); await settle();
 		document.body.querySelector<HTMLElement>('[role="option"][aria-label="You"]')!.click(); await settle();
 		item('owner').click(); await settle();
 		expect(picker()!.textContent).toContain('Only an agent can own a document');
+	});
+	it('tells agents with the same name apart by what each is responsible for', async () => {
+		await render(ownership({ choices: [agent('a1', 'Planner', 'ready', 'Release planning'), agent('a2', 'Planner', 'paused', 'Research')] }));
+		item('supervisor').click(); await settle();
+		expect(options()).toEqual(['Planner Release planning', 'Planner Paused · Research']);
+	});
+	it('keeps Paused apart from the responsibility, so a narrow row can drop the responsibility and keep Paused whole', async () => {
+		await render(ownership({ choices: [agent('a1', 'Planner', 'ready', 'Release planning'), agent('a2', 'Planner', 'paused', 'Research'), agent('a3', 'Idle', 'paused')] }));
+		item('supervisor').click(); await settle();
+		const row = (id: string) => document.getElementById(`supervisor-options-option-${id}`)!;
+		expect(row('a1').querySelector('.option-paused')).toBeNull();
+		expect(row('a1').querySelector('.option-role')!.textContent).toBe('​Release planning');
+		expect(row('a2').querySelector('.option-paused')!.textContent).toBe('Paused');
+		expect(row('a2').querySelector('.option-role')!.textContent).toBe('​ · Research');
+		expect(row('a3').querySelector('.option-paused')!.textContent).toBe('Paused');
+		expect(row('a3').querySelector('.option-role')).toBeNull();
+	});
+	it('names the workspace, not a project, when a workspace document has no agents to choose from', async () => {
+		await render(ownership({ choices: [], scope: 'workspace' }));
+		item('supervisor').click(); await settle();
+		expect(picker()!.textContent).toContain('There are no agents in this workspace to choose from.');
+	});
+	it('names the project when a project document has no agents to choose from', async () => {
+		await render(ownership({ choices: [], scope: 'project' }));
+		item('supervisor').click(); await settle();
+		expect(picker()!.textContent).toContain('There are no agents in this project to choose from.');
+	});
+	it('says it couldn’t load the agents, not that there are none, when the scope couldn’t be resolved', async () => {
+		await render(ownership({ choices: [], scope: null }));
+		item('supervisor').click(); await settle();
+		expect(picker()!.textContent).toContain('Couldn’t load the agents for this document. Reload the page to try again.');
+		expect(picker()!.textContent).not.toContain('There are no agents');
+		item('supervisor').click(); await settle();
+		item('owner').click(); await settle();
+		expect(picker()!.textContent).toContain('Couldn’t load the agents for this document. Reload the page to try again.');
 	});
 	it('filters its list as the person types', async () => {
 		await render(ownership());
