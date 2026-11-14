@@ -18,6 +18,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A document's owner and supervisor pickers list the agents of the document's own workspace or project and tell agents with the same name apart by their responsibility. A document no one owns says so before you pick and suggests asking CORSIA to give it an owner; a document everyone shares reads Everyone as its owner when more than one person uses CORSIA; and a change that fails says Couldn’t change.
+- A document's status row stays one line when a reply arrives on a phone or a narrow window: the comment count reads "N unread" while a reply is unread, and the text below no longer jumps down.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
