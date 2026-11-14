@@ -60,6 +60,41 @@ def test_e3_full_text_budget_and_unicode_length(pdb, amount):
         assert 'from_seq=N, to_seq=N, tool_output="full"' in result
 
 
+def _rows(result, ids):
+    """Each listed update's row line, in the order of ids."""
+    lines = {line.split(" | ", 1)[0]: line for line in result.split("\n")}
+    return [lines[message_id] for message_id in ids]
+
+
+def test_e3_one_paragraph_updates_past_the_budget_show_a_short_first_line(pdb):
+    from tools.post_update_text import FIRST_LINE_CHARS
+
+    thread = new_thread(pdb, "rows-paragraph")
+    text = "One paragraph update " + "p" * 1879
+    ids = [save(thread, text)[0] for _ in range(5)]
+    result = save(thread, "newest")[3]
+    bodies = [row.split(" | ", 3)[3] for row in _rows(result, ids)]
+    assert bodies[-1] == text
+    assert [len(body) for body in bodies[:-1]] == [FIRST_LINE_CHARS] * 4
+    assert all(body.endswith("…") for body in bodies[:-1])
+    assert len(result) < 3500  # 10,394 before the first line was cut
+
+
+def test_e3_many_rows_cost_full_texts_plus_one_short_row_each(pdb):
+    from tools.post_update_text import FIRST_LINE_CHARS, FULL_TEXT_BUDGET
+
+    thread = new_thread(pdb, "rows-many")
+    text = "- short bullet\n" + "- more detail\n" * 20
+    ids = [save(thread, text)[0] for _ in range(40)]
+    result = save(thread, "newest")[3]
+    shown_in_full = result.count(text)
+    assert 0 < shown_in_full and shown_in_full * len(text) <= FULL_TEXT_BUDGET
+    prefix = max(len(row.rsplit(" | ", 1)[0]) + 3 for row in _rows(result, ids))
+    alone = len(save(new_thread(pdb, "rows-none"), "alone")[3])
+    hint = 200
+    assert len(result) <= FULL_TEXT_BUDGET + 40 * (prefix + FIRST_LINE_CHARS + 1) + alone + hint
+
+
 def test_history_search_pages_and_direct_broadcast_exclude_old_rows(pdb):
     from api.thread_paging import page_messages
     from api.thread_focus_page import page_focus, page_run_range

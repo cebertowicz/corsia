@@ -9,6 +9,8 @@ GUIDANCE = (
     "and everything the person must know, including what was done, decided, or at risk. "
     f"A new subject needs no replace. For a seen update, {FOLLOW_UP}."
 )
+FULL_TEXT_BUDGET = 2000
+FIRST_LINE_CHARS = 120
 REASONS = {"presence_at_post": "presence at post", "visit": "chat opened",
            "mark_read": "Mark read", "comment": "person commented", "presence_now": "presence live now"}
 
@@ -35,13 +37,19 @@ def seen_refusal(message_id, verdict):
             f"{FOLLOW_UP.capitalize()}. A new subject needs no replace.")
 
 
+def first_line(text):
+    """An older row's first line, cut so a one-paragraph update stays one short row."""
+    line = text.split("\n", 1)[0].removesuffix("\r")
+    return line if len(line) <= FIRST_LINE_CHARS else line[:FIRST_LINE_CHARS - 1] + "…"
+
+
 def result_text(message_id, replaced, rows, thread_id):
     """Render newest full texts within the cap, then the older first lines."""
     texts = [row["content"] for row in rows]
     full = [True] * len(rows)
     total = sum(map(len, texts))
     for index in range(len(rows) - 1, -1, -1):
-        if total <= 2000:
+        if total <= FULL_TEXT_BUDGET:
             break
         full[index] = False
         total -= len(texts[index])
@@ -49,10 +57,10 @@ def result_text(message_id, replaced, rows, thread_id):
              f"Replaced: {', '.join(replaced) if replaced else 'none'}.",
              f"Other unseen updates: {len(rows)}."]
     for row, text, complete in zip(rows, texts, full):
-        body = text if complete else text.split("\n", 1)[0].removesuffix("\r")
+        body = text if complete else first_line(text)
         lines.append(f"{row['message_id']} | #{row['seq']} | {local_time(row['posted_at'])} | {body}")
     if not all(full):
-        lines.append("Oldest updates show their first line. Read one in full with "
+        lines.append(f"Oldest updates show their first line, up to {FIRST_LINE_CHARS} characters. Read one in full with "
                      f'get_thread_history(thread_id="{thread_id}", from_seq=N, to_seq=N, tool_output="full").')
     lines.append(GUIDANCE)
     return "\n".join(lines)

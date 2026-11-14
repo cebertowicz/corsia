@@ -417,7 +417,7 @@ class TestDelivery:
             metadata={"turn_id": "prior-turn"},
             msg_id="m-prior",
             db=conn,
-            created_at="now",
+            created_at="2026-01-01T00:00:00+00:00",
         )
         finish_turn(
             "prior-turn",
