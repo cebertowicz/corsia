@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 
 from api.files_roots import scope_roots
+from infra.chat_comment_answers import chat_not_drawn_sql, saved_answer_fields
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
 from registry.path_access import FileLookup
@@ -90,11 +91,11 @@ def _page_updates(db, thread_id: str, rows: list[dict]) -> list:
 
 
 def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
-    """The latest assistant step of a Turn that existed when a hold was placed."""
+    """The latest assistant step of a Turn that existed when a hold was placed and that chat draws."""
     row = db.execute(
         "SELECT id FROM messages WHERE thread_id=? AND role='assistant'"
         " AND json_extract(metadata, '$.turn_id')=? AND julianday(created_at)<=julianday(?)"
-        " ORDER BY seq DESC LIMIT 1",
+        f" AND NOT {chat_not_drawn_sql()} ORDER BY seq DESC LIMIT 1",
         (thread_id, turn_id, placed_at),
     ).fetchone()
     return row["id"] if row else None
@@ -149,6 +150,9 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
     if not messages:
         return
     asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
+    # Cards follow the text chat draws: the chat text saved for a row that placed answers, else its content.
+    # One read for the page (the reader attach_comments uses), never one per row.
+    saved = saved_answer_fields(db, thread_id, [r["id"] for r in messages if r.get("role") == "assistant"])
     bases: list[Path] | None = None
     lookup_memo: dict[str, FileLookup] = {}
     origin: Path | None = None
@@ -156,7 +160,7 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         if row.get("role") != "assistant":
             continue
         cards = list(asks.get(row["id"], []))
-        text = row.get("content")
+        text = saved[row["id"]]["chat_visible_content"] if row["id"] in saved else row.get("content")
         if isinstance(text, str) and text:
             if bases is None:
                 origin, bases = scope_roots(thread_row["project_id"], db)

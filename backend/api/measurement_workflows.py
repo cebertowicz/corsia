@@ -58,6 +58,7 @@ from core.workflow_verdicts import Run, parse_ts
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
+from infra.packed_rows import fetch_all
 from plans.public import node_working_seconds, run_end_records
 from tools.workflow_task_fields import version_short_hash
 from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
@@ -84,9 +85,11 @@ async def measurement_workflows(
     agent: str = Query(...),
     timezone_name: str = Query(..., alias="timezone"),
     grain: str = "days",
+    coverage_only: bool = False,
     user: dict = Depends(require_user),
 ) -> dict[str, Any]:
     """Return the Workflows section: coverage, then one entry per workflow with the runs in the window.
+    ``coverage_only`` drops ``workflows`` and its history read, for a bounded agent read of coverage alone.
 
     The scope and the window are the page's own: ``validate_scope``'s composite scope and the grain's
     latest comparison window (7 completed days or 4 completed weeks) that ``/key-figures`` and ``/agents``
@@ -95,10 +98,10 @@ async def measurement_workflows(
     step that failed with how it was caught, its gate rounds and its owner's own measure; each is null
     where the install records none (see this module's table).
     """
-    return await workflows_read(project, agent, resolve_grain(grain, timezone_name), user)
+    return await workflows_read(project, agent, resolve_grain(grain, timezone_name), user, coverage_only=coverage_only)
 
 
-async def workflows_read(project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
+async def workflows_read(project: str, agent: str, page_grain: Grain, user: dict, *, coverage_only=False) -> dict[str, Any]:
     """The section for one resolved grain, on the bulk lane the priced chain needs."""
 
     def query() -> dict[str, Any]:
@@ -107,7 +110,7 @@ async def workflows_read(project: str, agent: str, page_grain: Grain, user: dict
             selected_scope = validate_scope(db, user["id"], project, agent)
             return {"definition_version": 1, "scope": selected_scope.response(),
                     "period": page_grain.describe(),
-                    **workflow_runs(db, user["id"], selected_scope, page_grain)}
+                    **workflow_runs(db, user["id"], selected_scope, page_grain, coverage_only=coverage_only)}
         finally:
             db.close()
 
@@ -115,8 +118,8 @@ async def workflows_read(project: str, agent: str, page_grain: Grain, user: dict
 
 
 def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
-                  grain: Grain, *, now: datetime | None = None) -> dict[str, Any]:
-    """Coverage and the window's runs, for one already validated scope and grain."""
+                  grain: Grain, *, now: datetime | None = None, coverage_only: bool = False) -> dict[str, Any]:
+    """Coverage and the window's runs, for one already validated scope and grain; coverage alone if asked."""
     from core.workflow_verdict_read import read_snapshot
 
     window = grain.latest
@@ -124,6 +127,8 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
     parents = {str(row["id"]): row["parent_id"] for row in nodes}
     root_ids = frozenset(str(row["id"]) for row in roots)
     coverage = _coverage(db, scope.params(user_id), grain, window, parents, root_ids)
+    if coverage_only:
+        return {"window": {"from": window.first, "to": grain.period_end(window.last)}, "coverage": coverage}
     if not root_ids:
         return {"window": {"from": window.first, "to": grain.period_end(window.last)},
                 "coverage": coverage, "workflows": []}
@@ -164,13 +169,13 @@ def _coverage(db: sqlite3.Connection, params: dict[str, Any], grain: Grain, wind
     stamped on the task's ``node_created`` event (``null`` where none is recorded) and whether it is a
     follow-up of another node. The rows sum to the headline exactly, so the split never disagrees with it.
     """
-    rows = db.execute(scope_cte() + outcome_ctes(grain) + """
+    rows = fetch_all(db, scope_cte() + outcome_ctes(grain) + """
         SELECT o.id AS id, n.follow_up_of IS NOT NULL AS follow_up,
           (SELECT e.provenance FROM plan_node_events e WHERE e.node_id=o.id AND e.event='node_created'
            ORDER BY e.created_at LIMIT 1) AS provenance
         FROM outcome_rows o JOIN plan_nodes n ON n.id=o.id
         WHERE o.period IN (SELECT value FROM json_each(:periods))
-    """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))}).fetchall()
+    """, {**query_params({**params, "grain": grain}), "periods": json.dumps(sorted(window.periods))})
     origins: dict[tuple[str | None, bool], list[int]] = {}
     for row in rows:
         tally = origins.setdefault((row["provenance"], bool(row["follow_up"])), [0, 0])
@@ -189,11 +194,10 @@ def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: G
     """Which of these runs started inside the window, by the grain's own window test."""
     if not run_ids:
         return frozenset()
-    rows = db.execute(
-        f"SELECT id FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))"
+    rows = fetch_all(
+        db, f"SELECT id FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))"
         f" AND {grain.window_sql('created_at', window)}",
-        {"ids": json.dumps(sorted(run_ids))},
-    ).fetchall()
+        {"ids": json.dumps(sorted(run_ids))})
     return frozenset(str(row["id"]) for row in rows)
 
 
@@ -385,10 +389,9 @@ def _step_titles(db: sqlite3.Connection, node_ids: Iterable[str]) -> dict[str, s
     ids = sorted(set(node_ids))
     if not ids:
         return {}
-    return {str(row["id"]): str(row["title"]) for row in db.execute(
-        "SELECT id,title FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))",
-        {"ids": json.dumps(ids)},
-    ).fetchall()}
+    return {str(row["id"]): str(row["title"]) for row in fetch_all(
+        db, "SELECT id,title FROM plan_nodes WHERE id IN (SELECT value FROM json_each(:ids))",
+        {"ids": json.dumps(ids)})}
 
 
 

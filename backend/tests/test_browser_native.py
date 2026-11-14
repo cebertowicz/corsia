@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 from threading import Thread
 from types import SimpleNamespace
@@ -219,6 +220,68 @@ async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatc
         browser_pane.clear_page_endpoint(thread, connection)
 
 
+async def test_native_pane_open_writes_reach_targets_a_smooth_scroll_brings_into_view(native_owner, monkeypatch):
+    """With the pane open at DPR 2, writes on off-screen targets wait for the smooth scroll to stop."""
+    from host_access import browser_control
+    thread = 'native-smooth'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+    with popup_fixture() as base:
+        assert not (await native_owner.run(thread, ('open', f'{base}/smooth'))).startswith('Error:')
+        await browser_pane.match_pane(thread, browser_pane.PaneAppearance(700, 900, 2, 'light'))
+        browser_control.pane_connected(thread, 'pane')
+        try:
+            async def page(expected, expression):
+                # Mark the value so it is found in eval's rendered output whatever its framing.
+                rendered = await native_owner.run(thread, ('eval', f"'value=' + {expression} + ';'"), session='existing')
+                return f'value={expected};' in rendered
+
+            # An in-flow link whose hit lands on its own child (#1612), then a field further down.
+            assert await native_owner.run(thread, ('click', '#far'), session='existing') == 'ok'
+            assert await page('far', 'document.title')
+            await native_owner.run(thread, ('eval', 'scrollTo(0, 0)'), session='existing')
+            assert await native_owner.run(thread, ('fill', '#search', 'appointments'), session='existing') == 'ok'
+            assert await page('appointments', "document.querySelector('#search').value")
+            # A target that is really covered is still refused.
+            with pytest.raises(BrowserSessionError, match='another element covers it'):
+                await native_owner.run(thread, ('click', '#under'), session='existing')
+            assert await page('far', 'document.title')
+        finally:
+            browser_control.pane_disconnected(thread, 'pane')
+            browser_pane.clear_page_endpoint(thread, 'pane')
+
+
+async def test_native_pane_open_writes_on_a_stale_or_off_page_ref_say_why(native_owner, monkeypatch):
+    """A re-rendered ref says to take a new snapshot; a hidden element has no box; an off-page link never comes into view."""
+    from host_access import browser_control
+    thread = 'native-stale-ref'
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
+
+    async def ref(name):
+        snapshot = await native_owner.run(thread, ('snapshot', '-i'), session='existing')
+        return '@' + re.search(rf'"{name}" \[ref=(e\d+)\]', snapshot).group(1)
+
+    with popup_fixture() as base:
+        assert not (await native_owner.run(thread, ('open', f'{base}/rerender'))).startswith('Error:')
+        await browser_pane.match_pane(thread, browser_pane.PaneAppearance(700, 900, 2, 'light'))
+        browser_control.pane_connected(thread, 'pane')
+        try:
+            stale = await ref('Results')
+            await native_owner.run(thread, ('eval', 'rerender()'), session='existing')
+            with pytest.raises(BrowserSessionError, match='the page may have changed since your snapshot, '
+                               'so take a new snapshot and use its refs'):
+                await native_owner.run(thread, ('click', stale), session='existing')
+            with pytest.raises(BrowserSessionError, match='the element has no box on the page') as hidden:
+                await native_owner.run(thread, ('click', '#gone'), session='existing')
+            assert 'snapshot' not in str(hidden.value)
+            assert await native_owner.run(thread, ('click', await ref('Results')), session='existing') == 'ok'
+            assert 'results' in await native_owner.run(thread, ('get', 'title'), session='existing')
+            with pytest.raises(BrowserSessionError, match='it never came into view'):
+                await native_owner.run(thread, ('click', await ref('Menu copy')), session='existing')
+        finally:
+            browser_control.pane_disconnected(thread, 'pane')
+            browser_pane.clear_page_endpoint(thread, 'pane')
+
+
 @pytest.mark.parametrize('headed', [False, True])
 async def test_native_pane_clipboard_copy_cut_and_paste(native_owner, monkeypatch, headed):
     thread, connection = 'native-clipboard', 'pane'
@@ -414,6 +477,23 @@ def popup_fixture():
         '/popup': b'''<!doctype html><title>Popup</title><label>Account<input id="account"></label>
                        <button id="finish" onclick="window.opener.postMessage(document.querySelector('#account').value, '*');
                        setTimeout(() => window.close())">Finish</button>''',
+        # A smooth-scrolling page: scrollintoview returns before its targets stop moving.
+        '/smooth': b'''<!doctype html><title>Smooth</title><style>html { scroll-behavior: smooth }
+            li { height: 40px } #cover { position: fixed; top: 0; right: 0; width: 160px; height: 60px;
+            background: #ccc; z-index: 2 } #under { position: fixed; top: 10px; right: 10px }</style>
+            <button id="under" onclick="document.title = 'under'">Under</button><div id="cover"></div>
+            <ul>''' + b''.join(b'<li>Row %d</li>' % row for row in range(60)) + b'''
+            <li><a id="far" href="#" onclick="document.title = 'far'; return false"><span>Far link</span></a></li>'''
+            + b''.join(b'<li>Row %d</li>' % row for row in range(60, 120)) + b'''
+            <li><input id="search" placeholder="Search"></li></ul>''',
+        # A list the page re-renders on demand, a copy of a link parked off the page (a hidden menu),
+        # and a button that is not displayed at all.
+        '/rerender': b'''<!doctype html><title>Rerender</title>
+            <nav style="position: absolute; left: -9999px"><a href="#">Menu copy</a></nav>
+            <button id="gone" style="display: none">Gone</button>
+            <ul id="list"><li><a href="#" onclick="document.title = 'results'; return false">Results</a></li></ul>
+            <script>const html = document.querySelector('#list').innerHTML;
+            function rerender() { document.querySelector('#list').innerHTML = html; return 'done'; }</script>''',
     }
 
     class Handler(BaseHTTPRequestHandler):

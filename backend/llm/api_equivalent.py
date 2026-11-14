@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from llm.list_prices import LIST_PRICES, OPENAI_LONG_CONTEXT_INPUT_TOKENS, ListPrice
+from llm.list_prices import LIST_PRICES, ListPrice
 from llm.pricing import is_external_model, is_local_model
 
 # A price is one identity on one list: an External identity can appear on
@@ -52,20 +52,14 @@ def _known(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def is_long_context(prompt: int, cache_write: int, cache_read: int) -> bool:
-    """Whether OpenAI bills the call at its Standard long-context vector.
+def long_context_bound(model: str, listing: str | None = None) -> int | None:
+    """The input size above which the recorded identity bills its published long vector, or None.
 
-    The official boundary is input only: output tokens do not move a call into
-    the long tier. The ledger buckets are disjoint, so all three input buckets
-    contribute exactly once.
+    The official boundary is one call's input only: output tokens do not move a
+    call into the long tier. ``measurement_pricing.INPUT_TIER_SQL`` applies it.
     """
-    return prompt + cache_write + cache_read > OPENAI_LONG_CONTEXT_INPUT_TOKENS
-
-
-def has_public_long_context_price(model: str, listing: str | None = None) -> bool:
-    """Whether the recorded identity has a distinct published Standard long vector."""
     price = _price(model, listing)
-    return price is not None and price.long_input_per_million is not None
+    return price.long_context_above_input_tokens if price is not None else None
 
 
 def _rates(price: ListPrice, *, long_context: bool,

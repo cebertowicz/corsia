@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 
 ANTHROPIC_PRICING = "https://platform.claude.com/docs/en/about-claude/pricing"
+# Haiku 5.5's long-context rates apply above 100K input tokens.
+ANTHROPIC_HAIKU_LONG_CONTEXT_INPUT_TOKENS = 100_000
 # The raw maintained page exposes the full Standard table, including rows the
 # rendered page omits. It says short context is <=272K input tokens and long
 # context is >272K input tokens.
@@ -55,11 +57,13 @@ class ListPrice:
     source_url: str
     checked_date: str
     # ``None`` is a public absence, not a free bucket. Long vectors exist only
-    # where the provider publishes a distinct Standard long-context rate.
+    # where the provider publishes a distinct Standard long-context rate, and
+    # apply to a call whose input is above ``long_context_above_input_tokens``.
     long_input_per_million: float | None = None
     long_cache_write_per_million: float | None = None
     long_cache_read_per_million: float | None = None
     long_output_per_million: float | None = None
+    long_context_above_input_tokens: int | None = None
     # A provider whose public rate changes by time of day lists a second vector
     # for its idle hours, which apply over ``idle_utc_hours`` [start, end) of
     # the call's own UTC hour. ``listing`` is the regional price list (see
@@ -81,21 +85,34 @@ class ListPrice:
 LIST_PRICES: tuple[ListPrice, ...] = (
     ListPrice("claude-opus-5-5", 4, 5, 0.20, 20, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-opus-5", 5, 6.25, 0.50, 25, ANTHROPIC_PRICING, "2026-10-07"),
-    ListPrice("claude-sonnet-5-5", 2, 2.5, 0.20, 10, ANTHROPIC_PRICING, "2026-10-07"),
+    ListPrice("claude-fable-5-2", 8, 10, 0.20, 40, ANTHROPIC_PRICING, "2026-11-13"),
+    ListPrice("claude-sonnet-5-5", 2, 2.5, 0.10, 10, ANTHROPIC_PRICING, "2026-11-13"),
     ListPrice("claude-sonnet-5", 2, 2.5, 0.20, 10, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-fable-5-1", 10, 12.5, 0.25, 50, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-fable-5", 10, 12.5, 1, 50, ANTHROPIC_PRICING, "2026-10-07"),
     ListPrice("claude-haiku-4-5-20251001", 1, 1.25, 0.10, 5, ANTHROPIC_PRICING, "2026-10-07"),
+    ListPrice("claude-haiku-5-5", 0.10, 0.125, 0.01, 0.50, ANTHROPIC_PRICING, "2026-11-13",
+              0.50, 0.625, 0.05, 2.50, ANTHROPIC_HAIKU_LONG_CONTEXT_INPUT_TOKENS),
     # OpenAI Standard short and long vectors. Long context is >272K input
     # tokens; cache-write ``None`` is unavailable publicly, not $0.
-    ListPrice("gpt-6.1-sol", 2, 2.5, 0.10, 10, OPENAI_PRICING, "2026-10-07", 4, 5, 0.20, 15),
-    ListPrice("gpt-6-sol", 2, 2.5, 0.20, 10, OPENAI_PRICING, "2026-10-07", 4, 5, 0.40, 15),
-    ListPrice("gpt-5.6-sol", 4, 5, 0.40, 20, OPENAI_PRICING, "2026-10-07", 8, 10, 0.80, 30),
-    ListPrice("gpt-5.6-terra", 2, 2.5, 0.20, 12, OPENAI_PRICING, "2026-10-07", 4, 5, 0.40, 18),
-    ListPrice("gpt-5.6-luna", 0.2, 0.25, 0.02, 1.2, OPENAI_PRICING, "2026-10-07", 0.4, 0.5, 0.04, 1.8),
-    ListPrice("gpt-6-luna", 0.1, 0.125, 0.01, 0.5, OPENAI_PRICING, "2026-10-07", 0.2, 0.25, 0.02, 0.75),
-    ListPrice("gpt-6-astra", 10, 12.5, 1, 50, OPENAI_PRICING, "2026-10-07", 20, 25, 2, 75),
-    ListPrice("gpt-5.4", 2.5, None, 0.25, 15, OPENAI_PRICING, "2026-10-07", 5, None, 0.5, 22.5),
+    ListPrice("gpt-6.1-sol", 2, 2.5, 0.10, 10, OPENAI_PRICING, "2026-10-07",
+              4, 5, 0.20, 15, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-6.1-terra", 1, 1.25, 0.05, 5, OPENAI_PRICING, "2026-11-13",
+              2, 2.5, 0.10, 7.5, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-6-sol", 2, 2.5, 0.20, 10, OPENAI_PRICING, "2026-10-07",
+              4, 5, 0.40, 15, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-5.6-sol", 4, 5, 0.40, 20, OPENAI_PRICING, "2026-10-07",
+              8, 10, 0.80, 30, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-5.6-terra", 2, 2.5, 0.20, 12, OPENAI_PRICING, "2026-10-07",
+              4, 5, 0.40, 18, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-5.6-luna", 0.2, 0.25, 0.02, 1.2, OPENAI_PRICING, "2026-10-07",
+              0.4, 0.5, 0.04, 1.8, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-6-luna", 0.1, 0.125, 0.01, 0.5, OPENAI_PRICING, "2026-10-07",
+              0.2, 0.25, 0.02, 0.75, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-6-astra", 10, 12.5, 1, 50, OPENAI_PRICING, "2026-10-07",
+              20, 25, 2, 75, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
+    ListPrice("gpt-5.4", 2.5, None, 0.25, 15, OPENAI_PRICING, "2026-10-07",
+              5, None, 0.5, 22.5, OPENAI_LONG_CONTEXT_INPUT_TOKENS),
     ListPrice("gpt-5.3-codex", 1.75, None, 0.175, 14, OPENAI_PRICING, "2026-10-07"),
     # gpt-5.3-codex-spark has no published exact-identity rate; it stays unpriced.
     # Alibaba Model Studio, one block per region list. Cached input is 10% of
@@ -119,3 +136,10 @@ LIST_PRICES: tuple[ListPrice, ...] = (
               provider=ALIBABA_FAMILY, listing=ALIBABA_BEIJING),
 )
 LISTINGS = frozenset(price.listing for price in LIST_PRICES if price.listing is not None)
+if any((price.long_input_per_million is None) != (price.long_context_above_input_tokens is None)
+       for price in LIST_PRICES):
+    raise ValueError("a long-context vector and its input bound are listed together or not at all")
+# The distinct long-context bounds, which the ledger's per-call input tier splits on.
+LONG_CONTEXT_BOUNDS: tuple[int, ...] = tuple(sorted(
+    {price.long_context_above_input_tokens for price in LIST_PRICES
+     if price.long_context_above_input_tokens is not None}, reverse=True))
