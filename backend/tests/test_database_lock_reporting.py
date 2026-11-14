@@ -34,14 +34,15 @@ def test_locked_write_logs_refused_and_holding_scopes(tmp_path, caplog) -> None:
         refused.close()
 
 
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
 def test_long_write_hold_warns_only_after_threshold(tmp_path, caplog, monkeypatch) -> None:
-    class _FakeClock:
-        def __init__(self) -> None:
-            self.now = 0.0
-
-        def monotonic(self) -> float:
-            return self.now
-
     clock = _FakeClock()
     monkeypatch.setattr(database, "time", clock)
     monkeypatch.setattr(database, "WRITE_TRANSACTION_SLOW_SECONDS", 0.01)
@@ -63,12 +64,6 @@ def test_long_write_hold_warns_only_after_threshold(tmp_path, caplog, monkeypatc
 def test_slow_hold_names_the_calling_code_through_a_wrapping_context_manager(
     tmp_path, caplog, monkeypatch,
 ) -> None:
-    class _FakeClock:
-        now = 0.0
-
-        def monotonic(self) -> float:
-            return self.now
-
     clock = _FakeClock()
     monkeypatch.setattr(database, "time", clock)
     monkeypatch.setattr(database, "WRITE_TRANSACTION_SLOW_SECONDS", 0.01)

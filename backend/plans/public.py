@@ -321,7 +321,8 @@ from plans.lifecycle import archive_ended_owner
 from plans.service import touch_node
 from plans.admission import release as release_attempt
 from plans.delegation_harvest import returned_steps as returned_worker_steps
-from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdicts
+from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdict_ages, owed_verdicts
+from plans import automated_mutation_keys
 from plans.hierarchy import shown_worker_plan
 from plans.service import _transition as transition_node_in
 from plans.worker_retirement import (

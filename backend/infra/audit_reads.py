@@ -14,9 +14,10 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
+from infra.audit_plan_activity import plan_activity
 
 AUDIT_METRICS = (
-    "checkpoint_health", "lease_reviews", "seat_usage", "stored_message_pressure",
+    "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure",
     "agent_hours", "agent_day_levels"
 )
 MAX_WINDOW = timedelta(days=7)
@@ -241,6 +242,9 @@ def _read_audit_metric(
                 )
                 if len(rows) > MAX_ROWS:
                     raise AuditReadError("result_limit", "Audit result exceeds the fixed row limit; narrow the window.")
+            elif metric == "plan_activity":
+                assert start is not None and end is not None
+                rows = plan_activity(db, actor["user_id"], start, end)
             else:
                 rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
             if time.monotonic() >= deadline:
@@ -252,7 +256,10 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "caller_user" if metric in ("seat_usage", "agent_hours", "agent_day_levels") else "caller_user_and_project",
+        "scope": (
+            "caller_user" if metric in {"seat_usage", "plan_activity", "agent_hours", "agent_day_levels"}
+            else "caller_user_and_project"
+        ),
         "window": [start, end] if start is not None else None,
         "rows": rows,
         **coverage,

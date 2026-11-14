@@ -25,6 +25,7 @@ from infra.project_repo_policy import (
 from tools.repo_worktree_guidance import protected_checkout_worktree_guidance
 from tools.sandbox_ignored_files import is_ignored_untracked_file
 from tools.sandbox_git import verified_worktree_marker
+from tools.sandbox_worktree_cache import list_worktrees
 from tools.unix_socket_policy import thread_bind_roots
 
 
@@ -162,29 +163,10 @@ def repo_worktree_branch(
     return worktree, branch if head.startswith(prefix) and branch else None
 
 
+
 def list_repo_worktrees(repo_root: Path) -> list[Path]:
     """List verified linked worktrees beneath the required local directory."""
-    parent = repo_root.expanduser().resolve(strict=False) / ".worktrees"
-    if not parent.is_dir():
-        return []
-    worktrees: list[Path] = []
-    cache: dict = {}
-    plain_parent = not parent.is_symlink()
-    try:
-        entries = parent.iterdir()
-        for entry in entries:
-            # Under a resolved, non-symlink parent a non-symlink entry is its own
-            # canonical path; any other entry is resolved exactly once.
-            resolved = (
-                entry if plain_parent and not entry.is_symlink()
-                else entry.resolve(strict=False)
-            )
-            cache[("sandbox-resolved-path", str(entry))] = resolved
-            if repo_worktree_root(entry, repo_root, cache=cache) == resolved:
-                worktrees.append(resolved)
-    except OSError:
-        return []
-    return sorted(worktrees)
+    return list_worktrees(repo_root, _verified_worktree_root_and_gitdir, repo_worktree_root)
 
 
 

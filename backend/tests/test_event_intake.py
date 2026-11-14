@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from automation import script_runner, script_schedules
+from automation import script_event_lines, script_schedules
 from automation.script_readings import RunReport
 from events import intake, intake_errors, rule_authoring
 from events.intake import admit_event
@@ -460,14 +460,14 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
         cadence_seconds=600, series=[], timeout_seconds=30,
         now="2026-01-01T00:00:00+00:00", db=intake_world,
     )
-    accepted = asyncio.run(script_runner._admit_events(
+    accepted = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="run-1"),
     ))
-    refused = asyncio.run(script_runner._admit_events(
+    refused = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"outside": "x"}}], run_id="run-2"),
     ))
 
-    both = asyncio.run(script_runner._admit_events(
+    both = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.both", "facts": {"code": "ok"}}], run_id="run-3"),
     ))
 
@@ -497,7 +497,7 @@ def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_cou
         {"type": "qa.number", "facts": {"cost": "not a number"}},
         {"type": "qa.missing", "facts": {}},
     ]
-    report = asyncio.run(script_runner._admit_events(
+    report = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=events, run_id="run-many"),
     ))
 
@@ -513,7 +513,7 @@ def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_cou
 def test_a_script_refusal_is_explainable_by_type_for_the_owners_project(intake_world, tmp_path, monkeypatch):
     schedule = _schedule(intake_world, tmp_path)
     events = [{"type": "qa.route", "facts": {"outside": "x"}}]
-    refused = asyncio.run(script_runner._admit_events(
+    refused = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=events, run_id="run-explain"),
     ))
     found = rule_authoring.explain(intake_world, project_id="project-a", event_type="qa.route")
@@ -528,7 +528,7 @@ def test_a_script_refusal_is_explainable_by_type_for_the_owners_project(intake_w
         raise OSError("database unavailable")
 
     monkeypatch.setattr("events.intake.record_refusal", recording_failed)
-    again = asyncio.run(script_runner._admit_events(
+    again = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=events, run_id="run-explain-2"),
     ))
     assert again.error == refused.error and again.status == "error"
@@ -544,7 +544,7 @@ def test_a_both_row_from_a_workflow_without_a_version_is_counted_unversioned_onc
     )
     line = {"type": "qa.both", "facts": {"code": "ok"}}
     # Two lines, two event_ids, one run stamp: the store dedupes the second, which still routes.
-    report = asyncio.run(script_runner._admit_events(
+    report = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=[line, line], run_id="run-1"),
     ))
     counted = intake_world.execute(
