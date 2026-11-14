@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from math import inf, nextafter
 from typing import Callable
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
@@ -259,14 +260,16 @@ def own_waiting(connection, node_ids: list[str], now: datetime, rows_in: Callabl
 
 
 def own_waiting_intervals(
-    connection, node_ids: list[str], now: datetime, rows_in: Callable,
+    connection, node_ids: list[str], now: datetime, rows_in: Callable, *, stable: bool = False,
 ) -> dict[str, list[Interval]]:
     """Each node's own merged waiting intervals (epoch seconds); the one builder.
 
     ``own_waiting`` is their summed length; a roll-up carries the intervals
     themselves so time that several steps waited through together counts once.
     """
-    clock = now.timestamp()
+    # Mark open endpoints one float beyond the read clock. A closed interval can
+    # end exactly at now; comparing its endpoint with now would misclassify it.
+    clock = nextafter(now.timestamp(), inf) if stable else now.timestamp()
     facts = _read(connection, node_ids, rows_in)
     paused = _plan_paused(
         connection,

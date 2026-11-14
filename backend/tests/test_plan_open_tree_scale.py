@@ -60,8 +60,8 @@ def without_costs() -> Iterator[None]:
     """The pane with its cost roll-ups left unread (``project_costs(wanted=False)``)."""
     real = operator_node_facts.project_costs
 
-    def uncosted(node_plans, *, db, now, wanted=True, detail_ids=None):
-        return real(node_plans, db=db, now=now, wanted=False, detail_ids=detail_ids)
+    def uncosted(node_plans, *, db, now, wanted=True, detail_ids=None, stable=False):
+        return real(node_plans, db=db, now=now, wanted=False, detail_ids=detail_ids, stable=stable)
 
     operator_node_facts.project_costs = uncosted
     try:

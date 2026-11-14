@@ -26,7 +26,7 @@ def _parse(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _elapsed(nodes, now: datetime) -> dict[str, Any]:
+def _elapsed(nodes, now: datetime, *, stable: bool = False) -> dict[str, Any]:
     root = next((row for row in nodes if row["id"] == row["commitment_id"]), None)
     if root is None:
         raise service.PlanError("original plan commitment is unavailable")
@@ -37,7 +37,12 @@ def _elapsed(nodes, now: datetime) -> dict[str, Any]:
         and row["state"] not in service._TERMINAL_STATES
     ]
     end = now if open_nodes else max(_parse(row["updated_at"]) for row in nodes)
-    seconds = max(0, int((end - _parse(root["created_at"])).total_seconds()))
+    start = _parse(root["created_at"])
+    seconds = max(0, int((end - start).total_seconds()))
+    if stable:
+        # Operator names (``node_time.operator_amount``): only ended time is settled.
+        return {"settled_seconds": 0 if open_nodes else seconds, "status": "in_progress" if open_nodes else "complete",
+                "open_starts": [start.astimezone(timezone.utc).isoformat()] if open_nodes else []}
     return {"known": seconds, "status": "in_progress" if open_nodes else "complete"}
 
 
@@ -207,6 +212,7 @@ def project_many(
     db=None,
     now: datetime | None = None,
     ledger: usage_cost.Ledger | None = None,
+    stable: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Aggregate many commitments with a bounded query count.
 
@@ -253,7 +259,7 @@ def project_many(
                 "usage_recording_failures": loaded["recording_failures"].get(
                     commitment_id, 0,
                 ),
-                "elapsed_seconds": _elapsed(nodes, clock),
+                "elapsed_seconds": _elapsed(nodes, clock, stable=stable),
                 "user_effort": {
                     "known_plan_actions": loaded["effort"].get(commitment_id, 0),
                     "status": "partial",

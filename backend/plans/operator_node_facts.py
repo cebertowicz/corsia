@@ -36,6 +36,7 @@ def executor_labels(ids: set[str], *, db) -> dict[str, str]:
 
 def project_costs(
     node_plans, *, db, now: datetime, wanted: bool = True, detail_ids: frozenset[str] | None = None,
+    stable: bool = False,
 ) -> tuple[dict, dict, dict]:
     """Return commitment totals, per-plan node costs and initiative totals on one clock.
 
@@ -47,7 +48,7 @@ def project_costs(
     names; every other node's rolled, commitment and initiative figures are None.
     """
     if wanted and detail_ids is not None:
-        return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids)
+        return _scoped_costs(node_plans, db=db, now=now, detail_ids=detail_ids, stable=stable)
     if not wanted:
         nodes: dict[str, dict] = defaultdict(dict)
         for node, plan in node_plans:
@@ -59,13 +60,13 @@ def project_costs(
     commitment_ids = {str(node["commitment_id"]) for node, _plan in node_plans}
     # One priced ledger read serves both: the node read passes the commitments' dollars on.
     node_costs, initiatives, ledger = node_cost.project_with_commitments(
-        {str(plan["id"]) for _node, plan in node_plans}, commitment_ids, db=db, now=now,
+        {str(plan["id"]) for _node, plan in node_plans}, commitment_ids, db=db, now=now, stable=stable,
     )
-    costs = commitment_cost.project_many(commitment_ids, db=db, now=now, ledger=ledger)
+    costs = commitment_cost.project_many(commitment_ids, db=db, now=now, ledger=ledger, stable=stable)
     return costs, node_costs, initiatives
 
 
-def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) -> tuple[dict, dict, dict]:
+def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str], stable: bool = False) -> tuple[dict, dict, dict]:
     listed = [str(node["id"]) for node, _plan in node_plans]
     roots = [
         str(node["id"]) for node, _plan in node_plans
@@ -73,13 +74,13 @@ def _scoped_costs(node_plans, *, db, now: datetime, detail_ids: frozenset[str]) 
     ]
     wanted = [node_id for node_id in listed if node_id in detail_ids]
     # One priced ledger read serves every node the figures sum and the commitments listed nodes root.
-    own, rolled, scoped, ledger = node_cost_scoped.project(listed, wanted, roots, db=db, now=now)
+    own, rolled, scoped, ledger = node_cost_scoped.project(listed, wanted, roots, db=db, now=now, stable=stable)
     nodes: dict[str, dict] = defaultdict(dict)
     for node, plan in node_plans:
         node_id = str(node["id"])
         nodes[str(plan["id"])][node_id] = {"own": own[node_id], "rolled": rolled.get(node_id)}
     commitments = (
-        commitment_cost.project_many(roots, db=db, now=now, ledger=ledger)
+        commitment_cost.project_many(roots, db=db, now=now, ledger=ledger, stable=stable)
         if roots else {}
     )
     initiatives: dict[str, dict | None] = {str(node["id"]): None for node, _plan in node_plans}

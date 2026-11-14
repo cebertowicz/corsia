@@ -4,8 +4,8 @@ const EMPTY_AMOUNT: OperatorCostAmount = {
 	tokens: { known: null, unknown_rows: 0 },
 	model_cost_usd: { known: null, unknown_rows: 0 },
 	usage_recording_failures: 0,
-	execution: { seconds: 0, unknown_turns: 0, turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
-	waiting: { seconds: 0 },
+	execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
+	waiting: { settled_seconds: 0, open_starts: [] },
 };
 
 /**

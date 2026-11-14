@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import type { OperatorNode } from '$lib/api/plans';
@@ -43,6 +43,7 @@ afterEach(() => {
 	component?.$destroy();
 	component = null;
 	host?.remove();
+	vi.useRealTimers();
 });
 
 const held = 'Stalled: its input is held for its account';
@@ -68,6 +69,25 @@ describe('selected child account details', () => {
 		const status = render(selectedChild(null));
 		expect(status.querySelector('.reason')).toBeNull();
 		expect(status.textContent).not.toContain(' · ');
+	});
+
+	it('updates displayed open durations from the shared clock without another read', () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-01-01T00:00:10Z'));
+		const base = operatorNode({});
+		const cost = { ...base.node_cost.rolled,
+			execution: { ...base.node_cost.rolled.execution, settled_seconds: 2,
+				open_starts: ['2026-01-01T00:00:00Z'],
+				turns: { ...base.node_cost.rolled.execution.turns, running: 1 } },
+			waiting: { settled_seconds: 1, open_starts: ['2026-01-01T00:00:00Z'] },
+		};
+		render({ ...base, node_cost: { own: cost, rolled: cost } });
+		expect(host.textContent).toContain('12s');
+		expect(host.textContent).toContain('11s');
+		vi.advanceTimersByTime(15_000);
+		flushSync();
+		expect(host.textContent).toContain('27s');
+		expect(host.textContent).toContain('26s');
 	});
 
 	it('renders a person step’s instructions with code copy and the steps it releases', () => {
