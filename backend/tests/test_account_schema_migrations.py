@@ -350,6 +350,8 @@ def test_full_startup_78_to_current_parity_once_and_r1_usage_survives(tmp_path):
         assert (result.migrated, result.from_version, result.to_version) == (True, 78, _LADDER_END)
         assert MIGRATIONS[80] is migrate_80_to_81
         initialize_schema(fresh)
+        # This comparison is at _LADDER_END, before the later turn-index migration.
+        fresh.execute("DROP INDEX idx_llm_usage_turn")
         billing_objects = {
             "vendor_account_billing_revisions",
             "vendor_account_billing_facts",
@@ -846,9 +848,12 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 192 -> 193 admits the workspace scope on event rules.
         from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
         migrate_192_to_193(db)
-        # 193 -> 194 drops a closing-text answer a sent message already gave.
-        from infra.migration_193_to_194_closing_text_answers import migrate_193_to_194
+        # 193 -> 194 indexes turn-bound usage receipts.
+        from infra.migration_193_to_194_llm_usage_turn_index import migrate_193_to_194
         migrate_193_to_194(db)
+        # 194 -> 195 drops a closing-text answer a sent message already gave.
+        from infra.migration_194_to_195_closing_text_answers import migrate_194_to_195
+        migrate_194_to_195(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -982,7 +987,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 194
+    assert SCHEMA_VERSION == 195
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

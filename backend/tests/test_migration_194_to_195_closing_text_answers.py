@@ -1,10 +1,10 @@
-"""Schema 194: a closing-text answer a sent message in the same Turn already gave is dropped."""
+"""Schema 195: a closing-text answer a sent message in the same Turn already gave is dropped."""
 import json
 import sqlite3
 from contextlib import closing
 
 from infra.database import initialize_schema
-from infra.migration_193_to_194_closing_text_answers import migrate_193_to_194
+from infra.migration_194_to_195_closing_text_answers import migrate_194_to_195
 
 
 def _message(db, message_id, turn, for_user=False):
@@ -34,8 +34,8 @@ def test_only_the_unsent_duplicate_of_a_sent_answer_in_the_same_turn_is_dropped(
         for message_id in ("sent", "closing", "other-turn-closing", "only-closing"):
             _answer(db, message_id)
         _answer(db, "closing-other-comment", cid="c1.2")
-        migrate_193_to_194(db)
-        migrate_193_to_194(db)
+        migrate_194_to_195(db)
+        migrate_194_to_195(db)
         assert _left(db) == [
             ("closing-other-comment", "c1.2"), ("only-closing", "c1.1"),
             ("other-turn-closing", "c1.1"), ("sent", "c1.1"),

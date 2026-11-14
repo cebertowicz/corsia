@@ -65,8 +65,8 @@ def _fetch_lineage_rows(db, thread_id: str, anchors: list[dict]) -> list[dict]:
         child_rows.extend(dict(row) for row in db.execute(
             "SELECT *, rowid FROM messages WHERE thread_id = ? AND role = 'tool' "
             "AND json_valid(metadata) AND "
-            + predicate.format(",".join("?" for _ in ids)),
-            [thread_id, *sorted(ids)],
+            + predicate.format("SELECT value FROM json_each(?)"),
+            [thread_id, json.dumps(sorted(ids))],
         ).fetchall())
 
     relevant_assistants: list[dict] = []
@@ -78,11 +78,11 @@ def _fetch_lineage_rows(db, thread_id: str, anchors: list[dict]) -> list[dict]:
         # Legacy rows have no parent ID. Fetch only assistant rows whose JSON
         # may contain one of the relevant IDs, then make the exact decision in
         # the shared lineage resolver rather than trusting string matching.
-        like_terms = " OR ".join("metadata LIKE ?" for _ in call_ids)
         candidates = db.execute(
             "SELECT *, rowid FROM messages WHERE thread_id = ? "
-            "AND role = 'assistant' AND (" + like_terms + ")",
-            [thread_id, *(f'%"{call_id}"%' for call_id in sorted(call_ids))],
+            "AND role = 'assistant' AND EXISTS (SELECT 1 FROM json_each(?) j "
+            "WHERE messages.metadata LIKE '%\"' || j.value || '\"%')",
+            [thread_id, json.dumps(sorted(call_ids))],
         ).fetchall()
         relevant_assistants.extend(
             dict(row) for row in candidates

@@ -251,7 +251,8 @@ from infra.migration_189_to_190_comment_only_inputs import migrate_189_to_190
 from infra.migration_190_to_191_drop_reviewer_gate_tables import migrate_190_to_191
 from infra.migration_191_to_192_chat_drawn import migrate_191_to_192
 from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
-from infra.migration_193_to_194_closing_text_answers import migrate_193_to_194
+from infra.migration_193_to_194_llm_usage_turn_index import migrate_193_to_194
+from infra.migration_194_to_195_closing_text_answers import migrate_194_to_195
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -934,6 +935,7 @@ MIGRATIONS[190] = migrate_190_to_191
 MIGRATIONS[191] = migrate_191_to_192
 MIGRATIONS[192] = migrate_192_to_193
 MIGRATIONS[193] = migrate_193_to_194
+MIGRATIONS[194] = migrate_194_to_195
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

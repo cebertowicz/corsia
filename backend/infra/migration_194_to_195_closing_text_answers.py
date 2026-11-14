@@ -1,6 +1,6 @@
-"""Schema 193 -> 194: drop a closing-text answer when a sent message in its Turn already gave it.
+"""Schema 194 -> 195: drop a closing-text answer when a sent message in its Turn already gave it.
 
-From 194 on, ``chat_comment_answers.place_answers`` places an answer only from words the person is
+From 195 on, ``chat_comment_answers.place_answers`` places an answer only from words the person is
 shown. Before, an agent that answered a comment with ``post_update`` and again in its closing text
 had both stored, and the comment thread showed the answer twice. This step deletes the row that
 came from words the person was not sent (no ``for_user``) when a ``for_user`` message in the same
@@ -31,7 +31,7 @@ _DUPLICATES = (
 )
 
 
-def migrate_193_to_194(conn: sqlite3.Connection) -> None:
+def migrate_194_to_195(conn: sqlite3.Connection) -> None:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"chat_comment_answers", "messages"} <= tables:
         return
@@ -40,6 +40,6 @@ def migrate_193_to_194(conn: sqlite3.Connection) -> None:
     conn.execute(f"DELETE FROM chat_comment_answers WHERE rowid IN ({_DUPLICATES})")
     deleted = total - conn.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0]
     logger.info(
-        "migration 193->194 closing-text answers: deleted={} total={} elapsed_ms={}",
+        "migration 194->195 closing-text answers: deleted={} total={} elapsed_ms={}",
         deleted, total, round((time.monotonic() - started) * 1000),
     )
