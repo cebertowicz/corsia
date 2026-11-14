@@ -32,7 +32,7 @@ npx playwright test --headed      # watch in a real browser
 npx playwright test --ui          # Playwright UI mode (best for debug)
 ```
 
-Test artifacts (HTML report + traces + videos on failure):
+Test artifacts (HTML report + traces and screenshots on failure; video only for specs that opt in with `test.use({ video: 'on' })`):
 - `frontend/playwright-report/`
 - `frontend/test-results/`
 
