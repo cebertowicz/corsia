@@ -22,7 +22,8 @@ export function fitsOneRow(room: HeaderRoom): boolean {
 }
 
 /** A viewport this short is a phone held sideways: every pixel of header height is taken from the document. */
-export const SHORT_VIEWPORT = '(max-height: 420px)';
+const SHORT_HEIGHT = 420;
+export const SHORT_VIEWPORT = `(max-height: ${SHORT_HEIGHT}px)`;
 /** The header width under which the line always takes its own row, however short the viewport. */
 const NARROW_HEADER = 408;
 
