@@ -78,6 +78,8 @@ class ScriptRun:
     timed_out: bool
     #: Why the run had no GitHub login, in plain words; None when it ran as the agents' account.
     github_locked: str | None = None
+    #: True when CORSIA's own shutdown stopped the script before it finished.
+    stopped_by_shutdown: bool = False
 
     @property
     def over_cap(self) -> bool:
@@ -368,4 +370,6 @@ async def _run_with_channel(
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
         github_lock_reason(view, approved=socket_dir is not None),
+        # A script that ended with 0 finished its work, whatever the owner did after it.
+        stopped_by_shutdown=owned.stop_reason == "backend_shutdown" and owned.returncode != 0,
     )
