@@ -61,15 +61,25 @@ _NOT_SAVED = (
 )
 
 
+SAVE_ROUNDS = 5
+
+
 async def _save_open_text(entry: LiveEntry) -> None:
+    """Save until the file holds the live text, so typing that arrives during a save is saved too.
+
+    Returns with no await after its last check, so the caller's retire starts before more typing can land.
+    """
     live = entry.live
     try:
-        await live.commit_received()
-        if live.text == live.on_disk[1]:
-            return
-        actor = live.viewer_actor()
-        if actor is None:
-            raise DocumentNotSaved("no writable viewer holds the unsaved text")
-        (await entry.lane.submit(Operation("flush", actor=actor))).require_landed()
+        for _ in range(SAVE_ROUNDS):
+            await live.commit_received()
+            if live.text == live.on_disk[1]:
+                return
+            actor = live.viewer_actor()
+            if actor is None:
+                raise DocumentNotSaved("no writable viewer holds the unsaved text")
+            (await entry.lane.submit(Operation("flush", actor=actor))).require_landed()
+        if live.text != live.on_disk[1]:
+            raise DocumentNotSaved("typing kept arriving while the document was being saved")
     except Exception as error:
         raise DocumentNotSaved(_NOT_SAVED) from error

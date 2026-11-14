@@ -238,3 +238,54 @@ async def test_a_save_still_in_flight_when_the_move_starts_lands_in_the_moved_fi
     finally:
         gate.set()
         await asyncio.wait_for(manager.close(), 20)
+
+
+def _typing(entry, message_id, text):
+    """A browser update that inserts ``text`` at the start of the document as it is now."""
+    client = clone(entry.live.doc.get_update())
+    vector = client.get_state()
+    client["text"].insert(0, text)
+    entry.live.receive(BrowserMessage(message_id, client.get_update(vector)))
+
+
+@pytest.mark.asyncio
+async def test_typing_that_arrives_after_the_flush_is_saved_before_the_move(durable_scope, tmp_path, monkeypatch):
+    """The hold re-checks after each save: a keystroke landing right after the flush is flushed too."""
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    original, injected = entry.lane.submit, []
+
+    async def submit_then_type(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        if not injected:
+            injected.append(True)
+            _typing(entry, "after-flush", "LATE ")
+        return result
+    entry.lane.submit = submit_then_type
+    try:
+        receipt = await _promote(workspace, thread_id, source)
+        shared = workspace / "projects" / "alpha" / "shared" / "planning" / "live.md"
+        assert injected and not receipt.startswith("Error"), receipt
+        assert shared.read_text().startswith("LATE TYPED ") and not source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_typing_that_arrives_while_the_document_closes_refuses_the_move(durable_scope, tmp_path, monkeypatch):
+    """A keystroke in the instant the entry retires is not acknowledged and not in the file, so nothing moves."""
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    original = manager.release
+
+    async def type_then_release(artifact_id, retiring):
+        _typing(retiring, "during-close", "LATE ")
+        await original(artifact_id, retiring)
+    monkeypatch.setattr(manager, "release", type_then_release)
+    try:
+        receipt = await _promote(workspace, thread_id, source)
+        assert receipt.startswith("Error: This document is open with changes that could not be saved yet"), receipt
+        shared = workspace / "projects" / "alpha" / "shared" / "planning" / "live.md"
+        assert not shared.exists()
+        assert source.read_text().startswith("TYPED ") and "LATE" not in source.read_text()
+        assert "during-close" in entry.live.received  # still the browser's to resend: it was never acknowledged
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
