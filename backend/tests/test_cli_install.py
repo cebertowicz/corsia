@@ -348,8 +348,8 @@ def _download_error(cause: BaseException):
 
 @pytest.mark.parametrize(("error", "reason"), [
     (lambda: _download_error(urllib.error.URLError("offline")), "no internet connection"),
-    (lambda: _download_error(urllib.error.HTTPError("u", 404, "missing", {}, None)), "the download site refused the request"),
-    (lambda: _download_error(urllib.error.HTTPError("u", 503, "busy", {}, None)), "the download service cannot answer"),
+    (lambda: _download_error(urllib.error.HTTPError("u", 404, "missing", Message(), None)), "the download site refused the request"),
+    (lambda: _download_error(urllib.error.HTTPError("u", 503, "busy", Message(), None)), "the download service cannot answer"),
     (lambda: _download_error(TimeoutError("slow")), "it took too long"),
     (lambda: managed_runtime.ManagedRuntimeDownloadError("download checksum did not match the pinned runtime"), "the download didn't verify"),
     (lambda: managed_runtime.ManagedRuntimeError("download archive has an unsafe path"), "the download didn't verify"),
