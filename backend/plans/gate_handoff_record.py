@@ -1,9 +1,10 @@
 """What happened at an acceptance gate, read off events that already exist.
 
 The run phases and their step nodes, the person's verdicts, settlement times,
-corrections and offers are read from existing records. A batched document seam
-compares what went ahead at settlement; triage classifies failed runs. There is
-no table of counts: ``plans.gate_handoff`` replays the records into gate state.
+corrections and offers are read from existing records. Whether a run's document
+went ahead unchanged is read once after its settlement and kept on the run
+(``plans.gate_document_outcome``); triage classifies failed runs. There is no
+table of counts: ``plans.gate_handoff`` replays the records into gate state.
 
 Each read is a fixed number of statements whatever the gate's age: each one takes
 every run of the gate at once (``json_each`` over the ids), never one statement per run.
@@ -39,6 +40,8 @@ class Run:
     first_round_at: str | None = None
     answer_holds: set[str] = field(default_factory=set)
     document_outcome: dict | None = None
+    #: The run asked on a document whose read is missing or failed: it counts neither way.
+    document_unread: bool = False
 
 
 def project_of(db, plan_id: str) -> str:
@@ -114,14 +117,14 @@ def gate_runs(db, key: tuple[str, str, str]) -> list[Run]:
     for phase, stamp in _corrections(db, [(run.plan, run.phase) for run in runs.values()]):
         runs[phase].corrections.append(stamp)
     _triage(db, runs)
-    _documents(runs)
+    _documents(db, runs)
     return list(runs.values())
 
 
 def run_outcome(db, run: Run) -> str | None:
     """Classify a person's entire review using batched answers read for this run."""
     answers = run.answers
-    if not answers or run.settled_at is None:
+    if not answers or run.settled_at is None or run.document_unread:
         return None
     if any(detail.get("verdict") == "changes_requested" for detail in answers):
         return "failed"
@@ -134,19 +137,35 @@ def run_outcome(db, run: Run) -> str | None:
     ) else "failed"
 
 
-def _documents(runs: dict[str, Run]) -> None:
-    """Read all document outcomes once, at each gate's settlement time."""
-    candidates = [(run.artifact_id, run.first_round_at, run.settled_at) for run in runs.values()
-                  if run.artifact_id and run.first_round_at and run.settled_at and run.answers]
-    if not candidates:
-        return
+def document_ask(run: Run) -> tuple[str, str, str] | None:
+    """The document, first round and settlement time when the run's go-ahead is judged on a document.
+
+    That is a run asked on a document, answered and settled; any other run gives None.
+    """
+    if run.artifact_id and run.first_round_at and run.settled_at and run.answers:
+        return run.artifact_id, run.first_round_at, run.settled_at
+    return None
+
+
+def _documents(db, runs: dict[str, Run]) -> None:
+    """Attach each run's kept document read, in one statement and with no Git.
+
+    A read that found no recorded document leaves the outcome None, so the run is
+    judged by its feedback counts; a read that failed, or was never kept, counts
+    the run neither way rather than guess it clean.
+    """
     from plans import gate_document_outcome
 
-    outcomes = gate_document_outcome.went_ahead_outcomes(candidates)
-    for run in runs.values():
-        if run.artifact_id and run.first_round_at and run.settled_at and run.answers:
-            key = (run.artifact_id, run.first_round_at, run.settled_at)
-            run.document_outcome = outcomes[key]
+    asked = {phase: run for phase, run in runs.items() if document_ask(run)}
+    if not asked:
+        return
+    kept = gate_document_outcome.kept(db, asked)
+    for phase, run in asked.items():
+        answer = kept.get(phase)
+        if answer is None or "fault" in answer:
+            run.document_unread = True
+        else:
+            run.document_outcome = answer.get("outcome")
 
 
 def _triage(db, runs: dict[str, Run]) -> None:
@@ -170,7 +189,7 @@ def _triage(db, runs: dict[str, Run]) -> None:
     subjects: dict[str, list[str]] = {}
     for fact in facts:
         key = subject_key(fact.source_kind, fact.source_id)
-        subjects.setdefault(key, []).extend(members.get(fact.node_id, []))
+        subjects.setdefault(key, []).extend(members.get(fact.node_id or "", []))
     for row in db.execute(
         "SELECT subject_key,attributes FROM outcome_events WHERE event_name=? AND retracted_at IS NULL"
         " AND subject_key IN (SELECT value FROM json_each(?))", (TRIAGE_EVENT, _ids(subjects)),

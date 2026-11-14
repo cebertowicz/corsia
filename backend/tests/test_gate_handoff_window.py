@@ -58,13 +58,25 @@ async def test_run_outcome(detail, document, outcome):
 
 
 async def test_document_outcome_uses_first_ask_and_settlement_times(isolated_db, tmp_path, monkeypatch):
-    from plans import gate_document_outcome, holds, service
+    from infra import document_went_ahead
+    from plans import holds, service
 
     calls = []
-    def fake(requests):
+    def fake(requests, db=None):
+        import sqlite3
+
+        from infra.config import DB_PATH
+
+        # The history read runs Git, so it must hold no write: another writer gets the lock at once.
+        probe = sqlite3.connect(str(DB_PATH), timeout=0)
+        try:
+            probe.execute("BEGIN IMMEDIATE")
+            probe.rollback()
+        finally:
+            probe.close()
         calls.append(list(requests))
         return {request: {"went_ahead_unchanged": False, "changed_by": ["agent_revision"]} for request in requests}
-    monkeypatch.setattr(gate_document_outcome, "went_ahead_outcomes", fake)
+    monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", fake)
     run = _make(tmp_path, monkeypatch)
     _, gate = await _go(run, None)
     db = get_db()
@@ -96,7 +108,8 @@ async def test_document_outcome_uses_first_ask_and_settlement_times(isolated_db,
 
 
 async def test_reraised_ask_compares_to_first_presentation(isolated_db, tmp_path, monkeypatch):
-    from plans import gate_document_outcome, holds, service
+    from infra import document_went_ahead
+    from plans import holds, service
 
     run = _make(tmp_path, monkeypatch)
     _, gate = await _go(run, None)
@@ -120,11 +133,11 @@ async def test_reraised_ask_compares_to_first_presentation(isolated_db, tmp_path
     finally:
         db.close()
     calls = []
-    def fake(requests):
+    def fake(requests, db=None):
         calls.append(list(requests))
         return {request: {"went_ahead_unchanged": request[1] > revised_at, "changed_by": ["agent_revision"]}
                 for request in requests}
-    monkeypatch.setattr(gate_document_outcome, "went_ahead_outcomes", fake)
+    monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", fake)
     result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
                                              "evidence": "done", "verification_result": "passed"})
     assert not isinstance(result, str), result
@@ -174,26 +187,68 @@ async def test_scope_is_excluded_and_offer_lists_forgiven_and_scope(isolated_db,
         db.close()
 
 
-async def test_document_reads_are_batched_for_short_and_long_histories(monkeypatch):
+async def test_replay_reads_kept_document_answers_and_never_git(monkeypatch):
+    from infra import document_went_ahead
     from plans import gate_document_outcome
 
-    calls = []
-    def fake(requests):
-        calls.append(list(requests))
-        return {request: {"went_ahead_unchanged": True, "changed_by": []} for request in requests}
-    monkeypatch.setattr(gate_document_outcome, "went_ahead_outcomes", fake)
-    for length in (2, 30):
-        records = {}
-        for index in range(length):
-            record = _record([{"verdict": "approved"}])
-            record.phase, record.artifact_id, record.first_round_at = str(index), f"doc{index}", "first"
-            if index % 3 == 0:
-                record.tiers = ["instruction"]
-            records[record.phase] = record
-        gate_handoff_record._documents(records)
-        assert len(calls[-1]) == length
-        assert all(record.document_outcome["went_ahead_unchanged"] for record in records.values())
-    assert len(calls) == 2
+    def git(*_args, **_kwargs):
+        raise AssertionError("a replay must not read the workspace history")
+    monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", git)
+    kept = {
+        "unchanged": {"outcome": {"went_ahead_unchanged": True, "changed_by": []}},
+        "edited": {"outcome": {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]}},
+        "no_document": {"outcome": None},
+        "fault": {"fault": "history unavailable"},
+    }
+    reads = []
+    def read_kept(_db, phases):
+        reads.append(sorted(phases))
+        return kept
+    monkeypatch.setattr(gate_document_outcome, "kept", read_kept)
+    records = {}
+    for phase in (*kept, "never_kept"):
+        record = _record([{"verdict": "approved", "feedback_counts": {}}])
+        record.phase, record.artifact_id, record.first_round_at = phase, f"doc-{phase}", "first"
+        records[phase] = record
+    gate_handoff_record._documents(None, records)
+    assert len(reads) == 1
+    outcomes = {phase: gate_handoff_record.run_outcome(None, record) for phase, record in records.items()}
+    assert outcomes == {"unchanged": "clean", "edited": "failed", "no_document": "clean",
+                        "fault": None, "never_kept": None}
+
+
+async def test_a_history_fault_counts_the_run_neither_way_and_settles(isolated_db, tmp_path, monkeypatch):
+    from infra import document_went_ahead
+    from infra.guidance_states import GitFault
+    from plans import holds, service
+
+    def fault(_requests, db=None):
+        raise GitFault("git is busy")
+    monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", fault)
+    run = _make(tmp_path, monkeypatch)
+    _, gate = await _go(run, None)
+    db = get_db()
+    try:
+        holds.place_hold(gate, kind="blocked", reason_key="needs_review", reason="review", owner_kind="user",
+                         owner_id="document-1", expected_revision=service._node_row(db, gate)["revision"],
+                         actor_id=None, provenance="test.ask", db=db)
+        hold = holds.active_holds(gate, db=db)[-1]["id"]
+        holds.clear_write(gate, hold, expected_kind="blocked", actor_id=None, provenance="user.ask_cleared",
+                          detail={"verdict": "approved", "feedback_counts": {"comments": 0}}, db=db)
+        db.commit()
+    finally:
+        db.close()
+    result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
+                                             "evidence": "done", "verification_result": "passed"})
+    assert not isinstance(result, str), result
+    db = get_db()
+    try:
+        assert service._node_row(db, gate)["state"] == "accepted"
+        (record,) = gate_handoff_record.gate_runs(db, ("", "gated", "gate"))
+        assert record.document_unread
+        assert gate_handoff_record.run_outcome(db, record) is None
+    finally:
+        db.close()
 
 
 @pytest.mark.parametrize(("tiers", "forgiven"), [([], False), (["miss"], True)])

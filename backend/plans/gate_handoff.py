@@ -12,6 +12,7 @@ remain failures. A correction hands the gate back, resets the window and withdra
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -174,11 +175,13 @@ def drop_reason(state: GateState) -> str:
 
 
 def after_settlement(db, node_id: str) -> None:
-    """After the gate settles, offer a handoff when the recent window qualifies.
+    """After an acceptance gate step settles, read its document and offer a handoff once that commits.
 
-    Only an acceptance gate step counts; one offer at a time, and a gate already handed off is not offered again.
+    The document read runs Git, which takes seconds on a long history, so it never runs inside the
+    settlement's write: it is registered for after the commit, kept on the run, and the offer is
+    weighed in a write of its own (``_read_then_offer``).
     """
-    from plans import decisions
+    from infra.write_effects import after_commit
     from plans.workflow_fields import creation_payload
 
     node = service._node_row(db, node_id)
@@ -186,6 +189,47 @@ def after_settlement(db, node_id: str) -> None:
         return
     if creation_payload(db, node_id).get("workflow_gate") != "acceptance":
         return
+    from infra.database import TransactionOwnershipError
+
+    try:
+        after_commit(db, lambda: _read_then_offer(db, node_id))
+    except TransactionOwnershipError:
+        # A settlement outside an owned write has no commit to follow; the run stays unread and
+        # counts neither way, and the settlement itself must not fail over it.
+        logging.getLogger(__name__).warning(
+            "gate %s settled outside an owned write; its document read and offer were not run", node_id,
+        )
+
+
+def _read_then_offer(db, node_id: str) -> None:
+    """Keep the settled run's document read, then offer a handoff if the window qualifies.
+
+    Runs on the settlement's connection once its write has committed, so it reads that
+    database and opens a write of its own.
+    """
+    from plans import gate_document_outcome, plan_write
+    from plans.gate_handoff_record import document_ask
+
+    node = service._node_row(db, node_id)
+    phase = service._node_row(db, node["parent_id"])
+    key = (project_of(db, phase["plan_id"]), phase["workflow_ref"], node["workflow_step"])
+    run = next((run for run in gate_runs(db, key) if run.phase == phase["id"]), None)
+    asked = document_ask(run) if run is not None else None
+    answer = gate_document_outcome.read(db, *asked) if asked else None
+    with plan_write.transaction(db) as write:
+        if answer is not None:
+            gate_document_outcome.keep(write, phase["id"], answer)
+        _offer(write, node_id)
+
+
+def _offer(db, node_id: str) -> None:
+    """Offer a handoff when the gate's recent window qualifies.
+
+    One offer at a time, and a gate already handed off is not offered again.
+    """
+    from plans import decisions
+
+    node = service._node_row(db, node_id)
     phase = service._node_row(db, node["parent_id"])
     key = (project_of(db, phase["plan_id"]), phase["workflow_ref"], node["workflow_step"])
     state = derive(db, key, phase["workflow_version"])

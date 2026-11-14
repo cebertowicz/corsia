@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from infra.database import write_transaction
 from plans import gate_handoff, gate_handoff_record, holds, node_creation, service, workflow_fields
 from tests.plan_scale_fixture import build
 from tests.test_plan_open_tree_scale import SAMPLE_EVERY, SIZES, STEP_TOLERANCE, measure
@@ -134,8 +135,12 @@ def _approved_runs(scale, count: int, verdict: str = "approved") -> list[str]:
 
         review_evidence.record_verdict(steps[1]["id"], "done", verdict="Accepted", actor_id=None,
                                        provenance="t", db=scale.db)
-        service._transition(scale.db, steps[1]["id"], "accepted", actor_id=None, provenance="t",
-                            verification_result="passed", verified_by="test")
+        # Settle in an owned write, as every plan writer does: the gate's document read and offer
+        # run once that write commits.
+        scale.db.commit()
+        with write_transaction(scale.db, scope="test_settle"):
+            service._transition(scale.db, steps[1]["id"], "accepted", actor_id=None, provenance="t",
+                                verification_result="passed", verified_by="test")
     return nodes
 
 
