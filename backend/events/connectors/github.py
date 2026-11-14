@@ -244,14 +244,15 @@ def _project_repositories(project_id: str) -> frozenset[str] | None:
 
 
 def _unrouted_scope(facts: Mapping[str, Any]) -> frozenset[str] | None:
-    """The projects whose registered source repositories track the event's repository."""
+    """Rule scopes of projects whose source repositories track the event's repository."""
     from events.connectors.github_notifications_feed import FeedError, projects_tracking_github_repository
+    from infra.delegation_scope import scope_label
 
     repository = facts.get(MANIFEST.repository_fact or "")
     if not repository:
         return frozenset()
     try:
-        return projects_tracking_github_repository(str(repository))
+        return frozenset(scope_label(pid) for pid in projects_tracking_github_repository(str(repository)))
     except FeedError:
         return None
 

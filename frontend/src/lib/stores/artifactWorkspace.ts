@@ -1,12 +1,14 @@
 import { writable, get } from 'svelte/store';
 import {
 	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, consumeLanding, emptyWorkspace, newInstanceId, openTab,
-	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
+	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTab, type ArtifactTabStatus,
 	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
 	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
 import { openBrowserTab } from '$lib/artifactAuxiliaryTabs';
+import { openLinkTab, settleLinkTab } from '$lib/artifactLinkTabs';
+import type { ArtifactLink } from '$lib/artifactTabTypes';
 import { clearDraft, existingDraft, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
@@ -54,7 +56,8 @@ export const splitWidth = writable<number | null>(persisted.splitWidth);
 function persistentWorkspace(
 	workspace: ThreadArtifactWorkspace,
 ): ThreadArtifactWorkspace | null {
-	const tabs = workspace.tabs.filter((tab) => tab.kind === 'document');
+	// A link still resolving has no file to reopen.
+	const tabs = workspace.tabs.filter((tab) => tab.kind === 'document' && !tab.link);
 	if (tabs.length === 0) return null;
 	const activeTabId = tabs.some((tab) => tab.instanceId === workspace.activeTabId)
 		? workspace.activeTabId
@@ -161,6 +164,22 @@ export function openArtifactTab(threadId: string, input: OpenArtifactInput): voi
 	mutate(threadId, (ws) => openTab(ws, input));
 }
 
+/** Shows a pressed link's tab loading at once; null when that link is already loading (its tab is selected). */
+export function openLinkLoadingTab(threadId: string, link: ArtifactLink, title: string): string | null {
+	let instanceId: string | null = null;
+	mutate(threadId, (ws) => {
+		const opened = openLinkTab(ws, link, title, newInstanceId);
+		if (opened.started) instanceId = opened.instanceId;
+		return opened.ws;
+	});
+	return instanceId;
+}
+
+/** The pressed link named this document: its loading tab becomes the document's tab. */
+export function settleLinkLoadingTab(threadId: string, instanceId: string, input: OpenArtifactInput): void {
+	mutate(threadId, (ws) => settleLinkTab(ws, instanceId, input));
+}
+
 /** Applies an agent request without overriding the user's chosen canvas surface. */
 export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput): void {
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
@@ -168,25 +187,25 @@ export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput)
 
 /**
  * Opens a browser pane. Only an agent's first reveal of a thread's browser in this app session takes
- * the view; a later one adds a missing tab in the background, even after the user closed it.
+ * the view; a later one adds a missing tab in the background, even after the user closed it. A nested
+ * subagent's browser (`browserThreadId`) opens in the pane of the thread the person is looking at.
  */
-export function openBrowserPane(threadId: string, agentOpened = false): void {
+export function openBrowserPane(threadId: string, agentOpened = false, browserThreadId = threadId): void {
 	const foreground = !agentOpened || !revealedBrowsers.has(threadId);
 	if (agentOpened) revealedBrowsers.add(threadId);
-	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, foreground));
+	mutate(threadId, (ws) => openBrowserTab(ws, { threadId: browserThreadId }, newInstanceId, foreground));
 }
 
-/** Update this thread's sole browser tab without changing its selection or lifecycle. */
+/**
+ * Update every tab showing this thread's browser (its own pane's, and a parent's that opened a nested
+ * subagent's) without changing its selection or lifecycle.
+ */
 export function setBrowserPaneLabel(threadId: string, title: string): void {
-	mutate(threadId, (ws) => {
-		let changed = false;
-		const tabs = ws.tabs.map((tab) => {
-			if (tab.kind !== 'browser' || tab.title === title) return tab;
-			changed = true;
-			return { ...tab, title };
-		});
-		return changed ? { ...ws, tabs } : null;
-	});
+	const shows = (tab: ArtifactTab) => tab.kind === 'browser' && tab.threadId === threadId && tab.title !== title;
+	for (const [workspaceId, ws] of Object.entries(get(threadWorkspaces))) {
+		if (!ws.tabs.some(shows)) continue;
+		mutate(workspaceId, (current) => ({ ...current, tabs: current.tabs.map((tab) => (shows(tab) ? { ...tab, title } : tab)) }));
+	}
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */

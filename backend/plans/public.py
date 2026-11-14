@@ -173,6 +173,33 @@ def node_owner_thread(node_id: str, *, db) -> str | None:
     return row["owner_id"] if row is not None and row["owner_kind"] == "thread" else None
 
 
+def nodes_created_with(node_ids: list[str], provenances: tuple[str, ...], *, db) -> set[str]:
+    """Those of ``node_ids`` whose ``node_created`` event carries one of ``provenances`` (never rewritten).
+
+    One query; per node it walks ``idx_plan_node_events_node`` in time order and stops at the
+    ``node_created`` row, a node's first event, so it reads about one row per node, not its history.
+    """
+    import json
+
+    from plans import service
+
+    if not node_ids or not provenances:
+        return set()
+    with service._connection(db) as connection:
+        rows = connection.execute(
+            NODES_CREATED_WITH_SQL, (json.dumps(list(node_ids)), json.dumps(list(provenances))),
+        ).fetchall()
+    return {str(row["node_id"]) for row in rows}
+
+
+NODES_CREATED_WITH_SQL = (
+    "SELECT ids.value AS node_id FROM json_each(?) AS ids"
+    " WHERE (SELECT e.provenance FROM plan_node_events e"
+    " WHERE e.node_id = ids.value AND e.event = 'node_created' ORDER BY e.created_at LIMIT 1)"
+    " IN (SELECT value FROM json_each(?))"
+)
+
+
 def open_wait_intervals(
     thread_ids: list[str], *, since: datetime, until: datetime, db,
 ) -> dict[str, list[tuple[float, float]]]:

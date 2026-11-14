@@ -26,6 +26,7 @@ from core import thread_lifecycle_trims
 from core.thread_lifecycle import run_retention_sweep
 from automation.continuation import runner
 from automation.continuation.sources.harvest import HarvestSource
+from infra.auth import may_access_artifact
 from infra.schema import SCHEMA_SQL
 from plans import mutations, review_evidence, service
 from plans.boundary import PlanActor, mutate
@@ -153,7 +154,7 @@ def test_settled_worker_document_passes_to_live_ancestor(monkeypatch, tmp_path, 
                     "external_id": "workspace://ws-1/shared/result.md"}
         path = tmp_path / "result.md"
         path.write_text("Worker result")
-        models.register_artifact(**document, path=str(path), parent_thread_id="worker", db=db)
+        registered = models.register_artifact(**document, path=str(path), parent_thread_id="worker", db=db)
         if parent_ended:
             db.execute("UPDATE threads SET lifecycle_state='archived' WHERE id='parent'")
         submit_review_evidence(delegated.id, db=db, actor_id="parent")
@@ -162,6 +163,13 @@ def test_settled_worker_document_passes_to_live_ancestor(monkeypatch, tmp_path, 
         assert state["owner"] is not None
         assert state["owner"]["parent_thread_id"] == ("grandparent" if parent_ended else "parent")
         assert state["identity"]["state"] == "active"
+        # The document opens for the person who opened it from the parent: the row every
+        # open path reads is active and names a thread they own.
+        opened = models.get_artifact(registered["id"], db=db)
+        assert (opened["state"], opened["parent_thread_id"]) == (
+            "active", "grandparent" if parent_ended else "parent",
+        )
+        assert may_access_artifact(opened["parent_thread_id"], "user-1", db=db)
         assert _lifecycle(db, "worker") == ("archived", "assignment_settled")
     finally:
         db.close()

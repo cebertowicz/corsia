@@ -26,5 +26,9 @@ class DocumentOwnershipRefused(DurableWritePolicyError):
     """
 
 
+class PromotedPathRefused(DurableWritePolicyError):
+    """The path names a file a promote moved; a write there would recreate it beside the document."""
+
+
 class SuccessorHoldsComments(DurableWritePolicyError):
     """A promote's successor identity already holds comment state, so nothing may move onto it."""

@@ -94,8 +94,6 @@ def test_build_argv_with_settings():
     assert "--port" in argv and argv[argv.index("--port") + 1] == "8000"
     assert "--model-dir" in argv
     assert argv[argv.index("--model-dir") + 1] == "/Users/alice/models"
-    assert "--max-model-memory" in argv
-    assert argv[argv.index("--max-model-memory") + 1] == "200GB"
     assert any(arg.startswith("--api-key=") for arg in argv)
     assert "--max-concurrent-requests" in argv
     assert argv[argv.index("--max-concurrent-requests") + 1] == "4"

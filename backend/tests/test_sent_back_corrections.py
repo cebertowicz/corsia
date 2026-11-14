@@ -155,7 +155,7 @@ def test_the_migration_leaves_a_live_fact_alone_and_the_step_is_registered():
         assert record_rejection_correction(db, _seed_rejection(db, "worker"))
         migrate_143_to_144(db)
         assert len(_facts(db)) == 1
-        assert SCHEMA_VERSION == 192 and MIGRATIONS[143] is migrate_143_to_144
+        assert SCHEMA_VERSION == 194 and MIGRATIONS[143] is migrate_143_to_144
     finally:
         db.close()
 
@@ -178,6 +178,8 @@ def test_sent_back_facts_are_attributed_to_the_corrected_node():
         assert facts[0].source_kind == "sent_back"
         assert facts[0].node_id == facts[0].source_id.removeprefix("reject-")
         assert facts[0].is_correction
+        assert attributed_facts(db, node_ids={facts[0].node_id}) == facts
+        assert attributed_facts(db, node_ids={"another-node"}) == []
     finally:
         db.close()
 

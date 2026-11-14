@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 
 import pytest
 
@@ -33,14 +34,15 @@ def test_locked_write_logs_refused_and_holding_scopes(tmp_path, caplog) -> None:
         refused.close()
 
 
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
 def test_long_write_hold_warns_only_after_threshold(tmp_path, caplog, monkeypatch) -> None:
-    class _FakeClock:
-        def __init__(self) -> None:
-            self.now = 0.0
-
-        def monotonic(self) -> float:
-            return self.now
-
     clock = _FakeClock()
     monkeypatch.setattr(database, "time", clock)
     monkeypatch.setattr(database, "WRITE_TRANSACTION_SLOW_SECONDS", 0.01)
@@ -55,6 +57,33 @@ def test_long_write_hold_warns_only_after_threshold(tmp_path, caplog, monkeypatc
             clock.now = 0.02
         assert "slow_scope" in caplog.text
         assert "held=" in caplog.text
+    finally:
+        connection.close()
+
+
+def test_slow_hold_names_the_calling_code_through_a_wrapping_context_manager(
+    tmp_path, caplog, monkeypatch,
+) -> None:
+    clock = _FakeClock()
+    monkeypatch.setattr(database, "time", clock)
+    monkeypatch.setattr(database, "WRITE_TRANSACTION_SLOW_SECONDS", 0.01)
+    connection = _connection(tmp_path / "callers.db")
+
+    @contextmanager
+    def shared_scope_writer():  # like plans.plan_write.transaction: one scope, many operations
+        with write_transaction(connection, scope="shared_scope") as held:
+            yield held
+
+    def slow_operation() -> None:
+        with shared_scope_writer():
+            clock.now = 0.02
+
+    try:
+        slow_operation()
+        line = next(r.getMessage() for r in caplog.records if "shared_scope" in r.getMessage())
+        callers = line.split("callers=", 1)[1]
+        assert "shared_scope_writer" in callers and "slow_operation" in callers
+        assert "database.py" not in callers and "contextlib.py" not in callers
     finally:
         connection.close()
 

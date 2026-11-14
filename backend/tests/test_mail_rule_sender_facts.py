@@ -184,8 +184,8 @@ def test_the_reach_filter_still_holds_a_writer_the_scope_lets_through(isolated_d
     _agent("finance", "p")
     _agent("outsider", "q")
     account = _account("p")
-    monkeypatch.setattr("connections.connected_accounts.reached_projects",
-                        lambda _account, db: frozenset({"p", "q"}))
+    monkeypatch.setattr("connections.connected_accounts.rule_scopes",
+                        lambda _account, db: frozenset({"project:p", "project:q"}))
     _rule("outsider", "from_domain", "acme.com")
     _mail(account, "billing@acme.com", "m1")
     assert _wakes("outsider") == []
@@ -201,7 +201,7 @@ def test_an_unreadable_reach_wakes_no_one_and_records_nothing_against_any_rule(
     account = _account("p")
     _rule("finance", "from_domain", "acme.com")
     _rule("outsider", "from_domain", "acme.com")
-    monkeypatch.setattr("connections.connected_accounts.reached_projects",
+    monkeypatch.setattr("connections.connected_accounts.rule_scopes",
                         lambda _account, db: None)
     _mail(account, "billing@acme.com", "m1")
     assert (_wakes("finance"), _wakes("outsider")) == ([], [])

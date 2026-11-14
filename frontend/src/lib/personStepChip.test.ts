@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperatorArtifactLink, OperatorNode } from '$lib/api/plans';
 import { operatorNode } from '$lib/__tests__/fixtures/operatorPlan';
-import { doStep, doTarget, moreLabel, stepState } from './personStepChip';
+import { doStep, doTarget, moreLabel, openStep, stepState } from './personStepChip';
 
 const calls = vi.hoisted(() => ({
 	focus: vi.fn(async () => {}),
 	ask: vi.fn(),
+	browser: vi.fn(),
 	refresh: vi.fn(async () => {}),
 	payload: null as unknown,
 }));
 vi.mock('$lib/planNodeFocus', () => ({ focusPlanNode: calls.focus }));
-vi.mock('$lib/planLeafReturn', () => ({ openPlanAsk: calls.ask }));
+vi.mock('$lib/planLeafReturn', () => ({ openPlanAsk: calls.ask, openPlanBrowser: calls.browser }));
 vi.mock('$lib/stores/plans.svelte', () => ({
 	peekEntry: () => ({ payload: calls.payload }),
 	refresh: calls.refresh,
@@ -28,6 +29,7 @@ const card = { thread_id: 't1', node_id: 'step-1', title: 'Run the proof' };
 beforeEach(() => {
 	calls.focus.mockClear();
 	calls.ask.mockClear();
+	calls.browser.mockClear();
 	calls.refresh.mockClear();
 	calls.payload = null;
 });
@@ -57,6 +59,29 @@ describe('doTarget', () => {
 		expect(doTarget(step({ artifacts: [{ ...doc, role: 'attention' }] }))).toEqual({ kind: 'details' });
 		expect(doTarget(undefined)).toEqual({ kind: 'details' });
 	});
+
+	it('opens the shared browser of the thread a browser step names', () => {
+		expect(doTarget(step({ browser_thread_id: 't1' }))).toEqual({ kind: 'browser', threadId: 't1' });
+		expect(doTarget(step({ browser_thread_id: 'worker' }))).toEqual({ kind: 'browser', threadId: 'worker' });
+	});
+
+	it('keeps an instructions document first, so a step with one is unchanged', () => {
+		expect(doTarget(step({ artifacts: [doc], browser_thread_id: 't1' }))).toEqual({ kind: 'document', artifact: doc });
+	});
+});
+
+describe('openStep', () => {
+	it('opens a browser step in the given pane, and says the details need not show', () => {
+		expect(openStep('t1', { kind: 'browser', threadId: 'worker' }, 'Sign in')).toBe(true);
+		expect(calls.browser).toHaveBeenCalledWith('worker', 't1');
+		expect(calls.ask).not.toHaveBeenCalled();
+	});
+
+	it('opens nothing for a step with neither, so its details show', () => {
+		expect(openStep('t1', { kind: 'details' }, 'Read')).toBe(false);
+		expect(calls.browser).not.toHaveBeenCalled();
+		expect(calls.ask).not.toHaveBeenCalled();
+	});
 });
 
 describe('doStep', () => {
@@ -68,11 +93,20 @@ describe('doStep', () => {
 		expect(calls.refresh).not.toHaveBeenCalled();
 	});
 
+	it('opens a sign-in step’s shared browser in one press, without the plan', async () => {
+		calls.payload = read(step({ browser_thread_id: 't1' }));
+		await doStep(card);
+		expect(calls.browser).toHaveBeenCalledWith('t1', 't1');
+		expect(calls.focus).not.toHaveBeenCalled();
+		expect(calls.ask).not.toHaveBeenCalled();
+	});
+
 	it('focuses the step in the plan when it has no document', async () => {
 		calls.payload = read(step());
 		await doStep(card);
 		expect(calls.focus).toHaveBeenCalledWith('t1', 'step-1', null, true);
 		expect(calls.ask).not.toHaveBeenCalled();
+		expect(calls.browser).not.toHaveBeenCalled();
 	});
 
 	it('reads the plan first when the node is not loaded yet, then opens what that read says', async () => {
