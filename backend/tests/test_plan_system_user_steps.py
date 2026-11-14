@@ -318,6 +318,46 @@ def test_a_step_opened_with_no_selected_task_still_wakes_the_agent_when_it_ends(
     assert wake_currency.is_current("owner", json.loads(wake["continuation_condition"]), db=db)
 
 
+SESSION_ENDED = "The shared browser closed before this task was finished."
+
+
+def _close(db, node_id: str) -> bool:
+    closed = public.close_user_step(db, node_id, reason=SESSION_ENDED, provenance=PROVENANCE)
+    db.commit()
+    return closed
+
+
+def test_closing_an_unfinished_step_wakes_the_agent_with_why_even_with_no_selected_task(db):
+    """A step that can no longer finish ends as the person's Won't do, and the agent hears the reason."""
+    from plans import wake_currency
+
+    owner_plan(db)
+    step = _open(db)
+
+    assert _close(db, step) is True
+
+    assert row(db, step)["state"] == "closed"
+    wake = _closed_wake(db, step)
+    assert wake is not None
+    assert TITLE in wake["content"]
+    assert json.loads(wake["content"].split("\n", 1)[1])["reason"] == SESSION_ENDED
+    assert wake_currency.is_current("owner", json.loads(wake["continuation_condition"]), db=db)
+    # Already ended: neither ending writes again.
+    assert _close(db, step) is False and _settle(db, step) is False
+
+
+def test_close_refuses_a_step_the_system_did_not_open_or_an_empty_reason(db):
+    plan = owner_plan(db)
+    mine = task(db, plan.id, "Read the page")
+    with pytest.raises(service.PlanInputError):
+        _close(db, mine.id)
+    assert row(db, mine.id)["state"] != "closed"
+    step = _open(db)
+    with pytest.raises(service.PlanInputError):
+        public.close_user_step(db, step, reason=" ", provenance=PROVENANCE)
+    assert row(db, step)["state"] == "pending"
+
+
 def test_a_step_end_is_not_news_once_the_plan_is_paused(db):
     """The active-plan check runs before the step rule, so a pause still silences the wake at claim."""
     from plans import wake_currency

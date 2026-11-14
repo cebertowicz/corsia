@@ -130,3 +130,33 @@ async def test_observer_runs_once_before_effects_and_is_optional(plan, monkeypat
     assert order == ["observer", "ended"]
     await lifecycle.step_event("thread", lifecycle.Event("session_ended"))
     assert order == ["observer", "ended"]
+
+
+@pytest.mark.parametrize("kind", ["password", "person"])
+async def test_a_step_its_session_outlived_closes_and_tells_the_agent_it_did_not_finish(plan, kind):
+    """Closed, crashed or timed out: every session end runs this hook, and the step can no longer finish."""
+    from host_access import browser_session_commands
+    from host_access.browser_session_state import BrowserSessionError
+    from tests.plan_close_next_helpers import row
+    from tests.test_browser_person_step import THREAD, Page
+
+    page, db = Page(), plan["db"]
+    if kind == "password":
+        page.show("visit-one", frozenset({42}))
+        with pytest.raises(BrowserSessionError, match="asks for a password"):
+            await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",), session="s1")
+    else:
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account", session="s1")
+    node_id = lifecycle._steps[THREAD].node_id
+
+    await browser_session_commands.end_session(THREAD, "s1")
+
+    assert THREAD not in lifecycle._steps
+    assert row(db, node_id)["state"] == "closed"
+    [wake] = db.execute(
+        "SELECT content FROM messages WHERE thread_id=? AND id LIKE ?", (THREAD, f"plan-wake:task_closed:{node_id}:%"),
+    ).fetchall()
+    assert lifecycle.SESSION_ENDED_REASON in wake["content"]
+    # The session's end is the only ending: a later session never settles or reopens the closed row.
+    await lifecycle.step_event(THREAD, lifecycle.Event("session_ended", session="s1"))
+    assert row(db, node_id)["state"] == "closed"
