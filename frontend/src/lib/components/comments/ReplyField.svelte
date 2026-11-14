@@ -5,9 +5,10 @@
 	import MentionPicker from './MentionPicker.svelte';
 	import { createMentionSelection } from './mentionSelection';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import RecipientLine from './RecipientLine.svelte';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection() }: {
 		/** The reply's text. The field grows with it and never scrolls itself; the card's outer scroller keeps the caret in view. */
 		value?: string;
 		selection?: [number, number] | null;
@@ -17,16 +18,21 @@
 		posting?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
+		/** The agents this reply wakes, from the server's reply rule; absent where the caller does not know (chat comments). */
+		goesTo?: string[];
 		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
+	/** The height of the line under the field (its own top gap included), 0 when there is none. Revealing the field leaves this much clear below it, so the person never sees Send without seeing who gets the reply. */
+	let lineHeight = $state(0);
 	/** Once the person taps the field or types, it stays in view in whatever scrolls the thread (a keyboard rising, the text
 	 * growing). Focus alone doesn't: a card focused by picking its tag is already being scrolled to smoothly. */
 	let typing = $state(false);
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
+	const tagNames = $derived(picker && goesTo ? picker.occurrences(value).map(item => value.slice(item.start, item.end).replace(/^@/, '')) : []);
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
 	export function focus(options?: FocusOptions) { input?.focus(options); }
@@ -71,13 +77,14 @@
 <div class="ct-compose open" data-reply-composer>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} style:scroll-margin-block-end={lineHeight ? `calc(var(--space-1) + ${lineHeight}px)` : undefined} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
 			</button>
 		{/if}
 	</Field>
+	{#if goesTo}<div class="ct-goes" bind:offsetHeight={lineHeight}><RecipientLine names={[...new Set([...goesTo, ...tagNames])]} none="No agent gets this reply." /></div>{/if}
 </div>
 
 <style>
@@ -85,6 +92,8 @@
 	/* The field grows with its text and never scrolls itself. Revealing its end leaves a gap below it, so a scroll offset
 	   rounded to a whole pixel never clips the Send that sits flush with its foot. */
 	.ct-compose :global(.field .c textarea.ct-input) { max-height: none; scroll-margin-block-end: var(--space-1); }
+	/* Holds the line's own top gap inside the box that is measured. */
+	.ct-goes { display: flow-root; }
 	.ct-send { flex-shrink: 0; align-self: flex-end; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent-fill); border: none; color: var(--accent-on-fill); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }
 	/* In progress, not unavailable: the ring takes the send button's own ink, and the button keeps its fill. */

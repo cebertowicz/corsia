@@ -112,7 +112,8 @@ async function cardOpensViewerAndReturns(page: Page, testInfo: TestInfo, text: s
 	const card = drawer(page).locator('.ct').filter({ hasText: text });
 	await card.scrollIntoViewIfNeeded();
 	const scrolled = await drawerList(page).evaluate((list) => list.scrollTop);
-	await card.click();
+	// The comment's own text: the middle of the card is now the reply field, which a click focuses and does not open the viewer from.
+	await card.locator('.ct-original').click();
 	await expect(overlay(page)).toBeVisible();
 	await expect(overlay(page).locator('[data-region-tag][aria-pressed="true"]:not([inert])')).toHaveCount(1);
 	await expect(page.locator('[data-doc-comments-drawer]')).toBeHidden();

@@ -4,11 +4,12 @@
 	import Field from '$lib/components/ui/Field.svelte';
 	import CommentQuote from './CommentQuote.svelte';
 	import MentionPicker from './MentionPicker.svelte';
+	import RecipientLine from './RecipientLine.svelte';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -24,6 +25,9 @@
 		retryable?: boolean;
 		retainText?: boolean;
 		mentions?: boolean;
+		/** Who a new comment goes to, from the document's resolver; absent where the caller does not know (chat comments). */
+		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; names?: string[] };
+		onRetry?: () => void;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
 		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
@@ -33,6 +37,9 @@
 	} = $props();
 	let text = $state(untrack(() => body));
 	const explanationId = $props.id();
+	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
+	const tagged = $derived(mentions && picker ? picker.occurrences(text).map(item => text.slice(item.start, item.end).replace(/^@/, '')) : []);
+	const names = $derived([...new Set([...(goesTo?.state === 'agent' ? goesTo.names ?? [] : []), ...tagged])]);
 	let posting = $state(false);
 	$effect(() => {
 		text;
@@ -56,12 +63,13 @@
 
 <div class="composer">
 	<div class="quote-wrap"><CommentQuote {quote} {label} /></div>
+	{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 	<div class="input-wrap">
-		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
 			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 		</Field>
 	</div>
+	{#if goesTo}<RecipientLine {names} none="No agent gets this comment." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}
 	<div class="actions">
 		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
 		{#if !error || retryable}<button class="submit" disabled={!text.trim() || posting || pending || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting || pending ? submittingLabel : error ? 'Retry' : submitLabel}</button>{/if}
@@ -73,7 +81,10 @@
 <style>
 	.composer { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
 	.quote-wrap { flex: none; }
-	.input-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+	/* In a box with less room than its parts, only the field gives: it shrinks and scrolls its own text down to one row, and below that the popover or sheet scrolls as a whole.
+	   The picker, the recipient line and the actions never shrink into what is beside them, so nothing overlaps. The picker sits at the composer's level, its top padding doing the gap the field's wrapper used to. */
+	.composer > :global(.mention-region) { flex: none; margin-bottom: calc(-1 * var(--space-2)); }
+	.input-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: var(--space-7); }
 	.input-wrap :global(.field) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; align-items: stretch; }
 	.input-wrap :global(.c) { flex: 1 1 auto; flex-direction: column; min-height: 0; align-items: stretch; }
 	.input-wrap textarea { flex: 1 1 auto; min-height: 0; overflow-y: auto !important; }

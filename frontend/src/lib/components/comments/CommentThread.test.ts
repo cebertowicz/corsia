@@ -47,6 +47,21 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
+	describe('the line under the reply field', () => {
+		it('names the agents the reply wakes, and says so when there are none', () => {
+			render(thread({ replyGoesTo: [{ id: 'a1', name: 'Docs lane' }, { id: 'a2', name: 'Release lane' }] }));
+			expect(host.querySelector('.rl')?.textContent).toContain('Goes to');
+			expect(Array.from(host.querySelectorAll('.rl-name'), (name) => name.textContent)).toEqual(['Docs lane', 'Release lane']);
+			unmount(component!); host.remove();
+			render(thread({ replyGoesTo: [] }));
+			expect(host.querySelector('.rl')?.textContent).toContain('No agent gets this reply.');
+		});
+		it('is absent where the caller does not know who gets a reply', () => {
+			render(thread());
+			expect(host.querySelector('.rl')).toBeNull();
+		});
+	});
+
 	it('keeps focus in the reply field when a clicked Send goes away after posting', async () => {
 		render(thread());
 		const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;

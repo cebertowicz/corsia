@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "The chat-list read omits 19 engine columns no list caller reads (turn, model-switch, compaction, confinement and local-only state); thread detail and the owning routes still serve them.",
+  "reason": "The comment box now names who a new comment goes to, so GET /artifacts/{id}/comments resolves the document's recipients even when it has no comments: 3 more statements (13 to 16) on the gate's comment-free fixture; with comments the added work is a fixed 10 statements, not growing with comment count.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -37,9 +37,9 @@
       "steps": 223
     },
     "/api/artifacts/{artifact_id}/comments": {
-      "bytes": 172,
-      "statements": 13,
-      "steps": 38046
+      "bytes": 234,
+      "statements": 16,
+      "steps": 48102
     },
     "/api/artifacts/{artifact_id}/reviews": {
       "bytes": 14,

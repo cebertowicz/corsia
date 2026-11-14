@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
+from doceditor import comment_audience, comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.comment_creation import create_validated_comment
@@ -80,7 +80,8 @@ async def list_comments(artifact_id: str, token: str):
             comments, anchors_checked = anchored_threads(artifact_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
             feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
-            feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
+            goes_to = comment_audience.annotate(db, artifact, comments)
+            feedback = {**feedback_batches.user_feedback_for_document(db, artifact_id), "goes_to": goes_to}
             return comments, anchors_checked, feedback
         finally:
             db.close()

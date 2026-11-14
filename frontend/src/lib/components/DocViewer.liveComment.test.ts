@@ -443,6 +443,7 @@ it('returns focus to the editor without scrolling when the comment popover is di
 	await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
 	// Below the margin width (this canvas has no width) only a click on the text opens its popover.
 	const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+	vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8); // the pointer is over the comment when it goes down
 	view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1 }));
 	view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
 	window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -478,6 +479,7 @@ it('opens a comment where its text is clicked without scrolling to it', async ()
 	const view = await openWithComment();
 	const scroll = vi.spyOn(EditorView, 'scrollIntoView');
 	// The press moves the caret into the comment's text, as the browser does under the pointer.
+	vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(7);
 	view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 25 }));
 	view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1, clientX: 40, clientY: 25 }));
 	view.dispatch({ selection: { anchor: 7 }, userEvent: 'select.pointer' });
