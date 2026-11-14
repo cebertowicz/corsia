@@ -36,9 +36,17 @@ def probe_read_only(path: Path) -> None:
     main file and deletes it, even after refusing a damaged file. A read-only
     connection cannot, so a store refused here keeps its main file and -wal exactly
     as found: they may hold acknowledged typing.
+
+    A rollback-journal store left with a hot -journal by a crash mid-transaction
+    is not damaged: only a writable connection can roll it back, so that refusal
+    passes and the writable open recovers it as it always has.
     """
-    with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1.0)) as db:
-        db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    try:
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1.0)) as db:
+            db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.Error as exc:
+        if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_READONLY_ROLLBACK:
+            raise
 
 
 def enter_wal(connection: sqlite3.Connection, path: Path) -> None:

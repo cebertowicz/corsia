@@ -8,6 +8,8 @@ import os
 import shutil
 import sqlite3
 import struct
+import subprocess
+import sys
 from contextlib import closing
 
 import pytest
@@ -80,6 +82,30 @@ def test_wal_holding_page_one_opens_and_reads_the_edit(tmp_path):
     assert 1 in _wal_pages(image)
     _damage_page_one(image)
     assert ACKED in LiveStore(image).load_updates()
+
+
+_UNCOMMITTED_WRITER = """
+import os, sqlite3, sys
+db = sqlite3.connect(sys.argv[1], isolation_level=None)
+db.execute("PRAGMA cache_size=1")
+db.execute("BEGIN")
+for _ in range(64):
+    db.execute("INSERT INTO live(upd) VALUES (?)", (os.urandom(4000),))
+os._exit(0)
+"""
+
+
+def test_rollback_store_with_hot_journal_rolls_back_and_opens(tmp_path):
+    path = tmp_path / "rollback.sqlite"
+    LiveStore(path).initialize(b"initial", "hash")
+    with closing(sqlite3.connect(path, isolation_level=None)) as db:
+        assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    # A writer spills an uncommitted transaction into the main file, then dies.
+    subprocess.run([sys.executable, "-c", _UNCOMMITTED_WRITER, str(path)], check=True)
+    journal = path.with_name(path.name + "-journal")
+    assert journal.stat().st_size > 0
+    assert LiveStore(path).load_updates() == (b"initial",)
+    assert not journal.exists()
 
 
 def test_healthy_store_still_checkpoints_and_removes_its_wal(tmp_path):
