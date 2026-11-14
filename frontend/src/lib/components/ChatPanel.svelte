@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { apiFetch } from '$lib/api/request';
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
@@ -102,6 +102,12 @@
 		turnSummaries = { ...turnSummaries, ...(value as Record<string, TurnSummary>) };
 	}
 
+	/** Drop the shown thread's pages, load state, summaries and run stubs: an open replaces them, and a new chat has none. */
+	function clearThreadTranscript(): void {
+		pagerGeneration++; pager = createPager(); firstLoadPending = false; firstLoadFailed = false;
+		turnSummaries = {}; focusRuns = []; runLoads = {};
+	}
+	$effect(() => { if ($activeThreadId === null) untrack(clearThreadTranscript); });
 	const hasMoreMessages = $derived(!!$activeThreadId && pager.hasMore); // New chat has no history to page
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
@@ -123,11 +129,7 @@
 		// screen contributes a ~0 ms sample and would bias the percentiles this feeds.
 		// Idempotent: the route already began this open before its awaits (#2280).
 		if (get(activeThreadId) !== id) beginThreadOpen(id, source);
-		pagerGeneration++;
-		pager = createPager();
-		turnSummaries = {};
-		focusRuns = [];
-		runLoads = {};
+		clearThreadTranscript();
 
 		const myGen = pagerGeneration;
 		const ws = await import('$lib/ws');
