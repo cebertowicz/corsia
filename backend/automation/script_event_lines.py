@@ -19,10 +19,18 @@ from infra.db_async import run_in_db_unless_owned
 
 #: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
 _RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
-#: A run a rule started has no next run and its owner cannot start it with the same event.
-_RULE_RUN_FIX = "A run a rule started is not run again. If its work still matters, do it for its item yourself."
+#: A run a rule started has no next run and its owner cannot start it with the same event. The script
+#: itself finished: what is lost is the event its line would have sent, not the script's own work.
+#: Only a run the runner starts has its printed lines sent, so running the script by hand sends none.
+_RULE_RUN_FIX = ("The script finished, and the event this line would have sent is lost. "
+                 "A run a rule started is not run again, and running the script yourself does not send its lines. "
+                 "If what that event would have started still matters, start it yourself.")
 #: The wake's next step when the intake was all that failed: the general one tells the owner to fix the script.
-_INTAKE_DOWN_NEXT = "The event intake could not take the line. This wake does not mean your {} is at fault."
+_INTAKE_DOWN_NEXT = ("The event intake could not take the line. This wake does not mean your {} is at fault. "
+                     "not_sent lists the event type of each line that was not sent.")
+#: Added for a rule-started run, whose wake names the rule and the event that started it.
+_STARTED_BY_NEXT = (" started_by names the rule and the event that started this run; "
+                    "event_rules explain with its event_id shows that event's record.")
 #: The pause before each further try of an event line the intake could not take. One more try than pauses;
 #: each try can itself wait out the write queue, so a line is given up after a few minutes, never held.
 _ADMIT_PAUSE_SECONDS: tuple[float, ...] = (5, 15, 30)
@@ -57,10 +65,13 @@ async def _admit_line(schedule_id: str, index: int, tries: int, **event) -> tupl
 
 
 async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
-                       rule_decision_id: int | None = None) -> RunReport:
+                       rule_decision_id: int | None = None,
+                       started_by: dict[str, str] | None = None) -> RunReport:
     """Route parsed event lines before synchronous settlement; one refusal wakes the owner once.
 
     ``trace`` is the rule chain of a rule-started run; each event it sends carries it.
+    ``started_by`` is the rule and event that started such a run, named in the wake for a line the
+    intake could not take.
     """
     if not report.events:
         return report
@@ -70,6 +81,7 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
     stamps = run_stamps(schedule, report)
     producer = f"script:{schedule.id}"
     refusals: dict[str, str] = {}  # each distinct code, with the first text it came with
+    not_sent: set[str] = set()  # the event types of the lines the intake could not take
     for index, event in enumerate(report.events):
         try:
             # Once one line has used every try, the intake is down: later lines get one try each,
@@ -84,6 +96,8 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
             )
             if refused is not None:
                 refusals.setdefault(*refused)
+                if refused[0] == "intake_unreachable":
+                    not_sent.add(event["type"])
         finally:
             if (schedule.payload or {}).get("event_type") == event["type"] and event["facts"].get("staging_path"):
                 from automation.worker_inputs import remove_unclaimed_staging
@@ -102,9 +116,13 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
     ]
     more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
     message = f"event line refused: {' '.join(shown)}{more}"
-    details = {"message": message}
+    details: dict = {"message": message}
     if set(refusals) == {"intake_unreachable"}:
+        details["not_sent"] = sorted(not_sent)
         details["next"] = _INTAKE_DOWN_NEXT.format("script" if rule_decision_id is None else "script or rule")
+        if started_by is not None:
+            details["started_by"] = started_by
+            details["next"] += _STARTED_BY_NEXT
     return dataclasses.replace(
         report, status="error", error=message,
         signals=[*report.signals, Signal(

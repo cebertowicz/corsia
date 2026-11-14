@@ -199,6 +199,7 @@ async def run_claimed(
     report = await _stamped(schedule, report)
     report = await script_event_lines.admit_events(
         schedule, report, rule_run.trace if rule_run else (), rule_run.decision_id if rule_run else None,
+        started_by=rule_run.started_by if rule_run else None,
     )
     try:
         woken = await run_in_db_unless_owned(
