@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from automation import schedules, script_event_lines, script_runner, script_schedules
+from automation import schedules, script_event_lines, script_readings, script_runner, script_schedules
 from automation.script_readings import RunReport
 from events import intake, intake_errors, rule_declarations, rules
 from infra.database import get_db
@@ -136,6 +136,14 @@ def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
     assert report.status == "error" and report.error == message
     assert ("Run the script again" in message) == (rule_decision_id is None)
 
+    # The wake the owner reads: the intake failed, not the script, so nothing in it says to fix the script.
+    assert script_readings.emit_report(
+        intake_world, schedule, report, now="2026-01-01T00:00:00+00:00", rule_run=rule_decision_id is not None)
+    (wake,) = [row[0] for row in intake_world.execute(
+        "SELECT content FROM messages WHERE thread_id=? AND content LIKE '[EVENT: script.error]%'", (OWNER,))]
+    mine = "script" if rule_decision_id is None else "script or rule"
+    assert fix in wake and f"does not mean your {mine} is at fault" in wake and "fix the script" not in wake
+
 
 def test_a_defect_inside_the_intake_is_never_sent_again(intake_world, tmp_path, monkeypatch):
     schedule = _schedule(intake_world, tmp_path)
@@ -152,6 +160,7 @@ def test_a_defect_inside_the_intake_is_never_sent_again(intake_world, tmp_path, 
 
     assert calls == [f"script:{schedule.id}:r1:0"] and report.status == "error"
     assert "internal_error" in (report.error or "")
+    assert "next" not in report.signals[0].details  # a defect keeps the general next step
 
 
 def test_run_claimed_returns_and_records_an_error_when_the_intake_raises(intake_world, tmp_path, monkeypatch):

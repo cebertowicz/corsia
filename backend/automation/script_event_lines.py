@@ -21,6 +21,8 @@ from infra.db_async import run_in_db_unless_owned
 _RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
 #: A run a rule started has no next run and its owner cannot start it with the same event.
 _RULE_RUN_FIX = "A run a rule started is not run again. If its work still matters, do it for its item yourself."
+#: The wake's next step when the intake was all that failed: the general one tells the owner to fix the script.
+_INTAKE_DOWN_NEXT = "The event intake could not take the line. This wake does not mean your {} is at fault."
 #: The pause before each further try of an event line the intake could not take. One more try than pauses;
 #: each try can itself wait out the write queue, so a line is given up after a few minutes, never held.
 _ADMIT_PAUSE_SECONDS: tuple[float, ...] = (5, 15, 30)
@@ -100,10 +102,13 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
     ]
     more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
     message = f"event line refused: {' '.join(shown)}{more}"
+    details = {"message": message}
+    if set(refusals) == {"intake_unreachable"}:
+        details["next"] = _INTAKE_DOWN_NEXT.format("script" if rule_decision_id is None else "script or rule")
     return dataclasses.replace(
         report, status="error", error=message,
         signals=[*report.signals, Signal(
             "error", None, f'Script "{(schedule.script_path or "script").rsplit("/", 1)[-1]}": {message}',
-            {"message": message},
+            details,
         )],
     )
