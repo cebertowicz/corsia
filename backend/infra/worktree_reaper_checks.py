@@ -30,8 +30,8 @@ from infra.worktree_reaper_scan import Candidate, idle_since, newest_tree_mtime
 
 
 # A worktree whose owning worker is gone leaves once idle this long, uncommitted
-# and unpublished work included (copied out first for a settled worker, which
-# can be sent back); its branch outlives the tree.
+# and unpublished work included (copied out first unless the owner is purged,
+# since an archived worker can come back); its branch outlives the tree.
 GONE_OWNER_IDLE_SECONDS = 3600
 
 
@@ -44,18 +44,18 @@ def _load_active_threads() -> set[str]:
 def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
     """Map every thread id to how a gone owner's idle worktree leaves; None while it may return.
 
-    DISCARD: purged, or a temporary worker (spawned, not a roster agent) archived by
-    the person or by dormancy. A worker archived on settling its assignment can be
-    sent back, so its tree is SALVAGEd: removed after its uncommitted work is copied
-    out. A durable agent's or a root thread's worktree is never gone here.
+    DISCARD: purged, so it cannot come back. SALVAGE: a temporary worker (spawned,
+    not a roster agent) archived for any reason; every archive can be undone (the
+    person unarchives it, new activity wakes a dormant one, a settled one is sent
+    back), so its tree is removed only after its uncommitted work is copied out.
+    A durable agent's or a root thread's worktree is never gone here.
     """
-    from core.thread_lifecycle import SETTLED_WORKER_REASON
     from infra.database import get_db
 
     connection = get_db()
     try:
         rows = connection.execute(
-            "SELECT id, spawned_by, agent_enabled, lifecycle_state, archived_reason FROM threads",
+            "SELECT id, spawned_by, agent_enabled, lifecycle_state FROM threads",
         ).fetchall()
     finally:
         connection.close()
@@ -63,9 +63,10 @@ def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
     for row in rows:
         state = row["lifecycle_state"] or "active"
         worker = row["spawned_by"] is not None and not row["agent_enabled"]
-        if state == "purged" or (worker and state == "archived"):
-            settled = state == "archived" and row["archived_reason"] == SETTLED_WORKER_REASON
-            verdicts[str(row["id"])] = RemovalVerdict.SALVAGE if settled else RemovalVerdict.DISCARD
+        if state == "purged":
+            verdicts[str(row["id"])] = RemovalVerdict.DISCARD
+        elif worker and state == "archived":
+            verdicts[str(row["id"])] = RemovalVerdict.SALVAGE
         else:
             verdicts[str(row["id"])] = None
     return verdicts
@@ -116,12 +117,12 @@ class CheckContext:
     def gone_owner_verdict(
         self, candidate: Candidate, idle: float, *, fresh: bool = False,
     ) -> str | RemovalVerdict | None:
-        """DISCARD or SALVAGE for an idle worktree of a gone owner; None when the rule does not apply.
+        """DISCARD, SALVAGE or CLEAN for an idle worktree of a gone owner; None when the rule does not apply.
 
         Idle means nothing anywhere in the tree changed for the hour, not only
         Git's files: someone may be finishing the work in an editor. A tree with
-        nothing uncommitted is discarded even for a settled worker, since its
-        branch keeps every commit and a salvage copy would hold nothing.
+        nothing uncommitted is CLEAN for any owner: its branch keeps every commit,
+        so it takes the ordinary clean removal, re-checked in the quarantine.
         """
         if self.now - idle < GONE_OWNER_IDLE_SECONDS:
             return None
@@ -133,12 +134,11 @@ class CheckContext:
             return "unreadable"
         if self.now - newest < GONE_OWNER_IDLE_SECONDS:
             return "recent"
-        if verdict is RemovalVerdict.SALVAGE:
-            status = _status_reason(self, candidate, False)
-            if status == "status_error":
-                return status
-            if status is None:
-                verdict = RemovalVerdict.DISCARD
+        status = _status_reason(self, candidate, False)
+        if status == "status_error":
+            return status
+        if status is None:
+            verdict = RemovalVerdict.CLEAN
         if fresh:
             self.probe.refresh()
         return self.probe.skip_reason(candidate.path) or verdict
@@ -226,8 +226,10 @@ def _entry_reason(entry: WorktreeEntry | None) -> str | None:
 
 class RemovalVerdict(Enum):
     SALVAGE = "salvage"
-    # The owner is gone: remove without copying anything out.
+    # The owner is purged: remove without copying anything out.
     DISCARD = "discard"
+    # A gone owner's tree with nothing uncommitted: the ordinary clean removal.
+    CLEAN = "clean"
 
 
 def _status_verdict(

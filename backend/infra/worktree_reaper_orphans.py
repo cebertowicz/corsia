@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from infra.worktree_reaper_checks import GONE_OWNER_IDLE_SECONDS, CheckContext
+from infra.worktree_reaper_checks import GONE_OWNER_IDLE_SECONDS, CheckContext, RemovalVerdict
 from infra.worktree_reaper_probe import ReaperGitError, list_worktrees
 from infra.worktree_reaper_scan import Orphan, newest_tree_mtime, owner_thread
 
@@ -47,9 +47,10 @@ def orphan_skip_reason(
     process uses it. A ``.git`` file that points at this repository's own
     worktree records, at one that no longer exists, does not keep a tree Git
     has already forgotten when either it is a shell a removal left behind (no
-    subdirectory) or its owner is gone; it then goes once idle for
-    ``GONE_OWNER_IDLE_SECONDS``. A full tree whose record was pruned while its
-    owner lives keeps its ``.git`` entry's protection. Every check reads live
+    subdirectory) or its owner is purged; it then goes once idle for
+    ``GONE_OWNER_IDLE_SECONDS``. Orphans are never salvaged, so a full tree whose
+    record was pruned while its owner lives or can come back (archived) keeps its
+    ``.git`` entry's protection. Every check reads live
     state, so it doubles as the recheck.
     """
     path = orphan.path
@@ -57,7 +58,7 @@ def orphan_skip_reason(
         return "symlink", None
     forgotten = _forgotten_by_git(ctx.repo, path) and (
         _is_shell(path)
-        or ctx.owner_verdict(owner_thread(orphan.name), fresh=True) is not None
+        or ctx.owner_verdict(owner_thread(orphan.name), fresh=True) is RemovalVerdict.DISCARD
     )
     if not forgotten and os.path.lexists(path / ".git"):
         return "git_entry_present", None

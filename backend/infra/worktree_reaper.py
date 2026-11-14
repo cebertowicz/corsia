@@ -155,9 +155,9 @@ def _remove_candidate(
                 short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
             )
             def clear(quarantined: Path) -> str | None:
-                if verdict is RemovalVerdict.DISCARD:  # the owner is gone; nothing is copied out
+                if verdict is RemovalVerdict.DISCARD:  # the owner is purged; nothing is copied out
                     return None
-                if verdict is not RemovalVerdict.SALVAGE:  # clean; re-run the check that cleared it
+                if verdict is not RemovalVerdict.SALVAGE:  # clean (None or CLEAN); re-run the check that cleared it
                     return status_at(ctx, candidate, quarantined, merged)
                 copies.append(salvage_worktree(
                     repo, quarantined, candidate.admin, candidate.name, ctx.now,

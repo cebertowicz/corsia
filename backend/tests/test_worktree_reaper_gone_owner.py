@@ -1,11 +1,11 @@
 """Worktree reaper: a gone worker's worktree, and what a removal left behind.
 
-A purged thread, or a temporary worker archived by the person or by dormancy,
-cannot come back to its worktree. Its tree goes once idle for an hour,
-uncommitted and unpublished work included, without a salvage copy. A worker
-archived on settling its assignment can be sent back, so its tree goes after an
-hour too, but with its work copied out first. Every other owner, including a
-name no thread matches, keeps the ordinary checks.
+A purged thread cannot come back to its worktree. Its tree goes once idle for
+an hour, uncommitted and unpublished work included, without a salvage copy. A
+temporary worker archived for any reason can come back, so its tree goes after
+an hour too, but with its work copied out first. A gone owner's tree with
+nothing uncommitted takes the ordinary clean removal. Every other owner,
+including a name no thread matches, keeps the ordinary checks.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sqlite3
 
 import pytest
 
-from infra import worktree_reaper_checks
+from infra import worktree_reaper, worktree_reaper_checks
 from infra.worktree_reaper_checks import RemovalVerdict
 from tests.test_worktree_reaper import (  # noqa: F401  (fixtures)
     DAY,
@@ -82,14 +82,26 @@ def test_a_settled_workers_unfinished_worktree_is_removed_after_its_work_is_copi
     assert report.discarded == []
 
 
-def test_a_settled_workers_clean_worktree_is_removed_without_a_salvage_copy(repo, owners):
-    wt = _add(repo, f"{SETTLED}-task")
+@pytest.mark.parametrize("owner", [SETTLED, GONE])
+def test_a_gone_owners_clean_worktree_takes_the_ordinary_clean_removal(
+    repo, owners, monkeypatch, owner,
+):
+    wt = _add(repo, f"{owner}-task")
     _age_all(repo, wt, 2 * HOUR)
+    rechecked = []
+    real_status_at = worktree_reaper_checks.status_at
+
+    def _status_at(ctx, candidate, path, merged):
+        rechecked.append(path)
+        return real_status_at(ctx, candidate, path, merged)
+
+    monkeypatch.setattr(worktree_reaper, "status_at", _status_at)
 
     report = _run(repo)
 
     assert report.removed == 1 and not wt.exists()
-    assert report.salvaged == [] and report.discarded == [f"{SETTLED}-task"]
+    assert report.salvaged == [] and report.discarded == []
+    assert [path.parent.name for path in rechecked] == ["corsia-reaping"]  # re-checked in quarantine
     assert not (repo.parent / f"{repo.name}-salvage").exists()
     assert _git(repo, "for-each-ref", "refs/corsia-salvage/").strip() == ""
 
@@ -194,6 +206,17 @@ def test_a_live_owners_full_tree_git_has_forgotten_is_kept(repo, owners):
     assert report.orphan_removed == 0 and wt.is_dir()
 
 
+def test_a_settled_owners_full_tree_git_has_forgotten_is_kept(repo, owners):
+    # Orphans are never salvaged, and an archived worker can come back.
+    wt = _add(repo, f"{SETTLED}-task")
+    shutil.rmtree(_admin(wt))
+    _age_tree(wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.orphan_removed == 0 and wt.is_dir()
+
+
 def test_a_gone_owners_full_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
     wt = _add(repo, f"{GONE}-task")
     shutil.rmtree(_admin(wt))
@@ -243,7 +266,7 @@ def test_thread_rows_are_classified_by_lifecycle(monkeypatch):
     monkeypatch.setattr(infra.database, "get_db", lambda: _Unclosable())
 
     assert _REAL_LIFECYCLES() == {
-        "settled-worker": RemovalVerdict.SALVAGE, "user-archived-worker": RemovalVerdict.DISCARD,
-        "dormant-worker": RemovalVerdict.DISCARD, "running-worker": None, "archived-agent": None,
+        "settled-worker": RemovalVerdict.SALVAGE, "user-archived-worker": RemovalVerdict.SALVAGE,
+        "dormant-worker": RemovalVerdict.SALVAGE, "running-worker": None, "archived-agent": None,
         "archived-root": None, "purged-root": RemovalVerdict.DISCARD, "legacy-row": None,
     }
