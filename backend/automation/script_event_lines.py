@@ -21,8 +21,10 @@ from infra.db_async import run_in_db_unless_owned
 _RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
 #: A run a rule started has no next run and its owner cannot start it with the same event. The script
 #: itself finished: what is lost is the event its line would have sent, not the script's own work.
-_RULE_RUN_FIX = ("The script finished and nothing runs it again, so the event this line would have sent is lost. "
-                 "If what that event would have started still matters, do that yourself.")
+#: Only a run the runner starts has its printed lines sent, so running the script by hand sends none.
+_RULE_RUN_FIX = ("The script finished, and the event this line would have sent is lost. "
+                 "A run a rule started is not run again, and running the script yourself does not send its lines. "
+                 "If what that event would have started still matters, start it yourself.")
 #: The wake's next step when the intake was all that failed: the general one tells the owner to fix the script.
 _INTAKE_DOWN_NEXT = ("The event intake could not take the line. This wake does not mean your {} is at fault. "
                      "not_sent lists the event type of each line that was not sent.")
