@@ -114,7 +114,8 @@ def run_daily(*, now: datetime | None = None, config: LifecycleConfig | None = N
             skill_reads += day_skill_reads
             partial_reads += day_partial_reads
             if fallback:
-                logger.info("machinery_cost: day={} rows missing byte count: {}", day, fallback)
+                logger.info("machinery_cost: day={} rows without a stored byte count: {} (first: {})",
+                            day, len(fallback), fallback[:5])
         logger.info("machinery_cost: days={} skill reads={} partial={} whole={} guidance rows without thread={}",
                     written, skill_reads, partial_reads, skill_reads - partial_reads, no_thread)
         return written

@@ -13,8 +13,6 @@ import json
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
-from loguru import logger
-
 from api.measurement_breaks import local_date
 from api.measurement_prepared import PREPARED_OUTCOMES, PREPARED_SCOPE
 from core.machinery_cost import BUCKETS, DAY_EVENT, RECORD_EVENT, STEMS
@@ -85,11 +83,5 @@ def machinery_family(db, grain):
             target[f"{stem}_count"] += actions
             target[f"{stem}_bytes"] += returned
             target[f"{stem}_tokens"] += tokens * actions / count if count else 0
-    for p, total in totals.items():
-        for stem in ("skill_read", "machinery"):
-            numerator = total[f"{stem}_bytes"]
-            if numerator > total["bytes"]:
-                logger.warning("machinery_cost: id={} period={} numerator={} total={}",
-                               f"{stem}_returned_pct", p, numerator, total["bytes"])
     outcomes = {r["period"]: r["outcomes"] for r in db.execute(f"SELECT period,outcomes FROM {PREPARED_OUTCOMES}")}
     return [{"period": p, **totals[p], "outcomes": outcomes.get(p, 0)} for p in sorted(complete)]

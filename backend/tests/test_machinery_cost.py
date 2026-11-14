@@ -119,8 +119,8 @@ async def test_partial_and_whole_skill_reads(isolated_db, monkeypatch):
         _seed_thread(db, "root", agent=True)
         _tool(db, "partial", "root", "read_file", tool_result_byte_count=1000)
         _tool(db, "whole", "root", "read_file", tool_result_byte_count=100)
-        for ident, size, partial in (("g1", 10000, 1), ("g2", 80, 0)):
-            db.execute("INSERT INTO guidance_loads(id,thread_id,path,raw_sha256,git_blob_oid,delivered_sha256,byte_count,partial,created_at) VALUES (?, 'root', 'SKILL.md', 'a', 'b', 'c', ?, ?, '2026-09-23T12:00:00+00:00')", (ident, size, partial))
+        for ident, thread, size, partial in (("g1", "root", 10000, 1), ("g2", "root", 80, 0), ("g3", None, 5000, 0)):
+            db.execute("INSERT INTO guidance_loads(id,thread_id,path,raw_sha256,git_blob_oid,delivered_sha256,byte_count,partial,created_at) VALUES (?, ?, 'SKILL.md', 'a', 'b', 'c', ?, ?, '2026-09-23T12:00:00+00:00')", (ident, thread, size, partial))
         db.commit()
     finally:
         db.close()
@@ -131,13 +131,38 @@ async def test_partial_and_whole_skill_reads(isolated_db, monkeypatch):
         assert run_daily(now=datetime(2026, 9, 28, 12, tzinfo=timezone.utc)) == 28
     finally:
         logger.remove(sink)
-    assert any("skill reads=2 partial=1 whole=1" in str(message) for message in messages)
+    assert any("skill reads=2 partial=1 whole=1 guidance rows without thread=1" in str(message) for message in messages)
     _freeze_clock(monkeypatch)
     payload = await measurement_series("skill_read_action_pct,skill_read_returned_pct,machinery_returned_pct", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     rows = {row["series"]: row for row in payload["rows"] if row["period"] == WEEK}
     assert rows["skill_read_action_pct"]["raw_value"] == 1
     for name in ("skill_read_returned_pct", "machinery_returned_pct"):
         assert rows[name]["raw_value"] == pytest.approx(80 / 1100)
+
+
+@pytest.mark.asyncio
+async def test_row_without_stored_size_counts_its_content(isolated_db, monkeypatch):
+    from api.measurement import measurement_series
+    from loguru import logger
+    db = get_db()
+    try:
+        _seed_thread(db, "root", agent=True)
+        _tool(db, "sized", "root", "plan_update", tool_result_byte_count=9)
+        _tool(db, "unsized", "root", "mystery")
+        db.commit()
+    finally:
+        db.close()
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        assert run_daily(now=datetime(2026, 9, 28, 12, tzinfo=timezone.utc)) == 28
+    finally:
+        logger.remove(sink)
+    assert any("rows without a stored byte count: 1 (first: ['unsized'])" in str(message) for message in messages)
+    _freeze_clock(monkeypatch)
+    payload = await measurement_series("plan_returned_pct", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
+    row = next(row for row in payload["rows"] if row["period"] == WEEK)
+    assert row["raw_value"] == pytest.approx(9 / 12)
 
 
 @pytest.mark.asyncio
@@ -195,11 +220,33 @@ async def test_failed_sweep_still_records_machinery(isolated_db, monkeypatch):
         db.close()
 
 
-def test_retention_bound(isolated_db):
+@pytest.mark.asyncio
+async def test_retention_bound_and_period_before_first_marker(isolated_db, monkeypatch):
+    from api.measurement import measurement_series
+    db = get_db()
+    try:
+        _seed_thread(db, "root", agent=True)
+        _tool(db, "one", "root", "plan_update", tool_result_byte_count=3)
+        db.commit()
+    finally:
+        db.close()
     now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
-    assert run_daily(now=now, config=LifecycleConfig(tool_trim_after_days=10)) == 9
+    _freeze_clock(monkeypatch)
+
+    async def periods():
+        payload = await measurement_series("plan_action_pct", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
+        return {row["period"]: (row["value"], row["raw_value"], row["n"]) for row in payload["rows"]}
+
+    # The first marker is Sep 24: the week of Sep 14 ended before the reading existed,
+    # so the route serves no row for it, and the first week is short of days.
+    assert run_daily(now=now, config=LifecycleConfig(tool_trim_after_days=5)) == 4
+    first = await periods()
+    assert min(first) == WEEK
+    assert first[WEEK] == (None, None, 0)
+    assert run_daily(now=now, config=LifecycleConfig(tool_trim_after_days=10)) == 5
     db = get_db()
     try:
         assert not db.execute("SELECT 1 FROM outcome_events WHERE dedupe_key=?", (f"{DAY_EVENT}:2026-09-16",)).fetchone()
     finally:
         db.close()
+    assert (await periods())[WEEK] == (None, 1.0, 1)
