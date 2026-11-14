@@ -10,6 +10,7 @@ from infra.queries import thread_available_sql, thread_unavailable_reason
 
 
 WORKSPACE_SCOPE_ID = "workspace"
+PROJECT_SCOPE_PREFIX = "project:"
 log = logging.getLogger(__name__)
 
 
@@ -19,8 +20,8 @@ def scope_id_for_project(project_id: str | None) -> str:
 
 
 def scope_label(project_id: str | None) -> str:
-    """Return the human/debug label for a scope."""
-    return f"project:{project_id}" if project_id else WORKSPACE_SCOPE_ID
+    """Return the human/debug label and stored event rule scope."""
+    return f"{PROJECT_SCOPE_PREFIX}{project_id}" if project_id else WORKSPACE_SCOPE_ID
 
 
 def target_scope_authority(project_id: str | None, *, db) -> dict:

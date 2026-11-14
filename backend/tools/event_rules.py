@@ -138,7 +138,8 @@ class EventRulesTool(Tool):
             "and its checked answer comes back as a worker.result event on the item (worker.no_result "
             f"when it returns nothing usable); a match while {rule_runs.QUEUE_CAP} of its rule's "
             "starts wait is skipped. "
-            "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
+            "Your rules cover your own project, or the chats outside projects when yours is in none, "
+            "and deliver only to you (`to: self`, the default) or "
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A paused chat gets a digest instead. "
@@ -149,7 +150,7 @@ class EventRulesTool(Tool):
             "and no `to`, `mode`, `note`, `match` or `action`. The result tells you what happened; "
             "a file that already has an owner is never taken from it. A shipped rule set's own "
             "observe rules are in list's `rule_sets` and cover every agent. "
-            "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
+            "disable: turn off a rule you wrote or receive. list: the rules where you are, with when "
             "each last acted and its wakes, script and worker starts and skipped runs in the last 24 hours. "
             "types: each connector's event types with their fields, and the item types its observe rules read. test: which rules a set of `facts` "
             "would match. explain: why an event (`event_id`, or `artifact`, the file's external id "
@@ -200,7 +201,7 @@ class EventRulesTool(Tool):
                                 "description": "create observe: the command's leading words, e.g. gh, pr, create"},
                 "item_type": {"type": "string",
                               "description": "create observe: the artifact type a connector reads from the output"},
-                "scope": {"type": "string", "description": "create: project:<id>; only your own"},
+                "scope": {"type": "string", "description": "create: project:<id>, or workspace for a chat in no project; only your own"},
                 "rule_id": {"type": "string", "description": "disable: the rule to turn off"},
                 "facts": {"type": "object", "description": "test or emit: the event's fields"},
                 "event_id": {"type": "string",

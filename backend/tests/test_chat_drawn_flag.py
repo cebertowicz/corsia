@@ -1,6 +1,6 @@
 """An assistant step that draws nothing in chat is stamped once, and every reader reads the stamp.
 
-`place_answers` is the one writer of `metadata.chat_drawn = false`. The Focus filter, the
+`place_answers` is the one stamper of `metadata.chat_drawn = false`; the appender clears it. The Focus filter, the
 run and stub counts, the saved-answer fields frames carry, the sidebar preview and the update
 feed read it; none re-derives it (#2602: the folded line counted a step its list did not show).
 """
@@ -182,3 +182,110 @@ def test_an_ask_hold_maps_to_the_latest_step_chat_draws(db):
     db.commit()
     assert _flag(db, "answer-only") is False
     assert _turn_step(db, THREAD, "turn-1", "2026-01-03") == "worked"
+
+
+def test_no_chat_read_hands_a_stamped_step_to_the_card_builder(db, monkeypatch):
+    """Every read that attaches cards (page, focus view, one run's range) drops a stamped step before the card
+    builder sees the page, and a drawn step is still handed to it. This pins the filter itself: the card
+    builder would skip a stamped row's empty chat text anyway, so the rows are checked, not the text."""
+    from api import thread_cards
+    from api.thread_focus_page import read_authorized_focus_page, read_authorized_run_range
+
+    seen: list[str] = []
+    monkeypatch.setattr(
+        thread_cards, "attach_cards",
+        lambda db, thread_id, user_id, thread_row, messages: seen.extend(m["id"] for m in messages),
+    )
+    _worked_turn(db)
+    reads = {
+        "page": _page(db),
+        "focus": read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER),
+        "range": read_authorized_run_range(db, THREAD, 50, "target", "reply", None, user_id=OWNER_USER),
+    }
+    for name, result in reads.items():
+        seen.clear()
+        thread_cards.attach_result_cards(db, THREAD, OWNER_USER, result)
+        assert "answer-only" not in seen, f"{name} read handed the stamped step to the card builder"
+        assert "reply" in seen, f"{name} read lost the drawn reply"
+
+
+def test_a_card_follows_the_text_chat_draws_on_every_read(db, monkeypatch):
+    """A step that mixes chat text with a placed answer is offered to the card builder as the text chat draws
+    (the answer section left out), on the page, Focus and run-range reads; chat text that names a file is still
+    offered whole."""
+    from api import thread_cards
+    from api.thread_focus_page import read_authorized_focus_page, read_authorized_run_range
+
+    seen: list[str] = []
+
+    def spy(db, text, bases, user_id, **kwargs):
+        seen.append(text)
+        return []
+
+    monkeypatch.setattr(thread_cards, "reference_cards", spy)
+    _step(db, "mixed", "Done.\n\n[c1.1] See docs/plan.md", {"for_user": True})
+    _step(db, "names-file", "Wrote docs/guide.md.\n\n[c1.1] Moved.", {"for_user": True})
+    _step(db, "reply", "All done.", {"for_user": True})
+    reads = {
+        "page": _page(db),
+        "focus": read_authorized_focus_page(db, THREAD, 50, None, user_id=OWNER_USER),
+        "range": read_authorized_run_range(db, THREAD, 50, "target", "reply", None, user_id=OWNER_USER),
+    }
+    for name, result in reads.items():
+        seen.clear()
+        thread_cards.attach_result_cards(db, THREAD, OWNER_USER, result)
+        assert not any("docs/plan.md" in text for text in seen), f"{name} read offered the answer section"
+        assert any("docs/guide.md" in text for text in seen), f"{name} read lost the visible text's file"
+        assert any(text.startswith("Done.") for text in seen), f"{name} read lost the mixed step's chat text"
+
+
+def test_the_card_text_costs_one_read_for_the_page_not_one_per_row(db, monkeypatch):
+    from api import thread_cards
+
+    for index in range(5):
+        _step(db, f"mixed-{index}", f"Done {index}.\n\n[c1.1] See docs/plan.md")
+    page, *_rest = _page(db)
+    calls: list[int] = []
+    real = thread_cards.saved_answer_fields
+
+    def counted(db, thread_id, ids):
+        calls.append(len(ids))
+        return real(db, thread_id, ids)
+
+    monkeypatch.setattr(thread_cards, "saved_answer_fields", counted)
+    thread_cards.attach_cards(db, THREAD, OWNER_USER, {"project_id": None}, page)
+    assert calls == [len([m for m in page if m.get("role") == "assistant"])]
+
+
+def test_the_sidebar_fallback_picks_the_row_the_aggregate_picks(db):
+    """`_latest_drawn` and the aggregate share one selection rule: with the stamped steps taken away, the aggregate's
+    newest update is the fallback's, across a person step newer than it and two updates that share a time."""
+    from infra.thread_updates import _latest_drawn, latest_by_thread_with_attention
+
+    seqs = iter(range(10, 99))
+    def seed(thread_id, with_stamped):
+        if thread_id != THREAD:
+            seed_thread(db, thread_id)
+        rows = [("drawn-1", False, "2026-01-02T00:00:00"), ("drawn-2", False, "2026-01-03T00:00:00"),
+                ("drawn-3", False, "2026-01-03T00:00:00")]
+        rows += [("stamped-1", True, "2026-01-05T00:00:00")] if with_stamped else []
+        for name, stamped, at in rows:
+            mid = f"{thread_id}-{name}"
+            meta = json.dumps({"chat_drawn": False}) if stamped else None
+            db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES (?,?,'assistant','x',?,?,?)",
+                       (mid, thread_id, meta, at, next(seqs)))
+            db.execute("INSERT INTO thread_updates(thread_id,kind,source_kind,source_id,after_seq,created_at) VALUES (?,?,?,?,0,?)",
+                       (thread_id, "marked", "message", mid, at))
+        db.execute("INSERT INTO thread_updates(thread_id,kind,source_kind,source_id,node_id,title,after_seq,created_at) "
+                   "VALUES (?,'person_step','plan_event',?,'n','step',0,'2026-01-04T00:00:00')", (thread_id, f"{thread_id}-pe"))
+
+    seed(THREAD, True)
+    seed("twin", False)
+    db.commit()
+    stamped_display, _ = latest_by_thread_with_attention(db, [THREAD, "twin"])
+    fallback = _latest_drawn(db, THREAD)
+    assert fallback["message_id"] == f"{THREAD}-drawn-3"
+    assert stamped_display[THREAD] == fallback
+    assert stamped_display["twin"]["message_id"] == "twin-drawn-3"
+    assert {k: v for k, v in fallback.items() if k not in ("id", "thread_id", "message_id", "source_id")} == {
+        k: v for k, v in stamped_display["twin"].items() if k not in ("id", "thread_id", "message_id", "source_id")}
