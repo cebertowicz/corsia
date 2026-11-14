@@ -350,6 +350,8 @@ def test_full_startup_78_to_current_parity_once_and_r1_usage_survives(tmp_path):
         assert (result.migrated, result.from_version, result.to_version) == (True, 78, _LADDER_END)
         assert MIGRATIONS[80] is migrate_80_to_81
         initialize_schema(fresh)
+        # This comparison is at _LADDER_END, before the later turn-index migration.
+        fresh.execute("DROP INDEX idx_llm_usage_turn")
         billing_objects = {
             "vendor_account_billing_revisions",
             "vendor_account_billing_facts",
