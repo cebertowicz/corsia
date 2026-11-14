@@ -24,10 +24,10 @@ from infra.worktree_reaper_checks import (
     CheckContext,
     RemovalVerdict,
     candidate_verdict,
-    orphan_skip_reason,
     recheck_before_removal,
     status_at,
 )
+from infra.worktree_reaper_orphans import orphan_skip_reason
 from infra.worktree_reaper_probe import ProcessProbe, ReaperGitError, generated_trees
 from infra.worktree_reaper_remove import quarantine_entries, remove_orphan, remove_worktree, sweep_quarantine
 from infra.worktree_reaper_salvage import SalvageError, salvage_worktree
