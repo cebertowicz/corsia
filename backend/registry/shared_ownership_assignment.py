@@ -17,7 +17,7 @@ from infra.settings import set_setting
 from plans import public as plans
 from registry import node_retirement, service
 from registry.doc_freshness import seed_verified_from_headers
-from registry.durable_writes import _bounded_shared_files
+from registry.shared_file_scan import bounded_shared_files
 from registry.identity_metadata import merge_identity_metadata
 from registry.ownership import rehome_artifact
 from registry.shared_category_index import directory_owner_threads
@@ -96,7 +96,7 @@ def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -
     conductor = scope_conductor(project_id, db=db)
     directory_owners = _directory_owners(shared_root, project_id, db)
     rows: list[Assignment] = []
-    files = sorted(_bounded_shared_files(shared_root), key=lambda item: item.as_posix())
+    files = sorted(bounded_shared_files(shared_root), key=lambda item: item.as_posix())
     for path in files:
         artifact = service.find_file_identity(str(path), db=db)
         registered = artifact_owner(str(artifact["id"]), db=db) if artifact else None
@@ -225,7 +225,7 @@ def _scaffold_shared_tree(workspace: Path, project_id: str | None, *, db) -> boo
         for relative, content in layout.files
         if relative.startswith("shared/")
     }
-    actual = tuple(_bounded_shared_files(root / "shared"))
+    actual = tuple(bounded_shared_files(root / "shared"))
     return set(actual) == set(expected) and all(
         path.read_text(encoding="utf-8") == content
         for path, content in expected.items()
