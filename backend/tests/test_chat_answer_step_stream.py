@@ -61,6 +61,11 @@ def test_native_stream_reconnect_and_saved_projection(isolated_db):
     db = get_db()
     try:
         _seed(db)
+        # With Focus off every assistant step is shown, so its answers are placed as it is saved.
+        from infra.settings import set_setting
+
+        set_setting("features", {"focus_mode": False}, db=db)
+        db.commit()
     finally:
         db.close()
     identity = TurnIdentity('turn-test', 1)

@@ -154,16 +154,31 @@ def has_comment_cid(metadata: str | None, cid: str) -> bool:
         return False
 
 
+def focus_mode_on(db: sqlite3.Connection) -> bool:
+    """As the settings API reads it: Focus is on unless saved off."""
+    from infra.settings import get_setting
+
+    return (get_setting("features", db=db) or {}).get("focus_mode", True) is not False
+
+
+def _reaches_the_person(db: sqlite3.Connection, metadata: dict | None) -> bool:
+    """Whether the person is shown this assistant message's words: sent for them, or Focus is off."""
+    return bool(isinstance(metadata, dict) and metadata.get("for_user")) or not focus_mode_on(db)
+
+
 def place_answers(
     db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
     metadata: dict | None = None,
 ) -> None:
     """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
 
+    A comment is answered only by words the person is shown: a ``post_update`` message, or a message
+    the Focus fallback turns into one (``place_flipped_answers``). Other closing text places nothing.
+
     This is the one writer of ``metadata.chat_drawn``: a step that placed answers and has nothing left
     for chat is stamped ``false`` here, in the transaction that saves it.
     """
-    if role != "assistant" or "[c" not in content:
+    if role != "assistant" or "[c" not in content or not _reaches_the_person(db, metadata):
         return
     placed = []
     for cid in parse_answers(content, message_id):
@@ -190,6 +205,21 @@ def place_answers(
                 "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),'$.chat_drawn',json('false')) WHERE id=?",
                 (message_id,),
             )
+
+
+def place_flipped_answers(db: sqlite3.Connection, thread_id: str, message_id: str) -> None:
+    """Place the answers in a message just made ``for_user``, in the transaction that flipped it."""
+    row = db.execute(
+        "SELECT role,content,seq,created_at,metadata FROM messages WHERE id=? AND thread_id=?",
+        (message_id, thread_id),
+    ).fetchone()
+    if row is None or row[2] is None:
+        return
+    try:
+        metadata = json.loads(row[4] or "{}")
+    except ValueError:
+        metadata = {}
+    place_answers(db, message_id, thread_id, row[0], row[1] or "", row[2], row[3], metadata)
 
 
 def save_visible_content(db: sqlite3.Connection, message_id: str, thread_id: str, content: str) -> None:
