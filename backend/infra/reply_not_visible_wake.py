@@ -181,12 +181,16 @@ def _last_hidden(
 
 def _hidden_answer_steps(
     db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None = None,
+    before_seq: int | None = None,
 ) -> list[sqlite3.Row]:
-    """Hidden text steps since the person's message that tag an answer to a known comment, oldest first."""
+    """Hidden text steps after the person's message (and before ``before_seq``) that tag an answer to a
+    known comment, newest first. They span every Turn since that message, an event-woken Turn between
+    the message and the nudge included; the settle path relies on the newest-first order."""
+    before = "" if before_seq is None else "AND seq<? "
     rows = db.execute(
-        f"SELECT id, content, seq FROM messages WHERE thread_id=? AND seq>? AND id<>? "
+        f"SELECT id, content, seq FROM messages WHERE thread_id=? AND seq>? AND id<>? {before}"
         f"AND {_HIDDEN_TEXT} AND instr(content,'[c')>0 ORDER BY seq DESC",
-        (thread_id, after_seq, exclude_id or ""),
+        (thread_id, after_seq, exclude_id or "", *(() if before_seq is None else (before_seq,))),
     ).fetchall()
     return [r for r in rows if placeable_answers(db, str(r["id"]), thread_id, str(r["content"]), r["seq"])]
 
@@ -210,12 +214,15 @@ def _woken_about(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nu
 
 def _show_hidden_words(
     db: sqlite3.Connection, thread_id: str, row: sqlite3.Row, person_seq: int,
+    before_seq: int | None = None,
 ) -> None:
     """Make the nudged Turn's last words its reply, as if it had sent them.
 
-    The answers tagged in the Turn's earlier hidden steps are placed in the same write; those steps'
-    text stays out of chat and the answers go only to their comment threads.
+    The answers tagged in earlier hidden steps (all after the person's message, and before
+    ``before_seq`` when given) are placed in the same write, newest first; those steps' text stays
+    out of chat and the answers go only to their comment threads, which the page is told to re-read.
     """
+    from infra.chat_comment_answers import answered_comment_seqs
     from infra import thread_updates
     from infra.send_broadcast import broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
@@ -226,22 +233,31 @@ def _show_hidden_words(
         (row["id"],),
     )
     place_flipped_answers(db, thread_id, str(row["id"]))
-    earlier = [str(step["id"]) for step in _hidden_answer_steps(db, thread_id, person_seq)]
+    earlier = [
+        str(step["id"])
+        for step in _hidden_answer_steps(db, thread_id, person_seq, str(row["id"]), before_seq)
+    ]
     for step_id in earlier:
         place_flipped_answers(db, thread_id, step_id, hidden_step=True)
+    answered_seqs = answered_comment_seqs(db, thread_id, earlier)
     thread_updates.record_marked(
         db, thread_id=thread_id, message_id=str(row["id"]), node_id=None,
         created_at=str(row["created_at"]),
     )
-    projected = [read_input_broadcast_row(message_id, db=db) for message_id in (str(row["id"]), *earlier)]
+    projected = read_input_broadcast_row(str(row["id"]), db=db)
     owner = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
 
     def publish() -> None:
         if owner is not None:
             thread_updates.notify_changed(str(owner["user_id"]), [thread_id])
-        rows = tuple(item for item in projected if item is not None)
-        if rows:
-            broadcast_input_rows(thread_id, rows)
+        if projected is not None:
+            broadcast_input_rows(thread_id, (projected,))
+        if answered_seqs:  # hidden steps are not broadcast rows; the page re-reads the commented rows
+            import infra.state as state
+
+            state.broadcast_to_thread(
+                thread_id, {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": answered_seqs},
+            )
 
     after_commit(db, publish)
 
@@ -383,7 +399,8 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
             hidden = _woken_about(connection, thread_id, *nudged)
             if hidden is None or str(hidden["content"]).strip() == NO_REPLY:
                 return
-            _show_hidden_words(connection, thread_id, hidden, nudged[0]["seq"])
+            # Only the steps the nudge was sent about; the stopped Turn's own steps stay as they are.
+            _show_hidden_words(connection, thread_id, hidden, nudged[0]["seq"], before_seq=nudged[1]["seq"])
             logger.info("focus.nudge_settled thread={} result=shown_on_stop", thread_id)
     except Exception as error:
         if is_lock_refusal(error):

@@ -568,3 +568,41 @@ async def test_the_nudge_names_the_unplaced_answer_and_a_no_reply_places_nothing
 
     assert _placed(db) == []
     assert not _for_user(db, earlier)
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_tells_the_page_to_re_read_the_comments_it_answered(db, monkeypatch) -> None:
+    # Hidden steps are not broadcast rows, so the answers they place reach the page as a re-read notice.
+    import infra.state as state
+
+    cid = _comment_on(db, "")
+    db.execute("UPDATE messages SET metadata=json_set(metadata,'$.reply_context',json(?)) WHERE id='m1'",
+               (json.dumps({"comments": [{"cid": cid, "seq": 7}]}),))
+    db.commit()
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    _say(db, "All done.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    _say(db, "All done, nothing else needed.", turn="t2")
+    frames: list[dict] = []
+    monkeypatch.setattr(state, "broadcast_to_thread", lambda thread_id, payload, **_kw: frames.append(payload))
+
+    await _end(db, turn="t2")
+
+    assert {"type": "chat_comments_changed", "thread_id": _THREAD, "target_seqs": [7]} in frames
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_nudged_turn_places_nothing_from_its_own_steps(db) -> None:
+    # The stop path shows only the words the nudge was sent about; the stopped Turn's own tagged
+    # step stays as it is, and the woken-about step's answer is placed.
+    cid = _comment_on(db, "")
+    woken = _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    own = _say(db, f"[{cid}] Different words, from the stopped turn.", turn="t2")
+
+    await _stop(db, "t2")
+
+    assert _placed(db) == [("m1", cid, woken)]
+    assert not _for_user(db, own)

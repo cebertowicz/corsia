@@ -143,6 +143,24 @@ def message_answer_fields(thread_id: str, message_id: str, db: sqlite3.Connectio
             connection.close()
 
 
+def answered_comment_seqs(db: sqlite3.Connection, thread_id: str, message_ids: list[str]) -> list[int]:
+    """The seqs of the commented rows that the placed answers of these messages sit on."""
+    seqs: set[int] = set()
+    for cid, metadata in db.execute(
+        "SELECT a.cid, u.metadata FROM chat_comment_answers a JOIN messages u ON u.id=a.user_message_id "
+        "WHERE a.thread_id=? AND a.assistant_message_id IN (SELECT value FROM json_each(?))",
+        (thread_id, json.dumps(message_ids)),
+    ):
+        try:
+            comments = json.loads(metadata or "{}").get("reply_context", {}).get("comments", [])
+        except (ValueError, TypeError, AttributeError):
+            continue
+        for item in comments if isinstance(comments, list) else []:
+            if isinstance(item, dict) and item.get("cid") == cid and isinstance(item.get("seq"), int):
+                seqs.add(item["seq"])
+    return sorted(seqs)
+
+
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
     try:
         value = json.loads(metadata or "{}")
