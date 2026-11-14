@@ -10,7 +10,7 @@ import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { clearTabViewState } from '$lib/stores/tabViewState';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import type { DocOwnership } from '$lib/api/docOwnership';
+import { changeOwnership, type DocOwnership } from '$lib/api/docOwnership';
 
 // A tab return draws the owner and supervisor row the tab last showed in its first frame; the load that follows replaces it.
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), writeContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn() }));
@@ -22,6 +22,7 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 	destroy = async () => {};
 	subscribe(listener: (copy: unknown) => void) { listener(this); return () => {}; }
 } }));
+vi.mock('$lib/api/docOwnership', async importOriginal => ({ ...await importOriginal<typeof import('$lib/api/docOwnership')>(), changeOwnership: vi.fn() }));
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
 
 const notes: DocViewerTarget = { instanceId: 'tab-notes', path: '/documents/notes.md', name: 'notes.md', projectId: 'project', threadId: 'thread', artifactId: 'notes' };
@@ -125,5 +126,35 @@ describe('the owner and supervisor row on a tab return', () => {
 		failNotes!();
 		await vi.waitFor(() => expect(ownerLabel()).toBeNull());
 		expect(host.querySelectorAll('[data-ownership-row] button.item').length).toBe(0);
+	});
+
+	it('closes an owner picker opened on one tab when another tab\'s held load starts, and writes nothing', async () => {
+		// Both tabs have shown a row, so both are remembered: the switch keeps the control mounted while the load is held.
+		let holdOther = false; let release: (() => void) | null = null;
+		api.fetchContent.mockImplementation(async (path: string) => {
+			const id = path.includes('other') ? 'other' : 'notes';
+			const answer = { text: texts[id], writable: true, artifact: { id }, freshness: null, ownership: ownedBy(`${id} owner`) };
+			if (id === 'other' && holdOther) return new Promise(resolve => { release = () => resolve(answer); });
+			return answer;
+		});
+		const props = $state({ target: notes });
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(DocViewer, { target: host, props });
+		flushSync();
+		await serverOpen('notes');
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: notes owner'));
+		props.target = other; flushSync();
+		await serverOpen('other');
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: other owner'));
+		props.target = notes; flushSync();
+		await vi.waitFor(() => expect(owner()?.disabled).toBe(false));
+		owner()!.click();
+		await vi.waitFor(() => expect(document.body.querySelector('.role-picker')).not.toBeNull());
+		holdOther = true;
+		props.target = other; flushSync();
+		await vi.waitFor(() => expect(document.body.querySelector('.role-picker')).toBeNull());
+		for (const button of host.querySelectorAll<HTMLButtonElement>('[data-ownership-row] button.item')) expect(button.disabled).toBe(true);
+		expect(changeOwnership).not.toHaveBeenCalled();
+		release?.();
 	});
 });

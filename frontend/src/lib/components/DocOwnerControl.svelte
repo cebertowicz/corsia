@@ -46,6 +46,8 @@
 		active = Math.max(0, list.findIndex((choice) => choice.id === (role === 'owner' ? ownerId : supervisorId)));
 	}
 	function close() { picker = null; }
+	// A row that turns inert is waiting on a load; a picker left open would write to whatever that load opens.
+	$effect(() => { if (inert) picker = null; });
 	function restoreFocus() { void tick().then(() => (anchor?.isConnected ? anchor : null)?.focus()); }
 	function keys(event: KeyboardEvent) {
 		if (event.key === 'Enter' && matches.length) { event.preventDefault(); void choose(matches[Math.min(active, matches.length - 1)]); return; }
@@ -54,7 +56,7 @@
 	}
 	async function choose(choice: { id: string; name: string }) {
 		const role = picker;
-		if (!role || saving) return;
+		if (!role || saving || inert) return;
 		picker = null;
 		restoreFocus();
 		if (choice.id === (role === 'owner' ? ownerId : supervisorId)) return;
