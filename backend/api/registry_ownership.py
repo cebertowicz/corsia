@@ -219,7 +219,7 @@ def _refusal_for(
     from registry.document_supervisor import MULTI_PERSON_REFUSAL, change_refusal
     from registry.shared_principals import UI_PRINCIPAL
 
-    refusal = change_refusal(current)
+    refusal = change_refusal(current, multi_person=multi_person)
     if refusal:
         return 409, refusal
     new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner

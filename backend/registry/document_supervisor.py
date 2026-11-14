@@ -37,6 +37,10 @@ SUPERVISOR_KEY = "supervisor_thread_id"
 
 # The refusal sentences the screen shows, in the payload before a pick and in the 409 after one.
 MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
+SHARED_REFUSAL = (
+    "Everyone here shares this document, so its owner and supervisor can’t be changed "
+    "while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner."
+)
 RELEASED_REFUSAL = "No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner."
 
 
@@ -144,15 +148,19 @@ def is_multi_person(db) -> bool:
     return person_accounts(db) > 1
 
 
-def change_refusal(owner: str | None) -> str | None:
+def change_refusal(owner: str | None, *, multi_person: bool) -> str | None:
     """Why no one may change this document's owner or supervisor, or ``None`` when the person may.
 
     The one decision: the payload shows it before a pick and the ownership PUT
-    answers it as a 409. A document nobody owns has no owner to change. Any
-    person may give a ``ui`` or ``project:`` document an agent as its owner.
+    answers it as a 409. A document nobody owns has no owner to change. A
+    ``ui`` or ``project:`` document is shared by everyone on the install, so
+    while more than one person uses it, no one person re-routes its comments
+    or moves it into their own agents.
     """
     if owner is None:
         return RELEASED_REFUSAL
+    if multi_person and is_owner_sentinel(owner):
+        return SHARED_REFUSAL
     return None
 
 
@@ -168,7 +176,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path, mu
     scope = _scope(db, artifact, workspace)
     owner_row = _thread(db, owner) if kind == "agent" else None
     row, source = _supervisor(db, owner, stored_pick(artifact), lambda: scope[1] if scope is not None else None)
-    refusal = change_refusal(owner)
+    refusal = change_refusal(owner, multi_person=multi_person)
     agents = [] if refusal or scope is None else pickable_agents(scope[0], user_id, db=db)
     paused = _paused_threads(db, [str(agent["id"]) for agent in agents] + ([str(row["id"])] if row is not None else []))
     status = _status(row, paused)

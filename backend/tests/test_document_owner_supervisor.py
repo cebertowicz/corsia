@@ -337,24 +337,44 @@ def test_a_released_document_routes_as_its_header_reads_and_never_to_no_one(owne
 
 
 @pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
-def test_any_of_several_people_gives_a_shared_document_an_agent_owner(owned_document, shared_owner):
-    """With two people, a ``ui`` or ``project:`` document reads Not set and either person may pick an agent."""
-    from registry.document_supervisor import MULTI_PERSON_REFUSAL
+def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_document, shared_owner):
+    """Everyone shares a ``ui`` or ``project:`` document, so with two people neither field changes."""
+    from registry.document_supervisor import SHARED_REFUSAL
+
+    client, artifact_id = owned_document
+    _set_owner(artifact_id, shared_owner)
+    assert _view(artifact_id)["can_change"] is False
+    for change in ({"supervisor_thread_id": "agent-1"}, {"owner": "agent-1"}):
+        refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json=change)
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"] == SHARED_REFUSAL
+    view = _view(artifact_id)
+    assert view["owner"]["kind"] == ("person" if shared_owner == "ui" else "none")
+    assert (view["supervisor"] or {}).get("source") != "picked"
+
+
+@pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
+def test_one_persons_owner_pick_leaves_a_shared_document_reachable_by_the_other(owned_document, shared_owner):
+    """One of two people tries to give a shared document their own agent; it stays shared, so the other still reaches it."""
+    from infra.auth import may_access_artifact
+    from infra.database import get_db
+    from registry import models
+    from registry.document_supervisor import SHARED_REFUSAL
 
     client, artifact_id = owned_document
     url = f"/api/artifacts/{artifact_id}/ownership"
     _set_owner(artifact_id, shared_owner)
-    view = _view(artifact_id)
-    assert (view["can_change"], view["refusal"], view["owner"]["label"]) == (True, None, "Not set")
-    assert "agent-1" in {choice["id"] for choice in view["choices"]}
-    if shared_owner != "ui":
-        # The person still can't take it: only an agent owns a document on a CORSIA several people use.
-        person = client.put(url, json={"owner": "user"})
-        assert (person.status_code, person.json()["detail"]) == (409, MULTI_PERSON_REFUSAL)
-    assert client.put(url, json={"supervisor_thread_id": "agent-1"}).status_code == 200
-    assert client.put(url, json={"owner": "agent-1"}).status_code == 200
-    view = _view(artifact_id)
-    assert (view["owner"]["kind"], view["owner"]["id"], view["owner"]["label"]) == ("agent", "agent-1", view["owner"]["name"])
+    picked = client.put(url, json={"owner": "agent-1"})
+    assert (picked.status_code, picked.json()["detail"]) == (409, SHARED_REFUSAL)
+    db = get_db()
+    try:
+        assert may_access_artifact(models.get_artifact(artifact_id, db=db)["parent_thread_id"], SECOND_PERSON, db=db)
+    finally:
+        db.close()
+    # The other person reaches the document (a missing one answers 404) and meets the same refusal.
+    client.app.dependency_overrides[require_human_user] = lambda: {"id": SECOND_PERSON, "token_kind": "session"}
+    other = client.put(url, json={"owner": "agent-1"})
+    assert (other.status_code, other.json()["detail"]) == (409, SHARED_REFUSAL)
 
 
 def test_another_persons_document_reads_as_missing(owned_document):

@@ -249,7 +249,7 @@ def person_owner_label(owner: str | None, *, db, multi_person: bool) -> str:
 
     A ``ui`` document is the person's only while one person uses CORSIA; while
     more than one does, it reads ``Not set`` like a ``project:`` one, until
-    someone gives it an agent as its owner. Every person-facing surface (the
+    an agent is made its owner. Every person-facing surface (the
     document header, the Files tree, the viewer) shows this; ``owner_label``
     stays the agents' wording.
     """
