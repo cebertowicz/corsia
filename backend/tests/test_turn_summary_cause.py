@@ -11,6 +11,7 @@ import pytest
 
 from core.stop_causes import PLAN_LIMIT_REASON, PlanLimitStop
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
 _spec = importlib.util.spec_from_file_location("_test_turn_summary_paging", _module_path)
@@ -39,7 +40,7 @@ def _db(turns: list[tuple[str, str, str | None]]) -> sqlite3.Connection:
         "ended_at TEXT, error TEXT)"
     )
     # A page never draws a comment-only input, which this table marks.
-    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL + ";" + MESSAGE_UPDATE_SCHEMA_SQL)
     for seq, (turn_id, status, error) in enumerate(turns, start=1):
         conn.execute(
             "INSERT INTO active_turns VALUES (?,?,?,?,?,?)", (turn_id, _SID, status, _START, _END, error),

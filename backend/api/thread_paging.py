@@ -280,11 +280,12 @@ def finish_display(
         _defer_tool_results(display)
     _project_delivery_intents(db, thread_id, display)
     from api.post_update_details import hide_update_details
-    from infra.message_update_state import projection_fields
+    from infra.message_update_state import projection_fields_many
 
     hide_update_details(display)
+    projected = projection_fields_many(db, [row["id"] for row in display])
     for row in display:
-        row.update(projection_fields(db, row["id"]))
+        row.update(projected.get(row["id"], {}))
         row.pop("rowid", None)
 
 

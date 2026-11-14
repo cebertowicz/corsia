@@ -83,6 +83,40 @@ def test_history_search_pages_and_direct_broadcast_exclude_old_rows(pdb):
     assert page_messages(pdb, thread, 50, old)[0] == []
 
 
+def test_page_projection_reads_once_for_every_row(pdb):
+    from api.thread_paging import page_messages
+    from infra.message_update_state import projection_fields
+
+    thread = new_thread(pdb, "page-projection")
+    first = save(thread, "first")[0]
+    second = save(thread, "second", [first])[0]
+    chain_head = save(thread, "chain head", [second])[0]
+    other_old = save(thread, "other old")[0]
+    pdb.execute("INSERT INTO message_update_nodes VALUES (?,?)", (other_old, "node-x"))
+    pdb.commit()
+    other = save(thread, "other", [other_old])[0]
+    plain = save(thread, "plain")[0]
+    statements: list[str] = []
+    pdb.set_trace_callback(statements.append)
+    try:
+        rows, _, _ = page_messages(pdb, thread, 50, None)
+    finally:
+        pdb.set_trace_callback(None)
+    by_id = {r["id"]: r for r in rows}
+    assert set(by_id) == {chain_head, other, plain}
+    assert sorted(by_id[chain_head]["replaced_message_ids"]) == sorted([second, first])
+    assert by_id[other]["replaced_message_ids"] == [other_old]
+    assert by_id[other]["update_node_ids"] == ["node-x"]
+    assert "replaced_message_ids" not in by_id[plain]
+    for message_id in (chain_head, other, plain):
+        single = projection_fields(pdb, message_id)
+        assert {k: sorted(v) for k, v in single.items()} == {
+            k: sorted(by_id[message_id][k]) for k in ("replaced_message_ids", "update_node_ids") if k in by_id[message_id]}
+    # One ancestor read and one node read for the whole page, not two per row.
+    assert sum("WITH RECURSIVE ancestors(root" in s for s in statements) == 1
+    assert sum("FROM message_update_nodes" in s for s in statements) == 1
+
+
 def test_presence_here_and_visit_latches_never_become_unseen(pdb):
     thread = new_thread(pdb, "seen")
     old = save(thread)[0]

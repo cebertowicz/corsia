@@ -1,4 +1,6 @@
 """Canonical update provenance, links and all-or-nothing replacement effects."""
+import json
+
 from infra.message_update_seen import seen
 from tools.post_update_text import seen_refusal
 
@@ -72,15 +74,29 @@ def unseen_updates(db, thread_id, user_id, exclude_id, live, now):
     return [row for row in rows if not seen(db, row, user_id, live, now).reason]
 
 
+def projection_fields_many(db, message_ids) -> dict[str, dict]:
+    """Public removal ids and task links per message, never archived text or private evidence.
+
+    Two index reads for a whole page; the ids bind as one JSON array.
+    """
+    ids = json.dumps(list(message_ids))
+    out: dict[str, dict] = {}
+    for root, old in db.execute(
+            "WITH RECURSIVE ancestors(root,id) AS (SELECT replaced_by,message_id FROM message_update_state "
+            "WHERE replaced_by IN (SELECT value FROM json_each(?)) "
+            "UNION ALL SELECT a.root,s.message_id FROM message_update_state s JOIN ancestors a ON s.replaced_by=a.id) "
+            "SELECT root,id FROM ancestors", (ids,)):
+        out.setdefault(root, {}).setdefault("replaced_message_ids", []).append(old)
+    for message_id, node in db.execute(
+            "SELECT message_id,node_id FROM message_update_nodes "
+            "WHERE message_id IN (SELECT value FROM json_each(?)) ORDER BY message_id,node_id", (ids,)):
+        out.setdefault(message_id, {}).setdefault("update_node_ids", []).append(node)
+    return out
+
+
 def projection_fields(db, message_id):
-    """Public removal ids and task links, never archived text or private evidence."""
-    ids = [row[0] for row in db.execute(
-        "WITH RECURSIVE ancestors(id) AS (SELECT message_id FROM message_update_state WHERE replaced_by=? "
-        "UNION ALL SELECT s.message_id FROM message_update_state s JOIN ancestors a ON s.replaced_by=a.id) "
-        "SELECT id FROM ancestors", (message_id,))]
-    nodes = [row[0] for row in db.execute("SELECT node_id FROM message_update_nodes WHERE message_id=? ORDER BY node_id",
-                                        (message_id,))]
-    return {**({"replaced_message_ids": ids} if ids else {}), **({"update_node_ids": nodes} if nodes else {})}
+    """Projection fields for one message."""
+    return projection_fields_many(db, [message_id]).get(message_id, {})
 
 
 def delete_thread(db, thread_id):
