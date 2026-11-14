@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A chat whose Claude Code session can't be resumed now sends your message again instead of sometimes ending with an error.
+- A chat whose only recent activity is a collapsed work summary now shows that summary instead of the new-chat greeting, and a Paused line under it is no longer partly covered.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A comment list full of comments and long threads now stays usable on a phone and a computer: Accept all stays at the top while the list scrolls, a long thread shows a replies row and opens whole with Back, unread comments and replies always show in full, and nothing inside a comment card scrolls on its own, the reply field included. Before, controls could sit off screen and text was cut off inside small scrolling boxes.
