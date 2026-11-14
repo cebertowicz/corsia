@@ -207,7 +207,19 @@ async def relocate_artifact_endpoint(
         finally:
             db.close()
 
-    status, result = await run_in_db(_relocate)
+    from doceditor.live_move_hold import DocumentNotSaved, hold_for_artifact
+    from doceditor.live_runtime import get_documents
+
+    try:
+        documents = get_documents()
+        if documents is None:
+            status, result = await run_in_db(_relocate)
+        else:
+            # A person may have this file open: their typing is saved into it before it moves.
+            async with hold_for_artifact(documents, artifact_id):
+                status, result = await run_in_db(_relocate)
+    except DocumentNotSaved as error:
+        raise HTTPException(409, str(error))
     if status == "not_found":
         raise HTTPException(404, "Thread not found")
     if status == "bad_request":

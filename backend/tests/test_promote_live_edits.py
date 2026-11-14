@@ -130,3 +130,111 @@ async def test_a_tab_left_on_the_old_path_is_refused_and_recreates_nothing(durab
         assert not source.exists()
     finally:
         await asyncio.wait_for(manager.close(), 20)
+
+
+async def _relocate_with_tool(workspace, thread_id, source_id, target) -> str:
+    from tools.artifacts import ArtifactRelocateTool
+
+    return await ArtifactRelocateTool(workspace).execute(source_id, str(target), _thread_id=thread_id)
+
+
+def _user_of(thread_id):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def relocation_context(monkeypatch):
+    """The relocate tool resolves the caller's thread through its own context reader."""
+    def use(thread_id):
+        from tools import artifacts
+        monkeypatch.setattr(artifacts, "_require_context", lambda kwargs: (thread_id, {"user_id": _user_of(thread_id)}))
+    return use
+
+
+@pytest.mark.asyncio
+async def test_relocate_carries_the_text_a_person_typed_but_not_yet_saved(durable_scope, tmp_path, monkeypatch, relocation_context):
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    relocation_context(thread_id)
+    target = source.parent / "renamed.md"
+    try:
+        receipt = await _relocate_with_tool(workspace, thread_id, source_id, target)
+        assert not receipt.startswith("Error"), receipt
+        assert target.read_text().startswith("TYPED ") and not source.exists()
+        assert manager.documents == {}
+        reopened = await manager.open(source_id, target)
+        assert reopened.live.text == target.read_text()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_save_stops_a_relocate_and_moves_nothing(durable_scope, tmp_path, monkeypatch, relocation_context):
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    relocation_context(thread_id)
+    entry.live.viewer_actor = lambda: None
+    target = source.parent / "renamed.md"
+    before = source.read_text()
+    try:
+        receipt = await _relocate_with_tool(workspace, thread_id, source_id, target)
+        assert receipt.startswith("Error: This document is open with changes that could not be saved yet")
+        assert source.read_text() == before and not target.exists()
+        assert manager.documents.get(source_id) is entry
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_the_pane_relocate_carries_the_unsaved_text_too(durable_scope, tmp_path, monkeypatch):
+    from api import registry_pane
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    monkeypatch.setattr(registry_pane, "authenticate", lambda token: {"id": _user_of(thread_id)})
+    target = source.parent / "renamed.md"
+    try:
+        await registry_pane.relocate_artifact_endpoint(
+            source_id, "token", registry_pane.ArtifactRelocateBody(thread_id=thread_id, target_path=str(target)))
+        assert target.read_text().startswith("TYPED ") and not source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@CARRIED_AND_STALE
+@pytest.mark.asyncio
+async def test_a_save_still_in_flight_when_the_move_starts_lands_in_the_moved_file(durable_scope, tmp_path, monkeypatch, stale):
+    from doceditor.live_lane import Operation
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, stale)
+    person = WriteActor("ui", "project-alpha", direct_user=True, user_id="u1")
+    gate, reached = asyncio.Event(), asyncio.Event()
+    original = entry.lane.write
+
+    async def held(*args, **kwargs):
+        entry.lane.write = original  # only this one save is held; the hold's own flush runs behind it
+        reached.set()
+        await gate.wait()
+        return await original(*args, **kwargs)
+    entry.lane.write = held
+    try:
+        saving = asyncio.create_task(entry.lane.submit(Operation("replace", content=entry.live.text + "LATE\n", actor=person)))
+        await asyncio.wait_for(reached.wait(), 10)
+        moving = asyncio.create_task(_promote(workspace, thread_id, source))
+        await asyncio.sleep(0.2)
+        assert not moving.done()  # the move waits for the save to land
+        gate.set()
+        receipt = await asyncio.wait_for(moving, 20)
+        await asyncio.wait_for(saving, 20)
+        shared = workspace / "projects" / "alpha" / "shared" / "planning" / "live.md"
+        if receipt.startswith("Error"):
+            assert source.exists() and not shared.exists()
+        else:
+            assert shared.read_text().endswith("LATE\n") and shared.read_text().startswith("TYPED ")
+            assert not source.exists()
+    finally:
+        gate.set()
+        await asyncio.wait_for(manager.close(), 20)
