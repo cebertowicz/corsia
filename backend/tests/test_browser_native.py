@@ -358,18 +358,48 @@ async def _select_text(thread, connection, endpoint, selector, text, frame=None)
     assert result['result']['value'] == text
 
 
-async def _select_cross_origin_field(thread, connection, cdp):
+async def _reach_cross_origin_field(thread, connection, cdp, point):
+    """Hover the frame's field until the child sees it; return the moves sent and the ms since 'ready'.
+
+    'ready' says the child loaded, not that Chrome routes pointer input into the cross-origin frame:
+    until it does, input at these points can reach this page instead. Only moves are sent, never a
+    press or a key, so the frame's state is unchanged when the drag starts.
+    """
+    loop = asyncio.get_running_loop()
+    deadline, moves = loop.time() + 5, 0
+    while loop.time() < deadline:
+        moves += 1
+        # Alternate between two points in the field: a move to the pointer's current point may not be dispatched.
+        await browser_pane.mouse_event(thread, {
+            'type': 'input_mouse', 'eventType': 'mouseMoved', 'x': point[0] + moves % 2, 'y': point[1],
+            'button': 'none', 'clickCount': 0,
+        }, connection)
+        result = await cdp.call('Runtime.evaluate', expression="""new Promise(resolve => {
+          const poll = () => 'hover' in messageTimes ? resolve(messageTimes.hover - messageTimes.ready) : setTimeout(poll, 10);
+          poll(); setTimeout(() => resolve(null), 100); })""", awaitPromise=True, returnByValue=True)
+        if (ms := result['result'].get('value')) is not None:
+            return moves, ms
+    events = (await cdp.call('Runtime.evaluate', expression='clipboardEvents', returnByValue=True))['result']['value']
+    pytest.fail(f'pane input never reached the cross-origin frame: {moves} hover moves in 5 s; frame messages {events!r}')
+
+
+async def _select_cross_origin_field(thread, connection, cdp, capsys):
     # Child fixture has zero body margin and a 2px border/padding on its input.
     result = await cdp.call('Runtime.evaluate', expression="""(() => {
       const frame = document.querySelector('iframe'); const r = frame.getBoundingClientRect();
       const x = r.left + frame.clientLeft + 4; const y = r.top + frame.clientTop + 15;
       return {start: [x + 0.2, y], end: [x + 160, y]}; })()""", returnByValue=True)
     points = result['result']['value']
+    moves, ms = await _reach_cross_origin_field(thread, connection, cdp, points['start'])
+    reached = f'cross-origin frame saw a hover after {moves} move(s), {ms:.0f} ms after ready'
+    with capsys.disabled():
+        print(f'\n{reached}', flush=True)
     await _drag_selection(thread, connection, points['start'], points['end'])
     result = await cdp.call('Runtime.evaluate', expression="""new Promise(resolve => {
       const poll = () => clipboardEvents.includes('selection:Cross origin') ? resolve(true) : setTimeout(poll, 20);
       poll(); setTimeout(() => resolve(false), 5000); })""", awaitPromise=True, returnByValue=True)
-    assert result['result']['value'] is True
+    events = (await cdp.call('Runtime.evaluate', expression='clipboardEvents', returnByValue=True))['result']['value']
+    assert result['result']['value'] is True, f'{reached}; frame messages {events!r}'
 
 
 async def _exercise_clipboard(thread, connection, endpoint):
@@ -471,6 +501,7 @@ def popup_fixture():
             window.addEventListener('message', event => {
               if (event.data === 'focus') parent.postMessage('ready', '*');
             });
+            field.addEventListener('mousemove', () => parent.postMessage('hover', '*'), {once: true});
             field.addEventListener('mouseup', () => parent.postMessage('selection:' + field.value.slice(field.selectionStart, field.selectionEnd), '*'));
             field.addEventListener('input', () => parent.postMessage('input:' + field.value, '*'));
             </script>''',
@@ -520,7 +551,7 @@ def popup_fixture():
 
 
 @pytest.mark.parametrize('headed', [False, True])
-async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, headed):
+async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, monkeypatch, capsys, headed):
     thread, connection = 'native-clipboard-oopif', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
     with popup_fixture() as base:
@@ -548,9 +579,10 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 assert await read_probe() in not_read
                 child = base.replace('127.0.0.1', 'localhost') + '/clipboard-child'
                 setup = """new Promise((resolve, reject) => {
-                    window.clipboardEvents = [];
+                    window.clipboardEvents = []; window.messageTimes = {};
                     window.addEventListener('message', e => { if (typeof e.data !== 'string') return;
-                        clipboardEvents.push(e.data); if (e.data === 'ready') resolve(true); });
+                        clipboardEvents.push(e.data); messageTimes[e.data] ??= performance.now();
+                        if (e.data === 'ready') resolve(true); });
                     const frame = document.createElement('iframe'); frame.src = %s;
                     frame.onload = () => frame.contentWindow.postMessage('focus', '*'); document.body.append(frame);
                     setTimeout(() => reject(Error('frame not ready')), 5000);
@@ -558,7 +590,7 @@ async def test_native_cross_origin_clipboard_and_page_read_denial(native_owner, 
                 result = await cdp.call('Runtime.evaluate', expression=setup, awaitPromise=True, returnByValue=True)
                 assert result['result']['value'] is True
                 # Root-target pointer coordinates include the iframe border and child body margin.
-                await _select_cross_origin_field(thread, connection, cdp)
+                await _select_cross_origin_field(thread, connection, cdp, capsys)
                 replies = []
                 await browser_clipboard.handle(thread, connection, {'type': 'clipboard_selection', 'id': 1}, replies.append)
                 assert replies[0].get('text') == '', f'cross-origin copy replies: {replies!r}'
