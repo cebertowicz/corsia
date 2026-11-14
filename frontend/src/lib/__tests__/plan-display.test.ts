@@ -25,7 +25,7 @@ const COST = {
 	tokens: { known: null, unknown_rows: 0 },
 	model_cost_usd: { known: null, unknown_rows: 0 },
 	usage_recording_failures: 0,
-	elapsed_seconds: { known: 0, status: 'in_progress' as const },
+	elapsed_seconds: { settled_seconds: 0, status: 'in_progress' as const, open_starts: [] },
 	user_effort: { known_plan_actions: 0, status: 'partial' as const },
 };
 
@@ -33,8 +33,8 @@ const AMOUNT = {
 	tokens: { known: null, unknown_rows: 0 },
 	model_cost_usd: { known: null, unknown_rows: 0 },
 	usage_recording_failures: 0,
-	execution: { seconds: 0, unknown_turns: 0, turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
-	waiting: { seconds: 0 },
+	execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
+	waiting: { settled_seconds: 0, open_starts: [] },
 };
 const NODE_COST = { own: AMOUNT, rolled: AMOUNT };
 

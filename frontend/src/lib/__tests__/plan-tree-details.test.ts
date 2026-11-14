@@ -76,7 +76,7 @@ describe('PlanTree row details disclosure', () => {
 				tokens: { known: 1200, unknown_rows: 0 },
 				model_cost_usd: { known: 0.25, unknown_rows: 1 },
 					usage_recording_failures: 0,
-				elapsed_seconds: { known: 90, status: 'in_progress' },
+				elapsed_seconds: { settled_seconds: 90, status: 'in_progress', open_starts: [] },
 				user_effort: { known_plan_actions: 2, status: 'partial' },
 			},
 		});
@@ -208,15 +208,15 @@ describe('PlanTree row details disclosure', () => {
 					tokens: { known: 1_800_000, unknown_rows: 2 },
 					model_cost_usd: { known: null, unknown_rows: 5 },
 					usage_recording_failures: 1,
-					execution: { seconds: 720, unknown_turns: 1, turns },
-					waiting: { seconds: 0 },
+					execution: { settled_seconds: 720, open_starts: [], unknown_turns: 1, turns },
+					waiting: { settled_seconds: 0, open_starts: [] },
 				},
 				own: {
 					tokens: { known: 300_000, unknown_rows: 0 },
 					model_cost_usd: { known: null, unknown_rows: 1 },
 					usage_recording_failures: 0,
-					execution: { seconds: 120, unknown_turns: 0, turns },
-					waiting: { seconds: 0 },
+					execution: { settled_seconds: 120, open_starts: [], unknown_turns: 0, turns },
+					waiting: { settled_seconds: 0, open_starts: [] },
 				},
 			},
 		}));
@@ -234,13 +234,13 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known: 1_000, unknown_rows: 0 },
 			model_cost_usd: { known: 0.5, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 7_800, unknown_turns: 0, turns },
+			execution: { settled_seconds: 7_800, open_starts: [], unknown_turns: 0, turns },
 		};
 		await open(node({
 			id: 'waited',
 			node_cost: {
-				own: { ...base, waiting: { seconds: 600 } },
-				rolled: { ...base, waiting: { seconds: 18_180 } },
+				own: { ...base, waiting: { settled_seconds: 600, open_starts: [] } },
+				rolled: { ...base, waiting: { settled_seconds: 18_180, open_starts: [] } },
 			},
 		}));
 		expect(line('working')).toBe('Working: 2h 10m');
@@ -258,10 +258,10 @@ describe('PlanTree row details disclosure', () => {
 			model_cost_usd: { known: null, unknown_rows: 0 },
 			usage_recording_failures: 1,
 			execution: {
-				seconds: 0, unknown_turns: 0,
+				settled_seconds: 0, open_starts: [], unknown_turns: 0,
 				turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 },
 			},
-			waiting: { seconds: 0 },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		await open(node({ id: 'missing-cost', node_cost: { own: amount, rolled: amount } }));
 		expect(line('tokens')).toBe('Tokens: not recorded');
@@ -274,10 +274,10 @@ describe('PlanTree row details disclosure', () => {
 			model_cost_usd: { known: null, unknown_rows: 1 },
 			usage_recording_failures: 0,
 			execution: {
-				seconds: 0, unknown_turns: 0,
+				settled_seconds: 0, open_starts: [], unknown_turns: 0,
 				turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 },
 			},
-			waiting: { seconds: 0 },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		await open(node({ id: 'unpriced-only', node_cost: { own: amount, rolled: amount } }));
 		expect(line('tokens')).toBeNull();
@@ -291,8 +291,8 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known: 5_000, unknown_rows: 0 },
 			model_cost_usd: { known: 0.5, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 60, unknown_turns: 0, turns },
-			waiting: { seconds: 0 },
+			execution: { settled_seconds: 60, open_starts: [], unknown_turns: 0, turns },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		await open(node({
 			id: 'solo',
@@ -303,7 +303,7 @@ describe('PlanTree row details disclosure', () => {
 				tokens: amount.tokens,
 				model_cost_usd: amount.model_cost_usd,
 					usage_recording_failures: 0,
-				elapsed_seconds: { known: 60, status: 'in_progress' },
+				elapsed_seconds: { settled_seconds: 60, status: 'in_progress', open_starts: [] },
 				user_effort: { known_plan_actions: 0, status: 'partial' },
 			},
 		}));
@@ -318,8 +318,8 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known, unknown_rows: 0 },
 			model_cost_usd: { known: null, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 60, unknown_turns: 0, turns },
-			waiting: { seconds: 0 },
+			execution: { settled_seconds: 60, open_starts: [], unknown_turns: 0, turns },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		});
 		const commitment = (known: number) => ({
 			commitment_id: 'c',
@@ -327,7 +327,7 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known, unknown_rows: 0 },
 			model_cost_usd: { known: null, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			elapsed_seconds: { known: 60, status: 'in_progress' as const },
+			elapsed_seconds: { settled_seconds: 60, status: 'in_progress' as const, open_starts: [] },
 			user_effort: { known_plan_actions: 0, status: 'partial' as const },
 		});
 		// A few exact tokens apart, the same "18.8M tokens" on screen: one line, not two.
@@ -346,8 +346,8 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known: 18_788_400, unknown_rows: 0 },
 			model_cost_usd: { known: null, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 60, unknown_turns: 0, turns },
-			waiting: { seconds: 0 },
+			execution: { settled_seconds: 60, open_starts: [], unknown_turns: 0, turns },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		await open(node({
 			id: 'differs-on-screen',
@@ -358,7 +358,7 @@ describe('PlanTree row details disclosure', () => {
 				tokens: { known: 25_000_000, unknown_rows: 0 },
 				model_cost_usd: { known: null, unknown_rows: 0 },
 				usage_recording_failures: 0,
-				elapsed_seconds: { known: 60, status: 'in_progress' as const },
+				elapsed_seconds: { settled_seconds: 60, status: 'in_progress' as const, open_starts: [] },
 				user_effort: { known_plan_actions: 0, status: 'partial' as const },
 			},
 		}));
@@ -434,8 +434,8 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known: 100, unknown_rows: 0 },
 			model_cost_usd: { known: 0.1, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 60, unknown_turns: 0, turns: { completed: 1, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
-			waiting: { seconds: 0 },
+			execution: { settled_seconds: 60, open_starts: [], unknown_turns: 0, turns: { completed: 1, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		const rolled = {
 			...empty, tokens: { known: 100, unknown_rows: 1 },
@@ -454,8 +454,8 @@ describe('PlanTree row details disclosure', () => {
 			tokens: { known: 100, unknown_rows: 0 },
 			model_cost_usd: { known: 0.1, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 60, unknown_turns: 0, turns: { completed: 1, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
-			waiting: { seconds: 0 },
+			execution: { settled_seconds: 60, open_starts: [], unknown_turns: 0, turns: { completed: 1, error: 0, cancelled: 0, running: 0, waiting_retry: 0 } },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		};
 		await open(node({
 			id: 'unknown-follow-up', node_cost: { own: amount, rolled: amount },
@@ -463,7 +463,7 @@ describe('PlanTree row details disclosure', () => {
 				commitment_id: 'unknown-follow-up', attempts: { total: 0, failed: 0, correction: 0, delegated: 0 },
 				tokens: { known: 100, unknown_rows: 2 }, model_cost_usd: { known: 0.1, unknown_rows: 1 },
 				usage_recording_failures: 1,
-				elapsed_seconds: { known: 60, status: 'complete' },
+				elapsed_seconds: { settled_seconds: 60, status: 'complete', open_starts: [] },
 				user_effort: { known_plan_actions: 0, status: 'partial' },
 			},
 		}));
@@ -486,15 +486,15 @@ describe('PlanTree row details disclosure', () => {
 					tokens: { known: 1_800_000, unknown_rows: 2 },
 					model_cost_usd: { known: null, unknown_rows: 5 },
 					usage_recording_failures: 1,
-					execution: { seconds: 720, unknown_turns: 1, turns },
-					waiting: { seconds: 18_180 },
+					execution: { settled_seconds: 720, open_starts: [], unknown_turns: 1, turns },
+					waiting: { settled_seconds: 18_180, open_starts: [] },
 				},
 				own: {
 					tokens: { known: 300_000, unknown_rows: 0 },
 					model_cost_usd: { known: null, unknown_rows: 1 },
 					usage_recording_failures: 0,
-					execution: { seconds: 120, unknown_turns: 0, turns },
-					waiting: { seconds: 600 },
+					execution: { settled_seconds: 120, open_starts: [], unknown_turns: 0, turns },
+					waiting: { settled_seconds: 600, open_starts: [] },
 				},
 			},
 		}));

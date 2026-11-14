@@ -32,7 +32,7 @@ def read_node(plan_id: str, node_id: str, *, actor: PlanActor, db) -> dict:
         projected = open_rollup.rollup_open(connection, tree, memo)
     for plan in presented_plans(
         [projected], actor, db=db, include_archived=True, memo=memo,
-        detail_ids=frozenset({node_id}),
+        detail_ids=frozenset({node_id}), stable=True,
     ):
         for presented in plan["nodes"]:
             if presented["id"] == node_id:

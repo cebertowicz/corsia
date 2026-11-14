@@ -40,7 +40,9 @@ def _listed(db, plan_id: str, node_id: str) -> dict:
     projected = operator_projection.open_rollup.rollup_thread(
         plan_id, db=db, window=open_tree.FoldWindow(since=None, cap=50),
     )
-    plans = operator_projection.presented_plans([projected], _actor(), db=db, include_archived=True)
+    plans = operator_projection.presented_plans(
+        [projected], _actor(), db=db, include_archived=True, stable=True,
+    )
     return next(node for node in plans[0]["nodes"] if node["id"] == node_id)
 
 

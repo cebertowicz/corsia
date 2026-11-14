@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
+from math import inf, nextafter
 from typing import Any
 
 from infra.packed_rows import fetch_all
@@ -100,13 +101,17 @@ def _add(left: dict, right: dict) -> dict:
         ),
         "execution": {
             "seconds": left["execution"]["seconds"] + right["execution"]["seconds"],
+            **({"open_starts": sorted(left["execution"].get("open_starts", []) + right["execution"].get("open_starts", []))}
+               if "open_starts" in left["execution"] or "open_starts" in right["execution"] else {}),
             "unknown_turns": (
                 left["execution"]["unknown_turns"] + right["execution"]["unknown_turns"]
             ),
             "turns": {key: left_turns[key] + right_turns[key] for key in _EMPTY_TURNS},
         },
         # Wall clock beside working time, never folded into tokens or cost.
-        "waiting": {"seconds": left["waiting"]["seconds"] + right["waiting"]["seconds"]},
+        "waiting": {"seconds": left["waiting"]["seconds"] + right["waiting"]["seconds"],
+                    **({"open_starts": sorted(left["waiting"].get("open_starts", []) + right["waiting"].get("open_starts", []))}
+                       if "open_starts" in left["waiting"] or "open_starts" in right["waiting"] else {})},
     }
 
 
@@ -122,7 +127,7 @@ def _own_failures(connection, node_ids: list[str]) -> dict[str, int]:
 
 
 def _own_execution(
-    connection, node_ids: list[str], now: datetime,
+    connection, node_ids: list[str], now: datetime, *, stable: bool = False,
 ) -> tuple[dict[str, dict], dict[str, list]]:
     """Sum each node's durable Turn intervals; count what cannot be measured.
 
@@ -152,8 +157,14 @@ def _own_execution(
             fact["unknown_turns"] += 1
             continue
         start, end = interval
-        fact["seconds"] += int((end - start).total_seconds())
-        found[node_id].append((start.timestamp(), end.timestamp()))
+        if stable and row["status"] == "running" and not row["ended_at"]:
+            fact.setdefault("open_starts", []).append(start.astimezone(timezone.utc).isoformat())
+            fact["open_starts"].sort()
+            # One float past the read clock marks the span open for ``node_time.stable_amount``.
+            found[node_id].append((start.timestamp(), nextafter(now.timestamp(), inf)))
+        else:
+            fact["seconds"] += int((end - start).total_seconds())
+            found[node_id].append((start.timestamp(), end.timestamp()))
     return facts, {node_id: node_waiting.union(items) for node_id, items in found.items()}
 
 
@@ -189,6 +200,7 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
 
 def own_many_timed(
     node_ids, *, db=None, now: datetime | None = None, dollars: Mapping[str, dict] | None = None,
+    stable: bool = False,
 ) -> tuple[dict[str, dict], dict[str, node_time.Span]]:
     """``own_many`` plus each node's own time intervals, from the same reads.
 
@@ -202,8 +214,8 @@ def own_many_timed(
     with service._connection(db) as connection:
         usage = usage_cost.own_usage(connection, ids, dollars, _rows_in)
         failures = _own_failures(connection, ids)
-        execution, working = _own_execution(connection, ids, clock)
-        waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
+        execution, working = _own_execution(connection, ids, clock, stable=stable)
+        waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in, stable=stable)
     result: dict[str, dict] = {}
     spans: dict[str, node_time.Span] = {}
     for node_id in ids:
@@ -216,9 +228,12 @@ def own_many_timed(
         exec_found = execution.get(node_id)
         if exec_found is not None:
             own["execution"] = exec_found
-        own["waiting"] = {
-            "seconds": int(sum(end - start for start, end in waiting.get(node_id, []))),
-        }
+        own["waiting"] = (
+            node_time.stable_amount(waiting.get(node_id, []), clock) if stable else
+            {"seconds": int(sum(end - start for start, end in waiting.get(node_id, [])))}
+        )
+        if stable:
+            own["execution"].setdefault("open_starts", [])
         result[node_id] = own
         spans[node_id] = {
             "working": working.get(node_id, []), "waiting": waiting.get(node_id, []),
@@ -256,6 +271,7 @@ def _attached_children(connection, plan_ids: list[str]) -> dict[str, str]:
 
 def _rollup_one_plan(
     own: dict, attached: dict, child_totals: dict, span_roll: node_span_roll.SpanRoll,
+    *, clock: datetime | None = None,
 ) -> dict[str, dict]:
     """Roll one plan's nodes up in a single pass, every child before its parent.
 
@@ -278,10 +294,14 @@ def _rollup_one_plan(
         if node_id in attached:
             total = _add(total, child_totals.get(attached[node_id], _empty_own()))
         working, waiting = node_time.seconds(carried[node_id])
+        working_amount = node_time.stable_amount(carried[node_id]["working"], clock, floor_each=True) if clock else {"seconds": working}
+        waiting_amount = node_time.stable_amount(
+            node_waiting.subtract(carried[node_id]["waiting"], carried[node_id]["working"]), clock,
+        ) if clock else {"seconds": waiting}
         rolled[node_id] = {
             **total,
-            "execution": {**total["execution"], "seconds": working},
-            "waiting": {"seconds": waiting},
+            "execution": {**total["execution"], **working_amount},
+            "waiting": waiting_amount,
         }
     return rolled
 
@@ -312,6 +332,7 @@ def project_with_initiatives(
 
 def project_with_commitments(
     plan_ids, commitment_ids: Collection[str], *, db=None, now: datetime | None = None, initiatives: bool = True,
+    stable: bool = False,
 ) -> tuple[dict[str, dict[str, dict]], dict[str, dict | None], usage_cost.Ledger | None]:
     """``project_with_initiatives`` plus the ``usage_cost.Ledger`` of ``commitment_ids``.
 
@@ -334,9 +355,9 @@ def project_with_commitments(
             str(row["id"]) for rows in nodes_by_plan.values() for row in rows
         ]
         dollars, ledger = usage_cost.priced_with_pending(connection, node_ids, commitment_ids)
-        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars)
+        own, spans = own_many_timed(node_ids, db=connection, now=clock, dollars=dollars, stable=stable)
     found = node_cost_initiative.totals(lineages, own) if lineages else {}
-    by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans)
+    by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans, clock=clock if stable else None)
     return by_plan, {
         row["id"]: found.get(row["id"])
         for plan_id in tree for row in nodes_by_plan[plan_id]
@@ -344,13 +365,13 @@ def project_with_commitments(
 
 
 def _roll_plans(
-    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict,
+    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict, *, clock: datetime | None = None,
 ) -> dict:
-    return _roll_plans_with_totals(tree, nodes_by_plan, own, attached, spans)[0]
+    return _roll_plans_with_totals(tree, nodes_by_plan, own, attached, spans, clock=clock)[0]
 
 
 def _roll_plans_with_totals(
-    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict,
+    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict, *, clock: datetime | None = None,
 ) -> tuple[dict, dict, dict]:
     """``_roll_plans`` plus each plan's total and merged span (its top-level nodes')."""
     by_plan: dict[str, dict[str, dict]] = {}
@@ -359,7 +380,7 @@ def _roll_plans_with_totals(
     # Each plan is rolled only after the child plans its steps carry.
     for plan_id, rows, carried in node_span_roll.plans_bottom_up(tree, nodes_by_plan, attached):
         span_roll = node_span_roll.roll_spans(rows, attached, spans, plan_spans)
-        rolled = _rollup_one_plan(own, attached, {child_id: totals[child_id] for child_id in carried}, span_roll)
+        rolled = _rollup_one_plan(own, attached, {child_id: totals[child_id] for child_id in carried}, span_roll, clock=clock)
         plan_spans[plan_id] = span_roll.plan
         by_plan[plan_id] = {
             node_id: {"own": _settled(own[node_id]),
