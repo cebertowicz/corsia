@@ -32,8 +32,8 @@ _CANDIDATES = (
     "JOIN messages sent ON sent.id=o.assistant_message_id "
     "WHERE sent.role='assistant' AND json_valid(sent.metadata) AND json_extract(sent.metadata,'$.for_user')=1 "
     "AND COALESCE(CASE WHEN json_valid(closing.metadata) THEN json_extract(closing.metadata,'$.for_user') END,0)=0 "
-    "AND json_extract(closing.metadata,'$.turn_id') IS NOT NULL "
-    "AND json_extract(closing.metadata,'$.turn_id')=json_extract(sent.metadata,'$.turn_id')"
+    "AND CASE WHEN json_valid(closing.metadata) AND json_extract(closing.metadata,'$.turn_id') IS NOT NULL "
+    "THEN json_extract(closing.metadata,'$.turn_id')=json_extract(sent.metadata,'$.turn_id') ELSE 0 END"
 )
 
 

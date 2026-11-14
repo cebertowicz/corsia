@@ -80,3 +80,17 @@ def test_only_a_repeat_in_the_same_turn_of_the_same_comment_is_dropped():
             ("closing-other-comment", "c1.2"), ("only-closing", "c1.1"),
             ("other-turn-closing", "c1.1"), ("sent", "c1.1"),
         ]
+
+
+def test_a_closing_row_with_malformed_metadata_is_kept_and_does_not_abort_the_step():
+    with closing(sqlite3.connect(":memory:")) as db:
+        initialize_schema(db)
+        _message(db, "sent", "t1", for_user=True)
+        db.execute(
+            "INSERT INTO messages(id,thread_id,role,content,metadata,created_at) "
+            "VALUES ('broken','thread','assistant','[c1.1] Moved it.','{not json','t')",
+        )
+        _answer(db, "sent")
+        _answer(db, "broken")
+        migrate_194_to_195(db)
+        assert _left(db) == [("broken", "c1.1"), ("sent", "c1.1")]
