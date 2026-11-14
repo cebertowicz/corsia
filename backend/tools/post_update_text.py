@@ -1,5 +1,5 @@
 """Shared replacement guidance and exact tool result/refusal text."""
-FOLLOW_UP = "post a new update that says only what changed"
+FOLLOW_UP = "post a new update with only what changed, without repeating the rest"
 REPLACE_RULE = (
     "Replace your own unseen updates when their subject changes; once one is seen, "
     "send a new update with only what changed; a new subject needs no replace."

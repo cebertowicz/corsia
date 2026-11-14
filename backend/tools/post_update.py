@@ -265,7 +265,7 @@ class PostUpdateTool(Tool):
         if text is None:
             return refuse("text must be non-empty after trimming.")
         if len(text) > _MAX_TEXT_LENGTH:
-            return refuse("text must be at most 2,000 characters; put longer detail in a linked document.")
+            return refuse(f"text must be at most {_MAX_TEXT_LENGTH:,} characters; put longer detail in a linked document.")
         turn_id = causal_turn_id(kwargs)
         if not turn_id:
             return refuse("The calling turn could not be resolved.")
