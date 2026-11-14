@@ -76,7 +76,8 @@ export function hasChangedTab(ws: ThreadArtifactWorkspace): boolean {
 
 /** Same document? Artifact identity decides once known; path is the fallback. */
 function sameArtifact(tab: ArtifactTab, artifactId: string | null | undefined, path: string): boolean {
-	if (tab.kind !== 'document') return false;
+	// A link tab names no file yet, so it is no document's tab.
+	if (tab.kind !== 'document' || tab.link) return false;
 	if (artifactId && tab.artifactId) return tab.artifactId === artifactId;
 	return tab.path === path;
 }

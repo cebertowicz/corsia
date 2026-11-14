@@ -92,7 +92,6 @@ def normalized_row_by_id(
         return None
 
     states = registration_states
-    projected_state = None
     if parent_thread_id is None and registration_states == OWNER_REGISTRATION_STATES:
         if identity["state"] != "active":
             states = OWNER_REGISTRATION_STATES
@@ -105,19 +104,13 @@ def normalized_row_by_id(
                 return None
             parent_thread_id = released_owner
             states = RELEASED_OWNER_REGISTRATION_STATES
-            projected_state = "archived"
     elif identity["state"] != "active":
         return None
 
     row = _joined_registration(
         db, artifact_id, states, parent_thread_id=parent_thread_id
     )
-    if row is None:
-        return None
-    projected = dict(row)
-    if projected_state is not None:
-        projected["projected_state"] = projected_state
-    return public_row_from_normalized(projected)
+    return public_row_from_normalized(row) if row else None
 
 
 def written_row(db, artifact_id: str, writer_thread_id: str) -> dict | None:
@@ -125,7 +118,7 @@ def written_row(db, artifact_id: str, writer_thread_id: str) -> dict | None:
 
     A write to a released file leaves it unowned and the writer a subscriber,
     so the write reports the writer's own registration, never the former
-    owner's archived projection that ``normalized_row_by_id`` gives readers.
+    owner's released registration that ``normalized_row_by_id`` gives readers.
     """
     row = _joined_registration(db, artifact_id, OWNER_REGISTRATION_STATES) or _joined_registration(
         db, artifact_id, RELEASED_OWNER_REGISTRATION_STATES, parent_thread_id=writer_thread_id
@@ -184,7 +177,7 @@ def public_row_from_normalized(row) -> dict:
         "title": row["title"],
         "description": row["description"],
         "path": row["path"],
-        "state": _row_value(row, "projected_state") or row["state"],
+        "state": row["state"],
         "retention": row["retention"],
         "surfacing": row["surfacing"],
         "relationship_state": row["relationship_state"],

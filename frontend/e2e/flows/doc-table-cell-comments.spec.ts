@@ -36,6 +36,31 @@ const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((e
 	}
 	throw new Error(`no "${words}" drawn`);
 }, words);
+/**
+ * Scrolls the document, if it has to, until `words` in `root` are drawn above the phone sheet that covers the bottom of the
+ * screen, so a tap on them is a tap outside the sheet. Where on the screen a table lies depends on what is drawn above it
+ * (a row more in the document's header moves it down), so the spec brings the words clear of the sheet instead of relying on
+ * where they happen to land.
+ */
+const scrollClearOfSheet = async (page: Page, root: Locator, words: string) => {
+	const sheet = page.locator('[data-adaptive-drawer] .drawer-panel');
+	// Once the first tap has closed the sheet there is nothing to be clear of.
+	if (!(await sheet.count())) return;
+	const sheetTop = await sheet.evaluate((el) => el.getBoundingClientRect().top);
+	const room = 12;
+	const behind = (await wordsIn(root, words)).bottom - (sheetTop - room);
+	if (behind <= 0) return;
+	await root.evaluate((el, by) => {
+		let scroller: Element | null = el.parentElement;
+		while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+		if (!scroller) throw new Error('nothing around the table scrolls');
+		scroller.scrollTop += by;
+	}, behind);
+	await settled(page);
+	const after = await wordsIn(root, words);
+	expect(after.bottom, `"${words}" is above the sheet (${sheetTop}) once scrolled`).toBeLessThanOrEqual(sheetTop - room + 1);
+	expect(after.y, `"${words}" is still on the screen once scrolled`).toBeGreaterThan(0);
+};
 const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
 /** Where the offer sits against the selected words: across from where they end, and its middle from their top. */
 /** Where the composer opened: its left, and its top below the selected words; on the screen when it opened in the phone's sheet. */
@@ -152,10 +177,10 @@ for (const layout of LAYOUTS) {
 			await frame(page, `05-selection-composer-${at}`);
 		});
 
-		test('a selection from below a table up into it is offered Comment where it ends, as prose\'s is', async ({ page }) => {
-			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
-			test.setTimeout(120_000);
-			await openTableDocument(page, layout);
+		// The offer sits by the rule a prose selection's does (1c7205810): above the rows the selection is drawn on, or below them
+		// near the window's top, so it never covers selected text. A selection that runs from the table down into prose is drawn from
+		// the table's top, so the offer sits above the table; it does not sit where the selection ends.
+		const selectUpIntoTable = async (page: Page) => {
 			const line = page.locator('.cm-line', { hasText: 'Paragraph below the first table.' });
 			await line.scrollIntoViewIfNeeded();
 			await line.click();
@@ -165,11 +190,46 @@ for (const layout of LAYOUTS) {
 			const offer = page.locator('.sel-comment');
 			await expect(offer, 'the selection running into the table is offered Comment').toBeVisible();
 			await expect(page.locator('.cm-md-cell-editor'), 'setup: no cell opened').toHaveCount(0);
-			const shown = await boxOf(offer), prose = await boxOf(line), table = await boxOf(page.locator('.cm-md-table table').first());
+			return { line, offer };
+		};
+		/** The boxes the selection is drawn in, as the browser draws them now. */
+		const selectedBoxes = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.cm-selectionBackground')].map((el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, right: r.right, bottom: r.bottom }; }).filter((b) => b.right > b.x && b.bottom > b.y));
+		const overlaps = (a: Box, b: Box) => a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
+
+		test('a selection from below a table up into it is offered Comment above the rows it is drawn on, as prose\'s is', async ({ page }) => {
+			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			const { offer } = await selectUpIntoTable(page);
+			const shown = await boxOf(offer), table = await boxOf(page.locator('.cm-md-table table').first());
+			expect(await offer.evaluate((el) => el.classList.contains('above')), 'above the selected rows').toBe(true);
 			expect(await offer.evaluate((el) => el.classList.contains('below')), 'not the table\'s place below it').toBe(false);
-			expect(shown.x < table.right && Math.abs(shown.y - prose.y) <= 24,
-				`beside where the selection ends, on the prose line, not in the table's margin (${JSON.stringify({ shown, prose, table })})`).toBe(true);
+			expect(shown.bottom <= table.y, `above the table the selection starts in, not beside where it ends (${JSON.stringify({ shown, table })})`).toBe(true);
+			const covered = (await selectedBoxes(page)).filter((b) => overlaps(shown, b));
+			expect(covered.length, `the offer covers no selected text (${JSON.stringify({ shown, covered })})`).toBe(0);
 			await frame(page, `05-selection-into-table-${at}`);
+		});
+
+		test('a selection into a table whose top is scrolled out of view still has its Comment offer on screen', async ({ page }) => {
+			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			// A window short enough that the document scrolls (the whole fixture fits in a tall one).
+			await page.setViewportSize({ width: layout.width, height: 480 });
+			await settled(page);
+			const { offer } = await selectUpIntoTable(page);
+			// The selection's rows now start above the visible area: scroll the table's top out of view, keeping the prose line under it on screen.
+			const table = page.locator('.cm-md-table table').first();
+			const tableTop = (await boxOf(table)).y;
+			await page.locator('.cm-scroller').first().evaluate((el, by) => { el.scrollTop += by; }, tableTop + 40);
+			await settled(page);
+			await expect(offer, 'the offer is still there').toBeVisible();
+			expect((await boxOf(table)).y, 'setup: the table\'s top is out of view').toBeLessThan(0);
+			const shown = await boxOf(offer), height = await page.evaluate(() => window.innerHeight);
+			expect(shown.y >= 0 && shown.bottom <= height, `the offer is on screen (${JSON.stringify({ shown, height })})`).toBe(true);
+			const covered = (await selectedBoxes(page)).filter((b) => overlaps(shown, b));
+			expect(covered.length, `the offer covers no selected text (${JSON.stringify({ shown, covered })})`).toBe(0);
+			await frame(page, `05-selection-into-table-scrolled-${at}`);
 		});
 
 		test('a click on a comment covering a whole cell opens the comment and the cell, and the comment stays open', async ({ page }) => {
@@ -177,7 +237,9 @@ for (const layout of LAYOUTS) {
 			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });
 			// A whole-cell comment is drawn on all of the cell's text, as a text comment is.
 			const mark = page.locator(`td [data-comment-ids*="${seeded.commentId}"]`).first();
-			const whole = page.locator('td', { has: mark });
+			// The cell is named by its place: once its editor opens, the cell no longer holds the mark, so a locator that finds
+			// the cell by the mark finds nothing.
+			const whole = cell(page, 2, 1);
 			await expect(mark, 'the comment is drawn on all of the cell\'s text').toHaveText('Plain words in a cell.');
 			const phone = layout.project === 'chromium-mobile';
 			if (phone) await mark.tap(); else await mark.click({ delay: 80 });
@@ -225,7 +287,11 @@ for (const layout of LAYOUTS) {
 				// line, so the caret goes in front of it and nowhere else. The cell wraps over several lines, so its editor has to
 				// wrap them at the same words for the click to land on the word that was drawn there.
 				const target = cell(page, 3, 1);
-				const pointAtWord = async () => { const word = await wordsIn(target, 'few'); return { x: word.x + 1, y: (word.y + word.bottom) / 2 }; };
+				const pointAtWord = async () => {
+					if (card && phone) await scrollClearOfSheet(page, target, 'few');
+					const word = await wordsIn(target, 'few');
+					return { x: word.x + 1, y: (word.y + word.bottom) / 2 };
+				};
 				const press = async () => {
 					const point = await pointAtWord();
 					if (phone) await page.touchscreen.tap(point.x, point.y);

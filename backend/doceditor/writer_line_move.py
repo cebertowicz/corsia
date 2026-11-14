@@ -1,9 +1,10 @@
-"""The writer-line owner's identity re-key for a promote.
+"""The writer-line owner's identity moves: the re-key for a promote, and the path repoint for any move.
 
 Lives beside `writer_line`, whose rules it does not touch: no line is admitted, settled,
 served or dropped here, and a moved line keeps its place in line, its saved text and its
-delivery state. The file is separate because `writer_line.py` sits at its size ratchet and
-this is a re-key. `doceditor.comment_transfer` calls `move_identity` from
+delivery state. The file is separate because `writer_line.py` sits at its size ratchet.
+`move_identity` is the re-key (a line changes identity); `repoint_lines` re-keys nothing
+(a line keeps its identity and its saved call is pointed at the file's new path). `doceditor.comment_transfer` calls `move_identity` from
 `registry.models.retire`, so the moved lines commit with the tombstone and the successor link,
 and only after it has proved the successor holds no comment state of its own -- which is why
 nothing here merges two lines or re-orders anyone.
@@ -24,11 +25,11 @@ def holds_rows(db, artifact_id: str) -> bool:
 
 
 def _repoint(ops_json: str, old_path: str | None, new_path: str | None) -> str:
-    """The saved ops with each call's `path` taken to the promoted file, the call otherwise verbatim.
+    """The saved ops with each call's `path` taken to the file's new path, the call otherwise verbatim.
 
     A saved edit or write names the file by the path its agent used, and the wake asks the agent to
-    repeat that call. The file now lives at the successor's path, so the repeat must name it; only a
-    `path` that names the source's file (as stored, or as its trailing part) is replaced.
+    repeat that call. The file now lives at its new path, so the repeat must name it; only a
+    `path` that names the old file (as stored, or as its trailing part) is replaced.
     """
     if not old_path or not new_path:
         return ops_json
@@ -41,6 +42,29 @@ def _repoint(ops_json: str, old_path: str | None, new_path: str | None) -> str:
             call["path"] = new_path
             changed = True
     return json.dumps(ops) if changed else ops_json
+
+
+def repoint_lines(db, *, artifact_id: str, old_path: str, new_path: str) -> int:
+    """Point this document's saved calls at the path it moved to, its identity unchanged; returns how many lines.
+
+    Any identity path move (a promote that carries the identity, `artifact_relocate`, a file moved outside
+    the tools) changes only the path, so no line is re-keyed; the wake still asks the agent to repeat a
+    saved call, and that call must name the file where it now is. `registry.relocate` calls this from the
+    one writer of an identity's path move.
+
+    Cost: no index covers `artifact_id`, so the SELECT reads every row of this table, the waiting lines
+    of all documents, once per actual path move and never per save; only this document's rows are
+    matched and then updated, one UPDATE each. A row exists only while an agent waits in line and
+    `settle` deletes it, so the table's size is the number of agents waiting across all documents.
+    `holds_rows` and `move_identity` in this file scan the table the same way.
+    """
+    changed = 0
+    for row in db.execute("SELECT id, ops FROM doc_comment_writer_line WHERE artifact_id=?", (artifact_id,)).fetchall():
+        ops = _repoint(str(row["ops"]), old_path, new_path)
+        if ops != str(row["ops"]):
+            db.execute("UPDATE doc_comment_writer_line SET ops=? WHERE id=?", (ops, row["id"]))
+            changed += 1
+    return changed
 
 
 def move_identity(db, *, from_artifact_id: str, to_artifact_id: str) -> int:

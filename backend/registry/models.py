@@ -38,6 +38,12 @@ from registry.registration_writer import (  # noqa: F401 — compatibility re-ex
     RegistrationOrigin,
     RetentionChangeDenied,
     register_artifact,
+    upsert_identity,
+)
+from registry.retirement_state import (  # noqa: F401 - re-exported for callers
+    identity_state,
+    retired_cause,
+    successor_id,
 )
 
 
@@ -93,34 +99,6 @@ def get_artifact(artifact_id: str, db=None) -> dict | None:
     finally:
         if not db:
             _db.close()
-
-
-def identity_state(artifact_id: str, *, db) -> str | None:
-    """The identity's own lifecycle state, whoever owns it; ``None`` only when no such identity exists."""
-    row = db.execute("SELECT state FROM artifact_identities WHERE id=?", (artifact_id,)).fetchone()
-    return row["state"] if row else None
-
-
-def retired_cause(artifact_id: str, *, db) -> str | None:
-    """The ``cause`` its latest ``retire()`` was given, or None while the identity is active."""
-    row = db.execute(
-        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
-        " THEN json_extract(metadata, '$.retired_cause') END AS cause"
-        " FROM artifact_identities WHERE id=?",
-        (artifact_id,),
-    ).fetchone()
-    return row["cause"] if row else None
-
-
-def successor_id(artifact_id: str, *, db) -> str | None:
-    """The identity ``retire()`` handed this document to, or None while the identity is active."""
-    row = db.execute(
-        "SELECT CASE WHEN state != 'active' AND json_valid(metadata)"
-        " THEN json_extract(metadata, '$.successor_id') END AS successor"
-        " FROM artifact_identities WHERE id=?",
-        (artifact_id,),
-    ).fetchone()
-    return row["successor"] if row else None
 
 
 def find_identity_by_external_ids(
@@ -309,6 +287,25 @@ def retire(
             (passive_state, now, artifact_id),
         )
         plans_public.close_retired_comment_task(_db, artifact_id, cause)
+
+
+def tombstone_promoted_path(left: dict, successor: str, *, db) -> bool:
+    """Leave a promoted tombstone at ``left``'s old path after a promote carried its identity to ``successor``.
+
+    ``left`` is the identity's row before the move. The row comes from ``upsert_identity`` and is closed by
+    ``retire()``, so it has the same cause, successor and side effects as any promote tombstone. It holds no
+    registration and no comments, so nothing moves. False when a row already sits at that path.
+    """
+    with write_transaction(db, scope="tombstone_promoted_path") as _db:
+        zone = json.loads(left["metadata"] or "{}").get("zone")
+        row, inserted = upsert_identity(
+            _db, integration=left["integration"], artifact_type=left["type"], external_id=left["external_id"],
+            title=left["title"], description=None, path=left["path"], retention=left["retention"],
+            metadata={"zone": zone} if zone else None, now=_now(),
+        )
+        if inserted:
+            retire(row["id"], tombstone=True, cause="promoted", successor=successor, db=_db)
+        return inserted
 
 
 def retire_owned_temporary(

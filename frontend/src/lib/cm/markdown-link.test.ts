@@ -311,7 +311,9 @@ describe('following a document link through the app router', () => {
 			projectId: () => 'project-1',
 			fetchRoots: vi.fn().mockResolvedValue(ROOTS),
 			fetchRevision: vi.fn().mockImplementation(async (path: string) => ({ exists: !path.endsWith('missing.md'), path, revision: 'r', size: 1, writable: true, artifact_id: null })),
+			openLoading: vi.fn(() => 'loading-1'),
 			openArtifact: vi.fn(),
+			failLoading: vi.fn(),
 			showError: vi.fn(),
 			openExternal: vi.fn().mockResolvedValue(undefined),
 			isTauri: () => false,
@@ -333,19 +335,20 @@ describe('following a document link through the app router', () => {
 		expect(opened(d)).toEqual(['/workspace/shared/documents/DECISIONS.md', '/workspace/shared/y.md', '/workspace/other/z.md']);
 	});
 
-	it('does not find a path that leaves every workspace root, and tells the person', async () => {
+	it('does not find a path that leaves every workspace root, and says so in its tab', async () => {
 		const d = deps();
 		expect(await follow('../../../../outside.md', d)).toBe('error');
 		expect(await follow('/etc/hosts', d)).toBe('error');
 		expect(d.openArtifact).not.toHaveBeenCalled();
-		expect(d.showError).toHaveBeenCalledTimes(2);
-		expect(d.showError).toHaveBeenCalledWith("Couldn't find the linked workspace document");
+		expect(vi.mocked(d.failLoading).mock.calls).toEqual([[THREAD, 'loading-1', 'unavailable'], [THREAD, 'loading-1', 'unavailable']]);
+		expect(d.showError).not.toHaveBeenCalled();
 	});
 
-	it('tells the person when the document is missing', async () => {
+	it('says so in its tab when the document is missing', async () => {
 		const d = deps();
 		expect(await follow('./missing.md', d)).toBe('error');
-		expect(d.showError).toHaveBeenCalledWith("Couldn't find the linked workspace document");
+		expect(d.failLoading).toHaveBeenCalledWith(THREAD, 'loading-1', 'unavailable');
+		expect(d.showError).not.toHaveBeenCalled();
 		expect(d.openArtifact).not.toHaveBeenCalled();
 	});
 

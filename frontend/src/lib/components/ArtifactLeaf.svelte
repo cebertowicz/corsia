@@ -8,6 +8,7 @@
 	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
+	import LinkTabLoadState from './LinkTabLoadState.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import { targetForTab } from '$lib/artifactViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -54,8 +55,10 @@
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
-		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
+		activeTab?.kind === 'document' && !activeTab.link && threadId && activeTab.status !== 'unavailable' ? viewerTarget(activeTab) : null
 	);
+	// A pressed link still resolving to a file shows the document's loading state, then its failure if it fails.
+	const linkTab = $derived(activeTab?.kind === 'document' && activeTab.link && activeTab.status !== 'unavailable' ? activeTab : null);
 	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
 	const target = $derived(showsImage ? null : showable);
 	const imageTarget = $derived(showsImage ? showable : null);
@@ -259,7 +262,7 @@
 				/>
 			</div>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
+		<div class="leaf-body" class:document-canvas={!!target || !!linkTab} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'browser' && activeTab.threadId}
 				<BrowserLeaf threadId={activeTab.threadId} />
 				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
@@ -268,11 +271,13 @@
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{#if activeTab.link}<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />{:else}<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />{/if}</svg>
 					<p>{activeTab.title} is unavailable.</p>
-					<span>It isn’t in this chat’s files.</span>
+					<span>{activeTab.link ? 'There’s no file at this link.' : 'It isn’t in this chat’s files.'}</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
+			{:else if linkTab?.link && threadId}
+				<LinkTabLoadState {threadId} instanceId={linkTab.instanceId} link={linkTab.link} title={linkTab.title} failed={linkTab.status === 'error'} />
 			{:else if imageTarget}
 				<ImageViewer
 					bind:this={imageViewer}

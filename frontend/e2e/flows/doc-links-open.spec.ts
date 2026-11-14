@@ -147,15 +147,17 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await expect.poll(() => page.evaluate(() => (window as unknown as { __opened: unknown[][] }).__opened.length)).toBe(1);
 				expect(await page.evaluate(() => (window as unknown as { __opened: unknown[][] }).__opened[0][0])).toBe(WEB_LINK);
 
-				// A target that is not there tells the person, and the canvas stays as it was.
+				// A target that is not there opens its own tab, which says so with nothing over it; closing it returns.
 				await press(link(page, 'a page that is gone'));
-				const toast = page.getByRole('status').filter({ hasText: MISSING_TOAST });
-				await expect(toast).toBeVisible();
-				await shoot('missing-toast');
+				const reason = page.getByText('nope.md is unavailable.');
+				await expect(reason).toBeInViewport();
+				await expect(page.getByText('There’s no file at this link.')).toBeInViewport();
+				await expect(page.getByRole('status').filter({ hasText: MISSING_TOAST })).toHaveCount(0);
+				await shoot('missing-tab');
+				await page.getByRole('button', { name: 'Close tab', exact: true }).click();
+				await expect(content).toContainText('Read the decisions first');
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(1);
 				else await expect(page.getByRole('button', { name: /Files \(1\)/ })).toBeVisible();
-				await toast.getByRole('button').click();
-				await expect(toast).toHaveCount(0);
 
 				// Follow the link at the bottom of a scrolled document into a second tab.
 				// The editor draws only the lines near the viewport, so scroll first and let the link render.

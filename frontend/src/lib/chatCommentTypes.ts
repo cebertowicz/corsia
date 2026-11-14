@@ -29,3 +29,17 @@ export interface ChatComment extends Delivery {
 	created_at: string;
 	answers: ChatCommentAnswer[];
 }
+
+/**
+ * An agent answer read here stays read when a page fetched before the read arrives after it. The server's seen mark only
+ * moves forward and an answer's time never changes, so a read answer never turns unread again; only a stale page says so.
+ */
+export function keepReadAnswers(existing: ChatComment[] | undefined, incoming: ChatComment[] | undefined): ChatComment[] | undefined {
+	if (!existing?.length || !incoming?.length) return incoming;
+	const key = (answer: ChatCommentAnswer) => answer.author_kind === 'agent' ? `${answer.user_message_id}:${answer.cid}:${answer.assistant_message_id}` : null;
+	const read = new Set(existing.flatMap(comment => comment.answers.filter(answer => !answer.unread).map(key).filter(Boolean)));
+	const staleUnread = (answer: ChatCommentAnswer) => answer.unread && read.has(key(answer));
+	return incoming.map(comment => comment.answers.some(staleUnread)
+		? { ...comment, answers: comment.answers.map(answer => staleUnread(answer) ? { ...answer, unread: false } : answer) }
+		: comment);
+}

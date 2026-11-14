@@ -1,0 +1,309 @@
+"""A write or edit that names the path a promote left points at the promoted document."""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from registry import durable_writes, models
+from registry.shared_write_errors import PromotedPathRefused
+from tests.test_durable_writes import _promote, _working_file
+from tests.test_durable_writes import durable_scope as durable_scope
+
+MOVED = "This file was promoted to projects/alpha/shared/planning/{name}; {verb} it there{more}."
+WRITE_MORE = ", or use a new name for a different file"
+
+
+def _promoted(durable_scope, name):
+    """A working file promoted to shared/planning as a new identity: the old path is gone and its tombstone has a successor.
+
+    The file is edited outside CORSIA first (``stale``), so the promote cannot carry its identity and tombstones the old
+    one. ``_carried`` is the other case, where the identity moves and a tombstone is inserted at the old path.
+    """
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, name, stale=True)
+    successor_id = _promote(workspace, thread_id, db, source)
+    return workspace, thread_id, db, source, source_id, successor_id
+
+
+def _carried(durable_scope, name):
+    """A working file promoted with its own identity: same id at the new path, plus the tombstone left at the old one."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, name)
+    assert _promote(workspace, thread_id, db, source) == source_id
+    return workspace, thread_id, db, source, source_id
+
+
+def _left_rows(db, source_id):
+    return db.execute(
+        "SELECT * FROM artifact_identities WHERE id != ? AND json_extract(metadata,'$.retired_cause')='promoted'",
+        (source_id,),
+    ).fetchall()
+
+
+def _write(workspace, thread_id, path):
+    return durable_writes.write_text(
+        path, "replayed\n", thread_id=thread_id, project_id="project-alpha", workspace=workspace,
+    )
+
+
+def test_a_write_to_the_path_a_promote_left_is_refused_and_creates_nothing(durable_scope):
+    workspace, thread_id, _db, source, _source_id, _successor = _promoted(durable_scope, "left.md")
+    assert not source.exists()
+
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+
+    assert str(refused.value) == MOVED.format(name="left.md", verb="write", more=WRITE_MORE)
+    assert not source.exists()
+
+
+def test_a_persons_own_save_to_the_path_a_promote_left_is_not_refused(durable_scope):
+    """The refusal guards an agent's replayed call; the document save API's own write (``direct_user``) is
+    answered as on dev, with the ownership decision the caller then writes under, never a refusal."""
+    workspace, thread_id, _db, source, _source_id, _successor = _promoted(durable_scope, "person.md")
+    assert not source.exists()
+
+    durable_writes.write_text(
+        source, "mine\n", thread_id=thread_id, project_id="project-alpha", workspace=workspace, direct_user=True,
+    )
+
+    with pytest.raises(PromotedPathRefused):
+        _write(workspace, thread_id, source)
+
+
+def test_the_pointer_names_the_document_the_comments_moved_to(durable_scope):
+    """The registry's successor link, not the path text, decides where the pointer goes."""
+    workspace, thread_id, db, source, source_id, successor_id = _promoted(durable_scope, "linked.md")
+    assert models.successor_id(source_id, db=db) == successor_id
+
+    with pytest.raises(PromotedPathRefused, match="projects/alpha/shared/planning/linked.md"):
+        _write(workspace, thread_id, source)
+
+
+def test_a_path_whose_file_was_deleted_still_takes_a_write(durable_scope):
+    """A plain delete leaves a tombstone with no successor, and its path is writable as before."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "gone.md")
+    source.unlink()
+    models.retire(source_id, tombstone=True, cause="file_gone", db=db)
+    db.commit()
+
+    assert _write(workspace, thread_id, source) is None
+
+
+def test_a_path_never_registered_takes_a_write(durable_scope):
+    from core.workspace_layout import resolve_thread_working_root
+
+    workspace, project_root, thread_id, _db = durable_scope
+    fresh = resolve_thread_working_root(project_root, thread_id) / "new.md"
+
+    assert _write(workspace, thread_id, fresh) is None
+
+
+def test_a_path_a_promote_left_is_writable_once_the_promoted_document_is_gone(durable_scope):
+    """With no live successor there is nowhere to point, so the write is not refused."""
+    workspace, thread_id, db, source, _source_id, successor_id = _promoted(durable_scope, "orphan.md")
+    models.retire(successor_id, tombstone=True, cause="file_gone", db=db)
+    db.commit()
+
+    assert _write(workspace, thread_id, source) is None
+
+
+def test_a_path_that_holds_a_file_again_is_not_refused(durable_scope):
+    """The refusal is for a missing file only; a file at the path is an ordinary write."""
+    workspace, thread_id, _db, source, _source_id, _successor = _promoted(durable_scope, "back.md")
+    source.write_text("restored\n", encoding="utf-8")
+
+    _write(workspace, thread_id, source)  # raises PromotedPathRefused if the refusal fired on a present file
+
+
+@pytest.fixture(autouse=True)
+def _tools_reach_the_workspace(durable_scope, monkeypatch):
+    from tools import sandbox_config
+
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [durable_scope[0].resolve()])
+
+
+def _edit(workspace, thread_id, path, tool_cls, **arguments):
+    tool = tool_cls(workspace=workspace)
+    return asyncio.run(tool.execute(path=str(path), _thread_id=thread_id, _thread_project_id="project-alpha", **arguments))
+
+
+def test_edit_file_on_the_path_a_promote_left_points_at_the_document(durable_scope):
+    from tools.filesystem_edit import EditFileTool
+
+    workspace, thread_id, _db, source, *_ = _promoted(durable_scope, "edit.md")
+
+    result = _edit(workspace, thread_id, source, EditFileTool, old_string="Launch", new_string="Ship")
+
+    assert result == "Error: " + MOVED.format(name="edit.md", verb="edit", more="")
+    assert not source.exists()
+
+
+def test_multi_edit_on_the_path_a_promote_left_points_at_the_document(durable_scope):
+    from tools.filesystem_edit import MultiEditTool
+
+    workspace, thread_id, _db, source, *_ = _promoted(durable_scope, "multi.md")
+
+    result = _edit(
+        workspace, thread_id, source, MultiEditTool,
+        edits=[{"old_string": "Launch", "new_string": "Ship"}],
+    )
+
+    assert result == "Error: " + MOVED.format(name="multi.md", verb="edit", more="")
+
+
+def test_edit_file_on_a_deleted_path_keeps_the_plain_not_found_error(durable_scope):
+    from tools.filesystem_edit import EditFileTool
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "plain.md")
+    source.unlink()
+    models.retire(source_id, tombstone=True, cause="file_gone", db=db)
+    db.commit()
+
+    result = _edit(workspace, thread_id, source, EditFileTool, old_string="Launch", new_string="Ship")
+
+    assert result == f"Error: File not found: {source}"
+
+
+def test_a_carried_promote_points_saved_calls_at_the_new_path(durable_scope):
+    """A promote that keeps the identity changes only its path; the saved call a wake repeats must name the new one."""
+    import json
+
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "carried.md")
+    user_id = str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0])
+    ops = [{"call": {"path": str(source), "old_string": "Launch", "new_string": "Ship"}}]
+    db.execute(
+        """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
+           VALUES ('line-carried','root-carried',?,?,?,?,'2026-11-13T00:00:00+00:00')""",
+        (source_id, thread_id, user_id, json.dumps(ops)),
+    )
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == source_id
+
+    saved = json.loads(db.execute("SELECT ops FROM doc_comment_writer_line WHERE id='line-carried'").fetchone()[0])
+    assert saved[0]["call"]["path"].endswith("projects/alpha/shared/planning/carried.md")
+    assert saved[0]["call"]["old_string"] == "Launch"
+
+
+def test_a_path_outside_every_registrable_root_is_not_a_promoted_path(durable_scope, tmp_path):
+    """A path no registry row can describe (no identity at all) is never refused, and nothing raises."""
+    from registry.promoted_path import promoted_to
+
+    assert promoted_to(tmp_path / "elsewhere" / "note.md") is None
+
+
+def test_a_workspace_selection_that_disagrees_with_the_workspace_fails_loudly(durable_scope, monkeypatch):
+    """The refusal never goes quiet on a misconfigured process: the selection error reaches the caller."""
+    from infra import config
+    from registry.promoted_path import promoted_to
+
+    workspace = durable_scope[0]
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace.parent))
+
+    with pytest.raises(ValueError, match="different selected root"):
+        promoted_to(workspace / "projects" / "alpha" / "missing.md")
+
+
+def test_a_write_to_the_path_a_carried_promote_left_is_refused_and_creates_nothing(durable_scope):
+    workspace, thread_id, _db, source, _source_id = _carried(durable_scope, "kept.md")
+    assert not source.exists()
+
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+
+    assert str(refused.value) == MOVED.format(name="kept.md", verb="write", more=WRITE_MORE)
+    assert not source.exists()
+
+
+def test_edit_file_on_the_path_a_carried_promote_left_points_at_the_document(durable_scope):
+    from tools.filesystem_edit import EditFileTool
+
+    workspace, thread_id, _db, source, _source_id = _carried(durable_scope, "kept-edit.md")
+
+    result = _edit(workspace, thread_id, source, EditFileTool, old_string="Launch", new_string="Ship")
+
+    assert result == "Error: " + MOVED.format(name="kept-edit.md", verb="edit", more="")
+
+
+def test_the_tombstone_a_carried_promote_leaves_is_one_unlisted_row_naming_the_carried_identity(durable_scope):
+    _workspace, _thread_id, db, _source, source_id = _carried(durable_scope, "row.md")
+
+    (left,) = _left_rows(db, source_id)
+
+    assert left["state"] == "tombstone"
+    assert models.successor_id(left["id"], db=db) == source_id
+    assert models.retired_cause(left["id"], db=db) == "promoted"
+    assert left["external_id"] != db.execute(
+        "SELECT external_id FROM artifact_identities WHERE id=?", (source_id,)
+    ).fetchone()["external_id"]
+    assert db.execute("SELECT COUNT(*) FROM artifact_registrations WHERE artifact_id=?", (left["id"],)).fetchone()[0] == 0
+    assert db.execute("SELECT state FROM artifact_identities WHERE id=?", (source_id,)).fetchone()["state"] == "active"
+
+
+def test_a_source_stored_under_its_legacy_path_id_still_gets_the_tombstone_and_the_promote_note(durable_scope):
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "legacy.md")
+    db.execute("UPDATE artifact_identities SET external_id=? WHERE id=?", (str(source.resolve()), source_id))
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == source_id
+
+    (left,) = _left_rows(db, source_id)
+    assert left["state"] == "tombstone" and left["external_id"] == str(source.resolve())
+    assert models.successor_id(left["id"], db=db) == source_id
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+    assert str(refused.value) == MOVED.format(name="legacy.md", verb="write", more=WRITE_MORE)
+    summary, reason = _relocated_change(db, source_id)
+    assert "by the promote tool" in summary and reason == "promoted"
+
+
+def test_a_failed_registration_leaves_no_tombstone_and_keeps_the_identity_at_the_old_path(durable_scope, monkeypatch):
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "rollback.md")
+    before = db.execute("SELECT path, external_id FROM artifact_identities WHERE id=?", (source_id,)).fetchone()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("registration failed after the move")
+
+    monkeypatch.setattr(durable_writes, "record_post_write_events", fail)
+    with pytest.raises(RuntimeError, match="registration failed after the move"):
+        _promote(workspace, thread_id, db, source)
+
+    assert _left_rows(db, source_id) == []
+    after = db.execute("SELECT path, external_id FROM artifact_identities WHERE id=?", (source_id,)).fetchone()
+    assert tuple(after) == tuple(before)
+
+
+def _relocated_change(db, artifact_id):
+    import json
+
+    row = db.execute(
+        "SELECT summary, details_json FROM context_change_journal WHERE object_id=? AND change_kind='relocated'",
+        (artifact_id,),
+    ).fetchone()
+    return row["summary"], json.loads(row["details_json"])["provenance"]["reason"]
+
+
+def test_a_carried_promote_says_it_was_promoted_and_records_a_promote_reason(durable_scope):
+    _workspace, _thread_id, db, source, source_id = _carried(durable_scope, "said.md")
+
+    summary, reason = _relocated_change(db, source_id)
+
+    assert "by the promote tool" in summary and "outside the file tools" not in summary
+    assert str(source) in summary
+    assert reason == "promoted"
+
+
+def test_a_move_outside_the_tools_keeps_the_outside_move_text_and_reason(durable_scope):
+    from registry.moved_files import recover_moved_file_identity
+
+    workspace, root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "outside.md")
+    target = root / "shared" / "planning" / "outside.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(target)
+
+    assert recover_moved_file_identity(target, actor_thread_id=thread_id, db=db) is not None
+
+    summary, reason = _relocated_change(db, source_id)
+    assert "was moved to" in summary and "outside the file tools; it is still yours." in summary
+    assert reason == "moved_outside_tools"
