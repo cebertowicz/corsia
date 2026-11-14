@@ -1,5 +1,6 @@
 """Shared replacement guidance and exact tool result/refusal text."""
-FOLLOW_UP = "post a new update with only what changed, without repeating the rest"
+FOLLOW_UP = "post a new update that says only what changed"
+SEEN_FOLLOW_UP = "Post a new update with only what changed, without repeating the rest"
 REPLACE_RULE = (
     "Replace your own unseen updates when their subject changes; once one is seen, "
     "send a new update with only what changed; a new subject needs no replace."
@@ -32,9 +33,9 @@ def seen_refusal(message_id, verdict):
     """Name known viewing evidence or explicitly say unknown counts as seen."""
     if verdict.reason == "unknown":
         return (f"Whether {message_id} was seen is unknown ({verdict.unknown_reason}); "
-                f"it counts as seen. {FOLLOW_UP.capitalize()}. A new subject needs no replace.")
+                f"it counts as seen. {SEEN_FOLLOW_UP}. A new subject needs no replace.")
     return (f"{message_id} was seen at {local_time(verdict.at)} ({REASONS[verdict.reason]}). "
-            f"{FOLLOW_UP.capitalize()}. A new subject needs no replace.")
+            f"{SEEN_FOLLOW_UP}. A new subject needs no replace.")
 
 
 def first_line(text):
