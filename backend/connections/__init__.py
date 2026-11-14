@@ -129,9 +129,10 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
     """Probe the resolved ``gh`` and store GitHub's row; False if the probe failed.
 
     Startup stores a failed probe as needs_auth. The model-source recheck keeps
-    the last stored row instead and reports itself incomplete.
+    the last stored row instead and reports itself incomplete. Only an answered
+    check that found no GitHub login at all marks the row ``NO_OWN_LOGIN``.
     """
-    from connections.github_signin import UPDATE_GH_REASON, GhUpdateRequired
+    from connections.github_signin import NO_OWN_LOGIN, UPDATE_GH_REASON, GhUpdateRequired
     from connections.models import (
         SOURCE_CHECK_KEY,
         ConnectionStatus,
@@ -142,7 +143,7 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
     from connections.source_state import UNVERIFIED, resolve_check
 
     gh_cfg, gh_bin = resolve_builtin_binary("github", db=db)
-    gh_cfg = {k: v for k, v in gh_cfg.items() if k != SOURCE_CHECK_KEY}
+    gh_cfg = {k: v for k, v in gh_cfg.items() if k not in (SOURCE_CHECK_KEY, NO_OWN_LOGIN)}
     update_needed = False
     try:
         authed, login = _gh_status(gh_bin) if gh_bin else (False, None)
@@ -162,11 +163,14 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
         gh_status = ConnectionStatus.AVAILABLE
     else:
         gh_status = ConnectionStatus.NEEDS_AUTH
+    # Not installed, or answered with no login listed: the person has no GitHub sign-in here.
+    no_login = not update_needed and (not gh_bin or (authed is False and not login))
     upsert_connection(
         type=ConnectionType.CLI,
         provider="github",
         # Only a definite login replaces the stored one: the agents' account compares against it.
-        config={**gh_cfg, "binary": gh_bin or "gh", **({"login": login} if authed and login else {})},
+        config={**gh_cfg, "binary": gh_bin or "gh", **({"login": login} if authed and login else {}),
+                **({NO_OWN_LOGIN: True} if no_login else {})},
         status=gh_status,
         db=db,
     )
