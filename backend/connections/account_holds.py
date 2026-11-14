@@ -78,8 +78,11 @@ def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
 def affected_thread_ids(account_id: str, *, db) -> list[str]:
     """Current subjects resolved through the one account-selection owner.
 
-    One read names every candidate with its project and its binding row; the owner
-    then answers from those facts, so the walk reads nothing per thread.
+    One read names every candidate with its project and its binding row, and the owner answers from
+    those facts. A candidate whose next turn moved off the account it is bound to is then also
+    judged by that account's hold reason, which costs one account read and one policy read per such
+    candidate: both answer from the scoped read memo the caller already opened, and only an account
+    still signed in reaches the readiness evaluator's home check.
     """
     from connections.account_policy import scoped_turn_account
 
@@ -101,6 +104,18 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
                                            account_id=None, model=str(row['model']), db=db, binding=binding)
         if selected == account_id:
             affected.append(str(row['id']))
+        elif row['project_id'] != '' and row['bound'] is not None and str(row['bound']) == account_id:
+            # The claim moves off its own account only for a project denial or a usage limit, so any
+            # other reason keeps this thread on the account being changed: it is a subject of the
+            # change even though the next turn runs elsewhere. A literal empty project is left to
+            # the canonical selection, which already answers it as a missing project, not a subject.
+            from connections.account_rollover import NOT_PERMITTED
+
+            reason = _binding_hold({'account_id': account_id, 'provider': provider}, missing=None,
+                                   project=row['project_id'], model=str(row['model']),
+                                   provider=provider, db=db)
+            if reason not in (None, NOT_PERMITTED):
+                affected.append(str(row['id']))
     return affected
 
 

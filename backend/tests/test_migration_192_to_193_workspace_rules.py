@@ -26,7 +26,7 @@ def _observe(db, rule_id, scope):
 
 
 def test_migration_preserves_rows_indexes_and_triggers_and_accepts_workspace():
-    assert SCHEMA_VERSION == 193
+    assert SCHEMA_VERSION == 194
     assert MIGRATIONS[192] is migrate_192_to_193
     assert scope_label(None) == WORKSPACE_SCOPE_ID
     assert scope_label('abc') == 'project:abc'
