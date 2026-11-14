@@ -66,7 +66,11 @@ ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_bulk_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_bulk_ms DOUBLE;
-CREATE INDEX IF NOT EXISTS idx_request_slow_ts ON request_slow (ts);
+-- request_slow has no index. Nothing in the app reads it, the nightly age prune is
+-- a range delete that row-group min/max already narrows, and deleting through
+-- the old ts index failed ('Failed to delete all rows from index'), invalidating
+-- the shared connection so every later flush failed until restart.
+DROP INDEX IF EXISTS idx_request_slow_ts;
 """
 
 
