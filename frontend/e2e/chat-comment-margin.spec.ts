@@ -75,10 +75,25 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	// The highlight picks its card instead of opening a popover, as a highlight picks a card in a document, and the text clicked
 	// stays where it was: the column is already up, so picking moves the card to the text, never the text.
 	const highlight = row.locator('.cm-comment-anchor').filter({ hasText: QUOTE });
+	// Every frame from just before the pick until its card has settled: the transcript's scroll and the clicked text's line.
+	await highlight.evaluate((anchor) => {
+		const scroller = document.querySelector<HTMLElement>('.messages')!;
+		const frames: { scrollTop: number; y: number }[] = [];
+		const start = performance.now();
+		const step = () => {
+			frames.push({ scrollTop: scroller.scrollTop, y: anchor.getBoundingClientRect().top });
+			if (performance.now() - start < 1500) requestAnimationFrame(step);
+		};
+		step();
+		(window as unknown as { pickFrames: typeof frames }).pickFrames = frames;
+	});
 	await highlight.click();
 	await expect(card).toHaveClass(/selected/);
 	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
-	await page.waitForTimeout(500);
+	await page.waitForTimeout(1500);
+	const frames = await page.evaluate(() => (window as unknown as { pickFrames: { scrollTop: number; y: number }[] }).pickFrames);
+	const moved = frames.filter((frame) => Math.abs(frame.scrollTop - frames[0].scrollTop) > 0.5 || Math.abs(frame.y - frames[0].y) > 0.5);
+	expect(moved, `the transcript holds still on every frame of the pick (${frames.length} frames from ${JSON.stringify(frames[0])})`).toEqual([]);
 	expect(Math.abs((await highlight.boundingBox())!.y - mark.y), 'the clicked text stays put').toBeLessThanOrEqual(2);
 	await capture(page, 'chat-margin-1920');
 

@@ -18,6 +18,8 @@ afterEach(() => {
 
 it('scrolls a picked card on the canvas that is taller than the window until its Send button is above the window bottom', () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	// jsdom draws nothing; the column here is drawn on the canvas.
+	vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
 	// A wide document (1440 x 900): the editor's scroller sits under the 100px header, and the picked card holds a 1085px reply.
 	const bounds = document.createElement('div');
 	bounds.innerHTML = '<div class="cm-scroller"><div class="cm-content"></div></div>';
