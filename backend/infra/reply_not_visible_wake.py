@@ -9,6 +9,9 @@ any comment answers tagged in them are placed in the same write; a
 woken Turn that leaves no words of its own (it errored first) shows the words it
 was woken about instead.
 
+The original Turn's check (``_original_turn_replied``) decides whether to wake; the woken
+Turn's (``_woken_turn_replied``) is any message sent after the nudge.
+
 Before any person message, the delivered first-run event can anchor the same rule.
 Both run inside the terminal write (``automation.turn_end_effects``). A person's
 Stop records no Turn end, so it never nudges; an error before any nudge is the
@@ -60,6 +63,15 @@ def nudge_text(hhmm: str, hidden: str | None) -> str:
         "send a visible response, please use post_update now. If no reply to their last "
         "message was necessary or expected, DO NOT SEND AN UPDATE. "
         f"Instead, answer with exactly {NO_REPLY} and nothing else."
+    )
+
+
+def comment_nudge_text(cids: list[str]) -> str:
+    """The wake for a comment whose tagged answer is not in its thread; the person did get an update."""
+    tags = " ".join(f"[{cid}]" for cid in cids)
+    return (
+        f"Your answer to the comment {tags} is not in its thread. Send it with post_update, "
+        f"starting with [{cids[0]}] and then your answer."
     )
 
 
@@ -124,26 +136,29 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
     return str(visible).strip()
 
 
-def _replied_after(
-    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
-) -> bool:
-    """A message sent for the person after theirs, unless it leaves a comment of theirs unanswered.
-
-    A comment is left unanswered when words the person was not sent tag it and no answer
-    to it shows in its thread (``SHOWN_ANSWERS_FROM``); the Turn still owes that answer.
-    An update that answers no comment and tags none leaves nothing owed.
-    """
-    sent = db.execute(
+def _sent_after(db: sqlite3.Connection, thread_id: str, after_seq: int) -> bool:
+    return db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
-        (thread_id, person["seq"]),
+        (thread_id, after_seq),
     ).fetchone() is not None
-    return sent and not _tagged_comment_unanswered(db, thread_id, person)
 
 
-def _tagged_comment_unanswered(
+def _original_turn_replied(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
-    """Words the person was not sent tag one of this message's comments with no answer shown."""
+    """Something was sent after the message and no comment of it is left unanswered."""
+    return _sent_after(db, thread_id, person["seq"]) and not _unanswered_cids(db, thread_id, person)
+
+
+def _woken_turn_replied(db: sqlite3.Connection, thread_id: str, nudge_seq: int) -> bool:
+    """Anything sent after the nudge, tagged or not: the wake fires once, so no second ask."""
+    return _sent_after(db, thread_id, nudge_seq)
+
+
+def _unanswered_cids(
+    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
+) -> list[str]:
+    """Comments that words the person was not sent tag, with no answer shown in their thread."""
     row = db.execute(
         "SELECT metadata, CASE WHEN json_valid(metadata) "
         "THEN COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) ELSE 0 END "
@@ -151,7 +166,7 @@ def _tagged_comment_unanswered(
         (person["id"], thread_id),
     ).fetchone()
     if row is None or row[1] == 0:
-        return False
+        return []
     tagged = {
         cid
         for (content,) in db.execute(
@@ -163,18 +178,18 @@ def _tagged_comment_unanswered(
         if has_comment_cid(row[0], cid)
     }
     if not tagged:
-        return False
+        return []
     shown = {
         cid for (cid,) in db.execute(
             f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.user_message_id=?",
             (thread_id, person["id"]),
         )
     }
-    return not tagged <= shown
+    return sorted(tagged - shown)
 
 
 def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
-    """True when ``turn_id`` ran a nudge and the message it was about now shows a reply."""
+    """True when ``turn_id`` ran a nudge and a message was sent after the one it was about."""
     nudge = db.execute(
         "SELECT json_extract(metadata,'$.person_message_id') FROM messages "
         "WHERE active_turn_id=? AND thread_id=? AND json_valid(metadata) "
@@ -183,10 +198,8 @@ def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
     ).fetchone()
     if nudge is None or nudge[0] is None:
         return False
-    person = db.execute("SELECT id, seq FROM messages WHERE id=?", (nudge[0],)).fetchone()
-    if person is None or person[1] is None:
-        return False
-    return _replied_after(db, thread_id, {"id": person[0], "seq": person[1]})
+    person = db.execute("SELECT seq FROM messages WHERE id=?", (nudge[0],)).fetchone()
+    return person is not None and person[0] is not None and _sent_after(db, thread_id, person[0])
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:
@@ -242,7 +255,7 @@ def _settle_nudged_turn(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row,
 ) -> None:
     """At the nudged Turn's end: NO_REPLY stays hidden; any other last words show."""
-    if _replied_after(db, thread_id, person):
+    if _woken_turn_replied(db, thread_id, nudge["seq"]):
         logger.info("focus.nudge_settled thread={} result=sent", thread_id)
         return
     # A woken Turn that wrote nothing (it errored first) leaves the words it was woken about.
@@ -285,8 +298,10 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     from infra.onboarding_events import first_run_message_id
 
     words = (_unseen(db, thread_id, hidden) or None) if hidden is not None else None
+    owed = _unanswered_cids(db, thread_id, person) if _sent_after(db, thread_id, person["seq"]) else []
     text = (
         _first_run_nudge_text(words) if person["id"] == first_run_message_id(thread_id)
+        else comment_nudge_text(owed) if owed
         else nudge_text(_clock(str(person["created_at"])), words)
     )
     try:
@@ -324,7 +339,7 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
         return False  # The person stopped the Turn their message started.
     if status == "running" and person["active_turn_id"] != ending_turn:
         return False  # A later Turn is answering it; that Turn's end decides.
-    if _replied_after(db, thread_id, person):
+    if _original_turn_replied(db, thread_id, person):
         return False
     if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.
@@ -366,7 +381,7 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
     try:
         with write_transaction(db, scope="reply_not_visible_stop") as connection:
             nudged = _nudged_by(connection, thread_id, turn_id) if _focus_on(connection) else None
-            if nudged is None or _replied_after(connection, thread_id, nudged[0]):
+            if nudged is None or _woken_turn_replied(connection, thread_id, nudged[1]["seq"]):
                 return
             own = _last_hidden(connection, thread_id, nudged[1]["seq"])
             if own is not None and str(own["content"]).strip() == NO_REPLY:

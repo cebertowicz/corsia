@@ -15,7 +15,7 @@ import pytest
 
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
-from infra.reply_not_visible_wake import EVENT, nudge_text
+from infra.reply_not_visible_wake import EVENT, comment_nudge_text, nudge_text
 
 pytestmark = pytest.mark.focus_nudge
 
@@ -112,6 +112,13 @@ def test_the_text_is_the_approved_wording() -> None:
         "visible response, please use post_update now. If no reply to their last message was "
         "necessary or expected, DO NOT SEND AN UPDATE. Instead, answer with exactly NO_REPLY "
         "and nothing else."
+    )
+
+
+def test_the_comment_wake_names_the_comments_and_asks_for_a_tagged_update() -> None:
+    assert comment_nudge_text(["c4.1", "c4.2"]) == (
+        "Your answer to the comment [c4.1] [c4.2] is not in its thread. Send it with post_update, "
+        "starting with [c4.1] and then your answer."
     )
 
 
@@ -525,14 +532,50 @@ async def test_an_untagged_update_beside_tagged_closing_text_leaves_the_comment_
     monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
     cid = _comment_on(db, "")
     _say(db, "Moved the meeting.", for_user=True)
-    closing = f"[{cid}] Yes, Friday is skipped."
-    _say(db, closing)
+    _say(db, f"[{cid}] Yes, Friday is skipped.")
 
     effects = await _end(db)
 
     (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", closing))
+    # The person did get an update, so the wake does not say that no reply is visible.
+    assert nudge["content"].endswith(comment_nudge_text([cid]))
+    assert "No reply is visible" not in nudge["content"]
     assert effects.drives.count(_THREAD) == 1
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_answering_with_an_untagged_update_has_replied(db) -> None:
+    # Turn 1's tagged closing text is still unanswered, but the wake fires once: any update the
+    # woken Turn sends settles it. Nothing is flipped and Turn 1's closing text is not re-shown.
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    first_closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    _say(db, "Yes, Friday is skipped.", turn="t2", for_user=True)
+    done = _say(db, "Done.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert not _for_user(db, done)
+    assert not _for_user(db, first_closing)
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+    assert len(_nudges(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_woken_turn_that_sent_an_untagged_update_shows_nothing_more(db) -> None:
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    first_closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    _say(db, "Yes, Friday is skipped.", turn="t2", for_user=True)
+
+    await _stop(db, "t2")
+
+    assert not _for_user(db, first_closing)
     assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
 
 
@@ -600,11 +643,9 @@ async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, mon
     # answer with it, so the tagged closing text still owes one and the Turn is nudged.
     import infra.reply_not_visible_wake as wake
 
-    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
     cid = _comment_on(db, "")
     _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
-    closing = f"[{cid}] Moved. Tonight runs at 4 AM."
-    _say(db, closing)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
     assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
     db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
     db.commit()
@@ -612,5 +653,5 @@ async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, mon
     effects = await _end(db)
 
     (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", closing))
+    assert nudge["content"].endswith(comment_nudge_text([cid]))
     assert effects.drives.count(_THREAD) == 1
