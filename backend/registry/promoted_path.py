@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from infra import config
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from infra.workspace_paths import resolve_registered_path
 from registry import models, service
 from registry.document_ownership import document_write_authority
@@ -52,7 +55,10 @@ def promoted_to(path: str | Path, *, db=None) -> str | None:
 def moved_message(path: str | Path, verb: str, *, db=None) -> str | None:
     """The one sentence plus next step for a caller that named a promoted-away path, else None."""
     where = promoted_to(path, db=db)
-    return None if where is None else f"This file was promoted to {where}; {verb} it there."
+    if where is None:
+        return None
+    then = f"{verb} it there" + (", or use a new name for a different file" if verb == "write" else "")
+    return f"This file was promoted to {where}; {then}."
 
 
 def write_authority_unless_promoted(
@@ -70,3 +76,41 @@ def write_authority_unless_promoted(
     return document_write_authority(
         target, workspace=workspace, thread_id=thread_id, direct_user=direct_user, db=db,
     )
+
+
+def mark_carried(prepared, source_identity):
+    """``(prepared, left)`` for a promote registering ``source_identity``'s file at its new path.
+
+    A recorded hash that matches makes registration move the source's own identity there; ``left`` is
+    that identity's row as it stood before, and the recovery is marked as the promote's so its change
+    note says so. Any other registration returns ``(prepared, None)``.
+    """
+    moved = prepared.moved_from
+    if moved is None or source_identity is None or moved.identity["external_id"] != source_identity.external_id:
+        return prepared, None
+    return replace(prepared, moved_from=replace(moved, by_promote=True)), moved.identity
+
+
+def settle_promoted_source(source_identity, left, artifact: dict, *, db) -> None:
+    """Close the source's old path after a promote registered ``artifact``, in the registration's transaction.
+
+    A new identity (the recorded hash did not match) tombstones the old row and takes its comments. A
+    carried one (``artifact`` is ``left``'s own id) left no row at the old path, so one is inserted: a
+    promoted tombstone naming it, with no registration, so the pane and ``artifact_list`` never show it,
+    and no comments, so nothing moves. A source never registered leaves nothing.
+    """
+    old = service.find_file_identity(source_identity, db=db) if source_identity is not None else None
+    if old is not None:
+        models.retire(old["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
+    elif left is not None and artifact["id"] == left["id"]:
+        meta = json.loads(left["metadata"]) if left.get("metadata") else {}
+        meta = {k: meta[k] for k in ("zone",) if k in meta}
+        meta |= {"retired_cause": "promoted", "successor_id": artifact["id"]}
+        with write_transaction(db, scope="tombstone_promoted_path") as _db:
+            now = models._now()
+            _db.execute(
+                "INSERT INTO artifact_identities(id,integration,type,external_id,title,path,state,retention,"
+                "metadata,created_at,updated_at) VALUES (?,?,?,?,?,?,'tombstone',?,?,?,?)",
+                (str(uuid.uuid4())[:12], left["integration"], left["type"], left["external_id"], left["title"],
+                 left["path"], left["retention"], json.dumps(meta), now, now),
+            )
