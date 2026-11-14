@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
+import time
 
 import pytest
 from loguru import logger
@@ -81,12 +84,15 @@ async def test_graph_timeout_is_a_warning(tmp_path, monkeypatch):
     git(repo, "init", "-q")
     git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
     monkeypatch.setattr(config, "WORKSPACE", str(repo))
-    run = subprocess.run
-    def timeout_graph(args, **kwargs):
-        if "commit-graph" in args:
-            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-        return run(args, **kwargs)
-    monkeypatch.setattr(nightly.subprocess, "run", timeout_graph)
+    popen = subprocess.Popen
+
+    class TimeoutGraph(popen):
+        def communicate(self, *args, **kwargs):
+            if "commit-graph" in self.args and kwargs.get("timeout") != 5:
+                raise subprocess.TimeoutExpired(self.args, kwargs["timeout"])
+            return super().communicate(*args, **kwargs)
+
+    monkeypatch.setattr(nightly.subprocess, "Popen", TimeoutGraph)
     records = []
     sink = logger.add(lambda message: records.append(message.record))
     try:
@@ -94,3 +100,47 @@ async def test_graph_timeout_is_a_warning(tmp_path, monkeypatch):
     finally:
         logger.remove(sink)
     assert any(r["level"].name == "WARNING" and "outcome=stopped at bound commits=1 filters=unknown elapsed_ms=" in r["message"] for r in records)
+
+
+@pytest.mark.asyncio
+async def test_interrupted_real_graph_write_releases_lock_and_next_run_succeeds(tmp_path, monkeypatch):
+    from infra import config
+    from jobs import nightly
+
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    commits = (
+        f"commit refs/heads/main\ncommitter A <a@example.com> {1700000000 + i} +0000\n"
+        f"data 6\nsave!\nM 100644 inline note.md\ndata 6\n{i:05d}\n"
+        for i in range(15000)
+    )
+    git(repo, "fast-import", "--quiet", input="".join(commits).encode())
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+    monkeypatch.setattr(config, "WORKSPACE", str(repo))
+    lock = repo / ".git/objects/info/commit-graphs/commit-graph-chain.lock"
+    popen = subprocess.Popen
+    interrupted = []
+
+    class InterruptGraph(popen):
+        def communicate(self, *args, **kwargs):
+            if "commit-graph" in self.args and not interrupted:
+                deadline = time.monotonic() + 20
+                while not lock.exists() and self.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.001)
+                assert lock.exists() and self.poll() is None, "real Git did not reach an active graph lock"
+                os.kill(self.pid, signal.SIGSTOP)
+                interrupted.append(True)
+                raise subprocess.TimeoutExpired(self.args, kwargs["timeout"])
+            return super().communicate(*args, **kwargs)
+
+        def terminate(self):
+            super().terminate()
+            os.kill(self.pid, signal.SIGCONT)
+
+    monkeypatch.setattr(nightly.subprocess, "Popen", InterruptGraph)
+    await nightly._update_history_graph_safely()
+    assert interrupted and not lock.exists()
+    await nightly._update_history_graph_safely()
+    assert (repo / ".git/objects/info/commit-graphs/commit-graph-chain").exists()
+    assert not lock.exists()
