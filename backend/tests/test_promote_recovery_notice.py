@@ -156,7 +156,13 @@ def test_a_rollback_for_comments_on_both_documents_is_told_to_the_agent(durable_
     [(history, actor)] = _document_changes(db, source_id)
     assert actor == thread_id and not history.startswith("Your")
     assert history.startswith(f"The promote of `{source}` to `{target}` by thread {thread_id} ")
-    assert "both have comments" in history and history.endswith(f"The file is at `{source}`.")
+    # The agent's note carries the exception text; the history, read by others, must not.
+    assert "Promote to a different shared path" in summary
+    assert "Promote to a different" not in history
+    assert history == _history(
+        source, target, thread_id,
+        "It was rolled back, and nothing was moved, because it could not be completed.", source,
+    )
 
 
 def test_a_claim_parked_beside_a_newer_file_is_told_to_the_agent(durable_scope):

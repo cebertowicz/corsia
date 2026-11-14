@@ -21,6 +21,7 @@ from registry import models, service
 logger = logging.getLogger(__name__)
 
 INTERRUPTED = "It was interrupted by a restart before it finished."
+ROLLED_BACK = "It was rolled back, and nothing was moved, because it could not be completed."
 PARKED = "A newer file was already at the source path, so your file was kept beside it."
 PARKED_IN_HISTORY = "A newer file was already at the source path, so the file was kept beside it."
 
@@ -51,10 +52,14 @@ def announce_undone_promote(db, row: dict, *, why: str, source: Path, target: Pa
         f"{parked}Your file is at `{where}`."
     )
     # The document's history is read by every agent that follows the document and by the person,
-    # none of whom made the promote, so it says whose promote it was instead of "your".
+    # none of whom made the promote, so it says whose promote it was instead of "your". It also
+    # never repeats `why` when that is an exception message, which is written to the promoting
+    # agent ("Promote to a different shared path"); the agent's own note carries that reason.
+    history_why = INTERRUPTED if why == INTERRUPTED else ROLLED_BACK
     history = (
         f"The promote of `{source}` to `{target}` by thread {thread_id} was undone when CORSIA "
-        f"restarted. {why} {PARKED_IN_HISTORY + ' ' if where != source else ''}The file is at `{where}`."
+        f"restarted. {history_why} {PARKED_IN_HISTORY + ' ' if where != source else ''}"
+        f"The file is at `{where}`."
     )
     details = {
         "intent_id": intent_id,
