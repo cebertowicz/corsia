@@ -715,11 +715,13 @@ def test_equal_timestamp_dispositions_follow_append_order(
         assert models.latest_released_owner_thread_id(
             artifact["id"], db=db
         ) == "thread-c"
-        archived = models.get_artifact(artifact["id"], db=db)
-        assert (archived["parent_thread_id"], archived["state"]) == (
-            "thread-c",
-            "archived",
-        )
+        released = models.get_artifact(artifact["id"], db=db)
+        # The identity stays active; only the registration says it is unowned.
+        assert (
+            released["parent_thread_id"],
+            released["state"],
+            released["relationship_state"],
+        ) == ("thread-c", "active", "subscriber-recent")
         assert [
             row["id"]
             for row in models.list_for_thread(
@@ -754,9 +756,10 @@ def test_released_artifact_remains_in_former_owner_history(isolated_db):
         history = models.list_for_thread(
             "thread-a", include_archived=True, db=db
         )
-        assert [(row["id"], row["state"]) for row in history] == [
-            (artifact["id"], "archived")
-        ]
+        assert [
+            (row["id"], row["state"], row["relationship_state"])
+            for row in history
+        ] == [(artifact["id"], "active", "subscriber-recent")]
     finally:
         db.close()
 
@@ -787,16 +790,18 @@ def test_release_to_former_owner_triage_keeps_public_history(isolated_db):
         assert routing["triage"]["relationship_state"] == "unassigned-triage"
 
         public = models.get_artifact(artifact["id"], db=db)
-        assert (public["parent_thread_id"], public["state"]) == (
-            "thread-a",
-            "archived",
-        )
+        assert (
+            public["parent_thread_id"],
+            public["state"],
+            public["relationship_state"],
+        ) == ("thread-a", "active", "unassigned-triage")
         history = models.list_for_thread(
             "thread-a", include_archived=True, db=db
         )
-        assert [(row["id"], row["state"]) for row in history] == [
-            (artifact["id"], "archived")
-        ]
+        assert [
+            (row["id"], row["state"], row["relationship_state"])
+            for row in history
+        ] == [(artifact["id"], "active", "unassigned-triage")]
     finally:
         db.close()
 

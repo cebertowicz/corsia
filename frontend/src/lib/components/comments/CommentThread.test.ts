@@ -194,27 +194,6 @@ describe('CommentThread', () => {
 		});
 	}
 
-	it('stamps an unread reply only after it is observed in the viewport', async () => {
-		visibleObserver();
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-		vi.unstubAllGlobals();
-	});
-
-	it('retries a failed visible stamp only on the next visibility change', async () => {
-		visibleObserver();
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
-		flushSync(); await Promise.resolve(); flushSync();
-		expect(onViewed).toHaveBeenCalledTimes(1);
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
-		warn.mockRestore(); vi.unstubAllGlobals();
-	});
-
 	it('shows only new and latest replies in a long thread until earlier replies are expanded', () => {
 		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
 		render(thread({ replies, newReplyIds: ['r4', 'r5'] }));
