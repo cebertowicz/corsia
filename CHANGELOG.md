@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
 - A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A comment list full of comments and long threads now stays usable on a phone and a computer: Accept all stays at the top while the list scrolls, a long thread shows a replies row and opens whole with Back, unread comments and replies always show in full, and nothing inside a comment card scrolls on its own, the reply field included. Before, controls could sit off screen and text was cut off inside small scrolling boxes.
+- A comment or reply now counts as read only when you pick it, in documents and in chat; before, it could count as read just by arriving on screen.
 - A comment reply field stays on screen after you jump to it on a phone and as you type at the end of a reply in a short popover, so Send stays in reach; an unread long comment in the margin shows whole instead of behind Show more; and Escape inside a thread in the comment list goes back to the list. Before, the field and Send could sit off screen, and Escape closed the whole list.
 - A document that is open live no longer refuses other reads and writes of it while a save is in progress on a busy disk; before, they could fail with a database error.
 - A document comment set to go to the agent right away now goes 5 seconds after your last one; before, it could wait up to a minute.
@@ -91,7 +92,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Measurement's Workflows section now stays quick on a long history while your agents are busy; before, it could still take a minute.
 - An agent that keeps a workflow is now told to split it when it has grown too long to read in one pass: a part other work also needs, or a different kind of work, becomes its own workflow that a step runs.
 - Workflow version comparisons now count a run once it ends, and group each run by the model of the agent that ran it. Earlier, runs made of several tasks never counted.
-- Working copies of code left by finished temporary agents are now removed an hour after their last change, even with unsaved work in them, so they stop filling your disk.
+- Working copies of code left by temporary agents that have finished are now removed an hour after their last change, so they stop filling your disk. Unsaved work in them is copied out first, unless the agent was deleted.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
