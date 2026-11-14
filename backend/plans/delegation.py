@@ -37,6 +37,20 @@ def _live_attachment(states=_OPEN_PARENT_STATES, alias: str = "") -> tuple[str, 
     return f"{prefix}archived_at IS NULL AND {prefix}state IN ({placeholders})", tuple(states)
 
 
+def _harvest_candidates(db, worker_thread_id: str | None, node_ids=None) -> list:
+    """The live delegated attachments a harvest considers, in id order."""
+    live, params = _live_attachment(_HARVESTABLE_STATES)
+    if worker_thread_id is not None:
+        live, params = f"{live} AND spawned_thread_id=?", (*params, worker_thread_id)
+    if node_ids is not None:
+        live = f"{live} AND id IN ({','.join('?' * len(node_ids))})"
+        params = (*params, *node_ids)
+    return db.execute(
+        f"SELECT * FROM plan_nodes WHERE spawned_thread_id IS NOT NULL AND {live} ORDER BY id",
+        params,
+    ).fetchall()
+
+
 def _is_live_attachment(node, states=_OPEN_PARENT_STATES) -> bool:
     """Row-level twin of :func:`_live_attachment`, for an already-loaded node."""
     return node["archived_at"] is None and node["state"] in states
