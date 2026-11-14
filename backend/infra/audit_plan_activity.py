@@ -1,4 +1,4 @@
-"""The plan_activity audit metric: plan use per agent-day, conductor adds, stale tasks.
+"""The plan_activity audit metric: plan use per agent-day, conductor adds, stale tasks, owed verdicts.
 
 Read through ``infra.audit_reads``, which binds the caller's scope and deadline.
 """
@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
+
+from plans.public import owed_verdict_ages
 
 
 # Start with the user's indexed threads, then visit their plans, nodes, and
@@ -115,6 +117,7 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
         "nodes_created_per_day": created,
         "conductor_adds": adds,
         "stale_open_tasks": stale,
+        "owed_verdicts": owed_verdict_ages(db, user_id=user_id, now=snapshot_at),
         "plan_update_calls": update_calls,
         "plan_update_calls_per_day": calls,
         "plan_update_calls_per_active_agent_day": update_calls / active_days if active_days else None,
@@ -144,4 +147,7 @@ _PLAN_ACTIVITY_DEFINITIONS = {
                       "creation; 'current_designation' uses today's conductor assignment.",
     "stale_open_tasks": "Snapshot at snapshot_as_of: unfinished tasks with no event in "
                         "the last 7 days. Event counts use the requested window.",
+    "owed_verdicts": "Snapshot at snapshot_as_of: delegated steps a worker returned that "
+                     "still await the parent's verdict, by age since the return; paused "
+                     "plans and already-reminded steps included.",
 }

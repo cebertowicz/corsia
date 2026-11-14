@@ -574,7 +574,8 @@ def test_plan_activity_scopes_real_plan_events_and_turns(isolated_db, monkeypatc
     assert sum(item["n"] for item in row["nodes_created_per_day"]) == 1
     assert row["plan_read_calls"] is None
     assert {"active_agent_days", "plan_update_calls", "plan_read_calls", "conductor_adds",
-            "stale_open_tasks"} <= set(row["definitions"])
+            "stale_open_tasks", "owed_verdicts"} <= set(row["definitions"])
+    assert row["owed_verdicts"]["owed"] == 0
     assert "secret" not in json.dumps(result)
     assert "steve-p1" not in json.dumps(result)
     with pytest.raises(audit_reads.AuditReadError, match="seven days"):

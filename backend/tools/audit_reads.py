@@ -31,7 +31,7 @@ class AuditReadTool(Tool):
             "all projects. Its token sums cover only calls Measurement can price; "
             "excluded_calls counts the rest. "
             "plan_activity counts this user's plan activity across projects: agent-days, "
-            "tasks created, conductor adds, stale open tasks and plan_update calls; its "
+            "tasks created, conductor adds, stale open tasks, owed verdicts and plan_update calls; its "
             "row carries the definition of each field. "
             "stored_message_pressure returns the top "
             "ten stored-message sizes as a proxy for unfolded backlog. Its "
