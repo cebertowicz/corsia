@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from connections import PINNED_HARNESSES
@@ -15,25 +16,31 @@ from connections import PINNED_HARNESSES
 log = logging.getLogger(__name__)
 
 
-def install_pinned(vendor: str) -> Path:
+def install_pinned(vendor: str, *, should_stop: Callable[[], bool] | None = None) -> Path:
     """Install this machine's pinned copy if missing, drop older versions, return the executable.
 
-    Raises ``ManagedRuntimeError`` (``ManagedRuntimeDownloadError`` for a failed or
-    mismatched download); the caller turns it into its own failure state.
+    Raises ``ManagedRuntimeError`` (``ManagedRuntimeCancelled`` once ``should_stop`` says
+    so); the caller turns it into its own failure state.
     """
     from tools.managed_runtime import ensure_runtime, machine_key, remove_other_versions
 
-    executable = ensure_runtime(vendor, arch=machine_key())
+    executable = ensure_runtime(vendor, arch=machine_key(), should_stop=should_stop)
     remove_other_versions(vendor)
     return executable
 
 
 def vendor_in_use(vendor: str, *, db=None) -> bool:
-    """The person has this vendor's own CLI, or a CORSIA account for it."""
+    """The person has this vendor's own CLI, or a signed-in CORSIA account for it.
+
+    A signed-out account, or the ``legacy`` Default every migrated install got for each
+    seeded connection, is not use: counting it would download both CLIs for a local-only person.
+    """
     from cli_location import service_binary
     from connections.vendor_accounts import list_accounts
 
-    return bool(service_binary(vendor)) or bool(list_accounts(provider=vendor, db=db))
+    if service_binary(vendor):
+        return True
+    return any(account["state"] == "signed_in" for account in list_accounts(provider=vendor, db=db))
 
 
 async def install_used_harnesses() -> None:

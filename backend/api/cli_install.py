@@ -240,27 +240,28 @@ def _run_installer(vendor: str, job: InstallJob) -> str | None:
 
 
 def _pinned_failure_reason(error: Exception) -> str:
-    """Map a pinned-install failure onto the existing safe reasons."""
-    from tools.managed_runtime import ManagedRuntimeDownloadError
+    """Map a pinned-install failure onto the existing safe reasons, by error type only.
 
+    Only a failed fetch is a connection problem; a local failure such as a full disk is not.
+    """
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeUnverifiedError
+
+    if isinstance(error, ManagedRuntimeUnverifiedError):
+        return DOWNLOAD_UNVERIFIED
     if isinstance(error, ManagedRuntimeDownloadError):
-        if "checksum" in str(error):
-            return DOWNLOAD_UNVERIFIED
-        if isinstance(error.__cause__, TimeoutError):
-            return TIMED_OUT
         if isinstance(error.__cause__, urllib.error.HTTPError):
             return DOWNLOAD_REFUSED if error.__cause__.code in (403, 404) else DOWNLOAD_UNAVAILABLE
+        if isinstance(error.__cause__, TimeoutError):
+            return TIMED_OUT
         return NO_INTERNET
-    if "archive" in str(error) or "did not contain" in str(error) or "byte limit" in str(error):
-        return DOWNLOAD_UNVERIFIED
     return INSTALLER_STOPPED
 
 
 def _run_pinned_install(vendor: str, job: InstallJob) -> str | None:
     """Install CORSIA's own checked copy; return a safe failure reason, if any.
 
-    A cancel before the download starts settles as cancelled. A download already under way
-    finishes within its own byte and time bounds; a finished install counts as done.
+    A cancel stops the download at its next chunk and settles as cancelled, as does any
+    failure after a cancel. A finished install counts as done, as with ``_run_installer``.
     """
     from connections.pinned_harness import install_pinned
     from tools.managed_runtime import ManagedRuntimeError
@@ -270,9 +271,12 @@ def _run_pinned_install(vendor: str, job: InstallJob) -> str | None:
             job.cancelled = True
             return None
     try:
-        install_pinned(vendor)
+        install_pinned(vendor, should_stop=lambda: job.cancel_requested)
     except ManagedRuntimeError as error:
-        log.warning("CORSIA's %s copy did not install: %s", vendor, error)
+        job.cancelled = job.cancel_requested
+        if job.cancelled:
+            return None
+        log.warning("CORSIA's %s copy did not install: %r (cause %r)", vendor, error, error.__cause__)
         return _pinned_failure_reason(error)
     return None
 

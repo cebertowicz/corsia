@@ -64,9 +64,6 @@ def _harness_source(provider: str) -> dict[str, Any]:
         "source": provider, "name": name, **view, "fix": fix,
         "accounts": accounts, "lost_binding": lost_binding,
     }
-    if view["state"] == "not_installed":
-        from api.provider_cli_link import invisible_binary
-        source["invisible_binary"] = invisible_binary(provider)
     if view["state"] == "unverified":
         from cli_location import package_manager_for
 
@@ -118,11 +115,6 @@ async def _recheck() -> None:
     if any(isinstance(r, BaseException) or isinstance(r, dict) and not r.get("ok", False)
            for r in results):
         raise RuntimeError("Model source checks incomplete")
-    from api.provider_cli_link import cache_invisible_binary
-
-    for provider in HARNESS_PROVIDERS:
-        if (await run_in_db(harness_state, provider))["state"] == "not_installed":
-            await asyncio.to_thread(cache_invisible_binary, provider)
 
 
 @router.get("/sources")

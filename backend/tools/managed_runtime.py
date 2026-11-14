@@ -12,21 +12,16 @@ import stat
 import tarfile
 import tempfile
 import threading
-import time
-import urllib.error
-import urllib.request
+import urllib.request  # noqa: F401  tests patch urllib.request.urlopen through this module
 import zipfile
+from collections.abc import Callable
 
 from infra.platform_paths import APP_FOLDER
 from tools.gws_release import GWS_MAC_ARM64_SHA256, GWS_VERSION as _GWS_VERSION
-
-
-class ManagedRuntimeError(RuntimeError):
-    """A download or install that must not use an unpinned fallback."""
-
-
-class ManagedRuntimeDownloadError(ManagedRuntimeError):
-    """A pinned runtime could not be fetched or verified."""
+from tools.runtime_download import (  # noqa: F401  callers catch these through this module
+    ManagedRuntimeCancelled, ManagedRuntimeChecksumError, ManagedRuntimeDownloadError, ManagedRuntimeError,
+    ManagedRuntimeUnverifiedError, download as _download,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +101,6 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     },
 }
 COMMAND_RUNTIME = {"node": "node", "npm": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
-# The largest pinned archive is far below this cap; the cap bounds a compromised or
-# malformed response before it can hold the connected-app lifecycle lock indefinitely.
-_MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
-_DOWNLOAD_DEADLINE_SECONDS = 5 * 60
 _RUNTIME_LOCKS: dict[str, threading.Lock] = {}
 _RUNTIME_LOCKS_GUARD = threading.Lock()
 
@@ -224,25 +215,6 @@ def runtime_fetch_plan(command: str, *, path: str | None = None, root: Path | No
     return None if runtime_is_installed(kind, root=root, arch=selected) else (kind, pin)
 
 
-def _download(url: str, destination: Path) -> str:
-    digest = hashlib.sha256()
-    deadline = time.monotonic() + _DOWNLOAD_DEADLINE_SECONDS
-    received = 0
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response, destination.open("xb") as output:
-            while chunk := response.read(1024 * 1024):
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("pinned runtime download exceeded its deadline")
-                received += len(chunk)
-                if received > _MAX_DOWNLOAD_BYTES:
-                    raise ManagedRuntimeError("pinned runtime download exceeded its byte limit")
-                digest.update(chunk)
-                output.write(chunk)
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as exc:
-        raise ManagedRuntimeDownloadError(f"download failed: {type(exc).__name__}") from exc
-    return digest.hexdigest()
-
-
 def _matches_pin(sha256: str, archive: Path, pin: RuntimePin) -> bool:
     """Check the download against its pin; a SHA-512 pin re-reads the archive."""
     if not pin.sha512:
@@ -287,17 +259,17 @@ def _extract(archive: Path, destination: Path, pin: RuntimePin) -> None:
         with tarfile.open(archive, "r:gz" if pin.archive == "tar.gz" else "r:xz") as source:
             tar_members = source.getmembers()
             if any(not _safe_tar_member(member) for member in tar_members):
-                raise ManagedRuntimeError("download archive has an unsafe path")
+                raise ManagedRuntimeUnverifiedError("download archive has an unsafe path")
             for member in tar_members:
                 source.extract(member, destination)
     elif pin.archive == "zip":
         with zipfile.ZipFile(archive) as source:
             zip_members = source.infolist()
             if any(not _safe_member(member.filename) or stat.S_ISLNK(member.external_attr >> 16) for member in zip_members):
-                raise ManagedRuntimeError("download archive has an unsafe path")
+                raise ManagedRuntimeUnverifiedError("download archive has an unsafe path")
             source.extractall(destination, members=zip_members)
     else:
-        raise ManagedRuntimeError("unsupported pinned archive format")
+        raise ManagedRuntimeUnverifiedError("unsupported pinned archive format")
 
 
 def _make_read_execute_only(path: Path) -> None:
@@ -324,8 +296,13 @@ def _runtime_lock(kind: str) -> threading.Lock:
         return _RUNTIME_LOCKS.setdefault(kind, threading.Lock())
 
 
-def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = None) -> Path:
-    """Fetch one pinned runtime atomically, or return its verified executable."""
+def ensure_runtime(
+    kind: str, *, root: Path | None = None, arch: str | None = None, should_stop: Callable[[], bool] | None = None,
+) -> Path:
+    """Fetch one pinned runtime atomically, or return its verified executable.
+
+    ``should_stop`` lets a caller end the download early (``ManagedRuntimeCancelled``).
+    """
     selected, pin = _pin(kind, arch)
     base = root or runtime_cache_root()
     final = _install_dir(kind, selected, pin, base)
@@ -340,14 +317,14 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
             final.parent.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
             archive = staging / "download"
-            if not _matches_pin(_download(pin.url, archive), archive, pin):
-                raise ManagedRuntimeDownloadError("download checksum did not match the pinned runtime")
+            if not _matches_pin(_download(pin.url, archive, should_stop), archive, pin):
+                raise ManagedRuntimeChecksumError("download checksum did not match the pinned runtime")
             unpacked = staging / "runtime"
             unpacked.mkdir()
             _extract(archive, unpacked, pin)
             executable = _expected_executable(unpacked, pin)
             if not executable.is_file():
-                raise ManagedRuntimeError("download did not contain the pinned executable")
+                raise ManagedRuntimeUnverifiedError("download did not contain the pinned executable")
             executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
             _marker_path(unpacked).write_text(json.dumps({"kind": kind, "arch": selected, **_pin_record(pin)}, sort_keys=True), encoding="utf-8")
             os.replace(unpacked, final)

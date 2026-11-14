@@ -142,7 +142,9 @@ def test_claude_never_updates_itself(monkeypatch):
 @pytest.mark.parametrize(("had_copy", "persons_copy", "accounts", "installs", "rechecks"), [
     (False, None, [], False, False),
     (False, "/usr/local/bin/claude", [], True, True),
-    (False, None, [{"id": "a"}], True, True),
+    (False, None, [{"id": "a", "state": "signed_in"}], True, True),
+    # The legacy Default every migrated install has, and a signed-out account, are not use.
+    (False, None, [{"id": "a", "state": "legacy"}, {"id": "b", "state": "signed_out"}], False, False),
     # An installed copy only drops older versions; startup discovery already read its catalogs.
     (True, None, [], True, False),
 ])

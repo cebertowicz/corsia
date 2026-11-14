@@ -298,12 +298,10 @@ def _person_copy_updatable(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_install_refuses_only_when_corsias_own_copy_is_installed(monkeypatch):
-    """A person's copy, on PATH or only in their login shell, is not the copy agents run."""
-    import cli_location
+    """A person's own copy on PATH is not the copy agents run."""
     from api import cli_install
 
     monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: "/usr/local/bin/codex")
-    monkeypatch.setattr(cli_location, "login_shell_binary", lambda _vendor: Path("/Users/user/bin/codex"))
     monkeypatch.setattr(cli_install, "_run_pinned_install", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
@@ -323,7 +321,7 @@ def test_the_install_job_runs_corsias_pinned_install(monkeypatch):
     from connections import pinned_harness
 
     ran = []
-    monkeypatch.setattr(pinned_harness, "install_pinned", lambda vendor: ran.append(vendor) or Path("/x"))
+    monkeypatch.setattr(pinned_harness, "install_pinned", lambda vendor, **_k: ran.append(vendor) or Path("/x"))
     assert cli_install._run_pinned_install("codex", cli_install.InstallJob()) is None
     assert ran == ["codex"]
 
@@ -332,9 +330,63 @@ def test_a_cancel_before_the_pinned_install_starts_means_it_never_starts(monkeyp
     from api import cli_install
     from connections import pinned_harness
 
-    monkeypatch.setattr(pinned_harness, "install_pinned", lambda _vendor: pytest.fail("a cancelled job must not install"))
+    monkeypatch.setattr(pinned_harness, "install_pinned", lambda _vendor, **_k: pytest.fail("a cancelled job must not install"))
     job = cli_install.InstallJob()
     cli_install._request_cancel(job)
+    assert cli_install._run_pinned_install("codex", job) is None
+    assert job.cancelled
+
+
+class _Stream(_Response):
+    """A download that keeps sending chunks until the test's hook says otherwise."""
+
+    def __init__(self, on_read=None):
+        super().__init__(b"x" * 16)
+        self.reads = 0
+        self.on_read = on_read
+
+    def read(self, _size):
+        self.reads += 1
+        if self.on_read:
+            self.on_read()
+        return self.content if self.reads < 1000 else b""
+
+
+def _real_codex_download(monkeypatch, root: Path, stream: _Stream) -> None:
+    """Run the real pinned install for codex into the test's own root, from the given stream."""
+    pin = managed_runtime.RuntimePin("9.9.9", "https:" "//registry.test/codex.tgz", "", "tar.gz", "package/codex", "0" * 128)
+    monkeypatch.setitem(managed_runtime.RUNTIME_PINS, "codex", {"arm64": pin})
+    monkeypatch.setattr(managed_runtime, "machine_key", lambda: "arm64")
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_a, **_k: stream)
+    isolated = managed_runtime.ensure_runtime  # the test-wide guard; it runs the real install given a root
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda kind, **kwargs: isolated(kind, root=root, **kwargs))
+
+
+def test_a_cancel_during_the_pinned_download_stops_it_and_settles_cancelled(monkeypatch, tmp_path):
+    """Cancel reaches the real download loop: it stops at the next chunk and nothing is installed."""
+    from api import cli_install
+
+    job = cli_install.InstallJob()
+    stream = _Stream(on_read=lambda: cli_install._request_cancel(job))  # Cancel pressed mid-download
+    _real_codex_download(monkeypatch, tmp_path, stream)
+
+    assert cli_install._run_pinned_install("codex", job) is None
+    assert job.cancelled and stream.reads == 1
+    assert managed_runtime.installed_runtime_path("codex", root=tmp_path) is None
+    assert list((tmp_path / "codex").rglob("download")) == []
+
+
+def test_a_failure_after_cancel_settles_cancelled_not_failed(monkeypatch):
+    from api import cli_install
+    from connections import pinned_harness
+
+    job = cli_install.InstallJob()
+
+    def fail_after_cancel(_vendor, **_k):
+        cli_install._request_cancel(job)
+        raise _download_error(urllib.error.URLError("connection reset"))
+
+    monkeypatch.setattr(pinned_harness, "install_pinned", fail_after_cancel)
     assert cli_install._run_pinned_install("codex", job) is None
     assert job.cancelled
 
@@ -351,9 +403,10 @@ def _download_error(cause: BaseException):
     (lambda: _download_error(urllib.error.HTTPError("u", 404, "missing", Message(), None)), "the download site refused the request"),
     (lambda: _download_error(urllib.error.HTTPError("u", 503, "busy", Message(), None)), "the download service cannot answer"),
     (lambda: _download_error(TimeoutError("slow")), "it took too long"),
-    (lambda: managed_runtime.ManagedRuntimeDownloadError("download checksum did not match the pinned runtime"), "the download didn't verify"),
-    (lambda: managed_runtime.ManagedRuntimeError("download archive has an unsafe path"), "the download didn't verify"),
-    (lambda: managed_runtime.ManagedRuntimeError("pinned runtime install failed: OSError"), "the installer stopped"),
+    (lambda: managed_runtime.ManagedRuntimeChecksumError("any words"), "the download didn't verify"),
+    (lambda: managed_runtime.ManagedRuntimeUnverifiedError("any words"), "the download didn't verify"),
+    # Classified by type, never by the words: a local failure mentioning a download is still local.
+    (lambda: managed_runtime.ManagedRuntimeError("download archive checksum byte limit"), "the installer stopped"),
 ])
 def test_pinned_install_failures_have_the_existing_safe_reasons(monkeypatch, error, reason):
     from api import cli_install
@@ -361,11 +414,33 @@ def test_pinned_install_failures_have_the_existing_safe_reasons(monkeypatch, err
 
     failure = error()
 
-    def fail(_vendor):
+    def fail(_vendor, **_k):
         raise failure
 
     monkeypatch.setattr(pinned_harness, "install_pinned", fail)
     assert cli_install._run_pinned_install("claude-code", cli_install.InstallJob()) == reason
+
+
+def test_a_full_disk_during_the_pinned_download_is_not_no_internet(monkeypatch, tmp_path):
+    """The real install path: a write that fails for lack of space is not a connection problem."""
+    from api import cli_install
+
+    class FullDisk:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def write(self, _chunk):
+            raise OSError(28, "No space left on device")
+
+    real_open = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, mode="r", *a, **k: FullDisk() if mode == "xb" else real_open(self, mode, *a, **k))
+    _real_codex_download(monkeypatch, tmp_path, _Stream())
+
+    assert cli_install._run_pinned_install("codex", cli_install.InstallJob()) == cli_install.INSTALLER_STOPPED
+    assert managed_runtime.installed_runtime_path("codex", root=tmp_path) is None
 
 
 @pytest.mark.asyncio

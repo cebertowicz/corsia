@@ -1,5 +1,5 @@
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
-import { accountToSignIn, cancelCliInstall, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startSignin, type Signin } from '$lib/conductorSourcesApi';
+import { accountToSignIn, cancelCliInstall, cancelSignin, checkSignin, getCliInstall, startCliInstall, startSignin, type Signin } from '$lib/conductorSourcesApi';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 import { formatMoment } from '$lib/time';
 
@@ -134,7 +134,6 @@ export function createSetupConnect(deps: ConnectDeps) {
 		setConnect(source.source, { phase: 'installing' });
 		try {
 			const refusal = await startCliInstall(source.source);
-			if (refusal === 'invisible_binary') await linkCli(source.source);
 			if (refusal) { await afterInstalled(source.source); return; }
 		} catch { setConnect(source.source, { phase: 'failed', failed: 'install' }); return; }
 		finally { starting.delete(source.source); }

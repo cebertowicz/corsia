@@ -226,7 +226,9 @@ def test_concurrent_installs_share_one_runtime_download(monkeypatch, tmp_path):
 def test_download_byte_cap_is_reported(monkeypatch, tmp_path):
     from tools import managed_runtime
 
-    monkeypatch.setattr(managed_runtime, "_MAX_DOWNLOAD_BYTES", 3)
+    from tools import runtime_download
+
+    monkeypatch.setattr(runtime_download, "_MAX_DOWNLOAD_BYTES", 3)
     monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"four"))
 
     with pytest.raises(managed_runtime.ManagedRuntimeError, match="byte limit"):
