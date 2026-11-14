@@ -36,10 +36,12 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # names the holder; errorcode/errorname tell SQLITE_BUSY, SQLITE_BUSY_SNAPSHOT, SQLITE_LOCKED and
 # CORSIA_ADMISSION_* (errorcode=None) apart. _log_database_lock, write_admission.sqlite_errorname_tag
 # and write_admission._log_slow_wait are that fix's acceptance evidence: delete them in the change
-# that settles it (24 h of production with zero in-process lock refusals).
+# that settles it (24 h of production with zero in-process lock refusals), and no later than
+# 2026-12-14.
 # (2) Slow write holds stall every other writer on the file. The slow-hold warning names the
 # holding callers (_hold_callers) so each slow writer can be fixed: delete it once production
-# logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days.
+# logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than
+# 2026-12-14. Keeping either past its date needs a reviewed change that says why and sets a new one.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
 _HOLD_PLUMBING_FILES = frozenset({os.path.normcase(__file__), os.path.normcase(contextlib.__file__)})
 
