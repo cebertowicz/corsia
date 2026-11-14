@@ -2,7 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { activeThreadId, messages, type Message } from './stores/threads';
 import { token } from './stores/auth';
-import { adoptThreadSnapshot, claimDisplayedThread, resetDisplayedTranscript, _resetDisplayedThreadsForTests } from './stores/displayedThreads';
+import { adoptThreadSnapshot, claimDisplayedThread, _resetDisplayedThreadsForTests } from './stores/displayedThreads';
 import { resetReplacementsForTests } from './messageReplacements';
 import { handleMessage } from './ws/handlers';
 import { loadRunRange } from './focusRunLoader';
@@ -53,28 +53,26 @@ it('learns removal ancestry from a fresh page after a missed frame', () => {
 	expect(get(messages).map(row => row.id)).toEqual(['c']);
 });
 
-it('reconnect drops retained rows before fetching the fresh page', () => {
+it('reconnect keeps the loaded rows and fetches the fresh page', () => {
 	token.set(null); // No unrelated checkpoint hydration in this event test.
 	messages.set([row('a', 1)]);
 	const fetchThreadMessages = vi.fn(async () => {});
 	const stop = subscribeChatPanelEvents({ activeThreadId, fetchThreadMessages,
 		isNearBottom: () => false, scrollToBottom: vi.fn(), followBottom: vi.fn(), clearWarmKeys: vi.fn() });
 	emit('connected', {}); stop();
-	expect(get(messages)).toEqual([]);
-	expect(fetchThreadMessages).toHaveBeenCalledWith('main', true);
+	expect(get(messages).map(row => row.id)).toEqual(['a']);
+	expect(fetchThreadMessages).toHaveBeenCalledWith('main');
 });
 
-it('a range response begun before reconnect cannot resurrect missed replacements', async () => {
+it('a range response begun before reconnect cannot resurrect a replacement the fresh page reports', async () => {
 	let resolve!: (response: Response) => void;
 	vi.mocked(apiFetch).mockReturnValueOnce(new Promise(done => { resolve = done; }));
 	const setLoad = vi.fn();
 	const read = loadRunRange({ firstId: 'a', lastId: 'a', firstSeq: 1, lastSeq: 1,
 		count: 1, turnIds: [], weight: 1, kinds: [], continuesOlder: false },
 		{ pageSize: 50, loads: () => ({}), setLoad, onSummaries: vi.fn() });
-	resetDisplayedTranscript('main');
-	adoptThreadSnapshot('main', [row('b', 2)]);
+	adoptThreadSnapshot('main', [row('b', 2, 'main', ['a'])]);
 	resolve(new Response(JSON.stringify({ messages: [row('a', 1)] })));
 	await read;
 	expect(get(messages).map(row => row.id)).toEqual(['b']);
-	expect(setLoad).toHaveBeenCalledTimes(1);
 });

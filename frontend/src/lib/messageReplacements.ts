@@ -20,13 +20,5 @@ export function pruneReplacedRows<T extends ReplacementRow>(rows: T[]): T[] {
 	return rows.filter(row => !row.thread_id || !row.id || !removed.get(row.thread_id)?.has(row.id));
 }
 
-const readEpochs = new Map<string, number>();
-/** A reconnect invalidates pending transcript reads as well as retained rows. */
-export function invalidateTranscriptReads(thread: string): void {
-	readEpochs.set(thread, transcriptReadEpoch(thread) + 1);
-}
-/** Capture before a read and compare before adopting its result. */
-export function transcriptReadEpoch(thread: string): number { return readEpochs.get(thread) ?? 0; }
-
 /** Reset session knowledge only in isolated tests. */
-export function resetReplacementsForTests(): void { removed.clear(); readEpochs.clear(); }
+export function resetReplacementsForTests(): void { removed.clear(); }

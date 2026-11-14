@@ -10,7 +10,6 @@ import { activeThreadId, messages } from '$lib/stores/threads';
 import { hydrateFetchedMessages, mergeFetchedHistoryRows } from './messageHistory';
 import type { RunLoad, RunStub } from './focusRuns';
 import { apiFetch } from '$lib/api/request';
-import { transcriptReadEpoch } from './messageReplacements';
 
 export interface RunLoaderDeps {
 	pageSize: number;
@@ -28,7 +27,6 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 	const threadId = get(activeThreadId);
 	const bearer = get(token);
 	if (prior?.loading || !threadId || !bearer) return;
-	const epoch = transcriptReadEpoch(threadId);
 	const base = { oldestId: prior?.oldestId ?? null, coveredFirstId: prior?.coveredFirstId ?? stub.firstId };
 	deps.setLoad(key, { ...base, hasMore: true, loading: true, error: false });
 	const fail = () => deps.setLoad(key, { ...base, hasMore: true, loading: false, error: true });
@@ -39,10 +37,10 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 	try {
 		// The messages route declares the session as a required query parameter.
 		const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`, { sessionInAddress: true });
-		if (get(activeThreadId) !== threadId || transcriptReadEpoch(threadId) !== epoch) return;
+		if (get(activeThreadId) !== threadId) return;
 		if (!res.ok) return fail();
 		const page = await res.json();
-		if (get(activeThreadId) !== threadId || transcriptReadEpoch(threadId) !== epoch) return;
+		if (get(activeThreadId) !== threadId) return;
 		messages.update((current) => mergeFetchedHistoryRows(current, hydrateFetchedMessages(page.messages ?? [])));
 		deps.onSummaries(page.turn_summaries);
 		deps.setLoad(key, {
@@ -54,6 +52,6 @@ export async function loadRunRange(stub: RunStub, deps: RunLoaderDeps): Promise<
 		});
 	} catch (e) {
 		console.error('loadRunRange failed:', e);
-		if (get(activeThreadId) === threadId && transcriptReadEpoch(threadId) === epoch) fail();
+		if (get(activeThreadId) === threadId) fail();
 	}
 }

@@ -2,13 +2,6 @@ import { get, writable } from 'svelte/store';
 import { activeThreadId, messages, type Message } from './threads';
 import { mergeFetchedHistorySnapshot } from '../messageHistory';
 import { hydrateMeasuredFromRows } from './contextUsageByThread';
-import { invalidateTranscriptReads } from '../messageReplacements';
-
-/** Reconnect starts a fresh transcript: frames may have been missed while offline. */
-export function resetDisplayedTranscript(threadId: string): void {
-	invalidateTranscriptReads(threadId);
-	messages.update(rows => rows.filter(row => row.thread_id !== threadId));
-}
 
 /**
  * Threads whose transcript is on screen besides the active one — a subagent
