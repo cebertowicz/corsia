@@ -96,7 +96,7 @@ def test_a_new_comment_on_a_document_the_person_owns_names_the_conductor_that_de
     db = get_db()
     seed_thread(db, "conductor", title="Project conductor")
     artifact_id = seed_document(db, "ui")
-    monkeypatch.setattr(document_supervisor, "_conductor", lambda *_: "conductor")
+    monkeypatch.setattr(document_supervisor, "_scope", lambda *_: (None, "conductor"))
     named, woken = _goes_to(db, artifact_id)
     assert named == ["conductor"]
     assert woken == ["conductor", "ui"]  # the person is also on the list, and is not an agent to name
@@ -112,7 +112,7 @@ def test_a_new_comment_names_the_conductor_when_the_owning_agent_is_unavailable(
     db.execute("UPDATE threads SET lifecycle_state='archived', archived_reason='user' WHERE id='owner'")
     db.commit()
     artifact_id = seed_document(db, "owner")
-    monkeypatch.setattr(document_supervisor, "_conductor", lambda *_: "conductor")
+    monkeypatch.setattr(document_supervisor, "_scope", lambda *_: (None, "conductor"))
     named, woken = _goes_to(db, artifact_id)
     assert named == woken
     assert named[0] == "conductor"
