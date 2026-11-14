@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { colorAt } from '../support/browserCanvas';
 import { createSession, loginByUrl, sendChatMessage, sidebarThread, saveEvidenceScreenshot } from '../support/corsia';
 import { seedMockResponses } from '../support/mock';
 import { startProbeServer } from '../support/probeServer';
@@ -15,10 +16,7 @@ const canvas = (page: Page) => page.locator('canvas[aria-label="Shared browser"]
 /** The page's pixels reached the pane: the probe's password field paints its top-left corner. */
 async function expectPagePixels(page: Page): Promise<void> {
 	await expect(canvas(page)).toBeVisible({ timeout: 30_000 });
-	await expect.poll(() => canvas(page).evaluate(node => {
-		const frame = node as HTMLCanvasElement;
-		return Array.from(frame.getContext('2d')!.getImageData(5, 5, 1, 1).data).slice(0, 3);
-	}), { timeout: 20_000 }).toEqual([240, 240, 240]);
+	await expect.poll(() => colorAt(canvas(page), 0.02, 0.02, [240, 240, 240]), { timeout: 20_000 }).toEqual([240, 240, 240]);
 }
 
 /** The agent opens the sign-in page headless and reads it, which raises the password step in `thread`'s plan. */
@@ -129,10 +127,7 @@ test('a subagent’s sign-in step opens the subagent’s browser from the parent
 		await page.keyboard.press('Meta+A');
 		await page.keyboard.type('next');
 		await page.keyboard.press('Enter');
-		await expect.poll(() => canvas(page).evaluate(node => {
-			const frame = node as HTMLCanvasElement;
-			return Array.from(frame.getContext('2d')!.getImageData(frame.width / 2, frame.height / 2, 1, 1).data).slice(0, 3);
-		}), { timeout: 20_000 }).toEqual([0, 160, 80]);
+		await expect.poll(() => colorAt(canvas(page), 0.5, 0.5, [0, 160, 80]), { timeout: 20_000 }).toEqual([0, 160, 80]);
 		expect(sent.some(entry => entry.startsWith(`/api/browser/${child}/stream`))).toBe(true);
 		expect(sent.some(entry => entry.startsWith(`/api/browser/${parent}/stream`))).toBe(false);
 		await saveEvidenceScreenshot(page, info, 'nested-3-signed-in', { fullPage: false });

@@ -173,6 +173,23 @@ def node_owner_thread(node_id: str, *, db) -> str | None:
     return row["owner_id"] if row is not None and row["owner_kind"] == "thread" else None
 
 
+def nodes_created_with(node_ids: list[str], provenances: tuple[str, ...], *, db) -> set[str]:
+    """Those of ``node_ids`` whose ``node_created`` event carries one of ``provenances`` (never rewritten)."""
+    import json
+
+    from plans import service
+
+    if not node_ids or not provenances:
+        return set()
+    with service._connection(db) as connection:
+        rows = connection.execute(
+            "SELECT node_id FROM plan_node_events WHERE event = 'node_created'"
+            " AND provenance IN (SELECT value FROM json_each(?)) AND node_id IN (SELECT value FROM json_each(?))",
+            (json.dumps(list(provenances)), json.dumps(list(node_ids))),
+        ).fetchall()
+    return {str(row["node_id"]) for row in rows}
+
+
 def open_wait_intervals(
     thread_ids: list[str], *, since: datetime, until: datetime, db,
 ) -> dict[str, list[tuple[float, float]]]:
