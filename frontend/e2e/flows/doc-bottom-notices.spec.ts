@@ -27,8 +27,8 @@ function skipOtherProject(mobile: boolean, projectName: string) {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || mobile !== projectName.endsWith('mobile'), 'Each device project checks its own width.');
 }
 
-/** The reader's comment on the document's last line, below the fold at every checked width, or on its first line. Returns its id. */
-async function commentOnLastLine(request: APIRequestContext, artifactId: string, anchor: 'last' | 'first' = 'last'): Promise<string> {
+/** The reader's comment on the document's last line (below the fold at every checked width) or, with `anchor` 'first', on its first line. Returns its id. */
+async function commentOnLine(request: APIRequestContext, artifactId: string, anchor: 'last' | 'first' = 'last'): Promise<string> {
 	const quote = anchor === 'last' ? QUOTE : FIRST_QUOTE;
 	const from = anchor === 'last' ? BODY.lastIndexOf(QUOTE) : BODY.indexOf(FIRST_QUOTE);
 	const made = await request.post(`/api/artifacts/${artifactId}/comments`, {
@@ -65,7 +65,7 @@ async function openDocument(page: Page, request: APIRequestContext, label: strin
 	const saved = await request.put('/api/files/content', { params, data: { path: docPath, text: BODY, thread_id: thread, create: true } });
 	expect(saved.ok(), await saved.text()).toBeTruthy();
 	const artifactId = (await saved.json()).artifact.id as string;
-	const comment = await commentOnLastLine(request, artifactId, anchor);
+	const comment = await commentOnLine(request, artifactId, anchor);
 	if (unread) addAgentReply(artifactId, comment, thread);
 	await page.addInitScript(({ thread, artifactId, docPath, name }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'notices', artifactId, path: docPath, title: name, loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'notices', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
