@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from api.audit_agent_hours import read_agent_hours
-from api import usage_rollup
 from infra.audit_reads import AUDIT_METRICS, AuditReadError, read_audit_metric
 from infra.db_async import run_in_db
 from tools.base import Tool
@@ -85,6 +83,10 @@ class AuditReadTool(Tool):
         thread_id = kwargs.pop("_thread_id", None)
         kwargs.pop("_thread_project_id", None)
         kwargs.pop("_host_access_turn_identity", None)
+        # Imported here, as other tools import the api layer, so loading the tool does not load it.
+        from api import usage_rollup
+        from api.audit_agent_hours import read_agent_hours
+
         if kwargs.get("metric") in ("agent_hours", "agent_day_levels"):
             usage_rollup.schedule_refresh()
 
