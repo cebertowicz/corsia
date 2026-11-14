@@ -69,8 +69,11 @@ async def _token(_account: str) -> str:
 
 @pytest.fixture
 def microsoft(deleg_db, workspace, monkeypatch):  # noqa: F811
+    from infra import config
     from tools import sandbox_config
 
+    # The workspace root and the process's workspace selection name one root, as they do in production.
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace))
     monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
     account = connect()
     monkeypatch.setattr(microsoft_actions, "_designated", _no_designated)
@@ -109,10 +112,7 @@ async def _calendar_draft(
     return json.loads(result)
 
 
-async def test_calendar_draft_revision_accepts_its_returned_draft_id(microsoft, workspace, monkeypatch) -> None:
-    from infra import config
-
-    monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace))
+async def test_calendar_draft_revision_accepts_its_returned_draft_id(microsoft) -> None:
     tool = MicrosoftCalendarDraftTool()
     first_args = {
         "account_id": microsoft,
