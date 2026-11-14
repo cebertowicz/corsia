@@ -93,7 +93,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Measurement's Workflows section now stays quick on a long history while your agents are busy; before, it could still take a minute.
 - An agent that keeps a workflow is now told to split it when it has grown too long to read in one pass: a part other work also needs, or a different kind of work, becomes its own workflow that a step runs.
 - Workflow version comparisons now count a run once it ends, and group each run by the model of the agent that ran it. Earlier, runs made of several tasks never counted.
-- Working copies of code left by temporary agents that have finished are now removed an hour after their last change, so they stop filling your disk. Unsaved work in them is copied out first, unless the agent was deleted.
+- Working copies of code left by temporary agents that have finished are now removed a day after their last change, so they stop filling your disk. Unsaved work in them is copied out first, unless the agent was deleted.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
