@@ -16,7 +16,6 @@ from core.tool_result_debt import (
     read_declaration_metadata,
     readable_call_id,
 )
-from core.tool_result_binding import quarantine_stranded_tool_results
 from core.tool_result_projection import tool_result_integrity_metadata
 from core.turns_steps import MISSING_TOOL_RESULT_TEXT
 from infra.delivery_states import TOOL_RESULT_BOUND, TURN_ENDED_WITHOUT_RESULT_REASON
@@ -136,31 +135,21 @@ def _pay_turn_debt(conn, thread_id: str, turn_id: str) -> int:
     return settled
 
 
-def settle_turn_tool_lineage(conn, turn_id: str) -> None:
-    """Settle this Turn's calls and provisional results without vetoing terminal."""
-    owner = conn.execute(
-        "SELECT thread_id FROM active_turns WHERE id=?", (turn_id,),
-    ).fetchone()
-    if owner is None:
-        return
-    thread_id = str(owner["thread_id"])
+def settle_turn_tool_lineage(conn, thread_id: str, turn_id: str) -> None:
+    """Give every call this Turn declared a durable result, never vetoing terminal.
+
+    Harnesses settle their own calls while their process is alive. This is the
+    one shared settlement for a Turn whose process is gone (restart recovery)
+    or whose harness left a call open. Without a durable row the call stays
+    debt, and every later cold checkpoint over it is refused.
+    """
     settled = 0
     with settled_or_debt(
         conn, label=f"declared calls of turn {turn_id} on {thread_id}",
     ):
         settled = _pay_turn_debt(conn, thread_id, turn_id)
-    stranded = 0
-    with settled_or_debt(
-        conn, label=f"stranded rows of turn {turn_id} on {thread_id}",
-    ):
-        stranded = quarantine_stranded_tool_results(
-            thread_id=thread_id,
-            db=conn,
-            owning_turn_id=turn_id,
-        )
-    if settled or stranded:
+    if settled:
         logger.warning(
-            "turn {} terminal settled {} unanswered call(s) and quarantined "
-            "{} unbindable result(s) on {}",
-            turn_id, settled, stranded, thread_id,
+            "turn {} terminal settled {} unanswered call(s) on {}",
+            turn_id, settled, thread_id,
         )
