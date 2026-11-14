@@ -7,7 +7,7 @@ import pytest
 
 import infra.app_loop as app_loop
 import infra.thread_execution as thread_execution
-from automation import script_runner
+from automation import script_event_lines, script_runner
 from automation.script_readings import RunReport
 from events.delivery import enqueue_event_wake, start_idle_after_commit
 from infra.database import write_transaction
@@ -32,7 +32,7 @@ def test_a_rule_wake_from_a_script_event_line_drives_its_idle_owner(intake_world
     _every_rule(intake_world, rule_id="self-wake", destination=OWNER)
     schedule = _schedule(intake_world, tmp_path)
 
-    report = asyncio.run(script_runner._admit_events(
+    report = asyncio.run(script_event_lines.admit_events(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="run-1"),
     ))
     queued = intake_world.execute(

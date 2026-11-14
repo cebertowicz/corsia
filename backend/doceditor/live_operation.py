@@ -54,6 +54,8 @@ class Operation:
     reason: str | None = None
     #: Write only if the version is recorded (a restore); the write fails, and is undone, otherwise.
     history_required: bool = False
+    #: The suggestion ids an accept applied, set by the lane once it knows them; its version records them.
+    accepted: tuple[str, ...] = ()
     op_id: str = field(default_factory=lambda: str(uuid4()))
 
 

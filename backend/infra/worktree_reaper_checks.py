@@ -29,10 +29,11 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_scan import Candidate, idle_since, newest_tree_mtime
 
 
-# A worktree whose owning worker is gone leaves once idle this long, uncommitted
-# and unpublished work included (copied out first unless the owner is purged,
-# since an archived worker can come back); its branch outlives the tree.
-GONE_OWNER_IDLE_SECONDS = 3600
+# The one short idle clock, a full day. A published worktree with no open PR
+# leaves once idle this long. So does a worktree whose owning worker is gone,
+# uncommitted and unpublished work included (copied out first unless the owner
+# is purged, since an archived worker can come back); its branch outlives the tree.
+SHORT_IDLE_THRESHOLD_SECONDS = 86400
 
 
 def _load_active_threads() -> set[str]:
@@ -121,12 +122,12 @@ class CheckContext:
     ) -> str | RemovalVerdict | None:
         """DISCARD, SALVAGE or CLEAN for an idle worktree of a gone owner; None when the rule does not apply.
 
-        Idle means nothing anywhere in the tree changed for the hour, not only
+        Idle means nothing anywhere in the tree changed for the day, not only
         Git's files: someone may be finishing the work in an editor. A tree with
         nothing uncommitted is CLEAN for any owner: its branch keeps every commit,
         so it takes the ordinary clean removal, re-checked in the quarantine.
         """
-        if self.now - idle < GONE_OWNER_IDLE_SECONDS:
+        if self.now - idle < SHORT_IDLE_THRESHOLD_SECONDS:
             return None
         verdict = self.owner_verdict(candidate.owner_thread, fresh=fresh)
         if verdict is None:
@@ -134,7 +135,7 @@ class CheckContext:
         newest = newest_tree_mtime(candidate.path)
         if newest is None:
             return "unreadable"
-        if self.now - newest < GONE_OWNER_IDLE_SECONDS:
+        if self.now - newest < SHORT_IDLE_THRESHOLD_SECONDS:
             return "recent"
         status = _status_reason(self, candidate, False)
         if status == "status_error":
