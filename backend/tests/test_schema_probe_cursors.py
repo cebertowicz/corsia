@@ -62,3 +62,34 @@ def test_probe_leaves_no_snapshot_for_the_next_write(connections, probe):
     probe_db.execute("COMMIT")
 
     assert all(cursor.fetchone() is None for cursor in probe_db.kept)
+
+
+def test_a_probe_inside_a_write_transaction_leaves_no_snapshot_after_its_commit(tmp_path):
+    """Being inside the caller's write is no exemption: a kept cursor outlives the COMMIT."""
+    from connections.harness_legacy_fallback import sync_legacy_fallback
+    from connections.harness_model_rows import CACHE_KEY
+
+    path = tmp_path / "fallback.db"
+    setup = sqlite3.connect(path)
+    setup.execute("PRAGMA journal_mode=WAL")
+    # harness is the second column, so a probe that stops at it leaves rows unread.
+    setup.execute("CREATE TABLE models (id TEXT, harness TEXT, source TEXT, provider_model_id TEXT, a INT, b INT)")
+    setup.execute("CREATE TABLE other (x INT)")
+    setup.commit()
+    setup.close()
+    probe_db = sqlite3.connect(path, factory=_KeepsCursors, isolation_level=None)
+    writer = sqlite3.connect(path, isolation_level=None)
+    try:
+        probe_db.execute("BEGIN IMMEDIATE")
+        sync_legacy_fallback("codex", config={CACHE_KEY: {}}, db=probe_db)
+        probe_db.execute("COMMIT")
+        writer.execute("INSERT INTO other VALUES (1)")
+
+        probe_db.execute("BEGIN IMMEDIATE")
+        probe_db.execute("INSERT INTO other VALUES (2)")
+        probe_db.execute("COMMIT")
+
+        assert all(cursor.fetchone() is None for cursor in probe_db.kept)
+    finally:
+        probe_db.close()
+        writer.close()
