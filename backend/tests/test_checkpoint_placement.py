@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -434,6 +435,10 @@ def test_a_rewrite_unmarks_the_entry(tmp_path, monkeypatch) -> None:
              state="selected", revision=revision,
              detail=_answered())
     assert [row["entry_id"] for row in selected_entries(db)] == [entry]
+    # The placement lookup is bounded by this stamp, so it is the selection's own.
+    assert selected_entries(db)[0]["selected_at"] == db.execute(
+        "SELECT reviewed_at FROM continuity_entries WHERE entry_id=?", (entry,),
+    ).fetchone()[0]
     replace_entry(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
                   body={**_lesson("one, revised"), "rationale": "r"})
     assert selected_entries(db) == []
@@ -696,6 +701,32 @@ def test_placement_save_commits_its_path_after_recording_outside_edits(tmp_path)
         capture_output=True, text=True, check=True,
     ).stdout
     assert swept == "# Lessons\n- x\n- outside\n"
+
+
+def test_a_stopped_save_is_found_only_from_its_selection_on(tmp_path, monkeypatch) -> None:
+    """The lookup walks back to the selection, never the whole history, and reads its stamp as UTC."""
+    from infra.guidance_git import find_commit
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    repo = _repo(tmp_path)
+    target = repo / "context" / "LESSONS.md"
+    target.parent.mkdir()
+    target.write_text("- x\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "placement: written\n\nPlacement: t/1@2\n"],
+        check=True, env={**os.environ, "GIT_COMMITTER_DATE": "2026-01-01T12:00:00+00:00"},
+    )
+    sha = _log_sha(repo)
+    # Stamps are naive UTC; read as local time, 12:30 would bound the walk at 20:30Z and miss.
+    assert find_commit(repo, "Placement: t/1@2", target, since="2026-01-01T12:30:00") == sha
+    assert find_commit(repo, "Placement: t/1@2", target, since="2026-01-01T14:00:00") is None
+
+
+def _log_sha(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
+    ).stdout.strip()
 
 
 def test_placement_save_inside_an_enclosing_repository_writes_nothing(tmp_path) -> None:
