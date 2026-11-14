@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -12,7 +13,9 @@ from automation.script_readings import RunReport
 from events import intake, intake_errors, rule_declarations, rules
 from infra.database import get_db
 from tests.test_event_emit import emit_world  # noqa: F401 - fixture
+from tests import test_event_rules_run_script as rule_runs_world
 from tests.test_event_intake import OWNER, _admit, _every_rule, intake_world  # noqa: F401 - fixture
+from tests.test_event_rules_run_script import runs, world  # noqa: F401 - fixtures
 from tools.event_rules import EventRulesTool
 
 
@@ -143,6 +146,35 @@ def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
         "SELECT content FROM messages WHERE thread_id=? AND content LIKE '[EVENT: script.error]%'", (OWNER,))]
     mine = "script" if rule_decision_id is None else "script or rule"
     assert fix in wake and f"does not mean your {mine} is at fault" in wake and "fix the script" not in wake
+    # Which of the script's lines was lost.
+    assert json.loads(wake[wake.index("{"):wake.rindex("}") + 1])["not_sent"] == ["qa.route"]
+
+
+def test_a_rule_started_run_that_loses_its_line_names_the_rule_and_event_that_started_it(runs, monkeypatch):  # noqa: F811
+    """Through the real sweep and runner: the wake says what the run was for, and explain finds it."""
+    w = rule_runs_world
+    rule = w._rule(w._script(runs, "emits.sh"))
+    runs["outputs"]["emits.sh"] = w._emits(("qa.two", "a"))
+    event_id = w._emit()
+    monkeypatch.setattr("events.intake.admit_event", _raising(sqlite3.OperationalError(_LOCKED)))
+    monkeypatch.setattr(script_event_lines, "_ADMIT_PAUSE_SECONDS", (0, 0, 0))
+
+    w._sweep()
+
+    db = get_db()
+    try:
+        (wake,) = [row[0] for row in db.execute(
+            "SELECT content FROM messages WHERE thread_id=? AND content LIKE '[EVENT: script.error]%'", (w.OWNER,))]
+    finally:
+        db.close()
+    details = json.loads(wake[wake.index("{"):wake.rindex("}") + 1])
+    assert details["started_by"] == {"rule_id": rule["id"], "event_id": event_id, "event_type": "qa.route"}
+    assert details["not_sent"] == ["qa.two"]
+    assert script_event_lines._RULE_RUN_FIX in details["message"]
+    assert details["next"].endswith(script_event_lines._STARTED_BY_NEXT)
+    # The event id the wake names is the one explain takes, and it shows this rule's run.
+    explained = json.loads(w._tool(w.OWNER, operation="explain", event_id=details["started_by"]["event_id"]))
+    assert [d["explanation"] for d in explained["decisions"] if rule["id"] in d["explanation"]]
 
 
 def test_a_defect_inside_the_intake_is_never_sent_again(intake_world, tmp_path, monkeypatch):
