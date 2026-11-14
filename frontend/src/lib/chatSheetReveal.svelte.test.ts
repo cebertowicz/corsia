@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { createChatSheetReveal } from './chatSheetReveal.svelte';
 
 const rect = (top: number, height: number) => new DOMRect(10, top, 200, height);
@@ -52,5 +52,26 @@ describe('createChatSheetReveal pressedText', () => {
 		expect(reveal.pressedText()).not.toBeNull();
 		panel.el = null; flushSync();
 		expect(reveal.pressedText()).toBeNull();
+	});
+});
+
+describe('createChatSheetReveal focus', () => {
+	it('moves focus to the Back button inside its own sheet, not to a document comment view\'s `.thread-back` wrapper', async () => {
+		vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => { run(0); return 0; });
+		const docWrapper = document.createElement('div');
+		docWrapper.className = 'thread-back';
+		docWrapper.tabIndex = -1;
+		document.body.append(docWrapper);
+		const { panel, mode } = setup('list');
+		flushSync();
+		const sheet = document.createElement('div');
+		const back = document.createElement('button');
+		back.className = 'thread-back';
+		sheet.append(back);
+		document.body.append(sheet);
+		panel.el = sheet;
+		mode.now = 'thread'; flushSync();
+		await tick(); await tick();
+		expect(document.activeElement).toBe(back);
 	});
 });
