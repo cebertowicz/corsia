@@ -39,7 +39,8 @@ export function createCommentOpeners(ui: ReturnType<typeof createCommentSurfaceS
 }
 
 /**
- * The box a card opened by `click` sits against: the clicked line at the pointer's x. Null when no click opened it, for a
+ * The box a card opened by `click` sits against: the whole highlight at the pointer's x when it is up to three lines tall (`keptWhole`), else
+ * the clicked line at the pointer's x. Null when no click opened it, for a
  * keyboard press on a button (a click with no pointer, `detail` 0), so the card opens beside the comment's text as before.
  * The box keeps its offset from `live` (the comment's own box), so the card follows its text as it scrolls or moves and
  * hides when `live` does.
