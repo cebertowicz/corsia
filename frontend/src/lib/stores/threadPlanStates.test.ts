@@ -269,14 +269,28 @@ describe('the open thread', () => {
 		expect(get(listedNeedsYou)).toBe(false);
 	});
 
-	it('stops following the thread once its chat closes', async () => {
-		mocks.read.mockResolvedValue({});
-		watchOpenThreadPlanStates(['open']);
+	it('stops following the thread once its chat closes, and keeps no stale reading for it', async () => {
+		mocks.read.mockImplementation(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, entry('waiting')])));
+		watchThreadPlanStates(['listed']);
+		watchOpenThreadPlanStates(['open', 'listed']);
 		await settle();
+		expect(get(threadPlanStates).open?.state).toBe('waiting');
 		watchOpenThreadPlanStates([]);
 		mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id: 'open' } }] });
 		await settle();
-		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['open']]);
+		expect(mocks.read.mock.calls.map(([chunk]) => chunk)).toEqual([['listed'], ['open']]);
+		expect(get(threadPlanStates).open, 'a closed chat the menu does not list keeps no reading').toBeUndefined();
+		expect(get(threadPlanStates).listed?.state, 'a listed thread keeps its reading').toBe('waiting');
+	});
+
+	it('keeps no reading that lands after the chat closed', async () => {
+		let release: (value: Record<string, unknown>) => void = () => {};
+		mocks.read.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+		watchOpenThreadPlanStates(['open']);
+		watchOpenThreadPlanStates([]);
+		release({ open: entry('waiting') });
+		await settle();
+		expect(get(threadPlanStates).open).toBeUndefined();
 	});
 
 	it('keeps refreshing the open thread after the menu stops watching', async () => {

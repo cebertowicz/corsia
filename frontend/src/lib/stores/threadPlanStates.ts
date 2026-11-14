@@ -114,6 +114,8 @@ async function loadChunk(ids: string[]): Promise<void> {
 	threadPlanStates.update((current) => {
 		const next = { ...current };
 		for (const id of ids) {
+			// A thread dropped while its read was out keeps no reading nothing will refresh.
+			if (!isTracked(id)) continue;
 			if (states[id]) next[id] = states[id];
 			else delete next[id];
 		}
@@ -187,7 +189,18 @@ export function watchThreadPlanStates(threadIds: string[]): void {
 export function watchOpenThreadPlanStates(threadIds: string[]): void {
 	// A thread the menu already lists needs no extra read; its row is already kept current.
 	const added = threadIds.filter((id) => !openChats.has(id) && !listed.has(id));
+	const previous = openChats;
 	openChats = new Set(threadIds);
+	// A closed chat the menu does not list would keep a reading nothing refreshes;
+	// drop it, as for a thread the store never read.
+	const dropped = [...previous].filter((id) => !isTracked(id));
+	if (dropped.length > 0) {
+		threadPlanStates.update((current) => {
+			const next = { ...current };
+			for (const id of dropped) delete next[id];
+			return next;
+		});
+	}
 	syncAmbient();
 	void load(added);
 }
