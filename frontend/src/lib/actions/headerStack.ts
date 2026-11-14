@@ -34,22 +34,28 @@ export function shouldStack(room: HeaderRoom, short: boolean): boolean {
 
 const px = (value: string): number => Number.parseFloat(value) || 0;
 
-/** The line's floor, from the line as drawn: the same floor whether it is one row or stacked, expanded or not. */
-function lineFloor(line: HTMLElement): number {
+/**
+ * The line's floor, from the line as drawn: the same floor whether it is one row or stacked, expanded or not. A line that draws
+ * no request (a task for the person, whose text sits under the row) has neither the ask nor the chevron to make room for; its
+ * name then takes the ask's 16 characters instead when it is cut, so a long name is never left a few letters wide beside the tools.
+ */
+export function lineFloor(line: HTMLElement): number {
 	const probe = document.createElement('span');
 	probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;height:0;padding:0;border:0';
 	line.append(probe);
 	probe.style.width = '16ch';
-	const ask = probe.getBoundingClientRect().width;
+	const sixteen = probe.getBoundingClientRect().width;
+	const ask = line.querySelector('.rb-ask') ? sixteen : 0;
 	probe.style.width = 'var(--space-2)';
 	const gap = probe.getBoundingClientRect().width;
 	probe.remove();
 	const avatar = line.querySelector('.rb-lead')?.firstElementChild?.getBoundingClientRect().width ?? 0;
 	const who = line.querySelector<HTMLElement>('.rb-who');
 	// A cut name has its own floor (`min-width`); a name that is not cut keeps its natural width.
-	const whoFloor = who ? (px(getComputedStyle(who).minWidth) || who.scrollWidth) : 0;
+	const cutFloor = who ? px(getComputedStyle(who).minWidth) : 0;
+	const whoFloor = who ? (cutFloor ? (ask ? cutFloor : Math.max(cutFloor, sixteen)) : who.scrollWidth) : 0;
 	const chevron = line.querySelector('.rb-chev')?.getBoundingClientRect().width ?? 0;
-	return avatar + (who ? gap + whoFloor : 0) + gap + ask + (chevron ? gap + chevron : 0);
+	return avatar + (who ? gap + whoFloor : 0) + (ask ? gap + ask : 0) + (chevron ? gap + chevron : 0);
 }
 
 /** A notice or receipt has no line: it needs about a request's worth of room beside the tools. */

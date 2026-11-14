@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { fitsOneRow, shouldStack } from './headerStack';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fitsOneRow, lineFloor, shouldStack } from './headerStack';
 
 // What the review line needs in the first column: avatar, name at its floor, a 16-character ask, the chevron and the gaps between them.
 const floor = 19 + 8 + 56 + 8 + 122 + 8 + 13;
@@ -18,6 +18,36 @@ describe('shouldStack', () => {
 	it('still stacks a header narrower than 408px on a short viewport', () => {
 		expect(shouldStack({ ...tight, content: 407 }, true)).toBe(true);
 		expect(shouldStack({ ...tight, content: 408 }, true)).toBe(false);
+	});
+});
+
+describe('lineFloor', () => {
+	// jsdom draws nothing: give the pieces the widths the browser gave them (avatar 19, a 16ch probe 122, one gap 8, chevron 13, a short name 116 wide).
+	afterEach(() => vi.restoreAllMocks());
+	const draw = (html: string): HTMLElement => {
+		document.body.innerHTML = `<div id="line">${html}</div>`;
+		vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+			const el = this as HTMLElement;
+			const width = el.style.width === '16ch' ? 122 : el.style.width === 'var(--space-2)' ? 8 : el.matches('.avatar') ? 19 : el.matches('.rb-chev') ? 13 : 0;
+			return { width } as DOMRect;
+		});
+		const line = document.getElementById('line') as HTMLElement;
+		Object.defineProperty(line.querySelector('.rb-who'), 'scrollWidth', { value: 116 });
+		return line;
+	};
+	const lead = '<span class="rb-lead"><span class="avatar"></span><span class="rb-who">Rollout agent:</span></span>';
+
+	it('holds no ask or chevron for a line that draws no request', () => {
+		expect(lineFloor(draw(lead))).toBe(19 + 8 + 116);
+	});
+
+	it('gives a cut name the ask\'s 16 characters when no request is drawn, never its bare cut floor', () => {
+		const cut = lead.replace('class="rb-who"', 'class="rb-who" style="min-width:70px"');
+		expect(lineFloor(draw(cut))).toBe(19 + 8 + 122);
+	});
+
+	it('holds the 16-character ask and the chevron for a line that draws a request', () => {
+		expect(lineFloor(draw(`${lead}<span class="rb-ask">Review</span><svg class="rb-chev"></svg>`))).toBe(19 + 8 + 116 + 8 + 122 + 8 + 13);
 	});
 });
 
