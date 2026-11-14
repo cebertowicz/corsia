@@ -352,7 +352,6 @@ def _persist_before_terminal(
 
     _persist_completed_tool_results(connection, thread_id, turn_id, error)
     from core.tool_result_settlement import settle_turn_tool_lineage
-
     settle_turn_tool_lineage(connection, thread_id, turn_id)
     usage.settle(connection, thread_id)
     return settle_terminal_limits(
