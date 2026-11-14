@@ -491,7 +491,7 @@ async def test_a_settled_password_visit_refuses_reads_of_its_hidden_field_by_ref
             assert "person" in await owner.run(thread_id, ("get", "value", "#user"), session="existing")
             for command in (("get", "value", "#pw"), ("get", "attr", "#pw", "value"), ("get", "value", "input[type=password]"),
                             ("eval", "pw.value")):
-                with pytest.raises(BrowserSessionError, match="asks for a password"):
+                with pytest.raises(BrowserSessionError, match="has shown a password field"):
                     await owner.run(thread_id, command, session="existing")
     finally:
         await owner.close_thread(thread_id)
