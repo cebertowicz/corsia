@@ -105,7 +105,9 @@ def migrate_100_to_101(conn: sqlite3.Connection) -> None:
     fresh install writes. A database that already has the charge day column is
     left alone, so a repeated run is safe.
     """
-    if any(row[1] == "charge_day" for row in conn.execute("PRAGMA table_info(vendor_account_billing_facts)")):
+    # Read every row: a cursor left mid-step and kept alive past the commit pins a read snapshot.
+    columns = conn.execute("PRAGMA table_info(vendor_account_billing_facts)").fetchall()
+    if any(row[1] == "charge_day" for row in columns):
         return
     conn.execute("ALTER TABLE vendor_account_billing_revisions RENAME TO vendor_account_billing_revisions_old")
     conn.execute("ALTER TABLE vendor_account_billing_facts RENAME TO vendor_account_billing_facts_old")

@@ -333,6 +333,53 @@ class TestProjectArtifacts:
             f"/api/projects/{p['id']}/artifacts?token={_TOKEN}&limit=1&offset=0")
         assert len(r.json()["artifacts"]) == 1 and r.json()["total"] >= 3
 
+    def test_listing_state_is_the_identity_state_for_released_and_archived_documents(
+        self, integration_client,
+    ):
+        """A released document is a live document: listed under active, on its former
+        owner's released registration, and not under archived. A truly archived
+        document is listed under archived only."""
+        from infra.database import get_db
+        from registry import models
+
+        p = self._project(integration_client)
+        sid = _mk_session(p["id"])
+        ext = f"released-{uuid.uuid4().hex[:8]}"
+        r = _register(integration_client, sid, external_id=ext, title="released.md")
+        assert r.status_code == 200, r.text
+        old = f"archived-{uuid.uuid4().hex[:8]}"
+        r = _register(integration_client, sid, external_id=old, title="archived.md")
+        assert r.status_code == 200, r.text
+        archived_id = r.json()["artifact"]["id"]
+        db = get_db()
+        try:
+            models.release_artifact(
+                integration="workspace", type="document", external_id=ext,
+                actor_thread_id=sid, authority="current-owner-handoff",
+                reason="test release", source_path="test_registry_api", db=db,
+            )
+            models.retire(archived_id, tombstone=False, db=db)
+            db.commit()
+        finally:
+            db.close()
+
+        def listed(state: str) -> dict:
+            r = integration_client.get(
+                f"/api/projects/{p['id']}/artifacts?token={_TOKEN}&type=document&state={state}")
+            assert r.status_code == 200, r.text
+            return {a["external_id"]: a for a in r.json()["artifacts"]}
+
+        active, archived = listed("active"), listed("archived")
+        row = active[ext]
+        assert (row["state"], row["parent_thread_id"], row["relationship_state"]) == (
+            "active", sid, "subscriber-recent",
+        )
+        assert ext not in archived
+        assert old not in active
+        assert (archived[old]["state"], archived[old]["relationship_state"]) == (
+            "archived", "owner-active",
+        )
+
     def test_unknown_project_404_and_bad_token_401(self, integration_client):
         r = integration_client.get(
             f"/api/projects/nope-{uuid.uuid4().hex[:6]}/artifacts?token={_TOKEN}")

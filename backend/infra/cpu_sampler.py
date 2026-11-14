@@ -33,6 +33,9 @@ SUMMARY_ENTRY_COUNT = 15
 THREAD_ENTRY_CHARS = 100
 STACK_ENTRY_CHARS = 320
 _BACKEND_PREFIX = f"{Path(__file__).resolve().parents[1]}{os.sep}"
+# Decorator plumbing between a reader and its caller: three frames per memoized call that
+# name no work, and would otherwise push the caller out of the six frames a signature keeps.
+_PASS_THROUGH_FILES = frozenset({"connections/fact_memo.py"})
 _STDLIB_PREFIX = f"{Path(os.__file__).resolve().parent}{os.sep}"
 _lifecycle_lock = threading.Lock()
 _sampler: CpuSampler | None = None
@@ -69,12 +72,18 @@ def _is_idle_frame(frame: FrameType) -> bool:
 
 
 def _signature(frame: FrameType, thread_group: str) -> str:
-    """Return six innermost frames without locals, arguments, or values."""
+    """Return six innermost frames without locals, arguments, or values.
+
+    Pass-through decorator frames are left out so the six name the work and its callers;
+    one stays when it is the innermost, because then the decorator itself is the work.
+    """
     frames: list[str] = []
     current: FrameType | None = frame
     while current is not None and len(frames) < 6:
         code = current.f_code
-        frames.append(f"{_short_path(code.co_filename)}:{code.co_name}:{current.f_lineno}")
+        path = _short_path(code.co_filename)
+        if current is frame or path not in _PASS_THROUGH_FILES:
+            frames.append(f"{path}:{code.co_name}:{current.f_lineno}")
         current = current.f_back
     sample = "idle" if _is_idle_frame(frame) else "active"
     return f"thread_group={thread_group} sample={sample} stack={' <- '.join(frames)}"

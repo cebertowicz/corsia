@@ -80,20 +80,20 @@ async function freezeClock(page: Page): Promise<void> {
 		}
 		Object.setPrototypeOf(FrozenDate, RealDate);
 		window.Date = FrozenDate as DateConstructor;
-		// A reply counts read after a 1.5 s dwell. While a frame is being taken the dwell is held, so the frame shows the reply
-		// still marked New however long the capture takes; releasing the hold lets the dwell finish within 100 ms.
+		// While a frame is being taken every 1.5 s timer (the margin hold among them) is held, so the frame shows the state it
+		// was taken for however long the capture takes; releasing the hold lets each one finish within 100 ms.
 		const realSetTimeout = window.setTimeout.bind(window);
-		(window as unknown as { __holdDwell: boolean }).__holdDwell = false;
+		(window as unknown as { __holdTimers: boolean }).__holdTimers = false;
 		window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
 			if (delay !== 1500 || typeof fn !== 'function') return realSetTimeout(fn, delay, ...args);
-			const run = (): number | void => (window as unknown as { __holdDwell: boolean }).__holdDwell ? realSetTimeout(run, 100) : fn(...args);
+			const run = (): number | void => (window as unknown as { __holdTimers: boolean }).__holdTimers ? realSetTimeout(run, 100) : fn(...args);
 			return realSetTimeout(run, delay);
 		}) as typeof window.setTimeout;
 	}, FROZEN_NOW);
 }
 
-async function holdDwell(page: Page, hold: boolean): Promise<void> {
-	await page.evaluate((value) => { (window as unknown as { __holdDwell: boolean }).__holdDwell = value; }, hold);
+async function holdTimers(page: Page, hold: boolean): Promise<void> {
+	await page.evaluate((value) => { (window as unknown as { __holdTimers: boolean }).__holdTimers = value; }, hold);
 }
 
 
@@ -239,7 +239,7 @@ async function reloadComments(page: Page, artifactId: string): Promise<void> {
 
 // Back, not Escape: Escape first closes the pin's own card in the viewer, and Back leaves the viewer in one step.
 async function backToDocument(page: Page): Promise<void> {
-	// The reply counts read once its thread has been on screen for 1.5 s; leaving sooner leaves it waiting, which is the product's rule.
+	// Opening the thread already counted its reply read; the pause lets the margin hold's 1.5 s timer end before the viewer closes.
 	await page.waitForTimeout(1700);
 	await putSheetAway(page);
 	await page.getByRole('button', { name: 'Back to walkthrough.md', exact: true }).click();
@@ -249,10 +249,16 @@ async function backToDocument(page: Page): Promise<void> {
 const controlButton = (page: Page) => page.locator('[data-doc-jump]').getByRole('button');
 const controlBox = (page: Page) => page.locator('[data-doc-jump]');
 
-/** Arriving on a thread opens it, so its New replies clear once its card is shown. */
-async function awaitFocusedRead(page: Page): Promise<void> {
+/** The request that records a thread's replies as read. */
+const viewedRecorded = (page: Page) => page.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/artifacts\/[^/]+\/comments\/[^/]+\/viewed$/.test(new URL(response.url()).pathname) && response.ok());
+
+/** The jump control is an explicit pick: its thread opens and is counted read, and its New replies stay marked until it closes. */
+async function jumpAndAwaitRead(page: Page): Promise<void> {
+	const stamped = viewedRecorded(page);
+	await controlButton(page).click();
 	await expect(page.locator('[data-comment-id].focused')).toBeVisible();
-	await expect(page.locator('[data-comment-id].focused .ct-reply.new')).toHaveCount(0);
+	await stamped;
+	await expect(page.locator('[data-comment-id].focused .ct-reply.new').first()).toBeVisible();
 }
 
 /** The control's face is its touch target: like chat's control, no pseudo-element padding. Measured at rest: mid-arrival
@@ -438,7 +444,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(page.locator('.doc .cm-content')).toBeFocused();
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			const before = await page.locator('.cm-scroller').evaluate((el) => el.scrollTop);
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			await controlButton(page).click();
 			// The waiting reply it pointed at is brought into view, focused, and the comments list opens at it.
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
@@ -462,7 +468,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await input.focus();
 			await expect(input).toBeFocused();
 			await expect(controlBox(page)).toHaveCount(0);
-			await holdDwell(page, false);
+			await holdTimers(page, false);
 		});
 	}
 }
@@ -482,7 +488,7 @@ for (const width of [1440, 393]) {
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
 		await expectControl(page, '1 new');
-		await holdDwell(page, true);
+		await holdTimers(page, true);
 		await controlButton(page).click();
 		await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 		await expect(page.getByText(token)).toBeVisible();
@@ -660,7 +666,7 @@ for (const width of [1440, 393]) {
 			await page.keyboard.press('Tab');
 			await expect(controlButton(page)).toBeFocused();
 
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			await page.keyboard.press(key);
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expectCommentsShown(page.locator('[data-doc-comments-drawer]'));
@@ -676,7 +682,7 @@ for (const width of [1440, 393]) {
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			await expectControl(page, '1 new');
 			await expectControlPoints(page, 1, 'below');
-			await holdDwell(page, false);
+			await holdTimers(page, false);
 		});
 	}
 }
@@ -696,7 +702,7 @@ for (const width of [1440, 393]) {
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 				await openThread(page, threadTitle);
 				await expectControl(page, '2 new');
-				await holdDwell(page, true);
+				await holdTimers(page, true);
 				await controlButton(page).focus();
 				await page.keyboard.press('Enter');
 				// A phone lists the comments in a sheet over a scrim. At 1440 the canvas beside the chat and the Workspace panel is too
@@ -725,7 +731,7 @@ for (const width of [1440, 393]) {
 				await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 				await expectControl(page, '1 new');
 				await saveMotionProbe(page);
-				await holdDwell(page, false);
+				await holdTimers(page, false);
 			});
 		}
 	}
@@ -746,7 +752,7 @@ for (const width of [393]) {
 		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		const box = (await controlButton(page).boundingBox())!;
-		await holdDwell(page, true);
+		await holdTimers(page, true);
 		await controlButton(page).click();
 		const sheet = page.locator('[data-adaptive-drawer].drawer-backdrop');
 		await expect(sheet).toBeVisible();
@@ -765,7 +771,7 @@ for (const width of [393]) {
 		await page.locator('body').focus();
 		await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 		await expectControl(page, '1 new');
-		await holdDwell(page, false);
+		await holdTimers(page, false);
 	});
 }
 
@@ -781,7 +787,7 @@ test(`${TAG} list popover 1440px: the control still jumps while the list is open
 	await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 	await openThread(page, threadTitle);
 	await expectControl(page, '2 new');
-	await holdDwell(page, true);
+	await holdTimers(page, true);
 	const inPopover = async (id: string) => await page.evaluate((wanted) => {
 		const card = document.querySelector<HTMLElement>(`[data-popover] [data-comment-id="${wanted}"]`);
 		if (!card) return false;
@@ -806,7 +812,7 @@ test(`${TAG} list popover 1440px: the control still jumps while the list is open
 	await expect(page.locator('[data-popover] .list-pop')).toBeVisible();
 	await expect(page.locator(`[data-comment-id="${doc.roots[11]}"]`)).toHaveClass(/focused/);
 	await expect.poll(() => inPopover(doc.roots[11]), { message: 'the second jump shows the next thread inside the list' }).toBe(true);
-	await holdDwell(page, false);
+	await holdTimers(page, false);
 });
 
 for (const theme of ['light', 'dark'] as const) {
@@ -846,15 +852,15 @@ for (const theme of ['light', 'dark'] as const) {
 			// Read from below the image, where both pins are off frame: with a pin on screen there is nothing to be taken to and
 			// the band would rightly show nothing.
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = el.scrollHeight; });
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			await expectControl(page, '2 new');
 			await expectControlPoints(page, 2, 'above');
-			await holdDwell(page, false);
+			await holdTimers(page, false);
 			// Opening the document delivers the two pin comments; its header says so, and no notice joins the jump control's cell.
 			await expect(page.locator('.document-header .feedback-controls [role="status"]')).toHaveText(/^2 comments sent/);
 			await expect(page.locator('.toast').filter({ hasText: /comments? sent/ })).toHaveCount(0);
 
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			if (width === 1440) await page.evaluate(() => {
 				const samples: boolean[] = [];
 				(window as unknown as { __documentJumpHit: boolean[] }).__documentJumpHit = samples;
@@ -893,21 +899,21 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(overlay(page).locator('[data-doc-jump]')).toHaveCount(0);
 			}
 
-			await holdDwell(page, false);
+			await holdTimers(page, false);
 			// Back to the document: one waiting reply is left. Its pin sits on the image the reader was just looking at, so the
 			// band shows nothing; it returns when the reader scrolls that image out of view, and the next tap goes to that pin.
 			await backToDocument(page);
 			await expect.poll(() => unreadCountInStore(page, seeded.artifactId)).toBe(1);
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = el.scrollHeight; });
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			await expectControl(page, '1 new');
 
-			await holdDwell(page, true);
+			await holdTimers(page, true);
 			await controlButton(page).click();
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('It stays where it is; only its label changed.')).toBeVisible();
 
-			await holdDwell(page, false);
+			await holdTimers(page, false);
 			await backToDocument(page);
 			// Everything read: the control is gone.
 			await expect(controlBox(page)).toHaveCount(0);
@@ -952,9 +958,8 @@ for (const theme of ['light', 'dark'] as const) {
 			// Tapping through every waiting thread reads them all: the control leaves.
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await controlBox(page).count())) break;
-				await controlButton(page).click();
-				// The comments list opens over the document and covers the control; stay until the arrival reads it, then put it away to tap again.
-				await awaitFocusedRead(page);
+				// The comments list opens over the document and covers the control; stay until the pick is read, then put it away to tap again.
+				await jumpAndAwaitRead(page);
 				await closeComments(page);
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
@@ -980,7 +985,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await openThread(page, threadTitle);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		// Nothing is read while the reader moves, so every state below is the control's own, not a count falling.
-		await holdDwell(page, true);
+		await holdTimers(page, true);
 
 		// Opened at the top: both threads are below, so it points down at the nearer one.
 		await expectControl(page, '2 new');
@@ -1019,7 +1024,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
-		await holdDwell(page, true);
+		await holdTimers(page, true);
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
 		// Put the reader on the thread's own line. A document paints only the lines around the reader — at 393 that line
 		// is not in the page yet — so reach it the way a reader does: scroll toward it until it is drawn, then stand on it.
@@ -1036,7 +1041,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await expect.poll(async () => (await anchorBox(page, SECTIONS[2].anchor))?.whole === true, { message: `the unread line (${SECTIONS[2].anchor}) sits inside the visible pane` }).toBe(true);
 		await expect(controlButton(page)).toHaveCount(0);
 		await page.screenshot({ path: stillPath(width, theme, 'hidden') });
-		await holdDwell(page, false);
+		await holdTimers(page, false);
 	});
 }
 

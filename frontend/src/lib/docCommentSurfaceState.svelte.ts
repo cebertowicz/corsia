@@ -5,7 +5,7 @@ import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { arrivedDocComments } from '$lib/stores/docComments';
+import { pickedComments } from '$lib/stores/docComments';
 import { paneOverlay } from '$lib/stores/artifactCanvas';
 import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
 import { CELL_EDITOR, cellAtPosition, closeCell, openCellAt, openCellState } from '$lib/cm/widget-cell-state';
@@ -121,12 +121,12 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		state = { kind: 'draft' };
 		bump();
 	}
-	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. The highlight is how a thread is opened now that no marker stands by it: its card, once shown, stamps the replies viewed. */
-	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
+	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. A click or tap on it (`pressed`) reads the thread: the card showing it stamps the replies viewed. A caret passing into it by keys reads nothing. */
+	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false, pressed = false) {
 		const margin = marginUp?.();
 		// A document canvas with no room for the column shows its list as a popover (a phone's as a sheet): a highlight picked there opens that one thread in its place.
 		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
-		if (changed) arrivedDocComments.set(new Set([id]));
+		if (pressed) pickedComments.set(new Set([id]));
 		return changed;
 	}
 	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean, replacesList = false) {
@@ -156,7 +156,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		anchor = reading ?? opener;
 		atClick = clicked;
 		restoreFocus = () => opener.focus();
-		arrivedDocComments.set(new Set(ids));
+		pickedComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {
 		if (state?.kind === 'thread' && state.ids?.includes(id)) state = { ...state, id };

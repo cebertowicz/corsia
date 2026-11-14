@@ -23,6 +23,7 @@ from events.connectors import github_notifications_feed as feed
 from events.connectors import github_pr_facts as pr_facts
 from events.connectors import github_repo_activity as poller
 from events.connectors.github_pr_quiet_reasons import rank
+from events.intake_errors import failure_code
 
 log = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 30
@@ -167,12 +168,21 @@ class HeadCheckAggregator:
                 facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts)
                 event_id = _event_id(repo, head_sha, latest)
                 for attempt in range(1, MAX_ATTEMPTS + 1):
-                    result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
-                        origin="connector", producer="github", event_id=event_id)
-                    if result.refusal is None:
+                    try:
+                        result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
+                            origin="connector", producer="github", event_id=event_id)
+                        code = None if result.refusal is None else result.refusal.code
+                    except Exception as exc:
+                        # A write the intake could not take (a held database lock) raises rather than refuses.
+                        if failure_code(exc) != "intake_unreachable":
+                            raise
+                        code = "intake_unreachable"
+                        log.warning("github-head-checks: intake unreachable for %s@%s, try %s of %s: %s",
+                                    *key, attempt, MAX_ATTEMPTS, exc)
+                    if code is None:
                         break
-                    log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
-                    if result.refusal.code != "intake_unreachable":
+                    log.info("github-head-checks: intake refused %s@%s code=%s", *key, code)
+                    if code != "intake_unreachable":
                         break
                     if attempt == MAX_ATTEMPTS:
                         keep = True

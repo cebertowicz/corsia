@@ -24,24 +24,15 @@ from infra.worktree_reaper_checks import (
     CheckContext,
     RemovalVerdict,
     candidate_verdict,
-    orphan_skip_reason,
     recheck_before_removal,
     status_at,
 )
+from infra.worktree_reaper_orphans import orphan_skip_reason
 from infra.worktree_reaper_probe import ProcessProbe, ReaperGitError, generated_trees
-from infra.worktree_reaper_remove import (
-    quarantine_entries,
-    remove_orphan,
-    remove_worktree,
-    sweep_quarantine,
-)
+from infra.worktree_reaper_remove import quarantine_entries, remove_orphan, remove_worktree, sweep_quarantine
 from infra.worktree_reaper_salvage import SalvageError, salvage_worktree
 from infra.worktree_reaper_scan import Candidate, Orphan, scan_repo
-from infra.worktree_reaper_store import (
-    forget_pr_terminal,
-    pr_terminal_heads,
-    remember_pr_terminal,
-)
+from infra.worktree_reaper_store import forget_pr_terminal, pr_terminal_heads, remember_pr_terminal
 
 IDLE_THRESHOLD_SECONDS = 7 * 86400
 PUBLISHED_IDLE_THRESHOLD_SECONDS = 86400
@@ -87,6 +78,7 @@ class RepoReport:
     scanned: int = 0
     removed: int = 0
     salvaged: list[Salvaged] = field(default_factory=list)
+    discarded: list[str] = field(default_factory=list)  # gone owners' trees, nothing copied
     orphan_removed: int = 0
     quarantine_removed: int = 0
     quarantine_entries: list[str] = field(default_factory=list)
@@ -130,6 +122,7 @@ def emit_report(report: RepoReport) -> None:
         "removed": report.removed,
         "salvaged": len(report.salvaged),
         "salvaged_to": [asdict(item) for item in report.salvaged[:METRIC_ITEM_CAP]],
+        "discarded": report.discarded[:METRIC_ITEM_CAP],
         "remaining_count": report.remaining_count,
         "orphan_removed": report.orphan_removed,
         "quarantine_removed": report.quarantine_removed,
@@ -161,10 +154,10 @@ def _remove_candidate(
                 ctx, candidate, IDLE_THRESHOLD_SECONDS, expected_head, merged=merged,
                 short_threshold_seconds=PUBLISHED_IDLE_THRESHOLD_SECONDS,
             )
-            salvage = verdict is RemovalVerdict.SALVAGE
-
             def clear(quarantined: Path) -> str | None:
-                if not salvage:
+                if verdict is RemovalVerdict.DISCARD:  # the owner is purged; nothing is copied out
+                    return None
+                if verdict is not RemovalVerdict.SALVAGE:  # clean (None or CLEAN); re-run the check that cleared it
                     return status_at(ctx, candidate, quarantined, merged)
                 copies.append(salvage_worktree(
                     repo, quarantined, candidate.admin, candidate.name, ctx.now,
@@ -192,6 +185,9 @@ def _remove_candidate(
             report.salvaged.append(Salvaged(candidate.name, owner, str(destination)))
     if outcome == "removed":
         report.removed += 1
+        if verdict is RemovalVerdict.DISCARD:
+            logger.info("worktree_reaper: discarded {} (owner {} gone)", candidate.name, owner)
+            report.discarded.append(candidate.name)
         forget_pr_terminal(candidate.path)
     else:
         reason = "quarantine_removal_pending" if outcome == "quarantine_pending" else outcome

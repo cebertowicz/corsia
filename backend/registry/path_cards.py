@@ -4,7 +4,9 @@ The client link resolver and these card paths share decoding and normalization
 vectors in ``testdata/link-target-vectors.json``. Their allowed roots differ: the
 client opens workspace links, while cards can also refer to scoped files.
 Relative card paths use the explicit workspace origin when supplied, otherwise
-the inherited first-scoped-root fallback.
+the inherited first-scoped-root fallback. A relative path with no file there is
+tried once more from ``fallback_origin`` (a project thread's workspace root), so
+a path written from either root names the same file; the scope check is unchanged.
 """
 
 from __future__ import annotations
@@ -103,8 +105,12 @@ def targets(text: str) -> list[str]:
 def reference_cards(
     db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
     lookup_memo: dict[str, FileLookup] | None = None, origin: Path | None = None,
+    fallback_origin: Path | None = None,
 ) -> list[dict]:
     """Cards for accessible files ``text`` names.
+
+    A relative path resolves from ``origin`` first; only when no file is there is it
+    tried from ``fallback_origin``, so a path present under both names the origin's file.
 
     ``covered`` maps an artifact id to the holds whose ask card covers it: the card is
     kept and marked ``covered_by_ask``, so the client shows it only when none of those
@@ -115,15 +121,24 @@ def reference_cards(
     cards: list[dict] = []
     seen_paths: set[str] = set()
     seen_ids: set[str] = set()
+    origins = [str(origin) if origin else None]
+    if fallback_origin is not None and fallback_origin != origin:
+        origins.append(str(fallback_origin))
     for target in targets(text):
-        path = workspace_path(target, roots, str(origin) if origin else None)
-        if path is None:
-            continue
-        found = lookups.get(path)
-        if found is None:
-            found = lookup_file(path, list(bases), db=db)
-            lookups[path] = found
-        if not found.allowed or not found.is_file or found.path is None:
+        found: FileLookup | None = None
+        tried: set[str] = set()
+        for start in origins:
+            path = workspace_path(target, roots, start)
+            if path is None or path in tried:
+                continue
+            tried.add(path)
+            found = lookups.get(path)
+            if found is None:
+                found = lookup_file(path, list(bases), db=db)
+                lookups[path] = found
+            if found.is_file:
+                break
+        if found is None or not found.allowed or not found.is_file or found.path is None:
             continue
         canonical = str(found.path)
         artifact_id = str(found.artifact["id"]) if found.artifact else None

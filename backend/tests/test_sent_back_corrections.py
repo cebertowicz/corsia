@@ -178,6 +178,8 @@ def test_sent_back_facts_are_attributed_to_the_corrected_node():
         assert facts[0].source_kind == "sent_back"
         assert facts[0].node_id == facts[0].source_id.removeprefix("reject-")
         assert facts[0].is_correction
+        assert attributed_facts(db, node_ids={facts[0].node_id}) == facts
+        assert attributed_facts(db, node_ids={"another-node"}) == []
     finally:
         db.close()
 

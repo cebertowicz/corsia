@@ -15,7 +15,7 @@ import sqlite3
 from typing import TypeVar
 from uuid import uuid4
 
-from doceditor.live_store_journal import enter_wal
+from doceditor.live_store_journal import connect, enter_wal, probe_read_only
 from doceditor.live_publication_record import Publication, OwedPublication
 from doceditor.live_failure_record import FailureRecord
 
@@ -96,6 +96,8 @@ class LiveStore:
         self.observe_refusal: Callable[[StoreRefused], None] = lambda error: None
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            if path.exists():
+                probe_read_only(path)
             with closing(self._connect()) as connection:
                 connection.executescript(_SCHEMA)
             self._transaction(lambda db: db.execute(
@@ -107,11 +109,7 @@ class LiveStore:
             raise StoreRefused(str(exc)) from exc
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=1.0, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=1000")
-        connection.execute("PRAGMA synchronous=FULL")
-        return connection
+        return connect(self.path)
 
     @staticmethod
     def probe_owed(path: Path) -> bool:

@@ -7,7 +7,7 @@ vi.mock('$lib/stores/auth', () => ({ token: writable('test-token') }));
 vi.mock('$lib/stores/threads', () => ({ activeThreadId: writable('thread'), messages: writable([]) }));
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
-import { watchChatCommentThreads } from './chatCommentRefresh';
+import { adoptCommentThreads, watchChatCommentThreads } from './chatCommentRefresh';
 import { messages } from '$lib/stores/threads';
 
 const row = (id: string, seq: number, extra: object = {}) => ({ id, thread_id: 'thread', role: 'assistant' as const, content: '', created_at: 't', seq, ...extra });
@@ -34,6 +34,13 @@ it('asks the answer about a thread the loaded page has no comment in', async () 
   expect(get(messages).find(item => item.id === 'target')?.chat_comments?.[0].answers[0].unread).toBe(true);
   expect(announce).toHaveBeenCalledWith('text');
   stop();
+});
+
+it('keeps an answer read here read when a thread read started before the read lands after it', () => {
+  const comment = (unread: boolean) => ({ id: 'comment', cid: 'c1.1', user_message_id: 'user', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [{ author_kind: 'agent', user_message_id: 'user', assistant_message_id: 'answer', cid: 'c1.1', text: 'answer', created_at: 't', unread }] });
+  messages.set([row('target', 1, { chat_comments: [comment(false)] })] as never);
+  adoptCommentThreads('thread', [{ id: 'target', chat_comments: [comment(true)] }] as never);
+  expect(get(messages)[0].chat_comments?.[0].answers[0].unread).toBe(false);
 });
 
 it('reads the answer only once for a thread with no comment anywhere', async () => {

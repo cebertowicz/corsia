@@ -360,7 +360,7 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
 
 
 def holds_rows(db, artifact_id: str) -> bool:
-    """True when this document already has comments -- so it is not a promote successor (`doceditor.comment_transfer`)."""
+    """True when this document already has comments; a promote onto it is refused only if the promoted file has some too (`doceditor.comment_transfer`)."""
     return db.execute(
         "SELECT 1 FROM doc_comments WHERE artifact_id=? LIMIT 1", (artifact_id,)
     ).fetchone() is not None
