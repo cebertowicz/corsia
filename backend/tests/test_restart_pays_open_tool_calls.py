@@ -82,6 +82,54 @@ def test_restart_pays_open_call_so_a_cold_checkpoint_installs(
     assert len(projection.missing_result_stub_seqs) == 1
 
 
+def _provisional_result(db) -> None:
+    """Real bytes the harness wrote for 'older' before its echo named the call."""
+    from infra.delivery_states import TOOL_RESULT_PROVISIONAL
+
+    db.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+        "VALUES ('older-provisional','debt','tool','partial',?,'t',3)",
+        (json.dumps({
+            "turn_id": "current", "assistant_step_id": "older-step",
+            "tool_invocation_id": "inv-older", "name": "bash", "arguments": {},
+            "tool_result_binding_state": TOOL_RESULT_PROVISIONAL,
+        }),),
+    )
+    db.commit()
+
+
+def test_late_echo_after_restart_binds_the_terminal_result(debt_db, monkeypatch):
+    """Production 2026-08-14: an echo can arrive after the Turn's terminal.
+
+    The terminal sets the provisional row aside, so the echo binds the one
+    result it wrote instead of finding two rows for the same call.
+    """
+    from core.tool_result_binding import bind_tool_result_echo
+    from history.projection import render_portable_history
+    from infra.delivery_states import (
+        TOOL_RESULT_QUARANTINED_UNBOUND,
+        TURN_ENDED_WITHOUT_RESULT_REASON,
+    )
+
+    _context(debt_db, monkeypatch, "codex", outstanding=True)
+    _provisional_result(debt_db)
+
+    _restart(debt_db)
+
+    state = json.loads(debt_db.execute(
+        "SELECT metadata FROM messages WHERE id='older-provisional'"
+    ).fetchone()["metadata"])["tool_result_binding_state"]
+    assert state == TOOL_RESULT_QUARANTINED_UNBOUND
+    bound = bind_tool_result_echo(
+        thread_id="debt", provider_tool_call_id="older",
+        assistant_step_id="older-step", echoed_content="partial", db=debt_db,
+    )
+    assert bound.provider_tool_call_id == "older"
+    [result] = _older_results(debt_db)
+    assert result["synthetic_reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
+    render_portable_history("debt", db=debt_db)
+
+
 def test_answered_calls_get_no_second_result(debt_db, monkeypatch):
     _context(debt_db, monkeypatch, "codex", outstanding=False)
 

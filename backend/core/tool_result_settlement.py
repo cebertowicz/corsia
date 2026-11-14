@@ -16,9 +16,14 @@ from core.tool_result_debt import (
     read_declaration_metadata,
     readable_call_id,
 )
+from core.tool_result_binding import quarantine_unbound_tool_result
 from core.tool_result_projection import tool_result_integrity_metadata
 from core.turns_steps import MISSING_TOOL_RESULT_TEXT
-from infra.delivery_states import TOOL_RESULT_BOUND, TURN_ENDED_WITHOUT_RESULT_REASON
+from infra.delivery_states import (
+    TOOL_RESULT_BOUND,
+    TOOL_RESULT_PROVISIONAL,
+    TURN_ENDED_WITHOUT_RESULT_REASON,
+)
 from infra.queries import insert_message
 
 
@@ -119,10 +124,12 @@ def _write_authored_result(
     )
 
 
-def _pay_turn_debt(conn, thread_id: str, turn_id: str) -> int:
+def _pay_turn_debt(
+    conn, thread_id: str, turn_id: str, declared: list[UnsettledToolCall],
+) -> int:
     """Persist one missing result for each unanswered call this Turn declared."""
     settled = 0
-    for debt in _turn_declared_calls(conn, thread_id, turn_id):
+    for debt in declared:
         label = (
             f"tool call {readable_call_id(debt.call_id)} of turn {turn_id} on "
             f"{thread_id} (Assistant Step {debt.assistant_step_id})"
@@ -135,21 +142,58 @@ def _pay_turn_debt(conn, thread_id: str, turn_id: str) -> int:
     return settled
 
 
+_STEP_PROVISIONAL_ROWS = (
+    "SELECT id FROM messages WHERE thread_id=? AND role='tool' "
+    "AND json_valid(metadata) AND json_extract(metadata,'$.assistant_step_id')=? "
+    "AND json_extract(metadata,'$.tool_result_binding_state')=?"
+)
+
+
+def _quarantine_provisional_results(
+    conn, thread_id: str, step_ids: set[str],
+) -> int:
+    """Set aside the ending Turn's provisional rows so a late echo binds its result.
+
+    A provisional row left beside the terminal's result would win a later
+    echo's ranking and then meet that result as a second row for the same call.
+    Each Step is one seek on idx_messages_tool_lineage.
+    """
+    quarantined = 0
+    for step_id in sorted(step_ids):
+        rows = conn.execute(
+            _STEP_PROVISIONAL_ROWS, (thread_id, step_id, TOOL_RESULT_PROVISIONAL),
+        ).fetchall()
+        for row in rows:
+            with settled_or_debt(conn, label=f"provisional tool row {row['id']!r}"):
+                quarantine_unbound_tool_result(
+                    thread_id=thread_id, message_id=str(row["id"]), db=conn,
+                )
+                quarantined += 1
+    return quarantined
+
+
 def settle_turn_tool_lineage(conn, thread_id: str, turn_id: str) -> None:
     """Give every call this Turn declared a durable result, never vetoing terminal.
 
     Harnesses settle their own calls while their process is alive. This is the
     one shared settlement for a Turn whose process is gone (restart recovery)
     or whose harness left a call open. Without a durable row the call stays
-    debt, and every later cold checkpoint over it is refused.
+    debt, and every later cold checkpoint over it is refused. The Turn's
+    provisional rows are quarantined in the same pass, so a late echo binds
+    the result written here.
     """
-    settled = 0
+    settled = quarantined = 0
     with settled_or_debt(
         conn, label=f"declared calls of turn {turn_id} on {thread_id}",
     ):
-        settled = _pay_turn_debt(conn, thread_id, turn_id)
-    if settled:
+        declared = _turn_declared_calls(conn, thread_id, turn_id)
+        settled = _pay_turn_debt(conn, thread_id, turn_id, declared)
+        quarantined = _quarantine_provisional_results(
+            conn, thread_id, {debt.assistant_step_id for debt in declared},
+        )
+    if settled or quarantined:
         logger.warning(
-            "turn {} terminal settled {} unanswered call(s) on {}",
-            turn_id, settled, thread_id,
+            "turn {} terminal settled {} unanswered call(s) and quarantined "
+            "{} unbound result(s) on {}",
+            turn_id, settled, quarantined, thread_id,
         )
