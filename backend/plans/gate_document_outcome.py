@@ -6,7 +6,8 @@ read for after its commit, and the answer is kept as one event on the run's phas
 reads the kept answers, never Git, so a replay is quick and gives the same answer every time (the
 history reader also looks at the working file, which keeps changing after the run settled).
 
-A read Git can't answer is kept as a fault: that run counts neither for nor against the gate.
+A read Git can't answer (a history fault, or no runnable git at all) is kept as a fault: that run
+counts neither for nor against the gate, and the handoff offer is still weighed.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ def read(db, artifact_id: str, first_round_at: str, as_of: str) -> dict:
     run = (artifact_id, first_round_at, as_of)
     try:
         return {"outcome": went_ahead_outcomes([run], db=db)[run]}
-    except GitFault as fault:
+    except (GitFault, OSError) as fault:
         log.warning("gate document read for %s failed; the run counts neither way: %s", artifact_id, fault)
         return {"fault": str(fault) or "history unavailable"}
 

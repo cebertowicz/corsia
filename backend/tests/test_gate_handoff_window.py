@@ -217,13 +217,14 @@ async def test_replay_reads_kept_document_answers_and_never_git(monkeypatch):
                         "fault": None, "never_kept": None}
 
 
-async def test_a_history_fault_counts_the_run_neither_way_and_settles(isolated_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", ["git_fault", "no_git"])
+async def test_a_history_fault_counts_the_run_neither_way_and_settles(isolated_db, tmp_path, monkeypatch, failure):
     from infra import document_went_ahead
     from infra.guidance_states import GitFault
-    from plans import holds, service
+    from plans import gate_document_outcome, holds, service
 
     def fault(_requests, db=None):
-        raise GitFault("git is busy")
+        raise GitFault("git is busy") if failure == "git_fault" else FileNotFoundError("git")
     monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", fault)
     run = _make(tmp_path, monkeypatch)
     _, gate = await _go(run, None)
@@ -246,6 +247,7 @@ async def test_a_history_fault_counts_the_run_neither_way_and_settles(isolated_d
         assert service._node_row(db, gate)["state"] == "accepted"
         (record,) = gate_handoff_record.gate_runs(db, ("", "gated", "gate"))
         assert record.document_unread
+        assert "fault" in gate_document_outcome.kept(db, [record.phase])[record.phase]
         assert gate_handoff_record.run_outcome(db, record) is None
     finally:
         db.close()
