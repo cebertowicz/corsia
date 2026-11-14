@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => {
 vi.mock('$lib/api/docs', () => ({
 	fetchContent: mocks.fetchContent,
 	fetchRevision: mocks.fetchRevision,
+	// A link's Retry resolves through the roots read; it never answers here, so the tab stays loading.
+	fetchRoots: vi.fn(() => new Promise(() => {})),
 	writeContent: vi.fn(async () => ({ saved: true, revision: 'r-written' })),
 	registerArtifact: vi.fn(),
 }));
@@ -83,7 +85,7 @@ import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 import { updateDocumentOpenCapability } from '$lib/ws/presence';
-import { threadWorkspaces, openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab, setActiveTab, splitWidth } from '$lib/stores/artifactWorkspace';
+import { threadWorkspaces, openArtifactTab, openLinkLoadingTab, markTabStatus, openLegacyDiscussionArchiveTab, openSubagentConversationTab, setActiveTab, splitWidth } from '$lib/stores/artifactWorkspace';
 import { clearDraft, docSaveDrafts, seedDraft, setDraftText } from '$lib/stores/docSaveQueue';
 import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
@@ -876,6 +878,28 @@ describe('ArtifactLeaf load-status ownership', () => {
 		expect(host.textContent).toContain('gone.md is unavailable.');
 		expect(host.querySelector('.gone button')?.textContent).toContain('Close tab');
 		expect([...host.querySelectorAll('.gone button')].map((button) => button.textContent)).not.toContain('Retry');
+	});
+
+	it('shows a pressed link loading at once, then its failure with Retry, then its unavailable state', async () => {
+		const link = { href: 'shared/linked.md', projectId: null };
+		const id = openLinkLoadingTab(THREAD, link, 'linked.md')!;
+		render();
+		flushSync();
+		expect(host.querySelector('.leaf-body.document-canvas .doc .doc-main .loadbar')).not.toBeNull();
+		expect(mocks.fetchContent).not.toHaveBeenCalled();
+
+		markTabStatus(THREAD, id, 'error');
+		flushSync();
+		expect(host.querySelector('.load-error')?.textContent).toContain("Couldn't open linked.md.");
+		[...host.querySelectorAll<HTMLButtonElement>('.load-error button')].find((b) => b.textContent?.includes('Retry'))!.click();
+		flushSync();
+		expect(tabsOf()).toEqual([expect.objectContaining({ instanceId: id, status: 'loading', link })]);
+		expect(host.querySelector('.loadbar')).not.toBeNull();
+
+		markTabStatus(THREAD, id, 'unavailable');
+		flushSync();
+		expect(host.textContent).toContain('linked.md is unavailable.');
+		expect(mocks.fetchContent).not.toHaveBeenCalled();
 	});
 
 	it('keeps a genuine load failure as an error rather than claiming the doc is gone', async () => {

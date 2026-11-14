@@ -29,6 +29,7 @@ import json
 from pathlib import Path
 
 from api.files_roots import scope_roots
+from infra import config
 from infra.chat_comment_answers import chat_not_drawn_sql
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
@@ -153,6 +154,7 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
     bases: list[Path] | None = None
     lookup_memo: dict[str, FileLookup] = {}
     origin: Path | None = None
+    fallback: Path | None = None
     for row in messages:
         if row.get("role") != "assistant":
             continue
@@ -161,13 +163,18 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         if isinstance(text, str) and text:
             if bases is None:
                 origin, bases = scope_roots(thread_row["project_id"], db)
+                # A project thread's path written from the workspace root names the same file.
+                fallback = config.WORKSPACE.resolve() if thread_row["project_id"] else None
             # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
             turn_id = _loads(row.get("metadata")).get("turn_id")
             asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
             covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
             for card in cards:
                 covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
-            refs = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo, origin=origin)
+            refs = reference_cards(
+                db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo,
+                origin=origin, fallback_origin=fallback,
+            )
             cards.extend(refs)
         if cards:
             row["cards"] = cards
