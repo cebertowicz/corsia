@@ -29,6 +29,7 @@ consumed contract pinned in the tests: changing one changes that skill too.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -230,6 +231,22 @@ def build_where_to_look(
     }
 
 
+async def _together(reads: list[Any]) -> list[Any]:
+    """Await the page reads at once, so the ledger and task-chain costs Models, Cost and Agents
+    share are each read once (joined in flight) and the route waits for its slowest read, not their sum.
+
+    If one fails, the rest are cancelled and its error is raised.
+    """
+    tasks = [asyncio.ensure_future(read) for read in reads]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 @router.get("/where-to-look")
 async def measurement_where_to_look(
     project: str = Query(...), agent: str = Query(...), grain: str = "days",
@@ -268,15 +285,18 @@ async def measurement_where_to_look(
 
     scope = await run_in_db(scope_of)
     requested = page.requested_series(",".join(dict.fromkeys([*(ids or "").split(","), *SERIES_IDS])))
-    series = await page.series_payload(requested, project, agent, page_grain, user, reuse_finished=True)
-    # The page's Models table request, so a page load that drew it shares the read.
-    models = await page.models_read(project, agent, page_grain.unaveraged(), user, reuse_finished=True)
-    # The page's Cost request: its headline $ per hour of work is read as served, never computed again here.
-    cost = await cost_read(project, agent, page_grain, user, reuse_finished=True)
-    agents = None
+    reads = [
+        page.series_payload(requested, project, agent, page_grain, user, reuse_finished=True),
+        # The page's Models table request, so a page load that drew it shares the read.
+        page.models_read(project, agent, page_grain.unaveraged(), user, reuse_finished=True),
+        # The page's Cost request: its headline $ per hour of work is read as served, never computed again here.
+        cost_read(project, agent, page_grain, user, reuse_finished=True),
+    ]
     if scope["kind"] != "agent":
         # The page's default Agents table: its dollars column is not a measure ranked here.
-        agents = await page.agents_payload(project, agent, page_grain.unaveraged(), "ranked", "fresh_tokens_per_outcome",
-                                           True, user, reuse_finished=True)
+        reads.append(page.agents_payload(project, agent, page_grain.unaveraged(), "ranked", "fresh_tokens_per_outcome",
+                                         True, user, reuse_finished=True))
+    series, models, cost, *rest = await _together(reads)
+    agents = rest[0] if rest else None
     comparable = lambda metric, period: page.period_comparable(period, series["breaks"].get(metric, ()))
     return build_where_to_look(scope, series["windows"], agents, comparable, page_grain, models, cost)

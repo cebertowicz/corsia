@@ -443,15 +443,17 @@ def test_affected_account_threads_filter_provider_subjects_through_canonical_che
     checked = []
 
     def canonical(provider, *, thread_id, project, account_id, model, db, binding):
-        checked.append((provider, thread_id, model, binding and binding["account_id"]))
-        return (legacy["id"] if thread_id == "destination" else second["id"], None)
+        checked.append((provider, thread_id, project, model, binding and binding["account_id"]))
+        # Given the binding row, the canonical selector reads nothing else of the thread.
+        return (binding["account_id"], None)
 
     # turn_account is this selector once a caller has read the thread's project (and binding)
     monkeypatch.setattr(account_policy, "scoped_turn_account", canonical)
 
     assert affected_thread_ids(legacy["id"], db=db) == ["destination"]
-    assert checked == [("codex", "destination", "codex/test", legacy["id"]),
-                       ("codex", "other", "codex/test", second["id"])]
+    # One judgment per distinct project, model and binding; no thread identity is needed for it.
+    assert checked == [("codex", None, "destination-project", "codex/test", legacy["id"]),
+                       ("codex", None, None, "codex/test", second["id"])]
 
 
 def test_affected_account_threads_includes_unbound_queued_default_subject(accounts):
@@ -492,6 +494,93 @@ def test_affected_account_threads_includes_rollover_destination_for_limited_bind
 
     assert turn_account("codex", thread_id="workspace", model="codex/test", db=db) == (second["id"], None)
     assert affected_thread_ids(second["id"], db=db) == ["workspace"]
+
+
+def _per_thread_subjects(account_id, *, db):
+    """The per-thread judgment ``affected_thread_ids`` made before it judged each distinct candidate once."""
+    from connections.account_holds import _binding_hold
+    from connections.account_policy import scoped_turn_account
+    from connections.account_rollover import NOT_PERMITTED
+    from connections.vendor_accounts import get_account
+
+    provider = get_account(account_id, db=db)["provider"]
+    rows = db.execute("""SELECT t.id,t.model,t.project_id,b.account_id AS bound,b.pending_account_id AS pending
+        FROM threads t LEFT JOIN thread_vendor_accounts b ON b.thread_id=t.id AND b.provider=?
+        WHERE t.model IS NOT NULL AND trim(t.model)<>''
+          AND EXISTS (SELECT 1 FROM models m WHERE m.harness=?
+                      AND (m.id=trim(t.model) OR m.litellm_model=trim(t.model)))
+          AND (b.thread_id IS NOT NULL
+               OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id
+                          AND m.input_order IS NOT NULL AND m.delivery_state='queued'
+                          AND m.active_turn_id IS NULL))""", (provider, provider)).fetchall()
+    affected = []
+    for row in rows:
+        binding = None if row["bound"] is None else {"account_id": row["bound"], "pending_account_id": row["pending"]}
+        selected, _ = scoped_turn_account(provider, thread_id=str(row["id"]), project=row["project_id"],
+                                           account_id=None, model=str(row["model"]), db=db, binding=binding)
+        if selected == account_id:
+            affected.append(str(row["id"]))
+        elif row["project_id"] != "" and row["bound"] is not None and str(row["bound"]) == account_id:
+            reason = _binding_hold({"account_id": account_id, "provider": provider}, missing=None,
+                                   project=row["project_id"], model=str(row["model"]), provider=provider, db=db)
+            if reason not in (None, NOT_PERMITTED):
+                affected.append(str(row["id"]))
+    return affected
+
+
+def test_affected_account_threads_match_the_per_thread_judgment(accounts):
+    """Judging each distinct project, model and binding once gives the per-thread answer, in and out of the memo."""
+    from connections import fact_memo, harness_usage
+    from connections.account_holds import affected_thread_ids
+    from connections.account_receipts import capture_receipt
+    from connections.provider_policy import effective_policy, set_policy
+    from infra.input_admission import accept_thread_input
+    from vendor_account_fixtures import _ready
+
+    db, first, second, third = accounts
+    db.execute("UPDATE models SET context_window=200000 WHERE id='codex/test'")
+    _ready(db, second)
+    set_policy(None, "codex", rollover=True, order=[first["id"], second["id"]],
+               disabled=[], expected_revision=effective_policy(None, "codex", db=db)["revision"], db=db)
+    set_policy("actor-project", "codex", rollover=False, order=None, disabled=[third["id"]],
+               expected_revision=effective_policy("actor-project", "codex", db=db)["revision"], db=db)
+    harness_usage.record_limited(
+        provider="codex", receipt=capture_receipt("codex", account_id=first["id"], db=db),
+        reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update", db=db,
+    )
+    harness_usage.record_allowed(
+        provider="codex", receipt=capture_receipt("codex", account_id=second["id"], db=db),
+        source="rate_limit_update", db=db,
+    )
+    population = [  # (thread, project, bound, pending)
+        ("w1", None, first, None), ("w2", None, first, None), ("w3", None, second, None),
+        ("d1", "destination-project", first, None), ("d2", "destination-project", third, None),
+        ("d3", "destination-project", third, None), ("d4", "destination-project", third, second),
+        ("a1", "actor-project", second, third),
+        ("a2", "actor-project", third, None), ("a3", "actor-project", first, None),
+        ("e1", "", third, None), ("e2", "", first, None),
+    ]
+    for thread_id, project, bound, pending in population:
+        db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
+                   "VALUES (?,'user','codex/test',?,'t','t')", (thread_id, project))
+        db.execute("INSERT INTO thread_vendor_accounts(thread_id,provider,account_id,pending_account_id) "
+                   "VALUES (?,'codex',?,?)", (thread_id, bound["id"], pending and pending["id"]))
+    db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
+               "VALUES ('q1','user','codex/test','destination-project','t','t')")
+    db.commit()
+    accept_thread_input("q1", role="user", content="input", intent="apply_now", message_id="queued-q1", db=db)
+
+    for account in (first, second, third):
+        expected = _per_thread_subjects(account["id"], db=db)
+        assert affected_thread_ids(account["id"], db=db) == expected, account["id"]
+        with fact_memo.fact_reads():
+            assert affected_thread_ids(account["id"], db=db) == expected, account["id"]
+    # The mix reaches every branch: selected subjects (w1 by rollover, a2 though not permitted), a bound
+    # subject whose next turn runs elsewhere (d4 for third), and non-subjects (e1, e2).
+    assert {name: _per_thread_subjects(account["id"], db=db)
+            for name, account in (("first", first), ("second", second), ("third", third))} == {
+        "first": ["a3"], "second": ["w1", "w2", "w3", "d1", "d4", "q1"],
+        "third": ["d2", "d3", "d4", "a1", "a2"]}
 
 
 def test_workspace_policy_write_schedules_a_workspace_following_project_head(accounts, monkeypatch):

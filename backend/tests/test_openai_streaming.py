@@ -35,12 +35,15 @@ def _ev(etype: str, **fields) -> SimpleNamespace:
 
 def _completed_event(*, status: str = "completed", input_tokens: int = 1,
                      output_tokens: int = 1, total_tokens: int = 2) -> SimpleNamespace:
+    # A real Responses payload always reports ``input_tokens_details``; its
+    # cached count here is a measured zero, not an absent one.
     return _ev(
         "response.completed",
         response=SimpleNamespace(
             status=status,
             usage=SimpleNamespace(
                 input_tokens=input_tokens,
+                input_tokens_details=SimpleNamespace(cached_tokens=0),
                 output_tokens=output_tokens,
                 total_tokens=total_tokens,
             ),
