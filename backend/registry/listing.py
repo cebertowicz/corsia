@@ -147,9 +147,13 @@ def list_for_thread(
             conn.close()
 
 
-# Every record one thread registered for one integration and type.
-_THREAD_RECORDS = """FROM artifact_identities i
-                JOIN artifact_registrations r ON r.artifact_id=i.id
+# Every record one thread registered for one integration and type. CROSS JOIN
+# keeps the thread's own registrations as the outer loop: with no ANALYZE
+# statistics SQLite otherwise starts from every identity of that integration and
+# type (one claude-code session per thread ever), so each call grew with the
+# install's age instead of with this thread's registrations.
+_THREAD_RECORDS = """FROM artifact_registrations r
+                CROSS JOIN artifact_identities i ON i.id=r.artifact_id
                 WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?"""
 
 
