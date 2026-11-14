@@ -197,6 +197,32 @@ describe('a new chat after a thread with work', () => {
 	});
 });
 
+describe('landing on another chat without selecting it', () => {
+	it('shows only that chat\'s work, never the chat it replaced', async () => {
+		serve({ olderHasMore: false });
+		await open();
+		await vi.waitFor(() => expect(host.querySelector('.fold-toggle')?.textContent).toContain('Worked'));
+
+		// What deleting the open chat does: the next chat becomes active and its first page loads.
+		const replaced = globalThis.fetch;
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = new URL(String(input), 'http://app.test');
+			const body = (value: unknown) => ({ ok: true, status: 200, json: async () => value });
+			if (!url.pathname.includes('thread-2')) return replaced(input);
+			if (!url.pathname.endsWith('/messages')) return body({ thread_kind: 'chat' });
+			const next = { ...said('next', 30), thread_id: 'thread-2' };
+			return body({ messages: [next], runs: [], has_more: true, oldest_id: 'next' });
+		}) as unknown as typeof fetch;
+		threads.set([{ id: 'thread-2', title: 'Two' } as never]);
+		activeThreadId.set('thread-2');
+		await component!.fetchThreadMessages('thread-2');
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('said next'));
+		expect(host.querySelector('.fold-toggle')).toBeNull();
+	});
+});
+
 describe('opening a thread with Focus off', () => {
 	it('does not ask for the Focus view', async () => {
 		coreSettings.set({ features: { focus_mode: false } } as never);

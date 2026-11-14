@@ -164,11 +164,11 @@
 		if (thread) reasoningEffort.set(thread.reasoning_effort ?? null);
 	}
 	export async function fetchThreadMessages(threadId: string) {
-		pagerGeneration++;
-		pager = createPager();
-		// A same-thread refresh replaces the first page but retains older rows, so
-		// retain their keyed summaries until that page is actually unloaded.
-		if (lastFirstPageThreadId !== null && lastFirstPageThreadId !== threadId) turnSummaries = {};
+		// Another chat replaces the whole transcript, whichever path changed it. A
+		// same-thread refresh replaces only the first page: older rows, their
+		// summaries and run stubs stay until that page is actually unloaded.
+		if (lastFirstPageThreadId !== null && lastFirstPageThreadId !== threadId) clearThreadTranscript();
+		else { pagerGeneration++; pager = createPager(); }
 		const myGen = pagerGeneration;
 		try {
 			await loadFirstPage(threadId, myGen);
