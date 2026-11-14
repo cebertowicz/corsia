@@ -153,24 +153,22 @@ def record_install(provider: str) -> str | None:
 
 
 async def check_harness_source(provider: str) -> None:
-    """Re-check Claude Code / Codex: install a missing copy, find it, then refresh its accounts.
+    """Re-check Claude Code / Codex: find the CLI, then refresh its accounts.
 
-    A vendor in use whose pinned copy is missing (a failed startup download, a moved
-    pin) is installed here, so a re-check recovers without a restart. A failed download
-    is logged and the row records ``not_installed``, as it would offline. The binary and
-    whether it is installed land on the connection row. Each signed-in account's
-    refresh records its own discovery, which ``harness_state`` reads. Any other failure raises.
+    A vendor whose pinned copy is missing (a failed startup download, a moved pin)
+    gets a background install, so a re-check recovers without a restart and never
+    waits on the download; the row reads ``not_installed`` until the copy lands. The
+    binary and whether it is installed land on the connection row. Each signed-in
+    account's refresh records its own discovery, which ``harness_state`` reads.
+    Any other failure raises.
     """
     from connections import PINNED_HARNESSES
     from connections.harness_models import refresh_provider
-    from connections.pinned_harness import install_if_used
-    from tools.managed_runtime import ManagedRuntimeError
+    from connections.pinned_harness import start_install
+    from tools.managed_runtime import installed_runtime_path
 
-    if provider in PINNED_HARNESSES:
-        try:
-            await install_if_used(provider)
-        except ManagedRuntimeError as exc:
-            log.warning("could not set up CORSIA's %s copy: %s", provider, exc)
+    if provider in PINNED_HARNESSES and installed_runtime_path(provider) is None:
+        start_install(provider)
     binary = await run_in_db(record_install, provider)
     if binary is not None:
         await refresh_provider(provider, reason="manual", binary=binary)

@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import tarfile
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -204,17 +205,27 @@ def test_startup_schedules_the_install_off_its_path_and_tests_fetch_nothing(monk
 
 
 @pytest.mark.parametrize(("in_use", "installs"), [(True, True), (False, False)])
-def test_a_recheck_installs_a_missing_copy_for_a_vendor_in_use(monkeypatch, in_use, installs):
-    """A failed startup download or a moved pin recovers on the next re-check, without a restart."""
+def test_a_recheck_installs_a_missing_copy_in_the_background(monkeypatch, in_use, installs):
+    """A failed startup download or a moved pin recovers on the next re-check, without a
+    restart, and the re-check returns while the download is still running."""
     from connections import pinned_harness, source_state
+    from infra.state import ws
 
-    present = []
+    present, notified, refreshed = [], [], []
+    downloading, release = threading.Event(), threading.Event()
+
+    def install(vendor):
+        downloading.set()
+        assert release.wait(timeout=5)
+        present.append(vendor)
+        return Path("/pinned/claude")
+
     monkeypatch.setattr(managed_runtime, "installed_runtime_path",
                         lambda kind, **_k: Path("/pinned/claude") if present else None)
     monkeypatch.setattr(pinned_harness, "vendor_in_use", lambda vendor, **_k: in_use)
-    monkeypatch.setattr(pinned_harness, "install_pinned", lambda vendor: present.append(vendor) or Path("/pinned/claude"))
+    monkeypatch.setattr(pinned_harness, "install_pinned", install)
     monkeypatch.setattr(source_state, "record_install", lambda provider: "/pinned/claude" if present else None)
-    refreshed = []
+    monkeypatch.setattr(ws, "schedule_models_changed", lambda: notified.append(True))
 
     async def refresh(provider, **kwargs):
         refreshed.append(kwargs["binary"])
@@ -226,10 +237,64 @@ def test_a_recheck_installs_a_missing_copy_for_a_vendor_in_use(monkeypatch, in_u
 
     monkeypatch.setattr(source_state, "run_in_db", inline)
     monkeypatch.setattr("infra.db_async.run_in_db", inline)
-    asyncio.run(source_state.check_harness_source("claude-code"))
+
+    async def scenario():
+        await source_state.check_harness_source("claude-code")
+        if installs:
+            assert await asyncio.to_thread(downloading.wait, 5)
+        assert present == [] and refreshed == []  # the re-check did not wait on the download
+        release.set()
+        await pinned_harness._installs["claude-code"]
+
+    asyncio.run(scenario())
 
     assert present == (["claude-code"] if installs else [])
     assert refreshed == (["/pinned/claude"] if installs else [])
+    assert notified == ([True] if installs else [])
+
+
+def test_rechecks_during_a_download_join_it(monkeypatch):
+    from connections import pinned_harness
+
+    release, started = threading.Event(), []
+
+    def install(vendor):
+        started.append(vendor)
+        assert release.wait(timeout=5)
+        return Path("/pinned/claude")
+
+    monkeypatch.setattr(pinned_harness, "vendor_in_use", lambda vendor, **_k: True)
+    monkeypatch.setattr(pinned_harness, "install_pinned", install)
+
+    async def no_check(_vendor):
+        return None
+
+    monkeypatch.setattr("connections.source_state.check_harness_source", no_check)
+    monkeypatch.setattr("infra.state.ws.schedule_models_changed", lambda: None)
+
+    async def inline(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr("infra.db_async.run_in_db", inline)
+
+    async def scenario():
+        first = pinned_harness.start_install("claude-code")
+        assert pinned_harness.start_install("claude-code") is first
+        release.set()
+        await first
+
+    asyncio.run(scenario())
+    assert started == ["claude-code"]
+
+
+def test_a_waiting_install_stops_on_cancel_while_another_holds_the_lock(tmp_path):
+    lock = managed_runtime._runtime_lock("claude-code")
+    assert lock.acquire(timeout=1)
+    try:
+        with pytest.raises(managed_runtime.ManagedRuntimeCancelled):
+            managed_runtime.ensure_runtime("claude-code", root=tmp_path, should_stop=lambda: True)
+    finally:
+        lock.release()
 
 
 def test_a_recheck_whose_download_fails_records_not_installed(monkeypatch, caplog):
@@ -250,8 +315,13 @@ def test_a_recheck_whose_download_fails_records_not_installed(monkeypatch, caplo
 
     monkeypatch.setattr(source_state, "run_in_db", inline)
     monkeypatch.setattr("infra.db_async.run_in_db", inline)
-    with caplog.at_level("WARNING", logger=source_state.log.name):
-        asyncio.run(source_state.check_harness_source("claude-code"))
+
+    async def scenario():
+        await source_state.check_harness_source("claude-code")
+        await pinned_harness._installs["claude-code"]
+
+    with caplog.at_level("WARNING", logger=pinned_harness.log.name):
+        asyncio.run(scenario())
     assert recorded == ["claude-code"]
     assert "could not set up CORSIA's claude-code copy" in caplog.text
 

@@ -13,7 +13,8 @@ import tarfile
 import tempfile
 import threading
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 from infra.platform_paths import APP_FOLDER
 from tools.gws_release import GWS_MAC_ARM64_SHA256, GWS_VERSION as _GWS_VERSION
@@ -295,6 +296,19 @@ def _runtime_lock(kind: str) -> threading.Lock:
         return _RUNTIME_LOCKS.setdefault(kind, threading.Lock())
 
 
+@contextmanager
+def _held_install_lock(kind: str, should_stop: Callable[[], bool] | None) -> Iterator[None]:
+    """Hold ``kind``'s install lock; a caller that can stop does so while another install holds it."""
+    lock = _runtime_lock(kind)
+    while not lock.acquire(timeout=0.25):
+        if should_stop is not None and should_stop():
+            raise ManagedRuntimeCancelled("pinned runtime install was stopped while another install ran")
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def ensure_runtime(
     kind: str, *, root: Path | None = None, arch: str | None = None, should_stop: Callable[[], bool] | None = None,
 ) -> Path:
@@ -305,7 +319,7 @@ def ensure_runtime(
     selected, pin = _pin(kind, arch)
     base = root or runtime_cache_root()
     final = _install_dir(kind, selected, pin, base)
-    with _runtime_lock(kind):
+    with _held_install_lock(kind, should_stop):
         if _valid_install(final, kind, selected, pin):
             return _expected_executable(final, pin)
         staging: Path | None = None

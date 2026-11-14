@@ -15,6 +15,9 @@ from connections import PINNED_HARNESSES
 
 log = logging.getLogger(__name__)
 
+# One background install per vendor; startup and every re-check share it.
+_installs: dict[str, asyncio.Task[None]] = {}
+
 
 def install_pinned(vendor: str, *, should_stop: Callable[[], bool] | None = None) -> Path:
     """Install this machine's pinned copy if missing, drop older versions, return the executable.
@@ -57,22 +60,48 @@ async def install_if_used(vendor: str) -> bool:
     return True
 
 
+async def _install_then_check(vendor: str) -> None:
+    """Install a missing copy for a vendor in use, then record it, read its catalogs and tell model screens.
+
+    A failure is logged and leaves the row ``not_installed``; nothing retries here. The
+    next start, the Install button, or the next re-check tries again.
+    """
+    from connections.source_state import check_harness_source
+    from infra.state.ws import schedule_models_changed
+
+    try:
+        if not await install_if_used(vendor):
+            return
+        await check_harness_source(vendor)
+        schedule_models_changed()
+    except Exception as exc:  # the row says not installed
+        log.warning("could not set up CORSIA's %s copy: %s", vendor, exc)
+
+
+def start_install(vendor: str) -> asyncio.Task[None]:
+    """Start the background install of a missing copy, or join the one already running.
+
+    A re-check calls this and returns the current state at once; it never waits on the download.
+    """
+    task = _installs.get(vendor)
+    if task is None or task.done():
+        task = _installs[vendor] = asyncio.create_task(_install_then_check(vendor))
+    return task
+
+
 async def install_used_harnesses() -> None:
     """After startup, off its path: install the pinned copy for each vendor in use.
 
     A copy installed now is recorded on its row and its accounts' catalogs are read,
-    since startup discovery ran without it. A failure is logged and leaves the row
-    ``not_installed``; nothing retries here. The next start, the Install button, or
-    the next re-check (``check_harness_source``) tries again.
+    since startup discovery ran without it. An installed copy only drops older versions.
     """
-    from connections.source_state import check_harness_source
     from tools.managed_runtime import installed_runtime_path
 
     for vendor in PINNED_HARNESSES:
+        if installed_runtime_path(vendor) is None:
+            await start_install(vendor)
+            continue
         try:
-            if installed_runtime_path(vendor) is not None:
-                await asyncio.to_thread(install_pinned, vendor)  # an installed copy only drops older versions
-            elif await install_if_used(vendor):
-                await check_harness_source(vendor)
-        except Exception as exc:  # the row says not installed
+            await asyncio.to_thread(install_pinned, vendor)
+        except Exception as exc:
             log.warning("could not set up CORSIA's %s copy: %s", vendor, exc)
