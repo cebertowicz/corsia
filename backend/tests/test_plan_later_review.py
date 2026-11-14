@@ -118,6 +118,16 @@ def test_a_second_later_write_never_moves_the_armed_review(db):
     assert row(db, armed)["later"] == 1
 
 
+def test_bulk_edit_arms_the_first_later_review(db):
+    plan = owner_plan(db)
+    nodes = [task(db, plan.id, f"Someday {index}") for index in range(2)]
+    result = plan_update(db, plan.id, "edit", {
+        "node_ids": [node.id for node in nodes], "later": True,
+    })
+    assert len(result["changed"]) == 2 and result["refused"] == []
+    assert 6.999 < _days_from_now(_review_at(db, plan.id), clock=service._now()) <= 7
+
+
 def test_scope_owned_plan_never_arms_a_review(db):
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','Project','t','t')")
     plan = service.ensure_plan("project_scope", "p", db=db)
