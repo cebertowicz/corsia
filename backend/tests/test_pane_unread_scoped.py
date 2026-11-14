@@ -1,7 +1,4 @@
-"""The artifact pane's reply marker reads only the pane's own documents.
-
-It used to read every comment in the database on each pane request.
-"""
+"""The artifact pane's reply marker reads only the pane's own documents."""
 
 import sqlite3
 
