@@ -66,21 +66,20 @@ def test_restart_pays_open_call_so_a_cold_checkpoint_installs(
 
     _restart(debt_db)
 
+    projection = render_portable_history("debt", db=debt_db)
+    boundary = projection.sealed_boundary
+    assert boundary is not None
+    installed = _capture_and_install(debt_db, _cold_request(boundary))
+    assert (installed.status, installed.error) == ("installed", None)
+    assert not thread_tool_debt_through("debt", boundary.seq, db=debt_db).unsettled
+
     results = _older_results(debt_db)
     assert len(results) == 1
     assert results[0]["assistant_step_id"] == "older-step"
     assert results[0]["turn_id"] == "current"
     assert results[0]["synthetic_reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
-
-    projection = render_portable_history("debt", db=debt_db)
-    boundary = projection.sealed_boundary
-    assert boundary is not None
-    assert not thread_tool_debt_through("debt", boundary.seq, db=debt_db).unsettled
     # The model is still told this result was never recorded.
     assert len(projection.missing_result_stub_seqs) == 1
-
-    installed = _capture_and_install(debt_db, _cold_request(boundary))
-    assert (installed.status, installed.error) == ("installed", None)
 
 
 def test_answered_calls_get_no_second_result(debt_db, monkeypatch):
