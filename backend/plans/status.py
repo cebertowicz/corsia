@@ -31,8 +31,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from plans import later_review
-from plans import node_history, operator_node_state, service, status_facts, wait_causes
+from plans import node_history, operator_node_state, service, status_facts, status_later, wait_causes
 from plans.close_next_bounds import bounded, json_bytes
 from plans.errors import PlanError
 from plans.status_facts import facts as _facts, full_facts as _full_facts
@@ -215,40 +214,7 @@ def _minimal(row: dict) -> dict:
     } | {"truncated": True}
 
 
-def _later_row(node: dict, extra: dict) -> dict[str, Any]:
-    """One row of the pile: the identity to act on, and why it sits below the cut.
-
-    No state, condition or ages: every row here is open work its owner chose to
-    set aside, so what a page of it answers is which tasks and for what reason.
-    The reason and date are ``plans.later_review.row_facts``, so a row reads the
-    same here as in the weekly wake about the same pile.
-    """
-    title = bounded(str(node["title"]), TITLE_MAX_BYTES)
-    reason = extra.get("reason")
-    reason_text = bounded(str(reason), REASON_MAX_BYTES) if reason else None
-    row = {
-        "id": node["id"], "title": title, "revision": node["revision"],
-        "reason": reason_text,
-        "detail_read": f"plan_read(node_id='{node['id']}')",
-    }
-    if extra.get("date"):
-        row["date"] = extra["date"]
-    if title != node["title"] or reason_text != reason:
-        row["truncated"] = True
-    return row
-
-
-def _later_rows(db, nodes: list[dict]) -> list[dict]:
-    """The page's rows, each with the reason and date read for these rows only."""
-    extra = later_review.row_facts(db, [node["id"] for node in nodes])
-    return [_later_row(node, extra.get(node["id"], {})) for node in nodes]
-
-
-def _later_minimal(row: dict) -> dict:
-    """The smallest truthful Later row: the identity to act on and the read for the rest."""
-    return {
-        key: row[key] for key in ("id", "title", "revision", "detail_read")
-    } | {"truncated": True}
+# Later row rendering is in status_later.
 
 
 def _members(facts: dict, section: str) -> list[dict]:
@@ -318,8 +284,9 @@ def _page(facts: dict, section: str, position: dict | None, db=None) -> dict[str
     # costs one page of reads: a Later row's reason and date are keyed reads.
     window = members[offset:offset + max_rows]
     rows = cut_rows(
-        _later_rows(db, window) if later else [_row(node, facts) for node in window],
-        max_rows, max_bytes, minimal=_later_minimal if later else _minimal,
+        status_later.rows(db, window, title_bytes=TITLE_MAX_BYTES, reason_bytes=REASON_MAX_BYTES)
+        if later else [_row(node, facts) for node in window],
+        max_rows, max_bytes, minimal=status_later.minimal if later else _minimal,
     )
     omitted = len(members) - offset - len(rows)
     page: dict[str, Any] = {

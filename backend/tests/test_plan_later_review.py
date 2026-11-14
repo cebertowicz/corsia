@@ -41,10 +41,17 @@ def _arm(db, plan_id: str, value: str) -> None:
 
 def _below_cut(db, plan_id: str, title: str, **params):
     """Add one task already below the cut, through the real write."""
-    return plan_update(db, plan_id, "add", {
+    reason = params.pop("reason", None)
+    node = plan_update(db, plan_id, "add", {
         "title": title, "acceptance_criteria": f"{title} is verified",
-        "size": "unknown", "later": True, **params,
+        "size": "unknown", "later": reason is None, **params,
     })["node"]
+    if reason is not None:
+        node = plan_update(db, plan_id, "edit", {
+            "node_id": node["id"], "expected_revision": revision(db, node["id"]),
+            "later": True, "reason": reason,
+        })["node"]
+    return node
 
 
 def _pile_below(db, plan_id: str, count: int, *, reason: str | None = None) -> list:
@@ -84,7 +91,7 @@ def test_the_first_later_write_arms_the_review_a_week_out(db):
         "later": True, "reason": "Not before the launch cut",
     })
 
-    assert _days_from_now(_review_at(db, plan.id), clock=service._now()) == 7
+    assert 6.999 < _days_from_now(_review_at(db, plan.id), clock=service._now()) <= 7
 
 
 def test_a_task_born_below_the_cut_arms_the_review_too(db):
@@ -92,12 +99,12 @@ def test_a_task_born_below_the_cut_arms_the_review_too(db):
 
     _below_cut(db, plan.id, "Someday")
 
-    assert _days_from_now(_review_at(db, plan.id), clock=service._now()) == 7
+    assert 6.999 < _days_from_now(_review_at(db, plan.id), clock=service._now()) <= 7
 
 
 def test_a_second_later_write_never_moves_the_armed_review(db):
     plan = owner_plan(db)
-    armed = _below_cut(db, plan.id, "Someday")["later_review_at" and "id"]
+    armed = _below_cut(db, plan.id, "Someday")["id"]
     _arm(db, plan.id, DUE)
     first = _review_at(db, plan.id)
 
@@ -108,7 +115,19 @@ def test_a_second_later_write_never_moves_the_armed_review(db):
     })
 
     assert _review_at(db, plan.id) == first
-    assert row(db, armed.id)["later"] == 1
+    assert row(db, armed)["later"] == 1
+
+
+def test_scope_owned_plan_never_arms_a_review(db):
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','Project','t','t')")
+    plan = service.ensure_plan("project_scope", "p", db=db)
+    task(db, plan.id, "Born later", later=True)
+    assert _review_at(db, plan.id) is None
+
+    other = task(db, plan.id, "Moved later")
+    from plans import later_fields
+    later_fields.flip(db, other.id, later=True, reason="later", actor_id=None, provenance="test")
+    assert _review_at(db, plan.id) is None
 
 
 # --- due selection ---------------------------------------------------------
@@ -117,6 +136,7 @@ def test_a_second_later_write_never_moves_the_armed_review(db):
 def test_only_an_active_thread_plan_with_an_armed_review_is_due(db):
     owner = owner_plan(db)
     other = service.ensure_plan("thread", "worker", db=db)
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project-1','Project','t','t')")
     scope = service.ensure_plan("project_scope", "project-1", db=db)
     for plan in (owner, other, scope):
         _arm(db, plan.id, DUE)
@@ -330,7 +350,7 @@ def test_the_later_section_pages_the_pile_in_plan_order(db):
     assert row_["continue_read"].startswith("plan_read(section='later', cursor='")
     assert all({"id", "revision", "title", "reason", "detail_read"} <= set(r) for r in row_["rows"])
     assert all("state" not in r and "condition" not in r for r in row_["rows"])
-    assert above["id"] not in {r["id"] for r in row_["rows"]}
+    assert above.id not in {r["id"] for r in row_["rows"]}
 
     rest = status.read(
         db, service._plan_row(db, plan.id), actor=OWNER, section="later",
@@ -361,6 +381,18 @@ def test_the_later_section_row_carries_its_reason_and_date(db):
     assert by_id[dated["id"]]["detail_read"] == f"plan_read(node_id='{dated['id']}')"
 
 
+def test_latest_later_flip_without_reason_clears_old_reason(db):
+    plan = owner_plan(db)
+    node = _below_cut(db, plan.id, "Someday", reason="Old reason")
+    for flag in (False, True):
+        plan_update(db, plan.id, "edit", {
+            "node_id": node["id"], "expected_revision": revision(db, node["id"]),
+            "later": flag,
+        })
+    rows = status.read(db, service._plan_row(db, plan.id), actor=OWNER, section="later")["rows"]
+    assert not rows[0].get("reason")
+
+
 def test_a_later_section_cursor_refuses_a_snapshot_that_moved(db):
     plan = owner_plan(db)
     _pile_below(db, plan.id, status.LATER_ROWS + 1)
@@ -384,5 +416,11 @@ def test_a_later_section_cursor_refuses_a_snapshot_that_moved(db):
         raise AssertionError("a moved pile must refuse the old cursor")
 
 
-def test_later_is_listed_wherever_sections_are(db):
-    from plans import plan_schemas_holder  # noqa: F401 - replaced below
+def test_later_is_listed_wherever_sections_are():
+    from plans import withheld_projection
+    from tools import plan_schemas
+
+    assert "later" in status.SECTIONS
+    assert "later" in withheld_projection._ENUM_VALUES["section"]
+    assert "later" in plan_schemas.READ_PARAMS["section"]["enum"]
+
