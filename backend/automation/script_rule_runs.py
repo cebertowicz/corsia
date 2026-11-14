@@ -60,6 +60,13 @@ class RuleRun:
     def key(self) -> str:
         return f"{KEY_PREFIX}{self.decision_id}"
 
+    @property
+    def started_by(self) -> dict[str, str]:
+        """The rule and the event that started the run, under the names an interrupted run's wake uses."""
+        event = json.loads(self.stdin)
+        named = {"rule_id": self.rule_id, "event_id": event.get("id"), "event_type": event.get("type")}
+        return {key: value for key, value in named.items() if isinstance(value, str)}
+
 
 def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None]:
     """Bind the claimed repository, off-lock, to the repositories the run's project

@@ -270,7 +270,7 @@ def _seed_descriptors(
                     listing["plan"]["id"], "archive_node",
                     {"node_id": node["id"], "expected_revision": node["revision"]},
                     actor=actor, provenance="onboarding.app_first_run",
-                    mutation_id=f"first-run-app-reconcile:{conductor_id}:{node['id']}", db=db,
+                    mutation_id=public.automated_mutation_keys.first_run_app_reconcile(conductor_id, node["id"]), db=db,
                 )
         next_open_position = 0
         for step in descriptors:
@@ -289,7 +289,7 @@ def _seed_descriptors(
                     listing["plan"]["id"], "reorder",
                     {"node_id": node["id"], "order_key": next_open_position, "expected_revision": node["revision"]},
                     actor=actor, provenance="onboarding.app_first_run",
-                    mutation_id=f"first-run-app-order:{conductor_id}:{node['id']}:{node['revision']}", db=db,
+                    mutation_id=public.automated_mutation_keys.first_run_app_order(conductor_id, node["id"], node["revision"]), db=db,
                 )
             next_open_position += 1
 
