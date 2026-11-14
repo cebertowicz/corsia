@@ -37,7 +37,7 @@ def _an_install_that_still_holds_them() -> sqlite3.Connection:
 
 def test_the_step_is_registered_at_190() -> None:
     assert MIGRATIONS[190] is migrate_190_to_191
-    assert SCHEMA_VERSION == 192
+    assert SCHEMA_VERSION == 193
 
 
 def test_a_fresh_schema_has_none_of_the_tables() -> None:
