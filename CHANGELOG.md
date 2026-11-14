@@ -9,6 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
+- A chat comment's answer now comes only from what the agent sent you when Focus is on, so a comment answered with an update and again in the agent's closing words shows one reply; before, it showed both. With Focus off, every step you see still answers.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A chat whose Claude Code session can't be resumed now sends your message again instead of sometimes ending with an error.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.

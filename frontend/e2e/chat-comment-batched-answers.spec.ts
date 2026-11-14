@@ -2,6 +2,7 @@ import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { closeCommentThread, commentEditor, commentEditorClosed, openCommentThread, postedComments } from './support/chatComments';
+import { setFocusMode } from './support/focusMode';
 
 const BACKEND = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 const text = 'First selected phrase. Second selected phrase.';
@@ -9,6 +10,11 @@ const quotes = ['First selected phrase', 'Second selected phrase'];
 const lead = 'Untagged lead.';
 test.use({ video: 'off', colorScheme: 'light', seedPerTest: true });
 test.describe.configure({ timeout: 120_000 });
+
+// Focus is a persisted server setting; a spec that turns it off restores it here, which runs on failure too.
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
+});
 
 const narrow = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768;
 
@@ -80,9 +86,14 @@ async function expandWork(page: Page) {
   for (let left = 10; left > 0 && await collapsed.count(); left--) await collapsed.first().click();
 }
 
-/** Open a thread whose first Turn is still running, with `count` comments queued behind it; returns their cids. */
-async function queueComments(page: Page, request: any, title: string, count: number) {
+/**
+ * Open a thread whose first Turn is still running, with `count` comments queued behind it; returns their cids.
+ * Focus is on, the default, where only a message sent for the person is shown and so answers a comment; `focus: false`
+ * shows every assistant step, so closing text answers too.
+ */
+async function queueComments(page: Page, request: any, title: string, count: number, { focus = true } = {}) {
   if (narrow(page)) await page.setViewportSize({ width: 393, height: 852 });
+  if (!focus) await setFocusMode(request, false);
   await seedMockResponses(request, [{ content: 'Working on it', completion_gate: 'first-turn' }]);
   const thread = await createSession(request, title);
   // Earlier rows keep the commented message clear of the header on a phone.
@@ -154,9 +165,59 @@ for (const count of [1, 2]) test(`${count} queued comment(s): an answer sent mid
   for (const answer of answers) expect(await chatText(page)).not.toContain(answer);
 });
 
-test('an answer written into the reply never streams into chat', async ({ page, request }) => {
+for (const width of [1440, 393]) test.describe(`answer sent and repeated in the closing text at ${width}`, () => {
+test.use({ viewport: { width, height: width === 393 ? 852 : 1000 }, hasTouch: width === 393, isMobile: width === 393 });
+test(`a post_update answer repeated in the closing text reads once in its thread (${width})`, async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
-  const { thread, row, cids } = await queueComments(page, request, 'Streamed answer', 1);
+  test.skip(test.info().project.name !== 'chromium-desktop', 'Sets its own widths');
+  const { thread, row, cids } = await queueComments(page, request, 'Repeated answer', 1);
+  const answer = 'Moved it to the next line.';
+  // The agent sends the answer, then repeats it in its closing text: only the sent words answer the comment.
+  await seedMockResponses(request, [
+    { content: '', tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: `[${cids[0]}] ${answer}` }) }], finish_reason: 'tool_calls' },
+    { content: `[${cids[0]}] ${answer}` },
+  ]);
+  // The closing text is the one row a page read returns: the sent update draws nothing there.
+  await expect.poll(async () => (await messages(request, thread)).filter(m => m.role === 'assistant' && m.content === `[${cids[0]}] ${answer}`).length, { timeout: 30_000 }).toBe(1);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  const placed = (await messages(request, thread)).flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? [])
+    .filter((a: any) => a.author_kind === 'agent' && a.text === answer);
+  expect(placed).toHaveLength(1);
+  const surface = await answerReadsInItsThread(page, row, quotes[0], answer, { tap: width === 393 });
+  await expect(surface.getByText(answer)).toHaveCount(1);
+  await expect(surface).toContainText('1 reply');
+  await expect(surface).not.toContainText('2 replies');
+  await capture(page, 'repeated-answer-thread');
+  await closeCommentThread(page, surface);
+  // Chat keeps the closing words inside its folded work, not as a reply of its own.
+  expect(await chatText(page)).not.toContain(answer);
+});
+});
+
+test('an update that answers no comment, beside tagged closing text, places no answer and repeats nothing in chat', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  const { thread, cids } = await queueComments(page, request, 'Untagged update', 1);
+  const answer = 'Friday is skipped.';
+  // The Turn sends an update that answers no comment, then closes with the tagged answer the person is never sent.
+  // The e2e app turns the Focus nudge off (its unit tests own it), so this shows what the person sees until a nudge.
+  await seedMockResponses(request, [
+    { content: '', tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: 'Moved the meeting.' }) }], finish_reason: 'tool_calls' },
+    { content: `[${cids[0]}] ${answer}` },
+  ]);
+  await expect.poll(async () => (await messages(request, thread)).some(m => m.role === 'assistant' && m.content === `[${cids[0]}] ${answer}`), { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  const rows = await messages(request, thread);
+  expect(rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? []).filter((a: any) => a.author_kind === 'agent')).toHaveLength(0);
+  await expect(page.locator('.messages').getByText('Moved the meeting.')).toBeVisible();
+  // Nothing was placed, so the tagged closing text stays whole in the folded work, never in a comment thread.
+  await expandWork(page);
+  expect((await chatText(page)).split(answer).length - 1).toBe(1);
+  await capture(page, 'untagged-update-unanswered');
+});
+
+test('an answer written into the reply never streams into chat (Focus off)', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  const { thread, row, cids } = await queueComments(page, request, 'Streamed answer', 1, { focus: false });
   const answer = 'Streamed answer, long enough that the reply pauses partway through it.';
   // The mock streams the first half, which ends inside the answer, then holds until released.
   const reply = `${lead}\n\n[${cids[0]}] ${answer}`;
@@ -183,14 +244,17 @@ test('an answer written into the reply never streams into chat', async ({ page, 
 
 for (const width of [1440, 900, 393]) test.describe(`answers-only turn at ${width}`, () => {
 test.use({ viewport: { width, height: width === 393 ? 852 : 1000 }, hasTouch: width === 393, isMobile: width === 393 });
-test(`a turn made only of answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
+test(`a turn whose only sent words are answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
   test.skip(test.info().project.name !== 'chromium-desktop', 'Sets its own widths');
   const { thread, row, cids } = await queueComments(page, request, 'Answers only turn', 1);
   // The highlight while no answer has come, to read beside the one an unread answer leaves.
   await captureHighlight(page, row, 'highlight-no-answer');
   const answer = 'Only an answer.';
-  await seedMockResponses(request, [{ content: `[${cids[0]}] ${answer}`, completion_gate: 'answers-only' }]);
+  await seedMockResponses(request, [
+    { content: '', tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: `[${cids[0]}] ${answer}` }) }], finish_reason: 'tool_calls' },
+    { content: 'Done.', completion_gate: 'answers-only' },
+  ]);
   const blocks = () => page.locator('.messages [data-work-block]');
   const titled = (title: RegExp) => blocks().filter({ has: page.locator('.fold-toggle', { hasText: title }) });
   await expect(page.getByRole('button', { name: 'Stop turn' })).toBeVisible();
@@ -207,10 +271,10 @@ test(`a turn made only of answers adds nothing to chat, live and after a reload 
   }, { timeout: 30_000 }).toBe(true);
   await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
   await captureHighlight(page, row, 'highlight-unread-answer');
-  // Once it ends no line is left for it: the one folded line counts the step it lists when opened (#2602).
+  // Once it ends no line is left for it: the one folded line counts the steps it lists when opened (#2602).
   await expect(page.locator('.messages [data-work-block].live-work')).toHaveCount(0);
   const labels = await blocks().evaluateAll((nodes) => nodes.map((node) => (node.querySelector('.fold-toggle') as HTMLElement).innerText));
-  expect(labels.map((label) => label.replace(/ · under 1 min$/, ''))).toEqual(['Context updated', 'Worked · 1 step']);
+  expect(labels.map((label) => label.replace(/ · under 1 min$/, ''))).toEqual(['Context updated', 'Worked · 3 steps']);
   // What chat draws: the same rows and the same fold labels live and after a reload, none of them the answer.
   const drawn = async () => ({
     ids: await page.locator('.messages [data-message-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-message-id'))),
@@ -218,8 +282,9 @@ test(`a turn made only of answers adds nothing to chat, live and after a reload 
   });
   await expandWork(page);
   const live = await drawn();
-  const opened = await titled(/Worked/).locator('[data-message-id]').count();
-  expect(opened).toBe(1);
+  // Opened, the fold lists the first Turn's words, the sending tool call and the closing words; the answer is none of them.
+  const openedRows = await titled(/Worked/).locator('[data-message-id]').allInnerTexts();
+  expect(openedRows.map((row) => row.split('\n')[0])).toEqual(['Working on it', 'Used a tool', 'Done.']);
   expect(live.ids).not.toContain(stepId);
   expect(await chatText(page)).not.toContain(answer);
   await expectLastRowClear(page);

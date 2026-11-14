@@ -33,8 +33,11 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await expect(work).toHaveCount(1);
     await work.getByRole('button', { name: /Expand (Worked|Background work)/ }).click();
   }
-  // The comment posts as soon as it is written; its answer is held until the comment is out of view, so it arrives unread.
-  await seedMockResponses(request, [{ content: '[c2.1] This is the answer.', completion_gate: 'threaded-answer' }]);
+  // The comment posts as soon as it is written; its answer is sent with post_update and held until the comment is out of view, so it arrives unread.
+  await seedMockResponses(request, [
+    { content: '', completion_gate: 'threaded-answer', tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: '[c2.1] This is the answer.' }) }], finish_reason: 'tool_calls' },
+    { content: 'Done.' },
+  ]);
   await row.scrollIntoViewIfNeeded();
   await page.evaluate((id) => {
     const body = document.querySelector<HTMLElement>(`[data-message-id="${id}"] .long-message-body`)!;

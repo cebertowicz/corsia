@@ -293,4 +293,7 @@ class PostUpdateTool(Tool):
             except Exception:
                 # The committed message remains visible after reload.
                 log.warning("post_update broadcast failed for message %s", message_id, exc_info=True)
-        return f"Update saved as message {message_id}."
+        return (
+            f"Update saved as message {message_id}. "
+            "The person already has this text; don't repeat it in your closing text."
+        )

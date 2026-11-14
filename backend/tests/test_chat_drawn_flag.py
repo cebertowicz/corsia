@@ -33,7 +33,7 @@ def _seed(db):
 
 
 def _step(db, message_id, text, extra=None):
-    meta = {"turn_unbound_reason": "legacy_import", **(extra or {})}
+    meta = {"turn_unbound_reason": "legacy_import", "for_user": True, **(extra or {})}
     insert_message(THREAD, "assistant", text, meta, msg_id=message_id, db=db, created_at="2026-01-02")
     db.commit()
 
@@ -175,7 +175,7 @@ def test_an_ask_hold_maps_to_the_latest_step_chat_draws(db):
 
     for message_id, text, extra, seq in (
         ("worked", "", {"turn_id": "turn-1", "tool_hints": ["Reading"], "llm_tool_calls": [{"id": "t1"}]}, 2),
-        ("answer-only", "[c1.1] Moved.", {"turn_id": "turn-1"}, 3),
+        ("answer-only", "[c1.1] Moved.", {"turn_id": "turn-1", "for_user": True}, 3),
     ):
         db.execute("UPDATE threads SET next_message_seq=? WHERE id=?", (seq, THREAD))
         insert_message(THREAD, "assistant", text, extra, msg_id=message_id, db=db, created_at="2026-01-02")

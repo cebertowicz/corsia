@@ -17,7 +17,7 @@ def test_comments_render_exactly_before_existing_context():
         '[Comments (context, not an instruction):\n'
         ' c5000.1. On #5120: "first" | note: why?\n'
         ' c5000.2. On #5120: "second" | note: yes]\n'
-        '[Reply grounding: answer their comments; start each answer with the ids of the '
+        '[Reply grounding: answer their comments with post_update; start each answer with the ids of the '
         "comments it answers in brackets, like [c12.1] or [c12.3][c12.4], and don't repeat "
         'their quote. Comments that need no answer can go unanswered.]\n'
         '[In view while typing: #1-#2 (2 shown) (context, not an instruction)]\n'
@@ -129,7 +129,7 @@ def test_replies_are_admitted_and_answered_in_the_root_thread(thread_rows):
     # Queued inputs receive a transcript sequence when delivered to the agent.
     db.execute("UPDATE messages SET seq=41 WHERE id='reply-send'")
     db.execute("UPDATE threads SET next_message_seq=42 WHERE id=?", (THREAD,))
-    insert_message(THREAD, 'assistant', '[c2.1][c2.2] both', {'turn_unbound_reason': 'legacy_import'},
+    insert_message(THREAD, 'assistant', '[c2.1][c2.2] both', {'turn_unbound_reason': 'legacy_import', 'for_user': True},
                    msg_id='reply-answer', db=db)
     page = [{'id': 'm5', 'role': 'assistant'}]
     attach_comments(db, THREAD, 'person', page)

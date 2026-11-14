@@ -36,7 +36,7 @@ def _start_turn(db, turn_id: str) -> TurnIdentity:
 
 
 def _message_id(result: str) -> str:
-    return result.removeprefix("Update saved as message ").removesuffix(".")
+    return result.removeprefix("Update saved as message ").split(".")[0]
 
 
 def _seed_assistant_message(db, turn_id: str, metadata: dict) -> None:

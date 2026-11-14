@@ -41,13 +41,14 @@ async def test_post_update_writes_trimmed_agent_message_and_broadcasts(deleg_db,
     )
 
     assert result.startswith("Update saved as message ")
+    assert result.endswith("The person already has this text; don't repeat it in your closing text.")
     row = deleg_db.execute(
         "SELECT role, content, metadata FROM messages WHERE thread_id='sender-self'"
     ).fetchone()
     assert row["role"] == "assistant"
     assert row["content"] == "The focused check passed."
     assert json.loads(row["metadata"]) == {"for_user": True, "turn_id": "turn-1", "node_id": node.id}
-    broadcast.assert_awaited_once_with("sender-self", (result.removeprefix("Update saved as message ").removesuffix("."),))
+    broadcast.assert_awaited_once_with("sender-self", (result.removeprefix("Update saved as message ").split(".")[0],))
 
 
 @pytest.mark.asyncio

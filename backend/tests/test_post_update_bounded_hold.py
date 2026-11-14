@@ -15,7 +15,7 @@ TURN = TurnIdentity(turn_id="turn-1", turn_order=1)
 
 
 def _message_id(result: str) -> str:
-    return result.removeprefix("Update saved as message ").removesuffix(".")
+    return result.removeprefix("Update saved as message ").split(".")[0]
 
 
 def _own_node(db):

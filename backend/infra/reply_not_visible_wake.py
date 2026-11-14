@@ -1,11 +1,11 @@
 """The one Focus nudge for an unanswered person message or first-run wake.
 
 Focus shows an agent's words only when it sends them with ``post_update``. When
-a Turn ends while the person's newest message has no such reply after it, and its
-last words are not wholly answers shown in the message's comment threads, the agent
+a Turn ends while the person's newest message has no such reply after it, the agent
 is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
-its last words become the reply (``for_user``), so the person still sees them; a
+its last words become the reply (``for_user``), so the person still sees them, and
+any comment answers tagged in them are placed in the same write; a
 woken Turn that leaves no words of its own (it errored first) shows the words it
 was woken about instead.
 
@@ -27,7 +27,9 @@ from typing import Any
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
-from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN
+from infra.chat_comment_answers import (
+    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, place_flipped_answers,
+)
 
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
@@ -82,10 +84,7 @@ def _nudge_id(person_message_id: str) -> str:
 
 
 def _focus_on(db: sqlite3.Connection) -> bool:
-    from infra.settings import get_setting
-
-    # As ``get_feature_flags`` and the settings API read it: Focus is on unless saved off.
-    return (get_setting("features", db=db) or {}).get("focus_mode", True) is not False
+    return focus_mode_on(db)
 
 
 def _newest_person_input(
@@ -127,19 +126,26 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
 def _replied_after(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
-    """A reply after the message, or answers in its comment threads with no other last words."""
-    if db.execute(
+    """The person's message has its reply: for one carrying chat comments, an answer placed in a
+    comment thread; for any other, a message sent for them after theirs.
+
+    An update that answers no comment (untagged) is not a reply to one, so the comment is
+    nudged for like any unanswered message.
+    """
+    comments = db.execute(
+        "SELECT COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) FROM messages "
+        "WHERE id=? AND thread_id=? AND json_valid(metadata)",
+        (person["id"], thread_id),
+    ).fetchone()
+    if comments is not None and comments[0] > 0:
+        return db.execute(
+            "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? LIMIT 1",
+            (thread_id, person["id"]),
+        ).fetchone() is not None
+    return db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
         (thread_id, person["seq"]),
-    ).fetchone() is not None:
-        return True
-    if db.execute(
-        f"SELECT 1 {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.user_message_id=? LIMIT 1",
-        (thread_id, person["id"]),
-    ).fetchone() is None:
-        return False
-    hidden = _last_hidden(db, thread_id, person["seq"])
-    return hidden is None or not _unseen(db, thread_id, hidden)
+    ).fetchone() is not None
 
 
 def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
@@ -190,6 +196,7 @@ def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row)
         "WHERE id=?",
         (row["id"],),
     )
+    place_flipped_answers(db, thread_id, str(row["id"]))
     thread_updates.record_marked(
         db, thread_id=thread_id, message_id=str(row["id"]), node_id=None,
         created_at=str(row["created_at"]),

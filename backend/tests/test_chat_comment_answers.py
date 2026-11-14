@@ -30,7 +30,7 @@ def _seed(db):
 
 
 def _answer(db, text="[c1.1][c1.2] shared\n\nmore detail\n\n[c1.9] unknown"):
-    return insert_message("thread", "assistant", text, {"turn_unbound_reason": "legacy_import"},
+    return insert_message("thread", "assistant", text, {"turn_unbound_reason": "legacy_import", "for_user": True},
                           msg_id="answer", db=db, created_at="2026-01-02")
 
 
@@ -141,13 +141,65 @@ def test_write_places_known_answers(isolated_db):
         db.close()
 
 
+def _closing_text(db, text="[c1.1] Moved."):
+    return insert_message("thread", "assistant", text, {"turn_unbound_reason": "legacy_import"},
+                          msg_id="closing", db=db, created_at="2026-01-02")
+
+
+def _sent(db):
+    return insert_message("thread", "assistant", "[c1.1] Moved.", {"turn_unbound_reason": "legacy_import", "for_user": True},
+                          msg_id="sent", db=db, created_at="2026-01-03")
+
+
+def test_closing_text_places_no_answer_but_a_sent_message_places_one(isolated_db):
+    db = get_db()
+    try:
+        _seed(db)
+        _closing_text(db)
+        assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+        assert db.execute("SELECT 1 FROM chat_visible_content").fetchone() is None
+        _sent(db)
+        assert [tuple(r) for r in db.execute("SELECT cid,assistant_message_id FROM chat_comment_answers")] == [("c1.1", "sent")]
+        db.rollback()
+    finally:
+        db.close()
+
+
+def test_a_saved_closing_text_row_is_not_placed_again_and_is_left_alone(isolated_db):
+    db = get_db()
+    try:
+        _seed(db)
+        _closing_text(db)
+        # A row an earlier version placed from closing text, beside the sent answer.
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','question','c1.1','closing','2026-01-02')")
+        _sent(db)
+        assert [r[0] for r in db.execute("SELECT assistant_message_id FROM chat_comment_answers ORDER BY 1")] == ["closing", "sent"]
+        db.rollback()
+    finally:
+        db.close()
+
+
+def test_with_focus_off_closing_text_is_shown_so_it_places_its_answer(isolated_db):
+    from infra.settings import set_setting
+
+    db = get_db()
+    try:
+        _seed(db)
+        set_setting("features", {"focus_mode": False}, db=db)
+        _closing_text(db)
+        assert [r[0] for r in db.execute("SELECT assistant_message_id FROM chat_comment_answers")] == ["closing"]
+        db.rollback()
+    finally:
+        db.close()
+
+
 def test_write_saves_the_chat_text_once_and_keeps_the_message_as_written(isolated_db):
     text = "Intro\n\n[c1.1][c1.2] shared\n\n[c1.9] unknown"
     db = get_db()
     try:
         _seed(db)
         _answer(db, text)
-        insert_message("thread", "assistant", "Plain\n\n[c1.9] unknown", {"turn_unbound_reason": "legacy_import"},
+        insert_message("thread", "assistant", "Plain\n\n[c1.9] unknown", {"turn_unbound_reason": "legacy_import", "for_user": True},
                        msg_id="unplaced", db=db, created_at="2026-01-03")
         db.commit()
         assert db.execute("SELECT content FROM messages WHERE id='answer'").fetchone()[0] == text
@@ -233,7 +285,7 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     assert unread_and_stamps() == (1, ["2026-01-02"])
     db = get_db()
     try:
-        insert_message("thread", "assistant", "[c1.1] again", {"turn_unbound_reason": "legacy_import"},
+        insert_message("thread", "assistant", "[c1.1] again", {"turn_unbound_reason": "legacy_import", "for_user": True},
                        msg_id="answer-2", db=db, created_at="2026-01-04")
         db.commit()
     finally:
@@ -264,7 +316,7 @@ def test_viewing_one_answer_to_several_replies_clears_it_once(isolated_db):
                    "VALUES ('followup','thread','user','',?,'2026-01-02',2,2)", (json.dumps(metadata),))
         place_comments(db, 'thread', 'followup', metadata, '2026-01-02')
         db.execute("UPDATE threads SET next_message_seq=3 WHERE id='thread'")
-        insert_message('thread', 'assistant', '[c2.1][c2.2] shared', {'turn_unbound_reason': 'legacy_import'},
+        insert_message('thread', 'assistant', '[c2.1][c2.2] shared', {'turn_unbound_reason': 'legacy_import', 'for_user': True},
                        msg_id='shared-answer', db=db, created_at='2026-01-03')
         db.commit()
     finally:
