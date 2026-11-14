@@ -193,6 +193,7 @@ async def _run_job_safely() -> None:
     # the same once-per-day claim.
     await _emit_learning_reports_safely()
     await _run_workflow_verdicts_safely()
+    await _run_machinery_cost_safely()
     await _run_kpi_thresholds_safely(run_date)
     await _reap_worktrees_safely()
 
@@ -217,6 +218,15 @@ async def _emit_learning_reports_safely() -> None:
     except Exception:
         # This follow-up must not change the already-recorded maintenance disposition.
         logger.exception("nightly_job: learning report delivery failed")
+
+
+async def _run_machinery_cost_safely() -> None:
+    """Record missing machinery days without changing the maintenance result."""
+    try:
+        from jobs.machinery_cost import run_daily
+        await asyncio.to_thread(run_daily)
+    except Exception:
+        logger.exception("nightly_job: machinery cost recording failed")
 
 
 async def _run_workflow_verdicts_safely() -> None:
