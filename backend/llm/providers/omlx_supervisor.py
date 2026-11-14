@@ -44,6 +44,7 @@ MANAGED_HEALTH_STARTUP_CAP_S = 600.0
 DEFAULT_HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
+SIGKILL_WAIT_S = 30.0  # a process holding a large model can take seconds to tear down
 _life: dict[str, restart.Life] = {}
 
 
@@ -96,6 +97,16 @@ _port_owner_pid = process.port_owner_pid
 def _process_exited(pid: int) -> bool:
     """Return true for a dead process, including an exited child awaiting reap."""
     return process.process_exited(pid, _process_alive)
+
+
+async def _await_exit(pid: int, seconds: float) -> bool:
+    """Whether ``pid`` exits within ``seconds``; checked at least once."""
+    deadline = time.monotonic() + seconds
+    while not _process_exited(pid):
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.2)
+    return True
 
 
 def _is_managed_omlx_server(server_id: str) -> bool:
@@ -342,30 +353,19 @@ async def _stop_server(cfg: dict) -> dict[str, Any]:
         log.exception("SIGTERM failed")
         return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGTERM failed: {exc}"}
 
-    exited = False
-    deadline = time.monotonic() + SIGTERM_GRACE_S
-    while time.monotonic() < deadline:
-        exited = _process_exited(pid)
-        if exited:
-            break
-        await asyncio.sleep(0.2)
-
-    if not exited:
-        exited = _process_exited(pid)
-
+    exited = await _await_exit(pid, SIGTERM_GRACE_S)
     if not exited and _read_pid(sid, host=host, port=int(port) if port else None) != pid:
         exited = True
     if not exited:
         try:
             os.kill(pid, signal.SIGKILL)
-            await asyncio.sleep(0.2)
         except ProcessLookupError:
             exited = True
         except Exception as exc:
             log.exception("SIGKILL failed")
             return {"ok": False, "message": "Couldn’t stop the model server. Try again.", "error": f"SIGKILL failed: {exc}"}
         else:
-            exited = _process_exited(pid)
+            exited = await _await_exit(pid, SIGKILL_WAIT_S)
 
     if not exited:
         return {"ok": False, "message": f"oMLX failed to stop (pid {pid})"}

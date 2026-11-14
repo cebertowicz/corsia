@@ -299,6 +299,32 @@ def test_stop_server_confirms_forced_exit_before_clearing_pid(
         next(observations)
 
 
+def test_stop_server_waits_for_slow_teardown_after_sigkill(isolated_runtime, monkeypatch):
+    """A large model can take seconds to tear down after SIGKILL; that is a stop, not a failure."""
+    from llm.providers import omlx_supervisor as sup
+
+    sid = "ns-stop-slow-teardown"
+    sup._write_pid(sid, os.getpid())
+    signals = []
+    # Survives the SIGTERM grace and the first few checks after SIGKILL, then exits.
+    observations = iter([False, False, False, False, True])
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(sup, "SIGTERM_GRACE_S", 0)
+    monkeypatch.setattr(sup, "_process_alive", lambda _pid: True)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: next(observations))
+    monkeypatch.setattr(sup.os, "kill", lambda _pid, sig: signals.append(sig))
+    monkeypatch.setattr(sup.asyncio, "sleep", no_sleep)
+
+    result = asyncio.run(sup.stop_server({"server_id": sid}))
+
+    assert result["ok"] is True
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert sup._read_pid(sid) is None
+
+
 def test_stop_server_no_pid_file(isolated_runtime):
     from llm.providers.omlx_supervisor import stop_server
     result = asyncio.run(stop_server({"server_id": "ns-never-started"}))
