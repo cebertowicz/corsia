@@ -59,7 +59,7 @@ vi.mock('$lib/stores/docCommentArrivals', () => ({
 }));
 vi.mock('$lib/stores/docComments', async () => ({
 	docComments: mocks.docComments,
-	arrivedDocComments: (await import('svelte/store')).writable(new Set<string>()),
+	pickedComments: (await import('svelte/store')).writable(new Set<string>()),
 	commentLoads: { subscribe(run: (value: Record<string, unknown>) => void) { run({}); return () => {}; } },
 	hasUnread: (await import('$lib/stores/docCommentProjection')).hasUnread,
 	rangeFor: mocks.rangeFor,
@@ -96,7 +96,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { arrivedDocComments } from '$lib/stores/docComments';
+import { pickedComments } from '$lib/stores/docComments';
 import { openTabDocumentImage, recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
@@ -1073,13 +1073,13 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 
-	it('marks a thread opened from its highlight as arrived, so showing its replies stamps them viewed', async () => {
-		arrivedDocComments.set(new Set());
+	it('opens a thread the caret moves into without reading it: only a click or tap on the highlight reads', async () => {
+		pickedComments.set(new Set());
 		const view = await openCommented('art-arrival');
 		view.dispatch({ selection: { anchor: QUOTE.from + 2 } });
 		flushSync();
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(get(arrivedDocComments).has('comment')).toBe(true);
+		expect(get(pickedComments).has('comment')).toBe(false);
 	});
 
 	it('opens the image from a click on it, with the region comment on it, where no marker stands any more', async () => {

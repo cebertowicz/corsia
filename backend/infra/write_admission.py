@@ -227,10 +227,10 @@ def _wait_bound() -> float:
     return LOOP_WAIT_SECONDS
 
 
-# Temporary acceptance evidence, with the slow-hold warning and lock-refusal log
-# in infra.database: delete in the change that settles Phase B's production
-# acceptance (24 h with zero in-process lock refusals after deploy), and no later
-# than 2026-10-23.
+# Temporary acceptance evidence for issue #1077, with the lock-refusal log in
+# infra.database: delete in the change that settles that fix (24 h of production
+# with zero in-process lock refusals), and no later than 2026-12-14. See the
+# diagnosis note in infra.database.
 def _log_slow_wait(admission: Admission) -> None:
     waited = (admission.acquired_at or admission.requested_at) - admission.requested_at
     if waited >= SLOW_WAIT_SECONDS:

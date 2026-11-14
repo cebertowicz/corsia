@@ -14,12 +14,17 @@ class ScreencastSocket:
         self.incoming = asyncio.Queue()
         self.closed = False
         self.layout = {"cssLayoutViewport": {"clientWidth": 1000, "clientHeight": 1000}}
+        self.measurements = None  # A list here keeps each measurement's answer until the test sends it.
 
     async def send(self, text):
         message = json.loads(text)
         self.log.append(("cdp", message["method"], message["params"]))
         result = self.layout if message["method"] == "Page.getLayoutMetrics" else {}
-        self.incoming.put_nowait({"id": message["id"], "result": result})
+        answer = {"id": message["id"], "result": result}
+        if message["method"] == "Page.getLayoutMetrics" and self.measurements is not None:
+            self.measurements.append(answer)
+        else:
+            self.incoming.put_nowait(answer)
 
     def __aiter__(self):
         return self
@@ -194,6 +199,42 @@ async def test_pane_screencast_reports_a_page_emulated_narrower_than_the_window_
     assert [entry[2] for entry in log if entry[1] == "Page.screencastFrameAck"] == [{"sessionId": 1}, {"sessionId": 2}, {"sessionId": 3}]
     assert [entry[1]["metadata"] for entry in log if entry[0] == "pane"] == [
         {"deviceWidth": 419, "deviceHeight": 600}, {"deviceWidth": 400, "deviceHeight": 600}]
+
+
+async def _frame_before_measurement(monkeypatch, width, *, hold=False):
+    # Chrome can send a start's frame before it answers the start's measurement.
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    socket.layout = {"cssLayoutViewport": {"clientWidth": 400, "clientHeight": 600}}
+    socket.measurements = []
+    running = asyncio.create_task(cast.run())
+    await _started(log)
+    socket.incoming.put_nowait(_frame(1, width))
+    while not any(entry[2] == {"sessionId": 1} for entry in log if entry[0] == "cdp"):
+        await asyncio.sleep(0)
+    if hold:
+        cast.hold()
+    for message in (socket.measurements.pop(), _frame(2, 400), None):
+        socket.incoming.put_nowait(message)
+    await asyncio.wait_for(running, 1)
+    return [entry[1] for entry in log if entry[0] == "pane"]
+
+
+@pytest.mark.asyncio
+async def test_a_frame_sent_before_its_measurement_is_shown_once_it_answers_at_the_measured_size(monkeypatch):
+    # On a still page that frame is the only one: dropping it would leave the pane blank.
+    assert [frame["data"] for frame in await _frame_before_measurement(monkeypatch, 400)] == ["jpeg-1", "jpeg-2"]
+
+
+@pytest.mark.asyncio
+async def test_a_frame_sent_before_its_measurement_at_another_size_is_dropped(monkeypatch):
+    # Such as one of the replaced capture's frames at a screenshot's temporary size.
+    assert [frame["data"] for frame in await _frame_before_measurement(monkeypatch, 1280)] == ["jpeg-2"]
+
+
+@pytest.mark.asyncio
+async def test_a_frame_sent_before_its_measurement_is_dropped_once_a_metrics_command_holds_the_pane(monkeypatch):
+    assert await _frame_before_measurement(monkeypatch, 400, hold=True) == []
 
 
 @pytest.mark.asyncio
