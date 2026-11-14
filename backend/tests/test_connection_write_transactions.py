@@ -153,19 +153,24 @@ def test_discovered_connector_keeps_its_referenced_model(catalog, provider, sele
 
 def test_startup_connector_probes_run_outside_writes(catalog, monkeypatch):
     import shutil
+    from pathlib import Path
+
     import connections
+    from tools import managed_runtime
 
     observed = []
 
-    def probe(name):
+    def probe(name, **_kwargs):
         _writer_available(catalog)
         observed.append(name)
         return f"/test/{name}"
 
+    # Claude Code and Codex are found as CORSIA's pinned copies; GitHub on PATH.
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path", lambda kind, **kw: Path(probe(kind, **kw)))
     monkeypatch.setattr(shutil, "which", probe)
     monkeypatch.setattr(connections, "_gh_status", lambda _binary: (bool(probe("gh-auth")), None))
     assert connections.seed_builtin_connections() == 3
-    assert observed == ["claude", "gh", "gh-auth", "codex"]
+    assert observed == ["claude-code", "gh", "gh-auth", "codex"]
     assert _read(catalog, "SELECT provider,status FROM connections ORDER BY provider") == [
         ("claude-code", "available"), ("codex", "available"), ("github", "available"),
     ]

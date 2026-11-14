@@ -211,20 +211,31 @@ def test_binary_resolver_reports_both_setup_clis_absent_in_empty_search_roots(tm
     assert binary_from_config("codex", {}, candidate_roots=(Path(empty_root),)) is None
 
 
+def _pinned_installed(monkeypatch, **paths: str) -> None:
+    """CORSIA's pinned copy of each named vendor (claude_code=, codex=) reads as installed there."""
+    from tools import managed_runtime
+
+    installed = {kind.replace("_", "-"): Path(path) for kind, path in paths.items()}
+    real = managed_runtime.installed_runtime_path
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path",
+                        lambda kind, **kw: installed.get(kind) or real(kind, **kw))
+
+
 class TestSeedBuiltinConnections:
-    def test_claude_available_when_on_path(self, connections_db, monkeypatch):
+    def test_claude_available_when_the_pinned_copy_is_installed(self, connections_db, monkeypatch):
         import shutil
         from connections import seed_builtin_connections
         from connections.models import get_connection
 
+        _pinned_installed(monkeypatch, claude_code="/runtimes/claude-code/2/arm64/package/claude")
         monkeypatch.setattr(shutil, "which",
-                            lambda b: "/usr/local/bin/claude" if b == "claude" else None)
+                            lambda b, *_a, **_k: "/usr/local/bin/claude" if b == "claude" else None)
         seed_builtin_connections(db=connections_db)
         row = get_connection("claude-code", db=connections_db)
         assert row is not None
         assert row["status"] == "available"
         assert row["type"] == "cli"
-        assert row["config"]["binary"] == "/usr/local/bin/claude"
+        assert row["config"]["binary"] == "/runtimes/claude-code/2/arm64/package/claude"
 
     def test_claude_not_installed_when_absent(self, connections_db, monkeypatch):
         import os
@@ -268,14 +279,12 @@ class TestSeedBuiltinConnections:
         assert row["status"] == "available"
 
     def test_codex_present_is_installed_without_ambient_auth_probe(self, connections_db, monkeypatch):
-        import shutil
         import subprocess
         from connections import seed_builtin_connections
         from connections.models import get_connection
         from connections.source_state import NEEDS_AUTH, harness_state
 
-        monkeypatch.setattr(shutil, "which",
-                            lambda b: "/usr/local/bin/codex" if b == "codex" else None)
+        _pinned_installed(monkeypatch, codex="/runtimes/codex/0.1/arm64/package/vendor/t/bin/codex")
         monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("ambient auth probe"))
         seed_builtin_connections(db=connections_db)
         row = get_connection("codex", db=connections_db)
@@ -296,62 +305,43 @@ class TestSeedBuiltinConnections:
         providers = sorted(r["provider"] for r in list_connections(db=connections_db))
         assert providers == ["claude-code", "codex", "github"]
 
-    def test_manual_binary_preserved_when_executable(self, connections_db, monkeypatch, tmp_path):
+    def test_neither_a_stored_binary_nor_the_persons_copy_is_run(self, connections_db, monkeypatch, tmp_path):
+        """Agents run only CORSIA's pinned copy: a missing one stores where it will be, never PATH."""
+        import os
         import shutil
-        import connections as conn_pkg
         from connections import seed_builtin_connections
         from connections.models import (
             ConnectionStatus, ConnectionType, get_connection, upsert_connection,
         )
+        from tools.managed_runtime import pinned_executable_path
+
         manual = tmp_path / "custom-claude"
         manual.write_text("#!/bin/sh\n")
         manual.chmod(0o755)
         upsert_connection(type=ConnectionType.CLI, provider="claude-code",
                           config={"binary": str(manual)},
                           status=ConnectionStatus.AVAILABLE, db=connections_db)
-        monkeypatch.setattr(
-            shutil, "which",
-            lambda b: "/somewhere/else/claude" if b == "claude" else None,
-        )
-        monkeypatch.setattr(conn_pkg, "_gh_status", lambda _binary: (False, None))
+        persons = os.path.expanduser("~/.local/bin/claude")
+        real_isfile, real_access = os.path.isfile, os.access
+        monkeypatch.setattr(shutil, "which", lambda b, *_a, **_k: "/usr/local/bin/claude" if b == "claude" else None)
+        monkeypatch.setattr(os.path, "isfile", lambda p: p == persons or real_isfile(p))
+        monkeypatch.setattr(os, "access", lambda p, m: p == persons or real_access(p, m))
         seed_builtin_connections(db=connections_db)
         row = get_connection("claude-code", db=connections_db)
-        assert row["config"]["binary"] == str(manual)
-        assert row["status"] == "available"
+        assert row["status"] == "not_installed"
+        assert row["config"]["binary"] == str(pinned_executable_path("claude-code"))
+        assert row["config"]["binary"] not in {str(manual), "/usr/local/bin/claude", persons, "claude"}
 
-    def test_stale_manual_binary_replaced(self, connections_db, monkeypatch):
-        import shutil
-        import connections as conn_pkg
+    def test_a_stored_binary_is_replaced_by_the_pinned_copy(self, connections_db, monkeypatch):
         from connections import seed_builtin_connections
         from connections.models import (
             ConnectionStatus, ConnectionType, get_connection, upsert_connection,
         )
         upsert_connection(type=ConnectionType.CLI, provider="claude-code",
-                          config={"binary": "/does/not/exist"},
+                          config={"binary": "/usr/local/bin/claude"},
                           status=ConnectionStatus.AVAILABLE, db=connections_db)
-        monkeypatch.setattr(
-            shutil, "which",
-            lambda b: "/usr/local/bin/claude" if b == "claude" else None,
-        )
-        monkeypatch.setattr(conn_pkg, "_gh_status", lambda _binary: (False, None))
+        _pinned_installed(monkeypatch, claude_code="/runtimes/claude-code/2/arm64/package/claude")
         seed_builtin_connections(db=connections_db)
         row = get_connection("claude-code", db=connections_db)
-        assert row["config"]["binary"] == "/usr/local/bin/claude"
-
-    def test_discover_falls_back_to_candidate_path_off_PATH(self, connections_db, monkeypatch):
-        import os
-        import shutil
-        import connections as conn_pkg
-        from connections import seed_builtin_connections
-        from connections.models import get_connection
-
-        cand = os.path.expanduser("~/.local/bin/claude")
-        real_isfile, real_access = os.path.isfile, os.access
-        monkeypatch.setattr(shutil, "which", lambda b: None)  # nothing on PATH
-        monkeypatch.setattr(os.path, "isfile", lambda p: p == cand or real_isfile(p))
-        monkeypatch.setattr(os, "access", lambda p, m: p == cand or real_access(p, m))
-        monkeypatch.setattr(conn_pkg, "_gh_status", lambda _binary: (False, None))
-        seed_builtin_connections(db=connections_db)
-        row = get_connection("claude-code", db=connections_db)
-        assert row["config"]["binary"] == cand
+        assert row["config"]["binary"] == "/runtimes/claude-code/2/arm64/package/claude"
         assert row["status"] == "available"

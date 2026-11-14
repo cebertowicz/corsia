@@ -135,10 +135,21 @@ def harness_state(provider: str, *, db=None) -> dict[str, Any]:
 
 def _record_install(provider: str, cfg: dict, binary: str | None) -> None:
     """Keep the CLI's binary and whether it is installed: all the row holds for this source."""
+    from connections import stored_binary
+
     upsert_connection(
-        type=ConnectionType.CLI, provider=provider, config={**cfg, "binary": binary or provider},
+        type=ConnectionType.CLI, provider=provider, config={**cfg, "binary": stored_binary(provider, binary)},
         status=ConnectionStatus.AVAILABLE if binary else ConnectionStatus.NOT_INSTALLED,
     )
+
+
+def record_install(provider: str) -> str | None:
+    """Find the CLI again and record it on its row; return its executable, or None."""
+    from connections import resolve_builtin_binary
+
+    cfg, binary = resolve_builtin_binary(provider)
+    _record_install(provider, cfg, binary)
+    return binary
 
 
 async def check_harness_source(provider: str) -> None:
@@ -149,11 +160,9 @@ async def check_harness_source(provider: str) -> None:
     account's refresh records its own discovery, which ``harness_state`` reads.
     A failure raises.
     """
-    from connections import resolve_builtin_binary
     from connections.harness_models import refresh_provider
 
-    cfg, binary = await run_in_db(resolve_builtin_binary, provider)
-    await run_in_db(_record_install, provider, cfg, binary)
+    binary = await run_in_db(record_install, provider)
     if binary is not None:
         await refresh_provider(provider, reason="manual", binary=binary)
 

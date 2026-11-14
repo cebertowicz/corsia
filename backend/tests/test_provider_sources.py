@@ -52,11 +52,21 @@ def _sources(client):
 
 
 
+def _pinned(monkeypatch, *missing: str) -> None:
+    """CORSIA's pinned Claude Code and Codex read as installed at /bin/<name>, except ``missing``."""
+    from pathlib import Path
+
+    names = {"claude-code": "claude", "codex": "codex"}
+    monkeypatch.setattr("tools.managed_runtime.installed_runtime_path",
+                        lambda kind, **_k: None if kind in missing else Path(f"/bin/{names.get(kind, kind)}"))
+
+
 class TestSeedCodex:
     def _seed(self, monkeypatch):
         import connections
 
         monkeypatch.setattr("shutil.which", lambda name, *a, **k: f"/bin/{name}")
+        _pinned(monkeypatch)
         monkeypatch.setattr(connections, "_gh_status", lambda _binary: (True, None))
 
         connections.seed_builtin_connections()
@@ -70,8 +80,7 @@ class TestSeedCodex:
             self._seed(probe)
             connections.seed_builtin_connections()
         assert _sources(client)["codex"]["state"] == "needs_auth"
-        monkeypatch.setattr("shutil.which", lambda name, *a, **k: None if name == "codex" else "/bin/x")
-        monkeypatch.setattr("os.path.isfile", lambda p: False)
+        _pinned(monkeypatch, "codex")
         connections.seed_builtin_connections()
         assert _sources(client)["codex"]["state"] == "not_installed"
 
@@ -99,8 +108,8 @@ class TestSeedCodex:
         self._seed(monkeypatch)
         signed_in_default("claude-code")
         assert _sources(client)["claude-code"]["state"] == "ready"
-        monkeypatch.setattr("shutil.which", lambda name, *a, **k: None if name == "claude" else f"/bin/{name}")
-        monkeypatch.setattr("os.path.isfile", lambda p: False)
+        # The person's own copy on PATH does not count: agents run only CORSIA's.
+        _pinned(monkeypatch, "claude-code")
         connections.seed_builtin_connections()
         claude = _sources(client)["claude-code"]
         assert (claude["state"], claude["fix"]) == ("not_installed", _install_fix("claude-code"))

@@ -168,6 +168,21 @@ def _start_current_corrections_classifier() -> None:
         classifier_download.start(on_failure=report_classifier_download_failure)
 
 
+def _schedule_pinned_harness_install() -> None:
+    """Install CORSIA's Claude Code and Codex copies off the startup path; nothing waits on the download.
+
+    Disposable test runs fetch nothing.
+    """
+    import os
+
+    import infra.app_loop as app_loop
+    from connections.pinned_harness import install_used_harnesses
+
+    if os.environ.get("CORSIA_TEST_MODE") == "1":
+        return
+    app_loop.submit(install_used_harnesses())
+
+
 def _schedule_current_corrections_classifier() -> None:
     """Reconcile off the startup path: verifying the installed asset hashes its files, and nothing waits on the result."""
     import infra.app_loop as app_loop
@@ -215,6 +230,7 @@ async def _start_runtime_services() -> None:
     set_corrections_waker(startup_scan)
     recover_interrupted_install()
     _schedule_current_corrections_classifier()
+    _schedule_pinned_harness_install()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 

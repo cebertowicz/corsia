@@ -341,8 +341,7 @@ def test_the_installed_lookup_fetches_nothing_and_finds_only_a_verified_pin(monk
 
     root = tmp_path / "runtimes"
     assert managed_runtime.installed_runtime_path("gws", root=root) is None
-    arch = managed_runtime.macos_arch()
-    selected = f"linux-{arch}" if managed_runtime.platform.system() == "Linux" else arch
+    selected = managed_runtime.machine_key()
     pin = managed_runtime.RUNTIME_PINS["gws"][selected]
     install = managed_runtime._install_dir("gws", selected, pin, root)
     install.mkdir(parents=True)
@@ -350,7 +349,7 @@ def test_the_installed_lookup_fetches_nothing_and_finds_only_a_verified_pin(monk
     (install / "gws").chmod(0o755)
     assert managed_runtime.installed_runtime_path("gws", root=root) is None
     managed_runtime._marker_path(install).write_text(
-        managed_runtime.json.dumps({"kind": "gws", "arch": selected, **managed_runtime.asdict(pin)}), encoding="utf-8",
+        managed_runtime.json.dumps({"kind": "gws", "arch": selected, **managed_runtime._pin_record(pin)}), encoding="utf-8",
     )
     assert managed_runtime.installed_runtime_path("gws", root=root) == install / "gws"
 
