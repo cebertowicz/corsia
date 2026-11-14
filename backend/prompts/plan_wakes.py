@@ -47,6 +47,18 @@ REVISION_WORKER_STEP = (
 )
 #: A task in another thread's plan that one of yours depends on settled (#1552).
 WAKE_PREREQUISITE_SETTLED = "[CORSIA plan] {prerequisite} in {owner}'s plan {outcome}"
+#: The weekly review of the work below the cut (Later design §6): the count of the
+#: whole pile, its rows in plan order with the identity to act on, the way to the
+#: rest, and the three moves -- all a plan owner needs to re-cut the pile.
+LATER_REVIEW_HEAD = "[CORSIA plan] Weekly review: {count} open {task} in Later on your plan."
+LATER_REVIEW_ROW = "- {title} (node {node_id}, revision {revision}){tail}"
+LATER_REVIEW_UNTIL = " set aside until {until}"
+LATER_REVIEW_REASON = ": {reason}"
+LATER_REVIEW_MORE = "+{count} more: plan_read(section='later')"
+LATER_REVIEW_MOVES = (
+    "Promote one with plan_update edit later=false, re-rank with reorder, "
+    "or close several with close_node node_ids."
+)
 #: A conductor-added task reached a terminal outcome in the receiving agent's plan.
 WAKE_CONDUCTOR_TASK_SETTLED = (
     "[CORSIA plan] The task you added, {title}, in {receiver}'s plan {outcome}: {detail}."
@@ -282,6 +294,7 @@ WAKE_CHIPS = {
     "plan.intent_revised": "A task’s goal changed",
     "plan.intent_input": "What you said may affect a running task",
     "plan.prerequisite_settled": "A task you depend on settled",
+    "plan.later_review": "Your Later tasks are due for review",
     "plan.conductor_task_settled": "A task you added settled",
     "plan.child_returned_nothing": "Delegated worker returned nothing",
     "plan.child_round_returned": "Delegated worker stopped and is waiting on you",

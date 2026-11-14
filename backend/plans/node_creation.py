@@ -316,6 +316,11 @@ def create_node(
         # than joining the creation insert's three migration-shaped column lists;
         # it is ranking, so no aggregate is re-derived for it.
         service.touch_node(connection, node_id, later=1)
+        # A plan born with its first Later task reviews the pile a week from now
+        # (``plans.later_review``); a plan already armed keeps its own weekday.
+        from plans import later_review
+
+        later_review.arm(connection, plan_id)
     service._event(
         connection, node_id, "node_created", actor_id=actor_id, provenance=provenance,
         payload={
