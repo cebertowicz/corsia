@@ -6,6 +6,7 @@ import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSu
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { pickedComments } from '$lib/stores/docComments';
 import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
 import { toasts } from '$lib/stores/toast';
 
@@ -141,12 +142,12 @@ export function createImageComments(context: {
 	/**
 	 * A tag was picked: its card opens beside its box, and closing it returns
 	 * focus to the tag. With the drawer open, the drawer stays and the tag is
-	 * selected there instead, so the drawer can bring its card into view.
+	 * selected there instead, so the drawer can bring its card into view. Either way it is the person's pick, which reads it.
 	 */
 	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
 		listCandidates = null;
 		draftRegion = null;
-		if (ui.state?.kind === 'list') { focusedDocComment.set(id); listPicks += 1; return; }
+		if (ui.state?.kind === 'list') { focusedDocComment.set(id); pickedComments.set(new Set([id])); listPicks += 1; return; }
 		ui.focusMarker([id], opener, anchor);
 	}
 	function openList(opener: HTMLElement) {
