@@ -42,6 +42,20 @@ def test_a_write_to_the_path_a_promote_left_is_refused_and_creates_nothing(durab
     assert not source.exists()
 
 
+def test_a_persons_own_save_to_the_path_a_promote_left_is_not_refused(durable_scope):
+    """The refusal guards an agent's replayed call; the document save API's own write (``direct_user``) is
+    answered as on dev, with the ownership decision the caller then writes under, never a refusal."""
+    workspace, thread_id, _db, source, _source_id, _successor = _promoted(durable_scope, "person.md")
+    assert not source.exists()
+
+    durable_writes.write_text(
+        source, "mine\n", thread_id=thread_id, project_id="project-alpha", workspace=workspace, direct_user=True,
+    )
+
+    with pytest.raises(PromotedPathRefused):
+        _write(workspace, thread_id, source)
+
+
 def test_the_pointer_names_the_document_the_comments_moved_to(durable_scope):
     """The registry's successor link, not the path text, decides where the pointer goes."""
     workspace, thread_id, db, source, source_id, successor_id = _promoted(durable_scope, "linked.md")

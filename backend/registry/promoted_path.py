@@ -59,8 +59,12 @@ def write_authority_unless_promoted(
     target: Path, *, workspace: Path, thread_id: str, direct_user: bool, db,
 ) -> WriteAuthority | None:
     """``document_write_authority`` for a write the shared publisher does not govern, after refusing
-    one that would recreate a file a promote moved, and pointing at where the document went."""
-    message = moved_message(target, "write", db=db)
+    an agent's write that would recreate a file a promote moved, and pointing at where the document went.
+
+    The refusal guards an agent replaying a call on a path it no longer owns. A person's own save
+    (``direct_user``) is never refused: it creates the file they named, as it did before.
+    """
+    message = None if direct_user else moved_message(target, "write", db=db)
     if message is not None:
         raise PromotedPathRefused(message)
     return document_write_authority(
