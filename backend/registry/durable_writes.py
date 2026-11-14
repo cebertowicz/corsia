@@ -220,7 +220,7 @@ def _register_applied(
         service.prepare_file_identity(str(source), db=db)
         if source is not None and not source.exists() else None
     )
-    prepared, left = mark_carried(prepared, source_identity)
+    prepared, left = mark_carried(prepared, source_identity, db=db)
     metadata = {"last_written_sha256": content_hash}
     if shared.update_trigger:
         metadata["update_trigger"] = shared.update_trigger

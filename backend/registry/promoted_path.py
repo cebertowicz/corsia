@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import uuid
 from dataclasses import replace
 from pathlib import Path
 
 from infra import config
-from infra.database import get_db, write_transaction
+from infra.database import get_db
 from infra.workspace_paths import resolve_registered_path
 from registry import models, service
 from registry.document_ownership import document_write_authority
@@ -78,15 +76,17 @@ def write_authority_unless_promoted(
     )
 
 
-def mark_carried(prepared, source_identity):
+def mark_carried(prepared, source_identity, *, db):
     """``(prepared, left)`` for a promote registering ``source_identity``'s file at its new path.
 
     A recorded hash that matches makes registration move the source's own identity there; ``left`` is
     that identity's row as it stood before, and the recovery is marked as the promote's so its change
-    note says so. Any other registration returns ``(prepared, None)``.
+    note says so. The source is the row ``find_file_identity`` resolves, legacy path ids included, the
+    same lookup ``settle_promoted_source`` uses. Any other registration returns ``(prepared, None)``.
     """
     moved = prepared.moved_from
-    if moved is None or source_identity is None or moved.identity["external_id"] != source_identity.external_id:
+    source = service.find_file_identity(source_identity, db=db) if moved and source_identity is not None else None
+    if source is None or moved.identity["id"] != source["id"]:
         return prepared, None
     return replace(prepared, moved_from=replace(moved, by_promote=True)), moved.identity
 
@@ -103,14 +103,4 @@ def settle_promoted_source(source_identity, left, artifact: dict, *, db) -> None
     if old is not None:
         models.retire(old["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
     elif left is not None and artifact["id"] == left["id"]:
-        meta = json.loads(left["metadata"]) if left.get("metadata") else {}
-        meta = {k: meta[k] for k in ("zone",) if k in meta}
-        meta |= {"retired_cause": "promoted", "successor_id": artifact["id"]}
-        with write_transaction(db, scope="tombstone_promoted_path") as _db:
-            now = models._now()
-            _db.execute(
-                "INSERT INTO artifact_identities(id,integration,type,external_id,title,path,state,retention,"
-                "metadata,created_at,updated_at) VALUES (?,?,?,?,?,?,'tombstone',?,?,?,?)",
-                (str(uuid.uuid4())[:12], left["integration"], left["type"], left["external_id"], left["title"],
-                 left["path"], left["retention"], json.dumps(meta), now, now),
-            )
+        models.tombstone_promoted_path(left, artifact["id"], db=db)

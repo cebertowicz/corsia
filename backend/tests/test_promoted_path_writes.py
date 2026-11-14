@@ -241,6 +241,23 @@ def test_the_tombstone_a_carried_promote_leaves_is_one_unlisted_row_naming_the_c
     assert db.execute("SELECT state FROM artifact_identities WHERE id=?", (source_id,)).fetchone()["state"] == "active"
 
 
+def test_a_source_stored_under_its_legacy_path_id_still_gets_the_tombstone_and_the_promote_note(durable_scope):
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "legacy.md")
+    db.execute("UPDATE artifact_identities SET external_id=? WHERE id=?", (str(source.resolve()), source_id))
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == source_id
+
+    (left,) = _left_rows(db, source_id)
+    assert left["state"] == "tombstone" and left["external_id"] == str(source.resolve())
+    assert models.successor_id(left["id"], db=db) == source_id
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+    assert str(refused.value) == MOVED.format(name="legacy.md", verb="write", more=WRITE_MORE)
+    summary, reason = _relocated_change(db, source_id)
+    assert "by the promote tool" in summary and reason == "promoted"
+
+
 def test_a_failed_registration_leaves_no_tombstone_and_keeps_the_identity_at_the_old_path(durable_scope, monkeypatch):
     workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "rollback.md")
     before = db.execute("SELECT path, external_id FROM artifact_identities WHERE id=?", (source_id,)).fetchone()
