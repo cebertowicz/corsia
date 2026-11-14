@@ -1,4 +1,4 @@
 # Pinned oMLX release shared by the source installer and macOS bundle.
 
-OMLX_VERSION="0.7.3"
-OMLX_SHA256="fe36a7ae1de3d247bc18c86f9c90c174df3b37ffbbd2a5d1c05d1f4942d13942"
+OMLX_VERSION="0.8.0rc1"
+OMLX_SHA256="5a4f8024c836757a1a5613422f7cb6295712fa6ab0e349a936ad130b91473472"

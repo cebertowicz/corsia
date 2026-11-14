@@ -39,6 +39,11 @@ DAMAGE = [_damage, _corrupt_page("live"), _corrupt_page("mirror")]
 DAMAGE_IDS = ["not_a_database", "live_page", "mirror_page"]
 
 
+def _stores(root):
+    """The directory's files, less SQLite's WAL sidecars, which come and go with open connections."""
+    return sorted(name for name in os.listdir(root) if not name.endswith(("-wal", "-shm")))
+
+
 async def _closed_with_history(scope, tmp_path, monkeypatch):
     """A closed document whose store holds acknowledged typing the file does not."""
     from tests.test_document_live_file_tools import opened
@@ -115,7 +120,7 @@ async def test_ws_open_of_a_damaged_store_answers_non_live_with_the_reason(
     scope = ownership_scope
     manager, artifact_id, path, _ = await _closed_with_history(scope, tmp_path, monkeypatch)
     store = _store_path(manager, artifact_id)
-    before, listing = damage(store), sorted(os.listdir(manager.root))
+    before, listing = damage(store), _stores(manager.root)
     events = _events(monkeypatch)
     socket = Socket()
     frame = {"type": "doc_open", "path": str(path), "project_id": "project-alpha", "request_id": "r1"}
@@ -129,7 +134,7 @@ async def test_ws_open_of_a_damaged_store_answers_non_live_with_the_reason(
                               "request_id": request_id}
         assert [action for _, action, _ in events] == ["store_damaged", "store_damaged"]
         assert sum(record.levelno == logging.ERROR for record in caplog.records) >= 2
-        assert store.read_bytes() == before and sorted(os.listdir(manager.root)) == listing
+        assert store.read_bytes() == before and _stores(manager.root) == listing
         assert manager.documents == {}
     finally:
         await document_control.disconnect(socket)
@@ -163,7 +168,7 @@ async def test_restart_refuses_the_same_damaged_bytes_with_the_same_kind(ownersh
     manager, artifact_id, path, _ = await _closed_with_history(ownership_scope, tmp_path, monkeypatch)
     store = _store_path(manager, artifact_id)
     before = damage(store)
-    listing = sorted(os.listdir(manager.root))
+    listing = _stores(manager.root)
     with pytest.raises(OpenRefused) as first:
         await manager.open(artifact_id, path)
     await manager.close()
@@ -175,7 +180,7 @@ async def test_restart_refuses_the_same_damaged_bytes_with_the_same_kind(ownersh
     _refuses_after_meta(store, damage)
     assert first.value.kind == second.value.kind == "store_damaged"
     assert store.read_bytes() == before
-    assert sorted(os.listdir(manager.root)) == listing
+    assert _stores(manager.root) == listing
 
 
 @pytest.mark.asyncio

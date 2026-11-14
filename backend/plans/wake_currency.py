@@ -16,11 +16,16 @@ its own plan, whatever the parent's executor slot holds. Either wake stays
 current while the step is open, carries no hold (a paused or blocked step is
 not worth a Turn), and still names that worker: a wake queued by a worker that
 was since replaced or released is not about the step any more.
+
+The end of a step the system opened for the person (``plans.system_user_steps``)
+is news to the agent whatever else its plan holds: the agent was told to end its
+turn and wait for it, and with no task selected when the step opened, nothing
+in the plan waits on it to be selected again.
 """
 
 from __future__ import annotations
 
-from plans.plan_wake import CONDUCTOR_TASK_SETTLED
+from plans.plan_wake import CONDUCTOR_TASK_SETTLED, TASK_CLOSED
 
 #: The continuation kind a result-bearing plan wake carries.
 PLAN_WAKE = "plan_wake"
@@ -94,8 +99,14 @@ def is_current(thread_id: str, condition: dict, *, db) -> bool:
     ).fetchone()
     if plan is None:
         return False
-    if str(condition.get("transition") or "").partition(":")[0] in _NEWS_WAKES:
+    kind = str(condition.get("transition") or "").partition(":")[0]
+    if kind in _NEWS_WAKES:
         return True
+    if kind == TASK_CLOSED:
+        from plans import system_user_steps
+
+        if system_user_steps.is_person_step(db, plan_id, str(condition.get("subject_id") or "")):
+            return True
     step_id = details.get("delegated_step_id")
     worker = details.get("delegated_worker")
     if (
