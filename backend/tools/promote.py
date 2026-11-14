@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from doceditor.live_move_hold import hold_for_move
+from doceditor.live_runtime import get_documents
 from infra.db_async import run_in_db
 from registry import service
 from registry.registration_writer import origin_from_tool_context
@@ -90,8 +92,8 @@ class PromoteArtifactTool(Tool):
         source = Path(path).expanduser()
         if not source.is_absolute():
             source = self._workspace / source
-        try:
-            receipt = await run_in_db(
+        async def promote() -> dict:
+            return await run_in_db(
                 promote_file,
                 source,
                 category,
@@ -106,6 +108,15 @@ class PromoteArtifactTool(Tool):
                 ),
                 notify=False,
             )
+
+        try:
+            documents = get_documents()
+            if documents is None:
+                receipt = await promote()
+            else:
+                # A person may have this file open: their typing is saved into it before it moves.
+                async with hold_for_move(documents, source.resolve(strict=False)):
+                    receipt = await promote()
         except Exception as error:
             return f"Error: {error}"
         service.notify_changed(receipt["artifact"])
