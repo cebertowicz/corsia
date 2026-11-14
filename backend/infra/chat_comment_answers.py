@@ -204,6 +204,14 @@ def placeable_answers(
     return found
 
 
+def has_answer(db: sqlite3.Connection, thread_id: str, user_message_id: str, cid: str) -> bool:
+    """Whether the comment already has a placed answer."""
+    return db.execute(
+        "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? AND cid=?",
+        (thread_id, user_message_id, cid),
+    ).fetchone() is not None
+
+
 def place_answers(
     db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
     metadata: dict | None = None, *, hidden_step: bool = False,
@@ -224,10 +232,7 @@ def place_answers(
         return
     placed = []
     for cid, user_message_id, _text in placeable_answers(db, message_id, thread_id, content, seq):
-        if hidden_step and db.execute(
-            "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? AND cid=?",
-            (thread_id, user_message_id, cid),
-        ).fetchone():
+        if hidden_step and has_answer(db, thread_id, user_message_id, cid):
             continue  # a comment gets one answer: the newest words, placed first
         db.execute(
             "INSERT OR IGNORE INTO chat_comment_answers VALUES (?,?,?,?,?)",

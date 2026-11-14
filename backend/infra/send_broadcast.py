@@ -227,16 +227,19 @@ def chat_comments_changed_payload(thread_id: str, rows: list[InputBroadcastRow])
         for comment in (row.metadata or {})["reply_context"]["comments"]
         if isinstance(comment, dict) and isinstance(comment.get("seq"), int)
     })
-    return {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": seqs}
+    return _comments_changed(thread_id, seqs)
+
+
+def _comments_changed(thread_id: str, target_seqs: list[int]) -> dict:
+    """The one builder of the ``chat_comments_changed`` wire shape."""
+    return {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": target_seqs}
 
 
 def broadcast_comments_changed(thread_id: str, target_seqs: list[int]) -> None:
     """Tell chat clients to re-read the commented rows at these seqs (answers landed in their threads)."""
     import infra.state as state
 
-    state.broadcast_to_thread(
-        thread_id, {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": target_seqs},
-    )
+    state.broadcast_to_thread(thread_id, _comments_changed(thread_id, target_seqs))
 
 
 def _read_input_broadcast_rows(

@@ -28,7 +28,7 @@ from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 from infra.chat_comment_answers import (
-    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, place_flipped_answers, placeable_answers,
+    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, has_answer, place_flipped_answers, placeable_answers,
 )
 
 EVENT = "turn.reply_not_visible"
@@ -194,11 +194,13 @@ def _hidden_answer_steps(
 def _pending_answers(
     db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None,
 ) -> list[tuple[str, str]]:
-    """(comment id, first line of its answer) for answers tagged in hidden steps, each comment once."""
+    """(comment id, first line of its answer) for answers tagged in hidden steps, each comment once;
+    a comment the person already has an answer to is not pending."""
     pending: dict[str, str] = {}
     for row in _hidden_answer_steps(db, thread_id, after_seq, exclude_id):
-        for cid, _user, text in placeable_answers(db, str(row["id"]), thread_id, str(row["content"]), row["seq"]):
-            pending.setdefault(cid, (text.strip().splitlines() or [""])[0].strip()[:80])
+        for cid, user, text in placeable_answers(db, str(row["id"]), thread_id, str(row["content"]), row["seq"]):
+            if not has_answer(db, thread_id, user, cid):
+                pending.setdefault(cid, (text.strip().splitlines() or [""])[0].strip()[:80])
     return list(pending.items())
 
 
@@ -218,7 +220,7 @@ def _show_hidden_words(
     """
     from infra import thread_updates
     from infra.chat_comment_answers import answered_comment_seqs
-    from infra.send_broadcast import broadcast_input_rows, read_input_broadcast_row
+    from infra.send_broadcast import broadcast_comments_changed, broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
 
     db.execute(
@@ -247,8 +249,6 @@ def _show_hidden_words(
         if projected is not None:
             broadcast_input_rows(thread_id, (projected,))
         if answered_seqs:  # hidden steps are not broadcast rows; the page re-reads the commented rows
-            from infra.send_broadcast import broadcast_comments_changed
-
             broadcast_comments_changed(thread_id, answered_seqs)
 
     after_commit(db, publish)
@@ -341,8 +341,8 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
         return False  # The person stopped the Turn their message started.
     if status == "running" and person["active_turn_id"] != ending_turn:
         return False  # A later Turn is answering it; that Turn's end decides.
-    if _replied_after(db, thread_id, person):
-        return False
+    if _replied_after(db, thread_id, person) and not _pending_answers(db, thread_id, person["seq"], None):
+        return False  # Sent for them, and no tagged answer is left unsent.
     if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.
     return _queue_nudge(db, thread_id, person)

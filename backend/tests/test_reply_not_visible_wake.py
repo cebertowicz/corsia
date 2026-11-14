@@ -496,6 +496,39 @@ async def test_tagged_closing_text_places_no_answer_and_is_nudged_once(db, monke
 
 
 @pytest.mark.asyncio
+async def test_a_sent_update_does_not_hide_a_tagged_closing_answer_from_the_nudge(db, monkeypatch) -> None:
+    # A post_update that answers nothing is a reply to the message, yet a comment answer tagged in the
+    # closing words was never placed: the nudge still comes, naming it, so the answer is not lost.
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    closing = f"[{cid}] Yes, Friday is skipped."
+    _say(db, closing)
+
+    effects = await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(nudge_text("1:19", closing))  # the answer is in the quoted last words
+    assert effects.drives.count(_THREAD) == 1
+    assert _placed(db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_comment_already_answered_by_a_sent_message_is_not_pending(db) -> None:
+    # Tagged closing text repeating an answer that was already sent adds no nudge.
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
 async def test_the_fallback_shows_tagged_closing_text_as_one_answer_never_a_bubble(db) -> None:
     cid = _comment_on(db, "")
     _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
