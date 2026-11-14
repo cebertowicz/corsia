@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import Popover from './Popover.svelte';
+import Popover, { ANCHOR_MOVED } from './Popover.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -342,6 +342,18 @@ describe('Popover', () => {
 		await vi.waitFor(() => expect(surface().style.top).toBe('100px'));
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));
+	});
+	it('keeps the card scrolled where it was when it re-measures, so a caret scrolled into view stays in view', async () => {
+		render();
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface.style.top).not.toBe('12px'));
+		// A browser clamps the scroll of a card measured at full height to 0; jsdom has no layout, so do it here.
+		let scrollTop = 0;
+		Object.defineProperty(surface, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } });
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { if (this === surface && this.style.maxHeight === '') scrollTop = 0; return this.getBoundingClientRect().height; });
+		scrollTop = 120;
+		window.dispatchEvent(new Event(ANCHOR_MOVED));
+		expect(scrollTop).toBe(120);
 	});
 	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
 		const { fromStore, writable } = await import('svelte/store');

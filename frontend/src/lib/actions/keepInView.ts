@@ -18,14 +18,17 @@ function roomOf(owner: HTMLElement): number {
 	return owner.clientHeight - (parseFloat(style.scrollPaddingTop) || 0) - (parseFloat(style.scrollPaddingBottom) || 0);
 }
 
-/** What sticky `[data-pin-bottom]` rows (a suggestion's Accept and Reject) cover at the scroller's bottom edge: room the scroller has but a revealed field must not land under. */
+/**
+ * What sticky `[data-pin-bottom]` rows (a suggestion's Accept and Reject) cover at the scroller's bottom edge: room the scroller has but a revealed field must not land under.
+ * A sticky row sticks at the edge of the scroller's content box, so the scroller's own bottom padding sits under the row's own height.
+ */
 function pinnedBottom(owner: HTMLElement | null): number {
 	if (!owner) return 0;
 	let covered = 0;
 	for (const row of owner.querySelectorAll<HTMLElement>('[data-pin-bottom]')) {
 		if (getComputedStyle(row).position === 'sticky') covered += row.offsetHeight;
 	}
-	return covered;
+	return covered ? covered + (parseFloat(getComputedStyle(owner).paddingBottom) || 0) : 0;
 }
 
 /**
@@ -88,7 +91,9 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
 		if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block });
 		if (owner && pinned && target === node) {
-			const over = node.getBoundingClientRect().bottom - (owner.getBoundingClientRect().bottom - pinned);
+			// The box's rectangle includes its border, which is not scrollable room.
+			const edge = owner.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(owner).borderBottomWidth) || 0);
+			const over = node.getBoundingClientRect().bottom - (edge - pinned);
 			if (over > 1) owner.scrollTop += over;
 		}
 		endShown = true;
