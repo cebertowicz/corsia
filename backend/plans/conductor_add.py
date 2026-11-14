@@ -17,6 +17,19 @@ ADD_PROVENANCE = "plan.conductor_add"
 STEER_PROVENANCE = "plan.coordinator_steer"
 
 
+def conductor_kind(db, plan_id: str, actor_id: str | None) -> str:
+    """Resolve an authorized add's coordinator at creation, before designations change."""
+    if actor_id and actor_id == get_corsia_agent(db=db):
+        return "workspace"
+    owner = db.execute(
+        "SELECT t.project_id FROM plans p JOIN threads t ON t.id=p.owner_id "
+        "WHERE p.id=? AND p.owner_kind='thread'", (plan_id,)
+    ).fetchone()
+    if owner and actor_id and actor_id == conductor.get_scope_coordinator(owner["project_id"], db):
+        return "project"
+    raise ValueError("conductor add actor is not the designated coordinator")
+
+
 def coordinator_may_steer(db, plan, actor) -> bool:
     """Whether ``actor`` is the target project's or workspace's conductor."""
     if actor.kind != "thread" or actor.thread_id is None or plan["owner_kind"] != "thread":

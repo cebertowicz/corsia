@@ -139,6 +139,20 @@ def test_coordinator_resumes_a_pause_the_person_set_and_never_its_own_plan(db):
         _mutate(db, own.id, "pause", {"expected_revision": own.revision}, PROJECT_CONDUCTOR)
 
 
+@pytest.mark.parametrize("actor,expected", [
+    (PROJECT_CONDUCTOR, "project"), (WORKSPACE_CONDUCTOR, "workspace"),
+])
+def test_conductor_add_records_kind_at_creation(db, actor, expected):
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    node = _add(db, plan.id, actor)
+    event = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'",
+        (node["id"],),
+    ).fetchone()
+    assert json.loads(event["payload_json"])["conductor_kind"] == expected
+
+
 def test_coordinator_inserts_and_reorders_only_top_level(db):
     plan = service.ensure_plan("thread", "lane", db=db)
     first = service.add_node(plan.id, kind="phase", title="First", acceptance_criteria="Done", db=db)
