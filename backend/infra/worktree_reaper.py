@@ -1,5 +1,9 @@
 """Automatic cleanup of merged or idle linked worktrees under ``<repo>/.worktrees/``.
 
+A worktree whose owning worker is gone (an archived or purged temporary
+worker, or no thread at all) goes after an hour idle with nothing copied out;
+see ``worktree_reaper_checks.GONE_OWNER_IDLE_SECONDS``.
+
 ``reap`` is the one entry point. Two existing triggers call it and it adds no
 loop of its own: the ``pr_merged`` router hook (``worktree_reaper_pr``) and a
 step in the nightly maintenance job (``reap_all_idle``). It runs in the
@@ -164,6 +168,8 @@ def _remove_candidate(
             salvage = verdict is RemovalVerdict.SALVAGE
 
             def clear(quarantined: Path) -> str | None:
+                if verdict is RemovalVerdict.DISCARD:
+                    return None
                 if not salvage:
                     return status_at(ctx, candidate, quarantined, merged)
                 copies.append(salvage_worktree(

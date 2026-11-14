@@ -30,10 +30,39 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
 
 
+# A worktree whose owning worker is gone is deleted once idle this long,
+# uncommitted and unpublished work included: nobody is left to finish it, and
+# its pushed branch outlives the tree.
+GONE_OWNER_IDLE_SECONDS = 3600
+
+
 def _load_active_threads() -> set[str]:
     from core.turn_core import active_turn_thread_ids
 
     return active_turn_thread_ids()
+
+
+def _load_thread_lifecycles() -> dict[str, bool]:
+    """Map every thread id to whether it is gone for good as a worktree owner.
+
+    Gone: purged, or a temporary worker (spawned, not a roster agent) that is
+    archived. A durable agent's or a root thread's worktree is never gone here.
+    """
+    from infra.database import get_db
+
+    connection = get_db()
+    try:
+        rows = connection.execute(
+            "SELECT id, spawned_by, agent_enabled, lifecycle_state FROM threads",
+        ).fetchall()
+    finally:
+        connection.close()
+    gone: dict[str, bool] = {}
+    for row in rows:
+        state = row["lifecycle_state"] or "active"
+        worker = row["spawned_by"] is not None and not row["agent_enabled"]
+        gone[str(row["id"])] = state == "purged" or (worker and state == "archived")
+    return gone
 
 
 @dataclass
@@ -49,6 +78,41 @@ class CheckContext:
     _threads_loaded: bool = field(default=False, init=False)
     _open_prs: set[str] | None = field(default=None, init=False)
     _prs_loaded: bool = field(default=False, init=False)
+    _lifecycles: dict[str, bool] | None = field(default=None, init=False)
+    _lifecycles_loaded: bool = field(default=False, init=False)
+
+    def owner_gone(self, owner: str | None, *, fresh: bool = False) -> bool:
+        """Whether every thread the worktree name can mean is gone, or none exists.
+
+        A short owner matches by prefix. An unreadable thread table answers
+        False, so the worktree keeps the ordinary checks.
+        """
+        if owner is None:
+            return False
+        if fresh or not self._lifecycles_loaded:
+            self._lifecycles_loaded = True
+            try:
+                self._lifecycles = _load_thread_lifecycles()
+            except Exception as exc:
+                logger.warning("worktree_reaper: thread lifecycle read failed: {}", exc)
+                self._lifecycles = None
+        if self._lifecycles is None:
+            return False
+        matches = [gone for thread, gone in self._lifecycles.items()
+                   if thread == owner or thread.startswith(owner)]
+        return all(matches)
+
+    def gone_owner_verdict(
+        self, candidate: Candidate, idle: float, *, fresh: bool = False,
+    ) -> str | RemovalVerdict | None:
+        """DISCARD for an idle worktree of a gone owner; None when the rule does not apply."""
+        if self.now - idle < GONE_OWNER_IDLE_SECONDS:
+            return None
+        if not self.owner_gone(candidate.owner_thread, fresh=fresh):
+            return None
+        if fresh:
+            self.probe.refresh()
+        return self.probe.skip_reason(candidate.path) or RemovalVerdict.DISCARD
 
     def open_pr_branches(self, *, fresh: bool = False) -> set[str] | None:
         """Open-PR head branches, read once per pass; None when unknown.
@@ -133,6 +197,8 @@ def _entry_reason(entry: WorktreeEntry | None) -> str | None:
 
 class RemovalVerdict(Enum):
     SALVAGE = "salvage"
+    # The owner is gone: remove without copying anything out.
+    DISCARD = "discard"
 
 
 def _status_verdict(
@@ -174,6 +240,9 @@ def candidate_verdict(
         return "git_lock"
     if has_worktree_config(candidate.admin):
         return "worktree_config"
+    gone = ctx.gone_owner_verdict(candidate, candidate.idle_since)
+    if gone is not None:
+        return gone
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
@@ -223,6 +292,9 @@ def recheck_before_removal(
     if has_worktree_config(candidate.admin):
         return "worktree_config"
     idle = idle_since(candidate.path, candidate.admin)
+    gone = ctx.gone_owner_verdict(candidate, idle, fresh=True)
+    if gone is not None:
+        return gone
     if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
         return "recent"
     if expected_head is not None:
@@ -244,6 +316,24 @@ def recheck_before_removal(
             or verdict)
 
 
+def _forgotten_by_git(repo: Path, path: Path) -> bool:
+    """Whether ``path/.git`` is a file naming a missing record under ``repo/.git/worktrees/``."""
+    link = path / ".git"
+    if link.is_symlink() or not link.is_file():
+        return False
+    try:
+        text = link.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    if not text.startswith("gitdir: "):
+        return False
+    target = Path(text[len("gitdir: "):].strip())
+    records = (repo / ".git" / "worktrees").resolve(strict=False)
+    if not target.is_absolute() or target.resolve(strict=False).parent != records:
+        return False
+    return not os.path.lexists(target)
+
+
 def orphan_skip_reason(
     ctx: CheckContext, orphan: Orphan, threshold_seconds: float,
 ) -> tuple[str | None, float | None]:
@@ -251,13 +341,20 @@ def orphan_skip_reason(
 
     An orphan is deleted only when it has no ``.git`` entry, Git does not
     list it, nothing anywhere inside changed for the threshold, and no live
-    process uses it. Every check reads live state, so it doubles as the recheck.
+    process uses it. A ``.git`` file that points at this repository's own
+    worktree records, at one that no longer exists, does not keep it: Git has
+    already forgotten that tree, so it is what a removal left behind and goes
+    once idle for ``GONE_OWNER_IDLE_SECONDS``. Every check reads live state, so
+    it doubles as the recheck.
     """
     path = orphan.path
     if path.is_symlink():
         return "symlink", None
-    if os.path.lexists(path / ".git"):
+    forgotten = _forgotten_by_git(ctx.repo, path)
+    if not forgotten and os.path.lexists(path / ".git"):
         return "git_entry_present", None
+    if forgotten:
+        threshold_seconds = min(threshold_seconds, GONE_OWNER_IDLE_SECONDS)
     try:
         registered = {item.path for item in list_worktrees(ctx.repo)}
     except ReaperGitError:

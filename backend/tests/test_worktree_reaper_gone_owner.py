@@ -1,0 +1,179 @@
+"""Worktree reaper: a gone worker's worktree, and what a removal left behind.
+
+A temporary worker that is archived or purged, or an owner with no thread at
+all, cannot come back to its worktree. Its tree goes once idle for an hour,
+uncommitted and unpublished work included, without a salvage copy. Every
+other owner keeps the ordinary checks.
+"""
+
+from __future__ import annotations
+
+import shutil
+import sqlite3
+
+import pytest
+
+from infra import worktree_reaper_checks
+from tests.test_worktree_reaper import (  # noqa: F401  (fixtures)
+    DAY,
+    FakeProbe,
+    _add,
+    _admin,
+    _age_all,
+    _age_tree,
+    _git,
+    _reasons,
+    _run,
+    isolated,
+    repo,
+)
+
+# The real reader, taken before the autouse fixture stubs it.
+_REAL_LIFECYCLES = worktree_reaper_checks._load_thread_lifecycles
+
+GONE = "feedc0de-1111-2222-3333-444455556666"
+LIVE = "0123abcd-1111-2222-3333-444455556666"
+HOUR = 3600
+
+
+@pytest.fixture
+def owners(monkeypatch):
+    table = {GONE: True, LIVE: False}
+    monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles", lambda: dict(table))
+    return table
+
+
+def _unfinished(repo, name):
+    """A worktree with an unpublished commit and an uncommitted edit."""
+    wt = _add(repo, name)
+    (wt / "README").write_text("committed, never pushed\n")
+    _git(wt, "commit", "-q", "-am", "local only")
+    (wt / "README").write_text("never committed\n")
+    (wt / "scratch.txt").write_text("untracked\n")
+    return wt
+
+
+def test_a_gone_workers_unfinished_worktree_is_removed_without_a_copy(repo, owners):
+    wt = _unfinished(repo, f"{GONE}-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 1 and not wt.exists()
+    assert report.salvaged == []
+    assert _git(repo, "rev-parse", "--verify", f"b-{GONE}-task")  # the branch stays
+
+
+def test_an_owner_with_no_thread_counts_as_gone(repo, owners):
+    wt = _unfinished(repo, "deadbeef-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 1 and not wt.exists()
+
+
+def test_a_live_owners_unfinished_worktree_keeps_the_ordinary_checks(repo, owners):
+    wt = _unfinished(repo, f"{LIVE}-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+    assert _reasons(report) == {f"{LIVE}-task": "recent"}
+
+
+def test_a_short_name_any_live_thread_could_mean_is_kept(repo, owners):
+    owners["feedc0de-9999-2222-3333-444455556666"] = False
+    wt = _unfinished(repo, "feedc0de-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+
+
+def test_a_gone_workers_worktree_touched_within_the_hour_is_kept(repo, owners):
+    wt = _unfinished(repo, f"{GONE}-task")
+    _age_all(repo, wt, 10 * 60)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+
+
+def test_a_live_process_still_keeps_a_gone_workers_worktree(repo, owners):
+    wt = _unfinished(repo, f"{GONE}-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo, FakeProbe({f"{GONE}-task": "in_use"}))
+
+    assert _reasons(report) == {f"{GONE}-task": "in_use"} and wt.is_dir()
+
+
+def test_an_unreadable_thread_table_keeps_the_ordinary_checks(repo, monkeypatch):
+    def _broken():
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles", _broken)
+    wt = _unfinished(repo, f"{GONE}-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+
+
+def test_a_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
+    wt = _add(repo, "left-behind")
+    shutil.rmtree(_admin(wt))
+    for name in ("README", "ro"):
+        target = wt / name
+        shutil.rmtree(target) if target.is_dir() else target.unlink()
+    (wt / "CLAUDE.md").write_text("x\n")
+    _age_tree(wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.orphan_removed == 1 and not wt.exists()
+
+
+def test_a_forgotten_tree_touched_within_the_hour_is_kept(repo, owners):
+    wt = _add(repo, "left-behind")
+    shutil.rmtree(_admin(wt))
+    _age_tree(wt, 10 * 60)
+
+    report = _run(repo)
+
+    assert report.orphan_removed == 0 and wt.is_dir()
+
+
+def test_thread_rows_are_classified_by_lifecycle(monkeypatch):
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        "CREATE TABLE threads (id TEXT, spawned_by TEXT, agent_enabled INT, lifecycle_state TEXT)")
+    connection.executemany("INSERT INTO threads VALUES (?,?,?,?)", [
+        ("settled-worker", "parent", 0, "archived"),
+        ("running-worker", "parent", 0, "active"),
+        ("archived-agent", "parent", 1, "archived"),
+        ("archived-root", None, 0, "archived"),
+        ("purged-root", None, 0, "purged"),
+        ("legacy-row", None, None, None),
+    ])
+
+    class _Unclosable:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def close(self):
+            return None
+
+    import infra.database
+
+    monkeypatch.setattr(infra.database, "get_db", lambda: _Unclosable())
+
+    assert _REAL_LIFECYCLES() == {
+        "settled-worker": True, "running-worker": False, "archived-agent": False,
+        "archived-root": False, "purged-root": True, "legacy-row": False,
+    }
