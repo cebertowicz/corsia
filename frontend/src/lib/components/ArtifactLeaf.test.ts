@@ -155,6 +155,15 @@ function publishShowing() {
 	});
 }
 
+/**
+ * A draft restored with unsaved text, as a remounted tab finds it: no autosave pending. Typing it with
+ * setDraftText would arm the real 700 ms autosave, which saves the draft whenever the test runs that long.
+ */
+function restoreDirtyDraft(target: Parameters<typeof seedDraft>[0], saved: string, revision: string, edited: string) {
+	seedDraft(target, saved, revision);
+	docSaveDrafts.update((all) => ({ ...all, [target.instanceId]: { ...all[target.instanceId], editText: edited, status: 'dirty' } }));
+}
+
 function render(mode: 'expanded' | 'compact' = 'expanded') {
 	publishShowing();
 	component = mount(ArtifactLeaf, {
@@ -823,8 +832,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 			threadId: THREAD,
 			artifactId: tab.artifactId,
 		};
-		seedDraft(draftTarget, '# saved draft', 'r-saved');
-		setDraftText(draftTarget, '# local draft');
+		restoreDirtyDraft(draftTarget, '# saved draft', 'r-saved', '# local draft');
 
 		render();
 
@@ -853,8 +861,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 			threadId: THREAD,
 			artifactId: tab.artifactId,
 		};
-		seedDraft(draftTarget, '# saved draft', 'r-saved');
-		setDraftText(draftTarget, '# local draft');
+		restoreDirtyDraft(draftTarget, '# saved draft', 'r-saved', '# local draft');
 
 		render();
 
