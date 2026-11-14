@@ -335,6 +335,41 @@ def test_each_new_checkpoint_drops_the_last_receipts_bytes_through_the_index(par
     assert any(INSTALLED_BOUNDARY_INDEX in step for step in plan), plan
 
 
+def test_drop_writes_only_rows_that_carry_the_sources_key():
+    """A row that only mentions the key text is indexed but never rewritten."""
+    import sqlite3
+
+    from core.installed_context import INSTALLED_SOURCES, _superseded_sources_drop_sql
+    from infra.learning_schema import INSTALLED_BOUNDARY_INDEX, LEARNING_INDEX_SQL
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT, seq INTEGER, metadata TEXT)")
+    db.executescript(LEARNING_INDEX_SQL)
+    mention = json.dumps({"tool_output": f"grep: {INSTALLED_SOURCES} = ..."})
+    rows = [
+        ("old", 1, json.dumps({INSTALLED_SOURCES: ["bytes"], "map": 1})),
+        ("tool", 2, mention),
+        ("kept", 3, json.dumps({INSTALLED_SOURCES: ["bytes"], "map": 3})),
+    ]
+    db.executemany("INSERT INTO messages VALUES (?,'t',?,?)", rows)
+    writes = []
+    db.execute(
+        "CREATE TEMP TRIGGER count_writes AFTER UPDATE ON messages "
+        "BEGIN SELECT record_write(NEW.id); END"
+    )
+    db.create_function("record_write", 1, writes.append)
+    args = (f'$."{INSTALLED_SOURCES}"', "t", "kept")
+    plan = [str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + _superseded_sources_drop_sql(), args)]
+    db.execute(_superseded_sources_drop_sql(), args)
+    stored = dict(db.execute("SELECT id, metadata FROM messages").fetchall())
+
+    assert writes == ["old"]
+    assert stored["tool"] == mention
+    assert INSTALLED_SOURCES not in json.loads(stored["old"])
+    assert INSTALLED_SOURCES in json.loads(stored["kept"])
+    assert any(INSTALLED_BOUNDARY_INDEX in step for step in plan), plan
+
+
 def _boundary_rows():
     db = _db()
     try:
