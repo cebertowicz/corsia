@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.usage_rollup import definition
 from infra.audit_reads import AuditReadError, read_audit_metric
 from infra.auth import require_user
 from infra.db_async import run_in_db
@@ -23,7 +24,8 @@ async def audit_metric(
     try:
         return await run_in_db(
             lambda: read_audit_metric(
-                thread_id, user["id"], metric, since=since, until=until
+                thread_id, user["id"], metric, since=since, until=until,
+                rollup_definition=definition(),
             )
         )
     except AuditReadError as exc:

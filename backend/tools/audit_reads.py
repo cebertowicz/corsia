@@ -30,13 +30,19 @@ class AuditReadTool(Tool):
             "claude-code/ and codex/ usage; it covers this user's usage across "
             "all projects. Its token sums cover only calls Measurement can price; "
             "excluded_calls counts the rest. "
+            "agent_hours counts active agent-hours and usage per account or provider, "
+            "and across all accounts. One call counts the whole hour. "
+            "agent_day_levels groups agent-days by kind, project relationship and "
+            "hours active. Both cover this user's projects and report uncovered "
+            "hours; agent_day_levels excludes incomplete days and reports them. "
+            "Use whole UTC hours for agent_hours and UTC midnights for agent_day_levels. "
             "stored_message_pressure returns the top "
             "ten stored-message sizes as a proxy for unfolded backlog. Its "
             "rank_limit field is 10; matching threads beyond it are omitted. "
             "Each pressure row labels whether a current installed checkpoint "
             "exists. It does not "
             "estimate the exact rendered provider tail. The backend includes "
-            "only this thread's user and project (seat_usage: user), with no raw messages, error "
+            "only this thread's user and project (seat_usage, agent_hours and agent_day_levels: user), with no raw messages, error "
             "text, or SQL. checkpoint_health, lease_reviews and seat_usage require since "
             "and until as UTC ISO 8601 timestamps no more than seven days apart. "
             "For stored_message_pressure, omit both for the full current scope "
@@ -72,6 +78,8 @@ class AuditReadTool(Tool):
         thread_id = kwargs.pop("_thread_id", None)
         kwargs.pop("_thread_project_id", None)
         kwargs.pop("_host_access_turn_identity", None)
+        from api.usage_rollup import definition
+
         try:
             result = await run_in_db(
                 lambda: read_audit_metric(
@@ -80,6 +88,7 @@ class AuditReadTool(Tool):
                     kwargs["metric"],
                     since=kwargs.get("since"),
                     until=kwargs.get("until"),
+                    rollup_definition=definition(),
                 )
             )
         except AuditReadError as exc:
