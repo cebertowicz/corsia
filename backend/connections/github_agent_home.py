@@ -110,7 +110,9 @@ def parse_status(code: int, stdout: bytes) -> tuple[bool | None, dict[str, str]]
 
     The report exits 0 whatever the account's health, so the entry's own state decides; a
     fatal error or an unreadable report proves nothing and is unknown, never signed out.
-    The facts carry the login and where ``gh`` found its token.
+    The facts carry the login and where ``gh`` found its token. Not signed in with a login
+    still listed (a rejected token, a timed-out check), the facts carry that login alone:
+    the account exists even though it can't be used now.
     """
     if code != 0:
         return None, {}
@@ -125,13 +127,16 @@ def parse_status(code: int, stdout: bytes) -> tuple[bool | None, dict[str, str]]
         entries = hosts["github.com"]
     except (KeyError, TypeError):
         return False, {}
-    for entry in entries if isinstance(entries, list) else ():
-        if isinstance(entry, dict) and entry.get("active") is True:
+    listed = [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+    for entry in listed:
+        if entry.get("active") is True:
             login, source = entry.get("login"), entry.get("tokenSource")
             if entry.get("state") == "success" and isinstance(login, str) and LOGIN.match(login):
                 return True, {"login": login, "token_source": source if isinstance(source, str) else ""}
-            return False, {}
-    return False, {}
+            break
+    known = next((entry["login"] for entry in listed
+                  if isinstance(entry.get("login"), str) and LOGIN.match(entry["login"])), None)
+    return False, {"login": known} if known else {}
 
 
 def signin_prompt(output: str) -> dict[str, str] | None:

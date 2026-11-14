@@ -130,13 +130,16 @@ def _read_only_grants(argv) -> list[str]:
     return next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
 
 
-def _set_person(login: str | None, status: str | None = None) -> None:
+def _set_person(login: str | None, status: str | None = None, *, no_own_login: bool = False) -> None:
+    from connections.github_signin import NO_OWN_LOGIN
     from connections.models import get_connection, upsert_connection
 
     row = get_connection("github")
-    config = {key: value for key, value in row["config"].items() if key != "login"}
+    config = {key: value for key, value in row["config"].items() if key not in ("login", NO_OWN_LOGIN)}
     if login is not None:
         config["login"] = login
+    if no_own_login:
+        config[NO_OWN_LOGIN] = True
     upsert_connection(type="cli", provider="github", status=status or row["status"], config=config)
 
 
@@ -516,15 +519,25 @@ def test_person_without_own_github_gets_a_ready_agents_account(agent, monkeypatc
     # Someone with no GitHub account of their own: their gh was checked and has no sign-in.
     probes = []
     monkeypatch.setattr(github_agent, "request_probe", lambda: probes.append(True))
-    _set_person(None, status=status)
+    _set_person(None, status=status, no_own_login=True)
     _signed_in()
     view = github_agent.verify_now()
     assert view.ready and github_agent.agent_login(view) == BOT
     assert probes  # still looking, so a personal sign-in made later is caught
 
 
-def test_person_signing_in_later_as_the_agents_login_is_wrong_account(agent):
+def test_needs_auth_from_a_failed_check_is_not_proof_of_no_own_github(agent, monkeypatch):
+    # Startup writes needs_auth when its probe fails; the person may well be signed in.
+    monkeypatch.setattr(github_agent, "request_probe", lambda: None)
     _set_person(None, status="needs_auth")
+    _signed_in()
+    view = github_agent.verify_now()
+    assert (view.state, view.cause) == ("unverified", "own_login_unknown")
+    assert github_agent.agent_login(view) is None
+
+
+def test_person_signing_in_later_as_the_agents_login_is_wrong_account(agent):
+    _set_person(None, status="needs_auth", no_own_login=True)
     _signed_in()
     assert _ready_view().ready
     _set_person(BOT, status="available")  # the probe now sees the person's own gh as this login

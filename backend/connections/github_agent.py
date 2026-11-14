@@ -11,8 +11,8 @@ rule that agree.
 
 The account is ready only when ``gh api user`` in its own home answered with a
 login that is not the person's own, and the person's own GitHub is known: a stored
-login, or a finished check that found their ``gh`` signed out or not installed (a
-person with no GitHub account of their own).
+login, or an answered check that found no GitHub login in their ``gh``, or no ``gh``
+(a person with no GitHub account of their own). A failed check proves neither.
 """
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ from connections.github_agent_home import (
     stores_token,
 )
 from connections.github_person import request_probe, same_login
+from connections.github_signin import NO_OWN_LOGIN
 from infra.database import get_db
 
 log = logging.getLogger(__name__)
@@ -59,9 +60,7 @@ Cause = Literal[
 _ROWS = """SELECT a.id, a.source_home, a.state, a.revision, c.config
            FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id
            WHERE c.provider=? AND a.state!='removed' AND a.source_home IS NOT NULL"""
-_PERSON = "SELECT config, status FROM connections WHERE provider=?"
-# The person's own gh, checked and found with no sign-in: nothing for the agents' login to match.
-_NO_OWN_LOGIN = frozenset({"needs_auth", "not_installed"})
+_PERSON = "SELECT config FROM connections WHERE provider=?"
 
 
 @dataclass(frozen=True)
@@ -205,9 +204,10 @@ def _read(db) -> tuple[list, str | None, bool]:
     connection = db or get_db()
     rows = connection.execute(_ROWS, (PROVIDER,)).fetchall()
     person = connection.execute(_PERSON, (PROVIDER,)).fetchone()
-    login = _config(person["config"] if person else None).get("login")
+    config = _config(person["config"] if person else None)
+    login = config.get("login")
     login = login if isinstance(login, str) and login else None
-    return rows, login, login is None and person is not None and person["status"] in _NO_OWN_LOGIN
+    return rows, login, login is None and config.get(NO_OWN_LOGIN) is True
 
 
 def _resolve(db, *, wait: float | None) -> AgentAccountView:

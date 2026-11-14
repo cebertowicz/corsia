@@ -3,8 +3,9 @@
 GitHub's connection refresh (``connections.refresh_github_connection``) stores it on
 the ``github`` connection row, and only a definite login replaces it, so a cold start
 reads the last known login at once. The agents' account is never ready while this is
-unknown, unless the last check found the person's own ``gh`` signed out or not
-installed: then the person has no login for the agents' account to be.
+unknown, unless the last answered check found no GitHub login at all in the person's
+own ``gh``, or no ``gh`` (``NO_OWN_LOGIN`` on the row): then the person has no login
+for the agents' account to be. A failed check never sets it.
 """
 from __future__ import annotations
 

@@ -18,12 +18,14 @@ CUSTOM = "/opt/custom/gh"
 STATUS = ("auth", "status", "--hostname", "github.com", "--active", "--json", "hosts")
 
 
-def _report(answer: int) -> bytes:
-    """``gh``'s JSON report: 0 is the person signed in as ``person``, 1 is signed out."""
+def _report(answer: int | str) -> bytes:
+    """``gh``'s JSON report: 0 is the person signed in as ``person``, 1 is signed out, and a
+    string is ``person`` listed with that failed token state."""
     if answer == 1:
         return b'{"hosts":{}}'
     return json.dumps({"hosts": {"github.com": [{
-        "active": True, "state": "success", "login": "person", "tokenSource": "keyring"}]}}).encode()
+        "active": True, "state": answer if isinstance(answer, str) else "success",
+        "login": "person", "tokenSource": "keyring"}]}}).encode()
 
 
 @pytest.fixture
@@ -74,7 +76,10 @@ def _row():
 
 @pytest.mark.parametrize(("answer", "status", "config"), [
     (0, "available", {"binary": CUSTOM, "keep": "me", "login": "person"}),
-    (1, "needs_auth", {"binary": CUSTOM, "keep": "me"}),
+    (1, "needs_auth", {"binary": CUSTOM, "keep": "me", "no_own_login": True}),
+    # A listed login whose token failed its check: signed out, yet the person has an account.
+    ("error", "needs_auth", {"binary": CUSTOM, "keep": "me"}),
+    ("timeout", "needs_auth", {"binary": CUSTOM, "keep": "me"}),
 ])
 def test_a_definite_answer_is_stored_with_the_resolved_binary_and_config(gh, answer, status, config):
     from connections import refresh_github_connection
@@ -98,6 +103,22 @@ def test_a_signed_out_answer_keeps_the_last_known_login(gh):
     assert _row()["status"] == "needs_auth" and _row()["config"]["login"] == "person"
 
 
+def test_no_own_login_is_cleared_by_any_later_answer_but_a_definite_no(gh):
+    from connections import refresh_github_connection
+
+    gh.answer[0] = 1
+    refresh_github_connection()
+    assert _row()["config"]["no_own_login"] is True
+    gh.answer[0] = OSError("gone")
+    refresh_github_connection()  # startup: a failed probe proves nothing
+    assert "no_own_login" not in _row()["config"]
+    gh.answer[0] = 1
+    refresh_github_connection()
+    gh.answer[0] = 0
+    refresh_github_connection()
+    assert "no_own_login" not in _row()["config"] and _row()["config"]["login"] == "person"
+
+
 @pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("gh", 10), OSError("gone")])
 def test_a_failed_probe_keeps_the_row_on_recheck_and_reads_needs_auth_at_startup(gh, failure):
     from connections import refresh_github_connection
@@ -108,7 +129,7 @@ def test_a_failed_probe_keeps_the_row_on_recheck_and_reads_needs_auth_at_startup
     assert _row() == before and [e[0] for e in gh.events] == ["probe"]
 
     assert refresh_github_connection() is False  # startup keeps its classification
-    assert _row()["status"] == "needs_auth"
+    assert _row()["status"] == "needs_auth" and "no_own_login" not in _row()["config"]
 
 
 def test_a_missing_binary_is_a_completed_not_installed_check(gh, monkeypatch):
@@ -118,7 +139,7 @@ def test_a_missing_binary_is_a_completed_not_installed_check(gh, monkeypatch):
                         lambda provider, *, db=None: ({"keep": "me"}, None))
     assert connections.refresh_github_connection(keep_row_on_failed_probe=True) is True
     assert [e[0] for e in gh.events] == ["write"]
-    assert _row()["status"] == "not_installed"
+    assert _row()["status"] == "not_installed" and _row()["config"]["no_own_login"] is True
 
 
 @pytest.fixture
