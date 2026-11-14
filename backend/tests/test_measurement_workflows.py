@@ -681,6 +681,15 @@ def test_the_route_answers_for_the_page_parameters_and_the_live_window(db) -> No
     assert [run["run_id"] for run in entry["runs"]] == ["clock-run-in"]
     assert entry["ref"] == CLOSE and entry["owner"] is None
 
+    # Coverage alone: the same coverage and window, no run list, and the run history is never read.
+    from core import workflow_verdict_read
+    from unittest.mock import patch
+    with patch.object(workflow_verdict_read, "read_snapshot", side_effect=AssertionError("history read")):
+        alone = TestClient(app).get(
+            "/api/measurement/workflows?project=all&agent=none&grain=weeks&timezone=UTC&coverage_only=true")
+    assert alone.status_code == 200
+    assert alone.json() == {key: value for key, value in body.items() if key != "workflows"}
+
 
 def test_the_coverage_headline_is_the_share_series_summed_over_its_window(db, monkeypatch) -> None:
     """The headline and the ``under_workflow_pct`` series are one read of one rule.

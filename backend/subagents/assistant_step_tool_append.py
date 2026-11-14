@@ -49,7 +49,8 @@ def append_tool_use_locked(
             return assistant_step_id
         raise RuntimeError("provider tool call identity changed within Assistant Step")
     calls.append(candidate)
-    # A step with a tool call draws in chat; the stamp's only writer, chat_comment_answers.place_answers, said otherwise.
+    # A step with a tool call draws in chat; the stamp's one stamper, chat_comment_answers.place_answers, said
+    # otherwise, so the appender clears it.
     metadata.pop("chat_drawn", None)
     metadata["step_type"] = "tool_calls"
     metadata["llm_tool_calls"] = calls

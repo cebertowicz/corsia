@@ -176,6 +176,19 @@ In one week on the install building CORSIA, with automatic approval on, 471 of 5
 
 All three patches passed, and CORSIA's loop used the fewest model calls: 42% fewer than Claude Code and 17% fewer than Codex. One task cannot show a repeatable difference; fuller benchmarks are coming. See the [methods](docs/readme-evidence.md).
 
+**Where an agent's actions go.** One long-running agent on the install that builds CORSIA, over one night in November 2026: 196 of its actions (commands, file reads, plan updates and the like), counted by hand.
+
+| What the action was for | Share of actions | Share of text the agent wrote |
+|---|--:|--:|
+| The work: commands, files, search | 77% | 76% |
+| Reading and updating its plan | 7% | 8% |
+| Starting, checking and messaging other agents | 7% | 7% |
+| Re-reading a skill | 6% | 1% |
+| Memory and lessons | 4% | 8% |
+| Messages to the person | 0% | 0% |
+
+These are rounded shares of actions, not of tokens or dollars, for one agent on one night. With 196 actions, the largest share is uncertain by about 6 points either way and the others by 3 to 4, and more than that because the actions were taken in ten groups. This hand count will be replaced by measured readings as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
+
 </details>
 
 <details>

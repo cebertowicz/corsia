@@ -35,7 +35,7 @@ def _next_run(db: sqlite3.Connection, row_id: str) -> str | None:
 
 
 def test_the_step_is_registered_at_177() -> None:
-    assert SCHEMA_VERSION == 192
+    assert SCHEMA_VERSION == 194
     assert MIGRATIONS[177] is migrate_177_to_178
 
 

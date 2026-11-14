@@ -2,7 +2,7 @@ import type { OperatorArtifactLink, OperatorEnvelope, OperatorNode } from '$lib/
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import { personStepInstructionsDocument } from '$lib/components/plans/nodeDetailsText';
 import { focusPlanNode } from '$lib/planNodeFocus';
-import { openPlanAsk } from '$lib/planLeafReturn';
+import { openPlanAsk, openPlanBrowser } from '$lib/planLeafReturn';
 import { peekEntry, refresh } from '$lib/stores/plans.svelte';
 import { planKeyString } from '$lib/stores/planKeys';
 
@@ -14,14 +14,29 @@ export function stepState(card: Pick<UpdateCard, 'step_state'>, node: Pick<Opera
 	return card.step_state ?? 'open';
 }
 
-/** What Do → opens: the step's instructions document when it has one, else the task's details in the plan. */
+/**
+ * What Do → opens: the step's instructions document when it has one; a sign-in or other page in a
+ * shared browser, that thread's browser; else the task's details in the plan.
+ */
 export type DoTarget =
 	| { kind: 'document'; artifact: OperatorArtifactLink }
+	| { kind: 'browser'; threadId: string }
 	| { kind: 'details' };
 
 export function doTarget(node: OperatorNode | undefined): DoTarget {
 	const artifact = node ? personStepInstructionsDocument(node) : undefined;
-	return artifact ? { kind: 'document', artifact } : { kind: 'details' };
+	if (artifact) return { kind: 'document', artifact };
+	return node?.browser_thread_id ? { kind: 'browser', threadId: node.browser_thread_id } : { kind: 'details' };
+}
+
+/**
+ * Opens a step's document or browser in `threadId`'s pane; false for a step with neither, whose
+ * details the plan shows instead. The chip, the plan row and a focus request all open through here.
+ */
+export function openStep(threadId: string | null, target: DoTarget, title: string, openDecision: () => void = () => {}): boolean {
+	if (target.kind === 'document') openPlanAsk(threadId, target.artifact, title, openDecision);
+	else if (target.kind === 'browser') openPlanBrowser(target.threadId, threadId);
+	return target.kind !== 'details';
 }
 
 /** What a group of waiting tasks adds to its first task's title: "+6 more" for 7. */
@@ -35,7 +50,7 @@ function threadNode(threadId: string, nodeId: string): OperatorNode | undefined 
 }
 
 /**
- * Do → on a step: the same two opens the plan row makes (`ThreadPlanPane.focusNode`), never a second
+ * Do → on a step: the same opens the plan row makes (`ThreadPlanPane.focusNode`), never a second
  * path. The plan is read first when the chip's own read has not landed, so a press never opens stale.
  */
 export async function doStep(card: Pick<UpdateCard, 'thread_id' | 'node_id' | 'title'>): Promise<void> {
@@ -45,10 +60,6 @@ export async function doStep(card: Pick<UpdateCard, 'thread_id' | 'node_id' | 't
 		await refresh({ kind: 'thread', id: card.thread_id });
 		node = threadNode(card.thread_id, card.node_id);
 	}
-	const target = doTarget(node);
-	if (target.kind === 'document') {
-		openPlanAsk(card.thread_id, target.artifact, card.title ?? node?.title ?? 'Task', () => {});
-		return;
-	}
+	if (openStep(card.thread_id, doTarget(node), card.title ?? node?.title ?? 'Task')) return;
 	await focusPlanNode(card.thread_id, card.node_id, null, true);
 }
