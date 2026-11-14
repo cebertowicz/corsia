@@ -8,12 +8,12 @@ import { emit } from '$lib/ws/events';
 import { encodeUpdate } from '$lib/stores/documentWire';
 import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
-import { clearTabViewState } from '$lib/stores/tabViewState';
+import { clearTabViewState, tabViewState } from '$lib/stores/tabViewState';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { changeOwnership, type DocOwnership } from '$lib/api/docOwnership';
 
 // A tab return draws the owner and supervisor row the tab last showed in its first frame; the load that follows replaces it.
-const api = vi.hoisted(() => ({ fetchContent: vi.fn(), writeContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchContent: vi.fn(), writeContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), markArtifactVerified: vi.fn() }));
 vi.mock('$lib/api/docs', async importOriginal => ({ ...await importOriginal<typeof import('$lib/api/docs')>(), ...api }));
 const wire = vi.hoisted(() => ({ frames: [] as Record<string, any>[] }));
 vi.mock('$lib/ws/state', () => ({ ws: { readyState: 1, send: (text: string) => wire.frames.push(JSON.parse(text)) } }));
@@ -156,5 +156,77 @@ describe('the owner and supervisor row on a tab return', () => {
 		for (const button of host.querySelectorAll<HTMLButtonElement>('[data-ownership-row] button.item')) expect(button.disabled).toBe(true);
 		expect(changeOwnership).not.toHaveBeenCalled();
 		release?.();
+	});
+});
+
+// What a pick or a verification leaves behind belongs to the document it started on: a tab switch mid-way must not hand it to the next one.
+describe('a pick or verification started on one document, once the tab has moved to another', () => {
+	const unverified = (id: string) => ({ class: 'doc', verified_at: null, age_days: null, due_at: null, state: 'never_verified', owner_name: `${id} owner` });
+	const kept = (target: DocViewerTarget) => tabViewState('thread', target.instanceId)?.documentHeader;
+	/** Both tabs have shown their row, so the control stays mounted across the switch; returns with notes loaded. */
+	async function bothTabsLoaded() {
+		api.fetchContent.mockImplementation(async (path: string) => {
+			const id = path.includes('other') ? 'other' : 'notes';
+			return { text: texts[id], writable: true, artifact: { id }, freshness: unverified(id), ownership: ownedBy(`${id} owner`) };
+		});
+		const props = $state({ target: notes });
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(DocViewer, { target: host, props });
+		flushSync();
+		await serverOpen('notes');
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: notes owner'));
+		props.target = other; flushSync();
+		await serverOpen('other');
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: other owner'));
+		props.target = notes; flushSync();
+		await vi.waitFor(() => expect(owner()?.disabled).toBe(false));
+		return props;
+	}
+	async function pickResearchCoordinator() {
+		owner()!.click();
+		await vi.waitFor(() => expect(document.body.querySelector('.role-picker')).not.toBeNull());
+		const input = document.body.querySelector<HTMLInputElement>('.role-picker input')!;
+		input.value = 'Research'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	}
+	const verify = () => host.querySelector<HTMLButtonElement>('.verification-action button');
+
+	it('does not show the other document a failed pick', async () => {
+		vi.mocked(changeOwnership).mockRejectedValue(new Error('500'));
+		const props = await bothTabsLoaded();
+		await pickResearchCoordinator();
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: notes owner, couldn’t change'));
+		props.target = other; flushSync();
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: other owner'));
+	});
+
+	it('records a pick still in flight under its own document, and leaves the other row alone', async () => {
+		let settle!: (value: DocOwnership) => void;
+		vi.mocked(changeOwnership).mockImplementation(() => new Promise<DocOwnership>(resolve => { settle = resolve; }));
+		const props = await bothTabsLoaded();
+		await pickResearchCoordinator();
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: Research coordinator, saving'));
+		props.target = other; flushSync();
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: other owner'));
+		settle(ownedBy('picked owner'));
+		await vi.waitFor(() => expect(kept(notes)?.ownership?.owner.name).toBe('picked owner'));
+		expect(ownerLabel()).toBe('Owner: other owner');
+		expect(kept(other)?.ownership?.owner.name).toBe('other owner');
+	});
+
+	it('records a verification still in flight under its own document, and shows the other none of it', async () => {
+		let settle!: () => void;
+		api.markArtifactVerified.mockImplementation(() => new Promise<void>(resolve => { settle = resolve; }));
+		const props = await bothTabsLoaded();
+		verify()!.click();
+		await vi.waitFor(() => expect(verify()?.disabled).toBe(true));
+		props.target = other; flushSync();
+		await vi.waitFor(() => expect(ownerLabel()).toBe('Owner: other owner'));
+		await vi.waitFor(() => expect(verify()?.disabled).toBe(false));
+		settle();
+		await vi.waitFor(() => expect(kept(notes)?.freshness?.state).toBe('current'));
+		expect(kept(other)?.freshness?.state).toBe('never_verified');
+		expect(verify()).not.toBeNull();
+		expect(host.textContent).not.toContain('Document marked verified.');
 	});
 });

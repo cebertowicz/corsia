@@ -120,6 +120,7 @@
 		detailsOpen = false;
 		verificationError = '';
 		verificationNotice = '';
+		verifying = false;
 	});
 
 	async function changeImmediateDelivery(value: boolean): Promise<void> {
@@ -131,15 +132,16 @@
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
+		const started = artifactId; // the answer belongs to the document it started on
 		verifying = true;
 		verificationError = '';
 		try {
 			await onMarkVerified();
-			verificationNotice = 'Document marked verified.';
+			if (artifactId === started) verificationNotice = 'Document marked verified.';
 		} catch (error) {
-			verificationError = error instanceof Error ? error.message : 'Could not mark this document verified.';
+			if (artifactId === started) verificationError = error instanceof Error ? error.message : 'Could not mark this document verified.';
 		} finally {
-			verifying = false;
+			if (artifactId === started) verifying = false;
 		}
 	}
 
@@ -235,7 +237,7 @@
 	</div>
 {#if (freshness && freshnessPresentation) || showOwnership}
 	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} data-ownership-row={showOwnership || undefined}>
-		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+		{#if ownership && artifactId}<div class="metadata-owner">{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
 		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 		{#if freshnessPresentation?.datetime}
 			<time datetime={freshnessPresentation.datetime}>

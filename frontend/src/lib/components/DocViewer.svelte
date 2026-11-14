@@ -38,7 +38,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { DocViewerProps } from '$lib/docViewerProps'; import { rememberedHeader, rememberHeader } from '$lib/docViewerHeader';
+	import type { DocViewerProps } from '$lib/docViewerProps'; import { headerSettler, rememberedHeader, rememberHeader } from '$lib/docViewerHeader';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
@@ -79,7 +79,7 @@
 	let readonly = $state(false);
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
-	let freshness = $state<DocumentFreshness | null>(null); let ownership = $state<import('$lib/api/docOwnership').DocOwnership | null>(null); let headerStandIn = $state(false);
+	let freshness = $state<DocumentFreshness | null>(null); let ownership = $state<import('$lib/api/docOwnership').DocOwnership | null>(null); let headerStandIn = $state(false); const settling = (started: DocViewerTarget | null, id: string | null) => headerSettler(started, id, () => ({ target, artifactId: loadedArtifactId }), (patch) => { if (patch.ownership) ownership = patch.ownership; if (patch.freshness) freshness = patch.freshness; });
 	const focusedComment = $derived($focusedDocComment);
 
 	let editText = $state('');
@@ -293,9 +293,9 @@
 		historyAvailable={history.available}
 		historyOpen={history.open}
 		onOpenHistory={history.toggle}
-		{freshness} {ownership} {headerStandIn} onOwnershipChanged={(value) => { ownership = value; rememberHeader(target, { freshness, ownership: value }); }}
+		{freshness} {ownership} {headerStandIn} onOwnershipChanged={settling(target, loadedArtifactId).ownership}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => { freshness = next; rememberHeader(target, { freshness: next, ownership }); })}
+		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, settling(target, loadedArtifactId).freshness)}
 		liveSession={liveSession ?? null}
 		{openRefusal} {liveUnavailable}
 		tabText={editText}

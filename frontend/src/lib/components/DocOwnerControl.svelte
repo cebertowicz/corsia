@@ -46,8 +46,6 @@
 		active = Math.max(0, list.findIndex((choice) => choice.id === (role === 'owner' ? ownerId : supervisorId)));
 	}
 	function close() { picker = null; }
-	// A row that turns inert is waiting on a load; a picker left open would write to whatever that load opens.
-	$effect(() => { if (inert) picker = null; });
 	function restoreFocus() { void tick().then(() => (anchor?.isConnected ? anchor : null)?.focus()); }
 	function keys(event: KeyboardEvent) {
 		if (event.key === 'Enter' && matches.length) { event.preventDefault(); void choose(matches[Math.min(active, matches.length - 1)]); return; }
@@ -60,11 +58,12 @@
 		picker = null;
 		restoreFocus();
 		if (choice.id === (role === 'owner' ? ownerId : supervisorId)) return;
+		const settle = onChange; // what the row on screen does with the answer is fixed when the pick starts
 		pending = { role, id: choice.id, name: choice.name };
 		saving = true; failed = null;
 		try {
 			// Each pick sends only its own field; the server keeps the other as it is.
-			onChange(await changeOwnership(artifactId, role === 'owner' ? { owner: choice.id } : { supervisor: choice.id }));
+			settle(await changeOwnership(artifactId, role === 'owner' ? { owner: choice.id } : { supervisor: choice.id }));
 		} catch (error) {
 			const detail = error instanceof OwnershipChangeError && error.status < 500 ? error.detail : null;
 			failed = { role, message: !navigator.onLine ? `Couldn’t change the ${role} because you’re offline. Reconnect and try again.` : detail ?? `Couldn’t change the ${role}. Try again.` };
