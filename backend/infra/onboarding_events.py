@@ -133,7 +133,7 @@ def start_first_run_task(conductor_id: str, user_id: str) -> None:
                 listing["plan"]["id"], "start",
                 {"node_id": node["id"], "expected_revision": node["revision"]},
                 actor=actor, provenance="onboarding.first_run",
-                mutation_id=f"first-run-start:{conductor_id}", db=db,
+                mutation_id=public.automated_mutation_keys.first_run_start(conductor_id), db=db,
             )
         finally:
             db.close()

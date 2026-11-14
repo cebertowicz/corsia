@@ -8,7 +8,12 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from plans.public import owed_verdict_ages
+from plans.public import automated_mutation_keys, owed_verdict_ages
+
+#: The writes CORSIA makes for an agent, read from the keys their writers build.
+_AUTOMATED = automated_mutation_keys.excluded()
+_NOT_AUTOMATED = "".join(
+    " AND NOT (r.operation=? AND r.mutation_id GLOB ?)" for _ in _AUTOMATED)
 
 
 # Start with the user's indexed threads, then visit their plans, nodes, and
@@ -100,13 +105,9 @@ def plan_activity(db: sqlite3.Connection, user_id: str, since: str, until: str) 
         "CROSS JOIN threads a ON a.id=r.actor_id AND a.user_id=t.user_id "
         "WHERE t.user_id=? AND r.created_at>=? AND r.created_at<? "
         "AND julianday(r.created_at)>=julianday(?) AND julianday(r.created_at)<julianday(?) "
-        "AND r.operation NOT GLOB 'decision_*' AND r.operation!='answer_worker_needs' "
-        "AND NOT (r.operation='attach_spawned_thread' AND "
-        "(r.mutation_id GLOB 'delegate_task-attach-*' OR r.mutation_id GLOB 'delegate_send-attach-*')) "
-        "AND NOT (r.operation='start' AND r.mutation_id GLOB 'first-run-start:*') "
-        "AND NOT (r.operation='archive_node' AND r.mutation_id GLOB 'first-run-app-reconcile:*') "
-        "AND NOT (r.operation='reorder' AND r.mutation_id GLOB 'first-run-app-order:*') "
-        "GROUP BY day,archived ORDER BY day,archived", (user_id, *bounds),
+        "AND r.operation NOT GLOB 'decision_*' AND r.operation!='answer_worker_needs'"
+        + _NOT_AUTOMATED + " GROUP BY day,archived ORDER BY day,archived",
+        (user_id, *bounds, *(value for pair in _AUTOMATED for value in pair)),
     )]
     active_days = sum(row['n'] for row in days)
     update_calls = sum(row['n'] for row in calls)

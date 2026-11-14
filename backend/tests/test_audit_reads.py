@@ -606,6 +606,20 @@ def test_receipted_mutation_callers_are_reviewed_for_activity_exclusions():
             callers.add(relative.as_posix())
     assert callers == {"api/plans.py", "infra/onboarding_events.py",
                        "onboarding/app_first_run.py", "plans/delegate_attach.py"}
+    # Every automated write keys itself through the builders plan_activity
+    # excludes, so neither a changed key nor a new automated write is counted.
+    # api/plans.py writes as the person, whom the count never includes.
+    for relative in callers - {"api/plans.py"}:
+        tree = ast.parse((backend / relative).read_text())
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Name) and node.func.id == "mutate" or
+                isinstance(node.func, ast.Attribute) and node.func.attr == "mutate"
+            )):
+                continue
+            key = next((kw.value for kw in node.keywords if kw.arg == "mutation_id"), None)
+            assert isinstance(key, ast.Call) and "automated_mutation_keys" in ast.unparse(key.func), (
+                f"{relative}:{node.lineno} keys an automated plan write outside automated_mutation_keys")
     assert receipt_writers == {"plans/boundary.py", "plans/decisions.py", "plans/decision_writes.py",
                                "plans/delegation_needs.py", "plans/system_user_steps.py"}
 
