@@ -259,6 +259,16 @@ describe('merging a refetched page into a live row', () => {
 		expect(row.content).toBe('streamed answer');
 	});
 
+	it('keeps a comment answer read when a page fetched before the read arrives after it', () => {
+		const answer = (cid: string, assistant: string, unread: boolean) => ({ author_kind: 'agent', user_message_id: 'u1', cid, assistant_message_id: assistant, text: 'Answer', created_at: '2026-09-27T20:01:00Z', unread });
+		const comment = (answers: unknown[]) => [{ id: 'c', cid: 'c2.1', user_message_id: 'u1', answers }];
+		const read = { ...pageRow, content: 'streamed answer', chat_comments: comment([answer('c2.1', 'a1', false)]) };
+		// The stale page still says unread for the answer read here, and brings a newer answer that is really unread.
+		const stale = { ...pageRow, content: 'streamed answer', chat_comments: comment([answer('c2.1', 'a1', true), answer('c2.1', 'a2', true)]) };
+		const [row] = mergeFetchedHistoryRows([read], [stale]);
+		expect(row.chat_comments[0].answers.map((a: { unread: boolean }) => a.unread)).toEqual([false, true]);
+	});
+
 	it('takes content the page proves is richer', () => {
 		const [row] = mergeFetchedHistoryRows(
 			[{ ...liveRow, content: 'streamed' }], [{ ...pageRow, content: 'streamed answer' }],

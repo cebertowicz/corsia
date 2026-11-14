@@ -543,6 +543,87 @@ CLAUDE = "external_harness:claude-code"
 CODEX_ID = "0123456789abcdef01234567"
 
 
+def test_plan_activity_scopes_real_plan_events_and_turns(isolated_db, monkeypatch):
+    from datetime import timedelta, timezone
+    from infra import audit_reads
+    from plans import service
+
+    _seed(isolated_db)
+    monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
+    now = datetime.now(timezone.utc)
+    with sqlite3.connect(isolated_db) as db:
+        db.row_factory = sqlite3.Row
+        for thread in ("steve-p1", "leksi-p1"):
+            plan = service.ensure_plan("thread", thread, db=db)
+            service.add_node(plan.id, kind="task", title="secret title",
+                             acceptance_criteria="secret criteria", actor_id=thread, db=db)
+            db.execute(
+                "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,"
+                "started_at,boot_epoch) VALUES (?,?,0,'test','completed',?,'boot')",
+                (f"turn-{thread}", thread, now.isoformat()),
+            )
+        db.commit()
+    result = audit_reads.read_audit_metric(
+        "steve-p1", "steve", "plan_activity",
+        since=(now - timedelta(hours=1)).isoformat(),
+        until=(now + timedelta(hours=1)).isoformat(),
+    )
+    row = result["rows"][0]
+    assert result["scope"] == "caller_user"
+    assert row["active_agent_days"] == 1
+    assert sum(item["n"] for item in row["nodes_created_per_day"]) == 1
+    assert row["plan_read_calls"] is None
+    assert {"active_agent_days", "plan_update_calls", "plan_read_calls", "conductor_adds",
+            "stale_open_tasks", "owed_verdicts"} <= set(row["definitions"])
+    assert row["owed_verdicts"]["owed"] == 0
+    assert "secret" not in json.dumps(result)
+    assert "steve-p1" not in json.dumps(result)
+    with pytest.raises(audit_reads.AuditReadError, match="seven days"):
+        audit_reads.read_audit_metric("steve-p1", "steve", "plan_activity",
+            since=(now - timedelta(days=8)).isoformat(), until=now.isoformat())
+
+
+def test_receipted_mutation_callers_are_reviewed_for_activity_exclusions():
+    import ast
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    callers = set()
+    receipt_writers = set()
+    for path in backend.rglob("*.py"):
+        relative = path.relative_to(backend)
+        if relative.parts[0] == "tests" or relative.as_posix() == "tools/plans.py":
+            continue
+        tree = ast.parse(path.read_text())
+        if any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+               and isinstance(node.func.value, ast.Name) and node.func.value.id == "receipts"
+               and node.func.attr == "record" for node in ast.walk(tree)):
+            receipt_writers.add(relative.as_posix())
+        if any(isinstance(node, ast.Call) and (
+            isinstance(node.func, ast.Name) and node.func.id == "mutate" or
+            isinstance(node.func, ast.Attribute) and node.func.attr == "mutate"
+        ) for node in ast.walk(tree)):
+            callers.add(relative.as_posix())
+    assert callers == {"api/plans.py", "infra/onboarding_events.py",
+                       "onboarding/app_first_run.py", "plans/delegate_attach.py"}
+    # Every automated write keys itself through the builders plan_activity
+    # excludes, so neither a changed key nor a new automated write is counted.
+    # api/plans.py writes as the person, whom the count never includes.
+    for relative in callers - {"api/plans.py"}:
+        tree = ast.parse((backend / relative).read_text())
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Name) and node.func.id == "mutate" or
+                isinstance(node.func, ast.Attribute) and node.func.attr == "mutate"
+            )):
+                continue
+            key = next((kw.value for kw in node.keywords if kw.arg == "mutation_id"), None)
+            assert isinstance(key, ast.Call) and "automated_mutation_keys" in ast.unparse(key.func), (
+                f"{relative}:{node.lineno} keys an automated plan write outside automated_mutation_keys")
+    assert receipt_writers == {"plans/boundary.py", "plans/decisions.py", "plans/decision_writes.py",
+                               "plans/delegation_needs.py", "plans/system_user_steps.py"}
+
+
 def _seed_seat_usage(path) -> None:
     _seed(path)
     with sqlite3.connect(path) as db:

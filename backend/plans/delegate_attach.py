@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from plans import selection_validity, service
+from plans import automated_mutation_keys, selection_validity, service
 from plans.boundary import PlanActor, mutate
 from plans.delegation import has_open_structured_attachment
 from plans.errors import PlanInputError
@@ -222,8 +222,7 @@ def _hand_over(db, step: Step, child_thread_id: str, parent: dict, via: str):
             project_id=parent.get("project_id"),
         ),
         provenance=f"tool.{via}",
-        # A reused worker is handed several tasks over its life: the key names both.
-        mutation_id=f"{via}-attach-{child_thread_id}-{step.node_id}",
+        mutation_id=automated_mutation_keys.attach(via, child_thread_id, step.node_id),
         db=db,
     )
 

@@ -17,19 +17,31 @@ ADD_PROVENANCE = "plan.conductor_add"
 STEER_PROVENANCE = "plan.coordinator_steer"
 
 
-def coordinator_may_steer(db, plan, actor) -> bool:
-    """Whether ``actor`` is the target project's or workspace's conductor."""
-    if actor.kind != "thread" or actor.thread_id is None or plan["owner_kind"] != "thread":
-        return False
+def coordinator_kind(db, plan, actor_id: str | None) -> str | None:
+    """Which coordinator of the plan's owner ``actor_id`` is: ``workspace``, ``project`` or none.
+
+    The one rule for steering another agent's plan. ``coordinator_may_steer``
+    authorizes with it, and an add records its answer at creation, before
+    designations change.
+    """
+    if not actor_id or plan["owner_kind"] != "thread":
+        return None
     owner = db.execute(
         "SELECT project_id FROM threads WHERE id=?", (plan["owner_id"],)
     ).fetchone()
     if owner is None:
-        return False
-    return actor.thread_id in {
-        conductor.get_scope_coordinator(str(owner["project_id"]), db),
-        get_corsia_agent(db=db),
-    }
+        return None
+    if actor_id == get_corsia_agent(db=db):
+        return "workspace"
+    if owner["project_id"] is not None and actor_id == conductor.get_scope_coordinator(
+            str(owner["project_id"]), db):
+        return "project"
+    return None
+
+
+def coordinator_may_steer(db, plan, actor) -> bool:
+    """Whether ``actor`` is the target project's or workspace's conductor."""
+    return actor.kind == "thread" and coordinator_kind(db, plan, actor.thread_id) is not None
 
 
 def thread_may_mutate(db, plan, operation: str, params: dict[str, Any], actor) -> bool:

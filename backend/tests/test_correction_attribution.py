@@ -178,6 +178,32 @@ def test_each_correction_finds_its_answered_turn_across_ties_separators_and_own_
     found = {fact.source_id: fact.node_id for fact in attributed_facts(db)}
     assert found == expected
     assert sum(node is not None for node in found.values()) > 100  # the fixture exercises real matches
+    full = attributed_facts(db)
+    for chosen in ({"earlier"}, {"own"}, {"attempt"}, {"earlier", "own"}, {"earlier", "own", "attempt"}, {"nowhere"}):
+        assert attributed_facts(db, node_ids=chosen) == [fact for fact in full if fact.node_id in chosen]
+
+
+def test_a_selected_node_read_skips_threads_that_never_ran_it_and_matches_the_full_read(db) -> None:
+    turn(db, "t1-earlier", "t1", "earlier", "2026-10-02T00:00:00Z")
+    turn(db, "t2-own", "t2", "own", "2026-10-02T00:00:00Z")
+    turn(db, "t3-earlier", "t3", "earlier", "2026-10-02T00:00:00Z")
+    turn(db, "t3-own", "t3", "own", "2026-10-04T00:00:00Z")
+    for message_id, thread, at in (("a", "t1", "2026-10-03T00:00:00Z"), ("b", "t2", "2026-10-03T00:00:00Z"),
+                                   ("c", "t3", "2026-10-03T00:00:00Z"), ("d", "t3", "2026-10-05T00:00:00Z"),
+                                   ("e", "t4", "2026-10-03T00:00:00Z")):
+        message(db, message_id, thread, at)
+        legacy_fact(db, message_id)
+
+    full = attributed_facts(db)
+    assert {fact.source_id: fact.node_id for fact in full} == {
+        "a": "earlier", "b": "own", "c": "earlier", "d": "own", "e": None}
+    assert {fact.source_id for fact in attributed_facts(db, node_ids={"earlier"})} == {"a", "c"}
+    assert {fact.source_id for fact in attributed_facts(db, node_ids=["own"])} == {"b", "d"}
+    assert attributed_facts(db, node_ids=set()) == []
+
+    plan = " ".join(str(row["detail"]) for row in db.execute(
+        f"EXPLAIN QUERY PLAN {correction_attribution._SELECTED_THREADS_SQL}", ('["earlier"]',)))
+    assert "SCAN active_turns" not in plan  # the selected threads come from the plan-node index
 
 
 def test_a_node_maps_to_its_nearest_run_or_says_why_not() -> None:
