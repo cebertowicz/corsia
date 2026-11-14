@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-from infra.id_bind_chunk import id_chunks
-
 
 def _parse_metadata(raw: object) -> dict:
     if isinstance(raw, dict):
@@ -52,8 +50,7 @@ def _fetch_lineage_rows(db, thread_id: str, anchors: list[dict]) -> list[dict]:
     # Two seeks on idx_messages_tool_lineage rather than one OR, which scans
     # every tool row and reads its content to reach metadata. A child naming
     # another step never resolves here, so only unnamed children match by
-    # call ID. Final order is applied below, so neither query sorts, and each
-    # id set is sought in chunks so one statement binds a page of any size.
+    # call ID. Final order is applied below, so neither query sorts.
     child_rows: list[dict] = []
     for predicate, ids in (
         ("json_extract(metadata, '$.assistant_step_id') IN ({})", step_ids),
@@ -65,13 +62,12 @@ def _fetch_lineage_rows(db, thread_id: str, anchors: list[dict]) -> list[dict]:
     ):
         if not ids:
             continue
-        for chunk in id_chunks(sorted(ids)):
-            child_rows.extend(dict(row) for row in db.execute(
-                "SELECT *, rowid FROM messages WHERE thread_id = ? AND role = 'tool' "
-                "AND json_valid(metadata) AND "
-                + predicate.format(",".join("?" for _ in chunk)),
-                [thread_id, *chunk],
-            ).fetchall())
+        child_rows.extend(dict(row) for row in db.execute(
+            "SELECT *, rowid FROM messages WHERE thread_id = ? AND role = 'tool' "
+            "AND json_valid(metadata) AND "
+            + predicate.format("SELECT value FROM json_each(?)"),
+            [thread_id, json.dumps(sorted(ids))],
+        ).fetchall())
 
     relevant_assistants: list[dict] = []
     legacy_children = [
@@ -82,17 +78,16 @@ def _fetch_lineage_rows(db, thread_id: str, anchors: list[dict]) -> list[dict]:
         # Legacy rows have no parent ID. Fetch only assistant rows whose JSON
         # may contain one of the relevant IDs, then make the exact decision in
         # the shared lineage resolver rather than trusting string matching.
-        for chunk in id_chunks(sorted(call_ids)):
-            like_terms = " OR ".join("metadata LIKE ?" for _ in chunk)
-            candidates = db.execute(
-                "SELECT *, rowid FROM messages WHERE thread_id = ? "
-                "AND role = 'assistant' AND (" + like_terms + ")",
-                [thread_id, *(f'%"{call_id}"%' for call_id in chunk)],
-            ).fetchall()
-            relevant_assistants.extend(
-                dict(row) for row in candidates
-                if _assistant_call_ids(dict(row)) & call_ids
-            )
+        candidates = db.execute(
+            "SELECT *, rowid FROM messages WHERE thread_id = ? "
+            "AND role = 'assistant' AND EXISTS (SELECT 1 FROM json_each(?) j "
+            "WHERE messages.metadata LIKE '%\"' || j.value || '\"%')",
+            [thread_id, json.dumps(sorted(call_ids))],
+        ).fetchall()
+        relevant_assistants.extend(
+            dict(row) for row in candidates
+            if _assistant_call_ids(dict(row)) & call_ids
+        )
 
     by_id = {
         row["id"]: row

@@ -16,7 +16,7 @@ import sqlite3
 import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
-from infra.id_bind_chunk import IDS_PER_STATEMENT
+_ID_TEST_SIZE = 400
 
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
@@ -331,13 +331,15 @@ def test_bounded_page_queries_seek_indexes_without_sorting_the_thread():
     for turn in range(4):
         thread.add(f"u{turn}", "user")
         thread.step(f"s{turn}", f"c{turn}")
-        thread.result(f"r{turn}", f"c{turn}", "out", step=f"s{turn}")
+        thread.result(f"r{turn}", f"c{turn}", "out", step=... if turn == 3 else f"s{turn}")
         thread.add(f"a{turn}", "assistant", "done")
     statements: list[str] = []
     conn.set_trace_callback(statements.append)
 
     first, _, oldest = page_messages(conn, _SID, limit=2, before=None)
     older, _, _ = page_messages(conn, _SID, limit=2, before=oldest)
+    from api.thread_turn_summaries import page_turn_summaries
+    page_turn_summaries(conn, _SID, [{"metadata": {"turn_id": "turn-1"}}])
     conn.set_trace_callback(None)
 
     assert [row["id"] for row in first + older] == ["s3", "a3", "a2", "u3"]
@@ -348,12 +350,20 @@ def test_bounded_page_queries_seek_indexes_without_sorting_the_thread():
         for sql in statements if sql.lstrip().upper().startswith("SELECT")
     }
     assert any("role = 'tool'" in sql for sql in plans)
+    assert any("idx_messages_turn_calls" in sql for sql in plans)
+    assert any("CROSS JOIN active_turns t" in sql for sql in plans)
     for sql, plan in plans.items():
-        assert not any("TEMP B-TREE" in step or step.startswith("SCAN") for step in plan), (
-            sql, plan,
-        )
+        # json_each scans only the bound page IDs, not the messages table.
+        assert not any(step.startswith("SCAN messages") for step in plan), (sql, plan)
+        # GROUP BY for activity already used a temporary B-tree before this change.
+        if "idx_messages_turn_calls" not in sql:
+            assert not any("TEMP B-TREE" in step for step in plan), (sql, plan)
         if "role = 'tool'" in sql:
             assert any("idx_messages_tool_lineage" in step for step in plan), (sql, plan)
+        if "idx_messages_turn_calls" in sql:
+            assert any("SEARCH messages USING INDEX idx_messages_turn_calls" in step for step in plan), (sql, plan)
+        if "CROSS JOIN active_turns t" in sql:
+            assert any("SEARCH t USING INDEX" in step and "id=?" in step for step in plan), (sql, plan)
 
 
 def test_unbounded_read_projects_queue_beyond_the_bindable_variable_limit():
@@ -364,11 +374,11 @@ def test_unbounded_read_projects_queue_beyond_the_bindable_variable_limit():
     that much larger than one statement may bind.
     """
     thread = _Thread()
-    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, IDS_PER_STATEMENT + 10)
-    ids = [f"m{n}" for n in range(2 * IDS_PER_STATEMENT + 1)]
+    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, _ID_TEST_SIZE + 10)
+    ids = [f"m{n}" for n in range(2 * _ID_TEST_SIZE + 1)]
     for mid in ids:
         thread.add(mid, "user")
-    queued = ids[-1]  # past the first chunk of displayed ids
+    queued = ids[-1]  # past the connection's variable limit
     thread.conn.execute(
         "UPDATE messages SET delivery_intent='queue_after_turn' WHERE id=?", (queued,),
     )
@@ -389,8 +399,8 @@ def test_large_page_fetches_lineage_beyond_the_bindable_variable_limit():
     """`limit` bounds a page by whatever the caller asks for, so the lineage
     fetch cannot bind one variable per anchor in one statement either."""
     thread = _Thread()
-    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, IDS_PER_STATEMENT + 10)
-    steps = [f"s{n}" for n in range(2 * IDS_PER_STATEMENT + 1)]
+    thread.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, _ID_TEST_SIZE + 10)
+    steps = [f"s{n}" for n in range(2 * _ID_TEST_SIZE + 1)]
     for n, step in enumerate(steps):
         thread.step(step, f"c{n}")
         # Half the children carry no authoritative step id, so both lineage
@@ -400,8 +410,13 @@ def test_large_page_fetches_lineage_beyond_the_bindable_variable_limit():
         else:
             thread.result(f"r{n}", f"c{n}", f"out {n}")
 
+    statements: list[str] = []
+    thread.conn.set_trace_callback(statements.append)
     page, _, _ = page_messages(thread.conn, _SID, limit=len(steps), before=None)
+    thread.conn.set_trace_callback(None)
 
+    legacy_reads = [sql for sql in statements if "role = 'assistant' AND" in sql and "LIKE" in sql]
+    assert len(legacy_reads) == 1
     assert [row["id"] for row in page] == steps
     assert _results(page[0]) == ["out 0"]
     assert _results(page[-1]) == [f"out {len(steps) - 1}"]

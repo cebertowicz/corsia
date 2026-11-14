@@ -1,4 +1,4 @@
-"""The Turn-summary read binds its Turn ids in chunks, not one per statement.
+"""The Turn-summary read supports more Turn ids than SQLite bind variables.
 
 A page with no `limit` hands every row of the thread to the summary read, so the
 number of Turn ids it receives is the thread's, not the page's.
@@ -12,16 +12,16 @@ from pathlib import Path
 import sqlite3
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
-from infra.id_bind_chunk import IDS_PER_STATEMENT
+_ID_TEST_SIZE = 400
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_turn_summaries.py"
-_spec = importlib.util.spec_from_file_location("_chunked_turn_summaries", _module_path)
+_spec = importlib.util.spec_from_file_location("_large_turn_summaries", _module_path)
 assert _spec is not None and _spec.loader is not None
 _thread_turn_summaries = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_thread_turn_summaries)
 page_turn_summaries = _thread_turn_summaries.page_turn_summaries
 
-_SID = "sess-chunked"
+_SID = "sess-large"
 _START, _END = "2026-06-12T00:00:00Z", "2026-06-12T00:04:00Z"
 
 
@@ -44,8 +44,8 @@ def test_more_turn_ids_than_one_statement_may_bind_still_get_summaries():
     conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
     # A lowered connection limit stands in for a thread whose Turn count is that
     # much larger than one statement may bind.
-    conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, IDS_PER_STATEMENT + 10)
-    turn_ids = [f"turn-{n}" for n in range(2 * IDS_PER_STATEMENT + 1)]
+    conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, _ID_TEST_SIZE + 10)
+    turn_ids = [f"turn-{n}" for n in range(2 * _ID_TEST_SIZE + 1)]
     for seq, turn_id in enumerate(turn_ids, start=1):
         conn.execute(
             "INSERT INTO active_turns VALUES (?,?,?,?,?,?)",
