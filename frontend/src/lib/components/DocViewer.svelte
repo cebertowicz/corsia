@@ -135,7 +135,7 @@
 	const heldUnread = createHeldUnread(() => !!commentUI.state, () => listedComments);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
 	const openCards = createCommentOpeners(commentUI, scroll);
-	const { notePress, revealCard, revealDraft } = createPressReveal({ highlights: () => highlights, view: () => editorSurface?.editorView(), draftCovered: (from, opening, clear, to) => editorSurface?.draftCovered(from, opening, clear, to), scrollTo: (to) => { scroll.value = to; }, draft: () => draftController.draft, sheetUp: () => commentUI.sheetUp });
+	const { notePress, revealCard, revealDraft } = createPressReveal({ highlights: () => highlights, view: () => editorSurface?.editorView(), draftCovered: (from, opening) => editorSurface?.draftCovered(from, opening), scrollTo: (to) => { scroll.value = to; }, draft: () => draftController.draft, sheetUp: () => commentUI.sheetUp });
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent, fromText = false) { notePress(ids, click); arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click, fromText)); }
 	function onDocEdit(changes: ChangeDesc, open: ReadonlySet<string>) { if (loadedArtifactId) remapComments(loadedArtifactId, changes, open); images.remap((p) => changes.mapPos(p)); }

@@ -114,6 +114,41 @@ describe('keyboard inset focus ordering', () => {
 	});
 });
 
+describe('transcript offset around a focused editor', () => {
+	it('puts the transcript back for a composer but not for an editor in a sheet, which keeps the passage above itself', () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number);
+		const panel = { captureBottomOffset: vi.fn(), restoreBottomOffset: vi.fn() };
+		const teardown = registerHomeLifecycle({
+			token: () => null, activeThreadId: () => null, activeView: () => 'chat', threads: () => [],
+			loadThreads: vi.fn(), loadModels: vi.fn(), loadSettings: vi.fn(), loadUpdateStatus: vi.fn(),
+			pollSystem: vi.fn(), checkSecurityAlert: vi.fn(), selectThread: vi.fn(async () => {}),
+			setActiveView: vi.fn(), chatPanel: () => panel, on: () => () => {}, connect: vi.fn(),
+		} as unknown as Parameters<typeof registerHomeLifecycle>[0]);
+		const composer = document.createElement('textarea');
+		const sheet = document.createElement('div');
+		sheet.setAttribute('data-adaptive-drawer', '');
+		const reply = document.createElement('textarea');
+		sheet.append(reply);
+		document.body.append(composer);
+		composer.focus();
+		vi.advanceTimersByTime(10);
+		expect(panel.restoreBottomOffset).toHaveBeenCalledTimes(1);
+		panel.captureBottomOffset.mockClear();
+		panel.restoreBottomOffset.mockClear();
+		document.body.append(sheet);
+		const moved = vi.fn();
+		document.addEventListener('corsia:transcript-moved', moved);
+		reply.focus();
+		vi.advanceTimersByTime(10);
+		expect(panel.restoreBottomOffset).not.toHaveBeenCalled();
+		expect(moved).toHaveBeenCalled();
+		document.removeEventListener('corsia:transcript-moved', moved);
+		teardown(); composer.remove(); sheet.remove();
+		vi.clearAllTimers(); vi.unstubAllGlobals(); vi.useRealTimers();
+	});
+});
+
 describe('registerHomeLifecycle polling', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();

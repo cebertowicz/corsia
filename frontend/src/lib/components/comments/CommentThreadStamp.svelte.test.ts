@@ -39,10 +39,10 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true, extra: Record<string, unknown> = { flat: true }) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface, ...extra } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {
@@ -282,7 +282,7 @@ describe('CommentThread stamping', () => {
 		}
 	});
 
-	it('stamps both visible chat replies and keeps the collapse point and the New signs stable', async () => {
+	it('stamps both visible chat replies and keeps the collapse point stable', async () => {
 		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
 		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
 		vi.useFakeTimers();
@@ -300,8 +300,7 @@ describe('CommentThread stamping', () => {
 		await vi.advanceTimersByTimeAsync(2);
 		expect(onViewed.mock.calls).toEqual([['c1', 'r4'], ['c1', 'r5']]);
 		arrive({ newReplyIds: [] });
-		// The viewed stamp has landed, and the signs stay on the replies the reader came to see until the card is closed.
-		expect(newMarks()).toBe(2);
+		expect(newMarks()).toBe(0);
 		expect(host.textContent).toContain('Show 4 earlier replies');
 		expect(host.textContent).toContain('reply r4');
 		expect(host.textContent).not.toContain('reply r0');
@@ -327,34 +326,14 @@ describe('CommentThread stamping', () => {
 		expect(newMarks()).toBe(0);
 	});
 
-	it('shows a reply New from when it arrives until the thread is closed, even once the server reports it read', () => {
+	it('shows only the server-reported unread reply while the thread is open', () => {
 		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
 		state.comment = { ...state.comment, replies, newReplyIds: ['r1'] };
 		render(vi.fn().mockResolvedValue(undefined));
 		expect(newMarks()).toBe(1);
 		arrive({ newReplyIds: ['r2'] });
-		expect(newMarks()).toBe(2);
+		expect(newMarks()).toBe(1);
 		arrive({ newReplyIds: [] });
-		expect(newMarks()).toBe(2);
-	});
-
-	it('shows a margin card only what the server says is new: a card that stays up does not keep a sign the server has cleared', () => {
-		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
-		state.comment = { ...state.comment, replies, newComment: true, newReplyIds: ['r1'] };
-		render(vi.fn().mockResolvedValue(undefined), true, { inMargin: true });
-		expect(newMarks()).toBe(2);
-		arrive({ newComment: false, newReplyIds: [] });
-		expect(newMarks()).toBe(0);
-	});
-
-	it('keeps a margin card\'s replies collapsed from where they were when the viewed stamp clears their New signs', () => {
-		const replies = Array.from({ length: 8 }, (_, i) => reply(`r${i + 1}`, `2026-10-16T18:0${i}:00Z`));
-		state.comment = { ...state.comment, replies, newComment: false, newReplyIds: ['r2', 'r3'] };
-		render(vi.fn().mockResolvedValue(undefined), true, { inMargin: true });
-		const shown = () => document.body.querySelectorAll('[data-reply-id]').length;
-		const before = shown();
-		arrive({ newComment: false, newReplyIds: [] });
-		expect(shown()).toBe(before);
 		expect(newMarks()).toBe(0);
 	});
 });

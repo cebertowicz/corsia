@@ -38,9 +38,9 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	const fromList = $derived(!!viewing?.list && !viewing.listed);
 	let sheetPanel = $state<HTMLElement | null>(null);
-	const sheetReveal = createChatSheetReveal(() => sheetPanel, messageRoot, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
+	const sheetReveal = createChatSheetReveal(() => sheetPanel, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
 	// The same keeping for an opened comment's sheet: the pressed text (after the sheet is capped above it) rises into the space above the sheet.
-	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText() ?? threadAnchor()));
+	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText() ?? threadAnchor(), sheet ? undefined : sheetReveal.pressedText));
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
@@ -222,8 +222,7 @@
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
 				if (unread) for (const wrap of wraps) wrap.dataset.unread = '';
-				// A thread held unread only for its open sheet keeps its drawn look; its dot and its spoken notice go with the read stamp.
-				if (anchor && (failed || sending || unreadNow(comment))) {
+				if (anchor) {
 					const quote = quoteLabel(comment.quote);
 					wraps[0].setAttribute('aria-label', failed ? `Your reply on ${quote} wasn’t delivered.` : sending ? `Your reply on ${quote} is sending.` : `The comment on ${quote} has a new reply.`);
 					if (failed || !sending) dotCleanups.push(placeHighlightDot(body, anchor, failed ? quote : null));

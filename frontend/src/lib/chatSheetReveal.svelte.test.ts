@@ -15,10 +15,8 @@ function span(rows: DOMRect[]): HTMLElement {
 function setup(initialMode: 'list' | 'thread' | null = null) {
 	const panel = $state<{ el: HTMLElement | null }>({ el: null });
 	const mode = $state<{ now: 'list' | 'thread' | null }>({ now: initialMode });
-	const scroller = document.createElement('div');
-	document.body.append(scroller);
 	let reveal!: ReturnType<typeof createChatSheetReveal>;
-	stop = $effect.root(() => { reveal = createChatSheetReveal(() => panel.el, () => scroller, () => mode.now, () => 'c1'); });
+	stop = $effect.root(() => { reveal = createChatSheetReveal(() => panel.el, () => mode.now, () => 'c1'); });
 	return { reveal, panel, mode };
 }
 

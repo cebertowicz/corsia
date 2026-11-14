@@ -19,14 +19,35 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 	panel.style.setProperty('--drawer-text-cap', `${Math.max(MIN_SHEET, Math.floor(room))}px`);
 }
 
+const roomAdded = new WeakMap<HTMLElement, string>();
+
 /**
- * A line near the end of a scroll area cannot be lifted by `move` without room below it. Adds the missing room to the scroller's bottom
- * padding and says whether it did, for the caller to give back (with the padding it had) once the sheet it was for is gone. The one
- * place that adds this room, for the chat transcript and the document alike.
+ * Scrolls `scroller` so `text` (a box in viewport coordinates) sits between `band.top` and the top of a sheet (`band.sheetTop`), a gap clear
+ * on each side: not at all when it is there already, else centred in that space (from its first line when it is taller than the space).
+ * A line near the end of a scroll area cannot be lifted without room below it, so the missing room is added to the scroller's bottom
+ * padding until `giveBackRoom`. `opening` is the sheet's first placement; a later movement (the keyboard, the sheet's content settling)
+ * only lifts text out from under the sheet, so a scroll the reader chose is not undone. The one placement and the one room-below
+ * mechanism, for the chat transcript and the document alike.
  */
-export function addRoomBelow(scroller: HTMLElement, move: number): boolean {
+export function placeAboveSheet(scroller: HTMLElement, text: { top: number; bottom: number }, band: { top: number; sheetTop: number }, opening: boolean): void {
+	const top = band.top + SHEET_GAP, bottom = band.sheetTop - SHEET_GAP, room = bottom - top, height = text.bottom - text.top;
+	if (room <= 0 || (text.top >= top && text.bottom <= bottom) || (!opening && text.bottom <= bottom)) return;
+	const move = height > room ? text.top - top : text.top + height / 2 - (top + room / 2);
 	const missing = move - (scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
-	if (missing <= 0) return false;
-	scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + Math.ceil(missing)}px`;
-	return true;
+	if (missing > 0) {
+		if (!roomAdded.has(scroller)) roomAdded.set(scroller, scroller.style.paddingBottom);
+		scroller.style.paddingBottom = `${parseFloat(getComputedStyle(scroller).paddingBottom) + Math.ceil(missing)}px`;
+	}
+	scroller.scrollTop += move;
 }
+
+/** Gives back the room `placeAboveSheet` added below the scroller, once the sheet it was for is gone. */
+export function giveBackRoom(scroller: HTMLElement): void {
+	const before = roomAdded.get(scroller);
+	if (before === undefined) return;
+	scroller.style.paddingBottom = before;
+	roomAdded.delete(scroller);
+}
+
+/** Fired on the document when the keyboard's settling has moved the chat transcript's layout while a comment sheet is open; the sheet then places its passage again. */
+export const TRANSCRIPT_MOVED = 'corsia:transcript-moved';

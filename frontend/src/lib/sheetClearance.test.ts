@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRoomBelow, capSheetAboveText, keptWhole, SHEET_GAP } from './sheetClearance';
+import { capSheetAboveText, giveBackRoom, keptWhole, placeAboveSheet, SHEET_GAP } from './sheetClearance';
 
 function sheet(backdropBottom: number): HTMLElement {
 	const backdrop = document.createElement('div');
@@ -49,17 +49,56 @@ function scroller(scrollHeight: number, clientHeight: number, scrollTop: number)
 	return el;
 }
 
-describe('addRoomBelow', () => {
-	it('adds only the room that is missing below the content, on top of the padding it has', () => {
-		const el = scroller(1000, 600, 380);
-		expect(addRoomBelow(el, 70)).toBe(true);
-		// 1000 - 600 - 380 = 20 left; 70 asked; 50 more.
-		expect(el.style.paddingBottom).toBe('60px');
+// The space for text: from the band's top plus a gap to the sheet's top less a gap (here 116 to 464, 348 tall).
+const band = { top: 100, sheetTop: 480 };
+
+describe('placeAboveSheet', () => {
+	it('centres text the sheet covers in the space above it', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 500, bottom: 521 }, band, true);
+		// Centre of the space is 290; the text's centre is 510.5.
+		expect(el.scrollTop).toBe(300 + 510.5 - 290);
 	});
 
-	it('changes nothing when the content already has the room', () => {
-		const el = scroller(1000, 600, 100);
-		expect(addRoomBelow(el, 70)).toBe(false);
+	it('leaves text that is already in the space where it is', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 200, bottom: 221 }, band, true);
+		expect(el.scrollTop).toBe(300);
+	});
+
+	it('keeps a gap between the text and the sheet: text touching the sheet moves', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 450, bottom: 480 - SHEET_GAP + 1 }, band, true);
+		expect(el.scrollTop).toBeGreaterThan(300);
+	});
+
+	it('after opening, lifts only text a movement has put under the sheet, never text the reader scrolled above it', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 20, bottom: 41 }, band, false);
+		expect(el.scrollTop).toBe(300);
+		placeAboveSheet(el, { top: 500, bottom: 521 }, band, false);
+		expect(el.scrollTop).toBeGreaterThan(300);
+	});
+
+	it('shows text taller than the space from its first line', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 500, bottom: 1000 }, band, true);
+		expect(el.scrollTop).toBe(300 + 500 - (band.top + SHEET_GAP));
+	});
+
+	it('adds only the room missing below the content, on top of the padding it has, and gives it back', () => {
+		// 20 left below; the lift is 510.5 - 290 = 220.5, so 201 more (rounded up) on top of 10.
+		const el = scroller(1000, 600, 380);
+		placeAboveSheet(el, { top: 500, bottom: 521 }, band, true);
+		expect(el.style.paddingBottom).toBe('211px');
+		giveBackRoom(el);
+		expect(el.style.paddingBottom).toBe('10px');
+	});
+
+	it('adds nothing when the content already has the room, and giving back changes nothing', () => {
+		const el = scroller(2000, 600, 300);
+		placeAboveSheet(el, { top: 500, bottom: 521 }, band, true);
+		giveBackRoom(el);
 		expect(el.style.paddingBottom).toBe('10px');
 	});
 });
