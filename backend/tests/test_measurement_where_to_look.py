@@ -366,7 +366,7 @@ async def test_the_daily_all_work_read_an_agent_consumes_keeps_its_fields(isolat
 
 #: Worker-thread round trips on the longest awaited chain of one cold all-work read. Each round trip
 #: waits for the event loop to resume it, so on a CPU-starved host the read's time grows with this
-#: chain, not with its database time. Run at once the page reads take 5; run one after another they took 14.
+#: chain, not with its database time.
 MAX_ROUND_TRIPS_IN_A_CHAIN = 6
 
 
@@ -421,3 +421,52 @@ async def test_a_cold_all_work_read_reads_the_shared_costs_once_on_a_short_chain
     assert sorted(row["subject"]["id"] for row in result["worse"] if row["subject"]["kind"] == "agent") == ["one", "two"]
     assert sorted(calls) == ["chain_costs", "ledger_shapes"]
     assert 0 < deepest[0] <= MAX_ROUND_TRIPS_IN_A_CHAIN
+
+
+@pytest.mark.asyncio
+async def test_one_failed_page_read_raises_its_error_and_leaves_no_other_read_running(isolated_db, monkeypatch):
+    """The page reads run at once; when one fails, the route raises that error only after every other
+    read has been cancelled and has finished, so a failed request leaves no work running behind it."""
+    import asyncio
+
+    from api import measurement as page
+    from api import measurement_where_to_look as route
+
+    _freeze(monkeypatch, POST_BREAK)
+
+    def seed(db):
+        _seed_project(db, "p1")
+        _seed_agent(db, "one", project_id="p1")
+
+    _seeded(seed)
+    started: list[str] = []
+    cancelled: list[str] = []
+    pending: list[asyncio.Task] = []
+
+    def waiting(name):
+        async def read(*args, **kwargs):
+            pending.append(asyncio.current_task())
+            started.append(name)
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(name)
+                raise
+        return read
+
+    async def failing(*args, **kwargs):
+        # Fail only once every other read is in flight, so the cancellation path is what is tested.
+        while len(started) < 3:
+            await asyncio.sleep(0)
+        raise RuntimeError("cost read failed")
+
+    monkeypatch.setattr(page, "series_payload", waiting("series"))
+    monkeypatch.setattr(page, "models_read", waiting("models"))
+    monkeypatch.setattr(page, "agents_payload", waiting("agents"))
+    monkeypatch.setattr(route, "cost_read", failing)
+
+    with pytest.raises(RuntimeError, match="cost read failed"):
+        await route.measurement_where_to_look(
+            project="all", agent="none", grain="days", timezone_name="UTC", user={"id": "steve"})
+    assert sorted(cancelled) == ["agents", "models", "series"]
+    assert all(task.done() for task in pending) and len(pending) == 3
