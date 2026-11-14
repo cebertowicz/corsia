@@ -291,7 +291,7 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     finally:
         db.close()
     assert unread_and_stamps() == (2, ["2026-01-02"])
-    # A newer answer arriving during the first reply's dwell stays unread.
+    # A newer answer arriving after the first reply was opened stays unread.
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer"}).status_code == 200
     assert unread_and_stamps() == (2, ["2026-01-02"])
     assert client.post(url, headers=headers, json={"assistant_message_id": "answer-2"}).status_code == 200

@@ -25,7 +25,8 @@ export function createCommentOpeners(ui: ReturnType<typeof createCommentSurfaceS
 	return {
 		comment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) {
 			const point = clicked(click, anchor);
-			if (!ui.focusComment(id, point ?? anchor, viaSuggestion, !!point)) return;
+			// A click or tap on the highlight reads the thread; a caret moved in by keys comes with no click and reads nothing.
+			if (!ui.focusComment(id, point ?? anchor, viaSuggestion, !!point, !!click)) return;
 			if (point) scroll.stay(id); else scroll.toComment(id, false, 'navigation');
 		},
 		markers(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) {
