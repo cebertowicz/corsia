@@ -28,9 +28,9 @@
 		{@render body(true)}
 	</AdaptiveDrawer>
 {:else}
-	<Popover {anchor} {bounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} {onClose} {onClosed}>
+	<Popover {anchor} {bounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} initialFocus={listed ? '.thread-list-title' : undefined} {onClose} {onClosed}>
 		<div role="dialog" aria-label={name}>
-			{#if listed}<h2 class="thread-list-title">{name}</h2>{/if}
+			{#if listed}<h2 class="thread-list-title" tabindex="-1">{name}</h2>{/if}
 			{#if fromList}{@render backButton()}{/if}
 			{@render body(false)}
 		</div>
@@ -41,5 +41,6 @@
 	/* The way back to the list: the Back of the other drill-in screens (chevron and the word), a touch-sized target. */
 	.thread-back { display: inline-flex; align-items: center; gap: var(--space-1); min-height: var(--touch-target); min-width: var(--touch-target); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; }
 	.thread-back:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.thread-list-title:focus { outline: none; }
 	.thread-list-title { margin: 0; padding: var(--space-1) var(--space-3) 0; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 </style>
