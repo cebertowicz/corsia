@@ -352,16 +352,16 @@
       "sha256": "c983e70b15d675f44ac9488bf546fe0da42e995c2f72dbee9eb361464bfa80c8"
     },
     {
-      "bytes": 2858,
+      "bytes": 3240,
       "kind": "skill",
       "path": "skills/isolated-workers/SKILL.md",
-      "sha256": "2712b19ffceff252c69ec4cec34cc75205a9ad255c22e4343b725d4e6a37a88b"
+      "sha256": "f036a7e9d226fa88bbe12485090d3a4eceda2017bf2e1ab00623736c991d78e7"
     },
     {
-      "bytes": 7612,
+      "bytes": 7617,
       "kind": "skill",
       "path": "skills/isolated-workers/references/each-time.md",
-      "sha256": "01c376651b64780bdbf1064d64b299a3be79fae54e4fbbfe4f7f2728f1948fcc"
+      "sha256": "aa339537a025214fdfdfa67ccd87d0ca48fa5a303ec3ef22446b769856bf374d"
     },
     {
       "bytes": 3634,
