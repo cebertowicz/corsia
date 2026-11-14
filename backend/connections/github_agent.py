@@ -10,7 +10,9 @@ view, so a shell spawn that reads one view gets an environment, a grant and a de
 rule that agree.
 
 The account is ready only when ``gh api user`` in its own home answered with a
-login that is not the person's own, and the person's login is known.
+login that is not the person's own, and the person's own GitHub is known: a stored
+login, or an answered check that found no GitHub login in their ``gh``, or no ``gh``
+(a person with no GitHub account of their own). A failed check proves neither.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ from connections.github_agent_home import (
     stores_token,
 )
 from connections.github_person import request_probe, same_login
+from connections.github_signin import NO_OWN_LOGIN
 from infra.database import get_db
 
 log = logging.getLogger(__name__)
@@ -86,6 +89,7 @@ class AgentAccountView:
     binary: str | None = None
     login: str | None = None
     user_id: int | None = None
+    unconfirmed: bool = False  # ready with no own login to compare: only the person can tell
 
     @property
     def ready(self) -> bool:
@@ -151,10 +155,7 @@ def _verify(binary: str, home: str) -> Verified | Failed:
 
 
 def _verify_and_store(key: tuple, binary: str, home: str) -> None:
-    """Verify, then store the answer under the key it started with, before the future completes.
-
-    A soft failure never drops a verified answer.
-    """
+    """Store the answer under its starting key before the future completes; a soft failure keeps a verified one."""
     try:
         result = _verify(binary, home)
     except Exception as exc:  # noqa: BLE001 - a crashed verification is an unknown answer
@@ -196,17 +197,20 @@ def _agent_binary(config: dict) -> str | None:
     return agent_binary_from_config(config)
 
 
-def _read(db) -> tuple[list, str | None]:
+def _read(db) -> tuple[list, str | None, bool]:
+    """The account rows, the person's stored login, and whether their own gh has no sign-in."""
     connection = db or get_db()
     rows = connection.execute(_ROWS, (PROVIDER,)).fetchall()
     person = connection.execute(_PERSON, (PROVIDER,)).fetchone()
-    login = _config(person["config"] if person else None).get("login")
-    return rows, login if isinstance(login, str) and login else None
+    config = _config(person["config"] if person else None)
+    login = config.get("login")
+    login = login if isinstance(login, str) and login else None
+    return rows, login, login is None and config.get(NO_OWN_LOGIN) is True
 
 
 def _resolve(db, *, wait: float | None) -> AgentAccountView:
     try:
-        rows, person = _read(db)
+        rows, person, no_own_login = _read(db)
     except Exception as exc:  # noqa: BLE001 - an unreadable row is never read as no account
         log.warning("agents' github account read failed: %s", type(exc).__name__)
         return AgentAccountView("unverified", "read_failed")
@@ -241,15 +245,16 @@ def _resolve(db, *, wait: float | None) -> AgentAccountView:
         with _lock:
             entry = _results.get(key)
     if person is None:
-        request_probe()
-        return replace(base, state="unverified", cause="own_login_unknown")
+        request_probe()  # keeps looking, so a personal sign-in made later is still caught
+        if not no_own_login:
+            return replace(base, state="unverified", cause="own_login_unknown")
     if entry is None:
         return replace(base, state="unverified", cause="verifying")
     if isinstance(entry, Failed):
         return replace(base, state="needs_auth" if entry.definite else "unverified", cause=entry.cause)
     if same_login(entry.login, person):
         return replace(base, state="wrong_account", cause="person_account")
-    return replace(base, state="ready", login=entry.login, user_id=entry.user_id)
+    return replace(base, state="ready", login=entry.login, user_id=entry.user_id, unconfirmed=person is None)
 
 
 def view(db=None) -> AgentAccountView:
@@ -263,12 +268,14 @@ def verify_now(db=None) -> AgentAccountView:
 
 
 def source_state(account: AgentAccountView) -> dict:
-    """The model-source row: the state, a named cause, and the login once verified."""
+    """The model-source row: the state, a named cause, the login once verified, and whether it was compared."""
     shown: dict = {"state": account.state}
     if account.cause is not None:
         shown["cause"] = account.cause
     if account.ready:
         shown["login"] = account.login
+    if account.ready and account.unconfirmed:
+        shown["own_login_checked"] = False
     return shown
 
 
@@ -304,7 +311,6 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     command.
     """
     return {} if account.absent else _identity_env(account)
-
 
 
 def script_view() -> AgentAccountView:
