@@ -49,6 +49,10 @@ def clean_claude_env() -> dict[str, str]:
     env["DISABLE_AUTO_COMPACT"] = "1"
     env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
     env["CLAUDE_CODE_SILENT_TURN_REMINDER"] = "0"
+    # CORSIA runs its own pinned copy; it must never update itself or the person's copy.
+    # DISABLE_UPDATES also refuses `claude update`; DISABLE_AUTOUPDATER alone does not.
+    env["DISABLE_UPDATES"] = "1"
+    env["DISABLE_AUTOUPDATER"] = "1"
     return env
 
 

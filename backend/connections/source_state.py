@@ -135,25 +135,41 @@ def harness_state(provider: str, *, db=None) -> dict[str, Any]:
 
 def _record_install(provider: str, cfg: dict, binary: str | None) -> None:
     """Keep the CLI's binary and whether it is installed: all the row holds for this source."""
+    from connections import stored_binary
+
     upsert_connection(
-        type=ConnectionType.CLI, provider=provider, config={**cfg, "binary": binary or provider},
+        type=ConnectionType.CLI, provider=provider, config={**cfg, "binary": stored_binary(provider, binary)},
         status=ConnectionStatus.AVAILABLE if binary else ConnectionStatus.NOT_INSTALLED,
     )
 
 
-async def check_harness_source(provider: str) -> None:
-    """Re-check Claude Code / Codex: find its binary again, then refresh its accounts.
-
-    The binary and whether it is installed land on the connection row, so an
-    install or a moved binary is picked up when the user asks. Each signed-in
-    account's refresh records its own discovery, which ``harness_state`` reads.
-    A failure raises.
-    """
+def record_install(provider: str) -> str | None:
+    """Find the CLI again and record it on its row; return its executable, or None."""
     from connections import resolve_builtin_binary
-    from connections.harness_models import refresh_provider
 
-    cfg, binary = await run_in_db(resolve_builtin_binary, provider)
-    await run_in_db(_record_install, provider, cfg, binary)
+    cfg, binary = resolve_builtin_binary(provider)
+    _record_install(provider, cfg, binary)
+    return binary
+
+
+async def check_harness_source(provider: str) -> None:
+    """Re-check Claude Code / Codex: find the CLI, then refresh its accounts.
+
+    A vendor whose pinned copy is missing (a failed startup download, a moved pin)
+    gets a background install, so a re-check recovers without a restart and never
+    waits on the download; the row reads ``not_installed`` until the copy lands. The
+    binary and whether it is installed land on the connection row. Each signed-in
+    account's refresh records its own discovery, which ``harness_state`` reads.
+    Any other failure raises.
+    """
+    from connections import PINNED_HARNESSES
+    from connections.harness_models import refresh_provider
+    from connections.pinned_harness import start_install
+    from tools.managed_runtime import installed_runtime_path
+
+    if provider in PINNED_HARNESSES and installed_runtime_path(provider) is None:
+        start_install(provider)
+    binary = await run_in_db(record_install, provider)
     if binary is not None:
         await refresh_provider(provider, reason="manual", binary=binary)
 

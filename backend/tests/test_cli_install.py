@@ -10,10 +10,13 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.request
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+
+from tools import managed_runtime
 
 
 @pytest.fixture(autouse=True)
@@ -187,7 +190,7 @@ async def test_the_failure_line_carries_the_reason_into_the_setup_report(monkeyp
     from api import cli_install
     from onboarding.setup_report import relevant_lines
 
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: "the installer stopped")
+    monkeypatch.setattr(cli_install, "_run_pinned_install", lambda _vendor, _job: "the installer stopped")
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
@@ -208,29 +211,30 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
     async def refresh():
         refreshed.append(True)
 
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
+    monkeypatch.setattr(cli_install, "_run_pinned_install", lambda _vendor, _job: None)
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", refresh)
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: notified.append(True))
-    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: "/usr/local/bin/codex")
+    # Agents run CORSIA's own copy, so a person's copy earlier on PATH shadows nothing.
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: pytest.fail("shadow check on install"))
     assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": "/usr/local/bin/codex"}
+    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": None}
     assert refreshed == [True] and notified == [True]
 
 
 @pytest.mark.asyncio
-async def test_location_check_failure_does_not_break_a_successful_install(monkeypatch, caplog):
+async def test_location_check_failure_does_not_break_a_successful_update(monkeypatch, caplog):
     from api import cli_install
 
+    _person_copy_updatable(monkeypatch)
     monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: (_ for _ in ()).throw(OSError("unreadable")))
-    _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
 
     with caplog.at_level("WARNING", logger=cli_install.log.name):
-        await cli_install.start_install("codex", {})
+        await cli_install.start_update("codex", {})
         await cli_install._jobs["codex"].task
     assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": None}
     assert "location check after installation did not complete" in caplog.text
@@ -246,7 +250,7 @@ async def test_second_post_returns_the_existing_running_job(monkeypatch):
         release.wait()
         return None
 
-    monkeypatch.setattr(cli_install, "_run_installer", run)
+    monkeypatch.setattr(cli_install, "_run_pinned_install", run)
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
@@ -280,59 +284,164 @@ async def test_update_reuses_the_installer_unless_a_package_manager_owns_the_cli
 
 
 def _nothing_installed(monkeypatch):
-    """Neither the service PATH nor the login shell knows the CLI."""
+    """CORSIA's own copy of the CLI is not installed."""
+    monkeypatch.setattr("tools.managed_runtime.installed_runtime_path", lambda _kind, **_k: None)
+
+
+def _person_copy_updatable(monkeypatch):
+    """The person's own copy is on the service PATH and no package manager owns it."""
     from api import cli_install
 
-    monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: None)
-    monkeypatch.setattr(cli_install, "login_shell_binary", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "service_binary", lambda vendor: f"/usr/local/bin/{vendor}")
+    monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: None)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
 
 
 @pytest.mark.asyncio
-async def test_post_rejects_invisible_and_installed_binaries(monkeypatch):
+async def test_install_refuses_only_when_corsias_own_copy_is_installed(monkeypatch):
+    """A person's own copy on PATH is not the copy agents run."""
     from api import cli_install
 
-    monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: None)
-    monkeypatch.setattr(cli_install, "login_shell_binary", lambda _vendor: Path("/Users/user/bin/codex"))
-    response = await cli_install.start_install("codex", {})
-    assert response.status_code == 409 and response.body == b'{"reason":"invisible_binary"}'
     monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: "/usr/local/bin/codex")
+    monkeypatch.setattr(cli_install, "_run_pinned_install", lambda _vendor, _job: None)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+    _nothing_installed(monkeypatch)
+    assert (await cli_install.start_install("codex", {}))["state"] == "running"
+    await cli_install._jobs["codex"].task
+
+    cli_install._jobs.clear()
+    monkeypatch.setattr("tools.managed_runtime.installed_runtime_path", lambda _kind, **_k: Path("/runtimes/codex"))
     response = await cli_install.start_install("codex", {})
     assert response.status_code == 409 and response.body == b'{"reason":"already_installed"}'
-
-
-@pytest.mark.asyncio
-async def test_guard_finds_a_login_shell_binary_live_with_an_empty_cache(monkeypatch, tmp_path):
-    """A restarted server has no cached observation; the guard still sees a shell-only CLI."""
-    from api import cli_install, provider_cli_link
-    import cli_location
-
-    binary = tmp_path / "login-bin" / "codex"
-    binary.parent.mkdir()
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
-    provider_cli_link._invisible_binaries.clear()
-    monkeypatch.setattr(cli_location.Path, "home", lambda: tmp_path / "home")
-    monkeypatch.setenv("CORSIA_SERVICE_PATH", str(tmp_path / "empty"))
-    monkeypatch.setattr(cli_location, "shell_binary", lambda _name: str(binary))
-    response = await cli_install.start_install("codex", {})
-    assert response.status_code == 409 and response.body == b'{"reason":"invisible_binary"}'
     assert "codex" not in cli_install._jobs
 
 
-@pytest.mark.asyncio
-async def test_guard_treats_a_hung_login_shell_as_not_found(monkeypatch):
+def test_the_install_job_runs_corsias_pinned_install(monkeypatch):
+    from api import cli_install
+    from connections import pinned_harness
+
+    ran = []
+    monkeypatch.setattr(pinned_harness, "install_pinned", lambda vendor, **_k: ran.append(vendor) or Path("/x"))
+    assert cli_install._run_pinned_install("codex", cli_install.InstallJob()) is None
+    assert ran == ["codex"]
+
+
+def test_a_cancel_before_the_pinned_install_starts_means_it_never_starts(monkeypatch):
+    from api import cli_install
+    from connections import pinned_harness
+
+    monkeypatch.setattr(pinned_harness, "install_pinned", lambda _vendor, **_k: pytest.fail("a cancelled job must not install"))
+    job = cli_install.InstallJob()
+    cli_install._request_cancel(job)
+    assert cli_install._run_pinned_install("codex", job) is None
+    assert job.cancelled
+
+
+class _Stream(_Response):
+    """A download that keeps sending chunks until the test's hook says otherwise."""
+
+    def __init__(self, on_read=None):
+        super().__init__(b"x" * 16)
+        self.reads = 0
+        self.on_read = on_read
+
+    def read(self, _size):
+        self.reads += 1
+        if self.on_read:
+            self.on_read()
+        return self.content if self.reads < 1000 else b""
+
+
+def _real_codex_download(monkeypatch, root: Path, stream: _Stream) -> None:
+    """Run the real pinned install for codex into the test's own root, from the given stream."""
+    pin = managed_runtime.RuntimePin("9.9.9", "https:" "//registry.test/codex.tgz", "", "tar.gz", "package/codex", "0" * 128)
+    monkeypatch.setitem(managed_runtime.RUNTIME_PINS, "codex", {"arm64": pin})
+    monkeypatch.setattr(managed_runtime, "machine_key", lambda: "arm64")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_a, **_k: stream)
+    isolated = managed_runtime.ensure_runtime  # the test-wide guard; it runs the real install given a root
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda kind, **kwargs: isolated(kind, root=root, **kwargs))
+
+
+def test_a_cancel_during_the_pinned_download_stops_it_and_settles_cancelled(monkeypatch, tmp_path):
+    """Cancel reaches the real download loop: it stops at the next chunk and nothing is installed."""
     from api import cli_install
 
-    def hang(_vendor):
-        raise TimeoutError
+    job = cli_install.InstallJob()
+    stream = _Stream(on_read=lambda: cli_install._request_cancel(job))  # Cancel pressed mid-download
+    _real_codex_download(monkeypatch, tmp_path, stream)
 
-    monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: None)
-    monkeypatch.setattr(cli_install, "login_shell_binary", hang)
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
-    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
-    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
-    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
-    await cli_install._jobs["codex"].task
+    assert cli_install._run_pinned_install("codex", job) is None
+    assert job.cancelled and stream.reads == 1
+    assert managed_runtime.installed_runtime_path("codex", root=tmp_path) is None
+    assert list((tmp_path / "codex").rglob("download")) == []
+
+
+def test_a_failure_after_cancel_settles_cancelled_not_failed(monkeypatch):
+    from api import cli_install
+    from connections import pinned_harness
+
+    job = cli_install.InstallJob()
+
+    def fail_after_cancel(_vendor, **_k):
+        cli_install._request_cancel(job)
+        raise _download_error(urllib.error.URLError("connection reset"))
+
+    monkeypatch.setattr(pinned_harness, "install_pinned", fail_after_cancel)
+    assert cli_install._run_pinned_install("codex", job) is None
+    assert job.cancelled
+
+
+def _download_error(cause: BaseException):
+    try:
+        raise managed_runtime.ManagedRuntimeDownloadError(f"download failed: {type(cause).__name__}") from cause
+    except managed_runtime.ManagedRuntimeDownloadError as error:
+        return error
+
+
+@pytest.mark.parametrize(("error", "reason"), [
+    (lambda: _download_error(urllib.error.URLError("offline")), "no internet connection"),
+    (lambda: _download_error(urllib.error.HTTPError("u", 404, "missing", Message(), None)), "the download site refused the request"),
+    (lambda: _download_error(urllib.error.HTTPError("u", 503, "busy", Message(), None)), "the download service cannot answer"),
+    (lambda: _download_error(TimeoutError("slow")), "it took too long"),
+    (lambda: managed_runtime.ManagedRuntimeChecksumError("any words"), "the download didn't verify"),
+    (lambda: managed_runtime.ManagedRuntimeUnverifiedError("any words"), "the download didn't verify"),
+    # Classified by type, never by the words: a local failure mentioning a download is still local.
+    (lambda: managed_runtime.ManagedRuntimeError("download archive checksum byte limit"), "the installer stopped"),
+])
+def test_pinned_install_failures_have_the_existing_safe_reasons(monkeypatch, error, reason):
+    from api import cli_install
+    from connections import pinned_harness
+
+    failure = error()
+
+    def fail(_vendor, **_k):
+        raise failure
+
+    monkeypatch.setattr(pinned_harness, "install_pinned", fail)
+    assert cli_install._run_pinned_install("claude-code", cli_install.InstallJob()) == reason
+
+
+def test_a_full_disk_during_the_pinned_download_is_not_no_internet(monkeypatch, tmp_path):
+    """The real install path: a write that fails for lack of space is not a connection problem."""
+    from api import cli_install
+
+    class FullDisk:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def write(self, _chunk):
+            raise OSError(28, "No space left on device")
+
+    real_open = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, mode="r", *a, **k: FullDisk() if mode == "xb" else real_open(self, mode, *a, **k))
+    _real_codex_download(monkeypatch, tmp_path, _Stream())
+
+    assert cli_install._run_pinned_install("codex", cli_install.InstallJob()) == cli_install.INSTALLER_STOPPED
+    assert managed_runtime.installed_runtime_path("codex", root=tmp_path) is None
 
 
 @pytest.mark.asyncio
@@ -345,10 +454,10 @@ async def test_a_tempfile_error_settles_the_job_failed(monkeypatch):
 
     monkeypatch.setattr(cli_install.urllib.request, "urlopen", lambda *_a, **_k: _Response(b"#!/bin/sh\n"))
     monkeypatch.setattr(cli_install, "private_mkstemp", broken)
-    _nothing_installed(monkeypatch)
+    _person_copy_updatable(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
-    await cli_install.start_install("codex", {})
+    await cli_install.start_update("codex", {})
     await cli_install._jobs["codex"].task
     result = await cli_install.get_install("codex", {})
     assert result["state"] == "failed" and result["reason"] == cli_install.INSTALLER_STOPPED
@@ -362,7 +471,7 @@ async def test_any_unexpected_error_settles_the_job_failed_and_is_logged(monkeyp
     def explode(_vendor, _job):
         raise RuntimeError("unexpected")
 
-    monkeypatch.setattr(cli_install, "_run_installer", explode)
+    monkeypatch.setattr(cli_install, "_run_pinned_install", explode)
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
@@ -448,7 +557,7 @@ def _gone_soon(pid: int) -> bool:
 
 
 async def _start_real_installer(monkeypatch, tmp_path, *, trap: str = ""):
-    """Start a job whose installer is a real shell script; returns the script path and the pid directory."""
+    """Start an update whose installer is a real shell script; returns the script path and the pid directory."""
     from api import cli_install
 
     script = tmp_path / "installer.sh"
@@ -456,8 +565,8 @@ async def _start_real_installer(monkeypatch, tmp_path, *, trap: str = ""):
     monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
-    _nothing_installed(monkeypatch)
-    await cli_install.start_install("claude-code", {})
+    _person_copy_updatable(monkeypatch)
+    await cli_install.start_update("claude-code", {})
     deadline = time.monotonic() + 5
     while not (tmp_path / "child").exists() or not (tmp_path / "child").read_text().strip():
         assert time.monotonic() < deadline, "the installer never started"
@@ -506,7 +615,7 @@ async def test_a_new_install_can_start_after_a_cancel(monkeypatch, tmp_path):
     assert cli_install._jobs["claude-code"].state == "cancelled"
 
     (tmp_path / "child").unlink()
-    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
+    assert await cli_install.start_update("claude-code", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install.cancel_install("claude-code", {})
     await cli_install._jobs["claude-code"].task
 
@@ -594,7 +703,7 @@ async def test_a_cancel_racing_completion_returns_the_single_state_the_job_settl
         release.wait()
         return None
 
-    monkeypatch.setattr(cli_install, "_run_installer", finish_first)
+    monkeypatch.setattr(cli_install, "_run_pinned_install", finish_first)
     monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
