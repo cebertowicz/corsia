@@ -179,6 +179,7 @@ jobs:
           release_version="${RELEASE_TAG#v}"
           desktop/scripts/test-stamp-release-version.sh
           desktop/scripts/test-stamp-bundle-version.sh
+          desktop/scripts/test-list-macho.sh
           desktop/scripts/stamp-release-version.sh "$RELEASE_TAG"
           if [ "$CHANNEL" = dev ]; then
             desktop/scripts/test-stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
