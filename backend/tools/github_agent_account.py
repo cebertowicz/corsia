@@ -136,7 +136,8 @@ class GitHubAgentAccountTool(Tool):
             "in a browser signed in as the agents' GitHub account, never their own, or a "
             "named cause, with a next step when there is one (skill github, agent-account.md). "
             "check: read the sign-in and verify the account; repeat only while the sign-in "
-            "is waiting, then act on the account's state. sign_out: sign the "
+            "is waiting; once it is over, do the top-level next first when one is set (it names an "
+            "unchecked login to the person), then act on the account's state. sign_out: sign the "
             "account out; agent shells stay locked until it is connected again. Never run "
             "gh auth login in the shell."
         )
