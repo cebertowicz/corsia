@@ -425,20 +425,25 @@ def _answered() -> str:
 
 def test_a_rewrite_unmarks_the_entry(tmp_path, monkeypatch) -> None:
     from infra.continuity_store import replace_entry
-    from infra.placement_marks import selected_entries, set_mark
+    from infra.placement_marks import clear_mark, selected_entries, set_mark
 
     db = _db()
     _seed_thread(db)
     entry = _add(db, "decisions", {**_lesson("one"), "rationale": "r"})
     revision = _mark(db, entry)["revision"]
-    set_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
-             state="selected", revision=revision,
-             detail=_answered())
+    db.execute("UPDATE continuity_entries SET updated_at='2026-01-01T09:00:00' WHERE entry_id=?", (entry,))
+
+    def select() -> None:
+        set_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
+                 state="selected", revision=revision, detail=_answered())
+
+    select()
     assert [row["entry_id"] for row in selected_entries(db)] == [entry]
-    # The placement lookup is bounded by this stamp, so it is the selection's own.
-    assert selected_entries(db)[0]["selected_at"] == db.execute(
-        "SELECT reviewed_at FROM continuity_entries WHERE entry_id=?", (entry,),
-    ).fetchone()[0]
+    # The placement lookup is bounded by the revision's time, which a failed save that
+    # clears the mark and a later re-selection of the same revision both leave alone.
+    clear_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry)
+    select()
+    assert selected_entries(db)[0]["revised_at"] == "2026-01-01T09:00:00"
     replace_entry(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
                   body={**_lesson("one, revised"), "rationale": "r"})
     assert selected_entries(db) == []
@@ -707,8 +712,8 @@ def _unexpected(*_args, **_kwargs) -> None:
     raise AssertionError("the save should have been found or written")
 
 
-def test_a_stopped_save_is_resumed_only_from_its_selection_on(tmp_path, monkeypatch) -> None:
-    """A save's lookup walks back to the entry's selection, never the whole history, reading its stamp as UTC."""
+def test_a_save_resumes_its_revision_commit_and_walks_no_further_back(tmp_path, monkeypatch) -> None:
+    """A save's lookup walks back to the entry's revision, never the whole history, reading its time as UTC."""
     from core.placement_save import save_placement
     from infra.guidance_git import digest
 
@@ -726,8 +731,8 @@ def test_a_stopped_save_is_resumed_only_from_its_selection_on(tmp_path, monkeypa
     )
     stopped = _log_sha(repo)
 
-    def save(selected_at: str) -> str | None:
-        entry = {"thread_id": "t", "entry_id": 1, "revision": 2, "selected_at": selected_at}
+    def save(revised_at: str) -> str | None:
+        entry = {"thread_id": "t", "entry_id": 1, "revision": 2, "revised_at": revised_at}
         return save_placement(
             entry, None, None, "context/LESSONS.md", target, {target: "- x\n- y\n"},
             {target: digest("- x\n")}, [], settle=_unexpected, defer=_unexpected, refuse=_unexpected,
@@ -735,10 +740,11 @@ def test_a_stopped_save_is_resumed_only_from_its_selection_on(tmp_path, monkeypa
             message=lambda *_args: "placement: written\n\nPlacement: t/1@2\n", logger=None,
         )
 
-    # Stamps are naive UTC; read as local time, 12:30 would bound the walk at 20:30Z and miss.
-    assert save("2026-01-01T12:30:00") == stopped
+    # The revision predates the commit, so the commit is this revision's, however late it is
+    # re-selected. Stamps are naive UTC; read as local time, 11:30 would bound at 18:30Z and miss.
+    assert save("2026-01-01T11:30:00") == stopped
     assert target.read_text() == "- x\n"
-    # Selected well after that commit: it is outside this selection's walk, so the save is made anew.
+    # A revision written well after that commit cannot own it, so the save is made anew.
     fresh = save("2026-01-01T14:00:00")
     assert fresh not in (None, stopped)
     assert target.read_text() == "- x\n- y\n"

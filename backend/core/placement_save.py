@@ -30,8 +30,8 @@ def save_placement(
     if repo is None:
         settle(entry, "unplaced", "history-off", destination=relative)
         return None
-    # A commit left by a save that stopped before settling; it can only follow the selection.
-    sha = find_commit(repo, trailer, path, since=entry.get("selected_at"))
+    # A commit an earlier save of this revision made before it could settle; none predates the revision.
+    sha = find_commit(repo, trailer, path, since=entry.get("revised_at"))
     if sha is not None:
         return sha
     result = save_with_history(
