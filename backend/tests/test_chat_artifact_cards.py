@@ -513,6 +513,43 @@ def test_thread_cards_choose_workspace_origin_over_repository(db, ws, tmp_path, 
     assert Path(card["path"]).read_text() == "workspace"
 
 
+def _write(path: Path, text: str = "doc") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_project_thread_cards_take_paths_written_from_either_root(db, ws, monkeypatch):
+    planning = (ws / "proj").resolve()
+    from_ws = f"{ws.name}/proj"  # the project folder as written from the workspace root
+    for rel in (".threads/a/one.md", ".threads/a/two.md", "shared/three.md", "shared/four.md"):
+        _write(planning / rel)
+    _write(planning / "both.md", "project-root copy")
+    _write(planning / from_ws / "both.md", "the same path read from the project root")
+    _write(ws / "outside.md")
+    monkeypatch.setattr("doceditor.document_scope.resolve_project", lambda *_a: (planning, []))
+    _message(db, 1, text=(
+        f".threads/a/one.md and {from_ws}/.threads/a/two.md, [three](shared/three.md),"
+        f" [four]({from_ws}/shared/four.md), `{from_ws}/both.md`, {ws.name}/outside.md, nowhere.md"
+    ))
+    paths = [card["path"] for card in _page(db)["m1"]["cards"]]
+    assert paths == [str(planning / rel) for rel in (
+        ".threads/a/one.md", ".threads/a/two.md", "shared/three.md", "shared/four.md", f"{from_ws}/both.md",
+    )]
+
+
+def test_workspace_thread_cards_resolve_from_the_workspace_root_only(db, ws, monkeypatch):
+    planning = (ws / "proj").resolve()
+    from_ws = f"{ws.name}/proj"
+    _write(planning / ".threads/a/one.md")
+    _write(planning / "shared/three.md")
+    db.execute("UPDATE threads SET project_id=NULL WHERE id='owner'")
+    _message(db, 1, text=(
+        f".threads/a/one.md and {from_ws}/.threads/a/one.md, [three](shared/three.md), [three]({from_ws}/shared/three.md)"
+    ))
+    paths = [card["path"] for card in _page(db)["m1"]["cards"]]
+    assert paths == [str(planning / ".threads/a/one.md"), str(planning / "shared/three.md")]
+
+
 def test_candidates_after_versions_and_numeric_filenames_make_cards(db, ws):
     (ws / "real.md").write_text("real")
     (ws / "3.42").write_text("numeric filename")

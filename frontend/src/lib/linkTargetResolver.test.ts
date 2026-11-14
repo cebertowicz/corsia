@@ -4,6 +4,7 @@ import AssistantMessage from '$lib/components/AssistantMessage.svelte';
 import { renderMarkdown } from '$lib/markdown';
 import vectors from '../../../testdata/link-target-vectors.json';
 import * as productEvents from '$lib/product_events';
+import { RequestRefused } from '$lib/api/docs';
 import { installLinkTargetResolver, resolveLinkTarget, type LinkResolverDeps } from './linkTargetResolver';
 
 const ROOTS = [{
@@ -18,7 +19,9 @@ function deps(overrides: Partial<LinkResolverDeps> = {}): LinkResolverDeps {
 		fetchRevision: vi.fn().mockResolvedValue({
 			exists: true, path: '/workspace/shared/linked.md', revision: 'rev-1', size: 1, writable: true, artifact_id: null,
 		}),
+		openLoading: vi.fn(() => 'loading-1'),
 		openArtifact: vi.fn(),
+		failLoading: vi.fn(),
 		showError: vi.fn(),
 		openExternal: vi.fn().mockResolvedValue(undefined),
 		isTauri: () => true,
@@ -55,7 +58,7 @@ describe('resolveLinkTarget', () => {
 		expect(d.fetchRevision).toHaveBeenCalledWith('/workspace/shared/linked.md', 'project-1');
 		expect(d.openArtifact).toHaveBeenCalledWith('thread-1', {
 			artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md',
-		});
+		}, 'loading-1');
 	});
 
 	it('preserves the resolved registered artifact identity when opening its path', async () => {
@@ -67,13 +70,14 @@ describe('resolveLinkTarget', () => {
 		expect(await resolveLinkTarget('/workspace/shared/audit.md', d)).toBe('document');
 		expect(d.openArtifact).toHaveBeenCalledWith('thread-1', {
 			artifactId: 'artifact-1', path: '/workspace/shared/audit.md', title: 'audit.md',
-		});
+		}, 'loading-1');
 	});
 
-	it('shows a visible error for an unresolvable workspace path', async () => {
+	it('shows an unresolvable workspace path as unavailable in its own tab, with no toast', async () => {
 		const d = deps();
 		expect(await resolveLinkTarget('/outside/missing.md', d)).toBe('error');
-		expect(d.showError).toHaveBeenCalledWith("Couldn't find the linked workspace document");
+		expect(d.failLoading).toHaveBeenCalledWith('thread-1', 'loading-1', 'unavailable');
+		expect(d.showError).not.toHaveBeenCalled();
 		expect(d.openArtifact).not.toHaveBeenCalled();
 	});
 
@@ -139,10 +143,9 @@ describe('resolveLinkTarget', () => {
 	});
 });
 
-// One click, stated as literals: the path probed, the tab opened, the toast shown, and the one
-// `link.open` event. These are the outcomes a chat link must keep whichever read supplies the roots.
+// One click, stated as literals: the path probed, the tab opened or failed, and the one `link.open`
+// event. These are the outcomes a chat link must keep whichever read supplies the roots.
 describe('chat link click outcomes', () => {
-	const NOT_FOUND = "Couldn't find the linked workspace document";
 	const found = (path: string) => ({
 		exists: true, path, revision: 'rev-1', size: 1, writable: true, artifact_id: null,
 	});
@@ -154,38 +157,39 @@ describe('chat link click outcomes', () => {
 		{ what: 'a relative link', href: 'shared/linked.md', revision: found('/workspace/shared/linked.md'),
 			result: 'document', probed: '/workspace/shared/linked.md',
 			opened: { artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md' },
-			toast: null as string | null, event: OK },
+			failed: null as string | null, event: OK },
 		{ what: 'an absolute link inside the root', href: '/workspace/shared/linked.md', revision: found('/workspace/shared/linked.md'),
 			result: 'document', probed: '/workspace/shared/linked.md',
 			opened: { artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md' },
-			toast: null, event: OK },
+			failed: null, event: OK },
 		{ what: 'a relative link cited at a line', href: 'shared/linked.md:12', revision: found('/workspace/shared/linked.md'),
 			result: 'document', probed: '/workspace/shared/linked.md',
 			opened: { artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md' },
-			toast: null, event: OK },
+			failed: null, event: OK },
 		{ what: 'an absolute link cited at a line', href: '/workspace/shared/linked.md:12', revision: found('/workspace/shared/linked.md'),
 			result: 'document', probed: '/workspace/shared/linked.md',
 			opened: { artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md' },
-			toast: null, event: OK },
+			failed: null, event: OK },
 		{ what: 'a bare file name cited at a line', href: 'file.md:12', revision: found('/workspace/file.md'),
 			result: 'document', probed: '/workspace/file.md', opened: { artifactId: null, path: '/workspace/file.md', title: 'file.md' },
-			toast: null, event: OK },
+			failed: null, event: OK },
 		{ what: 'a link outside every root', href: '/outside/missing.md', revision: found('/outside/missing.md'),
-			result: 'error', probed: null, opened: null, toast: NOT_FOUND, event: MISSING },
+			result: 'error', probed: null, opened: null, failed: 'unavailable', event: MISSING },
 		{ what: 'a relative link escaping the root', href: '../escape.md', revision: found('/escape.md'),
-			result: 'error', probed: null, opened: null, toast: NOT_FOUND, event: MISSING },
+			result: 'error', probed: null, opened: null, failed: 'unavailable', event: MISSING },
 		{ what: 'a link to a file that is gone', href: 'shared/gone.md', revision: gone,
-			result: 'error', probed: '/workspace/shared/gone.md', opened: null, toast: NOT_FOUND, event: MISSING },
+			result: 'error', probed: '/workspace/shared/gone.md', opened: null, failed: 'unavailable', event: MISSING },
 	];
 
-	it.each(clicks)('$what', async ({ href, revision, result, probed, opened, toast, event }) => {
+	it.each(clicks)('$what', async ({ href, revision, result, probed, opened, failed, event }) => {
 		const events = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
 		const d = deps({ fetchRevision: vi.fn().mockResolvedValue(revision) });
 
 		expect(await resolveLinkTarget(href, d)).toBe(result);
 		expect(d.fetchRevision.mock.calls).toEqual(probed === null ? [] : [[probed, 'project-1']]);
-		expect(d.openArtifact.mock.calls).toEqual(opened === null ? [] : [['thread-1', opened]]);
-		expect(d.showError.mock.calls).toEqual(toast === null ? [] : [[toast]]);
+		expect(d.openArtifact.mock.calls).toEqual(opened === null ? [] : [['thread-1', opened, 'loading-1']]);
+		expect(d.failLoading.mock.calls).toEqual(failed === null ? [] : [['thread-1', 'loading-1', failed]]);
+		expect(d.showError).not.toHaveBeenCalled();
 		expect(events.mock.calls).toEqual([['link', 'open', event]]);
 		events.mockRestore();
 	});
@@ -197,10 +201,109 @@ describe('chat link click outcomes', () => {
 		expect(await resolveLinkTarget('shared/linked.md', d)).toBe('error');
 		expect(d.fetchRevision.mock.calls).toEqual([]);
 		expect(d.openArtifact.mock.calls).toEqual([]);
-		expect(d.showError.mock.calls).toEqual([['Couldn\'t open the linked workspace document']]);
+		expect(d.failLoading.mock.calls).toEqual([['thread-1', 'loading-1', 'error']]);
+		expect(d.showError).not.toHaveBeenCalled();
 		expect(events.mock.calls).toEqual([['link', 'open',
 			{ target: 'workspace_document', outcome: 'failed', reason: 'open_failed' }]]);
 		events.mockRestore();
+	});
+});
+
+// A project chat's link may be written from the project root or from the workspace root.
+describe('chat links written from either root', () => {
+	const PROJECT = [{ id: 'planning', label: 'Project', kind: 'workspace' as const, path: '/ws/projects/p' }];
+	const WORKSPACE = [{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws' }];
+	const roots = vi.fn((projectId: string | null) => Promise.resolve(projectId ? PROJECT : WORKSPACE));
+	const revisions = (files: string[], refused: string[] = [], failing: string[] = []) => vi.fn((path: string) => {
+		if (refused.includes(path)) return Promise.reject(new RequestRefused('400 {"detail":"Path is outside this scope\'s roots"}', null));
+		if (failing.includes(path)) return Promise.reject(new RequestRefused('500 Internal Server Error', null));
+		const exists = files.includes(path);
+		return Promise.resolve({ exists, path: exists ? path : null, revision: exists ? 'rev' : null, size: 1, writable: true, artifact_id: null });
+	});
+
+	it.each([
+		{ what: 'project chat, project-relative path', projectId: 'project-1', href: 'shared/a.md', files: ['/ws/projects/p/shared/a.md'],
+			probed: ['/ws/projects/p/shared/a.md'], opened: '/ws/projects/p/shared/a.md' },
+		{ what: 'project chat, workspace-relative path', projectId: 'project-1', href: 'projects/p/.threads/x/report.md',
+			files: ['/ws/projects/p/.threads/x/report.md'],
+			probed: ['/ws/projects/p/projects/p/.threads/x/report.md', '/ws/projects/p/.threads/x/report.md'], opened: '/ws/projects/p/.threads/x/report.md' },
+		{ what: 'project chat, path under both roots: the project file wins', projectId: 'project-1', href: 'shared/a.md',
+			files: ['/ws/projects/p/shared/a.md', '/ws/shared/a.md'], probed: ['/ws/projects/p/shared/a.md'], opened: '/ws/projects/p/shared/a.md' },
+		{ what: 'workspace chat, workspace-relative path', projectId: null, href: 'projects/p/shared/a.md', files: ['/ws/projects/p/shared/a.md'],
+			probed: ['/ws/projects/p/shared/a.md'], opened: '/ws/projects/p/shared/a.md' },
+		{ what: 'workspace chat, project-relative path has no project to try', projectId: null, href: 'shared/a.md', files: ['/ws/projects/p/shared/a.md'],
+			probed: ['/ws/shared/a.md'], opened: null },
+		{ what: 'project chat, missing under both roots', projectId: 'project-1', href: 'shared/none.md', files: [],
+			probed: ['/ws/projects/p/shared/none.md', '/ws/shared/none.md'], opened: null },
+		{ what: 'project chat, absolute path is never retried', projectId: 'project-1', href: '/ws/projects/p/none.md', files: [],
+			probed: ['/ws/projects/p/none.md'], opened: null },
+	])('$what', async ({ projectId, href, files, probed, opened }) => {
+		const d = deps({ projectId: () => projectId, fetchRoots: roots, fetchRevision: revisions(files) });
+		expect(await resolveLinkTarget(href, d)).toBe(opened ? 'document' : 'error');
+		expect(vi.mocked(d.fetchRevision).mock.calls).toEqual(probed.map((path) => [path, projectId]));
+		expect(vi.mocked(d.openArtifact).mock.calls).toEqual(opened
+			? [['thread-1', { artifactId: null, path: opened, title: opened.split('/').at(-1) }, 'loading-1']] : []);
+		expect(vi.mocked(d.failLoading).mock.calls).toEqual(opened ? [] : [['thread-1', 'loading-1', 'unavailable']]);
+		expect(d.showError).not.toHaveBeenCalled();
+	});
+
+	it('treats a workspace path the project scope refuses as not found, as today', async () => {
+		const d = deps({ fetchRoots: roots, fetchRevision: revisions([], ['/ws/shared/b.md']) });
+		expect(await resolveLinkTarget('shared/b.md', d)).toBe('error');
+		expect(vi.mocked(d.failLoading).mock.calls).toEqual([['thread-1', 'loading-1', 'unavailable']]);
+		expect(d.showError).not.toHaveBeenCalled();
+		expect(vi.mocked(d.openArtifact)).not.toHaveBeenCalled();
+	});
+
+	it('shows a failed workspace-root read as a failed read with Retry, never as no file', async () => {
+		const events = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
+		try {
+			const d = deps({ fetchRoots: roots, fetchRevision: revisions([], [], ['/ws/shared/b.md']) });
+			expect(await resolveLinkTarget('shared/b.md', d)).toBe('error');
+			expect(vi.mocked(d.failLoading).mock.calls).toEqual([['thread-1', 'loading-1', 'error']]);
+			expect(events.mock.calls).toEqual([['link', 'open', { target: 'workspace_document', outcome: 'failed', reason: 'open_failed' }]]);
+			expect(d.showError).not.toHaveBeenCalled();
+		} finally {
+			events.mockRestore();
+		}
+	});
+});
+
+// The roots and revision reads can wait seconds on the database; the press shows its tab first.
+describe('a pressed link shows its tab before it resolves', () => {
+	it('opens the loading tab before any read, then settles that same tab', async () => {
+		let releaseRoots: (roots: typeof ROOTS) => void = () => {};
+		const d = deps({ fetchRoots: vi.fn(() => new Promise<typeof ROOTS>((resolve) => { releaseRoots = resolve; })) });
+		const routed = resolveLinkTarget('shared/linked.md', d);
+		await Promise.resolve();
+		expect(d.openLoading).toHaveBeenCalledWith('thread-1', { href: 'shared/linked.md', projectId: 'project-1' }, 'linked.md');
+		expect(d.openArtifact).not.toHaveBeenCalled();
+		releaseRoots(ROOTS);
+		expect(await routed).toBe('document');
+		expect(vi.mocked(d.openArtifact).mock.calls[0][2]).toBe('loading-1');
+		expect(d.failLoading).not.toHaveBeenCalled();
+	});
+
+	it('leaves the tab in its unavailable state when the link names no file, with no toast over it', async () => {
+		const d = deps({ fetchRevision: vi.fn().mockResolvedValue({ exists: false, path: null, revision: null, size: 0, writable: false, artifact_id: null }) });
+		expect(await resolveLinkTarget('shared/none.md', d)).toBe('error');
+		expect(d.failLoading).toHaveBeenCalledWith('thread-1', 'loading-1', 'unavailable');
+		expect(d.showError).not.toHaveBeenCalled();
+	});
+
+	it('leaves the tab in its error state when a read fails, with no toast over it', async () => {
+		const d = deps({ fetchRevision: vi.fn().mockRejectedValue(new Error('500')) });
+		expect(await resolveLinkTarget('shared/linked.md', d)).toBe('error');
+		expect(d.failLoading).toHaveBeenCalledWith('thread-1', 'loading-1', 'error');
+		expect(d.showError).not.toHaveBeenCalled();
+	});
+
+	it('starts nothing new when the same link is still loading', async () => {
+		const d = deps({ openLoading: vi.fn(() => null) });
+		expect(await resolveLinkTarget('shared/linked.md', d)).toBe('document');
+		expect(d.fetchRoots).not.toHaveBeenCalled();
+		expect(d.openArtifact).not.toHaveBeenCalled();
+		expect(d.showError).not.toHaveBeenCalled();
 	});
 });
 
@@ -234,6 +337,10 @@ describe('link.open product event', () => {
 		const calls = await route(href, overrides as Partial<LinkResolverDeps>);
 		expect(calls).toEqual([['link', 'open', payload]]);
 		expect(JSON.stringify(calls)).not.toMatch(SENSITIVE);
+	});
+
+	it('emits nothing for a press on a link still loading: the first press reports the outcome', async () => {
+		expect(await route('shared/linked.md', { openLoading: vi.fn(() => null) })).toEqual([]);
 	});
 });
 

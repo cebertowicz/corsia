@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => {
 vi.mock('$lib/api/docs', () => ({
 	fetchContent: mocks.fetchContent,
 	fetchRevision: mocks.fetchRevision,
+	// A link's Retry resolves through the roots read; it never answers here, so the tab stays loading.
+	fetchRoots: vi.fn(() => new Promise(() => {})),
 	writeContent: vi.fn(async () => ({ saved: true, revision: 'r-written' })),
 	registerArtifact: vi.fn(),
 }));
@@ -83,7 +85,7 @@ import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 import { updateDocumentOpenCapability } from '$lib/ws/presence';
-import { threadWorkspaces, openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab, setActiveTab, splitWidth } from '$lib/stores/artifactWorkspace';
+import { threadWorkspaces, openArtifactTab, openLinkLoadingTab, markTabStatus, openLegacyDiscussionArchiveTab, openSubagentConversationTab, setActiveTab, splitWidth } from '$lib/stores/artifactWorkspace';
 import { clearDraft, docSaveDrafts, seedDraft, setDraftText } from '$lib/stores/docSaveQueue';
 import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
@@ -151,6 +153,15 @@ function publishShowing() {
 		const workspace = all[THREAD];
 		if (workspace) updateDocumentOpenCapability(THREAD, documentOpenCapability(workspace, { mode: 'split', artifactWidth: 500 }, false));
 	});
+}
+
+/**
+ * A draft restored with unsaved text, as a remounted tab finds it: no autosave pending. Typing it with
+ * setDraftText would arm the real 700 ms autosave, which saves the draft whenever the test runs that long.
+ */
+function restoreDirtyDraft(target: Parameters<typeof seedDraft>[0], saved: string, revision: string, edited: string) {
+	seedDraft(target, saved, revision);
+	docSaveDrafts.update((all) => ({ ...all, [target.instanceId]: { ...all[target.instanceId], editText: edited, status: 'dirty' } }));
 }
 
 function render(mode: 'expanded' | 'compact' = 'expanded') {
@@ -821,8 +832,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 			threadId: THREAD,
 			artifactId: tab.artifactId,
 		};
-		seedDraft(draftTarget, '# saved draft', 'r-saved');
-		setDraftText(draftTarget, '# local draft');
+		restoreDirtyDraft(draftTarget, '# saved draft', 'r-saved', '# local draft');
 
 		render();
 
@@ -851,8 +861,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 			threadId: THREAD,
 			artifactId: tab.artifactId,
 		};
-		seedDraft(draftTarget, '# saved draft', 'r-saved');
-		setDraftText(draftTarget, '# local draft');
+		restoreDirtyDraft(draftTarget, '# saved draft', 'r-saved', '# local draft');
 
 		render();
 
@@ -874,8 +883,34 @@ describe('ArtifactLeaf load-status ownership', () => {
 		await vi.waitFor(() => expect(tabsOf()[0].status).toBe('unavailable'));
 		flushSync();
 		expect(host.textContent).toContain('gone.md is unavailable.');
+		expect(host.querySelector('.gone span')?.textContent).toBe('It isn’t in this chat’s files.');
 		expect(host.querySelector('.gone button')?.textContent).toContain('Close tab');
 		expect([...host.querySelectorAll('.gone button')].map((button) => button.textContent)).not.toContain('Retry');
+	});
+
+	it('shows a pressed link loading at once, then its failure with Retry, then its unavailable state', async () => {
+		const link = { href: 'shared/linked.md', projectId: null };
+		const id = openLinkLoadingTab(THREAD, link, 'linked.md')!;
+		render();
+		flushSync();
+		expect(host.querySelector('.leaf-body.document-canvas .doc .doc-main .loadbar')).not.toBeNull();
+		expect(mocks.fetchContent).not.toHaveBeenCalled();
+
+		markTabStatus(THREAD, id, 'error');
+		flushSync();
+		expect(host.querySelector('.load-error')?.textContent).toContain("Couldn't open linked.md.");
+		[...host.querySelectorAll<HTMLButtonElement>('.load-error button')].find((b) => b.textContent?.includes('Retry'))!.click();
+		flushSync();
+		expect(tabsOf()).toEqual([expect.objectContaining({ instanceId: id, status: 'loading', link })]);
+		expect(host.querySelector('.loadbar')).not.toBeNull();
+
+		markTabStatus(THREAD, id, 'unavailable');
+		flushSync();
+		expect(host.textContent).toContain('linked.md is unavailable.');
+		// A link miss names no deleted file: it says the link has no file, under a file icon.
+		expect(host.querySelector('.gone span')?.textContent).toBe('There’s no file at this link.');
+		expect(host.querySelectorAll('.gone svg path')).toHaveLength(2);
+		expect(mocks.fetchContent).not.toHaveBeenCalled();
 	});
 
 	it('keeps a genuine load failure as an error rather than claiming the doc is gone', async () => {

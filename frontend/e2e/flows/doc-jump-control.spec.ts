@@ -249,10 +249,13 @@ async function backToDocument(page: Page): Promise<void> {
 const controlButton = (page: Page) => page.locator('[data-doc-jump]').getByRole('button');
 const controlBox = (page: Page) => page.locator('[data-doc-jump]');
 
-/** Arriving on a thread opens it, so its New replies clear once its card is shown. */
-async function awaitFocusedRead(page: Page): Promise<void> {
+/** The request that records a thread's replies as read. */
+const viewedRecorded = (page: Page) => page.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/artifacts\/[^/]+\/comments\/[^/]+\/viewed$/.test(new URL(response.url()).pathname) && response.ok());
+
+/** Arriving on a thread opens it and records its replies read. Its New marks stay until the card closes, so the reader keeps the sign they came to see; the control leaves once the list is put away. */
+async function awaitFocusedRead(page: Page, read: Promise<unknown>): Promise<void> {
 	await expect(page.locator('[data-comment-id].focused')).toBeVisible();
-	await expect(page.locator('[data-comment-id].focused .ct-reply.new')).toHaveCount(0);
+	await read;
 }
 
 /** The control's face is its touch target: like chat's control, no pseudo-element padding. Measured at rest: mid-arrival
@@ -952,9 +955,10 @@ for (const theme of ['light', 'dark'] as const) {
 			// Tapping through every waiting thread reads them all: the control leaves.
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await controlBox(page).count())) break;
+				const read = viewedRecorded(page);
 				await controlButton(page).click();
 				// The comments list opens over the document and covers the control; stay until the arrival reads it, then put it away to tap again.
-				await awaitFocusedRead(page);
+				await awaitFocusedRead(page, read);
 				await closeComments(page);
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
