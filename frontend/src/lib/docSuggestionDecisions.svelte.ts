@@ -47,7 +47,7 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			inputs.onSuggestionBusy?.(true, decision === 'accept' ? id : undefined);
 			try {
 				if (decision === 'accept') {
-					if (!doc || !await flushDraft(doc)) throw new SuggestionBlocked('Couldn’t save the document before accepting this suggestion. Try again.');
+					if (!doc || !await flushDraft(doc)) throw new SuggestionBlocked('Couldn’t save the document before accepting. Try again.');
 				}
 				const result: SuggestionDecision = allFromAuthor
 					? await decideSuggestion(id, decision, true)

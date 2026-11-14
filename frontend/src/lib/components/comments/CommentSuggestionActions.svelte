@@ -15,9 +15,8 @@
 	} = $props();
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	const named = (verb: string) => (name ? `${verb}: ${name}` : verb);
-	/** Why Accept is off, said on the screen as well as in its tooltip: a touch screen has no tooltip. */
+	/** Why Accept is off, for its tooltip; the card already says it on the screen (`.ct-orphan`). */
 	const cantAccept = $derived(textChanged ? 'Can’t accept: the text doesn’t match this suggestion.' : orphaned ? 'Can’t accept: the text this suggestion replaces isn’t in the document.' : null);
-	const cantAcceptShort = $derived(textChanged ? 'Can’t accept: the text doesn’t match.' : 'Can’t accept: the text isn’t in the document.');
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && (orphaned || textChanged))) return;
 		decisionBusy = decision;
@@ -45,7 +44,6 @@
 		</IconButton>
 	</div>
 {/if}
-{#if cantAccept && !readOnly}<div class="ct-cant-accept">{cantAcceptShort}</div>{/if}
 {#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 </div>
 
@@ -71,8 +69,6 @@
 		.ct-suggestion-actions :global(.ico-btn.lg) { min-width: var(--touch-target); height: var(--touch-target); }
 	}
 	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
-	.ct-cant-accept { font-size: var(--text-footnote); color: var(--text-secondary); }
 	/* A sheet is read at arm's length: its decision labels take the body size, not the popover's compact one. */
 	:global([data-adaptive-drawer]) .ct-suggestion-actions :global(.ico-btn.lg) { font-size: var(--text-body); }
-	:global([data-adaptive-drawer]) .ct-cant-accept { font-size: var(--text-subhead); }
 </style>
