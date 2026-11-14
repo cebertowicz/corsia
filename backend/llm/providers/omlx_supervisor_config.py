@@ -25,7 +25,7 @@ def resolve_settings(cfg: dict) -> dict:
         except Exception as e:
             log.warning("server metadata lookup failed for %s: %s", sid, e)
             base = {}
-    for key in ("api_key", "model_dir", "max_model_memory"):
+    for key in ("api_key", "model_dir"):
         if cfg.get(key) is not None:
             base[key] = cfg[key]
     return base
