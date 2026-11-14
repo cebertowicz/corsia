@@ -9,6 +9,7 @@ import type { ActivityIndexReadOutcome } from './activityIndexTypes';
 import { decodeActivityIndexEnvelope } from './activityIndexDecode';
 import type { OperatorReadOutcome, OperatorUserAction } from './plansTypes';
 import { decodeOperatorEnvelope } from './plansDecode';
+import { measureServerClock, onClientClock } from './planClock';
 
 export * from './activityIndexTypes';
 export * from './plansCostTypes';
@@ -23,7 +24,12 @@ async function readOperator(
 	url: string,
 	etag: string | null | undefined,
 ): Promise<OperatorReadOutcome> {
-	return readPlan(url, etag, decodeOperatorEnvelope);
+	const outcome = await readPlan(url, etag, decodeOperatorEnvelope);
+	if (outcome.status === 'fresh') {
+		measureServerClock(outcome.payload.as_of, Date.now());
+		onClientClock(outcome.payload.plans);
+	}
+	return outcome;
 }
 
 async function readActivityIndex(
