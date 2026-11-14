@@ -7,6 +7,8 @@ import {
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
 import { openBrowserTab } from '$lib/artifactAuxiliaryTabs';
+import { openLinkTab, settleLinkTab } from '$lib/artifactLinkTabs';
+import type { ArtifactLink } from '$lib/artifactTabTypes';
 import { clearDraft, existingDraft, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
@@ -54,7 +56,8 @@ export const splitWidth = writable<number | null>(persisted.splitWidth);
 function persistentWorkspace(
 	workspace: ThreadArtifactWorkspace,
 ): ThreadArtifactWorkspace | null {
-	const tabs = workspace.tabs.filter((tab) => tab.kind === 'document');
+	// A link still resolving has no file to reopen.
+	const tabs = workspace.tabs.filter((tab) => tab.kind === 'document' && !tab.link);
 	if (tabs.length === 0) return null;
 	const activeTabId = tabs.some((tab) => tab.instanceId === workspace.activeTabId)
 		? workspace.activeTabId
@@ -159,6 +162,22 @@ function mutate(
 
 export function openArtifactTab(threadId: string, input: OpenArtifactInput): void {
 	mutate(threadId, (ws) => openTab(ws, input));
+}
+
+/** Shows a pressed link's tab loading at once; null when that link is already loading (its tab is selected). */
+export function openLinkLoadingTab(threadId: string, link: ArtifactLink, title: string): string | null {
+	let instanceId: string | null = null;
+	mutate(threadId, (ws) => {
+		const opened = openLinkTab(ws, link, title, newInstanceId);
+		if (opened.started) instanceId = opened.instanceId;
+		return opened.ws;
+	});
+	return instanceId;
+}
+
+/** The pressed link named this document: its loading tab becomes the document's tab. */
+export function settleLinkLoadingTab(threadId: string, instanceId: string, input: OpenArtifactInput): void {
+	mutate(threadId, (ws) => settleLinkTab(ws, instanceId, input));
 }
 
 /** Applies an agent request without overriding the user's chosen canvas surface. */
