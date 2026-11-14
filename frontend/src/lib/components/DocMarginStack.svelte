@@ -51,6 +51,9 @@
 		};
 		let frame = 0;
 		const read = () => {
+			// A column not yet drawn on its canvas has no box, so its top would read 0 and every card would be placed off by the
+			// scroll; nothing is placed (or shown) until it has one, which its resize then reports.
+			if (!column.getClientRects().length) return;
 			const columnTop = column.getBoundingClientRect().top;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {

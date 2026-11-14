@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import DocMarginStack from './DocMarginStack.svelte';
 import type { DocComment } from '$lib/stores/docComments';
@@ -9,11 +9,15 @@ const thread = (id: string) => ({ id, anchor: 'quote', author: 'you', text: id, 
 
 let component: ReturnType<typeof mount> | null = null;
 
+// jsdom draws nothing, so every element would read as having no box; here each one is drawn unless a test says otherwise.
+beforeEach(() => { vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList); });
+
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 describe('DocMarginStack', () => {
@@ -87,6 +91,36 @@ describe('DocMarginStack', () => {
 		expect(place(null)).toEqual({ head: '0px', card: '48px' });
 		expect(place('a')).toEqual({ head: '0px', card: '48px' });
 		vi.restoreAllMocks();
+	});
+
+	it('places and shows no card while its column is not drawn yet, then places each level with its text once the column is', () => {
+		const observed: Array<() => void> = [];
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} unobserve() {} disconnect() {} });
+		const scroller = document.createElement('div');
+		const column = document.createElement('div');
+		scroller.append(column);
+		document.body.append(scroller);
+		const mark = document.createElement('span');
+		scroller.append(mark);
+		// The text is scrolled: its line is 300px down the window, and the column, once drawn, starts 200px above the window top.
+		mark.getBoundingClientRect = () => ({ top: 300 }) as DOMRect;
+		let drawn = false;
+		column.getClientRects = () => (drawn ? [{}] : []) as unknown as DOMRectList;
+		column.getBoundingClientRect = () => ({ top: drawn ? -200 : 0 }) as DOMRect;
+		const source: MarginAnchorSource = { scroller: () => scroller, column: () => column, anchor: (id) => id === 'a' ? mark : null, moved: () => [], resized: () => [] };
+		const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => { step(0); return 1; });
+		component = mount(DocMarginStack, { target: column, props: { source, pinned: [thread('a')], selectedId: null, card } });
+		flushSync();
+
+		const placed = () => column.querySelector<HTMLElement>('[data-margin-card="a"]')!;
+		expect(placed().classList.contains('placed')).toBe(false);
+
+		drawn = true;
+		observed.forEach((callback) => callback());
+		flushSync();
+		expect(placed().classList.contains('placed')).toBe(true);
+		expect(placed().style.top).toBe('500px');
+		raf.mockRestore();
 	});
 
 	it('brings a picked card into view from the place it is given, not the place its box held before the pick', () => {
