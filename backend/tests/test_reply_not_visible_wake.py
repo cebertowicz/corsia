@@ -542,6 +542,7 @@ async def test_the_nudged_turn_answers_the_comment_with_a_tagged_update(db) -> N
 
     cid = _comment_on(db, "")
     _say(db, "Moved the meeting.", for_user=True)
+    _say(db, f"[{cid}] Yes, Friday is skipped.")
     await _end(db)
     _take_nudge(db, "t2")
     answer = _say(db, f"[{cid}] Yes, Friday is skipped.", turn="t2", for_user=True)
@@ -554,3 +555,62 @@ async def test_the_nudged_turn_answers_the_comment_with_a_tagged_update(db) -> N
         "SELECT user_message_id,cid,assistant_message_id FROM chat_comment_answers",
     )] == [("m1", cid, answer)]
     assert len(_nudges(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_untagged_update_alone_is_a_reply_to_a_comment_message(db) -> None:
+    # The agent answered the typed text, or left the comments unanswered as its grounding allows:
+    # nothing is tagged anywhere, so nothing is owed and the person is not told "no reply is visible".
+    _comment_on(db, "Also, can we skip Friday?")
+    _say(db, "Yes, Friday is skipped.", for_user=True)
+    _say(db, "Done.")
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_a_plain_message_answered_by_an_untagged_update_is_replied_to(db) -> None:
+    _take_in(db)
+    _say(db, "Hi there", for_user=True)
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_answer_repeated_in_closing_text_is_not_nudged(db) -> None:
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, monkeypatch) -> None:
+    # An answer shows in its thread only while its comment row joins; a deleted comment takes its
+    # answer with it, so the tagged closing text still owes one and the Turn is nudged.
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
+    closing = f"[{cid}] Moved. Tonight runs at 4 AM."
+    _say(db, closing)
+    assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
+    db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
+    db.commit()
+
+    effects = await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(nudge_text("1:19", closing))
+    assert effects.drives.count(_THREAD) == 1

@@ -28,7 +28,8 @@ from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 from infra.chat_comment_answers import (
-    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, place_flipped_answers,
+    SHOWN_ANSWERS_FROM, VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, has_comment_cid,
+    parse_answers, place_flipped_answers,
 )
 
 EVENT = "turn.reply_not_visible"
@@ -126,26 +127,50 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
 def _replied_after(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
-    """The person's message has its reply: for one carrying chat comments, an answer placed in a
-    comment thread; for any other, a message sent for them after theirs.
+    """A message sent for the person after theirs, unless it leaves a comment of theirs unanswered.
 
-    An update that answers no comment (untagged) is not a reply to one, so the comment is
-    nudged for like any unanswered message.
+    A comment is left unanswered when words the person was not sent tag it and no answer
+    to it shows in its thread (``SHOWN_ANSWERS_FROM``); the Turn still owes that answer.
+    An update that answers no comment and tags none leaves nothing owed.
     """
-    comments = db.execute(
-        "SELECT COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) FROM messages "
-        "WHERE id=? AND thread_id=? AND json_valid(metadata)",
-        (person["id"], thread_id),
-    ).fetchone()
-    if comments is not None and comments[0] > 0:
-        return db.execute(
-            "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? LIMIT 1",
-            (thread_id, person["id"]),
-        ).fetchone() is not None
-    return db.execute(
+    sent = db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
         (thread_id, person["seq"]),
     ).fetchone() is not None
+    return sent and not _tagged_comment_unanswered(db, thread_id, person)
+
+
+def _tagged_comment_unanswered(
+    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
+) -> bool:
+    """Words the person was not sent tag one of this message's comments with no answer shown."""
+    row = db.execute(
+        "SELECT metadata, CASE WHEN json_valid(metadata) "
+        "THEN COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) ELSE 0 END "
+        "FROM messages WHERE id=? AND thread_id=?",
+        (person["id"], thread_id),
+    ).fetchone()
+    if row is None or row[1] == 0:
+        return False
+    tagged = {
+        cid
+        for (content,) in db.execute(
+            "SELECT content FROM messages WHERE thread_id=? AND seq>? AND content LIKE '%[c%' "
+            f"AND {_HIDDEN_TEXT}",
+            (thread_id, person["seq"]),
+        )
+        for cid in parse_answers(str(content), "")
+        if has_comment_cid(row[0], cid)
+    }
+    if not tagged:
+        return False
+    shown = {
+        cid for (cid,) in db.execute(
+            f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.user_message_id=?",
+            (thread_id, person["id"]),
+        )
+    }
+    return not tagged <= shown
 
 
 def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
