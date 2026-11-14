@@ -205,10 +205,10 @@ test('@flow:doc-margin-cards each suggestion is its own card with Accept and Rej
 	const doc = await open(page, request);
 	for (const i of [SUGGESTION, SUGGESTION + 1]) {
 		await expect(card(page, doc, i)).toHaveCount(1);
-		await expect(card(page, doc, i).getByRole('button', { name: 'Accept', exact: true })).toBeVisible();
-		await expect(card(page, doc, i).getByRole('button', { name: 'Reject', exact: true })).toBeVisible();
+		await expect(card(page, doc, i).getByRole('button', { name: /^Accept(:|$)/ })).toBeVisible();
+		await expect(card(page, doc, i).getByRole('button', { name: /^Reject(:|$)/ })).toBeVisible();
 	}
-	await card(page, doc, SUGGESTION).getByRole('button', { name: 'Reject', exact: true }).click();
+	await card(page, doc, SUGGESTION).getByRole('button', { name: /^Reject(:|$)/ }).click();
 	await expect(card(page, doc, SUGGESTION)).toHaveCount(0);
 });
 

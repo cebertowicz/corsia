@@ -91,6 +91,7 @@
 		// Measure the natural size: a width cap from an earlier placement must not shrink what a roomier one may use.
 		const capped = surface.style.maxWidth;
 		const heightCap = surface.style.maxHeight;
+		const scrolled = surface.scrollTop;
 		surface.style.maxWidth = '';
 		surface.style.maxHeight = '';
 		// Layout dimensions are unaffected by the entrance scale; a transformed rect would permanently shrink the width cap.
@@ -98,6 +99,8 @@
 		const naturalHeight = surface.offsetHeight;
 		surface.style.maxWidth = capped;
 		surface.style.maxHeight = heightCap;
+		// Measuring at full height clamps the card's own scroll to 0; put it back so a caret scrolled into view stays there.
+		surface.scrollTop = scrolled;
 		const gap = 8;
 		const width = Math.min(naturalWidth, area.right - area.left - 2 * gap);
 		const height = Math.min(naturalHeight, area.bottom - area.top - 2 * gap);
@@ -215,6 +218,8 @@
 		if (!open || !surface) return;
 		const observer = new ResizeObserver(() => position());
 		observer.observe(surface);
+		// A card already at its height cap keeps its own size while its content grows, so the content is watched too.
+		for (const child of surface.children) observer.observe(child);
 		return () => observer.disconnect();
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.

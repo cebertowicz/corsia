@@ -8,6 +8,7 @@
 	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import CloseButton from './CloseButton.svelte';
 	import { sheetFly } from '$lib/sheetMotion';
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 
@@ -17,7 +18,8 @@
 		headingMeta = null,
 		contextLabel = null,
 		leading,
-		doneLabel = 'Done',
+		actions, compact = false,
+		doneLabel = 'Done', doneIcon = false,
 		onClose,
 		children,
 		above,
@@ -48,8 +50,14 @@
 		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
+		/** Word buttons for what the sheet shows, at the leading edge of the header row and apart from the dismiss control (a comment thread's Agree and Resolve). */
+		actions?: Snippet;
+		/** Draw the sheet with the design system's drawer radius (`--radius`) instead of the 28px glass sheet. The comment sheets use it. */
+		compact?: boolean;
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
+		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as the comment list's heading does. */
+		doneIcon?: boolean;
 		onClose: () => void;
 		children: Snippet;
 		/** A row above the chrome title, below the grabber. */
@@ -174,7 +182,7 @@
 			bind:this={panel}
 			class="drawer-panel"
 			class:dragging={drag.dragging}
-			class:opaque
+			class:opaque class:compact
 			class:half={detent === 'half'}
 			style:--drawer-drag-y="{drag.y}px"
 			role="dialog"
@@ -197,9 +205,9 @@
 				</div>
 				{#if above}{@render above()}{/if}
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
-					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
+					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}{#if actions}<span class="drawer-actions">{@render actions()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
-					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
+					{#if doneIcon}<span class="drawer-done-icon"><CloseButton label={doneLabel} onclick={onClose} /></span>{:else}<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>{/if}
 				</div>{/if}
 			</div>
 			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>
@@ -270,6 +278,7 @@
 	.drawer-panel.dragging {
 		transition: none;
 	}
+	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
 	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
@@ -337,6 +346,7 @@
 		white-space: nowrap;
 	}
 	.drawer-lead { justify-self: start; }
+	/* 44px between neighbouring targets and before Close (the head's 8px gap is part of it), so a thumb aimed at one does not land on the next. */ .drawer-actions { display: inline-flex; align-items: center; gap: var(--touch-target); margin-right: calc(var(--space-7) + var(--space-1)); } .drawer-done-icon { display: inline-flex; margin-right: calc(var(--space-1) / -2); }
 	.drawer-head.centered .drawer-done { justify-self: end; }
 	/* Holds Done at the trailing edge when the content owns the title. */
 	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
@@ -380,6 +390,7 @@
 			border-radius: 28px;
 			margin-bottom: max(16px, env(safe-area-inset-bottom, 0px));
 		}
+		.drawer-panel.compact { border-radius: var(--radius); }
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.drawer-panel {

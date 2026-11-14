@@ -15,9 +15,16 @@ describe('decideSuggestion', () => {
 		await expect(refusal).rejects.toMatchObject({ status: 409, kind: 'stale' });
 	});
 
-	it('leaves the kind empty when the server sends none', async () => {
+	it('leaves the kind empty when the server sends none, and shows the fallback sentence, not its text', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, json: vi.fn().mockResolvedValue({ detail: 'Bad' }) }));
-		await expect(decideSuggestion('comment-1', 'accept')).rejects.toMatchObject({ status: 400, kind: null });
+		const refusal = decideSuggestion('comment-1', 'accept');
+		await expect(refusal).rejects.toMatchObject({ status: 400, kind: null });
+		await expect(refusal).rejects.toThrow('Couldn’t accept this suggestion. Try again.');
+	});
+
+	it('shows the fallback sentence for a crash page with no JSON, for either decision', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: vi.fn().mockRejectedValue(new SyntaxError('Unexpected token <')) }));
+		await expect(decideSuggestion('comment-1', 'reject')).rejects.toThrow('Couldn’t reject this suggestion. Try again.');
 	});
 
 	it('lets a request that got no answer fail as itself, not as a refusal', async () => {

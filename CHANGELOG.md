@@ -84,6 +84,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On a narrow screen, opening another agent's chat from a chat now keeps it visible.
 - On a paired computer, updates and restarts now reach the main CORSIA service instead of failing because they were started from the paired device.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
+- On a phone, no review button is on screen while a comment sheet is open, so a tap aimed at Close can't approve anything. A suggestion's Accept and Reject are larger buttons with their names beside them, the review bar's Reject now says Send back, and the bar says what Approve all will do before you tap. A reply you are typing grows to its text, and the card is the only thing that scrolls.
 - On a phone, one tap on a highlighted word opens its comment, and its unread mark goes once you open it; before, a tap that landed short of the word opened nothing.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
 - On a phone, tapping a comment's Reply field in the comments sheet keeps the whole card on screen, its author and quoted text included.

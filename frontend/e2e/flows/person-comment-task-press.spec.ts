@@ -104,7 +104,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await log('list shown 3 s');
 	await frame('2-list');
 
-	const accept = (scope: Page | Locator) => scope.getByRole('button', { name: 'Accept', exact: true });
+	const accept = (scope: Page | Locator) => scope.getByRole('button', { name: /^Accept(:|$)/ });
 	const commentCards = cards.filter({ hasNot: accept(page) });
 	const suggestionCards = cards.filter({ has: accept(page) });
 	const back = async () => {
@@ -130,7 +130,7 @@ for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, a
 	await back();
 	await showList();
 	// (c) Reject the other.
-	await press(suggestionCards.first().getByRole('button', { name: 'Reject', exact: true }));
+	await press(suggestionCards.first().getByRole('button', { name: /^Reject(:|$)/ }));
 	await expectCount('Reject on suggestion 2', '1 comment', '5-rejected');
 	await back();
 	await showList();

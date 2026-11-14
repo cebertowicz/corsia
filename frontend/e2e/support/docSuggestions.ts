@@ -73,8 +73,8 @@ export async function openSuggestionDocument(page: Page, request: APIRequestCont
 
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const row = (id: string) => drawer.locator(`[data-comment-id="${id}"]`);
-	const accept = (id: string) => row(id).getByRole('button', { name: 'Accept', exact: true });
-	const reject = (id: string) => row(id).getByRole('button', { name: 'Reject', exact: true });
+	const accept = (id: string) => row(id).getByRole('button', { name: /^Accept(:|$)/ });
+	const reject = (id: string) => row(id).getByRole('button', { name: /^Reject(:|$)/ });
 	/** The saved file, read through the API rather than the screen. */
 	const storedText = async () => {
 		const stored = await request.get('/api/files/content', { params: { ...params, path: docPath } });

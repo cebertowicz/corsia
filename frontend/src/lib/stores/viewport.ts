@@ -23,6 +23,9 @@ function createMatchMediaStore(query: string): Readable<boolean> {
 
 export const isMobile = createMatchMediaStore(MOBILE_QUERY);
 
+/** A touch screen too short to hold a comment card beside its text (a phone held sideways, 393px tall): it opens comments in the sheet a portrait phone uses. */
+export const isShortTouch = createMatchMediaStore('(any-pointer: coarse) and (max-height: 30em)');
+
 /** True from a 1280px-wide window (80em, the unit SetupShell's own breakpoints use), where first-run setup shows its living mark beside each screen. */
 export const isSetupWide = createMatchMediaStore('(min-width: 80em)');
 
