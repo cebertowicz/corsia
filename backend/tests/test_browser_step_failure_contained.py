@@ -1,6 +1,7 @@
 """A sign-in step that can't be written never breaks the browser. The failure is logged with its exception and a
-live step is kept for the next call or re-probe to recover. On a page showing a password field the command is
-refused, as an open step would refuse it; on any other page it runs and the agent gets one line to pass on."""
+live step is kept for the next call or re-probe to recover. A held step refuses every command, as an open step
+would (its task exists); with no step held, a page showing a password field is refused and any other page runs
+the command and the agent gets one line to pass on."""
 from __future__ import annotations
 
 import logging
@@ -104,15 +105,18 @@ async def test_a_password_page_whose_event_fails_after_the_row_opened_refuses_as
 
 
 @pytest.mark.asyncio
-async def test_a_page_with_no_password_field_runs_the_command_when_its_row_cannot_be_read(plan, monkeypatch, caplog):  # noqa: F811
+async def test_a_held_person_step_refuses_every_command_when_its_row_cannot_be_read(plan, monkeypatch, caplog):  # noqa: F811
     page = Page()
     await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
     step = lifecycle._steps[THREAD]
     original = lifecycle._step_row_state
     _fail_row_read(monkeypatch)
     with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
-        notes = await _three_commands(page)
-    assert notes == [NOTE] * 3
+        # No password field on the page: the held step alone makes it the person's.
+        for _ in range(3):
+            with pytest.raises(BrowserSessionError) as raised:
+                await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+            assert raised.value.args[0] == browser_control.PERSON_STEP
     assert lifecycle._steps[THREAD] is step
     assert _step_logs(caplog)[0].exc_info[0] is PlanError
     monkeypatch.setattr(lifecycle, "_step_row_state", original)
@@ -122,7 +126,7 @@ async def test_a_page_with_no_password_field_runs_the_command_when_its_row_canno
 
 
 @pytest.mark.asyncio
-async def test_a_page_with_no_password_field_runs_the_command_when_its_step_cannot_be_settled(plan, monkeypatch, caplog):  # noqa: F811
+async def test_a_held_password_step_refuses_every_command_when_its_field_is_gone_but_it_cannot_be_settled(plan, monkeypatch, caplog):  # noqa: F811
     page = Page()
     await _open_for_real(page)
     step = lifecycle._steps[THREAD]
@@ -130,13 +134,27 @@ async def test_a_page_with_no_password_field_runs_the_command_when_its_step_cann
     real = lifecycle._plan_write
     _fail_write(monkeypatch, "settle_user_step")
     with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
-        notes = await _three_commands(page)
-    assert notes == [NOTE] * 3
+        await _three_refusals(page, match="asks for a password")
     assert lifecycle._steps[THREAD] is step
     assert _step_logs(caplog)[0].exc_info[0] is sqlite3.OperationalError
     monkeypatch.setattr(lifecycle, "_plan_write", real)
     assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
     assert not lifecycle.has_step(THREAD)
+
+
+@pytest.mark.asyncio
+async def test_a_page_with_no_step_and_no_password_field_runs_the_command_when_the_event_fails(plan, monkeypatch, caplog):  # noqa: F811
+    page = Page()
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("event sink down")
+
+    monkeypatch.setattr(lifecycle, "step_event", broken)
+    with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
+        notes = await _three_commands(page)
+    assert notes == [NOTE] * 3
+    assert not lifecycle.has_step(THREAD)
+    assert _step_logs(caplog)[0].exc_info[0] is RuntimeError
 
 
 @pytest.mark.asyncio
@@ -163,15 +181,7 @@ async def test_a_declaration_that_cannot_be_recorded_never_claims_a_step_state(p
     assert not lifecycle.has_step(THREAD)
 
 
-@pytest.mark.asyncio
-async def test_the_command_result_carries_the_note_after_the_command_ran(synthetic_browser, monkeypatch):  # noqa: F811
-    fake = synthetic_browser
-    await fake.owner.run("thread", ["snapshot"])  # the first result carries a one-time profile notice
-    plain = await fake.owner.run("thread", ["snapshot"])
-    # The step belongs to this session, so the lifecycle reads its row instead of ending it as a replaced session.
-    session = fake.owner._sessions["thread"].record.session
-    lifecycle._steps["thread"] = lifecycle.PersonStep("visit", "example.test", "target", instruction="x", node_id="row", session=session)
-
+async def _stub_page(monkeypatch) -> None:
     async def endpoint(_command):
         return "ws://fixture"
 
@@ -180,13 +190,41 @@ async def test_the_command_result_carries_the_note_after_the_command_ran(synthet
 
     monkeypatch.setattr(browser_cdp, "page_endpoint", endpoint)
     monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
+
+
+@pytest.mark.asyncio
+async def test_the_command_result_carries_the_note_after_the_command_ran(synthetic_browser, monkeypatch):  # noqa: F811
+    fake = synthetic_browser
+    await fake.owner.run("thread", ["snapshot"])  # the first result carries a one-time profile notice
+    plain = await fake.owner.run("thread", ["snapshot"])
+    await _stub_page(monkeypatch)
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("event sink down")
+
+    monkeypatch.setattr(lifecycle, "step_event", broken)
+    result = await fake.owner.run("thread", ["snapshot"])
+    assert result.startswith(plain) and result.endswith(f"\n{NOTE}")
+    assert not lifecycle.has_step("thread")
+
+
+@pytest.mark.asyncio
+async def test_a_held_step_whose_row_cannot_be_read_refuses_the_command_and_browser_close_as_a_healthy_step_does(synthetic_browser, monkeypatch):  # noqa: F811
+    fake = synthetic_browser
+    await fake.owner.run("thread", ["snapshot"])
+    # The step belongs to this session, so the lifecycle reads its row instead of ending it as a replaced session.
+    session = fake.owner._sessions["thread"].record.session
+    lifecycle._steps["thread"] = lifecycle.PersonStep("visit", "example.test", "target", instruction="x", node_id="row", session=session)
+    await _stub_page(monkeypatch)
     _fail_row_read(monkeypatch)
     try:
-        result = await fake.owner.run("thread", ["snapshot"])
-        assert result.startswith(plain) and result.endswith(f"\n{NOTE}")
+        with pytest.raises(BrowserSessionError) as raised:
+            await fake.owner.run("thread", ["snapshot"])
+        assert raised.value.args[0] == browser_control.PERSON_STEP
         assert lifecycle.has_step("thread")
-        # browser_close clears a step whose row can't be read.
-        assert await fake.owner.close_thread("thread") == "Browser session closed."
-        assert not lifecycle.has_step("thread")
+        with pytest.raises(BrowserSessionError) as closing:
+            await fake.owner.close_thread("thread")
+        assert closing.value.args[0] == browser_control.PERSON_STEP
+        assert lifecycle.has_step("thread")
     finally:
         lifecycle._steps.pop("thread", None)
