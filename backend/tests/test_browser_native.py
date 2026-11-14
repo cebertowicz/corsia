@@ -399,7 +399,11 @@ async def _select_cross_origin_field(thread, connection, cdp, capsys):
       const poll = () => clipboardEvents.includes('selection:Cross origin') ? resolve(true) : setTimeout(poll, 20);
       poll(); setTimeout(() => resolve(false), 5000); })""", awaitPromise=True, returnByValue=True)
     events = (await cdp.call('Runtime.evaluate', expression='clipboardEvents', returnByValue=True))['result']['value']
-    assert result['result']['value'] is True, f'{reached}; frame messages {events!r}'
+    # Whether the field got the drag's press and release, and when: a missing 'up' means the release went elsewhere.
+    arrivals = (await cdp.call('Runtime.evaluate', expression="""['down', 'up'].map(kind => kind in messageTimes
+      ? `${kind} ${Math.round(messageTimes[kind] - messageTimes.ready)} ms after ready` : `no ${kind}`).join(', ')""",
+      returnByValue=True))['result']['value']
+    assert result['result']['value'] is True, f'{reached}; {arrivals}; frame messages {events!r}'
 
 
 async def _exercise_clipboard(thread, connection, endpoint):
@@ -502,6 +506,8 @@ def popup_fixture():
               if (event.data === 'focus') parent.postMessage('ready', '*');
             });
             field.addEventListener('mousemove', () => parent.postMessage('hover', '*'), {once: true});
+            field.addEventListener('mousedown', () => parent.postMessage('down', '*'));
+            field.addEventListener('mouseup', () => parent.postMessage('up', '*'));
             field.addEventListener('mouseup', () => parent.postMessage('selection:' + field.value.slice(field.selectionStart, field.selectionEnd), '*'));
             field.addEventListener('input', () => parent.postMessage('input:' + field.value, '*'));
             </script>''',
