@@ -1,6 +1,6 @@
 ---
 name: instruction-review
-description: Use when the periodic line-by-line review of the instructions every agent always loads is due (weekly, or after a material roster or objective change), or when an addition would exceed the recorded size budget. Not for a wording fix inside the task you were asked to do, for documents and artifacts the person owns, or for a project's goals, commitments or decision rights.
+description: Use when the periodic line-by-line review of the instructions every agent always loads is due (weekly, or after a material roster or objective change). Not for a wording fix inside the task you were asked to do, for documents and artifacts the person owns, or for a project's goals, commitments or decision rights.
 metadata:
   corsia-data: corsia.yaml
   corsia-format: "1"
@@ -12,7 +12,7 @@ metadata:
 
 Improve agent behavior, not prose volume, and diagnose before you cut, per skill `context-stewardship`. Judge whether an agent would act rightly on its first move, not whether the file reads well.
 
-**Always-loaded** means a source an agent carries before it has read the task: the scope's project instructions, each agent's own responsibility context, and whatever this install injects every turn. A skill or a workflow step is the opposite: it arrives only when triggered, so a rule put there must be reachable at the moment it is first needed. **Budget** is the limit on the part of that set written on this install; **headroom** is the share above the first count that the budget starts with.
+**Always-loaded** means a source an agent carries before it has read the task: the scope's project instructions, each agent's own responsibility context, and whatever this install injects every turn. A skill or a workflow step is the opposite: it arrives only when triggered, so a rule put there must be reachable at the moment it is first needed.
 
 Each step's section below reaches you when that step starts.
 
@@ -22,9 +22,9 @@ Find the set the way `context-stewardship` says: the effective-context view if y
 
 ## Measure
 
-Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. Count text that shipped with the product apart from the rest: nobody on this install can cut it, so it is reported beside the budget and never set against it.
+Count with something you can repeat: lines, or characters. Record the unit once beside the number, never change it between runs or mix units, and never guess a count. Count text that shipped with the product apart from the rest: nobody on this install can cut it.
 
-The budget is the sum of three recorded numbers, and nothing else changes it: the first run's count of the text written on this install; the person's headroom on that count, a quarter by default; and the size of each addition the person has asked for since, so their own asks never cost a removal. A headroom the person sets later applies to that same first count. Never re-base the budget on today's count: a budget that moves with the set never limits it. What agents add on their own between reviews can take the set over the budget; this review brings it back under.
+The count is a reading, not a limit. Record it each run beside the last one, dated and marked `a reading, not a limit, nothing to ask the person`: an agent that meets the number between reviews has not read this. No number forces a cut: a line goes only on its own verdict. A budget or headroom an earlier run recorded limits nothing now: leave it out of this run's record and ask the person nothing about it.
 
 ## Inventory
 
@@ -32,7 +32,7 @@ Quote each line as written; the quote is what the disposition and any before-and
 
 ## Verdicts
 
-Test each line with the questions in `context-stewardship`'s **Make each source earn its cost**; a line every recipient needs every turn stays. Only some agents need it: narrow it into the always-loaded context of the agents that do, where it still arrives in time. It is needed at a recognizable moment: condition it into a skill or workflow step whose trigger fires at that moment — a rule needed mid-task cannot live behind a trigger that only fires once the task is chosen. Prefer a workflow step when the moment falls inside work a workflow runs: the step names a section of that workflow's own skill, so the section arrives when the step starts, to whoever does it, no other agent carries it, and one workflow can replace several skills. That skill still loads by its description when an agent does the work without starting the workflow, so its description must name the moment, or the rule is lost off the run. An authority, safety or invariant line moves to a step only if that step is required. A rule several workflows need goes in one shared workflow each names as a step, never a copy in each. Nearly every agent needs it and one file happens to hold it: widen it. Delete only what no task needs; history someone still uses moves to a reference. With a single agent, narrowing has nowhere to go, so the choices are keep, condition, widen or delete. Keep an authority, safety or invariant line even when it is costly — move it, never drop it to save room (`context-stewardship`).
+Test each line with the questions in `context-stewardship`'s **Make each source earn its cost**; a line every recipient needs every turn stays. Only some agents need it: narrow it into the always-loaded context of the agents that do, where it still arrives in time. It is needed at a recognizable moment: condition it into a skill or workflow step whose trigger fires at that moment — a rule needed mid-task cannot live behind a trigger that only fires once the task is chosen. Prefer a workflow step when the moment falls inside work a workflow runs: the step names a section of that workflow's own skill, so the section arrives when the step starts, to whoever does it, no other agent carries it, and one workflow can replace several skills. That skill still loads by its description when an agent does the work without starting the workflow, so its description must name the moment, or the rule is lost off the run. An authority, safety or invariant line moves to a step only if that step is required. A rule several workflows need goes in one shared workflow each names as a step, never a copy in each. Nearly every agent needs it and one file happens to hold it: widen it. Delete only what no task needs; history someone still uses moves to a reference. With a single agent, narrowing has nowhere to go, so the choices are keep, condition, widen or delete. When an agent that needs the line has no always-loaded context of its own, the verdict is still narrow: create that context if you may, else record the gap; a missing destination never makes it a line every agent keeps. Keep an authority, safety or invariant line even when it is costly — move it, never drop it to save room (`context-stewardship`).
 
 ## Authority
 
@@ -60,7 +60,7 @@ Only when the set changed or something needs the person: say what changed in out
 
 ## Defaults
 
-Never ask the person about these; run each as written and record it once with the count. Size is counted in lines or characters, whichever you can count repeatedly. The budget's headroom is a quarter above the first count. You propose changes to the person's own instruction text and never edit it. The review runs weekly, and after any material roster or objective change. It stops at the always-loaded set. When the person asks, unprompted, for one of these to be different, that replaces the default and is recorded.
+Never ask the person about these; run each as written and record it once with the count. Size is counted in lines or characters, whichever you can count repeatedly. You propose changes to the person's own instruction text and never edit it. The review runs weekly, and after any material roster or objective change. It stops at the always-loaded set. When the person asks, unprompted, for one of these to be different, that replaces the default and is recorded.
 
 ## Never
 
