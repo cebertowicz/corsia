@@ -10,7 +10,7 @@ from pathlib import Path
 
 from infra.database import get_db, write_transaction
 from registry import service
-from registry.durable_writes import _bounded_shared_files
+from registry.shared_file_scan import bounded_shared_files
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_document_events import report_owner_write
 from registry.shared_documents import _scope_root
@@ -131,7 +131,7 @@ def detect_shell_shared_writes(
         )
         changed = [
             path
-            for path in _bounded_shared_files(scope_root / "shared")
+            for path in bounded_shared_files(scope_root / "shared")
             if _changed_since(path, started_at_ns)
         ]
         if changed:
