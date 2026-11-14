@@ -126,7 +126,22 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
 def _replied_after(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
-    """A message sent for the person after theirs; a comment answer is one, as it is only placed from one."""
+    """The person's message has its reply: for one carrying chat comments, an answer placed in a
+    comment thread; for any other, a message sent for them after theirs.
+
+    An update that answers no comment (untagged) is not a reply to one, so the comment is
+    nudged for like any unanswered message.
+    """
+    comments = db.execute(
+        "SELECT COALESCE(json_array_length(metadata,'$.reply_context.comments'),0) FROM messages "
+        "WHERE id=? AND thread_id=? AND json_valid(metadata)",
+        (person["id"], thread_id),
+    ).fetchone()
+    if comments is not None and comments[0] > 0:
+        return db.execute(
+            "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? LIMIT 1",
+            (thread_id, person["id"]),
+        ).fetchone() is not None
     return db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
         (thread_id, person["seq"]),

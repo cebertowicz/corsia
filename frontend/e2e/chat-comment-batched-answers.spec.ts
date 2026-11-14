@@ -194,6 +194,27 @@ test(`a post_update answer repeated in the closing text reads once in its thread
 });
 });
 
+test('an update that answers no comment, beside tagged closing text, places no answer and repeats nothing in chat', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  const { thread, cids } = await queueComments(page, request, 'Untagged update', 1);
+  const answer = 'Friday is skipped.';
+  // The Turn sends an update that answers no comment, then closes with the tagged answer the person is never sent.
+  // The e2e app turns the Focus nudge off (its unit tests own it), so this shows what the person sees until a nudge.
+  await seedMockResponses(request, [
+    { content: '', tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: 'Moved the meeting.' }) }], finish_reason: 'tool_calls' },
+    { content: `[${cids[0]}] ${answer}` },
+  ]);
+  await expect.poll(async () => (await messages(request, thread)).some(m => m.role === 'assistant' && m.content === `[${cids[0]}] ${answer}`), { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  const rows = await messages(request, thread);
+  expect(rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? []).filter((a: any) => a.author_kind === 'agent')).toHaveLength(0);
+  await expect(page.locator('.messages').getByText('Moved the meeting.')).toBeVisible();
+  // Nothing was placed, so the tagged closing text stays whole in the folded work, never in a comment thread.
+  await expandWork(page);
+  expect((await chatText(page)).split(answer).length - 1).toBe(1);
+  await capture(page, 'untagged-update-unanswered');
+});
+
 test('an answer written into the reply never streams into chat (Focus off)', async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
   const { thread, row, cids } = await queueComments(page, request, 'Streamed answer', 1, { focus: false });
