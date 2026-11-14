@@ -224,6 +224,34 @@ def test_prune_retention_keeps_boundary_date_and_timestamp(analytics):
     assert analytics.execute("SELECT route FROM request_slow").fetchall() == [("/edge",)]
 
 
+def test_bootstrap_drops_the_old_slow_row_ts_index_and_the_prune_still_works(tmp_path, monkeypatch):
+    import duckdb
+
+    path = tmp_path / "indexed.duckdb"
+    old = duckdb.connect(str(path))
+    old.execute(
+        "CREATE TABLE request_slow (ts TIMESTAMP NOT NULL, method VARCHAR NOT NULL, route VARCHAR NOT NULL, "
+        "status INTEGER NOT NULL, dur_ms DOUBLE NOT NULL, dbq_ms DOUBLE NOT NULL, db_ms DOUBLE NOT NULL)"
+    )
+    old.execute("CREATE INDEX idx_request_slow_ts ON request_slow (ts)")
+    old.execute("INSERT INTO request_slow VALUES (TIMESTAMP '2026-08-01', 'GET', '/old', 200, 1, 0, 0)")
+    old.close()
+    monkeypatch.setattr(analytics_db, "ANALYTICS_DB_PATH", path)
+    monkeypatch.delenv("CORSIA_ANALYTICS_DISABLE", raising=False)
+    analytics_db._reset_for_tests()
+    try:
+        conn = analytics_db.get_db()
+        indexes = conn.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'request_slow'"
+        ).fetchall()
+        request_timing.prune_retention(datetime(2026, 9, 25, tzinfo=UTC))
+        remaining = conn.execute("SELECT count(*) FROM request_slow").fetchone()[0]
+    finally:
+        analytics_db._reset_for_tests()
+
+    assert indexes == [] and remaining == 0
+
+
 @pytest.mark.parametrize("days, expected", [(1, ["/today"]), (3, ["/today", "/edge"])])
 def test_route_query_window_is_inclusive_of_today(analytics, days, expected):
     today = datetime.now(UTC).date()
