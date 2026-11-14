@@ -575,7 +575,7 @@ async def test_the_fallback_tells_the_page_to_re_read_the_comments_it_answered(d
     # Hidden steps are not broadcast rows, so the answers they place reach the page as a re-read notice.
     import infra.state as state
 
-    cid = _comment_on(db, "")
+    cid = _comment_on(db, "")  # the comment's seq below is what the notice must name
     db.execute("UPDATE messages SET metadata=json_set(metadata,'$.reply_context',json(?)) WHERE id='m1'",
                (json.dumps({"comments": [{"cid": cid, "seq": 7}]}),))
     db.commit()

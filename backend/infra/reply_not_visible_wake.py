@@ -4,12 +4,10 @@ Focus shows an agent's words only when it sends them with ``post_update``. When
 a Turn ends while the person's newest message has no such reply after it, the agent
 is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
-its last words become the reply (``for_user``), so the person still sees them, and
-any comment answers tagged in them, and in the Turn's earlier hidden steps, are placed in the
-same write (those steps' text stays out of chat); the nudge names the answers still pending, so
-a NO_REPLY after it is an informed decline; a
-woken Turn that leaves no words of its own (it errored first) shows the words it
-was woken about instead.
+its last words become the reply (``for_user``), and comment answers tagged in them or in earlier
+hidden steps are placed in the same write (those steps' text stays hidden); the nudge names answers
+still pending, so NO_REPLY after it is an informed decline; a woken Turn with no words of its own
+(it errored first) shows the words it was woken about instead.
 
 Before any person message, the delivered first-run event can anchor the same rule.
 Both run inside the terminal write (``automation.turn_end_effects``). A person's
@@ -183,14 +181,12 @@ def _hidden_answer_steps(
     db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None = None,
     before_seq: int | None = None,
 ) -> list[sqlite3.Row]:
-    """Hidden text steps after the person's message (and before ``before_seq``) that tag an answer to a
-    known comment, newest first. They span every Turn since that message, an event-woken Turn between
-    the message and the nudge included; the settle path relies on the newest-first order."""
-    before = "" if before_seq is None else "AND seq<? "
+    """Hidden steps after the person's message (before ``before_seq``) tagging a comment answer, newest
+    first (the settle path relies on it), across every Turn since that message."""
     rows = db.execute(
-        f"SELECT id, content, seq FROM messages WHERE thread_id=? AND seq>? AND id<>? {before}"
+        f"SELECT id, content, seq FROM messages WHERE thread_id=? AND seq>? AND id<>? AND seq<? "
         f"AND {_HIDDEN_TEXT} AND instr(content,'[c')>0 ORDER BY seq DESC",
-        (thread_id, after_seq, exclude_id or "", *(() if before_seq is None else (before_seq,))),
+        (thread_id, after_seq, exclude_id or "", 2**62 if before_seq is None else before_seq),
     ).fetchall()
     return [r for r in rows if placeable_answers(db, str(r["id"]), thread_id, str(r["content"]), r["seq"])]
 
@@ -202,8 +198,7 @@ def _pending_answers(
     pending: dict[str, str] = {}
     for row in _hidden_answer_steps(db, thread_id, after_seq, exclude_id):
         for cid, _user, text in placeable_answers(db, str(row["id"]), thread_id, str(row["content"]), row["seq"]):
-            first = text.strip().splitlines()[0].strip() if text.strip() else ""
-            pending.setdefault(cid, first[:80])
+            pending.setdefault(cid, (text.strip().splitlines() or [""])[0].strip()[:80])
     return list(pending.items())
 
 
@@ -218,12 +213,11 @@ def _show_hidden_words(
 ) -> None:
     """Make the nudged Turn's last words its reply, as if it had sent them.
 
-    The answers tagged in earlier hidden steps (all after the person's message, and before
-    ``before_seq`` when given) are placed in the same write, newest first; those steps' text stays
-    out of chat and the answers go only to their comment threads, which the page is told to re-read.
+    Answers tagged in earlier hidden steps are placed in the same write, newest first; their text
+    stays out of chat and the page re-reads the answered comment threads.
     """
-    from infra.chat_comment_answers import answered_comment_seqs
     from infra import thread_updates
+    from infra.chat_comment_answers import answered_comment_seqs
     from infra.send_broadcast import broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
 
@@ -253,11 +247,9 @@ def _show_hidden_words(
         if projected is not None:
             broadcast_input_rows(thread_id, (projected,))
         if answered_seqs:  # hidden steps are not broadcast rows; the page re-reads the commented rows
-            import infra.state as state
+            from infra.send_broadcast import broadcast_comments_changed
 
-            state.broadcast_to_thread(
-                thread_id, {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": answered_seqs},
-            )
+            broadcast_comments_changed(thread_id, answered_seqs)
 
     after_commit(db, publish)
 

@@ -230,6 +230,15 @@ def chat_comments_changed_payload(thread_id: str, rows: list[InputBroadcastRow])
     return {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": seqs}
 
 
+def broadcast_comments_changed(thread_id: str, target_seqs: list[int]) -> None:
+    """Tell chat clients to re-read the commented rows at these seqs (answers landed in their threads)."""
+    import infra.state as state
+
+    state.broadcast_to_thread(
+        thread_id, {"type": "chat_comments_changed", "thread_id": thread_id, "target_seqs": target_seqs},
+    )
+
+
 def _read_input_broadcast_rows(
     message_ids: tuple[str, ...],
 ) -> tuple[InputBroadcastRow, ...]:
