@@ -442,13 +442,14 @@ describe('links in a rendered table', () => {
 		const deps = {
 			activeThreadId: () => 't1', projectId: () => 'p1',
 			fetchRoots: vi.fn().mockResolvedValue([{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws' }]),
-			fetchRevision, openArtifact, showError, openExternal: vi.fn(), isTauri: () => true, origin: () => 'http://corsia.test',
+			fetchRevision, openArtifact, showError, openLoading: vi.fn(() => 'loading-1'), failLoading: vi.fn(),
+			openExternal: vi.fn(), isTauri: () => true, origin: () => 'http://corsia.test',
 			openSettings: vi.fn(), openThread: vi.fn(),
 		};
 		const cleanup = installLinkTargetResolver(document, () => deps);
 		try {
 			mount(LINK_DOC, 0).dom.querySelector<HTMLAnchorElement>('.cm-md-table a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
-			await vi.waitFor(() => expect(openArtifact).toHaveBeenCalledWith('t1', { artifactId: null, path: '/ws/onboarding/steps.md', title: 'steps.md' }));
+			await vi.waitFor(() => expect(openArtifact).toHaveBeenCalledWith('t1', { artifactId: null, path: '/ws/onboarding/steps.md', title: 'steps.md' }, 'loading-1'));
 			expect(fetchRevision).toHaveBeenCalledWith('/ws/onboarding/steps.md', 'p1');
 			expect(showError).not.toHaveBeenCalled();
 		} finally {

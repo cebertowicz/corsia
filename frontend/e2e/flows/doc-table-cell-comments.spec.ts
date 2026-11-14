@@ -152,10 +152,10 @@ for (const layout of LAYOUTS) {
 			await frame(page, `05-selection-composer-${at}`);
 		});
 
-		test('a selection from below a table up into it is offered Comment where it ends, as prose\'s is', async ({ page }) => {
-			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
-			test.setTimeout(120_000);
-			await openTableDocument(page, layout);
+		// The offer sits by the rule a prose selection's does (1c7205810): above the rows the selection is drawn on, or below them
+		// near the window's top, so it never covers selected text. A selection that runs from the table down into prose is drawn from
+		// the table's top, so the offer sits above the table; it does not sit where the selection ends.
+		const selectUpIntoTable = async (page: Page) => {
 			const line = page.locator('.cm-line', { hasText: 'Paragraph below the first table.' });
 			await line.scrollIntoViewIfNeeded();
 			await line.click();
@@ -165,11 +165,46 @@ for (const layout of LAYOUTS) {
 			const offer = page.locator('.sel-comment');
 			await expect(offer, 'the selection running into the table is offered Comment').toBeVisible();
 			await expect(page.locator('.cm-md-cell-editor'), 'setup: no cell opened').toHaveCount(0);
-			const shown = await boxOf(offer), prose = await boxOf(line), table = await boxOf(page.locator('.cm-md-table table').first());
+			return { line, offer };
+		};
+		/** The boxes the selection is drawn in, as the browser draws them now. */
+		const selectedBoxes = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.cm-selectionBackground')].map((el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, right: r.right, bottom: r.bottom }; }).filter((b) => b.right > b.x && b.bottom > b.y));
+		const overlaps = (a: Box, b: Box) => a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
+
+		test('a selection from below a table up into it is offered Comment above the rows it is drawn on, as prose\'s is', async ({ page }) => {
+			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			const { offer } = await selectUpIntoTable(page);
+			const shown = await boxOf(offer), table = await boxOf(page.locator('.cm-md-table table').first());
+			expect(await offer.evaluate((el) => el.classList.contains('above')), 'above the selected rows').toBe(true);
 			expect(await offer.evaluate((el) => el.classList.contains('below')), 'not the table\'s place below it').toBe(false);
-			expect(shown.x < table.right && Math.abs(shown.y - prose.y) <= 24,
-				`beside where the selection ends, on the prose line, not in the table's margin (${JSON.stringify({ shown, prose, table })})`).toBe(true);
+			expect(shown.bottom <= table.y, `above the table the selection starts in, not beside where it ends (${JSON.stringify({ shown, table })})`).toBe(true);
+			const covered = (await selectedBoxes(page)).filter((b) => overlaps(shown, b));
+			expect(covered.length, `the offer covers no selected text (${JSON.stringify({ shown, covered })})`).toBe(0);
 			await frame(page, `05-selection-into-table-${at}`);
+		});
+
+		test('a selection into a table whose top is scrolled out of view still has its Comment offer on screen', async ({ page }) => {
+			test.skip(layout.project === 'chromium-mobile', 'Shift+Up selects with a keyboard');
+			test.setTimeout(120_000);
+			await openTableDocument(page, layout);
+			// A window short enough that the document scrolls (the whole fixture fits in a tall one).
+			await page.setViewportSize({ width: layout.width, height: 480 });
+			await settled(page);
+			const { offer } = await selectUpIntoTable(page);
+			// The selection's rows now start above the visible area: scroll the table's top out of view, keeping the prose line under it on screen.
+			const table = page.locator('.cm-md-table table').first();
+			const tableTop = (await boxOf(table)).y;
+			await page.locator('.cm-scroller').first().evaluate((el, by) => { el.scrollTop += by; }, tableTop + 40);
+			await settled(page);
+			await expect(offer, 'the offer is still there').toBeVisible();
+			expect((await boxOf(table)).y, 'setup: the table\'s top is out of view').toBeLessThan(0);
+			const shown = await boxOf(offer), height = await page.evaluate(() => window.innerHeight);
+			expect(shown.y >= 0 && shown.bottom <= height, `the offer is on screen (${JSON.stringify({ shown, height })})`).toBe(true);
+			const covered = (await selectedBoxes(page)).filter((b) => overlaps(shown, b));
+			expect(covered.length, `the offer covers no selected text (${JSON.stringify({ shown, covered })})`).toBe(0);
+			await frame(page, `05-selection-into-table-scrolled-${at}`);
 		});
 
 		test('a click on a comment covering a whole cell opens the comment and the cell, and the comment stays open', async ({ page }) => {

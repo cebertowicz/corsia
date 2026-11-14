@@ -81,7 +81,7 @@ def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
         "AND m.delivery_state='queued' AND m.input_order IS NOT NULL "
         f"AND {LIVE_CLAIM}",
         (thread_id,),
-    ))
+    ).fetchall())
 
 
 def _took_in_wake(db: sqlite3.Connection, turn_id: str) -> bool:

@@ -16,7 +16,7 @@ from connections.mail.email_document import email_draft_view
 from tools.reviewed_drafts import draft_at
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
-from registry.document_supervisor import ownership as document_ownership
+from registry.document_supervisor import is_multi_person, ownership as document_ownership
 from registry.identity_bridge import written_row
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -119,8 +119,11 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             art = art or registry_service.register_write_strict(thread_id, str(p), db=db)
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
-        freshness = artifact_freshness(art, p, db=db)
-        ownership = document_ownership(db, art, user_id=user_id, workspace=config.WORKSPACE) if art else None
+        multi_person = is_multi_person(db)
+        freshness = artifact_freshness(art, p, db=db, multi_person=multi_person)
+        ownership = document_ownership(
+            db, art, user_id=user_id, workspace=config.WORKSPACE, multi_person=multi_person,
+        ) if art else None
         draft = draft_at(p, "email", db=db)
     finally:
         db.close()

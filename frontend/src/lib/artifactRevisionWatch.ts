@@ -75,7 +75,8 @@ async function runTabChecks(
 		do {
 			pending.queued = false;
 			const tab = get(threadWorkspaces)[threadId]?.tabs.find((entry) => entry.instanceId === instanceId);
-			if (!tab || tab.kind !== 'document' || !get(token)) return;
+			// A link tab still resolving names no file yet, so there is nothing to probe.
+			if (!tab || tab.kind !== 'document' || tab.link || !get(token)) return;
 			const target: ProbeTarget = {
 				path: tab.path, artifactId: tab.artifactId, loadedRevision: tab.loadedRevision,
 			};

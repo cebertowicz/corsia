@@ -34,6 +34,21 @@ describe('openBrowserPane', () => {
 		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: ws.tabs[0].instanceId });
 	});
 
+	it('opens a nested subagent’s browser in front in the pane the person is looking at', () => {
+		openArtifactTab('browser-parent', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		setActiveSurface('browser-parent', 'chat');
+		openBrowserPane('browser-parent', false, 'browser-subagent');
+		const ws = get(threadWorkspaces)['browser-parent'];
+		const tab = ws.tabs.find((candidate) => candidate.kind === 'browser')!;
+		expect(tab.threadId).toBe('browser-subagent');
+		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: tab.instanceId });
+		expect(get(threadWorkspaces)['browser-subagent']).toBeUndefined();
+		// The page's title reaches the parent's tab, which names the subagent's browser.
+		setBrowserPaneLabel('browser-subagent', 'Sign in · example.com');
+		expect(get(threadWorkspaces)['browser-parent'].tabs.find((candidate) => candidate.kind === 'browser')?.title).toBe('Sign in · example.com');
+		expect(get(threadWorkspaces)['browser-subagent']).toBeUndefined();
+	});
+
 	it('updates the browser tab label without changing its selection', () => {
 		openBrowserPane('browser-label');
 		const before = get(threadWorkspaces)['browser-label'];

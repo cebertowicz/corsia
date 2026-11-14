@@ -16,9 +16,10 @@ import os
 import sqlite3
 from pathlib import Path
 
-from doceditor import person_comment_projection
+from api.operator_annotations import annotate
+from host_access.browser_steps import PasswordStep
 from infra.schema import SCHEMA_SQL
-from plans import admission, mutations, operator_projection, review_evidence, service
+from plans import admission, mutations, operator_projection, public, review_evidence, service
 from plans import watch_operations
 from plans.boundary import PlanActor
 from tests.plan_scene import _artifact
@@ -72,6 +73,11 @@ def _envelope(db) -> dict:
     delegated = _task(plan.id, "Delegated", db=db, spawn_kind="claude-code")
     _task(service.ensure_plan("thread", "worker", db=db).id, "Child step", db=db)
     pull_request = _artifact(db, external_id="owner/repo#1", owner="owner")
+    # Opened before any task is selected, so it adds no dependency to the rows above.
+    public.open_user_step(
+        db, "owner", key="password_step:visit", title="Enter your password",
+        description="On the shared browser.", provenance=PasswordStep.provenance,
+    )
     with service._write(db):
         for node in (waiting, running):
             admission.activate(
@@ -105,8 +111,8 @@ def _envelope(db) -> dict:
     payload = operator_projection.read_thread(
         "owner", actor=PlanActor(None, "user", None, kind="user"), db=db,
     )
-    # The route sends the projection through the comment-attention pass, as here.
-    payload = person_comment_projection.annotate(db, payload, "user")
+    # The route sends the projection through the same annotations, as here.
+    payload = annotate(db, payload, "user")
     return json.loads(json.dumps(payload))
 
 
@@ -137,6 +143,7 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
     assert any(node["commitment_cost"] for node in nodes)
     assert any(node["child"] for node in nodes)
     assert any(node["branch_progress"] for node in nodes)
+    assert any(node.get("browser_thread_id") for node in nodes)
     if os.environ.get("CORSIA_WRITE_CONTRACT_FIXTURES") == "1":
         FIXTURE.write_text(json.dumps(envelope, indent=1, sort_keys=True) + "\n")
     committed = json.loads(FIXTURE.read_text())

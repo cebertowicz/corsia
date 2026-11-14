@@ -2,8 +2,8 @@
 	/**
 	 * A person task in the transcript (corsia#687): the "Needs your review" tile itself (`NeedsYouTile`),
 	 * with the plan row's needs-you mark as its lead and the task's action ("Do →") where the tile has
-	 * its chevron. Do → opens what the plan row opens: the task's instructions document, else its
-	 * details in the plan.
+	 * its chevron. Do → opens what the plan row opens: the task's instructions document, a sign-in
+	 * page's shared browser, else its details in the plan.
 	 *
 	 * Settled, the chip becomes the EventChip receipt in place. Several waiting tasks in one Focus
 	 * stretch read as one line, the first task's title and "+N more", and Do → opens that first task;

@@ -1,6 +1,7 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { chatComposer, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
+import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
+import { isolatedDb } from '../support/heldComments';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
@@ -91,6 +92,14 @@ async function reviewLeavesOwnershipReachable(page: Page): Promise<'drawer' | 'p
 		expect(overlaps(await box(item), await box(panel)), `the review ${kind} covers ${await item.getAttribute('data-role')}`).toBe(false);
 	}
 	await reachable(page.getByRole('combobox', { name: 'Add reviewers' }), `reviewer search reachable in the ${kind}`);
+	// The popover leaves the document's own heading readable: the text of the H1 is never under the card.
+	if (kind === 'popover') {
+		const heading = await page.locator('.cm-content .cm-md-h1').first().evaluate((element) => {
+			const range = document.createRange(); range.selectNodeContents(element);
+			const { x, y, width, height } = range.getBoundingClientRect(); return { x, y, width, height };
+		});
+		expect(overlaps(heading, await box(panel)), 'the review popover covers the document heading').toBe(false);
+	}
 	// A drawer is a sheet: Close returns the document, and the items take the next tap. The popover leaves them live.
 	if (kind === 'drawer') { await page.getByRole('button', { name: 'Close', exact: true }).click(); await expect(reviews).toHaveCount(0); }
 	for (const item of [ownerItem(page), supervisorItem(page)]) await reachable(item, `${await item.getAttribute('data-role')} reachable after the review ${kind}`);
@@ -108,7 +117,8 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		test.skip(touch !== (label === 'phone'), 'wide runs on the desktop project, phone on the mobile one');
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width, height });
-		const seeded = await seedOwnedDocument(page, request);
+		// A heading long enough to run under the popover's column, so a card placed over it would be caught.
+		const seeded = await seedOwnedDocument(page, request, 'Project planning for the community garden and the neighbourhood volunteers who tend it');
 		await seeded.open(page);
 
 		// At rest: two plainly labelled items.
@@ -136,7 +146,7 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852]]
 		// A failed save keeps the old owner and says so.
 		await page.route('**/api/artifacts/*/ownership', (route) => route.fulfill({ status: 500, body: '{"detail":"boom"}' }));
 		await pick(page, seeded, 'owner', 'Planning specialist');
-		await expect(ownerItem(page)).toContainText('Change failed');
+		await expect(ownerItem(page)).toContainText('Couldn’t change');
 		await expect(ownerItem(page)).toContainText('Release planning');
 		await page.unroute('**/api/artifacts/*/ownership');
 
@@ -179,3 +189,75 @@ test('@document-owner-supervisor the items stay separate tap targets at 320 widt
 	await expect(ownerItem(page)).toContainText('Release planning');
 	await expect(supervisorItem(page)).toContainText('Research coordinator');
 });
+
+/** A picker row's name, its Paused mark, and which words of its responsibility show, each shown word whole or not. */
+async function rowParts(row: Locator) {
+	return row.evaluate((element) => {
+		const name = element.querySelector<HTMLElement>('.name-head');
+		const paused = element.querySelector<HTMLElement>('.option-paused');
+		const role = element.querySelector<HTMLElement>('.option-role');
+		const text = element.querySelector<HTMLElement>('.option-text')!.getBoundingClientRect();
+		const words: { word: string; shown: boolean; whole: boolean }[] = [];
+		if (role) {
+			const box = role.getBoundingClientRect();
+			const walker = document.createTreeWalker(role, NodeFilter.SHOW_TEXT);
+			for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+				for (const match of (node.textContent ?? '').matchAll(/[^\s​]+/g)) {
+					const range = document.createRange();
+					range.setStart(node, match.index!); range.setEnd(node, match.index! + match[0].length);
+					const rect = range.getBoundingClientRect();
+					words.push({ word: match[0], shown: rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5, whole: rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 });
+				}
+			}
+		}
+		return {
+			name: name ? { text: name.textContent, cut: name.scrollWidth > name.clientWidth + 0.5 } : null,
+			paused: paused ? { text: paused.textContent, cut: paused.scrollWidth > paused.clientWidth + 0.5, inside: paused.getBoundingClientRect().right <= text.right + 0.5 } : null,
+			words,
+		};
+	});
+}
+
+/** Every responsibility word that shows is whole, and the shown words are its first ones: each cut falls between words. */
+function expectCutBetweenWords(parts: Awaited<ReturnType<typeof rowParts>>, step: string) {
+	const shown = parts.words.filter((word) => word.shown);
+	expect(shown.every((word) => word.whole), `${step}: no word is cut ${JSON.stringify(parts.words)}`).toBe(true);
+	expect(parts.words.slice(0, shown.length).every((word) => word.shown), `${step}: the words shown are the first ones ${JSON.stringify(parts.words)}`).toBe(true);
+}
+
+for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852], ['320', 320, 640]] as const) {
+	test(`@document-owner-supervisor two agents with the same name read whole in the picker, told apart by responsibility, at ${label} width`, async ({ page, request }, info) => {
+		const touch = info.project.name.includes('mobile');
+		test.skip(touch !== (label !== 'wide'), 'wide runs on the desktop project, phone widths on the mobile one');
+		test.setTimeout(120_000);
+		await page.setViewportSize({ width, height });
+		const seeded = await seedOwnedDocument(page, request);
+		const twin = await createSession(request, 'Planning specialist');
+		// Responsibilities long enough that something in the row must give way; "Community outreach" is paused.
+		isolatedDb([
+			"connection.execute(\"UPDATE threads SET agent_enabled=1, agent_status='active', agent_responsibility='Budget, funding and the grant applications for the whole growing season' WHERE id=?\", (sys.argv[2],))",
+			"connection.execute(\"UPDATE threads SET agent_responsibility='Site layout, soil testing and the planting calendar for every bed' WHERE id=?\", (sys.argv[3],))",
+			"connection.execute(\"UPDATE threads SET agent_responsibility='Neighbourhood outreach and the volunteer rota for every weekend of the season' WHERE id=?\", (sys.argv[4],))",
+		], twin, seeded.agents[3], seeded.agents[1]);
+		await seeded.open(page);
+		await supervisorItem(page).click();
+		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Planning specialist');
+		// This test's own two agents; earlier tests on the same server may have left agents with the same name.
+		const rows = [twin, seeded.agents[3]].map((agent) => rolePicker(page).locator(`[id="supervisor-options-option-${agent}"]`));
+		for (const row of rows) {
+			await expect(row).toBeVisible();
+			// The name is not cut at all: its text fits its box. The responsibility is the part that gives way, between words.
+			const parts = await rowParts(row);
+			expect(parts.name, `${label}: name ${JSON.stringify(parts)}`).toMatchObject({ text: 'Planning specialist', cut: false });
+			expect(parts.words.some((word) => !word.shown), `${label}: responsibility gives way ${JSON.stringify(parts.words)}`).toBe(true);
+			expectCutBetweenWords(parts, label);
+		}
+		// A paused agent keeps "Paused" whole; its responsibility gives way between words, or drops whole.
+		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Community outreach');
+		const paused = rolePicker(page).locator(`[id="supervisor-options-option-${seeded.agents[1]}"]`);
+		await expect(paused).toBeVisible();
+		const parts = await rowParts(paused);
+		expect(parts.paused, `${label}: Paused ${JSON.stringify(parts)}`).toMatchObject({ text: 'Paused', cut: false, inside: true });
+		expectCutBetweenWords(parts, `${label} paused`);
+	});
+}

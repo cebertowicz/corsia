@@ -9,6 +9,7 @@ from typing import Collection
 
 from core.workspace_layout import resolve_project_root
 from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
+from infra.queries import thread_available_sql
 from infra.workspace_paths import WorkspaceReference, workspace_selection_for_root
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
@@ -133,8 +134,8 @@ def may_edit_document(
     return decide("refused", principal or thread_id)
 
 
-def document_scope(path: Path | str, *, workspace: Path, db) -> tuple[Path, str | None]:
-    """Return the root and conductor of the scope that holds ``path``, in one lookup.
+def document_project(path: Path | str, *, workspace: Path, db) -> tuple[Path, str | None]:
+    """Return the root and project id of the scope that holds ``path`` (``None`` for the workspace).
 
     The project that holds ``path`` is the one whose root, resolved the way
     every other caller resolves it (``core.project_context``, so a legacy row
@@ -153,14 +154,42 @@ def document_scope(path: Path | str, *, workspace: Path, db) -> tuple[Path, str 
             if project_root is not None and resolved.is_relative_to(project_root):
                 if holder is None or len(project_root.parts) > len(holder[0].parts):
                     holder = (project_root, str(row["id"]))
-    if holder is not None:
-        return holder[0], scope_conductor(holder[1], db=db)
-    return root, scope_conductor(None, db=db)
+    return (holder[0], holder[1]) if holder is not None else (root, None)
+
+
+def document_scope(path: Path | str, *, workspace: Path, db) -> tuple[Path, str | None]:
+    """Return the root and conductor of the scope that holds ``path``, in one lookup."""
+    root, project_id = document_project(path, workspace=workspace, db=db)
+    return root, scope_conductor(project_id, db=db)
 
 
 def scope_relative(path: Path, scope_root: Path) -> str:
     """Return ``path`` relative to its scope root, as events and refusals show it."""
     return path.relative_to(scope_root).as_posix() if path.is_relative_to(scope_root) else str(path)
+
+
+def pickable_agents(project_id: str | None, user_id: str, *, db, name: str | None = None) -> list:
+    """The agents one person may pick as an owner or supervisor in one scope, by title; with ``name``, those whose id or title match.
+
+    The one home of that rule: this person's persistent agents in this scope
+    that are still available (not archived by the person, not purged).
+    ``resolve_explicit_owner``, the document picker's choices and the ownership
+    PUT all read it, so what is offered, accepted and resolved is one list.
+    """
+    scope_sql = "project_id IS NULL" if project_id is None else "project_id=?"
+    params: list[object] = [user_id]
+    if project_id is not None:
+        params.append(project_id)
+    match_sql = ""
+    if name is not None:
+        match_sql = "AND (id=? OR title=?)"
+        params.extend((name, name))
+    return db.execute(
+        f"""SELECT id,title,project_id,user_id,agent_enabled,lifecycle_state,archived_reason,agent_responsibility FROM threads
+            WHERE user_id=? AND {scope_sql} AND COALESCE(agent_enabled,0)=1 AND {thread_available_sql()} {match_sql}
+            ORDER BY title COLLATE NOCASE, id""",
+        params,
+    ).fetchall()
 
 
 def resolve_explicit_owner(
@@ -181,19 +210,7 @@ def resolve_explicit_owner(
             return conductor
         raise ValueError("This scope has no designated conductor.")
 
-    scope_sql = "project_id IS NULL" if project_id is None else "project_id=?"
-    params: list[object] = [user_id]
-    if project_id is not None:
-        params.append(project_id)
-    params.extend((requested, requested))
-    rows = db.execute(
-        f"""SELECT id FROM threads
-            WHERE user_id=? AND {scope_sql}
-              AND COALESCE(agent_enabled,0)=1
-              AND (id=? OR title=?)
-            ORDER BY id""",
-        params,
-    ).fetchall()
+    rows = pickable_agents(project_id, user_id, db=db, name=requested)
     if len(rows) != 1:
         raise ValueError(
             "owner must resolve to one persistent agent name or ID, "
@@ -225,6 +242,25 @@ def owner_label(owner_thread_id: str, *, db) -> str:
     ).fetchone()
     title = str(row["title"] or "").strip() if row else ""
     return title or owner_thread_id
+
+
+def person_owner_label(owner: str | None, *, db, multi_person: bool) -> str:
+    """The owner as a person reads it: the agent's name, or for a shared owner ``You`` or ``Not set``.
+
+    A ``ui`` or ``project:`` document is everyone's while more than one person
+    uses CORSIA, so it reads ``Everyone`` then, as the picker's refusal says.
+    Every person-facing surface (the document header, the Files tree, the
+    viewer) shows this; ``owner_label`` stays the agents' wording.
+    """
+    from infra.auth import is_owner_sentinel
+
+    if owner is not None and is_owner_sentinel(owner) and multi_person:
+        return "Everyone"
+    if owner == UI_PRINCIPAL:
+        return "You"
+    if owner is None or is_owner_sentinel(owner):
+        return "Not set"
+    return owner_label(owner, db=db)
 
 
 def shared_roots(*, workspace: Path, db) -> list[Path]:

@@ -1,19 +1,10 @@
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
-import type { Locator } from '@playwright/test';
+import { colorAt } from '../support/browserCanvas';
 import { startProbeServer } from '../support/probeServer';
 import { seedMockResponses } from '../support/mock';
 import { sendChatMessage } from '../support/corsia';
-
-// Frames are JPEG, so a drawn color is matched within a small tolerance.
-async function colorAt(canvas: Locator, fx: number, fy: number, rgb: number[]) {
-	const pixel = await canvas.evaluate((node, [fx, fy]) => {
-		const frame = node as HTMLCanvasElement;
-		return Array.from(frame.getContext('2d')!.getImageData(Math.floor(frame.width * fx), Math.floor(frame.height * fy), 1, 1).data.slice(0, 3));
-	}, [fx, fy]);
-	return pixel.every((value, index) => Math.abs(value - rgb[index]) <= 12) ? rgb : pixel;
-}
 
 test.describe('@flow:browser-pane shared browser pane', () => {
 	let probe: Awaited<ReturnType<typeof startProbeServer>>;

@@ -7,7 +7,7 @@
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
-	import { personStepInstructionsDocument } from './nodeDetailsText';
+	import { doTarget, openStep } from '$lib/personStepChip';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
@@ -128,11 +128,8 @@
 			focusNotice = 'That task isn’t in this plan.';
 			return;
 		}
-		const instructions = personStepInstructionsDocument(node);
-		if (instructions) {
-			openAsk(instructions, node.title);
-			return;
-		}
+		// A person step opens its document or browser, as its row and its chat chip do.
+		if (openStep(threadId, doTarget(node), node.title, () => { void openDecisions(); })) return;
 		const forThread = threadId;
 		drillRootId = null;
 		await tick();

@@ -5,7 +5,8 @@ owner is paused, whose rule was turned off, or whose script schedule or owner is
 gone is skipped with the reason, since it never started. None of these wakes
 anyone; ``explain`` and ``list`` show them. A rule run takes its script's own
 in-flight claim, the one a scheduled run takes, so at most one run of a script
-is in flight; a run whose script is busy stays queued for a later sweep. The
+is in flight; a run whose script is busy stays queued for a later sweep, and the
+slot it could not take goes to the next queued run of another script. The
 queue itself is ``events.rule_runs``. The repository a run may read GitHub for is
 taken from that stored input's event here, before the script sees any of it.
 
@@ -152,28 +153,43 @@ def _report_interrupted(connection, ended: Iterable[Mapping[str, Any]]) -> None:
 def claim(now: str, capacity: int, live_keys: set[str], db) -> list[tuple[Schedule, RuleRun]]:
     """End interrupted rule runs and tell their owners, then claim up to ``capacity`` queued
     ones, oldest first."""
-    from plans.public import thread_paused_since
-
     claimed: list[tuple[Schedule, RuleRun]] = []
     with write_transaction(db, scope="script_rule_runs_claim") as connection:
         _report_interrupted(connection, rule_runs.interrupt(connection, live_decisions(live_keys)))
-        for row in rule_runs.queued(connection, capacity):
-            schedule, refused = _refusal(connection, row)
-            if refused is None and thread_paused_since(connection, row["thread_id"]) is not None:
-                refused = rule_runs.OWNER_PAUSED
-            if schedule is None or refused is not None:
-                rule_runs.finish(connection, row["id"], skipped=refused)
-                continue
-            if not store.claim_for_rule(schedule.id, now, db=connection):
-                continue  # an earlier row of this sweep took the script: this one waits its turn
-            # Still queued under this write lock; were it not, the next sweep frees the claim.
-            run_input = rule_runs.start(connection, row["id"])
-            if run_input is not None:
-                event = run_input.get("event", {})
-                claimed.append((schedule, RuleRun(
-                    row["id"], row["rule_id"],
-                    json.dumps(event, ensure_ascii=False).encode(),
-                    tuple(run_input.get("trace", ())),
-                    bound_repository(event),
-                )))
+        # A row passed over leaves its slot empty: read again for the slots still free, and the
+        # queue now leaves that row's script out. Each further read follows a claim, so a pass
+        # reads once per slot at most.
+        for _read in range(capacity):
+            rows = rule_runs.queued(connection, capacity - len(claimed))
+            if not _claim_rows(connection, rows, now, claimed):
+                break
     return claimed
+
+
+def _claim_rows(connection, rows, now: str, claimed: list[tuple[Schedule, RuleRun]]) -> bool:
+    """Claim each row that can start now into ``claimed``; True if one was passed over
+    because its script's claim was taken."""
+    from plans.public import thread_paused_since
+
+    passed_over = False
+    for row in rows:
+        schedule, refused = _refusal(connection, row)
+        if refused is None and thread_paused_since(connection, row["thread_id"]) is not None:
+            refused = rule_runs.OWNER_PAUSED
+        if schedule is None or refused is not None:
+            rule_runs.finish(connection, row["id"], skipped=refused)
+            continue
+        if not store.claim_for_rule(schedule.id, now, db=connection):
+            passed_over = True  # an earlier row of this sweep took the script: this one waits its turn
+            continue
+        # Still queued under this write lock; were it not, the next sweep frees the claim.
+        run_input = rule_runs.start(connection, row["id"])
+        if run_input is not None:
+            event = run_input.get("event", {})
+            claimed.append((schedule, RuleRun(
+                row["id"], row["rule_id"],
+                json.dumps(event, ensure_ascii=False).encode(),
+                tuple(run_input.get("trace", ())),
+                bound_repository(event),
+            )))
+    return passed_over

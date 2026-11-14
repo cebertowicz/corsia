@@ -74,7 +74,7 @@ Source: `backend/infra/usage_schema.py`.
 | `context_manifest_id` | TEXT | No | No | — | — |
 | `reasoning_effort` | TEXT | No | No | — | — |
 
-Indexes: `idx_llm_usage_commitment` (plan_commitment_id, created_at), `idx_llm_usage_context_manifest` (context_manifest_id), `idx_llm_usage_created_at` (created_at), `idx_llm_usage_model` (model, created_at), `idx_llm_usage_plan_node` (plan_node_id), `idx_llm_usage_priceable_measurement_start` (created_at), `idx_llm_usage_session` (thread_id, created_at), `idx_llm_usage_source` (source, created_at), `sqlite_autoindex_llm_usage_1` (id, unique).
+Indexes: `idx_llm_usage_commitment` (plan_commitment_id, created_at), `idx_llm_usage_context_manifest` (context_manifest_id), `idx_llm_usage_created_at` (created_at), `idx_llm_usage_model` (model, created_at), `idx_llm_usage_plan_node` (plan_node_id), `idx_llm_usage_priceable_measurement_start` (created_at), `idx_llm_usage_session` (thread_id, created_at), `idx_llm_usage_source` (source, created_at), `idx_llm_usage_turn` (turn_id), `sqlite_autoindex_llm_usage_1` (id, unique).
 
 ### `llm_usage_hourly`
 

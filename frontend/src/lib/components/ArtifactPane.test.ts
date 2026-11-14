@@ -109,7 +109,7 @@ describe('ArtifactPane — Open browser', () => {
 		paneOpen.set(true);
 		mountPane({ nodes: [], needs_attention: [] });
 		openBrowserButton().click();
-		expect(openBrowserPane).toHaveBeenCalledWith('sess-1');
+		expect(openBrowserPane).toHaveBeenCalledWith('sess-1', false, 'sess-1');
 		expect(get(paneOpen)).toBe(false);
 	});
 

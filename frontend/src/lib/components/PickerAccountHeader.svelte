@@ -91,7 +91,7 @@
 	.picker-account-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; min-height: 28px; font-size: var(--text-footnote); }
 	.picker-account-title { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; align-items: baseline; gap: 3px; padding: 0; color: inherit; font: inherit; background: none; border: 0; border-radius: var(--radius-xs); text-align: left; }
 	button.picker-account-title { cursor: pointer; }
-	.vendor { flex: 0 0 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-subhead); font-weight: 600; white-space: nowrap; }
+	.vendor { flex: 0 0 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-subhead); font-weight: 600; white-space: nowrap; }
 	/* A block with its own line box, so the icon's vertical-align sits it on the text baseline; an empty flex box would rest its bottom there. */
 	.switching-slot { display: inline-block; flex: 0 0 auto; }
 	.separator, .usage { color: var(--text-tertiary); }

@@ -85,7 +85,9 @@ export default defineConfig({
 		baseURL: frontendUrl,
 		trace: 'retain-on-failure',
 		screenshot: 'only-on-failure',
-		video: 'retain-on-failure',
+		// 'retain-on-failure' still encodes every test through ffmpeg and deletes on pass;
+		// the failure trace already carries a screencast. Specs that need video opt in.
+		video: 'off',
 	},
 	projects: [
 		{

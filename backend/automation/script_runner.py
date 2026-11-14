@@ -9,7 +9,8 @@ process no longer holds as interrupted, and (2) claims due runs up to the
 concurrency cap. A claim moves the row to its next slot before the run starts,
 so a restart or a slow run never replays and a missed period never piles up.
 The runs themselves are tasks, so a 5-minute script never holds the sweep.
-Runs ``run_script`` event rules queued share the same cap, after due ones,
+A run that ends wakes the sweep, so the slot it frees is filled then, not at the
+next interval. Runs ``run_script`` event rules queued share the same cap, after due ones,
 take the same per-script claim, so one run of a script is in flight at a time,
 and settle the same way (``automation.script_rule_runs``).
 """
@@ -37,6 +38,7 @@ from automation.script_readings import (
 )
 from automation.script_sandbox import ScriptSandboxError, run_script
 from host_access.processes import ProcessOwnerError
+from infra import sweep_wake
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db_unless_owned, run_off_db
 from infra.measure_registry import REGISTRY
@@ -65,6 +67,8 @@ def _start(key: str, run, holds: str | None = None) -> None:
     if holds is not None:
         _holds[key] = holds
     task.add_done_callback(partial(_forget, key))
+    # The slot is free once the run is forgotten: wake the sweep, the one caller that fills it.
+    task.add_done_callback(lambda _task: sweep_wake.sweep_soon())
 
 
 def _live() -> set[str]:

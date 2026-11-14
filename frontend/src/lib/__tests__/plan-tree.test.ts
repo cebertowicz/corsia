@@ -7,6 +7,12 @@ import { CHILD_AVAILABLE, node } from './fixtures/planTreeNode';
 import { blockedPlanTree } from './fixtures/blockedPlanTree';
 import { withFolds } from './fixtures/planFolds';
 import { childState } from './fixtures/planFolds';
+import { openPlanBrowser } from '$lib/planLeafReturn';
+
+vi.mock('$lib/planLeafReturn', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/planLeafReturn')>()),
+	openPlanBrowser: vi.fn(),
+}));
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -141,6 +147,30 @@ describe('PlanTree — same renderer contract', () => {
 
 		expect(onOpenArtifact).toHaveBeenCalledWith(instructions, 'Set up workspace');
 		expect(rowTitled('Set up workspace')!.querySelector('.node-details')).toBeNull();
+	});
+
+	it('opens a sign-in step’s shared browser from its row instead of details', async () => {
+		const onOpenArtifact = vi.fn();
+		component = mount(PlanTree, {
+			target: host,
+			props: withFolds({
+				nodes: [node({ id: 'sign-in', title: 'Enter your password', assignee: 'user', browser_thread_id: 'worker', user_actions: ['mark_done', 'close_node'] })],
+				onOpenArtifact,
+				onUserAction: vi.fn(),
+			}),
+		});
+		flushSync();
+
+		const rowButton = rowTitled('Enter your password')!.querySelector('.row-body') as HTMLButtonElement;
+		expect(rowButton.title).toBe('Open browser');
+		expect(rowButton.hasAttribute('aria-expanded')).toBe(false);
+		rowButton.click();
+		await settle();
+
+		// The row names no pane: the browser opens where the person is looking.
+		expect(openPlanBrowser).toHaveBeenCalledWith('worker', null);
+		expect(onOpenArtifact).not.toHaveBeenCalled();
+		expect(rowTitled('Enter your password')!.querySelector('.node-details')).toBeNull();
 	});
 
 	it('still offers Open on a paused ask that left Needs you', () => {

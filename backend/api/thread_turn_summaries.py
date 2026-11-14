@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from core.stop_causes import PLAN_LIMIT_REASON
 from infra.message_activity import ACTIVITY_ROW_SQL, ACTIVITY_SQL
 from infra.time import utc_storage_iso_to_api
@@ -30,21 +32,23 @@ def page_turn_summaries(db, thread_id: str, display: list[dict]) -> dict[str, di
     turn_ids = page_turn_ids(display)
     if not turn_ids:
         return {}
-    marks = ",".join("?" for _ in turn_ids)
+    params = [thread_id, json.dumps(turn_ids)]
     activity_rows = db.execute(
         "SELECT json_extract(metadata, '$.turn_id') AS turn_id, "
         f"SUM({ACTIVITY_SQL}) AS activity_count "
         "FROM messages INDEXED BY idx_messages_turn_calls "
         f"WHERE thread_id=? AND {ACTIVITY_ROW_SQL} "
-        f"AND json_extract(metadata, '$.turn_id') IN ({marks}) "
+        "AND json_extract(metadata, '$.turn_id') IN (SELECT value FROM json_each(?)) "
         "GROUP BY json_extract(metadata, '$.turn_id')",
-        [thread_id, *turn_ids],
+        params,
     ).fetchall()
     activity_by_turn = {str(row["turn_id"]): int(row["activity_count"]) for row in activity_rows}
+    # Keep the page IDs outermost so SQLite seeks each turn by primary key.
     turns = db.execute(
-        "SELECT id,status,started_at,ended_at,error FROM active_turns "
-        f"WHERE thread_id=? AND id IN ({marks})",
-        [thread_id, *turn_ids],
+        "SELECT t.id,t.status,t.started_at,t.ended_at,t.error "
+        "FROM json_each(?) j CROSS JOIN active_turns t "
+        "WHERE t.id=j.value AND t.thread_id=?",
+        [params[1], thread_id],
     ).fetchall()
     return {str(row["id"]): _summary(row, activity_by_turn.get(str(row["id"]), 0)) for row in turns}
 

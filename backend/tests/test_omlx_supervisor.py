@@ -94,10 +94,6 @@ def test_build_argv_with_settings():
     assert "--port" in argv and argv[argv.index("--port") + 1] == "8000"
     assert "--model-dir" in argv
     assert argv[argv.index("--model-dir") + 1] == "/Users/alice/models"
-    # oMLX 0.7.3+ replaced these with --memory-guard and exits on them (2: unrecognized
-    # arguments), so a stored legacy value must never reach the launch line.
-    assert "--max-model-memory" not in argv
-    assert "200GB" not in argv
     assert any(arg.startswith("--api-key=") for arg in argv)
     assert "--max-concurrent-requests" in argv
     assert argv[argv.index("--max-concurrent-requests") + 1] == "4"

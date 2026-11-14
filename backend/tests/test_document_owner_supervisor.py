@@ -23,14 +23,14 @@ def _view(artifact_id: str):
     """The ownership payload as the document load builds it."""
     import infra.config as config
     from infra.database import get_db
-    from registry.document_supervisor import ownership
+    from registry.document_supervisor import is_multi_person, ownership
     from registry import models
 
     db = get_db()
     try:
         return ownership(
             db, models.get_artifact(artifact_id, db=db),
-            user_id=PERSON["id"], workspace=config.WORKSPACE,
+            user_id=PERSON["id"], workspace=config.WORKSPACE, multi_person=is_multi_person(db),
         )
     finally:
         db.close()
@@ -83,7 +83,7 @@ def owned_document(isolated_db):
 
 
 def test_multi_person_installation_reports_the_flag_and_refuses_the_person(owned_document):
-    from api.registry_ownership import MULTI_PERSON_REFUSAL
+    from registry.document_supervisor import MULTI_PERSON_REFUSAL
 
     client, artifact_id = owned_document
 
@@ -339,7 +339,7 @@ def test_a_released_document_routes_as_its_header_reads_and_never_to_no_one(owne
 @pytest.mark.parametrize("shared_owner", ["ui", "project:p1"])
 def test_a_shared_document_is_not_changed_by_one_of_several_people(owned_document, shared_owner):
     """Everyone shares a ``ui`` or ``project:`` document, so with two people neither field changes."""
-    from api.registry_ownership import SHARED_REFUSAL
+    from registry.document_supervisor import SHARED_REFUSAL
 
     client, artifact_id = owned_document
     _set_owner(artifact_id, shared_owner)

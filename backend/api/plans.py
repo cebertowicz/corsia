@@ -50,7 +50,7 @@ def _operator_operation(kind: str, target_id: str | None, user_id: str):
     db = get_db()
     actor = _human_actor(user_id)
     try:
-        from doceditor.person_comment_projection import annotate
+        from api.operator_annotations import annotate
 
         if kind == "workspace":
             return annotate(db, public.read_operator_workspace(actor=actor, db=db), user_id)

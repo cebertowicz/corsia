@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 import { activeThreadId } from '$lib/stores/threads';
 import { focusPlanNode } from '$lib/planNodeFocus';
-import { openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab } from '$lib/stores/artifactWorkspace';
+import { openArtifactTab, openBrowserPane, openLegacyDiscussionArchiveTab, openSubagentConversationTab } from '$lib/stores/artifactWorkspace';
 import type { OperatorArtifactLink } from '$lib/api/plans';
 import type { ArtifactTab } from '$lib/artifactTabTypes';
 
@@ -58,6 +58,16 @@ export function openPlanAsk(
 		path: artifact.path ?? artifact.external_id,
 		title: artifact.title ?? nodeTitle,
 	});
+	if (isPaneDrawer()) paneOpen.set(false);
+}
+
+/**
+ * Opens a thread's shared browser in front, the person's own open: `browserThreadId`'s browser in
+ * `threadId`'s pane (none: the thread the person is looking at). An overlay pane closes to show it, as
+ * every other plan opener does.
+ */
+export function openPlanBrowser(browserThreadId: string, threadId: string | null = null): void {
+	openBrowserPane(threadId ?? get(activeThreadId) ?? browserThreadId, false, browserThreadId);
 	if (isPaneDrawer()) paneOpen.set(false);
 }
 
