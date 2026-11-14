@@ -51,6 +51,18 @@ CHANGED_EVENT = "thread_updates_changed"
 
 _COLUMNS = "id,thread_id,kind,source_kind,source_id,node_id,title,after_seq,created_at"
 
+
+# Which update a thread's sidebar preview shows: the newest one that is not a person's step. The aggregate and
+# the stamped-step fallback both build their SQL from these, so the rule has one definition. The key sorts as
+# ``created_at DESC, id DESC``; the fallback orders by those two columns so the thread index serves it.
+def _previewable(alias: str = "") -> str:
+    return f"{alias}kind != 'person_step'"
+
+
+def _newest_key(alias: str = "") -> str:
+    return f"{alias}created_at || '/' || printf('%019d', {alias}id)"
+
+
 def canonical_time(value: str) -> str:
     """One ordering shape for every source: naive UTC with microseconds."""
     return iso(parse(value))
@@ -163,8 +175,8 @@ def latest_by_thread_with_attention(
         raise ValueError(f"read at most {THREAD_LIMIT} threads at once; {len(ids)} were named")
     if not ids:
         return {}, {}
-    newest = "created_at || '/' || printf('%019d', id)"
-    row_key = "u.created_at || '/' || printf('%019d', u.id)"
+    newest = _newest_key()
+    row_key = _newest_key("u.")
     columns = ",".join(f"u.{column}" for column in _COLUMNS.split(","))
     rows = db.execute(
         f"""WITH selected AS (
@@ -174,7 +186,7 @@ def latest_by_thread_with_attention(
                                  AND (kind != 'failed' OR {asks_user_sql()})
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
-                 WHERE thread_id IN ({','.join('?' * len(ids))}) AND kind != 'person_step'
+                 WHERE thread_id IN ({','.join('?' * len(ids))}) AND {_previewable()}
                  GROUP BY thread_id
             )
             SELECT {columns}, {VISIBLE_CONTENT} AS message_content,
@@ -223,7 +235,7 @@ def _latest_drawn(db: sqlite3.Connection, thread_id: str) -> dict | None:
               FROM thread_updates u INDEXED BY idx_thread_updates_thread_time
               LEFT JOIN messages m ON m.id=u.source_id AND u.source_kind='message'
               {VISIBLE_CONTENT_JOIN}
-             WHERE u.thread_id=? AND u.kind != 'person_step' AND NOT {chat_not_drawn_sql('m.metadata')}
+             WHERE u.thread_id=? AND {_previewable('u.')} AND NOT {chat_not_drawn_sql('m.metadata')}
              ORDER BY u.created_at DESC, u.id DESC LIMIT 1""",
         (thread_id,),
     ).fetchone()

@@ -279,8 +279,6 @@ def build_argv(
 
     flag_map: list[tuple[str, str]] = [
         ("model_dir",                "--model-dir"),
-        ("max_model_memory",         "--max-model-memory"),
-        ("max_process_memory",       "--max-process-memory"),
         ("log_level",                "--log-level"),
         ("max_concurrent_requests",  "--max-concurrent-requests"),
         ("paged_ssd_cache_dir",      "--paged-ssd-cache-dir"),
