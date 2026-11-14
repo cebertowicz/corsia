@@ -202,7 +202,7 @@ def _read_audit_metric(
 ) -> dict:
     """Read one fixed metric after binding the actor to its owned project."""
     if metric not in AUDIT_METRICS:
-        raise AuditReadError("invalid_metric", "Choose a metric from the audit_read metric list.")
+        raise AuditReadError("invalid_metric", "Choose one of: " + ", ".join(AUDIT_METRICS) + ".")
     start, end = _window(metric, since, until)
     if not actor_thread_id:
         raise AuditReadError("scope_denied", "An authenticated caller thread is required.")

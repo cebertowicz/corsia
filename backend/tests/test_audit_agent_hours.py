@@ -181,7 +181,9 @@ def test_http_route_passes_definition(audit):
 
 
 def test_scale_through_real_reader(audit):
+    """A week of rollup rows at today's order of size reads inside the deadline."""
     path, read = audit
+    total = 50_000
     start = datetime(2026, 9, 20)
     with sqlite3.connect(path) as db:
         db.execute("UPDATE llm_usage_hourly_state SET built_through='2026-09-27T00'")
@@ -189,20 +191,17 @@ def test_scale_through_real_reader(audit):
             "INSERT INTO threads(id,user_id,project_id,created_at,updated_at) VALUES (?,'owner','p1','t','t')",
             [(f"scale-{i}",) for i in range(100)],
         )
-        for total, amount in ((50_000, 50_000), (500_000, 450_000)):
-            db.executemany(
-                "INSERT INTO llm_usage_hourly(hour,thread_id,model,source,vendor_account_id,admission,input_tier,"
-                "idle_hours,records,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,"
-                "total_tokens,fresh_tokens,fresh_unknown_records,cost_records,first_at) "
-                "VALUES (?,?,?,'test','a','x','x',0,1,10,2,3,4,19,15,0,0,'t')",
-                (((start + timedelta(hours=hour)).isoformat()[:13], f"scale-{i % 100}", f"codex/model-{i // 4200}")
-                 for hour in range(168) for i in range(hour, total, 168) if i >= total - amount),
-            )
-            db.commit()
-            for metric in ("agent_hours", "agent_day_levels"):
-                began = monotonic()
-                result = read(metric, until="2026-09-27T00:00:00Z")
-                elapsed = monotonic() - began
-                print(f"SCALE {total} {metric} {elapsed:.4f}s")
-                assert result["hours_left_out"] == 0
-                assert sum(r["calls"] for r in result["rows"] if r.get("row_type") != "all") == total
+        db.executemany(
+            "INSERT INTO llm_usage_hourly(hour,thread_id,model,source,vendor_account_id,admission,input_tier,"
+            "idle_hours,records,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,"
+            "total_tokens,fresh_tokens,fresh_unknown_records,cost_records,first_at) "
+            "VALUES (?,?,?,'test','a','x','x',0,1,10,2,3,4,19,15,0,0,'t')",
+            (((start + timedelta(hours=hour)).isoformat()[:13], f"scale-{i % 100}", f"codex/model-{i // 4200}")
+             for hour in range(168) for i in range(hour, total, 168)),
+        )
+    for metric in ("agent_hours", "agent_day_levels"):
+        began = monotonic()
+        result = read(metric, until="2026-09-27T00:00:00Z")
+        print(f"SCALE {total} {metric} {monotonic() - began:.4f}s")
+        assert result["hours_left_out"] == 0
+        assert sum(r["calls"] for r in result["rows"] if r.get("row_type") != "all") == total

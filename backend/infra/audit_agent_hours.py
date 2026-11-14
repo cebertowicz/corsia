@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime, timedelta
 
 
+# Uncached input is what the fresh total leaves after output and cache writes,
+# the same subtraction Measurement's key figures use.
 _TOKEN_SUMS = (
     "coalesce(sum(records),0) AS calls, "
     "coalesce(sum(fresh_tokens),0)-coalesce(sum(completion_tokens),0) "
