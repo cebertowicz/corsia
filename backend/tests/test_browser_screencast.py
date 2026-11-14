@@ -178,6 +178,62 @@ async def test_pane_screencast_restarts_once_a_new_document_loads_so_its_first_p
     ]
 
 
+def _starts(log):
+    return sum(entry[1] == "Page.startScreencast" for entry in log if entry[0] == "cdp")
+
+
+async def _until(predicate):
+    while not predicate():
+        await asyncio.sleep(0.001)
+
+
+@pytest.mark.asyncio
+async def test_a_start_chrome_sends_no_picture_for_restarts_until_one_is_shown(monkeypatch):
+    # Chrome can send no picture for a start, as while its window is still being shown, and a still
+    # page draws no more: without a restart the pane stays blank.
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    monkeypatch.setattr(cast, "FIRST_FRAME_WAIT", 0.01, raising=False)
+    running = asyncio.create_task(cast.run())
+    await asyncio.wait_for(_until(lambda: _starts(log) == 2), 1)
+    socket.incoming.put_nowait(_frame(1, 400))
+    await asyncio.wait_for(_until(lambda: any(entry[0] == "pane" for entry in log)), 1)
+    await asyncio.sleep(0.05)  # Past the restarted start's wait: a shown frame ends the restarts.
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    assert _starts(log) == 2
+    assert [entry[1]["data"] for entry in log if entry[0] == "pane"] == ["jpeg-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_never_gets_a_picture_restarts_twice_then_logs(monkeypatch, caplog):
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    monkeypatch.setattr(cast, "FIRST_FRAME_WAIT", 0.01, raising=False)
+    running = asyncio.create_task(cast.run())
+    with caplog.at_level("WARNING", logger=browser_screencast.__name__):
+        await asyncio.wait_for(_until(lambda: "showed no frame" in caplog.text), 1)
+        await asyncio.sleep(0.05)
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    assert _starts(log) == 1 + browser_screencast.PaneScreencast.FIRST_FRAME_RESTARTS
+    assert "ws://page.test/devtools/page/1 showed no frame after 2 restarts" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_held_start_is_left_to_its_command_to_restart(monkeypatch):
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    monkeypatch.setattr(cast, "FIRST_FRAME_WAIT", 0.01, raising=False)
+    running = asyncio.create_task(cast.run())
+    await _started(log)
+    cast.hold()
+    await asyncio.sleep(0.05)
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    assert _starts(log) == 1
+
+
 @pytest.mark.asyncio
 async def test_pane_screencast_reports_a_page_emulated_narrower_than_the_window_at_its_own_size(monkeypatch):
     # Chrome keeps a window at least about 500 px wide: a 419 px page fills the frame's left 419 px.

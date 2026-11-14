@@ -1,7 +1,9 @@
 """The browser pane's own screencast of the shared page."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Callable
 
 import websockets
@@ -9,6 +11,8 @@ import websockets
 from host_access.browser_cdp import CdpClient
 from host_access.browser_clipboard import PRELOAD, WORLD
 from host_access.browser_session_state import BrowserSessionError
+
+log = logging.getLogger(__name__)
 
 
 class PaneScreencast:
@@ -21,6 +25,8 @@ class PaneScreencast:
     resumes them, so the command path restarts each pane's screencast after such a command.
     Chrome can also capture none of a new document's first pictures, and a still page draws no
     more, so the pane would keep showing the page it left; each load event restarts the capture.
+    A start can also get no picture at all, as when the window is still being shown, so a start
+    that shows none within a second restarts, at most twice before it is logged.
 
     This session captures the window's whole view. Chrome will not make a window narrower than its
     minimum, so a page emulated narrower than that sits at the frame's left with the page's overflow
@@ -35,6 +41,8 @@ class PaneScreencast:
     # A compact pane (a phone, or a narrow desktop pane) gets smaller JPEGs. The quality stays fixed while input
     # moves: changing it needs a screencast restart, which delayed real frames when measured.
     COMPACT_QUALITY = 60
+    FIRST_FRAME_WAIT = 1.0  # Seconds a start waits for a shown frame before restarting.
+    FIRST_FRAME_RESTARTS = 2
 
     def __init__(self, endpoint: str, deliver: Callable[[str], object]) -> None:
         self.endpoint = endpoint
@@ -48,6 +56,8 @@ class PaneScreencast:
         self._cdp: CdpClient | None = None
         self._starts: set[int] = set()
         self._measures: set[int] = set()
+        self._shown = False  # A frame was shown since the latest start.
+        self._first_frame: asyncio.Task | None = None
 
     async def run(self) -> None:
         """Relay frames until the pane leaves or Chrome closes the page target."""
@@ -74,6 +84,8 @@ class PaneScreencast:
                         self._starts.discard(answered)
             finally:
                 self._cdp = None
+                if self._first_frame is not None:
+                    self._first_frame.cancel()
 
     def capture_at(self, width: int, height: int, *, compact: bool = False) -> None:
         """Capture at most this many device pixels from the next start on."""
@@ -86,17 +98,21 @@ class PaneScreencast:
 
     async def restart(self) -> None:
         """Restart capture, which makes Chrome send the current picture at once."""
+        await self._restart(0)
+
+    async def _restart(self, retries: int) -> None:
         if (cdp := self._cdp) is None:
             return  # run() has not started capturing yet, or has ended.
         try:
             await cdp.send("Page.stopScreencast")
-            await self._start(cdp)
+            await self._start(cdp, retries)
         except websockets.ConnectionClosed:
             pass  # The pane is leaving; run() ends with the closed socket.
 
-    async def _start(self, cdp: CdpClient) -> None:
+    async def _start(self, cdp: CdpClient, retries: int = 0) -> None:
         # Chrome answers in order, so the measurement arrives before this start's first frame.
         # Recorded before sending: the reader may take the answer before send returns.
+        self._shown = False
         self._unmeasured += 1
         self._held = False  # The measurement now holds frames until it answers.
         self._measures.add(cdp.next_request())
@@ -106,6 +122,19 @@ class PaneScreencast:
             params.update(maxWidth=self._size[0], maxHeight=self._size[1])
         self._starts.add(cdp.next_request())
         await cdp.send("Page.startScreencast", **params)
+        # One timer per start: a newer start replaces it, and the timer's own restart arms the next.
+        if self._first_frame is not None and self._first_frame is not asyncio.current_task():
+            self._first_frame.cancel()
+        self._first_frame = asyncio.create_task(self._await_first_frame(retries))
+
+    async def _await_first_frame(self, retries: int) -> None:
+        await asyncio.sleep(self.FIRST_FRAME_WAIT)
+        if self._shown or self._held:
+            return  # A held capture restarts when its metrics command finishes.
+        if retries >= self.FIRST_FRAME_RESTARTS:
+            log.warning("Pane screencast of %s showed no frame after %d restarts", self.endpoint, retries)
+            return
+        await self._restart(retries + 1)
 
     def _quality(self) -> int:
         return self.COMPACT_QUALITY if self._compact else self.QUALITY
@@ -141,4 +170,5 @@ class PaneScreencast:
                 metadata = {**metadata, "deviceWidth": min(width, self._page[0]), "deviceHeight": min(height, self._page[1])}
             if self._scroll_max is not None:
                 metadata = {**metadata, "scrollMaxX": self._scroll_max[0], "scrollMaxY": self._scroll_max[1]}
+            self._shown = True
             self._deliver(json.dumps({"type": "frame", "data": data, "metadata": metadata}, separators=(",", ":")))
