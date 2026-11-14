@@ -176,13 +176,13 @@ def _deliver(account_id: str, payload: dict[str, Any], db: sqlite3.Connection | 
     except ConnectedAccountError:
         return False  # removed since it was polled
     # Read before the write transaction: where agents' own rules may fire if no one owns the conversation.
-    scope = rule_reads.unrouted_projects(
+    scope = rule_reads.unrouted_scopes(
         connector, EMAIL_RECEIVED, get_manifest(connector).extract_facts(payload, None))
     with write_transaction(db, scope="mail_poll_deliver") as conn:
         if not is_connected(account_id, db=conn):
             return False
         deliveries = deliver_platform_event_sync(
-            connector, payload, target_filter=inside_account_reach, unrouted_projects=scope, db=conn,
+            connector, payload, target_filter=inside_account_reach, unrouted_scopes=scope, db=conn,
         )
         _record_delivery(account_id, deliveries)
         return True

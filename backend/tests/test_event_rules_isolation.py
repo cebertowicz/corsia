@@ -127,7 +127,7 @@ async def test_a_writer_leaving_the_project_turns_its_rules_off_once(isolated_db
     assert len(_wakes("watcher")) == 1 and _notes("watcher") == []
     assert [thread for thread, _ in sent] == ["owner"] * 3
     assert all("Watcher saw a push." not in content for _, content in sent[1:])
-    left = ("dead_lettered", "its writer left the rule's project; rule turned off")
+    left = ("dead_lettered", "its writer left the rule's scope; rule turned off")
     assert _outcomes(own["id"]) == [("woke", None), left]
     assert _outcomes(owners["id"])[1:] == [left]
     assert {row["id"]: row["enabled"] for row in _rows("SELECT id, enabled FROM event_rules WHERE origin LIKE 'agent:%'")} == {

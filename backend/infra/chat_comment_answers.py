@@ -85,9 +85,9 @@ VISIBLE_CONTENT_JOIN = "LEFT JOIN chat_visible_content cv ON cv.message_id=m.id"
 VISIBLE_CONTENT = "COALESCE(cv.content, m.content)"
 
 
-# The rule behind ``metadata.chat_drawn = false``, which ``place_answers`` stamps once as it saves a
-# step: the step placed answers, no chat text is left, and it has no reasoning or tool calls. A tool call
-# appended to the saved step later (subagents/assistant_step_tool_append) clears it. Every
+# The rule behind ``metadata.chat_drawn = false``, which ``place_answers`` (the one stamper) stamps once as
+# it saves a step: the step placed answers, no chat text is left, and it has no reasoning or tool calls. A
+# tool call appended to the saved step later (subagents/assistant_step_tool_append, the appender) clears it. Every
 # reader reads the flag; the 191 -> 192 data step reads these same fields in SQL, pinned to
 # ``draws_nothing`` by tests/test_migration_191_to_192_chat_drawn.py.
 def _has_items(value: object) -> bool:
@@ -160,8 +160,9 @@ def place_answers(
 ) -> None:
     """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
 
-    This is the one writer of ``metadata.chat_drawn``: a step that placed answers and has nothing left
-    for chat is stamped ``false`` here, in the transaction that saves it.
+    This is the one stamper of ``metadata.chat_drawn``; the appender clears it (``assistant_step_tool_append``).
+    A step that placed answers and has nothing left for chat is stamped ``false`` here, in the transaction
+    that saves it.
     """
     if role != "assistant" or "[c" not in content:
         return
