@@ -105,7 +105,7 @@ def is_current(thread_id: str, condition: dict, *, db) -> bool:
     if kind == TASK_CLOSED:
         from plans import system_user_steps
 
-        if system_user_steps.opened(db, plan_id, str(condition.get("subject_id") or "")):
+        if system_user_steps.is_person_step(db, plan_id, str(condition.get("subject_id") or "")):
             return True
     step_id = details.get("delegated_step_id")
     worker = details.get("delegated_worker")

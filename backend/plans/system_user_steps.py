@@ -121,6 +121,18 @@ def opened(db, plan_id: str, node_id: str) -> bool:
     return db.execute(_OPENED_SQL, _opened_params(plan_id, node_id)).fetchone() is not None
 
 
+def is_person_step(db, plan_id: str, node_id: str) -> bool:
+    """Whether a task is the person's and this module opened it.
+
+    One primary-key read on the task rules out every task that isn't the person's,
+    so only those scan the plan's step receipts.
+    """
+    assigned = db.execute(
+        "SELECT assignee FROM plan_nodes WHERE id=? AND plan_id=?", (node_id, plan_id),
+    ).fetchone()
+    return assigned is not None and assigned[0] == "user" and opened(db, plan_id, node_id)
+
+
 def _opened_params(plan_id: str, node_id: str) -> tuple:
     return (plan_id, _MUTATION_PREFIX, _MUTATION_PREFIX[:-1] + ";", OPERATION, node_id)
 
