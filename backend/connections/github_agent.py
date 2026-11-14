@@ -10,7 +10,9 @@ view, so a shell spawn that reads one view gets an environment, a grant and a de
 rule that agree.
 
 The account is ready only when ``gh api user`` in its own home answered with a
-login that is not the person's own, and the person's login is known.
+login that is not the person's own, and the person's own GitHub is known: a stored
+login, or a finished check that found their ``gh`` signed out or not installed (a
+person with no GitHub account of their own).
 """
 from __future__ import annotations
 
@@ -57,7 +59,9 @@ Cause = Literal[
 _ROWS = """SELECT a.id, a.source_home, a.state, a.revision, c.config
            FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id
            WHERE c.provider=? AND a.state!='removed' AND a.source_home IS NOT NULL"""
-_PERSON = "SELECT config FROM connections WHERE provider=?"
+_PERSON = "SELECT config, status FROM connections WHERE provider=?"
+# The person's own gh, checked and found with no sign-in: nothing for the agents' login to match.
+_NO_OWN_LOGIN = frozenset({"needs_auth", "not_installed"})
 
 
 @dataclass(frozen=True)
@@ -196,17 +200,19 @@ def _agent_binary(config: dict) -> str | None:
     return agent_binary_from_config(config)
 
 
-def _read(db) -> tuple[list, str | None]:
+def _read(db) -> tuple[list, str | None, bool]:
+    """The account rows, the person's stored login, and whether their own gh has no sign-in."""
     connection = db or get_db()
     rows = connection.execute(_ROWS, (PROVIDER,)).fetchall()
     person = connection.execute(_PERSON, (PROVIDER,)).fetchone()
     login = _config(person["config"] if person else None).get("login")
-    return rows, login if isinstance(login, str) and login else None
+    login = login if isinstance(login, str) and login else None
+    return rows, login, login is None and person is not None and person["status"] in _NO_OWN_LOGIN
 
 
 def _resolve(db, *, wait: float | None) -> AgentAccountView:
     try:
-        rows, person = _read(db)
+        rows, person, no_own_login = _read(db)
     except Exception as exc:  # noqa: BLE001 - an unreadable row is never read as no account
         log.warning("agents' github account read failed: %s", type(exc).__name__)
         return AgentAccountView("unverified", "read_failed")
@@ -241,8 +247,9 @@ def _resolve(db, *, wait: float | None) -> AgentAccountView:
         with _lock:
             entry = _results.get(key)
     if person is None:
-        request_probe()
-        return replace(base, state="unverified", cause="own_login_unknown")
+        request_probe()  # keeps looking, so a personal sign-in made later is still caught
+        if not no_own_login:
+            return replace(base, state="unverified", cause="own_login_unknown")
     if entry is None:
         return replace(base, state="unverified", cause="verifying")
     if isinstance(entry, Failed):

@@ -3,7 +3,8 @@
 GitHub's connection refresh (``connections.refresh_github_connection``) stores it on
 the ``github`` connection row, and only a definite login replaces it, so a cold start
 reads the last known login at once. The agents' account is never ready while this is
-unknown: nothing else proves the bot is not the person.
+unknown, unless the last check found the person's own ``gh`` signed out or not
+installed: then the person has no login for the agents' account to be.
 """
 from __future__ import annotations
 
