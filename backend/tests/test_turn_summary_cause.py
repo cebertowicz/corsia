@@ -11,6 +11,7 @@ import pytest
 
 from core.stop_causes import PLAN_LIMIT_REASON, PlanLimitStop
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.db_connection import register_message_sql_functions
 
 _module_path = Path(__file__).parents[1] / "api" / "thread_paging.py"
 _spec = importlib.util.spec_from_file_location("_test_turn_summary_paging", _module_path)
@@ -24,6 +25,7 @@ _START, _END = "2026-09-30T20:00:00Z", "2026-09-30T20:01:00Z"
 
 def _db(turns: list[tuple[str, str, str | None]]) -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
+    register_message_sql_functions(conn)
     conn.row_factory = sqlite3.Row
     conn.execute(
         "CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT, "
