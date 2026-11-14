@@ -180,14 +180,14 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 
 | What the action was for | Share of actions | Share of text the agent wrote |
 |---|--:|--:|
-| The work: commands, files, search | 76.5% | 75.9% |
-| Reading and updating its plan | 7.1% | 7.8% |
-| Starting, checking and messaging other agents | 6.6% | 7.1% |
-| Re-reading a skill | 6.1% | 1.2% |
-| Memory and lessons | 3.6% | 7.9% |
+| The work: commands, files, search | 77% | 76% |
+| Reading and updating its plan | 7% | 8% |
+| Starting, checking and messaging other agents | 7% | 7% |
+| Re-reading a skill | 6% | 1% |
+| Memory and lessons | 4% | 8% |
 | Messages to the person | 0% | 0% |
 
-These are shares of actions, not of tokens or dollars, for one agent on one night, and each is good to a few points either way. In a 40-action subsample, a plan action brought back about three times as much text as other actions (5,200 characters against 1,700 on average), so the plan's share of tokens is likely larger than its share of actions. This hand count will be replaced by measured readings as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
+These are rounded shares of actions, not of tokens or dollars, for one agent on one night. With 196 actions, the largest share is uncertain by about 6 points either way and the others by 3 to 4, and more than that because the actions were taken in ten groups. This hand count will be replaced by measured readings as they come in. See the [methods](docs/readme-evidence.md#where-an-agents-actions-go).
 
 </details>
 
