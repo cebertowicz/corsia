@@ -58,13 +58,14 @@ def test_two_queued_runs_of_one_script_do_not_leave_the_other_slot_empty(runs, m
     limits = _read_limits(monkeypatch)
 
     assert _drive_once() == script_runner.SCRIPT_RUN_CAP == 2
-    assert _codes(runs) == ["a1", "b1"]  # a2 waits for a1; the slot it can't take goes to b.sh
+    passes = [set(_codes(runs))]  # runs one pass starts run together, so they call in no set order
+    assert passes == [{"a1", "b1"}]  # a2 waits for a1; the slot it can't take goes to b.sh
     assert limits == [2, 1]  # the second read asks only for the slot still free
     assert [outcome for outcome, _reason in _outcomes(first["id"])] == ["ran", "queued", "queued"]
 
     while _drive_once():
-        pass
-    assert _codes(runs) == ["a1", "b1", "a2", "b2", "a3"]  # each script's own runs, oldest first
+        passes.append(set(_codes(runs)) - set().union(*passes))
+    assert passes == [{"a1", "b1"}, {"a2", "b2"}, {"a3"}]  # each script's own runs, oldest first
 
 
 def test_a_script_that_cannot_be_claimed_ends_the_pass(runs, monkeypatch):
