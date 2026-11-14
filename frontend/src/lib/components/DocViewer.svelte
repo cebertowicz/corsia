@@ -135,7 +135,6 @@
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
-	// The phone thread sheet covers the lower part of the text the same way: keep the thread's own text in the band above it, on open and once a movement covers it.
 	const revealThread = (opening: boolean) => { const state = commentUI.state; if (state?.kind !== 'thread') return; const target = canvasCommentScrollTarget(listedComments, editText, state.id, false, 'comment-save'); if (target && (editorSurface?.draftCovered(target.from, opening) ?? opening)) scroll.value = target; };
 	const openCards = createCommentOpeners(commentUI, scroll);
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).

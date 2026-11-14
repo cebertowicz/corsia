@@ -29,7 +29,8 @@
 	import { focusStillOurs } from '$lib/actions/focusTrap';
 	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
-	import { decidedOpen } from '$lib/docCanvasComments';
+	import ThreadSheetActions from './comments/ThreadSheetActions.svelte';
+	import { closeOnOwnResolve } from '$lib/docThreadClose.svelte';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { marginOut } from '$lib/docCommentDrawerMotion';
 	import { marginOnCanvas } from '$lib/docMarginCanvas';
@@ -213,17 +214,7 @@
 	/** A phone sheet showing one thread carries that thread's Agree and Resolve in its header row, apart from Close, so the card draws neither. */
 	const threadActionsUp = $derived(cardMode() === 'sheet' && sheet.state?.kind === 'thread' && displayed.length === 1);
 	const threadHead = $derived(threadActionsUp && !readOnly ? displayed[0] : undefined);
-	// The sheet closes when the person's own Resolve or Agree takes the thread from open to resolved: nothing is left in it to act on, and the resolved list is one tap away. Someone else resolving it while it is read leaves it up, and an unsent reply keeps it up so its text is not lost.
-	let actedOn: string | null = null;
-	let threadWasOpen: { id: string; open: boolean } | null = null;
-	$effect(() => {
-		const head = threadActionsUp ? displayed[0] : undefined;
-		if (!head) { threadWasOpen = null; actedOn = null; return; }
-		const open = !head.resolved;
-		const closing = actedOn === head.id && threadWasOpen?.id === head.id && threadWasOpen.open && !open && !untrack(() => (replyDrafts[head.id] ?? '').trim());
-		threadWasOpen = { id: head.id, open };
-		if (closing) { actedOn = null; onClose(); }
-	});
+	const ownClose = closeOnOwnResolve(() => threadActionsUp ? displayed[0] : undefined, (id) => !!(replyDrafts[id] ?? '').trim(), onClose);
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -329,12 +320,7 @@
 {#snippet threadList(items: DocComment[], reply?: boolean, inMargin?: boolean, underTextChanged?: boolean, flat?: boolean, replyView: 'recent' | 'all' | 'summary' = 'recent', actionsAbove?: boolean)}
 	<CommentList {actionsAbove} {replyView} onOpenThread={replyView === 'summary' ? threadView.open : undefined} {replyTags} {underTextChanged} {flat} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={items} {cellLabel} documentOrder={inMargin || sheet.state?.kind === 'list'} {focusedId} {focusedIds} restCards={!!inMargin && !flat} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage && !inMargin} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={reply ?? shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' && !inMargin ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decisions.decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 {/snippet}
-{#snippet threadActions()}
-	{#if threadHead}
-		{#if !threadHead.replacement && !threadHead.resolved}<button type="button" class="sheet-act ack" class:on={threadHead.acked} aria-pressed={threadHead.acked} title="Agree" onclick={() => { actedOn = threadHead.id; onAgree(threadHead.id, !threadHead.acked); }}>Agree</button>{/if}
-		{#if (!threadHead.replacement && !threadHead.resolved) || decidedOpen(threadHead)}<button type="button" class="sheet-act" title="Resolve — close the thread" onclick={() => { actedOn = threadHead.id; resolveThread(threadHead.id, true); }}>Resolve</button>{/if}
-	{/if}
-{/snippet}
+{#snippet threadActions()}{#if threadHead}<ThreadSheetActions head={threadHead} onAgree={(id, on) => { ownClose.acted(id); onAgree(id, on); }} onResolve={(id) => { ownClose.acted(id); resolveThread(id, true); }} />{/if}{/snippet}
 <!-- In the margin the column's head card (DocMarginStack), which takes no room unless there is something to say. -->
 {#snippet acceptAllBar()}
 	<SuggestionStatus authors={decisions.authorsWithOpenSuggestions} busy={decisions.acceptAllBusy} shownBusy={decisions.outcome.acceptAllShownBusy} skipped={decisions.outcome.skipped} error={decisions.outcome.acceptAllError} acceptAll={decisions.acceptAllFrom} />
@@ -382,9 +368,6 @@
 {:else if resolvedDrawer.mounted && resolvedPlace === 'sheet'}<AdaptiveDrawer ariaLabel="Resolved comments" heading="Resolved" headingMeta={String(resolvedList.length)} doneLabel="Close" opaque within={column} {covered} open={resolvedOpen} onClose={resolvedDrawer.close} onClosed={resolvedDrawer.closed}><div class="resolved-drawer" use:drawerKeys={resolvedDrawer.close}>{@render threadList(resolvedList, true, true, false, true)}</div></AdaptiveDrawer>{/if}
 
 <style>
-	.sheet-act { box-sizing: border-box; min-height: 44px; padding: 0 var(--space-2); border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-subhead); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap; border-radius: var(--radius-sm); }
-	.sheet-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.sheet-act.ack.on { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
 	/* Keep the review controls in the canvas container when the phone sheet is open. */
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
