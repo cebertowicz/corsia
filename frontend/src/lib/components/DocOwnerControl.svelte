@@ -32,9 +32,9 @@
 	// One agent holding both roles reads as one item; its Owner picker can still hand the supervisor role to another agent.
 	const merged = $derived(supervisorShown && !pending && !failed && ownership.owner.kind === 'agent' && ownerId === supervisorId);
 
-	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: [choice.status === 'paused' ? 'Paused' : '', choice.responsibility].filter(Boolean).join(' · ') })));
+	const agents = $derived(ownership.choices.map((choice) => ({ id: choice.id, name: choice.name, responsibility: choice.responsibility ?? '', paused: choice.status === 'paused' })));
 	// "You" is offered only on a CORSIA one person uses; the server refuses it otherwise.
-	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '' }, ...agents]);
+	const ownerChoices = $derived(ownership.multi_person ? agents : [{ id: 'user', name: 'You', responsibility: '', paused: false }, ...agents]);
 	const options = $derived(picker === 'owner' ? ownerChoices : agents);
 	const matches = $derived(options.filter((choice) => choice.name.toLowerCase().includes(search.trim().toLowerCase())));
 

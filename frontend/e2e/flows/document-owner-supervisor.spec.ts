@@ -190,6 +190,41 @@ test('@document-owner-supervisor the items stay separate tap targets at 320 widt
 	await expect(supervisorItem(page)).toContainText('Research coordinator');
 });
 
+/** A picker row's name, its Paused mark, and which words of its responsibility show, each shown word whole or not. */
+async function rowParts(row: Locator) {
+	return row.evaluate((element) => {
+		const name = element.querySelector<HTMLElement>('.name-head');
+		const paused = element.querySelector<HTMLElement>('.option-paused');
+		const role = element.querySelector<HTMLElement>('.option-role');
+		const text = element.querySelector<HTMLElement>('.option-text')!.getBoundingClientRect();
+		const words: { word: string; shown: boolean; whole: boolean }[] = [];
+		if (role) {
+			const box = role.getBoundingClientRect();
+			const walker = document.createTreeWalker(role, NodeFilter.SHOW_TEXT);
+			for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+				for (const match of (node.textContent ?? '').matchAll(/[^\s​]+/g)) {
+					const range = document.createRange();
+					range.setStart(node, match.index!); range.setEnd(node, match.index! + match[0].length);
+					const rect = range.getBoundingClientRect();
+					words.push({ word: match[0], shown: rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5, whole: rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 });
+				}
+			}
+		}
+		return {
+			name: name ? { text: name.textContent, cut: name.scrollWidth > name.clientWidth + 0.5 } : null,
+			paused: paused ? { text: paused.textContent, cut: paused.scrollWidth > paused.clientWidth + 0.5, inside: paused.getBoundingClientRect().right <= text.right + 0.5 } : null,
+			words,
+		};
+	});
+}
+
+/** Every responsibility word that shows is whole, and the shown words are its first ones: each cut falls between words. */
+function expectCutBetweenWords(parts: Awaited<ReturnType<typeof rowParts>>, step: string) {
+	const shown = parts.words.filter((word) => word.shown);
+	expect(shown.every((word) => word.whole), `${step}: no word is cut ${JSON.stringify(parts.words)}`).toBe(true);
+	expect(parts.words.slice(0, shown.length).every((word) => word.shown), `${step}: the words shown are the first ones ${JSON.stringify(parts.words)}`).toBe(true);
+}
+
 for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852], ['320', 320, 640]] as const) {
 	test(`@document-owner-supervisor two agents with the same name read whole in the picker, told apart by responsibility, at ${label} width`, async ({ page, request }, info) => {
 		const touch = info.project.name.includes('mobile');
@@ -198,11 +233,12 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 		await page.setViewportSize({ width, height });
 		const seeded = await seedOwnedDocument(page, request);
 		const twin = await createSession(request, 'Planning specialist');
-		// Responsibilities long enough that something in the row must give way.
+		// Responsibilities long enough that something in the row must give way; "Community outreach" is paused.
 		isolatedDb([
 			"connection.execute(\"UPDATE threads SET agent_enabled=1, agent_status='active', agent_responsibility='Budget, funding and the grant applications for the whole growing season' WHERE id=?\", (sys.argv[2],))",
 			"connection.execute(\"UPDATE threads SET agent_responsibility='Site layout, soil testing and the planting calendar for every bed' WHERE id=?\", (sys.argv[3],))",
-		], twin, seeded.agents[3]);
+			"connection.execute(\"UPDATE threads SET agent_responsibility='Neighbourhood outreach and the volunteer rota for every weekend of the season' WHERE id=?\", (sys.argv[4],))",
+		], twin, seeded.agents[3], seeded.agents[1]);
 		await seeded.open(page);
 		await supervisorItem(page).click();
 		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Planning specialist');
@@ -210,12 +246,18 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 		const rows = [twin, seeded.agents[3]].map((agent) => rolePicker(page).locator(`[id="supervisor-options-option-${agent}"]`));
 		for (const row of rows) {
 			await expect(row).toBeVisible();
-			// The name is not cut at all: its text fits its box. The responsibility is the part that gives way.
-			const [name, detail] = await row.evaluate((element) => [element.querySelector('.name-head'), element.querySelector('.option-detail')]
-				.map((part) => part ? { text: part.textContent, cut: part.scrollWidth > part.clientWidth + 0.5, width: part.clientWidth, needs: part.scrollWidth, row: part.closest('.option-text')!.clientWidth } : null));
-			expect(name, `${label}: name ${JSON.stringify({ name, detail })}`).toMatchObject({ text: 'Planning specialist', cut: false });
-			expect(detail?.cut, `${label}: responsibility gives way`).toBe(true);
-			expect(detail?.width ?? 0, `${label}: responsibility keeps some room`).toBeGreaterThan(0);
+			// The name is not cut at all: its text fits its box. The responsibility is the part that gives way, between words.
+			const parts = await rowParts(row);
+			expect(parts.name, `${label}: name ${JSON.stringify(parts)}`).toMatchObject({ text: 'Planning specialist', cut: false });
+			expect(parts.words.some((word) => !word.shown), `${label}: responsibility gives way ${JSON.stringify(parts.words)}`).toBe(true);
+			expectCutBetweenWords(parts, label);
 		}
+		// A paused agent keeps "Paused" whole; its responsibility gives way between words, or drops whole.
+		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Community outreach');
+		const paused = rolePicker(page).locator(`[id="supervisor-options-option-${seeded.agents[1]}"]`);
+		await expect(paused).toBeVisible();
+		const parts = await rowParts(paused);
+		expect(parts.paused, `${label}: Paused ${JSON.stringify(parts)}`).toMatchObject({ text: 'Paused', cut: false, inside: true });
+		expectCutBetweenWords(parts, `${label} paused`);
 	});
 }

@@ -141,6 +141,17 @@ describe('DocOwnerControl', () => {
 		item('supervisor').click(); await settle();
 		expect(options()).toEqual(['Planner Release planning', 'Planner Paused · Research']);
 	});
+	it('keeps Paused apart from the responsibility, so a narrow row can drop the responsibility and keep Paused whole', async () => {
+		await render(ownership({ choices: [agent('a1', 'Planner', 'ready', 'Release planning'), agent('a2', 'Planner', 'paused', 'Research'), agent('a3', 'Idle', 'paused')] }));
+		item('supervisor').click(); await settle();
+		const row = (id: string) => document.getElementById(`supervisor-options-option-${id}`)!;
+		expect(row('a1').querySelector('.option-paused')).toBeNull();
+		expect(row('a1').querySelector('.option-role')!.textContent).toBe('​Release planning');
+		expect(row('a2').querySelector('.option-paused')!.textContent).toBe('Paused');
+		expect(row('a2').querySelector('.option-role')!.textContent).toBe('​ · Research');
+		expect(row('a3').querySelector('.option-paused')!.textContent).toBe('Paused');
+		expect(row('a3').querySelector('.option-role')).toBeNull();
+	});
 	it('names the workspace, not a project, when a workspace document has no agents to choose from', async () => {
 		await render(ownership({ choices: [], scope: 'workspace' }));
 		item('supervisor').click(); await settle();
