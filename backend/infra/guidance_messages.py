@@ -20,6 +20,10 @@ _EVIDENCE_RE = re.compile(r"https?://\S+|[A-Za-z0-9][\w.:/#+-]{0,119}")
 
 REASON_PREFIX = "Reason: "
 UNRECORDED_REASON = "unrecorded"
+# The trailer a version that applies accepted suggestions carries; only commit_message writes it.
+SUGGESTION_ACCEPT_PREFIX = "Suggestion-accept: "
+_ACCEPT_LINE = re.compile(r"^([ \t]*)(suggestion-accept[ \t]*:)", re.IGNORECASE | re.MULTILINE)
+_SUGGESTION_ID = re.compile(r"[\w-]{1,128}")
 
 
 def parse_recorded_reason(message: str) -> str | None:
@@ -74,8 +78,26 @@ def recorded_reason(reason: str | None) -> str:
     return "" if contains_credential(line) else line
 
 
-def commit_message(subject: str, scope: str, reason: str | None, evidence: str | None) -> str:
-    """Subject, any sanitizing notes, then the trailers (which must come last)."""
+def unforgeable(text: str) -> str:
+    """``text`` with every line that would read as the suggestion-accept trailer quoted, so no caller's
+    free text (a reason, a subject, a whole message) can mark a version as an accepted suggestion."""
+    return _ACCEPT_LINE.sub(r"\1> \2", text)
+
+
+def accepted_suggestions(message: str) -> tuple[str, ...]:
+    """The suggestion ids a version's own trailer says it applied; empty for any other version."""
+    trailers = message.rstrip("\n").rsplit("\n\n", 1)[-1]
+    for line in trailers.splitlines():
+        if line.startswith(SUGGESTION_ACCEPT_PREFIX):
+            return tuple(line[len(SUGGESTION_ACCEPT_PREFIX):].split())
+    return ()
+
+
+def commit_message(
+    subject: str, scope: str, reason: str | None, evidence: str | None, accepted: tuple[str, ...] = (),
+) -> str:
+    """Subject, any sanitizing notes, then the trailers (which must come last). ``accepted`` names the
+    suggestions this version applies; it is the only way a ``Suggestion-accept`` trailer is written."""
     notes = ["Reason dropped: it looked like a credential."] if (reason or "").strip() and not recorded_reason(reason) else []
     tokens = (evidence or "").replace(",", " ").split()
     kept = [
@@ -84,5 +106,9 @@ def commit_message(subject: str, scope: str, reason: str | None, evidence: str |
         and not contains_credential(token)
     ]
     notes += ["Evidence trimmed to identifiers and URLs."] if len(kept) < len(tokens) else []
-    trailers = [f"{REASON_PREFIX}{recorded_reason(reason) or UNRECORDED_REASON}", *([f"Evidence: {' '.join(kept)}"] if kept else []), f"Scope: {scope}"]
-    return "\n\n".join([subject, *([" ".join(notes)] if notes else []), "\n".join(trailers)])
+    ids = [value for value in accepted if _SUGGESTION_ID.fullmatch(value)]
+    trailers = [
+        f"{REASON_PREFIX}{recorded_reason(reason) or UNRECORDED_REASON}", *([f"Evidence: {' '.join(kept)}"] if kept else []),
+        *([f"{SUGGESTION_ACCEPT_PREFIX}{' '.join(ids)}"] if ids else []), unforgeable(f"Scope: {scope}"),
+    ]
+    return "\n\n".join([unforgeable(subject), *([" ".join(notes)] if notes else []), "\n".join(trailers)])

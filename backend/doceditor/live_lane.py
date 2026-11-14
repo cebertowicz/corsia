@@ -240,12 +240,23 @@ class DocumentLane:
         so the re-run imports the outside text exactly as any write does.
         """
         from doceditor.document_save import FileChangedOutside
+        if operation.kind == "accept":
+            await self._save_pending_typing()
         for _ in range(OUTSIDE_WRITE_ATTEMPTS - 1):
             try:
                 return await self._attempt(operation, expected_sha256)
             except FileChangedOutside:
                 log.info("Live write met an outside write before its rename; re-running on top of it")
         return await self._attempt(operation, expected_sha256)
+
+    async def _save_pending_typing(self) -> None:
+        """Typing not yet in the file is saved first as its own version under its typist, so an accept's
+        version holds only the accepted text. With no typist or viewer known, the accept's version keeps it."""
+        await self._barrier()
+        prior_hash = await self._import()
+        typist = self.live.typist or self.live.viewer_actor()
+        if typist is not None and file_hash(self.live.text.encode("utf-8")) != prior_hash:
+            await self._execute(Operation("flush", actor=typist))
 
     async def _attempt(self, operation: Operation, expected_sha256: str | None = None) -> WriteResult:
         # A landed write disproves only store failures recorded before it started.
@@ -256,6 +267,8 @@ class DocumentLane:
             from doceditor.document_save import DocumentSaveError, STALE_MESSAGE
             raise DocumentSaveError("stale", STALE_MESSAGE)
         fork, accepted, skipped, receipt, author = await build_candidate(self.live, operation)
+        if accepted:
+            operation = replace(operation, accepted=tuple(accepted))
         text = str(fork["text"])
         ranges = candidate_ranges(self.live, fork)
         await self.validate_actor(text, operation.actor)

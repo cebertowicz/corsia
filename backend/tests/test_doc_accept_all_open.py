@@ -155,9 +155,9 @@ async def test_accept_all_credits_an_api_created_person_suggestion_despite_anoth
     def capture_person_writer(user, saved):
         writer = original_person_writer(user, saved)
 
-        async def write(path, text, project_id, reason, expected_sha256, suggestion_author):
+        async def write(path, text, project_id, reason, expected_sha256, suggestion_author, accepted):
             captured.append((user["id"], suggestion_author))
-            return await writer(path, text, project_id, reason, expected_sha256, suggestion_author)
+            return await writer(path, text, project_id, reason, expected_sha256, suggestion_author, accepted)
 
         return write
 
