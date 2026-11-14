@@ -7,7 +7,7 @@ vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeo
 import type { DocOwnership } from '$lib/api/docOwnership';
 
 const agent = (id: string, name: string, status = 'ready', responsibility = '') => ({ id, name, status, responsibility });
-const SHARED = 'Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner.';
+const RELEASED = 'No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner.';
 const MULTI = 'Only an agent can own a document when more than one person uses CORSIA here.';
 function ownership(patch: Partial<DocOwnership> = {}): DocOwnership {
 	return {
@@ -67,13 +67,13 @@ describe('DocOwnerControl', () => {
 		expect(options()).not.toContain('You');
 		expect(picker()!.textContent).toContain(MULTI);
 	});
-	it('offers no choices on a document everyone shares when more than one person uses this CORSIA, and says why', async () => {
-		await render(ownership({ owner: { kind: 'person', id: null, name: null, label: 'Everyone' }, multi_person: true, can_change: false, refusal: SHARED, choices: [] }));
-		expect(item('owner').textContent).toContain('Everyone');
+	it('offers no choices on a document no one owns, and says why', async () => {
+		await render(ownership({ owner: { kind: 'none', id: null, name: null, label: 'Not set' }, multi_person: true, can_change: false, refusal: RELEASED, choices: [] }));
+		expect(item('owner').textContent).toContain('Not set');
 		for (const role of ['owner', 'supervisor'] as const) {
 			item(role).click(); await settle();
 			expect(options()).toEqual([]);
-			expect(picker()!.textContent).toContain(SHARED);
+			expect(picker()!.textContent).toContain(RELEASED);
 		}
 		expect(changed).not.toHaveBeenCalled();
 	});

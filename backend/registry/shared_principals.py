@@ -247,16 +247,15 @@ def owner_label(owner_thread_id: str, *, db) -> str:
 def person_owner_label(owner: str | None, *, db, multi_person: bool) -> str:
     """The owner as a person reads it: the agent's name, or for a shared owner ``You`` or ``Not set``.
 
-    A ``ui`` or ``project:`` document is everyone's while more than one person
-    uses CORSIA, so it reads ``Everyone`` then, as the picker's refusal says.
-    Every person-facing surface (the document header, the Files tree, the
-    viewer) shows this; ``owner_label`` stays the agents' wording.
+    A ``ui`` document is the person's only while one person uses CORSIA; while
+    more than one does, it reads ``Not set`` like a ``project:`` one, until
+    someone gives it an agent as its owner. Every person-facing surface (the
+    document header, the Files tree, the viewer) shows this; ``owner_label``
+    stays the agents' wording.
     """
     from infra.auth import is_owner_sentinel
 
-    if owner is not None and is_owner_sentinel(owner) and multi_person:
-        return "Everyone"
-    if owner == UI_PRINCIPAL:
+    if owner == UI_PRINCIPAL and not multi_person:
         return "You"
     if owner is None or is_owner_sentinel(owner):
         return "Not set"
