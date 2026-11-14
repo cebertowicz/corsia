@@ -15,9 +15,10 @@ function span(rows: DOMRect[]): HTMLElement {
 function setup(initialMode: 'list' | 'thread' | null = null) {
 	const panel = $state<{ el: HTMLElement | null }>({ el: null });
 	const mode = $state<{ now: 'list' | 'thread' | null }>({ now: initialMode });
+	const popover = $state<{ el: HTMLElement | null }>({ el: null });
 	let reveal!: ReturnType<typeof createChatSheetReveal>;
-	stop = $effect.root(() => { reveal = createChatSheetReveal(() => panel.el, () => mode.now, () => 'c1'); });
-	return { reveal, panel, mode };
+	stop = $effect.root(() => { reveal = createChatSheetReveal(() => panel.el, () => mode.now, () => 'c1', () => popover.el); });
+	return { reveal, panel, mode, popover };
 }
 
 afterEach(() => { stop?.(); stop = null; document.body.replaceChildren(); vi.unstubAllGlobals(); });
@@ -70,6 +71,25 @@ describe('createChatSheetReveal focus', () => {
 		sheet.append(back);
 		document.body.append(sheet);
 		panel.el = sheet;
+		mode.now = 'thread'; flushSync();
+		await tick(); await tick();
+		expect(document.activeElement).toBe(back);
+	});
+
+	it('moves focus to the Back button inside the wide popover, where there is no sheet panel, not to a document view\'s wrapper', async () => {
+		vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => { run(0); return 0; });
+		const docWrapper = document.createElement('div');
+		docWrapper.className = 'thread-back';
+		docWrapper.tabIndex = -1;
+		document.body.append(docWrapper);
+		const { mode, popover } = setup('list');
+		flushSync();
+		const dialog = document.createElement('div');
+		const back = document.createElement('button');
+		back.className = 'thread-back';
+		dialog.append(back);
+		document.body.append(dialog);
+		popover.el = dialog;
 		mode.now = 'thread'; flushSync();
 		await tick(); await tick();
 		expect(document.activeElement).toBe(back);

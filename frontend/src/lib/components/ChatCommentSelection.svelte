@@ -39,7 +39,8 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	const fromList = $derived(!!viewing?.list && !viewing.listed);
 	let sheetPanel = $state<HTMLElement | null>(null);
-	const sheetReveal = createChatSheetReveal(() => sheetPanel, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId);
+	let sheetDialog = $state<HTMLElement | null>(null);
+	const sheetReveal = createChatSheetReveal(() => sheetPanel, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId, () => sheetDialog);
 	// The same keeping for an opened comment's sheet: the pressed text (after the sheet is capped above it) rises into the space above the sheet.
 	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText() ?? threadAnchor(), sheet ? undefined : sheetReveal.pressedText));
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
@@ -362,7 +363,7 @@
 	</button>
 {/if}
 {#if viewing && (viewing.listed ? listedComments.length > 0 : viewedComment) && threadId && !open}
-	<ChatThreadSheet bind:panel={sheetPanel} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
+	<ChatThreadSheet bind:panel={sheetPanel} bind:dialog={sheetDialog} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
 {/if}
 {#snippet composerBody()}
 	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} error={rootDraft?.error ?? ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />

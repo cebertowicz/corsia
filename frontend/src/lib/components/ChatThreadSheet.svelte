@@ -10,9 +10,9 @@
 	 * (`listed`). A thread opened from that list says Back in the header's leading slot. The dialog is named by what its header says:
 	 * "Comment" for one, the count for the list.
 	 */
-	let { messageId, threadId, comments, listed, fromList, closing, narrow, anchor, bounds, panel = $bindable(null), onReply, onBack, onClose, onClosed }: {
+	let { messageId, threadId, comments, listed, fromList, closing, narrow, anchor, bounds, panel = $bindable(null), dialog = $bindable(null), onReply, onBack, onClose, onClosed }: {
 		messageId: string; threadId: string; comments: ChatComment[]; listed: boolean; fromList: boolean; closing: boolean; narrow: boolean;
-		anchor: ComponentProps<typeof Popover>['anchor']; bounds: ComponentProps<typeof Popover>['bounds']; panel?: HTMLElement | null;
+		anchor: ComponentProps<typeof Popover>['anchor']; bounds: ComponentProps<typeof Popover>['bounds']; panel?: HTMLElement | null; dialog?: HTMLElement | null;
 		onReply: (note: string) => Promise<void>; onBack: () => void; onClose: () => void; onClosed: () => void;
 	} = $props();
 
@@ -29,7 +29,7 @@
 	</AdaptiveDrawer>
 {:else}
 	<Popover {anchor} {bounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} initialFocus={listed ? '.thread-list-title' : undefined} {onClose} {onClosed}>
-		<div role="dialog" aria-label={name}>
+		<div role="dialog" aria-label={name} bind:this={dialog}>
 			{#if listed}<h2 class="thread-list-title" tabindex="-1">{name}</h2>{/if}
 			{#if fromList}{@render backButton()}{/if}
 			{@render body(false)}
