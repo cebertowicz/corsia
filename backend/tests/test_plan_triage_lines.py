@@ -123,8 +123,14 @@ def _in_review(db, plan_id: str) -> None:
     request_review(db, plan_id, reviewed.id)
 
 
+def _later(db, plan_id: str) -> None:
+    """A task set aside in Later: startable, but never picked, so never passed over."""
+    task(db, plan_id, "Someday work", later=True)
+
+
 NOT_READY_SCENES = {
     "waiting": _waiting,
+    "later": _later,
     "held": _held,
     "behind_a_prerequisite": _behind_a_prerequisite,
     "user_assigned": _user_assigned,

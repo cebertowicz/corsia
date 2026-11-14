@@ -5,6 +5,9 @@ import json
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
+# These calls report both cache counts as zero; an omitted count would be unknown.
+_CACHE_MEASURED_ZERO = {"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+
 
 @pytest.mark.parametrize("terminal", [False, True])
 def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(terminal):
@@ -17,7 +20,7 @@ def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(term
 
     first = record("first", {"input_tokens": 100, "output_tokens": 20,
                             "cache_read_input_tokens": 300, "cache_creation_input_tokens": 200})
-    second = record("second", {"input_tokens": 50, "output_tokens": 10})
+    second = record("second", {"input_tokens": 50, "output_tokens": 10, **_CACHE_MEASURED_ZERO})
     frames = [first, first, second]
     if terminal:
         frames.append({"type": "result", "usage": {

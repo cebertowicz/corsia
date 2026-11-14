@@ -12,7 +12,8 @@ export function createReplyNavigation(source: {
 	ready: () => boolean;
 	comments: () => DocComment[];
 	text: () => string;
-	show: (thread: DocComment | null, landing: CanvasScrollTarget | null) => void;
+	/** `picked`: the reader chose this thread (the jump control), so showing it reads it; a tab's restore landing does not. */
+	show: (thread: DocComment | null, landing: CanvasScrollTarget | null, picked: boolean) => void;
 	openImageOr: (id: string, otherwise: () => void) => void;
 	onLanded: () => void;
 }) {
@@ -21,14 +22,14 @@ export function createReplyNavigation(source: {
 		? canvasCommentScrollTarget(source.comments(), source.text(), thread.id, false, 'quote-tap') : null;
 	createReplyLanding({
 		target: source.target, ready: source.ready, first, landing: () => landing(first()),
-		open: (thread, target) => { source.show(thread, target); source.onLanded(); },
+		open: (thread, target) => { source.show(thread, target, false); source.onLanded(); },
 	});
 	/** Goes to one thread the reader chose: the nearest the jump control is pointing at, wherever it sits in the document. */
 	function goTo(id: string, beforeText?: () => void) {
 		const thread = source.comments().find((item) => item.id === id);
 		if (!thread) return;
 		const target = landing(thread);
-		source.openImageOr(thread.id, () => { beforeText?.(); source.show(thread, target); });
+		source.openImageOr(thread.id, () => { beforeText?.(); source.show(thread, target, true); });
 	}
 	return { goTo };
 }

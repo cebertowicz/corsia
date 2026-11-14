@@ -531,8 +531,20 @@ def test_operator_fields_have_absolute_freshness_revisions_and_unwitnessed_compl
 
 @pytest.mark.asyncio
 async def test_operator_http_routes_emit_etag_revalidate_and_hide_target_existence(db, monkeypatch):
+    from datetime import timezone
     from api import plans as api_plans
+    from plans import operator_node_state
+
     ids = _seed_operator_tree(db)
+    fixed_now = datetime.now(timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz is not None else fixed_now.replace(tzinfo=None)
+
+    # Elapsed and waiting seconds are part of the response and its ETag.
+    monkeypatch.setattr(operator_node_state, "datetime", FixedDateTime)
     proxy = _DbProxy(db)
     monkeypatch.setattr(api_plans, "get_db", lambda: proxy)
     monkeypatch.setattr(api_plans, "run_in_db", _immediate)

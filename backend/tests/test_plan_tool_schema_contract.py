@@ -8,7 +8,9 @@ import pytest
 _MUTATION_REQUIRED = {
     "add": {"title", "acceptance_criteria"},
     "insert": {"title", "acceptance_criteria"},
-    "edit": {"node_id", "expected_revision"},
+    "edit": set(),
+    # Two bodies, so no key is required of both: the single one carries its
+    # revision, the bulk one its ids.
     "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
     "pause": {"expected_revision"},
@@ -50,7 +52,7 @@ _MUTATION_REQUIRED = {
     # its revision, or node_ids alone. `plans.boundary_fields` enforces the
     # exclusive choice and `plan_operation_docs` publishes it.
     "archive_node": set(),
-    "close_node": {"node_id", "reason", "expected_revision"},
+    "close_node": set(),
 }
 
 _DECISION_REQUIRED = {
@@ -221,7 +223,10 @@ def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(ope
     }
 
     assert PlanUpdateTool().validate_params(request) == []
-    cross_field = "expected_revision" if operation in {"add", "insert"} else "parent_id"
+    cross_field = next(
+        field for field in ("expected_revision", "parent_id", "kind", "title", "reason")
+        if field not in allowed
+    )
     request["params"][cross_field] = 0 if cross_field == "expected_revision" else "parent"
     assert any(
         f"unexpected params.{cross_field}" in error
@@ -252,7 +257,7 @@ _CLOSING_FIELDS = {
         "node_id", "node_ids", "expected_revision", "next_node_id",
     },
     "close_node": {
-        "node_id", "reason", "expected_revision", "next_node_id",
+        "node_id", "node_ids", "reason", "expected_revision", "next_node_id",
     },
     "pause_node": {"node_id", "reason", "expected_revision", "next_node_id"},
     "block_node": {
@@ -385,7 +390,10 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # write there; an agent never told of the cut cannot park work, so the words are the feature.
 # plan_update 9,487 -> 9,620 (+133): a conductor or the CORSIA agent pauses and resumes another
 # agent's plan, which needs the two operations listed and expected_revision to name the plan
-# revision for them; the pause-is-the-user's sentence they replace is gone.
+# revision for them; the pause-is-the-user's sentence they replace is gone. Later S2 publishes
+# two more bulk bodies inside that budget: the rule is trim, never raise, so `edit` and
+# `close_node` bought their shape lines by putting every bulk verb in one "one: …; many: …"
+# idiom, and by shortening the nested `affected_nodes` revision note to its own words.
 _PUBLISHED_BYTES = {"plan_update": 9_620, "plan_decision": 3_100}
 
 

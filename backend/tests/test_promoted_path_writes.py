@@ -11,18 +11,33 @@ from registry.shared_write_errors import PromotedPathRefused
 from tests.test_durable_writes import _promote, _working_file
 from tests.test_durable_writes import durable_scope as durable_scope
 
-MOVED = "This file was promoted to projects/alpha/shared/planning/{name}; {verb} it there."
+MOVED = "This file was promoted to projects/alpha/shared/planning/{name}; {verb} it there{more}."
+WRITE_MORE = ", or use a new name for a different file"
 
 
 def _promoted(durable_scope, name):
     """A working file promoted to shared/planning as a new identity: the old path is gone and its tombstone has a successor.
 
-    The file is edited outside CORSIA first (``stale``), the case where a promote cannot carry its identity and leaves
-    a tombstone behind. A promote that carries the identity leaves no row at the old path.
+    The file is edited outside CORSIA first (``stale``), so the promote cannot carry its identity and tombstones the old
+    one. ``_carried`` is the other case, where the identity moves and a tombstone is inserted at the old path.
     """
     workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, name, stale=True)
     successor_id = _promote(workspace, thread_id, db, source)
     return workspace, thread_id, db, source, source_id, successor_id
+
+
+def _carried(durable_scope, name):
+    """A working file promoted with its own identity: same id at the new path, plus the tombstone left at the old one."""
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, name)
+    assert _promote(workspace, thread_id, db, source) == source_id
+    return workspace, thread_id, db, source, source_id
+
+
+def _left_rows(db, source_id):
+    return db.execute(
+        "SELECT * FROM artifact_identities WHERE id != ? AND json_extract(metadata,'$.retired_cause')='promoted'",
+        (source_id,),
+    ).fetchall()
 
 
 def _write(workspace, thread_id, path):
@@ -38,7 +53,7 @@ def test_a_write_to_the_path_a_promote_left_is_refused_and_creates_nothing(durab
     with pytest.raises(PromotedPathRefused) as refused:
         _write(workspace, thread_id, source)
 
-    assert str(refused.value) == MOVED.format(name="left.md", verb="write")
+    assert str(refused.value) == MOVED.format(name="left.md", verb="write", more=WRITE_MORE)
     assert not source.exists()
 
 
@@ -120,7 +135,7 @@ def test_edit_file_on_the_path_a_promote_left_points_at_the_document(durable_sco
 
     result = _edit(workspace, thread_id, source, EditFileTool, old_string="Launch", new_string="Ship")
 
-    assert result == "Error: " + MOVED.format(name="edit.md", verb="edit")
+    assert result == "Error: " + MOVED.format(name="edit.md", verb="edit", more="")
     assert not source.exists()
 
 
@@ -134,7 +149,7 @@ def test_multi_edit_on_the_path_a_promote_left_points_at_the_document(durable_sc
         edits=[{"old_string": "Launch", "new_string": "Ship"}],
     )
 
-    assert result == "Error: " + MOVED.format(name="multi.md", verb="edit")
+    assert result == "Error: " + MOVED.format(name="multi.md", verb="edit", more="")
 
 
 def test_edit_file_on_a_deleted_path_keeps_the_plain_not_found_error(durable_scope):
@@ -188,3 +203,107 @@ def test_a_workspace_selection_that_disagrees_with_the_workspace_fails_loudly(du
 
     with pytest.raises(ValueError, match="different selected root"):
         promoted_to(workspace / "projects" / "alpha" / "missing.md")
+
+
+def test_a_write_to_the_path_a_carried_promote_left_is_refused_and_creates_nothing(durable_scope):
+    workspace, thread_id, _db, source, _source_id = _carried(durable_scope, "kept.md")
+    assert not source.exists()
+
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+
+    assert str(refused.value) == MOVED.format(name="kept.md", verb="write", more=WRITE_MORE)
+    assert not source.exists()
+
+
+def test_edit_file_on_the_path_a_carried_promote_left_points_at_the_document(durable_scope):
+    from tools.filesystem_edit import EditFileTool
+
+    workspace, thread_id, _db, source, _source_id = _carried(durable_scope, "kept-edit.md")
+
+    result = _edit(workspace, thread_id, source, EditFileTool, old_string="Launch", new_string="Ship")
+
+    assert result == "Error: " + MOVED.format(name="kept-edit.md", verb="edit", more="")
+
+
+def test_the_tombstone_a_carried_promote_leaves_is_one_unlisted_row_naming_the_carried_identity(durable_scope):
+    _workspace, _thread_id, db, _source, source_id = _carried(durable_scope, "row.md")
+
+    (left,) = _left_rows(db, source_id)
+
+    assert left["state"] == "tombstone"
+    assert models.successor_id(left["id"], db=db) == source_id
+    assert models.retired_cause(left["id"], db=db) == "promoted"
+    assert left["external_id"] != db.execute(
+        "SELECT external_id FROM artifact_identities WHERE id=?", (source_id,)
+    ).fetchone()["external_id"]
+    assert db.execute("SELECT COUNT(*) FROM artifact_registrations WHERE artifact_id=?", (left["id"],)).fetchone()[0] == 0
+    assert db.execute("SELECT state FROM artifact_identities WHERE id=?", (source_id,)).fetchone()["state"] == "active"
+
+
+def test_a_source_stored_under_its_legacy_path_id_still_gets_the_tombstone_and_the_promote_note(durable_scope):
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "legacy.md")
+    db.execute("UPDATE artifact_identities SET external_id=? WHERE id=?", (str(source.resolve()), source_id))
+    db.commit()
+
+    assert _promote(workspace, thread_id, db, source) == source_id
+
+    (left,) = _left_rows(db, source_id)
+    assert left["state"] == "tombstone" and left["external_id"] == str(source.resolve())
+    assert models.successor_id(left["id"], db=db) == source_id
+    with pytest.raises(PromotedPathRefused) as refused:
+        _write(workspace, thread_id, source)
+    assert str(refused.value) == MOVED.format(name="legacy.md", verb="write", more=WRITE_MORE)
+    summary, reason = _relocated_change(db, source_id)
+    assert "by the promote tool" in summary and reason == "promoted"
+
+
+def test_a_failed_registration_leaves_no_tombstone_and_keeps_the_identity_at_the_old_path(durable_scope, monkeypatch):
+    workspace, _root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "rollback.md")
+    before = db.execute("SELECT path, external_id FROM artifact_identities WHERE id=?", (source_id,)).fetchone()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("registration failed after the move")
+
+    monkeypatch.setattr(durable_writes, "record_post_write_events", fail)
+    with pytest.raises(RuntimeError, match="registration failed after the move"):
+        _promote(workspace, thread_id, db, source)
+
+    assert _left_rows(db, source_id) == []
+    after = db.execute("SELECT path, external_id FROM artifact_identities WHERE id=?", (source_id,)).fetchone()
+    assert tuple(after) == tuple(before)
+
+
+def _relocated_change(db, artifact_id):
+    import json
+
+    row = db.execute(
+        "SELECT summary, details_json FROM context_change_journal WHERE object_id=? AND change_kind='relocated'",
+        (artifact_id,),
+    ).fetchone()
+    return row["summary"], json.loads(row["details_json"])["provenance"]["reason"]
+
+
+def test_a_carried_promote_says_it_was_promoted_and_records_a_promote_reason(durable_scope):
+    _workspace, _thread_id, db, source, source_id = _carried(durable_scope, "said.md")
+
+    summary, reason = _relocated_change(db, source_id)
+
+    assert "by the promote tool" in summary and "outside the file tools" not in summary
+    assert str(source) in summary
+    assert reason == "promoted"
+
+
+def test_a_move_outside_the_tools_keeps_the_outside_move_text_and_reason(durable_scope):
+    from registry.moved_files import recover_moved_file_identity
+
+    workspace, root, thread_id, db, source, source_id, _text = _working_file(durable_scope, "outside.md")
+    target = root / "shared" / "planning" / "outside.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(target)
+
+    assert recover_moved_file_identity(target, actor_thread_id=thread_id, db=db) is not None
+
+    summary, reason = _relocated_change(db, source_id)
+    assert "was moved to" in summary and "outside the file tools; it is still yours." in summary
+    assert reason == "moved_outside_tools"

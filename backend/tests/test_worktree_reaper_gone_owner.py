@@ -1,9 +1,9 @@
 """Worktree reaper: a gone worker's worktree, and what a removal left behind.
 
 A purged thread cannot come back to its worktree. Its tree goes once idle for
-an hour, uncommitted and unpublished work included, without a salvage copy. A
+a day, uncommitted and unpublished work included, without a salvage copy. A
 temporary worker archived for any reason can come back, so its tree goes after
-an hour too, but with its work copied out first. A gone owner's tree with
+a day too, but with its work copied out first. A gone owner's tree with
 nothing uncommitted takes the ordinary clean removal. Every other owner,
 including a name no thread matches, keeps the ordinary checks.
 """
@@ -60,7 +60,7 @@ def _unfinished(repo, name):
 
 def test_a_gone_workers_unfinished_worktree_is_removed_without_a_copy(repo, owners):
     wt = _unfinished(repo, f"{GONE}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -73,7 +73,7 @@ def test_a_settled_workers_unfinished_worktree_is_removed_after_its_work_is_copi
     repo, owners,
 ):
     wt = _unfinished(repo, f"{SETTLED}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -87,7 +87,7 @@ def test_a_gone_owners_clean_worktree_takes_the_ordinary_clean_removal(
     repo, owners, monkeypatch, owner,
 ):
     wt = _add(repo, f"{owner}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
     rechecked = []
     real_status_at = worktree_reaper_checks.status_at
 
@@ -106,12 +106,12 @@ def test_a_gone_owners_clean_worktree_takes_the_ordinary_clean_removal(
     assert _git(repo, "for-each-ref", "refs/corsia-salvage/").strip() == ""
 
 
-def test_a_gone_workers_worktree_with_a_file_edited_within_the_hour_is_kept(repo, owners):
+def test_a_gone_workers_worktree_with_a_file_edited_within_the_day_is_kept(repo, owners):
     # Git's files and the tree root are old; one file deep in the tree is not.
     wt = _unfinished(repo, f"{GONE}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
     (wt / "ro" / "kept").write_text("still being finished\n")
-    _age(repo, wt, 2 * HOUR)
+    _age(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -122,7 +122,7 @@ def test_a_gone_workers_worktree_with_a_file_edited_within_the_hour_is_kept(repo
 def test_a_name_no_thread_matches_keeps_the_ordinary_checks(repo, owners):
     # A tree made by hand, or a database restored from before its owner existed.
     wt = _unfinished(repo, "deadbeef-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -132,7 +132,7 @@ def test_a_name_no_thread_matches_keeps_the_ordinary_checks(repo, owners):
 
 def test_a_live_owners_unfinished_worktree_keeps_the_ordinary_checks(repo, owners):
     wt = _unfinished(repo, f"{LIVE}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -143,16 +143,16 @@ def test_a_live_owners_unfinished_worktree_keeps_the_ordinary_checks(repo, owner
 def test_a_short_name_any_live_thread_could_mean_is_kept(repo, owners):
     owners["feedc0de-9999-2222-3333-444455556666"] = None
     wt = _unfinished(repo, "feedc0de-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
     assert report.removed == 0 and wt.is_dir()
 
 
-def test_a_gone_workers_worktree_touched_within_the_hour_is_kept(repo, owners):
+def test_a_gone_workers_worktree_touched_within_the_day_is_kept(repo, owners):
     wt = _unfinished(repo, f"{GONE}-task")
-    _age_all(repo, wt, 10 * 60)
+    _age_all(repo, wt, 2 * HOUR)
 
     report = _run(repo)
 
@@ -161,7 +161,7 @@ def test_a_gone_workers_worktree_touched_within_the_hour_is_kept(repo, owners):
 
 def test_a_live_process_still_keeps_a_gone_workers_worktree(repo, owners):
     wt = _unfinished(repo, f"{GONE}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo, FakeProbe({f"{GONE}-task": "in_use"}))
 
@@ -174,21 +174,21 @@ def test_an_unreadable_thread_table_keeps_the_ordinary_checks(repo, monkeypatch)
 
     monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles", _broken)
     wt = _unfinished(repo, f"{GONE}-task")
-    _age_all(repo, wt, 2 * HOUR)
+    _age_all(repo, wt, 2 * DAY)
 
     report = _run(repo)
 
     assert report.removed == 0 and wt.is_dir()
 
 
-def test_a_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
+def test_a_tree_git_has_forgotten_is_removed_after_a_day(repo, owners):
     wt = _add(repo, "left-behind")
     shutil.rmtree(_admin(wt))
     for name in ("README", "ro"):
         target = wt / name
         shutil.rmtree(target) if target.is_dir() else target.unlink()
     (wt / "CLAUDE.md").write_text("x\n")
-    _age_tree(wt, 2 * HOUR)
+    _age_tree(wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -199,7 +199,7 @@ def test_a_live_owners_full_tree_git_has_forgotten_is_kept(repo, owners):
     # `git worktree prune` can drop the record of a tree that is still in use.
     wt = _add(repo, f"{LIVE}-task")
     shutil.rmtree(_admin(wt))
-    _age_tree(wt, 2 * HOUR)
+    _age_tree(wt, 2 * DAY)
 
     report = _run(repo)
 
@@ -210,27 +210,27 @@ def test_a_settled_owners_full_tree_git_has_forgotten_is_kept(repo, owners):
     # Orphans are never salvaged, and an archived worker can come back.
     wt = _add(repo, f"{SETTLED}-task")
     shutil.rmtree(_admin(wt))
-    _age_tree(wt, 2 * HOUR)
+    _age_tree(wt, 2 * DAY)
 
     report = _run(repo)
 
     assert report.orphan_removed == 0 and wt.is_dir()
 
 
-def test_a_gone_owners_full_tree_git_has_forgotten_is_removed_after_an_hour(repo, owners):
+def test_a_gone_owners_full_tree_git_has_forgotten_is_removed_after_a_day(repo, owners):
     wt = _add(repo, f"{GONE}-task")
     shutil.rmtree(_admin(wt))
-    _age_tree(wt, 2 * HOUR)
+    _age_tree(wt, 2 * DAY)
 
     report = _run(repo)
 
     assert report.orphan_removed == 1 and not wt.exists()
 
 
-def test_a_forgotten_tree_touched_within_the_hour_is_kept(repo, owners):
+def test_a_forgotten_tree_touched_within_the_day_is_kept(repo, owners):
     wt = _add(repo, "left-behind")
     shutil.rmtree(_admin(wt))
-    _age_tree(wt, 10 * 60)
+    _age_tree(wt, 2 * HOUR)
 
     report = _run(repo)
 
