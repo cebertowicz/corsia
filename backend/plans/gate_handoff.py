@@ -5,8 +5,8 @@ the run owner's thread, the workflow and the step id. Its state is replayed from
 events ``plans.gate_handoff_record`` reads; there is no table of counts.
 
 A rolling window of answered runs crosses workflow versions. Scope changes are left out,
-and a miss is forgiven when the next counted run is clean. A correction hands the gate
-back, resets the window and withdraws an open offer.
+and a triaged miss is forgiven when the next counted run is clean. Untriaged failures
+remain failures. A correction hands the gate back, resets the window and withdraws an open offer.
 """
 
 from __future__ import annotations
@@ -28,9 +28,10 @@ _REJECTED = "changes_requested"
 _HANDED = {"A": "spot", "B": "none", "C": "drop"}
 
 OFFER_TITLE = "Hand the {step} review in {workflow} to an agent?"
-OFFER_CONTEXT = "{clean} of your last {n} reviews of {step} in {workflow} went ahead as you first saw them."
-OFFER_FORGIVEN = "{title}: missed; the next run went ahead as you first saw it"
-OFFER_SCOPE = "{title}: you changed what you wanted"
+OFFER_CONTEXT = "In {clean} of your last {n} reviews of {step} in {workflow}, the work needed no changes."
+OFFER_FORGIVEN_SUFFIX = " or only a fix that held"
+OFFER_FORGIVEN = "{title}: needed a fix, and the next review needed none."
+OFFER_SCOPE = "{title}: not counted, because you changed what you wanted."
 OFFER_TRADEOFF = "Handing it off saves your review time. If you later correct its work, the review comes back to you."
 OFFER_RATIONALE = "Spot checks keep some review of it without asking you every time."
 OFFER_OPTIONS = (
@@ -135,13 +136,13 @@ def _apply_run(db, state: GateState, run: Run, current_version: bool) -> None:
         if outcome == "failed" and run.tiers and all(tier in ("instruction", "not_correction") for tier in run.tiers):
             state.excluded.append(run)
         else:
-            state.window.append((run, outcome))
+            state.window.append((run, "miss" if outcome == "failed" and run.tiers else outcome))
 
 
 def _window(state: GateState) -> tuple[list[tuple[Run, str]], list[Run]]:
     counted = state.window[-WINDOW[0]:]
     forgiven = [run for index, (run, result) in enumerate(counted)
-                if result == "failed" and index + 1 < len(counted) and counted[index + 1][1] == "clean"]
+                if result == "miss" and index + 1 < len(counted) and counted[index + 1][1] == "clean"]
     return counted, forgiven
 
 
@@ -193,7 +194,10 @@ def after_settlement(db, node_id: str) -> None:
     if state.kind != "person" or state.open_offer or len(counted) < WINDOW[0] or clean < WINDOW[1]:
         return
     names = {"step": node["title"], "workflow": phase["title"]}
-    lines = [OFFER_CONTEXT.format(clean=clean, n=len(counted), **names)]
+    context = OFFER_CONTEXT.format(clean=clean, n=len(counted), **names)
+    if forgiven:
+        context = context[:-1] + OFFER_FORGIVEN_SUFFIX + "."
+    lines = [context]
     lines.extend(OFFER_FORGIVEN.format(title=run.title) for run in forgiven)
     lines.extend(OFFER_SCOPE.format(title=run.title) for run in state.excluded)
     decision = decisions.raise_offer(

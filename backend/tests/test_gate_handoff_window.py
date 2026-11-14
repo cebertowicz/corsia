@@ -137,7 +137,8 @@ async def test_reraised_ask_compares_to_first_presentation(isolated_db, tmp_path
         db.close()
 
 
-async def test_scope_is_excluded_and_offer_lists_forgiven_and_scope(isolated_db, tmp_path, monkeypatch):
+@pytest.mark.parametrize("typed_miss", [True, False])
+async def test_scope_is_excluded_and_offer_lists_forgiven_and_scope(isolated_db, tmp_path, monkeypatch, typed_miss):
     from plans import decisions
     import json
 
@@ -152,6 +153,8 @@ async def test_scope_is_excluded_and_offer_lists_forgiven_and_scope(isolated_db,
         phase, gate = reply["node"]["id"], reply["steps"][1]["id"]
         if index == 0:
             tiers[phase] = ["instruction"]
+        elif index == 1 and typed_miss:
+            tiers[phase] = ["miss"]
         _answer(gate, "approved_with_changes" if index < 2 else "approved")
         result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
                                                  "evidence": "done", "verification_result": "passed"})
@@ -161,8 +164,12 @@ async def test_scope_is_excluded_and_offer_lists_forgiven_and_scope(isolated_db,
     try:
         decision_id = json.loads(_offers()[0]["payload_json"])["decision_id"]
         context = decisions.read(decision_id, db=db)["context"]
-        assert "missed; the next run went ahead as you first saw it" in context
-        assert "you changed what you wanted" in context
+        assert ("needed a fix, and the next review needed none." in context) is typed_miss
+        assert "not counted, because you changed what you wanted." in context
+        count_line = context.splitlines()[0]
+        assert count_line.startswith("In 13 of your last 13 reviews" if typed_miss else "In 12 of your last 13 reviews")
+        assert count_line.endswith("the work needed no changes or only a fix that held." if typed_miss
+                                   else "the work needed no changes.")
     finally:
         db.close()
 
@@ -189,10 +196,15 @@ async def test_document_reads_are_batched_for_short_and_long_histories(monkeypat
     assert len(calls) == 2
 
 
-async def test_miss_is_forgiven_only_by_next_counted_clean_run():
+@pytest.mark.parametrize(("tiers", "forgiven"), [([], False), (["miss"], True)])
+async def test_miss_is_forgiven_only_by_next_counted_clean_run(tiers, forgiven):
     miss = _record([{"verdict": "approved_with_changes"}])
+    miss.tiers = tiers
     clean = _record([{"verdict": "approved"}])
-    state = gate_handoff.GateState(window=[(miss, "failed"), (clean, "clean")])
-    assert gate_handoff._window(state)[1] == [miss]
-    state.window = [(miss, "failed"), (miss, "failed")]
+    state = gate_handoff.GateState()
+    gate_handoff._apply_run(None, state, miss, True)
+    gate_handoff._apply_run(None, state, clean, True)
+    assert gate_handoff._window(state)[1] == ([miss] if forgiven else [])
+    state.window.pop()
+    gate_handoff._apply_run(None, state, miss, True)
     assert gate_handoff._window(state)[1] == []
