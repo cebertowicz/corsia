@@ -1,16 +1,10 @@
-"""find_for_thread starts from the thread's own registrations.
-
-With no ANALYZE statistics SQLite drove the lookup from every identity of the
-integration and type (one claude-code session per thread ever) and probed
-registrations once per row, so each checkpoint read grew with the install's age.
-"""
+"""find_for_thread starts from the thread's own registrations."""
 
 import sqlite3
 import uuid
 
 from infra.schema import SCHEMA_SQL
-from registry.identity_bridge import OWNER_REGISTRATION_STATES
-from registry.listing import _THREAD_RECORDS, _projection, find_for_thread
+from registry.listing import find_for_thread
 
 NOW = "2026-11-14T00:00:00+00:00"
 
@@ -38,16 +32,14 @@ def _register(db, integration, type_, thread, external_id, *, updated=NOW, state
 
 def test_the_lookup_is_driven_by_the_threads_registrations():
     db = _db()
-    states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
-    plan = [
-        row[3]
-        for row in db.execute(
-            f"EXPLAIN QUERY PLAN {_projection()} {_THREAD_RECORDS}"
-            f" AND i.state='active' AND r.relationship_state IN ({states})"
-            " ORDER BY i.updated_at DESC, i.id ASC LIMIT 1",
-            ("thread", "claude-code", "session", *OWNER_REGISTRATION_STATES),
-        )
-    ]
+    sent: list[str] = []
+    db.set_trace_callback(sent.append)
+    find_for_thread("thread", "claude-code", "session", db=db)
+    db.set_trace_callback(None)
+
+    # The statement find_for_thread actually sent, with its bound values expanded.
+    (query,) = sent
+    plan = [row[3] for row in db.execute(f"EXPLAIN QUERY PLAN {query}")]
     assert plan[0].startswith("SEARCH r USING INDEX idx_artifact_registrations_thread"), plan
     assert "(id=?)" in plan[1], plan
 
