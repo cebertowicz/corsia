@@ -174,7 +174,11 @@ def node_owner_thread(node_id: str, *, db) -> str | None:
 
 
 def nodes_created_with(node_ids: list[str], provenances: tuple[str, ...], *, db) -> set[str]:
-    """Those of ``node_ids`` whose ``node_created`` event carries one of ``provenances`` (never rewritten)."""
+    """Those of ``node_ids`` whose ``node_created`` event carries one of ``provenances`` (never rewritten).
+
+    One query; per node it walks ``idx_plan_node_events_node`` in time order and stops at the
+    ``node_created`` row, a node's first event, so it reads about one row per node, not its history.
+    """
     import json
 
     from plans import service
@@ -183,11 +187,17 @@ def nodes_created_with(node_ids: list[str], provenances: tuple[str, ...], *, db)
         return set()
     with service._connection(db) as connection:
         rows = connection.execute(
-            "SELECT node_id FROM plan_node_events WHERE event = 'node_created'"
-            " AND provenance IN (SELECT value FROM json_each(?)) AND node_id IN (SELECT value FROM json_each(?))",
-            (json.dumps(list(provenances)), json.dumps(list(node_ids))),
+            NODES_CREATED_WITH_SQL, (json.dumps(list(node_ids)), json.dumps(list(provenances))),
         ).fetchall()
     return {str(row["node_id"]) for row in rows}
+
+
+NODES_CREATED_WITH_SQL = (
+    "SELECT ids.value AS node_id FROM json_each(?) AS ids"
+    " WHERE (SELECT e.provenance FROM plan_node_events e"
+    " WHERE e.node_id = ids.value AND e.event = 'node_created' ORDER BY e.created_at LIMIT 1)"
+    " IN (SELECT value FROM json_each(?))"
+)
 
 
 def open_wait_intervals(

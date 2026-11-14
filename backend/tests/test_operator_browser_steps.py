@@ -66,3 +66,23 @@ def test_a_settled_step_is_no_longer_marked(db):
     node = _nodes(db, "owner").get(step)
 
     assert node is None or "browser_thread_id" not in node
+
+
+def test_the_provenance_read_seeks_each_nodes_first_event_not_its_history(db):
+    owner_plan(db)
+    step = _open(db, "owner", "password_step:visit-1", PasswordStep.provenance)
+    for _ in range(20):
+        db.execute(
+            "INSERT INTO plan_node_events (id, node_id, event, provenance, created_at)"
+            " SELECT lower(hex(randomblob(8))), id, 'node_updated', 'later', '9999-01-01' FROM plan_nodes WHERE id = ?",
+            (step,),
+        )
+    db.commit()
+
+    plan = " ".join(str(row[-1]) for row in db.execute(
+        "EXPLAIN QUERY PLAN " + public.NODES_CREATED_WITH_SQL, ('["x"]', '["y"]'),
+    ))
+
+    assert _nodes(db, "owner")[step]["browser_thread_id"] == "owner"
+    assert "USING INDEX idx_plan_node_events_node (node_id=?)" in plan
+    assert "SCAN e" not in plan and "TEMP B-TREE" not in plan
