@@ -31,10 +31,25 @@ class TestAnthropicIsDisjoint:
         assert usage.input_total == 600
         assert usage.total == 650
 
-    def test_absent_cache_counts_are_zero_not_missing(self):
+    def test_absent_cache_counts_are_unreported_not_zero(self):
         usage = from_anthropic({"input_tokens": 10, "output_tokens": 5})
-        assert usage == TokenUsage(input_uncached=10, output=5)
+        assert usage == TokenUsage(
+            input_uncached=10, output=5,
+            unreported=frozenset({"cache_read", "cache_write"}),
+        )
         assert usage.input_total == 10
+        row = usage.ledger_row()
+        assert row["cache_read_tokens"] is None
+        assert row["cache_creation_tokens"] is None
+        assert row["total_tokens"] is None
+
+    def test_reported_zero_cache_counts_are_measured(self):
+        usage = from_anthropic({
+            "input_tokens": 10, "output_tokens": 5,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        })
+        assert usage == TokenUsage(input_uncached=10, output=5)
+        assert usage.ledger_row()["total_tokens"] == 15
 
     @pytest.mark.parametrize(
         "input_tokens",
@@ -65,6 +80,17 @@ class TestCodexCachedIsASubset:
         assert usage.input_total == 1000
         assert usage.total == 1040
 
+    def test_absent_cached_count_is_unreported_but_write_stays_zero(self):
+        """Codex has no cache-write concept, so only the read is unknown."""
+        usage = from_codex({"inputTokens": 1000, "outputTokens": 40})
+        assert usage == TokenUsage(
+            input_uncached=1000, output=40, unreported=frozenset({"cache_read"}),
+        )
+        assert usage.input_total == 1000
+        row = usage.ledger_row()
+        assert row["cache_read_tokens"] is None
+        assert row["cache_creation_tokens"] == 0
+
     def test_cache_larger_than_input_cannot_invent_negative_usage(self):
         usage = from_codex({"inputTokens": 100, "cachedInputTokens": 999})
         assert usage.input_uncached == 0
@@ -91,8 +117,20 @@ class TestOpenAICachedIsASubset:
         )
         assert usage.input_total == 800
 
-    def test_missing_details_is_all_uncached(self):
+    def test_missing_details_leave_the_cached_share_unreported(self):
         usage = from_openai({"prompt_tokens": 800, "completion_tokens": 20})
+        assert usage == TokenUsage(
+            input_uncached=800, output=20, unreported=frozenset({"cache_read"}),
+        )
+        # The context the prompt occupies is still known.
+        assert usage.input_total == 800
+        assert usage.ledger_row()["cache_creation_tokens"] == 0
+
+    def test_reported_zero_cached_detail_is_measured(self):
+        usage = from_openai({
+            "prompt_tokens": 800, "completion_tokens": 20,
+            "prompt_tokens_details": {"cached_tokens": 0},
+        })
         assert usage == TokenUsage(input_uncached=800, output=20)
 
 
@@ -105,6 +143,7 @@ class TestCrossProviderComparability:
         anthropic = from_anthropic({
             "input_tokens": 700,
             "cache_read_input_tokens": 300,
+            "cache_creation_input_tokens": 0,
             "output_tokens": 40,
         })
         codex = from_codex({
@@ -271,7 +310,10 @@ class TestLitellmConventionDiscrimination:
             self._usage(prompt_tokens=1_000, completion_tokens=40), 900,
         )
         assert from_litellm(usage, model="anthropic/claude-3.5-sonnet") == (
-            TokenUsage(input_uncached=1_000, cache_read=900, output=40)
+            TokenUsage(
+                input_uncached=1_000, cache_read=900, output=40,
+                unreported=frozenset({"cache_write"}),
+            )
         )
 
     def test_api_base_overrides_the_model_id_in_the_discriminator(self):
@@ -284,13 +326,38 @@ class TestLitellmConventionDiscrimination:
         # A local runtime is OpenAI-compatible with or without the hint.
         assert reports_cache_outside_prompt("omlx@ns-x/Model") is False
 
-    def test_no_cache_traffic_is_read_the_same_either_way(self):
+    def test_reported_zero_cache_is_read_the_same_either_way(self):
         usage = self._usage(
             prompt_tokens=500, completion_tokens=10, total_tokens=510,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
         )
         expected = TokenUsage(input_uncached=500, output=10)
         assert from_litellm(usage, model="gpt-4o") == expected
         assert from_litellm(usage, model="claude-sonnet-4-20250514") == expected
+
+    def test_absent_cache_fields_are_unreported_in_either_convention(self):
+        """litellm leaves both styles unset when the vendor sent neither."""
+        usage = self._usage(
+            prompt_tokens=500, completion_tokens=10, total_tokens=510,
+        )
+        assert usage.prompt_tokens_details is None
+        subset = from_litellm(usage, model="gpt-4o")
+        assert subset == TokenUsage(
+            input_uncached=500, output=10, unreported=frozenset({"cache_read"}),
+        )
+        assert subset.input_total == 500
+        assert from_litellm(usage, model="claude-sonnet-4-20250514") == TokenUsage(
+            input_uncached=500, output=10,
+            unreported=frozenset({"cache_read", "cache_write"}),
+        )
+
+    def test_native_zero_read_without_a_mirror_is_measured(self):
+        usage = self._usage(prompt_tokens=500, completion_tokens=10)
+        usage.cache_read_input_tokens = 0
+        usage.cache_creation_input_tokens = 7
+        assert from_litellm(usage, model="claude-sonnet-4-20250514") == TokenUsage(
+            input_uncached=500, cache_write=7, output=10,
+        )
 
     def test_cached_exceeding_prompt_is_disjoint_by_arithmetic(self):
         """A subset cannot exceed its superset, whatever the vendor guess."""
@@ -300,6 +367,7 @@ class TestLitellmConventionDiscrimination:
         measured = from_litellm(usage, model="gpt-4o")
         assert measured == TokenUsage(
             input_uncached=100, cache_read=900, output=5,
+            unreported=frozenset({"cache_write"}),
         )
 
     def test_absent_measurement_is_unmeasured_not_zero(self):
