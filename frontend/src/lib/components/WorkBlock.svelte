@@ -188,8 +188,10 @@
 
 <style>
 	.transcript-fold { display: flex; flex-wrap: wrap; max-width: 760px; margin: 0 auto 14px; min-width: 0; align-items: center; scroll-margin-top: var(--sticky-top, 0px); }
-	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip. */
-	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; min-width: 0; }
+	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip.
+	   -6px (their tuck under a message row) would pull a note into the pill's own box, where the
+	   pill's z-index paints over it; 8px is the gap the expanded body already keeps under the pill. */
+	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; min-width: 0; margin-top: 8px; }
 	/* Collapsed: a glass capsule sized to its label. Expanded: the same capsule pins as the header. */
 	.fold-toggle {
 		position: sticky; top: var(--sticky-top, 0px); z-index: 4;

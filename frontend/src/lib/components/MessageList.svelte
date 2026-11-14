@@ -301,7 +301,7 @@
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			<span>Loading this chat…</span>
 		</div>
-	{:else if messageRows.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
+	{:else if transcriptEntries.length === 0 && pendingEntries.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />

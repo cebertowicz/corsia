@@ -4,7 +4,11 @@ import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threa
 import { _resetTurnStateForTests, applyLifecycle, applyTerminal } from '$lib/ws/turnState';
 import { coreSettings, type CoreSettings } from '$lib/stores/settings';
 import { threadPlanStates } from '$lib/stores/threadPlanStates';
+import { PAUSED_AT_USAGE_LIMIT, PLAN_LIMIT_REASON } from '$lib/stores/overageSetting';
+import type { RunStub } from '$lib/focusRuns';
 import MessageList from './MessageList.svelte';
+import transcriptContentSource from './TranscriptContent.svelte?raw';
+import workBlockSource from './WorkBlock.svelte?raw';
 
 /**
  * An empty canvas is a claim about the thread. It may only be made when the
@@ -123,6 +127,37 @@ describe('an empty thread whose plan waits outside', () => {
 		expect(greeting()).toBeNull();
 		expect(host.querySelector('.fold-toggle')?.textContent).toContain('Waiting');
 		expect(host.textContent).toContain('CI on PR #1193');
+	});
+});
+
+describe('a Focus window whose only entry is a run the page left unloaded', () => {
+	/** One collapsed run with no loaded rows, stopped at the plan limit. */
+	const stub: RunStub = {
+		firstId: 'm2', lastId: 'm9', firstSeq: 2, lastSeq: 9, count: 8, turnIds: ['t1'],
+		weight: 8, kinds: ['step'], continuesOlder: false,
+	};
+	const stopped = { t1: { status: 'cancelled', cause: PLAN_LIMIT_REASON } } as never;
+
+	function renderStubWindow(): void {
+		coreSettings.set({ features: { focus_mode: true } } as unknown as CoreSettings);
+		renderList({ focusRuns: [stub], turnSummaries: stopped });
+	}
+
+	it('renders the work block and its pause line, and never greets', () => {
+		renderStubWindow();
+
+		expect(host.querySelector('.transcript-fold')).not.toBeNull();
+		expect(host.querySelector('.plan-limit-paused')?.textContent).toBe(PAUSED_AT_USAGE_LIMIT);
+		expect(greeting()).toBeNull();
+	});
+
+	it('keeps the pause line clear of the pill on every path that draws it', () => {
+		// jsdom has no layout. A note the block hosts keeps the gap the expanded body keeps under
+		// the pill, so the pill never paints over its top; a note that stands beside the block
+		// (a stub fence, an older pause) reads the block's own bottom margin instead.
+		expect(workBlockSource).toMatch(/\.transcript-fold > :global\(\.plan-limit-paused\) \{[^}]*margin-top: 8px; \}/);
+		expect(workBlockSource).toMatch(/\.transcript-fold \{[^}]*margin: 0 auto 14px;/);
+		expect(transcriptContentSource).toMatch(/\.plan-limit-paused \{[^}]*margin: -6px auto 20px;/);
 	});
 });
 
