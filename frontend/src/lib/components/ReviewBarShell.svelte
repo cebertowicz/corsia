@@ -190,7 +190,9 @@
 	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
 	/* This wrapper constrains the name; MiddleName owns its head/tail truncation within it. */
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
-	/* The request keeps about 16 characters, the same floor the narrow header below uses: a long name gives up its middle before the request is left with nothing. */
+	/* A name cut in the middle keeps its first letter, the ellipsis, its last four characters and the colon (MiddleName's floor), whatever the row leaves it. */
+	.rb-who:has(:global(.name.cut)) { min-width: calc(1.8em + 6ch); }
+	/* The request keeps about 16 characters: a long name gives up its middle before the request is left with nothing. Where the header cannot hold both floors beside the tools, the header stacks (headerStack). */
 	.rb-ask { flex: 1 1 0; min-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
 	.review-bar.expanded .rb-chev { transform: rotate(180deg); }
@@ -248,23 +250,16 @@
 	:global(.document-header) .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
 	:global(.document-header) .review-bar.ask.static .rb-who :global(.name) { display: inline; white-space: normal; }
 	:global(.document-header) .review-bar.ask.static .rb-who :global(.name-head) { overflow: visible; }
-	/* A 16ch ask needs more room than the prior 48px floor. Below this point the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. Line 2 is unchanged.
-	   Threshold, measured at a fine pointer with a narrow canvas (the pill shows its count only):
-	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 16ch (122) + gap 8 + chevron 13
-	     + two header column gaps 8 + tools 94 (comments pill 52 + gap 4 + Request review 38) = 401px of header content; 408px keeps a small tolerance.
-	   Measured header content: 195px at 1280 with the pane overlaid, 345px on a 393 phone, 355px at 1440 with the pane docked,
-	   635px with it closed. The first three use this fallback. An ask with no one-line text (the person step) has no third row. */
-	@container doc-header (width < 408px) {
-		/* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
-		:global(.document-header) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
-		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
-		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
-		:global(.document-header) .review-bar.ask .rb-who { max-width: none; }
-		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
-		:global(.document-header) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-content: center; }
-		:global(.document-header) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
-		:global(.document-header) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
-	}
+	/* A 16ch ask needs more room than the prior 48px floor. When the header cannot hold the review line at its floors (avatar, name down to its floor, a 16-character ask, chevron, gaps) beside the tools as drawn, the header is marked `rb-stack` (actions/headerStack.ts): the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. The point is read from the tools as drawn, not from a fixed width. An ask with no one-line text (the person step) has no third row. */
+	/* The tools own the preceding header row; their intrinsic height needs no reserved spacer here. */
+	:global(.document-header:where(.rb-stack)) .review-bar.ask { grid-template-rows: 0 var(--space-7) auto; }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-who { max-width: none; }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; align-content: center; }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask.static { grid-template-rows: 0 minmax(var(--space-7), auto); }
+	:global(.document-header:where(.rb-stack)) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
 
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
 	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and the note's send button, as the phone capsule does. */

@@ -6,6 +6,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import { headerStack } from '$lib/actions/headerStack';
 	import CommentsPill from './comments/CommentsPill.svelte';
 	import { Button, StatePill, Toggle } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
@@ -185,7 +186,7 @@
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
-<header class="document-header" use:detailsKeys>
+<header class="document-header" use:detailsKeys use:headerStack={reviewTargetKey}>
 	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
@@ -343,11 +344,9 @@
 	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
-	@container doc-header (width < 408px) {
-		/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. */
-		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
-		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
-	}
+	/* With the review surface in the header, the tool cluster takes the full row under it and wraps between its two groups when one row cannot hold it. `rb-stack` is set by headerStack when the review line cannot keep its floors beside the tools. */
+	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
+	.document-header:global(:where(.rb-stack)):has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
 	/* History is a text button on a wide canvas and, like the Request review button beside it (DocReviewControls.svelte:97), an icon-only button once the canvas is phone-sized, so the row holds the same controls whatever the save state. */
 	.history-tool svg { display: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 	@container doc-canvas (max-width: 600px) {
