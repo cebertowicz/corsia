@@ -11,6 +11,9 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from native_checkpoint_fixtures import seed_vendor_checkpoint_thread
 from test_checkpoint_external_adapters import _request, _target
 
+# These calls report both cache counts as zero; an omitted count would be unknown.
+_CACHE_MEASURED_ZERO = {"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+
 pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
 
@@ -107,7 +110,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
             "id": "response", "stop_reason": "tool_use",
             "content": [{"type": "text", "text": "Partial checkpoint."},
                         {"type": "tool_use", "id": "edit", "name": "edit", "input": {}}],
-            "usage": {"input_tokens": 900, "output_tokens": 50},
+            "usage": {"input_tokens": 900, "output_tokens": 50, **_CACHE_MEASURED_ZERO},
         }},
     ]
     script = (

@@ -7,6 +7,8 @@
 	flex-shrink: 0;
 	pointer-events: none;
 }
+/* Only the composer's own boxes take the pointer: the band beside them belongs to what is drawn under it (a chat
+   margin card's reply field and Send). So a child here is the box it draws, never a full-width wrapper. */
 .input-floater > * { pointer-events: auto; }
 .attachment-previews {
 	display: flex; flex-wrap: wrap; gap: 8px;
