@@ -22,7 +22,7 @@ import pytest
 
 from infra.schema import SCHEMA_SQL
 from plans import (
-    archival, closure, decision_authz, delegation_child_lifecycle, node_states,
+    closure, decision_authz, delegation_child_lifecycle, node_states,
     operator_projection, projections, service, status,
 )
 from plans.boundary import PlanActor, mutate
@@ -355,9 +355,12 @@ def test_nothing_is_added_to_or_bound_to_a_closed_node(db):
 
 
 def test_a_closed_node_can_still_be_archived(db):
-    _plan, _live, _open_step, closed, beneath = _closed_branch(db)
+    plan, _live, _open_step, closed, beneath = _closed_branch(db)
 
-    result = archival.archive_nodes([*beneath, closed.id], provenance="test", db=db)
+    result = mutate(
+        plan.id, "archive_node", {"node_ids": [*beneath, closed.id]},
+        actor=OWNER, provenance="test", mutation_id=uuid.uuid4().hex, db=db,
+    ).result
 
     assert result["refused"] == []
     assert service._node_row(db, closed.id)["archived_at"] is not None
