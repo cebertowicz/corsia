@@ -6,7 +6,7 @@ import Pane from '$lib/components/Pane.svelte';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { focusPlanNode, registerPlanSurface } from '$lib/planNodeFocus';
-import { returnToPlanNode } from '$lib/planLeafReturn';
+import { openPlanBrowser, returnToPlanNode } from '$lib/planLeafReturn';
 import { resetPlanRuntimeForTests } from '$lib/stores/plans.svelte';
 import { resetObserversForTests } from '$lib/stores/planQuery.svelte';
 import { activeThreadId } from '$lib/stores/threads';
@@ -17,6 +17,10 @@ import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operat
 import { planFoldFields } from './fixtures/planFolds';
 
 vi.mock('$lib/ws', () => ({ on: () => () => {} }));
+vi.mock('$lib/planLeafReturn', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/planLeafReturn')>()),
+	openPlanBrowser: vi.fn(),
+}));
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -216,6 +220,19 @@ describe('ThreadPlanPane attention-node focus', () => {
 
 		expect(row('leaf')).toBeUndefined();
 		expect(focusedRowId()).toBeNull();
+	});
+
+	it('opens a sign-in step’s shared browser, as its row and chat chip do, instead of its details', async () => {
+		const signIn = operatorNode({ id: 'sign-in', title: 'Enter your password', assignee: 'user', browser_thread_id: 't1' });
+		vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(ok(envelope('t1', [...planNodes('t1'), signIn]), 't1'))));
+		await mountPane({ threadId: 't1' });
+
+		await focusPlanNode('t1', 'sign-in', null, true);
+		await settle();
+
+		expect(openPlanBrowser).toHaveBeenCalledWith('t1', 't1');
+		expect(row('sign-in')?.querySelector('.node-details') ?? null).toBeNull();
+		expect(host.textContent).not.toContain('That task isn’t in this plan.');
 	});
 
 	it('says so when the plan no longer has the node', async () => {

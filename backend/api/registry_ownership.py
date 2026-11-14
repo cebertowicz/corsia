@@ -10,12 +10,15 @@ subscribers never define transfer authority.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from infra.auth import authenticate, may_access_artifact, require_human_user
 from infra.database import write_transaction
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from registry import models, service
 from registry.ownership_authority import (
@@ -200,75 +203,105 @@ class OwnershipBody(BaseModel):
     supervisor_thread_id: str | None = None
 
 
-MULTI_PERSON_REFUSAL = "Only an agent can own a document when more than one person uses CORSIA here."
-SHARED_REFUSAL = "Everyone here shares this document, so its owner and supervisor can’t be changed while more than one person uses CORSIA."
+AGENT_CHOICE_REFUSAL = "Pick one of the agents listed."
+PERSON_OR_AGENT_CHOICE_REFUSAL = "Pick yourself or one of the agents listed."
+NOT_FOUND_REFUSAL = "Couldn’t find this document. Reload the page to see where it is."
+
+
+def _refusal_for(
+    body: OwnershipBody, current: str | None, multi_person: bool, agents: set[str],
+) -> tuple[int, str] | None:
+    """The status and sentence this change is refused with, or ``None``.
+
+    ``agents`` are the payload's choices, the only agents a pick may name. Only
+    a new owner is checked against them; one that stays may be outside them.
+    """
+    from registry.document_supervisor import MULTI_PERSON_REFUSAL, change_refusal
+    from registry.shared_principals import UI_PRINCIPAL
+
+    refusal = change_refusal(current, multi_person=multi_person)
+    if refusal:
+        return 409, refusal
+    new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
+    if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
+        return 400, AGENT_CHOICE_REFUSAL if multi_person else PERSON_OR_AGENT_CHOICE_REFUSAL
+    if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
+        return 400, AGENT_CHOICE_REFUSAL
+    if new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL and multi_person:
+        return 409, MULTI_PERSON_REFUSAL
+    return None
+
+
+def _apply_change(db, artifact: dict, body: OwnershipBody, current: str | None) -> tuple[dict, list]:
+    """Make the change inside the caller's transaction; returns the changed artifact and its events.
+
+    Every comparison is against the stored pick, the one value the header and
+    comment delivery read, so the person's explicit choice is always written and
+    an event fires only when what is stored changes.
+    """
+    from registry.document_supervisor import SUPERVISOR_KEY, owner_kind, stored_pick
+    from registry.identity_metadata import merge_identity_metadata
+    from registry.shared_principals import UI_PRINCIPAL
+
+    artifact_id = artifact["id"]
+    stored = stored_pick(artifact)
+    new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
+    picked = "supervisor_thread_id" in body.model_fields_set
+    supervisor = (body.supervisor_thread_id or None) if picked else stored
+    # The agent a person takes a document from supervises it, unless they picked one.
+    if new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL and supervisor is None and owner_kind(current) == "agent":
+        supervisor = current
+    if new_owner != current:
+        models.rehome_artifact(
+            integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
+            new_owner_thread_id=new_owner, actor_thread_id=None, authority="signed-in-person",
+            reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
+        )
+    # The owner supervises by default, so picking the owner stores no pick.
+    supervisor = supervisor if supervisor != new_owner else None
+    events = []
+    if new_owner != current:
+        events.append(("owner_changed", {"from": owner_kind(current), "to": owner_kind(new_owner)}))
+    if supervisor != stored:
+        merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
+        events.append(("supervisor_changed", {"from": "agent" if stored else "none", "to": "agent" if supervisor else "none"}))
+    return models.get_artifact(artifact_id, db=db), events
+
+
+def _change_ownership(artifact_id: str, body: OwnershipBody, user: dict):
+    """Returns ``(refusal, None)`` or ``(None, (changed artifact, ownership view, events))``."""
+    from infra import config
+    from registry.document_supervisor import is_multi_person, ownership
+    from registry.shared_principals import artifact_owner
+
+    with write_transaction(None, scope="api_document_ownership") as db:
+        artifact = models.get_artifact(artifact_id, db=db)
+        # Someone else's document, or an archived or deleted one, reads as missing, the same answer an unknown id gets.
+        if (
+            artifact is None
+            or models.identity_state(artifact_id, db=db) != "active"
+            or not may_access_artifact(artifact.get("parent_thread_id"), user["id"], db=db)
+        ):
+            return (404, NOT_FOUND_REFUSAL), None
+        current = artifact_owner(artifact_id, db=db)
+        multi_person = is_multi_person(db)
+        view = ownership(db, artifact, user_id=user["id"], workspace=config.WORKSPACE, multi_person=multi_person)
+        refusal = _refusal_for(body, current, multi_person, {choice["id"] for choice in view["choices"]})
+        if refusal:
+            return refusal, None
+        changed, events = _apply_change(db, artifact, body, current)
+        return None, (changed, ownership(db, changed, user_id=user["id"], workspace=config.WORKSPACE, multi_person=multi_person), events)
 
 
 @router.put("/artifacts/{artifact_id}/ownership")
 async def change_document_ownership(artifact_id: str, body: OwnershipBody, user: dict = Depends(require_human_user)):
     """The signed-in person changes a document's owner or supervisor."""
-    from infra import config
-    from registry.document_supervisor import (
-        SUPERVISOR_KEY,
-        is_multi_person,
-        may_change,
-        owner_kind,
-        ownership,
-    )
-    from registry.identity_metadata import merge_identity_metadata, parse_metadata
-    from registry.shared_principals import UI_PRINCIPAL, artifact_owner
-
-    def _change():
-        with write_transaction(None, scope="api_document_ownership") as db:
-            artifact = models.get_artifact(artifact_id, db=db)
-            # Someone else's document reads as missing, the same answer an unknown id gets.
-            if artifact is None or artifact.get("state") != "active" or not may_access_artifact(
-                artifact.get("parent_thread_id"), user["id"], db=db,
-            ):
-                return "not_found", None
-            current = artifact_owner(artifact_id, db=db)
-            multi_person = is_multi_person(db)
-            if not may_change(current, multi_person=multi_person):
-                return "shared", None
-            view = ownership(db, artifact, user_id=user["id"], workspace=config.WORKSPACE)
-            agents = {choice["id"] for choice in view["choices"]}
-            metadata = parse_metadata(artifact.get("metadata"))
-            new_owner = current if body.owner is None else UI_PRINCIPAL if body.owner == "user" else body.owner
-            taking_over = new_owner == UI_PRINCIPAL and current != UI_PRINCIPAL
-            # Only a new owner is checked against the choices; an owner that stays may be outside them.
-            if body.owner not in (None, "user") and new_owner != current and new_owner not in agents:
-                return "bad_choice", None
-            if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
-                return "bad_choice", None
-            if taking_over and multi_person:
-                return "multi_person", None
-            picked = metadata.get(SUPERVISOR_KEY)
-            supervisor = body.supervisor_thread_id if "supervisor_thread_id" in body.model_fields_set else picked
-            # The agent a person takes a document from supervises it, unless they picked one.
-            if taking_over and supervisor is None and owner_kind(current) == "agent":
-                supervisor = current
-            if new_owner != current:
-                models.rehome_artifact(
-                    integration=artifact["integration"], type=artifact["type"], external_id=artifact["external_id"],
-                    new_owner_thread_id=new_owner, actor_thread_id=None, authority="signed-in-person",
-                    reason="changed by the signed-in person", source_path="api:/api/artifacts/{id}/ownership", db=db,
-                )
-            supervisor = supervisor if supervisor != new_owner else None
-            if supervisor != picked:
-                merge_identity_metadata(db, artifact_id, {SUPERVISOR_KEY: supervisor})
-            changed = models.get_artifact(artifact_id, db=db)
-            return "ok", (changed, ownership(db, changed, user_id=user["id"], workspace=config.WORKSPACE))
-
-    status, result = await run_in_db(_change)
-    if status == "not_found":
-        raise HTTPException(404, "Couldn’t find this document. Reload the page to see where it is now.")
-    if status == "bad_choice":
-        raise HTTPException(400, "Pick yourself or one of the agents listed.")
-    if status == "multi_person":
-        raise HTTPException(409, MULTI_PERSON_REFUSAL)
-    if status == "shared":
-        raise HTTPException(409, SHARED_REFUSAL)
+    refusal, result = await run_in_db(lambda: _change_ownership(artifact_id, body, user))
+    if refusal:
+        raise HTTPException(*refusal)
     assert result is not None
-    changed, view = result
+    changed, view, events = result
     service.notify_changed(changed)
+    for action, properties in events:
+        await asyncio.to_thread(emit_product_event, "documents", action, user_id=user["id"], properties=properties)
     return {"ownership": view}
