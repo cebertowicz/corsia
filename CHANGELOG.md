@@ -23,6 +23,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A block of code in a document no longer shows a stray label, such as ts, on a line above it; the saved text is unchanged.
 - A link to a document at a line, such as notes.md:12, now opens that document in chat, in documents and in comments; before, it said the document couldn't be found.
 - A passage you comment on in a chat's last message now stays in view above the comment sheet on a phone, after a refused send and when you open a failed comment; before, the sheet could cover it.
+- A path an agent writes in a project chat now shows as a file you can open with one press, whether it was written from the project folder or from the workspace folder. A document link you press opens its tab at once, even while CORSIA is slow to answer, and if the file is missing or can't be opened, the tab says so; before, a slow press could show nothing for many seconds.
 - A press on a one-word comment inside a longer suggestion now opens that comment's card, on a phone as well as on a computer; before, it opened the suggestion's card or nothing.
 - A pull request that is closed and then reopened is followed again: it returns to Files in its agent's chat, the agent is told it was reopened, and the agent's event rules fire on it again. Before, nothing about it reached the agent after the reopen.
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
