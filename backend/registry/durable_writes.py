@@ -22,7 +22,7 @@ from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
 from registry.shared_target import SharedTarget
-from registry.promoted_path import write_authority_unless_promoted
+from registry.promoted_path import mark_carried, settle_promoted_source, write_authority_unless_promoted
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
 from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
@@ -220,6 +220,7 @@ def _register_applied(
         service.prepare_file_identity(str(source), db=db)
         if source is not None and not source.exists() else None
     )
+    prepared, left = mark_carried(prepared, source_identity, db=db)
     metadata = {"last_written_sha256": content_hash}
     if shared.update_trigger:
         metadata["update_trigger"] = shared.update_trigger
@@ -234,12 +235,7 @@ def _register_applied(
         )
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
-        source_artifact = (
-            service.find_file_identity(source_identity, db=db)
-            if source_identity is not None else None
-        )
-        if source_artifact is not None:
-            models.retire(source_artifact["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
+        settle_promoted_source(source_identity, left, artifact, db=db)
         record_post_write_events(
             shared,
             artifact,
