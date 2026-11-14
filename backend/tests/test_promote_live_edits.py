@@ -12,6 +12,7 @@ from tests.test_durable_writes import _working_file
 from tests.test_durable_writes import durable_scope as durable_scope
 
 NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
+MOVED_FIRST = "This document was moved by another request first, so it wasn’t moved again. Try again from its new place."
 NO_VIEWER = "This document has unsaved changes and no one has it open to save them, so it wasn’t moved. Open it, then try again."
 STILL_TYPING = "This document is still being typed in, so it wasn’t moved. Try again in a moment."
 CARRIED_AND_STALE = pytest.mark.parametrize("stale", [False, True], ids=["carried", "stale"])
@@ -435,7 +436,7 @@ async def test_a_relocate_that_waited_on_a_move_of_the_same_file_is_refused(
     _another_relocation_wins_the_race(monkeypatch, thread_id, source_id, winner)
     try:
         receipt = await _relocate_with_tool(workspace, thread_id, source_id, loser)
-        assert receipt == "Error: this file was moved while the move waited; try again", receipt
+        assert receipt == f"Error: {MOVED_FIRST}", receipt
         assert winner.exists() and not loser.exists() and not source.exists()
     finally:
         await asyncio.wait_for(manager.close(), 20)
@@ -455,7 +456,7 @@ async def test_a_pane_relocate_that_waited_on_a_move_of_the_same_file_is_refused
         with pytest.raises(HTTPException) as refused:
             await registry_pane.relocate_artifact_endpoint(
                 source_id, "token", registry_pane.ArtifactRelocateBody(thread_id=thread_id, target_path=str(loser)))
-        assert refused.value.status_code == 400
+        assert refused.value.status_code == 400 and refused.value.detail == MOVED_FIRST
         assert winner.exists() and not loser.exists() and not source.exists()
     finally:
         await asyncio.wait_for(manager.close(), 20)

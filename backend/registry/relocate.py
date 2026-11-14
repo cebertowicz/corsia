@@ -187,7 +187,7 @@ def relocate_artifact(
     try:
         identity = _authorized_identity(_db, artifact_id, actor_thread_id)
         if held_path is not None and Path(identity["path"] or "") != held_path:
-            raise RelocationError("this file was moved while the move waited; try again")
+            raise RelocationError("This document was moved by another request first, so it wasn’t moved again. Try again from its new place.")
         move = _validated_move(_db, identity, target_path, actor_thread_id)
 
         now = _now()
