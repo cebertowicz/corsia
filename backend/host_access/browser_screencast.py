@@ -99,7 +99,7 @@ class PaneScreencast:
             pass  # The pane is leaving; run() ends with the closed socket.
 
     async def _start(self, cdp: CdpClient) -> None:
-        # Chrome answers in order, so the measurement arrives before this start's first frame.
+        # Measured before the start, though this start's first frame can still arrive before the answer.
         # Recorded before sending: the reader may take the answer before send returns.
         self._unmeasured += 1
         self._held = False  # The measurement now holds frames until it answers.
