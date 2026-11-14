@@ -280,7 +280,9 @@ class ArtifactRelocateTool(Tool):
             return context
         actor_thread_id, actor = context
 
-        def _relocate():
+        from registry.relocate import RelocationError, checked_source_path, relocate_artifact
+
+        def _relocate(*, move: bool):
             db = get_db()
             try:
                 art = models.get_artifact(artifact_id, db=db)
@@ -288,9 +290,12 @@ class ArtifactRelocateTool(Tool):
                     art["parent_thread_id"], actor["user_id"], db=db
                 ):
                     return "not_found", None
-                from registry.relocate import RelocationError, relocate_artifact
-
                 try:
+                    if not move:
+                        return "ok", checked_source_path(
+                            artifact_id, tool_path(target_path, self._workspace),
+                            actor_thread_id=actor_thread_id, db=db,
+                        )
                     artifact = relocate_artifact(
                         artifact_id, tool_path(target_path, self._workspace),
                         actor_thread_id=actor_thread_id, db=db,
@@ -301,7 +306,22 @@ class ArtifactRelocateTool(Tool):
             finally:
                 db.close()
 
-        status, result = await run_in_db(_relocate)
+        from doceditor.live_move_hold import DocumentNotSaved, hold_for_move
+        from doceditor.live_runtime import get_documents
+
+        # Every check that can refuse runs first and holds nothing: a refused call closes nobody's document.
+        status, result = await run_in_db(_relocate, move=False)
+        if status == "ok":
+            try:
+                documents = get_documents()
+                if documents is None:
+                    status, result = await run_in_db(_relocate, move=True)
+                else:
+                    # A person may have this file open: their typing is saved into it before it moves.
+                    async with hold_for_move(documents, result):
+                        status, result = await run_in_db(_relocate, move=True)
+            except DocumentNotSaved as error:
+                return f"Error: {error}"
         if status == "not_found":
             return "Error: Artifact not found"
         if status == "bad_request":

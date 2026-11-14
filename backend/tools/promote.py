@@ -6,8 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from doceditor.live_move_hold import hold_for_move
+from doceditor.live_runtime import get_documents
+from infra.database import get_db
 from infra.db_async import run_in_db
 from registry import service
+from registry.promotion_source import promotion_source
 from registry.registration_writer import origin_from_tool_context
 from registry.durable_writes import promote_file
 from tools.base import Tool
@@ -90,8 +94,8 @@ class PromoteArtifactTool(Tool):
         source = Path(path).expanduser()
         if not source.is_absolute():
             source = self._workspace / source
-        try:
-            receipt = await run_in_db(
+        async def promote() -> dict:
+            return await run_in_db(
                 promote_file,
                 source,
                 category,
@@ -106,6 +110,28 @@ class PromoteArtifactTool(Tool):
                 ),
                 notify=False,
             )
+
+        def check() -> Path:
+            db = get_db()
+            try:
+                return promotion_source(
+                    source, category, thread_id=thread_id, project_id=actor.get("project_id"),
+                    workspace=WORKSPACE, db=db,
+                )[1]
+            finally:
+                db.close()
+
+        try:
+            # The checks that can refuse a promote run first and hold nothing, so a refused call closes
+            # nobody's document; promote_file runs them again under the hold.
+            source_path = await run_in_db(check)
+            documents = get_documents()
+            if documents is None:
+                receipt = await promote()
+            else:
+                # A person may have this file open: their typing is saved into it before it moves.
+                async with hold_for_move(documents, source_path):
+                    receipt = await promote()
         except Exception as error:
             return f"Error: {error}"
         service.notify_changed(receipt["artifact"])
