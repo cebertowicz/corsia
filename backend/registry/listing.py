@@ -57,23 +57,23 @@ def list_for_project(
     offset: int = 0,
     db=None,
 ) -> dict[str, Any]:
+    """List a project's artifacts whose identity is in ``state``.
+
+    Each identity appears once, on its owner's registration or, for a live
+    document its owner released, on the former owner's registration.
+    """
     conn = db or get_db()
     try:
         owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
         where = [
             "(s.project_id=? OR r.parent_thread_id=?)",
             "NOT (i.integration='claude-code' AND i.type='session')",
+            "i.state=?",
+            f"(r.relationship_state IN ({owner_states}) OR ({_released_owner_clause()}))",
         ]
-        params: list[Any] = [project_id, project_sentinel(project_id)]
-        if state == "archived":
-            where.append(
-                f"((i.state=? AND r.relationship_state IN ({owner_states})) "
-                f"OR ({_released_owner_clause()}))"
-            )
-            params.extend((state, *OWNER_REGISTRATION_STATES))
-        else:
-            where.extend(("i.state=?", f"r.relationship_state IN ({owner_states})"))
-            params.extend((state, *OWNER_REGISTRATION_STATES))
+        params: list[Any] = [
+            project_id, project_sentinel(project_id), state, *OWNER_REGISTRATION_STATES,
+        ]
         if type is not None:
             where.append("i.type=?")
             params.append(type)
