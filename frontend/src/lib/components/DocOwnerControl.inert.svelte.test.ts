@@ -6,7 +6,7 @@ import type { DocOwnership } from '$lib/api/docOwnership';
 
 vi.mock('$lib/api/docOwnership', async (original) => ({ ...(await original<typeof import('$lib/api/docOwnership')>()), changeOwnership: vi.fn() }));
 
-// A row that turns inert is waiting on a load, here the same document reloading (a switch to another document remounts the control, DocViewerStatus keys it by document); a picker already open may not write.
+// A row that turns inert is waiting on a load, whether the tab switched to another document or the same document reloads; a picker open at that moment must close, and nothing it offered may still act.
 const choice = (id: string, name: string) => ({ id, name, status: 'ready', responsibility: '' });
 const value: DocOwnership = {
 	owner: { kind: 'agent', id: 'a1', name: 'Release planning', label: 'Release planning' },
@@ -23,7 +23,7 @@ const picker = () => document.body.querySelector<HTMLElement>('.role-picker');
 const items = () => [...host.querySelectorAll<HTMLButtonElement>('button.item')];
 
 describe('DocOwnerControl when its row turns inert', () => {
-	it('refuses a pick from an already open picker and writes nothing', async () => {
+	it('closes an open picker when the same document reloads, and writes nothing', async () => {
 		const props = $state({ artifactId: 'doc-a', ownership: value, inert: false, onChange: () => {} });
 		host = document.createElement('div'); document.body.appendChild(host);
 		component = mount(DocOwnerControl, { target: host, props });
@@ -31,9 +31,7 @@ describe('DocOwnerControl when its row turns inert', () => {
 		host.querySelector<HTMLButtonElement>('button.item[data-role="owner"]')!.click(); await settle();
 		expect(picker()).not.toBeNull();
 		props.inert = true; await settle();
-		const input = document.body.querySelector<HTMLInputElement>('.role-picker input')!;
-		input.value = 'Research'; input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle();
+		expect(picker()).toBeNull();
 		expect(items().every((button) => button.disabled)).toBe(true);
 		expect(changed).not.toHaveBeenCalled();
 	});
