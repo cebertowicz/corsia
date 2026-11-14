@@ -6,7 +6,7 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { holdPersonBatches, installWorkspace, openThread, seedHeldComments, seedTextDocument, setDebugVersionOverlay, setMockCorsiaAgentModel, turnOffDocumentComments } from '../support/heldComments';
 
 /**
- * The document toolbar's "N comments · N unread" count shows whole, inside the toolbar and clear of the other controls,
+ * The document toolbar's count shows whole ("N comments · N unread"; on a canvas up to 600 px, while a reply is unread, "N unread"), inside the toolbar and clear of the other controls,
  * at 320, 360 and 393 px phones and at 900 and 1440, with one-, two- and three-digit counts. The tool cluster breaks into rows only in PE's order, and never clips, overlaps or shrinks a control.
  */
 
@@ -22,6 +22,18 @@ const CASES = [
 	{ width: 320, scheme: 'light' as const, resolved: 3 },
 ];
 const FRAMES = process.env.CORSIA_FRAMES_DIR;
+/** A container query reads the content width of its container, so the canvas width is measured the same way. Up to 600 px, while a reply is unread, the count is the icon and "N unread" alone (no total, no noun, no "·"); the row stays one line, so the toolbar keeps its height when the unread part comes or goes. */
+const nounShown = (canvasWidth: number) => canvasWidth > 600;
+const countPattern = (threads: number, unread: number, canvasWidth: number) => nounShown(canvasWidth) ? new RegExp(`^${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread$`) : new RegExp(`^${unread} unread$`);
+async function canvasWidthOf(page: Page) {
+	return page.evaluate(() => {
+		let canvas: HTMLElement | null = document.querySelector<HTMLElement>('.document-header');
+		while (canvas && !getComputedStyle(canvas).containerName.split(' ').includes('doc-canvas')) canvas = canvas.parentElement;
+		if (!canvas) return Infinity;
+		const style = getComputedStyle(canvas);
+		return canvas.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+	});
+}
 // The rows the ordinary counts make at each width, for worst-sweep.json (the desktop project runs these before the worst-content test).
 const ordinaryRows: Array<Record<string, unknown>> = [];
 
@@ -92,15 +104,22 @@ for (const { width, scheme, resolved } of CASES) {
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			return;
 		}
+		// With nothing unread, the toolbar's height: the first count below, one unread thread, must not change it (from a 393 px window up; in a narrower one "1 unread" no longer fits the row beside the other tools).
+		shown.threads = 1; shown.unread = 0;
+		await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
+		await expect(page.locator('.document-header .comment-status')).toHaveAccessibleName(/^1 comment$/);
+		await page.waitForTimeout(800);
+		const idleHeight = await page.locator('.document-header').evaluate((header) => header.getBoundingClientRect().height);
+		const canvasWidth = await canvasWidthOf(page);
 		for (const { threads, unread } of COUNTS) {
 			// The server's own answer, with the one real thread copied `threads` times, the first `unread` of them unread; the viewer loads it as it would any list.
 			shown.threads = threads; shown.unread = unread;
 			await page.evaluate(async (artifactId) => (await import('/src/lib/stores/docComments.ts')).loadComments(artifactId), artifactId);
 			const pill = page.locator('.document-header .comment-status');
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(countPattern(threads, unread, canvasWidth), { useInnerText: true });
 			// A person sees the settled state: nothing may redraw the pill after the store update.
 			await page.waitForTimeout(800);
-			await expect(pill).toHaveText(new RegExp(`${threads}\\s+${threads === 1 ? 'comment' : 'comments'}\\s+·\\s+${unread} unread`), { useInnerText: true });
+			await expect(pill).toHaveText(countPattern(threads, unread, canvasWidth), { useInnerText: true });
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const measured = await page.evaluate(() => {
 				const box = (element: Element) => { const r = element.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
@@ -124,8 +143,10 @@ for (const { width, scheme, resolved } of CASES) {
 			expect.soft(measured.pill.left, `${label}: the pill starts inside the toolbar`).toBeGreaterThanOrEqual(measured.header.left - 0.5);
 			expect.soft(measured.pill.right, `${label}: the pill ends inside the toolbar`).toBeLessThanOrEqual(measured.header.right + 0.5);
 			expect.soft(measured.pillScroll.scrollWidth, `${label}: the pill clips none of its text`).toBeLessThanOrEqual(measured.pillScroll.clientWidth);
-			expect.soft(measured.text.map((part) => part.name.split(' ')[0]), `${label}: the number, its noun and the unread part all exist`).toEqual(['count', 'count-unit', 'unread']);
+			expect.soft(measured.text.map((part) => part.name.split(' ')[0]), `${label}: the total, its noun and the unread part all exist`).toEqual(['count', 'count-unit', 'unread']);
+			if (threads === 1 && width >= 393) expect.soft(measured.header.bottom - measured.header.top, `${label}: the toolbar keeps its height when the unread part comes`).toBeCloseTo(idleHeight, 0);
 			for (const part of measured.text) {
+				if (part.name.startsWith('count') && !nounShown(canvasWidth)) { expect.soft(part.shown, `${label}: the total and its noun are dropped while a reply is unread on a canvas up to 600 px`).toBe(false); continue; }
 				expect.soft(part.shown, `${label}: ${part.name} is displayed`).toBe(true);
 				expect.soft(part.right - part.left, `${label}: ${part.name} has width`).toBeGreaterThan(0);
 				expect.soft(part.fits, `${label}: ${part.name} is not clipped inside itself`).toBe(true);
@@ -149,7 +170,7 @@ for (const { width, scheme, resolved } of CASES) {
 }
 
 /**
- * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 comments · 45 unread" and four
+ * The worst header at once: Send 99+, a reviewer group that overflows into "+2", "120 comments · 45 unread" ("45 unread" up to 600 px) and four
  * readers in the presence row. The tool cluster cannot shrink, so wherever the header is narrow it has to fit inside
  * it: on one row where one row can hold it, and wrapped inside the header where it cannot. Full window from 320 to
  * 1440 px (a fresh load at each phone and tablet width, one desktop load resized across the rest; the Workspace panel closed so the document has the room) and a narrow
@@ -236,6 +257,7 @@ async function measureTools(page: Page) {
 			names: { send: sendButton?.getAttribute('aria-label') ?? null, count: pill.getAttribute('aria-label') },
 			overlaps, minControlHeight: Math.min(...controls.filter((control) => control.name !== 'deliver').map((control) => control.bottom - control.top)),
 			toggleHit: { button: { width: Math.round(button.width * 10) / 10, height: Math.round(button.height * 10) / 10 }, area: { width: Math.round(area.width * 10) / 10, height: Math.round(area.height * 10) / 10 }, tapMisses, hitOverlaps, hitOutside, edgeMisses, touchMeant },
+			canvasWidth: canvas ? canvas.clientWidth - parseFloat(getComputedStyle(canvas).paddingLeft) - parseFloat(getComputedStyle(canvas).paddingRight) : Infinity,
 			headerOverflow: header.scrollWidth - header.clientWidth, pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
 			content, tools: box(tools), controls, parts, headerContentWidth: content.right - content.left, groupWidths, expectedGap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chip-inline-padding')),
 			pillText: pill.innerText.replace(/\s+/g, ' ').trim(),
@@ -295,9 +317,10 @@ function expectWholeInsideOneRow(measured: Measured, label: string) {
 	expect.soft(measured.names.send, `${label}: Send keeps its own number in its name`).toMatch(/^Send 10\d comments?/);
 	expect.soft(measured.names.count, `${label}: the count pill keeps its own name`).toMatch(/^120 comments, 45 unread/);
 	expect.soft(measured.reviewerMore, `${label}: the reviewer group overflows into +2`).toBe('+2');
-	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
+	expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(countPattern(120, 45, measured.canvasWidth));
 	expectLayout(measured, label);
 	for (const part of measured.parts) {
+		if (part.name.startsWith('count') && !nounShown(measured.canvasWidth)) continue;
 		expect.soft(part.shown && part.width > 0 && part.fits, `${label}: ${part.name} is shown and not clipped`).toBe(true);
 	}
 }
@@ -450,7 +473,7 @@ test(`@flow:doc-toolbar-count-fits @surface:documents every width from 360 to 43
 		const measured = await measureTools(page);
 		const names = measured.controls.map((control) => control.name);
 		expect.soft(names, `${label}: the count, Resolved, Deliver immediately, Request review and History are all in the row`).toEqual(expect.arrayContaining(['count', 'resolved', 'deliver', 'request', 'history']));
-		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(/^120 comments · 45 unread$/);
+		expect.soft(measured.pillText, `${label}: the count reads whole`).toMatch(countPattern(120, 45, measured.canvasWidth));
 		expectLayout(measured, label);
 		rowsSeen.push([width, measured.rows]);
 		if (FRAMES && [380, 381, 393].includes(width)) await page.screenshot({ path: path.join(FRAMES, `history-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(300, Math.ceil(measured.tools.bottom + 60)) } });
