@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
+	import { chatPickKey, pickedComments } from '$lib/stores/docComments';
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
@@ -143,11 +144,18 @@
 		if (!recorded.includes(messageId)) recorded.push(messageId);
 	}
 	const unreadNow = (comment: { answers: Array<{ author_kind?: string; unread?: boolean }> }) => comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
-	// Opening a thread reads it at once; its highlight keeps the unread look until the sheet or card is closed, so the sign the reader came to see does not vanish under them.
+	// Opening a thread reads it at once; its highlight keeps the unread look until the popover or sheet closes, or its picked margin card is let go, so the sign the reader came to see does not vanish under them.
 	const heldUnread = new Set<string>();
+	const openCommentId = $derived(viewing?.commentId ?? (marginComments ? selectedCommentId : null));
 	$effect(() => {
-		if (!viewing) { if (heldUnread.size) { heldUnread.clear(); untrack(schedule); } return; }
-		for (const comment of viewedMessage?.chat_comments ?? []) if (unreadNow(comment)) heldUnread.add(comment.id);
+		const open = openCommentId;
+		const released = [...heldUnread].filter(id => id !== open);
+		if (released.length) { for (const id of released) heldUnread.delete(id); untrack(schedule); }
+		if (!open) return;
+		for (const message of $messages) {
+			if (message.thread_id !== threadId) continue;
+			for (const comment of message.chat_comments ?? []) if (comment.id === open && unreadNow(comment)) heldUnread.add(comment.id);
+		}
 	});
 	function paint() {
 		const root = messageRoot();
@@ -274,8 +282,9 @@
 				// The press's own thread first, then the ones around it, so a press on an inner highlight picks it.
 				const comment = ids.map(id => message.chat_comments?.find(item => item.id === id)).find(item => !!item);
 				if (!comment) continue;
-				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card in a document.
-				if (marginComments) { selectedCommentId = comment.id; return; }
+				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card
+				// in a document, and every press reads it, so an answer that arrived while its card stayed picked is read by the next press.
+				if (marginComments) { selectedCommentId = comment.id; pickedComments.set(new Set([chatPickKey(comment.id)])); return; }
 				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};

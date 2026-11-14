@@ -57,23 +57,23 @@ def list_for_project(
     offset: int = 0,
     db=None,
 ) -> dict[str, Any]:
+    """List a project's artifacts whose identity is in ``state``.
+
+    Each identity appears once, on its owner's registration or, for a live
+    document its owner released, on the former owner's registration.
+    """
     conn = db or get_db()
     try:
         owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
         where = [
             "(s.project_id=? OR r.parent_thread_id=?)",
             "NOT (i.integration='claude-code' AND i.type='session')",
+            "i.state=?",
+            f"(r.relationship_state IN ({owner_states}) OR ({_released_owner_clause()}))",
         ]
-        params: list[Any] = [project_id, project_sentinel(project_id)]
-        if state == "archived":
-            where.append(
-                f"((i.state=? AND r.relationship_state IN ({owner_states})) "
-                f"OR ({_released_owner_clause()}))"
-            )
-            params.extend((state, *OWNER_REGISTRATION_STATES))
-        else:
-            where.extend(("i.state=?", f"r.relationship_state IN ({owner_states})"))
-            params.extend((state, *OWNER_REGISTRATION_STATES))
+        params: list[Any] = [
+            project_id, project_sentinel(project_id), state, *OWNER_REGISTRATION_STATES,
+        ]
         if type is not None:
             where.append("i.type=?")
             params.append(type)
@@ -86,14 +86,8 @@ def list_for_project(
             f"WHERE {' AND '.join(where)}"
         )
         total = conn.execute(f"SELECT COUNT(*) {source}", params).fetchone()[0]
-        projected = (
-            ", CASE WHEN i.state='active' THEN 'archived' "
-            "ELSE i.state END AS projected_state"
-            if state == "archived"
-            else ""
-        )
         rows = conn.execute(
-            f"{_projection()}{projected}, s.title AS parent_thread_title {source} "
+            f"{_projection()}, s.title AS parent_thread_title {source} "
             "ORDER BY i.updated_at DESC, i.id ASC LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
@@ -124,15 +118,10 @@ def list_for_thread(
             relationship_clause = (
                 f"((r.relationship_state IN ({owner_states})) OR ({released}))"
             )
-            projected = (
-                ", CASE WHEN r.relationship_state IN ('owner-pinned', 'owner-active') "
-                "THEN i.state ELSE 'archived' END AS projected_state"
-            )
         else:
             relationship_clause = f"r.relationship_state IN ({owner_states})"
-            projected = ""
         rows = conn.execute(
-            f"""{_projection()}{projected}
+            f"""{_projection()}
                 FROM artifact_identities i
                 JOIN artifact_registrations r ON r.artifact_id=i.id
                 WHERE r.parent_thread_id=?
@@ -147,9 +136,13 @@ def list_for_thread(
             conn.close()
 
 
-# Every record one thread registered for one integration and type.
-_THREAD_RECORDS = """FROM artifact_identities i
-                JOIN artifact_registrations r ON r.artifact_id=i.id
+# Every record one thread registered for one integration and type. CROSS JOIN
+# keeps the thread's own registrations as the outer loop: with no ANALYZE
+# statistics SQLite otherwise starts from every identity of that integration and
+# type (one claude-code session per thread ever), so each call grew with the
+# install's age instead of with this thread's registrations.
+_THREAD_RECORDS = """FROM artifact_registrations r
+                CROSS JOIN artifact_identities i ON i.id=r.artifact_id
                 WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?"""
 
 

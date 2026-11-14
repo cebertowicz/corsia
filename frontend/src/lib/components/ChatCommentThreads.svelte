@@ -4,6 +4,7 @@
 	import { retryChatComment } from './composerSend';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
+	import { chatPickKey } from '$lib/stores/docComments';
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
 	import CommentThread from './comments/CommentThread.svelte';
@@ -12,7 +13,7 @@
 	import './comments/comment-link.css';
 	import { apiFetch } from '$lib/api/request';
 
-	let { messageId, threadId, comments, onReply, keepReplyVisible = false, listed = false, detached = false, margin = false, picked = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => Promise<void>; keepReplyVisible?: boolean; /** The threads are the rows of a list of every thread on one highlight. */ listed?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean } = $props();
+	let { messageId, threadId, comments, onReply, keepReplyVisible = false, listed = false, detached = false, margin = false, picked = false, opened = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => Promise<void>; keepReplyVisible?: boolean; /** The threads are the rows of a list of every thread on one highlight. */ listed?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column, the document's resting card: its own frame, no rail or quote, since it sits level with its text, and its Reply only once picked. */ margin?: boolean; /** The margin card is the picked one. */ picked?: boolean; /** The person opened this thread from its highlight or Reply (a popover or sheet), which reads it, as picking a margin card does. */ opened?: boolean } = $props();
 	const agentName = $derived.by(() => {
 		const current = $threads.find(item => item.id === threadId);
 		return current && isNavAgent(current) ? current.title : 'CORSIA';
@@ -66,7 +67,7 @@
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached && !margin}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inList={listed} inMargin={margin} focused={margin && picked} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentDrafts.get(comment.id), (text) => chatCommentDrafts.set(comment.id, text)} replyPending={!!chatCommentDrafts.reply(comment.id)?.posting} replyError={chatCommentDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); await postReply(comment, text); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat={!margin} inList={listed} inMargin={margin} focused={margin && picked} opened={margin ? picked : opened} pickKey={margin ? chatPickKey(comment.id) : undefined} scrollOnFocus={!margin} hideReply={margin && !picked} hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatCommentDrafts.get(comment.id), (text) => chatCommentDrafts.set(comment.id, text)} replyPending={!!chatCommentDrafts.reply(comment.id)?.posting} replyError={chatCommentDrafts.reply(comment.id)?.error ?? ''} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); await postReply(comment, text); }}>
 				{#snippet failure()}
 				{#each unsentSends(comment) as send (send.messageId)}
 					<div class="failed-reply" class:own={send.root} role="status">

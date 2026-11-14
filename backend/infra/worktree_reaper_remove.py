@@ -2,8 +2,9 @@
 
 A worktree leaves ``.worktrees/`` by one same-filesystem rename into
 ``<repo>/.git/corsia-reaping/``; only then is it deleted. The removal path is the
-one place that decides an entry may be deleted: once its work is copied out, or
-the check that cleared it passes again at the quarantine path, it writes a
+one place that decides an entry may be deleted: once its work is copied out, the
+check that cleared it passes again at the quarantine path, or its owner is purged
+(nothing is owed to an owner that cannot return), it writes a
 copied-out record beside the entry, and only then deletes. ``sweep_quarantine``
 finishes an entry that has a record (a removal cut off or refused) and keeps
 every entry without one for a person.
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 QUARANTINE_DIR = "corsia-reaping"
 # Suffix of the record beside a quarantine entry that says nothing in it is owed to
 # anyone. Only the removal path writes it, once the entry is in the quarantine and
-# its work is copied out or its check passed there. It is the only thing that lets
+# its work is copied out, its check passed there or its owner is purged. It is the only thing that lets
 # any pass delete an entry: losing it can strand an entry, never delete one.
 COPIED_OUT_SUFFIX = ".copied-out"
 
@@ -125,7 +126,7 @@ def mark_copied_out(entry: Path) -> None:
     """Record that nothing in ``entry`` is owed to anyone any more.
 
     Only the removal path calls it, once the entry exists in the quarantine and
-    its work is copied out or its check passed there.
+    its work is copied out, its check passed there or its owner is purged.
     """
     _copied_out_record(entry).write_text(f"{entry.name}\n", encoding="utf-8")
 
@@ -246,8 +247,8 @@ def remove_worktree(
 ) -> str:
     """Quarantine, clear and remove one checked worktree.
 
-    ``clear`` gets the quarantined path and either copies its work out or runs the
-    check that cleared it again there. It returns None when nothing in the tree is
+    ``clear`` gets the quarantined path and copies its work out, runs the check
+    that cleared it again there, or (owner purged) does neither. It returns None when nothing in the tree is
     owed to anyone, or the reason something is. That answer is the one decision to
     delete: only after it is the record written, and only then the tree removed.
     A reason moves the tree back; so does a failed clear, which re-raises.

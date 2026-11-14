@@ -22,7 +22,7 @@ from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
 from registry.shared_target import SharedTarget
-from registry.document_ownership import document_write_authority
+from registry.promoted_path import write_authority_unless_promoted
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
 from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
@@ -596,7 +596,7 @@ def write_text(
             update_trigger=update_trigger,
         )
         if shared is None:
-            return document_write_authority(
+            return write_authority_unless_promoted(
                 target, workspace=workspace, thread_id=thread_id, direct_user=direct_user, db=db,
             )
         return _publish_bytes(

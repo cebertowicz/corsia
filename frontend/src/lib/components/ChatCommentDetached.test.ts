@@ -142,19 +142,16 @@ it('does not repaint the highlights when a detached thread appears under the mes
 	frames.mockRestore();
 });
 
-it('clears the unread answer of a detached thread once the person has read it', async () => {
+it('keeps a detached thread’s answer unread while it is on screen, and clears it once the person opens the thread', async () => {
 	vi.useFakeTimers();
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
 	vi.stubGlobal('cancelAnimationFrame', () => {});
-	class Observer {
-		static all: Observer[] = [];
-		target?: Element;
-		constructor(private callback: IntersectionObserverCallback) { Observer.all.push(this); }
-		observe(target: Element) { this.target = target; }
-		disconnect() { this.target = undefined; }
-		report(visible: boolean) { if (this.target) this.callback([{ target: this.target, isIntersecting: visible, intersectionRatio: visible ? 1 : 0, rootBounds: new DOMRect(0, 0, 300, 400), boundingClientRect: new DOMRect(0, 0, 300, 400), intersectionRect: new DOMRect(0, 0, 300, visible ? 400 : 0) } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
-	}
-	vi.stubGlobal('IntersectionObserver', Observer);
+	// Every observed element is reported fully in view: being seen must read nothing.
+	vi.stubGlobal('IntersectionObserver', class {
+		constructor(private callback: IntersectionObserverCallback) {}
+		observe(target: Element) { this.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+		disconnect() {} unobserve() {}
+	});
 	const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ threads: [] }) });
 	vi.stubGlobal('fetch', fetcher);
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -162,12 +159,15 @@ it('clears the unread answer of a detached thread once the person has read it', 
 	await tick();
 	await vi.advanceTimersByTimeAsync(0);
 	flushSync();
-	const reply = row()!.querySelector<HTMLElement>('[data-comment-uuid="one"] .ct-reply');
-	expect(reply).not.toBeNull();
-	Observer.all.filter(observer => reply!.contains(observer.target ?? reply!) || observer.target === reply).forEach(observer => observer.report(true));
-	await vi.advanceTimersByTimeAsync(1500);
+	const card = row()!.querySelector<HTMLElement>('[data-comment-uuid="one"] .ct');
+	expect(card?.querySelector('.ct-reply')).not.toBeNull();
+	const stamped = () => fetcher.mock.calls.some(call => String(call[0]).includes('/messages/agent-message/comments/c1/viewed'));
+	await vi.advanceTimersByTimeAsync(5000);
+	expect(stamped()).toBe(false);
+	expect(get(messages)[0]!.chat_comments?.[0]?.answers[0]?.unread).toBe(true);
+	card!.click();
 	await vi.advanceTimersByTimeAsync(1);
-	expect(fetcher.mock.calls.some(call => String(call[0]).includes('/messages/agent-message/comments/c1/viewed'))).toBe(true);
+	expect(stamped()).toBe(true);
 	expect(get(messages)[0]!.chat_comments?.[0]?.answers[0]?.unread).toBe(false);
 	delete (document as unknown as Record<string, unknown>).visibilityState;
 });

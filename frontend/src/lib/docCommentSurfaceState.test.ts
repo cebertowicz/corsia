@@ -2,11 +2,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { pickedComments } from '$lib/stores/docComments';
 import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
 
-afterEach(() => focusedDocComment.set(null));
+afterEach(() => { focusedDocComment.set(null); pickedComments.set(new Set()); });
 
 describe('comment surface state', () => {
+	it('reads a thread only when its highlight is pressed, never when the caret moves into it', () => {
+		const surface = createCommentSurfaceState(() => {});
+		surface.focusComment('c1', new DOMRect());
+		expect(get(pickedComments).size).toBe(0);
+		surface.focusComment('c2', new DOMRect(), false, false, true);
+		expect([...get(pickedComments)]).toEqual(['c2']);
+	});
+
+	it('reads every thread a margin marker opens', () => {
+		const surface = createCommentSurfaceState(() => {});
+		surface.focusMarker(['a', 'b'], document.createElement('button'));
+		expect([...get(pickedComments)]).toEqual(['a', 'b']);
+	});
+
 	it('opens a comment when the caret lands in its text', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.focusComment('c1', new DOMRect());

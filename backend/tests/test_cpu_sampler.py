@@ -188,6 +188,77 @@ def test_stack_signature_keeps_six_innermost_frames() -> None:
     )
 
 
+def _chain(*frames: tuple[str, str]):
+    """Build a fake innermost frame from (backend-relative path, function) pairs, innermost first."""
+    frame = None
+    for line, (path, name) in reversed(list(enumerate(frames))):
+        frame = type(
+            "Frame",
+            (),
+            {
+                "f_code": type(
+                    "Code", (), {"co_filename": f"{cpu_sampler._BACKEND_PREFIX}{path}", "co_name": name}
+                )(),
+                "f_lineno": line,
+                "f_back": frame,
+            },
+        )()
+    return frame
+
+
+def test_stack_signature_skips_memo_plumbing_to_reach_the_caller() -> None:
+    frame = _chain(
+        ("connections/vendor_accounts.py", "list_accounts"),
+        ("connections/fact_memo.py", "<lambda>"),
+        ("connections/fact_memo.py", "memoized"),
+        ("connections/fact_memo.py", "wrapper"),
+        ("llm/harness_catalog.py", "<listcomp>"),
+        ("llm/harness_catalog.py", "account_rows"),
+        ("llm/resolution.py", "_target_row"),
+        ("infra/input_writes.py", "write_input"),
+    )
+
+    assert cpu_sampler._signature(frame, "db_N") == (
+        "thread_group=db_N sample=active stack=connections/vendor_accounts.py:list_accounts:0 <- "
+        "llm/harness_catalog.py:<listcomp>:4 <- llm/harness_catalog.py:account_rows:5 <- "
+        "llm/resolution.py:_target_row:6 <- infra/input_writes.py:write_input:7"
+    )
+
+
+def test_stack_signature_names_the_caller_of_a_real_memoized_reader() -> None:
+    from connections import fact_memo
+
+    captured: list[str] = []
+
+    @fact_memo.memoized_reader
+    def read_rows(db, kind: str) -> int:
+        captured.append(cpu_sampler._signature(sys._getframe(), "db_N"))
+        return 0
+
+    def caller_of_the_reader() -> None:
+        with fact_memo.fact_reads():
+            read_rows(object(), "rows")
+
+    caller_of_the_reader()
+
+    stack = captured[0].split("stack=", 1)[1].split(" <- ")
+    assert [entry.split(":")[1] for entry in stack[:2]] == ["read_rows", "caller_of_the_reader"]
+    assert not any(entry.startswith("connections/fact_memo.py:") for entry in stack)
+
+
+def test_stack_signature_keeps_memo_work_when_it_is_innermost() -> None:
+    frame = _chain(
+        ("connections/fact_memo.py", "arguments_of"),
+        ("connections/fact_memo.py", "wrapper"),
+        ("llm/harness_catalog.py", "account_rows"),
+    )
+
+    assert cpu_sampler._signature(frame, "db_N") == (
+        "thread_group=db_N sample=active stack=connections/fact_memo.py:arguments_of:0 <- "
+        "llm/harness_catalog.py:account_rows:2"
+    )
+
+
 def test_summary_building_stays_cheap_with_sixty_thread_groups(caplog) -> None:
     caplog.set_level(logging.WARNING, logger="infra.cpu_sampler")
     sampler = cpu_sampler.CpuSampler()
