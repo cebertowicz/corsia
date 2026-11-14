@@ -219,27 +219,3 @@ def after_park(plan_id: str, operation: str, params: dict[str, Any], actor, comm
             title=str(parked["title"]), step=str(parked["id"]),
         )
     return result
-
-
-# Archive shares the bulk writer's per-node loop and slot sequencing.
-def archive_many(
-    plan_id: str, node_ids: list[str], common: dict, db, *, executor: str | None,
-) -> dict:
-    """Retire many nodes, reporting every refusal in the caller's order.
-
-    A lane-owned node is refused here, per node, rather than aborting the call
-    at authorization the way a single archive is: the lane rule is the
-    boundary's, so it is judged here, and ``plans.archival`` judges the rest.
-
-    Archiving a selected task takes its executor off that task, in bulk exactly
-    as singly: an attempt left open on an archived node holds the slot against
-    every later selection, and nothing would reopen it.
-    """
-    from plans import archival, bulk_nodes
-
-    held = bulk_nodes._held_slots(db, node_ids)
-    applied, reasons = bulk_nodes._apply(
-        db, node_ids, "archive_node", lambda node_id: archival.archive_node(node_id, **common),
-    )
-    bulk_nodes._free_slot(plan_id, held, applied, common, executor, closed=False, archived=True)
-    return {"archived": applied, "refused": bulk_nodes._refused(node_ids, reasons)}
