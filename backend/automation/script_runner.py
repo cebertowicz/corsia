@@ -48,6 +48,11 @@ from infra.queries import get_thread, thread_gone_for_good, thread_unavailable_r
 SCRIPT_RUN_CAP = 2
 WORKSPACE_SCOPE = "__workspace__"
 
+
+class _StoppedByShutdown(Exception):
+    """CORSIA's own shutdown stopped the script: the run has no result and is not settled."""
+
+
 _in_flight: dict[str, asyncio.Task] = {}
 #: The script schedule each in-flight rule run holds the claim of, by its key.
 _holds: dict[str, str] = {}
@@ -183,6 +188,11 @@ async def run_claimed(
         report = await _execute(schedule, rule_run)
     except asyncio.CancelledError:
         raise
+    except _StoppedByShutdown:
+        # A stopped script is not a failed one. Its rows stay as they are, and the next sweep
+        # ends them as it ends any run the backend lost: a rule's owner is told which item.
+        logger.warning("script schedule {} was stopped by shutdown; its run is left for recovery", schedule.id)
+        return
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
@@ -294,6 +304,8 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
+    if run.stopped_by_shutdown:
+        raise _StoppedByShutdown
     return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked)
 
 

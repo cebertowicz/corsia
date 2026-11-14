@@ -125,6 +125,7 @@ class ForegroundProcessResult:
     returncode: int
     timed_out: bool = False
     undeclared_background_stopped: bool = False
+    stop_reason: str | None = None  # the owner's reason, when it moved to stop the group
 
 
 @dataclass(frozen=True, slots=True)
@@ -791,12 +792,11 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
         if not timed_out:
             undeclared = await self._finish_normal_foreground(runtime)
         return ForegroundProcessResult(
-            record=runtime.record,
-            stdout=stdout,
-            stderr=stderr,
+            record=runtime.record, stdout=stdout, stderr=stderr,
             returncode=int(runtime.process.returncode or 0),
             timed_out=timed_out,
             undeclared_background_stopped=undeclared,
+            stop_reason=runtime.pending_reason,
         )
 
     async def _finish_normal_foreground(
