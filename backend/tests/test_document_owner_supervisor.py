@@ -568,6 +568,8 @@ def test_the_ownership_change_on_a_released_document_is_a_clear_refusal_not_a_40
         db.close()
     refused = client.put(f"/api/artifacts/{artifact_id}/ownership", json={"owner": "agent-1"})
     assert (refused.status_code, refused.json()["detail"]) == (409, RELEASED_REFUSAL)
+    # With no owner there is nothing to change, so the sentence speaks of picking one.
+    assert RELEASED_REFUSAL == "No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner."
     # The picker says so before a pick and lists no one, on a multi-person install and on a single-person one.
     view = _view(artifact_id)
     assert (view["can_change"], view["refusal"], view["choices"]) == (False, RELEASED_REFUSAL, [])

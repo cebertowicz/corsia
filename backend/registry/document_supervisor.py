@@ -41,7 +41,7 @@ SHARED_REFUSAL = (
     "Everyone here shares this document, so its owner and supervisor can’t be changed "
     "while more than one person uses CORSIA. Ask CORSIA to give it an agent as its owner."
 )
-RELEASED_REFUSAL = "No one owns this document, so its owner and supervisor can’t be changed. Ask CORSIA to give it an owner."
+RELEASED_REFUSAL = "No one owns this document, so an owner or supervisor can’t be picked. Ask CORSIA to give it an owner."
 
 
 def _thread(db, thread_id: str | None):

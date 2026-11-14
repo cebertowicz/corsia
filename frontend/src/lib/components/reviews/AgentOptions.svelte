@@ -29,8 +29,10 @@
 	.option-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.option-detail { color: var(--text-tertiary); font-size: var(--text-caption); }
 	.compact .option-text { flex: 1; flex-direction: row; align-items: center; gap: var(--space-2); }
-	.compact .option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.compact .option-detail { flex: none; }
+	/* The name keeps its full width and the responsibility gives way first, so two agents with the same name still read
+	   whole. A long name shrinks (MiddleName cuts it) only down to where the responsibility keeps room for "Paused". */
+	.compact .option-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.compact .option-detail { flex: 1 1 0; min-width: 4em; text-align: end; }
 	.empty { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.empty { margin: var(--space-2); }
 	/* The Retry button is 28px tall (space-7 less space-1); its margins take it down to one text line, so the error row is as tall as the loading row and Retry's size and hit area are unchanged. */

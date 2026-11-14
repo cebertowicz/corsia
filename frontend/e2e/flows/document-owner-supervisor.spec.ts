@@ -1,6 +1,7 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { chatComposer, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
+import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
+import { isolatedDb } from '../support/heldComments';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
@@ -188,3 +189,33 @@ test('@document-owner-supervisor the items stay separate tap targets at 320 widt
 	await expect(ownerItem(page)).toContainText('Release planning');
 	await expect(supervisorItem(page)).toContainText('Research coordinator');
 });
+
+for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852], ['320', 320, 640]] as const) {
+	test(`@document-owner-supervisor two agents with the same name read whole in the picker, told apart by responsibility, at ${label} width`, async ({ page, request }, info) => {
+		const touch = info.project.name.includes('mobile');
+		test.skip(touch !== (label !== 'wide'), 'wide runs on the desktop project, phone widths on the mobile one');
+		test.setTimeout(120_000);
+		await page.setViewportSize({ width, height });
+		const seeded = await seedOwnedDocument(page, request);
+		const twin = await createSession(request, 'Planning specialist');
+		// Responsibilities long enough that something in the row must give way.
+		isolatedDb([
+			"connection.execute(\"UPDATE threads SET agent_enabled=1, agent_status='active', agent_responsibility='Budget, funding and the grant applications for the whole growing season' WHERE id=?\", (sys.argv[2],))",
+			"connection.execute(\"UPDATE threads SET agent_responsibility='Site layout, soil testing and the planting calendar for every bed' WHERE id=?\", (sys.argv[3],))",
+		], twin, seeded.agents[3]);
+		await seeded.open(page);
+		await supervisorItem(page).click();
+		await page.getByRole('combobox', { name: 'Supervisor' }).fill('Planning specialist');
+		// This test's own two agents; earlier tests on the same server may have left agents with the same name.
+		const rows = [twin, seeded.agents[3]].map((agent) => rolePicker(page).locator(`[id="supervisor-options-option-${agent}"]`));
+		for (const row of rows) {
+			await expect(row).toBeVisible();
+			// The name is not cut at all: its text fits its box. The responsibility is the part that gives way.
+			const [name, detail] = await row.evaluate((element) => [element.querySelector('.name-head'), element.querySelector('.option-detail')]
+				.map((part) => part ? { text: part.textContent, cut: part.scrollWidth > part.clientWidth + 0.5, width: part.clientWidth, needs: part.scrollWidth, row: part.closest('.option-text')!.clientWidth } : null));
+			expect(name, `${label}: name ${JSON.stringify({ name, detail })}`).toMatchObject({ text: 'Planning specialist', cut: false });
+			expect(detail?.cut, `${label}: responsibility gives way`).toBe(true);
+			expect(detail?.width ?? 0, `${label}: responsibility keeps some room`).toBeGreaterThan(0);
+		}
+	});
+}
