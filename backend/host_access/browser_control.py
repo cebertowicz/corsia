@@ -141,8 +141,12 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
                     thread_id, exc_info=True)
         _observe_read_guard(thread_id, result, False, False)
-        # The same visible-password test the lifecycle's own refusal (R9) uses: that page is the person's.
+        # The same visible-password test the lifecycle's own refusal (R9) uses: that page is the person's. A held
+        # step means its task exists (a failed row read or emit leaves it), so the normal refusal is true; the
+        # unrecorded wording is only for a page with no step held.
         if result.visible_nodes:
+            if browser_step_lifecycle.has_step(thread_id):
+                raise BrowserSessionError(PASSWORD_PAGE + _ending(thread_id))
             raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
         return result, STEP_NOT_RECORDED
     messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,

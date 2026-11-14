@@ -51,9 +51,9 @@ async def _three_commands(page: Page) -> list[str | None]:
     return [await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) for _ in range(3)]
 
 
-async def _three_refusals(page: Page) -> None:
+async def _three_refusals(page: Page, match: str = UNRECORDED) -> None:
     for _ in range(3):
-        with pytest.raises(BrowserSessionError, match=UNRECORDED):
+        with pytest.raises(BrowserSessionError, match=match):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
 
 
@@ -78,13 +78,29 @@ async def test_a_password_page_whose_row_cannot_be_read_keeps_the_live_step_and_
     original = lifecycle._step_row_state
     _fail_row_read(monkeypatch)
     with caplog.at_level(logging.WARNING, logger=browser_control.__name__):
-        await _three_refusals(page)
+        # The task exists, so the refusal is the normal one and never claims the task wasn't recorded.
+        await _three_refusals(page, match="asks for a password")
     assert lifecycle._steps[THREAD] is step
     assert _step_logs(caplog)[0].exc_info[0] is PlanError
     monkeypatch.setattr(lifecycle, "_step_row_state", original)
     with pytest.raises(BrowserSessionError, match="person's to complete"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert lifecycle._steps[THREAD] is step
+
+
+@pytest.mark.asyncio
+async def test_a_password_page_whose_event_fails_after_the_row_opened_refuses_as_the_task_exists(plan, monkeypatch):  # noqa: F811
+    page = Page()
+    page.show("visit-pw", frozenset({42}))
+
+    async def broken(_action, _thread_id):
+        raise RuntimeError("event sink down")
+
+    monkeypatch.setattr(lifecycle, "_emit", broken)
+    with pytest.raises(BrowserSessionError, match="asks for a password") as raised:
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert "couldn't be recorded" not in raised.value.args[0]
+    assert lifecycle.has_step(THREAD)
 
 
 @pytest.mark.asyncio
