@@ -236,9 +236,9 @@ def unread_comment_rows(
     another account does not. ``artifact_id`` is one document, several, or None for all of them.
     """
     # A document read binds both sides to its artifacts so idx_doc_comments_artifact bounds the scan to them.
-    scope = (artifact_id,) if isinstance(artifact_id, str) else artifact_id
-    scoped = scope is not None
-    within = f"IN ({','.join('?' * len(scope))})" if scoped else ""
+    scope: tuple[str, ...] = (artifact_id,) if isinstance(artifact_id, str) else (artifact_id or ())
+    scoped = artifact_id is not None
+    within = f"IN ({','.join('?' * len(scope))})"
     sql = f"""FROM doc_comments item
            JOIN doc_comments root ON root.id=COALESCE(item.parent_id, item.id)
            LEFT JOIN (
