@@ -44,11 +44,13 @@ def _load_active_threads() -> set[str]:
 def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
     """Map every thread id to how a gone owner's idle worktree leaves; None while it may return.
 
-    DISCARD: purged, so it cannot come back. SALVAGE: a temporary worker (spawned,
-    not a roster agent) archived for any reason; every archive can be undone (the
-    person unarchives it, new activity wakes a dormant one, a settled one is sent
-    back), so its tree is removed only after its uncommitted work is copied out.
-    A durable agent's or a root thread's worktree is never gone here.
+    DISCARD: any purged thread (worker, roster agent or root thread), so it cannot
+    come back; its tree goes with nothing copied out. SALVAGE: a temporary worker
+    (spawned, not a roster agent) archived for any reason; every archive can be
+    undone (the person unarchives it, new activity wakes a dormant one, a settled
+    one is sent back), so its tree is removed only after its uncommitted work is
+    copied out. None: every other thread, including an archived roster agent or
+    root thread; its worktree is never gone here.
     """
     from infra.database import get_db
 
