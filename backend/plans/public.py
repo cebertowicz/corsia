@@ -27,8 +27,9 @@ from plans.service import (
 
 # Plan tool and decision schemas (tools/plan_schemas, tools/plan_field_schemas).
 from plans.boundary_fields import (
-    HUMAN_OPERATIONS, MAX_ARCHIVE_NODES, OPERATION_FIELDS, OPERATION_REQUIRED_FIELDS,
+    HUMAN_OPERATIONS, OPERATION_FIELDS, OPERATION_REQUIRED_FIELDS,
 )
+from plans.bulk_fields import MAX_BULK_NODES
 from plans.scheduled_wait import PAUSE_OPERATIONS, pause_refusal
 
 # Continuation sources (automation/continuation/sources/*).

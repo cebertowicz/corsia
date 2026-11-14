@@ -98,6 +98,7 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     except Exception as exc:
         if isinstance(exc, BrowserSessionError) and str(exc) == PAGE_CHECK_FAILED:
             raise
+        log.warning("browser page check failed for thread %s", thread_id, exc_info=True)
         raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
     event = browser_step_lifecycle.Event(
         "declare" if instruction is not None else "probe", result,

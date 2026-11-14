@@ -9,6 +9,8 @@ import plans.admission as admission
 import plans.boundary_after as after
 import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
+import plans.bulk_fields as bulk_fields
+import plans.bulk_nodes as bulk_nodes
 import plans.later_fields as later_fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
@@ -377,6 +379,10 @@ def _route(plan_id, operation, params, actor, common, db, workflow):
         return _dispatch_admission(operation, params, actor, common)
     if operation == "resolve_watch":
         return watch_operations.resolve(plan_id, params, actor, db)
+    if operation in bulk_fields.BULK_OPERATIONS and bulk_fields.is_bulk(params):
+        # Routed before the verbs' own handlers, which all start by naming the one
+        # node they act on: a bulk body has no single one of those.
+        return bulk_nodes.dispatch(plan_id, operation, params, common, db, actor)
     if operation in _STRUCTURE_OPERATIONS:
         return _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
     if operation in _SETTLEMENT_OPERATIONS:
