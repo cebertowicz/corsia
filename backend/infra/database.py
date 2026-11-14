@@ -43,19 +43,15 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # with zero in-process lock refusals after deploy), and no later than
 # 2026-10-23. Must never grow into retries, recovery, or suppression -- log only.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
-_SLOW_HOLD_CALLER_FRAMES = 4
 _HOLD_PLUMBING_FILES = frozenset({os.path.normcase(__file__), os.path.normcase(contextlib.__file__)})
 
 
 def _hold_callers() -> str:
-    """The nearest code that held the write, innermost first, skipping context-manager plumbing.
-
-    One scope can cover many operations (every plan write is ``plan_service``), so the
-    slow-hold warning names the calling frames too. Called only once a hold is already slow.
-    """
+    """The nearest four frames that held a slow write, skipping context-manager plumbing: one
+    scope can cover many operations (every plan write is ``plan_service``)."""
     frames: list[str] = []
     frame = sys._getframe(1)
-    while frame is not None and len(frames) < _SLOW_HOLD_CALLER_FRAMES:
+    while frame is not None and len(frames) < 4:
         code = frame.f_code
         if os.path.normcase(code.co_filename) not in _HOLD_PLUMBING_FILES:
             frames.append(f"{os.path.basename(code.co_filename)}:{frame.f_lineno}:{code.co_name}")
