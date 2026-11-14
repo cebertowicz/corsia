@@ -157,8 +157,20 @@ def test_a_carried_promote_points_saved_calls_at_the_new_path(durable_scope):
     assert saved[0]["call"]["old_string"] == "Launch"
 
 
-def test_a_path_under_another_workspace_is_not_a_promoted_path(durable_scope, tmp_path):
-    """A write whose workspace is not the one this process selected has no registry row here, so it is never refused."""
+def test_a_path_outside_every_registrable_root_is_not_a_promoted_path(durable_scope, tmp_path):
+    """A path no registry row can describe (no identity at all) is never refused, and nothing raises."""
     from registry.promoted_path import promoted_to
 
     assert promoted_to(tmp_path / "elsewhere" / "note.md") is None
+
+
+def test_a_workspace_selection_that_disagrees_with_the_workspace_fails_loudly(durable_scope, monkeypatch):
+    """The refusal never goes quiet on a misconfigured process: the selection error reaches the caller."""
+    from infra import config
+    from registry.promoted_path import promoted_to
+
+    workspace = durable_scope[0]
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace.parent))
+
+    with pytest.raises(ValueError, match="different selected root"):
+        promoted_to(workspace / "projects" / "alpha" / "missing.md")

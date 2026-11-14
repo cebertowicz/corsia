@@ -131,9 +131,6 @@ def apply_moved_file_recovery(
             actor_thread_id=actor_thread_id,
             db=connection,
         )
-        from doceditor.writer_line_move import repoint_lines
-
-        repoint_lines(connection, artifact_id=identity["id"], old_path=identity["path"], new_path=move["target_path"])
         models.record_artifact_change(
             artifact_id=identity["id"],
             internal_event="relocated",

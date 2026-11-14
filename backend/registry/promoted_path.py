@@ -25,11 +25,7 @@ def promoted_to(path: str | Path, *, db=None) -> str | None:
         return None
     _db = db or get_db()
     try:
-        try:
-            identity = service.prepare_file_identity(str(target), db=_db)
-        except ValueError:
-            # A path under another workspace than this process selected can hold no registered identity here.
-            return None
+        identity = service.prepare_file_identity(str(target), db=_db)
         if identity is None or identity.zone != "workspace":
             return None
         row = service.find_file_identity(identity, db=_db)

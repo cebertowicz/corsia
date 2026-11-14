@@ -24,11 +24,11 @@ def holds_rows(db, artifact_id: str) -> bool:
 
 
 def _repoint(ops_json: str, old_path: str | None, new_path: str | None) -> str:
-    """The saved ops with each call's `path` taken to the promoted file, the call otherwise verbatim.
+    """The saved ops with each call's `path` taken to the file's new path, the call otherwise verbatim.
 
     A saved edit or write names the file by the path its agent used, and the wake asks the agent to
-    repeat that call. The file now lives at the successor's path, so the repeat must name it; only a
-    `path` that names the source's file (as stored, or as its trailing part) is replaced.
+    repeat that call. The file now lives at its new path, so the repeat must name it; only a
+    `path` that names the old file (as stored, or as its trailing part) is replaced.
     """
     if not old_path or not new_path:
         return ops_json
@@ -46,8 +46,10 @@ def _repoint(ops_json: str, old_path: str | None, new_path: str | None) -> str:
 def repoint_lines(db, *, artifact_id: str, old_path: str, new_path: str) -> int:
     """Point this document's saved calls at the path it moved to, its identity unchanged; returns how many lines.
 
-    A promote that carries the file's identity changes only its path, so no line is re-keyed; the wake
-    still asks the agent to repeat a saved call, and that call must name the file where it now is.
+    Any identity path move (a promote that carries the identity, `artifact_relocate`, a file moved outside
+    the tools) changes only the path, so no line is re-keyed; the wake still asks the agent to repeat a
+    saved call, and that call must name the file where it now is. `registry.relocate` calls this from the
+    one writer of an identity's path move.
     """
     changed = 0
     for row in db.execute("SELECT id, ops FROM doc_comment_writer_line WHERE artifact_id=?", (artifact_id,)).fetchall():
