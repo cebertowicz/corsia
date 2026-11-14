@@ -88,6 +88,7 @@ test('@surface:chat-cards a chat link that cannot open says why in its own tab w
 	await press('Missing');
 	const unavailable = page.getByText('missing.md is unavailable.');
 	await expect(unavailable).toBeInViewport();
+	await expect(page.getByText('There’s no file at this link.')).toBeInViewport();
 	await expect(documentToasts).toHaveCount(0);
 	expect(await unavailable.evaluate((el) => {
 		const box = el.getBoundingClientRect();

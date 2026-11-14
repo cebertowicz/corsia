@@ -876,6 +876,7 @@ describe('ArtifactLeaf load-status ownership', () => {
 		await vi.waitFor(() => expect(tabsOf()[0].status).toBe('unavailable'));
 		flushSync();
 		expect(host.textContent).toContain('gone.md is unavailable.');
+		expect(host.querySelector('.gone span')?.textContent).toBe('It isn’t in this chat’s files.');
 		expect(host.querySelector('.gone button')?.textContent).toContain('Close tab');
 		expect([...host.querySelectorAll('.gone button')].map((button) => button.textContent)).not.toContain('Retry');
 	});
@@ -899,6 +900,9 @@ describe('ArtifactLeaf load-status ownership', () => {
 		markTabStatus(THREAD, id, 'unavailable');
 		flushSync();
 		expect(host.textContent).toContain('linked.md is unavailable.');
+		// A link miss names no deleted file: it says the link has no file, under a file icon.
+		expect(host.querySelector('.gone span')?.textContent).toBe('There’s no file at this link.');
+		expect(host.querySelectorAll('.gone svg path')).toHaveLength(2);
 		expect(mocks.fetchContent).not.toHaveBeenCalled();
 	});
 

@@ -271,9 +271,9 @@
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
 			{:else if activeTab?.status === 'unavailable'}
 				<div class="gone" role="status">
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{#if activeTab.link}<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />{:else}<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />{/if}</svg>
 					<p>{activeTab.title} is unavailable.</p>
-					<span>It isn’t in this chat’s files.</span>
+					<span>{activeTab.link ? 'There’s no file at this link.' : 'It isn’t in this chat’s files.'}</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
 			{:else if linkTab?.link && threadId}

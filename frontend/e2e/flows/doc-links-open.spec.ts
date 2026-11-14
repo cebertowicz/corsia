@@ -151,6 +151,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 				await press(link(page, 'a page that is gone'));
 				const reason = page.getByText('nope.md is unavailable.');
 				await expect(reason).toBeInViewport();
+				await expect(page.getByText('There’s no file at this link.')).toBeInViewport();
 				await expect(page.getByRole('status').filter({ hasText: MISSING_TOAST })).toHaveCount(0);
 				await shoot('missing-tab');
 				await page.getByRole('button', { name: 'Close tab', exact: true }).click();
