@@ -8,7 +8,7 @@
 
 	// The canvas's bottom slot: the one jump control and, over an image, the notice that a comment you sent was delivered. A document
 	// says that in its header instead (the Sent mark where Send stood), since a notice here would float over its text and margin cards.
-	let { artifactId, threads, root, ready, covered, sheetModalOpen, onJump, confirmsDelivery = false, ignoreConfirmationId = null }: {
+	let { artifactId, threads, root, ready, covered, sheetModalOpen, onJump, onControlGone, confirmsDelivery = false, ignoreConfirmationId = null }: {
 		artifactId: string | null;
 		threads: DocComment[];
 		/** The canvas the unread items are drawn in: the document, or the image shown over it. */
@@ -17,6 +17,8 @@
 		covered: boolean;
 		sheetModalOpen: boolean;
 		onJump: (thread: DocComment) => void;
+		/** Called as the jump control leaves while it holds the keyboard focus (its last unread answer was read): the host puts the focus back in the text, which a leaving control would otherwise drop to the page. */
+		onControlGone?: () => void;
 		/** Shows the delivery notice: an image viewer's band, which has no header to say it in. */
 		confirmsDelivery?: boolean;
 		ignoreConfirmationId?: string | null;
@@ -30,6 +32,13 @@
 	const hasToast = $derived(confirmsDelivery && !!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
 	// The name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
 	const label = $derived(`${jump().count} new, next ${jump().direction}: ${jump().target?.label ?? ''}`);
+	// Runs before the DOM update, while the control still holds the focus it is about to lose.
+	let hadJump = false;
+	$effect.pre(() => {
+		const has = hasJump;
+		if (hadJump && !has && document.activeElement?.closest('[data-doc-jump]')) onControlGone?.();
+		hadJump = has;
+	});
 	// The jump control stands over a document's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).
 	$effect(() => {
 		const canvas = root;
