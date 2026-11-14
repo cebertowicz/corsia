@@ -18,11 +18,24 @@ Accepts recorded before the trailer existed read by their author, as ``person_ed
 History holds only recorded versions. When ``as_of`` is at or after the document's latest version, the
 working file is read once and bytes that differ from that version count as one more ``outside_edit``
 version; for an earlier ``as_of``, history is all there is.
+
+Version times are whole seconds, so a version saved in the same second as ``first_round_at`` or
+``as_of`` may fall on either side of it. Every version that may have been current is weighed; when
+they all give one answer that is the outcome, and ``changed_by`` names any same-second version too.
+
+A run's outcome is None, never a partial answer, when:
+
+- its artifact has no recorded document;
+- no version is certainly at or before ``first_round_at`` (including the first version landing in
+  that same second);
+- the versions that may have been current give different answers (a version saved in the same second
+  as ``first_round_at`` or ``as_of``), so it can't be told.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass
@@ -61,8 +74,9 @@ _UNREAD = object()
 def went_ahead_outcomes(
     runs: Sequence[Run], *, db=None, workspace: Path | None = None,
 ) -> dict[Run, WentAhead | None]:
-    """Each run's outcome, keyed by the run as given; None when the artifact has no recorded document
-    or no version at or before ``first_round_at``. A history Git can't read raises ``GitFault``."""
+    """Each run's outcome, keyed by the run as given; None for the three causes in the module
+    docstring (no recorded document, no version certainly by ``first_round_at``, or same-second versions
+    that disagree). A history Git can't read raises ``GitFault``."""
     runs = list(runs)
     if not runs:
         return {}
@@ -92,19 +106,36 @@ def went_ahead_outcome(
     return went_ahead_outcomes([run], db=db, workspace=workspace)[run]
 
 
-def _outcome(history: list[_Version], first: float, as_of: float, working) -> WentAhead | None:
-    base = next((version for version in reversed(history) if version.at <= first), None)
-    if base is None or base.blob is None:
+def _possible(history: list[_Version], moment: float) -> list[int] | None:
+    """Indexes of the versions that may have been current at ``moment``. Version times are whole seconds,
+    so the last version before ``moment``'s second, and every version within it, all may have been;
+    None when no version is certainly before it."""
+    second = math.floor(moment)
+    before = [index for index, version in enumerate(history) if version.at < second]
+    if not before:
         return None
-    between = [version for version in history if first < version.at <= as_of]
-    end = between[-1].blob if between else base.blob
-    writers = [version.writer for version in between]
+    return [before[-1], *(index for index, version in enumerate(history) if version.at == second)]
+
+
+def _outcome(history: list[_Version], first: float, as_of: float, working) -> WentAhead | None:
+    bases = _possible(history, first)
+    if bases is None or any(history[index].blob is None for index in bases):
+        return None
+    blobs = [version.blob for version in history]
+    writers = [version.writer for version in history]
+    ends = _possible(history, as_of)
     if working is not _UNREAD and as_of >= history[-1].at and working != history[-1].blob:
-        end = working
+        blobs.append(working)
         writers.append(OUTSIDE_EDIT)
-    if end == base.blob:
+        ends = [len(history)]
+    if ends is None:
+        return None
+    same = {blobs[base] == blobs[end] for base in bases for end in ends if end >= base}
+    if len(same) != 1:  # the versions the person may have seen disagree about this run
+        return None
+    if same == {True}:
         return {"went_ahead_unchanged": True, "changed_by": []}
-    return {"went_ahead_unchanged": False, "changed_by": writers}
+    return {"went_ahead_unchanged": False, "changed_by": writers[min(bases) + 1:max(ends) + 1]}
 
 
 def _artifact_paths(db, artifact_ids: set[str]) -> dict[str, str]:

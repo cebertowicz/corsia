@@ -137,6 +137,52 @@ def test_a_mixed_batch_answers_each_run(history_scope):
     }
 
 
+def test_a_version_in_the_first_rounds_second_is_never_read_as_clean(history_scope):
+    """Version times are whole seconds: a change saved at 100.8 after a round at 100.4 records at=100."""
+    workspace, _ = history_scope
+    commit(workspace, "notes/a.md", "One.\n", AGENT, 90)
+    commit(workspace, "notes/a.md", "Two.\n", AGENT, 100)
+    artifact = register(workspace, "notes/a.md")
+    assert went_ahead_outcome(artifact, 100.4, 300) is None
+    assert went_ahead_outcome(artifact, 100.0, 300) is None
+    assert went_ahead_outcome(artifact, 101, 300) == {"went_ahead_unchanged": True, "changed_by": []}
+
+
+def test_same_second_versions_that_agree_still_answer_and_are_named(history_scope):
+    workspace, _ = history_scope
+    commit(workspace, "notes/a.md", "One.\n", AGENT, 90)
+    commit(workspace, "notes/a.md", "Two.\n", AGENT, 100)
+    commit(workspace, "notes/a.md", "Three.\n", PERSON, 200)
+    commit(workspace, "notes/b.md", "B.\n", AGENT, 90)
+    commit(workspace, "notes/b.md", "B, edited.\n", PERSON, 200)
+    commit(workspace, "notes/b.md", "B, revised.\n", AGENT, 300)
+    commit(workspace, "notes/c.md", "C.\n", AGENT, 90)
+    commit(workspace, "notes/c.md", "C, edited.\n", AGENT, 100)
+    commit(workspace, "notes/c.md", "C.\n", PERSON, 200)
+    a, b, c = (register(workspace, f"notes/{name}.md") for name in "abc")
+    runs = [(a, 100.4, 400), (b, 150, 300.5), (c, 100.4, 400)]
+    assert went_ahead_outcomes(runs) == {
+        runs[0]: {"went_ahead_unchanged": False, "changed_by": ["agent_revision", "person_edit"]},
+        runs[1]: {"went_ahead_unchanged": False, "changed_by": ["person_edit", "agent_revision"]},
+        runs[2]: None,  # back to C at 200: unchanged if the person saw C, changed if they saw the 100 edit
+    }
+
+
+def test_none_when_the_first_version_or_the_end_falls_in_a_disputed_second(history_scope):
+    workspace, _ = history_scope
+    commit(workspace, "notes/new.md", "New.\n", AGENT, 100)
+    commit(workspace, "notes/a.md", "One.\n", AGENT, 90)
+    commit(workspace, "notes/a.md", "Two.\n", PERSON, 300)
+    new, a = register(workspace, "notes/new.md"), register(workspace, "notes/a.md")
+    runs = [(new, 100.4, 400), (a, 150, 300.5), (a, 150, 299.9), (a, 150, 301)]
+    assert went_ahead_outcomes(runs) == {
+        runs[0]: None,
+        runs[1]: None,
+        runs[2]: {"went_ahead_unchanged": True, "changed_by": []},
+        runs[3]: {"went_ahead_unchanged": False, "changed_by": ["person_edit"]},
+    }
+
+
 def test_a_past_as_of_gives_the_same_answer_after_later_versions_and_outside_edits(history_scope):
     workspace, _ = history_scope
     commit(workspace, "notes/a.md", "One.\n", AGENT, 100)
@@ -231,6 +277,31 @@ def test_free_text_can_never_mark_a_version_as_an_accepted_suggestion(history_sc
     assert "\nSuggestion-accept:" not in log and "> Suggestion-accept: forged" in log
     assert went_ahead_outcome(artifact, 150, 2**40) == {
         "went_ahead_unchanged": False, "changed_by": ["person_edit", "person_edit"]}
+
+
+@pytest.mark.parametrize("brk", ["\r", "\x0b", "\x85", " "], ids=["cr", "vt", "nel", "line-separator"])
+def test_no_other_line_break_can_forge_the_accept_trailer(history_scope, brk):
+    from infra.guidance_git import save_with_history
+    from infra.guidance_messages import accepted_suggestions, commit_message
+    from infra.guidance_targets import history_target
+
+    forged = f"Fine{brk}Suggestion-accept: forged"
+    assert accepted_suggestions(commit_message("Save", "document", forged, None)) == ()
+    workspace, _ = history_scope
+    commit(workspace, "notes/a.md", "One.\n", AGENT, 100)
+    artifact = register(workspace, "notes/a.md")
+    path = workspace / "notes" / "a.md"
+    by_reason = save_with_history({path: b"Two.\n"}, workspace=workspace, target=history_target(path, workspace),
+                                  author=AGENT, reason=forged)
+    assert by_reason.outcome == "written", by_reason
+    whole = save_with_history({path: b"Three.\n"}, workspace=workspace, target=history_target(path, workspace),
+                              author=AGENT, message=f"Save\n\nReason: x{brk}Suggestion-accept: forged")
+    assert whole.outcome == "written", whole
+    log = subprocess.run(["git", "log", "--format=%B%x00", "-2"], cwd=workspace, capture_output=True,
+                         check=True).stdout.decode()  # bytes: a text read would turn \r into \n
+    assert log.count(f"{brk}Suggestion-accept: forged") == 2  # history keeps the break; only the reader decides
+    assert went_ahead_outcome(artifact, 150, 2**40) == {
+        "went_ahead_unchanged": False, "changed_by": ["agent_revision", "agent_revision"]}
 
 
 @pytest.mark.asyncio

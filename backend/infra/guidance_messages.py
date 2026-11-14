@@ -85,9 +85,10 @@ def unforgeable(text: str) -> str:
 
 
 def accepted_suggestions(message: str) -> tuple[str, ...]:
-    """The suggestion ids a version's own trailer says it applied; empty for any other version."""
+    """The suggestion ids a version's own trailer says it applied; empty for any other version. Lines
+    break on "\\n" only, as the writer and its quoting see them, so no other line break can forge one."""
     trailers = message.rstrip("\n").rsplit("\n\n", 1)[-1]
-    for line in trailers.splitlines():
+    for line in trailers.split("\n"):
         if line.startswith(SUGGESTION_ACCEPT_PREFIX):
             return tuple(line[len(SUGGESTION_ACCEPT_PREFIX):].split())
     return ()
