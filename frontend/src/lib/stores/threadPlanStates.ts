@@ -86,6 +86,7 @@ async function loadChunk(ids: string[]): Promise<void> {
 	threadPlanStates.update((current) => {
 		const next = { ...current };
 		for (const id of ids) {
+			if (pending.has(id)) continue; // A nudge invalidated this reading while it was out.
 			if (states[id]) next[id] = states[id];
 			else delete next[id];
 		}

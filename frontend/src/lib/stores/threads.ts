@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
+import { messageRows } from './messageRows';
 import { activeThreadId } from './activeThreadId';
 import { turnStates, type ThreadTurnState, type TurnIdentity } from '../ws/turnState';
 import type { ThreadModelSwitchState } from './threadModelSwitch';
@@ -82,39 +83,7 @@ export interface Message {
 	chat_answer_cids?: string[];
 }
 
-function validDeliveryRevision(value: unknown): number | null {
-	return typeof value === 'number' && Number.isInteger(value) && value >= 1
-		? value
-		: null;
-}
-
-/**
- * Merge an incoming server row without allowing an older delivery transition
- * to overwrite a newer one. Legacy payloads with no revision retain the
- * historical last-frame-wins behavior until the server starts providing one.
- */
-export function mergeMessageDelivery(existing: Message, incoming: Message): Message {
-	const existingRevision = validDeliveryRevision(existing.delivery_revision);
-	const incomingRevision = validDeliveryRevision(incoming.delivery_revision);
-	if (
-		existingRevision !== null
-		&& incomingRevision !== null
-		&& incomingRevision <= existingRevision
-		&& existing.delivery_state !== undefined
-	) {
-		return {
-			...existing,
-			...incoming,
-			delivery_state: existing.delivery_state,
-			delivery_error: existing.delivery_error,
-			delivery_revision: existing.delivery_revision,
-			write_outcome: existing.write_outcome,
-			...(incomingRevision < existingRevision
-				? { active_turn_id: existing.active_turn_id, seq: existing.seq } : {}),
-		};
-	}
-	return { ...existing, ...incoming };
-}
+export { mergeMessageDelivery } from './messageDeliveryMerge';
 
 export const threads = writable<Thread[]>([]);
 export const coordinationThreads = writable<Thread[]>([]);
@@ -126,7 +95,7 @@ export function demoteAgentLocally(threadId: string): void {
 }
 
 export { activeThreadId, draftAccountId } from './activeThreadId';
-export const messages = writable<Message[]>([]);
+export const messages = messageRows<Message>();
 /** Whether `threadId` has a live turn, read from the per-thread turn states. */
 export function isThreadTurnActive(
 	states: ReadonlyMap<string, ThreadTurnState>,

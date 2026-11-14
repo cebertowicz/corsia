@@ -1,8 +1,11 @@
 import { parseUTC } from '$lib/time';
+import { pruneReplacedRows } from './messageReplacements';
 import { mergeMessageDelivery } from '$lib/stores/threads';
 
 export interface HistoryMessage {
 	id?: string;
+	thread_id?: string;
+	replaced_message_ids?: string[];
 	metadata?: { input_id?: unknown };
 	created_at?: string;
 	seq?: number | null;
@@ -72,7 +75,7 @@ export function mergeChronologicalMessageHistory<T extends HistoryMessage>(
 	merge: (existing: T, next: T) => T,
 ): T[] {
 	const union: T[] = [];
-	for (const row of [...current, ...incoming]) {
+	for (const row of pruneReplacedRows([...current, ...incoming])) {
 		const existingIndex = union.findIndex((candidate) => sameMessageIdentity(candidate, row));
 		if (existingIndex === -1) union.push(row);
 		else union[existingIndex] = merge(union[existingIndex], row);

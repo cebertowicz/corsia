@@ -73,7 +73,8 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
 	// A comment or reply posted, retried or delivered names the rows it is on; the server keeps it on their threads.
-	const stops = [on('turn_complete', frame => refresh(frame)), on('chat_comments_changed', frame => {
+	const stops = [on('messages_replaced', frame => refresh({ ...frame, step_ids: [frame.message.id] })),
+		on('turn_complete', frame => refresh(frame)), on('chat_comments_changed', frame => {
 		if (Array.isArray(frame?.target_seqs) && frame.target_seqs.length) void refresh(frame, frame.target_seqs.map((seq: number) => ({ seq })));
 	}), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -310,11 +311,21 @@ def _live_view_locked(user_id: str, thread_id: str) -> tuple[str, datetime | Non
     return ("away", stamp) if stamp is not None else None
 
 
+@contextmanager
+def update_snapshot(user_id: str, thread_id: str):
+    """Retain a nonblocking snapshot through an update transaction; busy is unknown."""
+    acquired = _LOCK.acquire(blocking=False)
+    try:
+        yield _live_view_locked(user_id, thread_id) if acquired else "busy"
+    finally:
+        if acquired:
+            _LOCK.release()
+
+
 def live_view(user_id: str, thread_id: str) -> tuple[str, datetime | None] | None:
     """Return the canonical process-local visit verdict without a read-model cycle."""
     with _LOCK:
         return _live_view_locked(user_id, thread_id)
-
 
 
 def sweep(db: sqlite3.Connection, *, now: datetime) -> Changed:

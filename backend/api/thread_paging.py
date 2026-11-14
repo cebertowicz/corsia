@@ -71,6 +71,10 @@ def load_tool_result(
     metadata = _parse_metadata(assistant.get("metadata") if assistant else None)
     for call in metadata.get("tool_calls") or []:
         if isinstance(call, dict) and call.get("id") == tool_call_id:
+            from api.post_update_details import is_post_update
+
+            if is_post_update(call):
+                return ""
             result = call.get("result")
             return result if isinstance(result, str) else None
     return None
@@ -275,7 +279,12 @@ def finish_display(
     if not include_tool_results:
         _defer_tool_results(display)
     _project_delivery_intents(db, thread_id, display)
+    from api.post_update_details import hide_update_details
+    from infra.message_update_state import projection_fields
+
+    hide_update_details(display)
     for row in display:
+        row.update(projection_fields(db, row["id"]))
         row.pop("rowid", None)
 
 

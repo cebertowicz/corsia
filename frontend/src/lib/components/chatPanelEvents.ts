@@ -3,6 +3,7 @@ import { token } from '$lib/stores/sessionToken';
 import { on } from '$lib/ws';
 import { loadCheckpoints } from '$lib/stores/checkpoints';
 import { hydrateSubagentThread } from '$lib/stores/subagents';
+import { resetDisplayedTranscript } from '$lib/stores/displayedThreads';
 
 export async function refreshVisibleThread(threadId: string, page: Promise<void>): Promise<void> {
 	const signedIn = !!get(token);
@@ -20,7 +21,7 @@ export interface ChatPanelEventPort {
 	isNearBottom: () => boolean;
 	scrollToBottom: () => void;
 	followBottom: () => void;
-	fetchThreadMessages: (threadId: string) => Promise<void>;
+	fetchThreadMessages: (threadId: string, reconnect?: boolean) => Promise<void>;
 	clearWarmKeys: (threadId: string) => void;
 }
 
@@ -56,7 +57,10 @@ export function subscribeChatPanelEvents(port: ChatPanelEventPort): () => void {
 	const unsubTurnActivity = on('turn_activity', refreshLifecycle);
 	const unsubConnected = on('connected', () => {
 		const sid = get(port.activeThreadId);
-		if (sid) void port.fetchThreadMessages(sid);
+		if (sid) {
+			resetDisplayedTranscript(sid);
+			void port.fetchThreadMessages(sid, true);
+		}
 	});
 	return () => {
 		unsubStep();

@@ -7,6 +7,7 @@ from __future__ import annotations
 # use it without importing back up into the tool layer.
 from infra.db_fts import fts5_escape
 from infra.project_fence import HistoryFence
+from infra.message_update_schema import not_replaced_sql
 from infra.thread_confinement import Reader, hidden_clause
 
 __all__ = ["fts5_escape"]
@@ -68,7 +69,7 @@ def search_messages_fts(
     fts_query = fts5_escape(query)
     visible, identity = hidden_clause(reader, "t")
     open_to_caller, fence_params = (fence or HistoryFence.for_reader(reader, db=db)).visible_clause("t", "m.seq")
-    filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller}"
+    filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller} AND {not_replaced_sql('m.id')}"
     params: list = [fts_query, *identity, *fence_params]
 
     if thread_id:
@@ -92,7 +93,7 @@ def search_messages_fts(
         return db.execute(sql, params).fetchall()
     except Exception:
         like_params: list = [f"%{query}%", *identity, *fence_params]
-        like_filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller}"
+        like_filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller} AND {not_replaced_sql('m.id')}"
         if thread_id:
             like_filters += " AND m.thread_id = ?"
             like_params.append(thread_id)
@@ -115,7 +116,7 @@ def get_thread_message_count(db, thread_id: str) -> int:
     """Return the number of delivered messages in a thread."""
     row = db.execute(
         "SELECT COUNT(*) as cnt FROM messages WHERE thread_id = ? "
-        "AND delivery_state = 'delivered'",
+        f"AND delivery_state = 'delivered' AND {not_replaced_sql()}",
         (thread_id,),
     ).fetchone()
     return row["cnt"] if row else 0
@@ -175,13 +176,17 @@ def thread_history_rows(
         params.append(to_seq)
     if tool_output == "omit":
         where.append("role <> 'tool'")
+    if from_seq is None or from_seq != to_seq:
+        where.append(not_replaced_sql())
     order = "ASC" if oldest_first else "DESC"
     rows = db.execute(
-        f"SELECT seq, role, content, metadata, created_at FROM messages "
+        f"SELECT id, seq, role, content, metadata, created_at FROM messages "
         f"WHERE {' AND '.join(where)} ORDER BY seq {order} LIMIT ?",
         (*params, limit),
     ).fetchall()
-    return thread_row, rows
+    from tools.post_update_history import history_updates
+
+    return thread_row, history_updates(db, rows)
 
 
 def format_history_results(

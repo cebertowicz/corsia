@@ -19,6 +19,8 @@ export function addedMessage(payload: any, threadId: string): Message | null {
 		role: payload.role,
 		content: payload.content,
 		metadata: withChatDrawn(payload.metadata, payload),
+		...(Array.isArray(payload.replaced_message_ids) ? { replaced_message_ids: payload.replaced_message_ids } : {}),
+		...(Array.isArray(payload.update_node_ids) ? { update_node_ids: payload.update_node_ids } : {}),
 		created_at: payload.created_at,
 		...(sequence !== undefined ? { seq: sequence } : {}),
 		// An update sent mid-turn arrives with its placed answers already out of its chat text.

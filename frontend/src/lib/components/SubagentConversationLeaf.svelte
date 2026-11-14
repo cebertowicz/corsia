@@ -5,7 +5,7 @@
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { messages } from '$lib/stores/threads';
 	import { hydrateSubagentThread } from '$lib/stores/subagents';
-	import { adoptThreadSnapshot, claimDisplayedThread } from '$lib/stores/displayedThreads';
+	import { adoptThreadSnapshot, claimDisplayedThread, resetDisplayedTranscript } from '$lib/stores/displayedThreads';
 	import MessageList from './MessageList.svelte';
 	import InputBar from './InputBar.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -85,6 +85,7 @@
 		if ($token) void hydrateSubagentThread(subscribed);
 		subscribeThread(subscribed);
 		const offConnected = on('connected', () => {
+			resetDisplayedTranscript(subscribed);
 			subscribeThread(subscribed);
 			void load();
 		});

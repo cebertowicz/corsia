@@ -252,6 +252,7 @@ from infra.migration_190_to_191_drop_reviewer_gate_tables import migrate_190_to_
 from infra.migration_191_to_192_chat_drawn import migrate_191_to_192
 from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
 from infra.migration_193_to_194_llm_usage_turn_index import migrate_193_to_194
+from infra.migration_194_to_195_update_replacements import migrate_194_to_195
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -320,8 +321,7 @@ _MIGRATION_LOCK_WAIT_MS = 30 * 60 * 1000
 MigrationStep = Callable[[sqlite3.Connection], None]
 
 
-class MigrationError(RuntimeError):
-    """A migration refused or failed; the database is unchanged."""
+from infra.migration_plan import MigrationError, plan_steps
 
 
 class BackupRoomError(MigrationError):
@@ -934,6 +934,7 @@ MIGRATIONS[190] = migrate_190_to_191
 MIGRATIONS[191] = migrate_191_to_192
 MIGRATIONS[192] = migrate_192_to_193
 MIGRATIONS[193] = migrate_193_to_194
+MIGRATIONS[194] = migrate_194_to_195
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -1141,24 +1142,7 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
 
 def _plan(from_version: int, to_version: int) -> list[int]:
     """Return the ordered from-versions to apply, or raise if unreachable."""
-    if from_version > to_version:
-        raise MigrationError(
-            f"database schema version {from_version} is newer than this build's"
-            f" {to_version}; a newer CORSIA wrote it, so this build must not"
-            " downgrade it. Deploy the newer build instead."
-        )
-    steps: list[int] = []
-    version = from_version
-    while version < to_version:
-        if version not in MIGRATIONS:
-            raise MigrationError(
-                f"no migration registered from schema version {version};"
-                f" cannot reach {to_version} from {from_version}."
-                " The database was not modified."
-            )
-        steps.append(version)
-        version += 1
-    return steps
+    return plan_steps(from_version, to_version, MIGRATIONS)
 
 
 def _schema_snapshot(

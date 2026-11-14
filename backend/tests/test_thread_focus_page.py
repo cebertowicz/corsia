@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 from infra.focus_rows import FOCUS_VISIBLE_SQL, focus_kind_sql, is_focus_visible, row_kind
 from infra.message_activity import ACTIVITY_WEIGHT_SQL
 from api.thread_focus_page import (
@@ -48,7 +49,7 @@ def _db() -> sqlite3.Connection:
         "started_at TEXT, ended_at TEXT, error TEXT)"
     )
     # A page never draws a comment-only input, which this table marks.
-    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL + MESSAGE_UPDATE_SCHEMA_SQL)
     return conn
 
 

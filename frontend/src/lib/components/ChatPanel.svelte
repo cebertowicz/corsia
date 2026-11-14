@@ -161,11 +161,10 @@
 		const thread = $threads.find(s => s.id === id);
 		if (thread) reasoningEffort.set(thread.reasoning_effort ?? null);
 	}
-	export async function fetchThreadMessages(threadId: string) {
+	export async function fetchThreadMessages(threadId: string, reconnect = false) {
 		pagerGeneration++;
 		pager = createPager();
-		// A same-thread refresh replaces the first page but retains older rows, so
-		// retain their keyed summaries until that page is actually unloaded.
+		if (reconnect) { focusRuns = []; runLoads = {}; turnSummaries = {}; }
 		if (lastFirstPageThreadId !== null && lastFirstPageThreadId !== threadId) turnSummaries = {};
 		const myGen = pagerGeneration;
 		try {
