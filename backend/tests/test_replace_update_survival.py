@@ -107,11 +107,22 @@ def test_replacing_an_answering_update_keeps_its_comment_answer_and_read_stamp(p
     ('tool_call', json.dumps({'name': 'post_update', 'arguments': {'text': 'private'}})),
     ('mcp__corsia__tool_call', {'name': 'post_update', 'arguments': {'text': 'private'}}),
 ])
-def test_stored_human_tool_details_hide_every_update_without_touching_other_calls(name, args):
+def test_stored_human_tool_details_hide_every_done_update_without_touching_other_calls(name, args):
     from api.post_update_details import hide_update_details
-    call = {'name': name, 'args': args, 'result': 'private receipt', 'error_line': 'private', 'result_state': 'pending'}
+    call = {'name': name, 'args': args, 'result': 'private receipt', 'error_line': 'private', 'result_state': 'pending', 'outcome': 'done'}
     untouched = {'name': 'read_file', 'args': {'path': 'public'}, 'result': 'file'}
     rows = [{'metadata': {'tool_calls': [call, untouched.copy()]}}]
     hide_update_details(rows)
-    assert call == {'name': name, 'args': '', 'result': '', 'result_state': 'loaded'}
+    assert call == {'name': name, 'args': '', 'result': '', 'result_state': 'loaded', 'outcome': 'done'}
     assert rows[0]['metadata']['tool_calls'][1] == untouched
+
+
+@pytest.mark.parametrize('outcome', ['failed', 'refused', 'unknown', None])
+def test_an_update_that_wrote_no_chat_row_keeps_its_details_on_reload(outcome):
+    from api.post_update_details import hide_update_details, repeats_chat_row
+    call = {'name': 'post_update', 'args': {'text': 'tried'}, 'result': 'Error: Nothing was saved. text must be non-empty after trimming.',
+            'error_line': 'Nothing was saved.', 'outcome': outcome}
+    kept = dict(call)
+    hide_update_details([{'metadata': {'tool_calls': [call]}}])
+    assert call == kept
+    assert not repeats_chat_row(call)

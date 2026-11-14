@@ -18,14 +18,19 @@ def is_post_update(call):
     return isinstance(args, dict) and args.get("name") == "post_update"
 
 
+def repeats_chat_row(call):
+    """Only a post_update that settled done wrote a chat row; a refused, failed or unknown one keeps its details."""
+    return is_post_update(call) and call.get("outcome") == "done"
+
+
 def hide_update_details(display):
-    """Remove duplicate post-update argument/result text from every stored human page."""
+    """Remove post-update argument/result text that repeats the update's own chat row."""
     for row in display:
         meta = row.get("metadata")
         if not isinstance(meta, dict):
             continue
         for call in meta.get("tool_calls") or []:
-            if isinstance(call, dict) and is_post_update(call):
+            if isinstance(call, dict) and repeats_chat_row(call):
                 call["args"] = ""
                 call["result"] = ""
                 call["result_state"] = "loaded"

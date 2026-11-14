@@ -71,9 +71,9 @@ def load_tool_result(
     metadata = _parse_metadata(assistant.get("metadata") if assistant else None)
     for call in metadata.get("tool_calls") or []:
         if isinstance(call, dict) and call.get("id") == tool_call_id:
-            from api.post_update_details import is_post_update
+            from api.post_update_details import repeats_chat_row
 
-            if is_post_update(call):
+            if repeats_chat_row(call):
                 return ""
             result = call.get("result")
             return result if isinstance(result, str) else None
