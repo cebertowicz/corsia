@@ -38,6 +38,7 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
         {path: text.encode("utf-8")}, workspace=Path(config.WORKSPACE), target=target,
         author=_live_author(operation.actor if operation else None), reason=operation.reason if operation else None,
         expected={path: prior_sha256}, atomic=required,
+        accepted_suggestions=operation.accepted if operation else (),
         write=lambda _path, data: document_save.write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
     )
     if saved.outcome == "stale":

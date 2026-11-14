@@ -42,10 +42,10 @@ INSERT_STALE_MESSAGE = (
     "Reject it, or ask its author to suggest again against the current text."
 )
 
-# Writes ``text`` to the document at ``path`` in scope ``project_id``, recording ``reason``
-# where the save keeps history; raises when refused.
+# Writes ``text`` to the document at ``path`` in scope ``project_id``, recording ``reason`` and the
+# accepted suggestion ids (the last argument) where the save keeps history; raises when refused.
 DocumentWriter = Callable[
-    [str, str, str | None, str, str | None, str | None], Awaitable[dict[str, Any] | None]
+    [str, str, str | None, str, str | None, str | None, tuple[str, ...]], Awaitable[dict[str, Any] | None]
 ]
 
 _accept_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
@@ -297,7 +297,7 @@ async def _decide_suggestion(
                 artifact["path"], applied_text(comment, document_text), project_id,
                 f"Accepted suggestion {comment_id} from {comment['author']}",
                 hashlib.sha256(document_text.encode()).hexdigest(),
-                str(comment["author"]) if comment["author_kind"] == "user" else None,
+                str(comment["author"]) if comment["author_kind"] == "user" else None, (comment_id,),
             )
 
     def _record():

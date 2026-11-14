@@ -88,6 +88,8 @@ class LiveDocument:
         self.preview_changed: Callable[[dict], None] = lambda frame: None
         # The actor a last-viewer flush would use now; None when no writable viewer remains.
         self.viewer_actor: Callable[[], WriteActor | None] = lambda: None
+        # Who last sent typing; an accept saves typing not yet in the file as their version first.
+        self.typist: WriteActor | None = None
         # (hash, text) of the file as this session last wrote or imported it.
         self.on_disk: tuple[str, str] = ("", "")
         self._sender = None
