@@ -150,6 +150,14 @@ async function closeList(page: Page) {
 	await page.waitForTimeout(600);
 }
 
+/**
+ * Waits out the header's passing Sent. At a narrow document width it wraps the header's controls onto a second line; when
+ * it leaves, the document moves up by that line, so a press aimed at the text before then lands where the text no longer is.
+ */
+async function headerSettled(page: Page) {
+	await expect(page.locator('.document-header .sending-now:has(.sent)')).toHaveCount(0, { timeout: 10_000 });
+}
+
 /** The three forms the reader can be writing in, per DocCommentSurface: the list, a thread pinned in a popover, a new draft. */
 const writing = {
 	list: {
@@ -167,7 +175,10 @@ const writing = {
 			await closeList(page);
 			const card = page.locator('[data-popover] .ct-input, .canvas-comment-drawer.margin .focused .ct-input, .canvas-comment-drawer.sheet .ct-input');
 			// Press a highlight in the text: the thread it quotes opens as the card, in whichever form this width gives it.
-			if (!await card.count()) await page.locator('.cm-comment-anchor:visible').first().click();
+			if (!await card.count()) {
+				await headerSettled(page);
+				await page.locator('.cm-comment-anchor:visible').first().click();
+			}
 			await expect(card.first()).toBeVisible();
 			return card.first();
 		},
@@ -175,6 +186,7 @@ const writing = {
 	draft: {
 		open: async (page: Page) => {
 			await closeList(page);
+			await headerSettled(page);
 			await page.locator('.cm-line').filter({ hasText: 'This document collects' }).first().dblclick({ position: { x: 40, y: 8 } });
 			await page.locator('.sel-comment').click();
 			const input = page.locator('.composer textarea').last();
@@ -400,6 +412,7 @@ test('keeps the quoted word in view with its composer beside it across the panel
 	await scroller.hover();
 	await page.mouse.wheel(0, 900);
 	await page.waitForTimeout(500);
+	await headerSettled(page);
 	const rows = await line.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().y)));
 	await line.nth(Math.max(rows.findIndex((y) => y > 650 && y < 790), 0)).dblclick({ position: { x: 40, y: 8 } });
 	await page.locator('.sel-comment').click();
