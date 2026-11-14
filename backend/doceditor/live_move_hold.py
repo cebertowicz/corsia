@@ -15,22 +15,12 @@ class DocumentNotSaved(RuntimeError):
 
 
 @asynccontextmanager
-async def hold_for_artifact(documents: LiveDocuments, artifact_id: str) -> AsyncIterator[None]:
-    """``hold_for_move`` for a caller that knows the document's identity, not its path."""
-    entry = documents.documents.get(artifact_id)
-    if entry is None:
-        yield
-        return
-    async with hold_for_move(documents, entry.live.path):
-        yield
-
-
-@asynccontextmanager
 async def hold_for_move(documents: LiveDocuments, path: Path) -> AsyncIterator[None]:
     """Save and retire the document open at ``path``, then keep it closed while its file moves.
 
-    The path's lock stays held until the block ends, so no open or agent write that waits on it
-    reaches the file in between. Typing the store has accepted is saved to the file first, so the
+    The path's lock is taken whether or not a document is open, and stays held until the block ends,
+    so no open or agent write that waits on it reaches the file in between. Callers run every check
+    that can refuse the move before entering, so a refused call closes nobody's document. Typing the store has accepted is saved to the file first, so the
     moved file holds it; when that cannot be done, nothing moves. A viewer left on the retired entry
     is refused ("reopen it") and the retired entry accepts no more typing. A move that is then
     refused for another reason leaves the document closed, and the next open reads the same file.
@@ -55,10 +45,7 @@ def _refuse_late_typing(entry: LiveEntry) -> None:
         raise DocumentNotSaved(_NOT_SAVED)
 
 
-_NOT_SAVED = (
-    "This document is open with changes that could not be saved yet, so it was not moved. "
-    "Try again shortly."
-)
+_NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
 
 
 SAVE_ROUNDS = 5

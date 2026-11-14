@@ -11,6 +11,7 @@ from doceditor.live_text import clone
 from tests.test_durable_writes import _working_file
 from tests.test_durable_writes import durable_scope as durable_scope
 
+NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
 CARRIED_AND_STALE = pytest.mark.parametrize("stale", [False, True], ids=["carried", "stale"])
 
 
@@ -107,7 +108,7 @@ async def test_a_failed_save_moves_nothing(durable_scope, tmp_path, monkeypatch,
     entry.live.viewer_actor = lambda: None  # no writable viewer can save the typing
     try:
         receipt = await _promote(workspace, thread_id, source)
-        assert receipt.startswith("Error: This document is open with changes that could not be saved yet")
+        assert receipt.startswith("Error: " + NOT_SAVED)
         assert "Errno" not in receipt and str(workspace) not in receipt
         assert source.read_text() == before
         assert not (workspace / "projects" / "alpha" / "shared" / "planning" / "live.md").exists()
@@ -182,7 +183,7 @@ async def test_a_failed_save_stops_a_relocate_and_moves_nothing(durable_scope, t
     before = source.read_text()
     try:
         receipt = await _relocate_with_tool(workspace, thread_id, source_id, target)
-        assert receipt.startswith("Error: This document is open with changes that could not be saved yet")
+        assert receipt.startswith("Error: " + NOT_SAVED)
         assert source.read_text() == before and not target.exists()
         assert manager.documents.get(source_id) is entry
     finally:
@@ -240,6 +241,80 @@ async def test_a_save_still_in_flight_when_the_move_starts_lands_in_the_moved_fi
         await asyncio.wait_for(manager.close(), 20)
 
 
+@pytest.mark.asyncio
+async def test_a_caller_with_no_access_cannot_close_a_document_by_relocating_it(durable_scope, tmp_path, monkeypatch):
+    from tools import artifacts
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    monkeypatch.setattr(artifacts, "_require_context", lambda kwargs: ("other-thread", {"user_id": "someone-else"}))
+    try:
+        receipt = await _relocate_with_tool(workspace, "other-thread", source_id, source.parent / "renamed.md")
+        assert receipt == "Error: Artifact not found"
+        assert manager.documents.get(source_id) is entry and source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_a_pane_request_for_a_thread_the_caller_does_not_own_closes_nothing(durable_scope, tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import registry_pane
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    monkeypatch.setattr(registry_pane, "authenticate", lambda token: {"id": "someone-else"})
+    try:
+        with pytest.raises(HTTPException) as refused:
+            await registry_pane.relocate_artifact_endpoint(
+                source_id, "token",
+                registry_pane.ArtifactRelocateBody(thread_id=thread_id, target_path=str(source.parent / "renamed.md")))
+        assert refused.value.status_code == 404
+        assert manager.documents.get(source_id) is entry and source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_a_promote_the_caller_may_not_make_closes_nobodys_document(durable_scope, tmp_path, monkeypatch):
+    from tools import promote
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    monkeypatch.setattr(promote, "_require_context", lambda kwargs: ("other-thread", {"project_id": "project-alpha"}))
+    try:
+        receipt = await _promote(workspace, "other-thread", source)
+        assert receipt.startswith("Error") and "saved" not in receipt
+        assert manager.documents.get(source_id) is entry and source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_the_path_stays_locked_during_a_relocate_even_when_the_document_is_not_open(
+    durable_scope, tmp_path, monkeypatch, relocation_context,
+):
+    """An open that starts mid-move would bind a live entry to the old path, so the lock covers the move."""
+    import registry.relocate as relocate
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False, typed=False)
+    relocation_context(thread_id)
+    await manager.release(source_id, entry)
+    assert manager.documents == {}
+    locked, original = [], relocate.relocate_artifact
+
+    def watch(*args, **kwargs):
+        locked.append(manager._lifetime(source).lock.locked())
+        return original(*args, **kwargs)
+    monkeypatch.setattr(relocate, "relocate_artifact", watch)
+    target = source.parent / "renamed.md"
+    try:
+        receipt = await _relocate_with_tool(workspace, thread_id, source_id, target)
+        assert not receipt.startswith("Error"), receipt
+        assert locked == [True] and not manager._lifetime(source).lock.locked()
+        assert target.exists() and not source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
 def _typing(entry, message_id, text):
     """A browser update that inserts ``text`` at the start of the document as it is now."""
     client = clone(entry.live.doc.get_update())
@@ -282,7 +357,7 @@ async def test_typing_that_arrives_while_the_document_closes_refuses_the_move(du
     monkeypatch.setattr(manager, "release", type_then_release)
     try:
         receipt = await _promote(workspace, thread_id, source)
-        assert receipt.startswith("Error: This document is open with changes that could not be saved yet"), receipt
+        assert receipt.startswith("Error: " + NOT_SAVED), receipt
         shared = workspace / "projects" / "alpha" / "shared" / "planning" / "live.md"
         assert not shared.exists()
         assert source.read_text().startswith("TYPED ") and "LATE" not in source.read_text()

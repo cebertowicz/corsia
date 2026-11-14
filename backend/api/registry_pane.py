@@ -189,14 +189,18 @@ async def relocate_artifact_endpoint(
     if not user:
         raise HTTPException(401)
 
-    def _relocate():
+    from registry.relocate import RelocationError, checked_source_path, relocate_artifact
+
+    def _relocate(*, move: bool):
         db = get_db()
         try:
             if get_thread_for_user(body.thread_id, user["id"], db=db) is None:
                 return "not_found", None
-            from registry.relocate import RelocationError, relocate_artifact
-
             try:
+                if not move:
+                    return "ok", checked_source_path(
+                        artifact_id, body.target_path, actor_thread_id=body.thread_id, db=db,
+                    )
                 artifact = relocate_artifact(
                     artifact_id, body.target_path,
                     actor_thread_id=body.thread_id, db=db,
@@ -207,19 +211,22 @@ async def relocate_artifact_endpoint(
         finally:
             db.close()
 
-    from doceditor.live_move_hold import DocumentNotSaved, hold_for_artifact
+    from doceditor.live_move_hold import DocumentNotSaved, hold_for_move
     from doceditor.live_runtime import get_documents
 
-    try:
-        documents = get_documents()
-        if documents is None:
-            status, result = await run_in_db(_relocate)
-        else:
-            # A person may have this file open: their typing is saved into it before it moves.
-            async with hold_for_artifact(documents, artifact_id):
-                status, result = await run_in_db(_relocate)
-    except DocumentNotSaved as error:
-        raise HTTPException(409, str(error))
+    # Every check that can refuse runs first and holds nothing: a refused request closes nobody's document.
+    status, result = await run_in_db(_relocate, move=False)
+    if status == "ok":
+        try:
+            documents = get_documents()
+            if documents is None:
+                status, result = await run_in_db(_relocate, move=True)
+            else:
+                # A person may have this file open: their typing is saved into it before it moves.
+                async with hold_for_move(documents, result):
+                    status, result = await run_in_db(_relocate, move=True)
+        except DocumentNotSaved as error:
+            raise HTTPException(409, str(error))
     if status == "not_found":
         raise HTTPException(404, "Thread not found")
     if status == "bad_request":
