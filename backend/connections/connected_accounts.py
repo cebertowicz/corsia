@@ -15,6 +15,7 @@ import uuid
 from typing import Literal
 
 from connections.account_provider import AccountProvider
+from connections.account_rule_scope import reach_rule_scope
 from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
@@ -24,6 +25,7 @@ from connections.messages.provider import MESSAGES
 from connections.microsoft.provider import MICROSOFT
 from infra import key_store
 from infra.database import write_transaction
+from infra.delegation_scope import scope_label
 from infra.time import utc_now_iso
 
 PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT, MAILHOST, MESSAGES)}
@@ -96,14 +98,13 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
         return False
 
 
-def reached_projects(account_id: str, *, db: sqlite3.Connection) -> frozenset[str] | None:
-    """The projects an account's reach includes, where agents' mail rules may fire on its
-    unowned mail; ``None`` when they can't be read. Only-CORSIA reach includes none."""
+def rule_scopes(account_id: str, *, db: sqlite3.Connection) -> frozenset[str] | None:
+    """Rule scopes reached by an account's unowned mail; ``None`` when unreadable."""
     try:
         reach = _account_reach(account_id, db=db)
-        if reach.mode != "all":
-            return reach.project_ids if reach.mode == "selected" else frozenset()
-        return frozenset(row["id"] for row in db.execute("SELECT id FROM projects"))
+        if reach.mode == ONLY_CORSIA:
+            return frozenset({scope_label(None)})
+        return reach_rule_scope(reach, db)
     except (ConnectedAccountError, sqlite3.Error):
         log.exception("Rule scope for a connected account is unreadable")
         return None

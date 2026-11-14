@@ -845,9 +845,12 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 191 -> 192 stamps the steps that draw nothing in chat.
         from infra.migration_191_to_192_chat_drawn import migrate_191_to_192
         migrate_191_to_192(db)
-        # 192 -> 193 indexes turn-bound usage receipts.
-        from infra.migration_192_to_193_llm_usage_turn_index import migrate_192_to_193
+        # 192 -> 193 admits the workspace scope on event rules.
+        from infra.migration_192_to_193_workspace_rules import migrate_192_to_193
         migrate_192_to_193(db)
+        # 193 -> 194 indexes turn-bound usage receipts.
+        from infra.migration_193_to_194_llm_usage_turn_index import migrate_193_to_194
+        migrate_193_to_194(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
