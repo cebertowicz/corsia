@@ -1,8 +1,9 @@
-"""Journal mode of a document live store."""
+"""How a document live store's connections open, and its journal mode."""
 from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from infra.database import is_lock_refusal
@@ -13,6 +14,39 @@ log = logging.getLogger(__name__)
 # whole file, so it runs at most once per store per process; a busy store converts on the
 # first open after a restart.
 _stayed: set[Path] = set()
+
+
+def connect(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(path, timeout=1.0, isolation_level=None)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=1000")
+        connection.execute("PRAGMA synchronous=FULL")
+    except BaseException:
+        # Closed now, not whenever garbage collection reaches it: see probe_read_only.
+        connection.close()
+        raise
+    return connection
+
+
+def probe_read_only(path: Path) -> None:
+    """Read an existing store's header and schema before any writable connection opens.
+
+    A writable connection that is the last to close checkpoints the -wal into the
+    main file and deletes it, even after refusing a damaged file. A read-only
+    connection cannot, so a store refused here keeps its main file and -wal exactly
+    as found: they may hold acknowledged typing.
+
+    A rollback-journal store left with a hot -journal by a crash mid-transaction
+    is not damaged: only a writable connection can roll it back, so that refusal
+    passes and the writable open recovers it as it always has.
+    """
+    try:
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1.0)) as db:
+            db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.Error as exc:
+        if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_READONLY_ROLLBACK:
+            raise
 
 
 def enter_wal(connection: sqlite3.Connection, path: Path) -> None:

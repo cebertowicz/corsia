@@ -15,6 +15,7 @@ import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
 import { _resetSubagentHydrationForTests, subagentMeta } from '$lib/stores/subagents';
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
 import { coreSettings } from '$lib/stores/settings';
+import { _cancelPendingMessageCardRefreshForTests } from '$lib/stores/messageCardRefresh';
 
 /**
  * When the first page of a thread fails, the canvas must not answer with
@@ -72,6 +73,8 @@ beforeEach(() => {
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
+	// A turn_complete arms a page-wide 400 ms card re-read; left pending, it fires into the next test's fetch mock.
+	_cancelPendingMessageCardRefreshForTests();
 	host.remove();
 	vi.restoreAllMocks();
 	messages.set([]);
