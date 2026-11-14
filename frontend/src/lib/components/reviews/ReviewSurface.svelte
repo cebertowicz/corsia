@@ -16,6 +16,13 @@
 	function finishClose() { onHide(); restoreFocus(); }
 	// The popover opens below the document's owner and supervisor row, never over it, so both stay in view and reachable.
 	const ownershipRow = () => anchor?.closest('.document-header')?.querySelector<HTMLElement>('[data-ownership-row]')?.getBoundingClientRect() ?? null;
+	// ...and below the document's own first heading when it is on screen under that row, so the heading stays readable.
+	function cleared() {
+		const row = ownershipRow();
+		const heading = anchor?.closest<HTMLElement>('.leaf-body')?.querySelector<HTMLElement>('.cm-content .cm-md-h1')?.getBoundingClientRect();
+		if (!row || !heading || heading.top < row.bottom || heading.top > window.innerHeight) return row;
+		return new DOMRect(row.x, row.y, row.width, heading.bottom - row.y);
+	}
 	$effect(() => { void tick().then(() => content?.querySelector<HTMLElement>('[data-review-autofocus]')?.focus()); });
 </script>
 
@@ -29,7 +36,7 @@
 {#if narrow}
 	<AdaptiveDrawer fill within={anchor?.closest<HTMLElement>('.leaf-body') ?? null} ariaLabel="Document reviews" heading="Request review" doneLabel="Close" open={drawerOpen} onClose={close} onClosed={finishClose} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
 {:else}
-	<Popover fill {anchor} avoidRect={ownershipRow} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
+	<Popover fill {anchor} avoidRect={cleared} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
 {/if}
 
 <style>

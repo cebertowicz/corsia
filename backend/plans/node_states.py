@@ -157,7 +157,7 @@ def later_ready(connection: sqlite3.Connection) -> bool:
     version = connection.execute("PRAGMA schema_version").fetchone()[0]
     if _LATER_READY.get(connection) == version:
         return True
-    found = any(row[1] == "later" for row in connection.execute("PRAGMA table_info(plan_nodes)"))
+    found = any(row[1] == "later" for row in connection.execute("PRAGMA table_info(plan_nodes)").fetchall())
     if found:
         _LATER_READY[connection] = version
     return found
