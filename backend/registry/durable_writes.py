@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import hashlib
 import logging
 from pathlib import Path
@@ -21,6 +20,8 @@ from registry import durable_write_intents as intents
 from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
+from registry.promote_recovery_notice import INTERRUPTED, announce_undone_promote, recovery_path
+from registry.shared_file_scan import similar_files
 from registry.shared_target import SharedTarget
 from registry.promoted_path import mark_carried, settle_promoted_source, write_authority_unless_promoted
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
@@ -116,52 +117,6 @@ def _cleanup_undo(stage: Path, backup: Path | None) -> None:
     _remove_if_present(backup)
 
 
-def _bounded_shared_files(shared_root: Path, *, limit: int = 2000):
-    pending = [shared_root]
-    visited = 0
-    while pending and visited < limit:
-        current = pending.pop()
-        try:
-            children = sorted(
-                current.iterdir(),
-                key=lambda path: path.name.casefold(),
-            )
-        except OSError:
-            continue
-        directories: list[Path] = []
-        for candidate in children:
-            visited += 1
-            if visited > limit:
-                break
-            try:
-                if candidate.is_symlink():
-                    continue
-                if candidate.is_dir():
-                    directories.append(candidate)
-                elif candidate.is_file():
-                    yield candidate
-            except OSError:
-                continue
-        pending.extend(reversed(directories))
-
-
-def _similar_files(target: Path, shared_root: Path) -> list[str]:
-    scored: list[tuple[float, str]] = []
-    target_stem = target.stem.casefold()
-    for candidate in _bounded_shared_files(shared_root):
-        if (
-            candidate == target
-            or candidate.name == "INDEX.md"
-            or candidate.name.startswith(".")
-        ):
-            continue
-        score = SequenceMatcher(None, target_stem, candidate.stem.casefold()).ratio()
-        if score >= 0.45:
-            scored.append((score, str(candidate)))
-    scored.sort(key=lambda item: (-item[0], item[1].casefold()))
-    return [path for _score, path in scored[:5]]
-
-
 def _intent_identity(target: Path, *, db) -> tuple[str, str]:
     identity = service.prepare_file_identity(str(target), db=db)
     if identity is None:
@@ -191,7 +146,7 @@ def _recover_unpublished_claim(
         return None
     if restored:
         return source
-    collision = source.with_name(f"{source.name}.promotion-recovery-{intent_id}")
+    collision = recovery_path(source, intent_id)
     if restore_claimed_file(claim, collision):
         return collision
     return claim
@@ -400,7 +355,7 @@ def _complete_publication(
                 intent_id,
                 index_error,
             )
-    similar = _similar_files(shared.path, shared.category_root.parent)
+    similar = similar_files(shared.path, shared.category_root.parent)
     if notify:
         service.notify_changed(artifact)
     result_index: dict[str, str] = (
@@ -685,7 +640,7 @@ def promote_file(
         db.close()
 
 
-def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
+def _recover_one_intent(row: dict, *, workspace: Path, db, why: str = INTERRUPTED) -> None:
     target, stage, backup, source, claim = _validated_intent_paths(
         row, workspace=workspace, db=db,
     )
@@ -706,6 +661,8 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
             )
         if recovered_source not in (None, source):
             logger.warning("Recovered promotion source collision at %s.", recovered_source)
+        if row["operation"] == "promote":
+            announce_undone_promote(db, row, why=why, source=source, target=target)
         _cleanup_undo(stage, backup)
         intents.delete(db, row["id"])
         return
@@ -718,6 +675,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
             )
         if recovered_source not in (None, source):
             logger.warning("Recovered promotion source collision at %s.", recovered_source)
+            announce_undone_promote(db, row, why=why, source=source, target=target)
         _remove_if_present(stage)
         _remove_if_present(backup)
         if row["created_parent"]:
@@ -745,7 +703,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
         # retried, so letting it raise here would stop startup on every boot. Announce the undo and
         # finish it now, through the same path an intent takes after the live write refused.
         intents.mark_undoing(db, row["id"], 1)
-        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db)
+        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db, why=str(exc))
         logger.warning("Rolled back durable promotion %s: %s", row["id"], exc)
         return
     try:
