@@ -225,6 +225,27 @@ def test_stack_signature_skips_memo_plumbing_to_reach_the_caller() -> None:
     )
 
 
+def test_stack_signature_names_the_caller_of_a_real_memoized_reader() -> None:
+    from connections import fact_memo
+
+    captured: list[str] = []
+
+    @fact_memo.memoized_reader
+    def read_rows(db, kind: str) -> int:
+        captured.append(cpu_sampler._signature(sys._getframe(), "db_N"))
+        return 0
+
+    def caller_of_the_reader() -> None:
+        with fact_memo.fact_reads():
+            read_rows(object(), "rows")
+
+    caller_of_the_reader()
+
+    stack = captured[0].split("stack=", 1)[1].split(" <- ")
+    assert [entry.split(":")[1] for entry in stack[:2]] == ["read_rows", "caller_of_the_reader"]
+    assert not any(entry.startswith("connections/fact_memo.py:") for entry in stack)
+
+
 def test_stack_signature_keeps_memo_work_when_it_is_innermost() -> None:
     frame = _chain(
         ("connections/fact_memo.py", "arguments_of"),
