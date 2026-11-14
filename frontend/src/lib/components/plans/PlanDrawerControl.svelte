@@ -134,17 +134,15 @@
 		width: 7px;
 		height: 7px;
 		border-radius: var(--radius-circle);
-		background: var(--accent);
-		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 13%, transparent);
+		--mark-colour: var(--accent);
+		background: var(--mark-colour);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--mark-colour) 13%, transparent);
 	}
 	/*
-	 * The menu row's own needs-you colours (ThreadPlanStateMark's dot and word), so
-	 * the chip and the row it stands for read as one fact.
+	 * The menu row's needs-you amber (ThreadPlanStateMark's dot and word) on the
+	 * chip's own dot and halo, so the chip and the row it stands for read as one fact.
 	 */
-	.plan-progress-chip.needs-you .progress-mark {
-		background: var(--amber);
-		box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 13%, transparent);
-	}
+	.plan-progress-chip.needs-you .progress-mark { --mark-colour: var(--amber); }
 	.plan-progress-chip.needs-you b { color: var(--amber-text); }
 	.plan-progress-chip:focus-visible {
 		outline: 2px solid var(--accent);

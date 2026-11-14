@@ -337,9 +337,11 @@ describe('PlanDrawerControl needs-you colours', () => {
 	}
 
 	it('paints the dot and the count with the menu’s needs-you tokens', () => {
-		const mark = declarations('.plan-progress-chip.needs-you .progress-mark');
-		expect(mark).toContain('background: var(--amber);');
-		expect(mark).toContain('box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 13%, transparent);');
+		// One dot and halo rule, coloured through --mark-colour, so needs-you adds no raw shadow.
+		const dot = declarations('.progress-mark');
+		expect(dot).toContain('background: var(--mark-colour);');
+		expect(dot).toContain('box-shadow: 0 0 0 4px color-mix(in srgb, var(--mark-colour) 13%, transparent);');
+		expect(declarations('.plan-progress-chip.needs-you .progress-mark')).toContain('--mark-colour: var(--amber);');
 		expect(declarations('.plan-progress-chip.needs-you b')).toContain('color: var(--amber-text);');
 	});
 });
