@@ -210,8 +210,7 @@ async def test_row_read_failure_preserves_the_live_step_and_retry_recovers(plan,
         raise PlanError("fixture row read failure")
 
     monkeypatch.setattr(lifecycle, "_step_row_state", fail)
-    with pytest.raises(PlanError, match="fixture row read failure"):
-        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) == browser_control.STEP_NOT_RECORDED
     assert lifecycle._steps[THREAD] is step
     assert row(plan["db"], step.node_id)["state"] == "pending"
     assert plan["events"] == [f"{kind}_step_opened"]
