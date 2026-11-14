@@ -192,9 +192,25 @@ def _latest_classifications(rows: Iterable[sqlite3.Row]) -> list[sqlite3.Row]:
     return [row for _, row in latest.values()]
 
 
-def _measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
-    """Latest facts of Measurement's activated classifier, retaining task attribution."""
+_SELECTED_NODES = "SELECT value FROM json_each(?)"
+"""Selected node ids bound as one JSON array, so any number of them fits one bound variable."""
+
+_SELECTED_THREADS_SQL = (f"SELECT DISTINCT thread_id FROM active_turns "
+                         f"WHERE plan_node_id IN ({_SELECTED_NODES})")
+"""Threads with a turn bound to a selected node: only their facts can be attributed to one."""
+
+
+def _measured_attributed_facts(db: sqlite3.Connection, selected: str | None = None) -> list[AttributedFact]:
+    """Latest facts of Measurement's activated classifier, retaining task attribution.
+
+    With ``selected`` (a JSON array of node ids), facts in threads that never ran a selected node are
+    dropped before their turns are read: ``node_before`` only returns a node one of the thread's own turns
+    was bound to. The latest classification is chosen first, so the result equals filtering the full read.
+    """
     rows = _latest_classifications(db.execute(_ATTRIBUTED_SQL + f" WHERE {_ACTIVE_VERSION_ONLY}").fetchall())
+    if selected is not None:
+        threads = {thread for (thread,) in db.execute(_SELECTED_THREADS_SQL, (selected,))}
+        rows = [row for row in rows if row['thread_id'] in threads]
     turns = _ThreadTurns(db, (row['thread_id'] for row in rows if row['thread_id'] is not None))
     facts = []
     for row in rows:
@@ -206,11 +222,13 @@ def _measured_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
     return facts
 
 
-def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+def _plan_attributed_facts(db: sqlite3.Connection, selected: str | None = None) -> list[AttributedFact]:
     """Plan-sourced correction facts, attributed to the work they corrected.
 
-    Missing source events and missing corrected nodes stay unattributed.
+    Missing source events and missing corrected nodes stay unattributed. With ``selected`` (a JSON array
+    of node ids), only facts on those nodes are read.
     """
+    only_selected = "" if selected is None else f" AND n.id IN ({_SELECTED_NODES})"
     rows = db.execute(f"""
         SELECT f.subject_key,e.created_at AS source_at,f.attributes,n.id AS source_node
         FROM outcome_events f
@@ -227,8 +245,8 @@ def _plan_attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
             THEN json_extract(e.payload_json,'$.source_node_id') END
         WHERE f.event_name=? AND f.retracted_at IS NULL
           AND (f.subject_key LIKE '{SENT_BACK_SUBJECT_PREFIX}%'
-            OR f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%')
-    """, (CORRECTION_EVENT,)).fetchall()
+            OR f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'){only_selected}
+    """, (CORRECTION_EVENT,) if selected is None else (CORRECTION_EVENT, selected)).fetchall()
     facts = []
     for row in rows:
         attributes = json.loads(row['attributes'])
@@ -245,7 +263,8 @@ def attributed_facts(db: sqlite3.Connection, *, node_ids: Iterable[str] | None =
     selected = None if node_ids is None else frozenset(node_ids)
     if selected is not None and not selected:
         return []
-    facts = _measured_attributed_facts(db) + _plan_attributed_facts(db)
+    bound = None if selected is None else json.dumps(sorted(selected))
+    facts = _measured_attributed_facts(db, bound) + _plan_attributed_facts(db, bound)
     return facts if selected is None else [fact for fact in facts if fact.node_id in selected]
 
 
