@@ -130,14 +130,17 @@ def _read_only_grants(argv) -> list[str]:
     return next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
 
 
-def _set_person(login: str | None) -> None:
+def _set_person(login: str | None, status: str | None = None, *, no_own_login: bool = False) -> None:
+    from connections.github_signin import NO_OWN_LOGIN
     from connections.models import get_connection, upsert_connection
 
     row = get_connection("github")
-    config = {key: value for key, value in row["config"].items() if key != "login"}
+    config = {key: value for key, value in row["config"].items() if key not in ("login", NO_OWN_LOGIN)}
     if login is not None:
         config["login"] = login
-    upsert_connection(type="cli", provider="github", status=row["status"], config=config)
+    if no_own_login:
+        config[NO_OWN_LOGIN] = True
+    upsert_connection(type="cli", provider="github", status=status or row["status"], config=config)
 
 
 # -- add ------------------------------------------------------------------------------------------------
@@ -509,6 +512,66 @@ def test_unknown_person_login_never_ready(agent, monkeypatch):
     view = github_agent.verify_now()
     assert (view.state, view.cause) == ("unverified", "own_login_unknown")
     assert github_agent.agent_login(view) is None and probes
+
+
+@pytest.mark.parametrize("status", ["needs_auth", "not_installed"])
+def test_person_without_own_github_gets_a_ready_agents_account(agent, monkeypatch, status):
+    # Someone with no GitHub account of their own: their gh was checked and has no sign-in.
+    probes = []
+    monkeypatch.setattr(github_agent, "request_probe", lambda: probes.append(True))
+    _set_person(None, status=status, no_own_login=True)
+    _signed_in()
+    view = github_agent.verify_now()
+    assert view.ready and github_agent.agent_login(view) == BOT
+    assert probes  # still looking, so a personal sign-in made later is caught
+
+
+@pytest.mark.asyncio
+async def test_unchecked_login_is_named_to_the_person_on_check_and_connect(agent, monkeypatch):
+    # Nothing here shows the person's own login, so only they can tell the agents' login isn't theirs.
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    monkeypatch.setattr(github_agent, "request_probe", lambda: None)
+    _set_person(None, status="needs_auth", no_own_login=True)
+    _signed_in()
+    tool = GitHubAgentAccountTool()
+    checked = json.loads(await tool.execute(action="check"))
+    assert checked["account"]["own_login_checked"] is False and "next" not in checked["account"]
+    assert f"@{BOT}" in checked["next"] and checked["next"].endswith("call sign_out")
+    connected = json.loads(await tool.execute(action="connect"))
+    assert connected["next"] == checked["next"]
+    status = json.loads(await tool.execute(action="status"))
+    assert status["own_login_checked"] is False and "next" not in status  # named once, not on every read
+
+
+@pytest.mark.asyncio
+async def test_checked_login_needs_no_naming(agent):
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    _signed_in()
+    _ready_view()
+    checked = json.loads(await GitHubAgentAccountTool().execute(action="check"))
+    assert "next" not in checked and "own_login_checked" not in checked["account"]
+
+
+def test_needs_auth_from_a_failed_check_is_not_proof_of_no_own_github(agent, monkeypatch):
+    # Startup writes needs_auth when its probe fails; the person may well be signed in.
+    monkeypatch.setattr(github_agent, "request_probe", lambda: None)
+    _set_person(None, status="needs_auth")
+    _signed_in()
+    view = github_agent.verify_now()
+    assert (view.state, view.cause) == ("unverified", "own_login_unknown")
+    assert github_agent.agent_login(view) is None
+
+
+def test_person_signing_in_later_as_the_agents_login_is_wrong_account(agent):
+    _set_person(None, status="needs_auth", no_own_login=True)
+    _signed_in()
+    assert _ready_view().ready
+    _set_person(BOT, status="available")  # the probe now sees the person's own gh as this login
+    view = github_agent.verify_now()
+    assert (view.state, view.cause) == ("wrong_account", "person_account")
+    assert github_agent.shell_env(view)["GH_CONFIG_DIR"] == github_agent_home().LOCKED_HOME
 
 
 def test_persisted_person_login_survives_cold_start(agent):

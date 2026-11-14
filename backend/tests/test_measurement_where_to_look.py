@@ -362,3 +362,62 @@ async def test_the_daily_all_work_read_an_agent_consumes_keeps_its_fields(isolat
     assert (first["format"], first["previous"], first["latest"], first["n"]) == ("percent", 0.9, 0.6, 30)
     assert result["period"]["latest"] == {"from": "2026-11-09", "to": "2026-11-15"}
     assert result["period"]["previous"] == {"from": "2026-11-02", "to": "2026-11-08"}
+
+
+#: Worker-thread round trips on the longest awaited chain of one cold all-work read. Each round trip
+#: waits for the event loop to resume it, so on a CPU-starved host the read's time grows with this
+#: chain, not with its database time. Run at once the page reads take 5; run one after another they took 14.
+MAX_ROUND_TRIPS_IN_A_CHAIN = 6
+
+
+@pytest.mark.asyncio
+async def test_a_cold_all_work_read_reads_the_shared_costs_once_on_a_short_chain(isolated_db, monkeypatch):
+    """Cost of the ``attention-watch`` read with nothing joined or kept: Models, Cost and Agents share one
+    usage ledger and one task-chain cost read, and the page reads run at once, so the chain of worker
+    round trips the request waits through stays short."""
+    import asyncio
+    import contextvars
+
+    from api import measurement_chain_costs, measurement_cost, measurement_join
+    from api.measurement_where_to_look import measurement_where_to_look
+    from infra import db_async
+
+    _freeze(monkeypatch, POST_BREAK)
+
+    def seed(db):
+        for project, agent in (("p1", "one"), ("p2", "two")):
+            _seed_project(db, project)
+            _seed_agent(db, agent, project_id=project)
+            _seed_period(db, agent, "2026-11-03", 30, not_first_try=3)
+            _seed_period(db, agent, "2026-11-12", 30, not_first_try=12)
+
+    _seeded(seed)
+    calls: list[str] = []
+    for module, name in ((measurement_cost, "ledger_shapes"), (measurement_chain_costs, "chain_costs")):
+        def counted(*args, _read=getattr(module, name), _name=name, **kwargs):
+            calls.append(_name)
+            return _read(*args, **kwargs)
+        monkeypatch.setattr(module, name, counted)
+    # A task starts from the chain of the task that created it, so the deepest count is the longest chain.
+    chain = contextvars.ContextVar("chain", default=0)
+    deepest = [0]
+
+    def returned() -> None:
+        chain.set(chain.get() + 1)
+        deepest[0] = max(deepest[0], chain.get())
+
+    def round_trip(run):
+        async def wrapper(*args, **kwargs):
+            value = await run(*args, **kwargs)
+            returned()
+            return value
+        return wrapper
+
+    monkeypatch.setattr(db_async, "_run_shielded", round_trip(db_async._run_shielded))
+    monkeypatch.setattr(asyncio, "to_thread", round_trip(asyncio.to_thread))
+    measurement_join._flights.clear()
+    result = await measurement_where_to_look(
+        project="all", agent="none", grain="days", timezone_name="UTC", user={"id": "steve"})
+    assert sorted(row["subject"]["id"] for row in result["worse"] if row["subject"]["kind"] == "agent") == ["one", "two"]
+    assert sorted(calls) == ["chain_costs", "ledger_shapes"]
+    assert 0 < deepest[0] <= MAX_ROUND_TRIPS_IN_A_CHAIN
