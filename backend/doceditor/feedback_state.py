@@ -226,26 +226,30 @@ def past_watermark_sql(item: str, view: str) -> str:
                      AND {item}.id>{view}.seen_reply_id))"""
 
 
-def unread_comment_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
+def unread_comment_rows(
+    user_id: str, artifact_id: str | tuple[str, ...] | None,
+) -> tuple[str, tuple]:
     """The one definition of unread rows for replies and eligible top-level comments.
 
     Both use the same per-thread watermark, ordered by creation time and id. A tag of the
     viewing account makes either kind eligible even where the ordinary rules would not; a tag of
-    another account does not.
+    another account does not. ``artifact_id`` is one document, several, or None for all of them.
     """
-    # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
-    scoped = artifact_id is not None
+    # A document read binds both sides to its artifacts so idx_doc_comments_artifact bounds the scan to them.
+    scope = (artifact_id,) if isinstance(artifact_id, str) else artifact_id
+    scoped = scope is not None
+    within = f"IN ({','.join('?' * len(scope))})" if scoped else ""
     sql = f"""FROM doc_comments item
            JOIN doc_comments root ON root.id=COALESCE(item.parent_id, item.id)
            LEFT JOIN (
                SELECT DISTINCT parent_id FROM doc_comments
                WHERE author_kind='user' AND parent_id IS NOT NULL
-                 {"AND artifact_id=?" if scoped else ""}
+                 {f"AND artifact_id {within}" if scoped else ""}
            ) touched ON touched.parent_id=root.id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE item.author_kind<>'user'
-             {"AND item.artifact_id=? AND root.artifact_id=?" if scoped else ""}
+             {f"AND item.artifact_id {within} AND root.artifact_id {within}" if scoped else ""}
              AND ((item.parent_id IS NOT NULL
                    AND (root.author_kind='user' OR touched.parent_id IS NOT NULL OR {_person_tagged('item')}))
                   OR ({_eligible_top_level('item')})
@@ -253,7 +257,7 @@ def unread_comment_rows(user_id: str, artifact_id: str | None) -> tuple[str, tup
              AND {past_watermark_sql('item', 'thread_view')}"""
     # Text order: touched, thread_view, the scope, the two person-tag tests, then the directed set.
     directed = (USER_AUTHOR_ID, user_id)
-    return sql, ((artifact_id, user_id, artifact_id, artifact_id, user_id, user_id, *directed) if scoped
+    return sql, ((*scope, user_id, *scope, *scope, user_id, user_id, *directed) if scoped
                  else (user_id, user_id, user_id, *directed))
 
 
@@ -271,11 +275,26 @@ def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
 
-def unread_item_ids(db, user_id: str) -> set[str]:
-    """Return document IDs with unread replies or eligible top-level comments."""
-    sql, params = unread_comment_rows(user_id, None)
-    rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
-    return {str(row["artifact_id"]) for row in rows}
+# Documents per unread query, well under SQLite's bound-parameter limit (three IN lists each).
+_SCOPE_CHUNK = 300
+
+
+def unread_item_ids(db, user_id: str, artifact_ids: list[str] | None = None) -> set[str]:
+    """Return document IDs with unread replies or eligible top-level comments.
+
+    With ``artifact_ids`` only those documents are read, each through its own index range,
+    instead of every comment in the database.
+    """
+    scopes = [None] if artifact_ids is None else [
+        tuple(artifact_ids[start:start + _SCOPE_CHUNK])
+        for start in range(0, len(artifact_ids), _SCOPE_CHUNK)
+    ]
+    waiting: set[str] = set()
+    for scope in scopes:
+        sql, params = unread_comment_rows(user_id, scope)
+        rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
+        waiting.update(str(row["artifact_id"]) for row in rows)
+    return waiting
 
 
 def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
@@ -330,16 +349,20 @@ def mark_thread_viewed(
 
 def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
     """Add the passive reply marker to every artifact row in a pane payload."""
-    waiting = unread_item_ids(db, user_id)
+    artifacts: list[dict] = []
 
-    def visit(nodes: list[dict]) -> None:
+    def collect(nodes: list[dict]) -> None:
         for node in nodes:
             if node.get("kind") == "artifact":
-                node["reply_waiting"] = node.get("id") in waiting
+                artifacts.append(node)
             else:
-                visit(node.get("children") or [])
+                collect(node.get("children") or [])
 
-    visit(pane.get("nodes") or [])
+    collect(pane.get("nodes") or [])
+    ids = sorted({str(node["id"]) for node in artifacts if node.get("id") is not None})
+    waiting = unread_item_ids(db, user_id, ids)
+    for node in artifacts:
+        node["reply_waiting"] = node.get("id") in waiting
     return pane
 
 
