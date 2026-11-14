@@ -156,7 +156,7 @@ def test_conductor_add_records_kind_at_creation(db, actor, expected):
 def test_plan_activity_counts_real_conductor_adds_and_unique_receipts(db, monkeypatch):
     from datetime import datetime, timedelta, timezone
     import sys
-    from infra.audit_reads import _plan_activity
+    from infra.audit_plan_activity import plan_activity as _plan_activity
 
     plan = service.ensure_plan("thread", "lane", db=db)
     db.commit()
@@ -191,7 +191,7 @@ def test_plan_activity_counts_real_conductor_adds_and_unique_receipts(db, monkey
 
 def test_plan_activity_reports_archived_conductor_add_separately(db):
     from datetime import datetime, timedelta, timezone
-    from infra.audit_reads import _plan_activity
+    from infra.audit_plan_activity import plan_activity as _plan_activity
 
     plan = service.ensure_plan("thread", "lane", db=db)
     db.commit()
@@ -205,7 +205,7 @@ def test_plan_activity_reports_archived_conductor_add_separately(db):
 
 def test_plan_activity_counts_stale_watched_and_archived_owner(db, monkeypatch):
     from datetime import datetime, timedelta, timezone
-    from infra.audit_reads import _plan_activity
+    from infra.audit_plan_activity import plan_activity as _plan_activity
 
     now = datetime.now(timezone.utc)
     old = (now - timedelta(days=9)).isoformat()
