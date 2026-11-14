@@ -10,11 +10,14 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/app/sp ace" "$work/app/deep/er"
 cp /bin/ls "$work/app/sp ace/universal"
 cp /usr/lib/dyld "$work/app/deep/er/dyld"
+# A thin (single-architecture) binary: the shape of most Mach-O files in the bundle.
+thin_arch="$(lipo -archs /bin/ls | awk '{print $1}')"
+lipo -thin "$thin_arch" /bin/ls -output "$work/app/deep/thin"
 printf 'text\n' >"$work/app/notes.txt"
 printf '\xca\xfe\xba\xbe\x00\x00\x00\x34rest' >"$work/app/Foo.class"
 
 got="$("$here/list-macho.sh" "$work/app" | tr '\0' '\n' | sort)"
-want="$(printf '%s\n' "$work/app/deep/er/dyld" "$work/app/sp ace/universal" | sort)"
+want="$(printf '%s\n' "$work/app/deep/er/dyld" "$work/app/deep/thin" "$work/app/sp ace/universal" | sort)"
 [ "$got" = "$want" ] || { printf 'FAIL: list-macho found:\n%s\nwanted:\n%s\n' "$got" "$want" >&2; exit 1; }
 
 mkdir "$work/app/bad"$'\n'"name"
