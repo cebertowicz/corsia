@@ -26,6 +26,11 @@ async def _closed(scope, tmp_path, monkeypatch):
     """An opened then evicted document, so its next open reads the store again."""
     manager, entry, context = await opened(scope, tmp_path, monkeypatch)
     await manager.evict(entry.artifact_id, entry, can_evict=lambda: True)
+    # Eviction can leave the publisher finishing a store transaction. Let it
+    # release its connection before tests damage or lock the store at rest.
+    if entry.publisher.task is not None:
+        await entry.publisher.task
+    assert entry.publisher.retry is None and (entry.publisher.drained or entry.publisher.closed)
     return manager, entry.artifact_id, entry.live.path, context
 
 

@@ -393,9 +393,10 @@ fn local_get(port: u16, path: &str) -> Result<String, String> {
         .and_then(|response| String::from_utf8(response).map_err(|_| unavailable()))
 }
 
-/// Asks the service to stop the local model CORSIA started. Stopping takes up to its SIGTERM grace, so the read waits.
+/// Asks the service to stop the local model CORSIA started. Stopping takes up to its SIGTERM grace plus its wait after
+/// SIGKILL (`omlx_supervisor.SIGTERM_GRACE_S` + `SIGKILL_WAIT_S`, 35 s), so the read waits a little longer than that.
 fn stop_local_model(port: u16) -> Result<(), String> {
-    let response = local_exchange("POST", port, "/api/system/stop-local-model", Duration::from_millis(250), Duration::from_secs(15))
+    let response = local_exchange("POST", port, "/api/system/stop-local-model", Duration::from_millis(250), Duration::from_secs(40))
         .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))?;
     if response.starts_with("HTTP/1.1 200") {
         Ok(())

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -20,7 +21,14 @@ def write_live_text(path: Path, text: str, prior_sha256: str, operation=None) ->
     """Blocking. The live lane's write: a recorded document is written and saved as a version by the
     operation's actor under its reason, under the history lock, before this returns; any other file as
     before. A changed file is never replaced (``FileChangedOutside``). An operation that requires history
-    (a restore) raises, with the file left as it was, unless its version is recorded."""
+    (a restore) raises, with the file left as it was, unless its version is recorded.
+
+    Text whose bytes equal the file's is not written: a flush with nothing new (the last viewer
+    leaving) renames nothing and records no version. The lane still records and publishes it."""
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() == prior_sha256:
+        if hashlib.sha256(path.read_bytes()).hexdigest() != prior_sha256:
+            raise FileChangedOutside()
+        return
     target = history_target(path, Path(config.WORKSPACE))
     if target is None or not target.document:
         document_save.write_atomic_plain(path, text, prior_sha256)

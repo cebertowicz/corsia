@@ -33,6 +33,14 @@ export interface ArtifactTab {
 	status: ArtifactTabStatus;
 	/** Where the viewer should go once this tab's comments load; consumed once. */
 	landOn?: DocumentLanding;
+	/** A pressed link still resolving to a file: the tab shows its loading state until then (`artifactLinkTabs`). */
+	link?: ArtifactLink;
+}
+
+/** A link as pressed, before it names a file: its target and the scope it was pressed in. */
+export interface ArtifactLink {
+	href: string;
+	projectId: string | null;
 }
 
 export interface ThreadArtifactWorkspace {

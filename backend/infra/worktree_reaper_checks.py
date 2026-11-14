@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-import os
 from pathlib import Path
 
 from loguru import logger
@@ -27,13 +26,52 @@ from infra.worktree_reaper_probe import (
     status_skip_reason,
     worktree_git_env,
 )
-from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
+from infra.worktree_reaper_scan import Candidate, idle_since, newest_tree_mtime
+
+
+# A worktree whose owning worker is gone leaves once idle this long, uncommitted
+# and unpublished work included (copied out first unless the owner is purged,
+# since an archived worker can come back); its branch outlives the tree.
+GONE_OWNER_IDLE_SECONDS = 3600
 
 
 def _load_active_threads() -> set[str]:
     from core.turn_core import active_turn_thread_ids
 
     return active_turn_thread_ids()
+
+
+def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
+    """Map every thread id to how a gone owner's idle worktree leaves; None while it may return.
+
+    DISCARD: any purged thread (worker, roster agent or root thread), so it cannot
+    come back; its tree goes with nothing copied out. SALVAGE: a temporary worker
+    (spawned, not a roster agent) archived for any reason; every archive can be
+    undone (the person unarchives it, new activity wakes a dormant one, a settled
+    one is sent back), so its tree is removed only after its uncommitted work is
+    copied out. None: every other thread, including an archived roster agent or
+    root thread; its worktree is never gone here.
+    """
+    from infra.database import get_db
+
+    connection = get_db()
+    try:
+        rows = connection.execute(
+            "SELECT id, spawned_by, agent_enabled, lifecycle_state FROM threads",
+        ).fetchall()
+    finally:
+        connection.close()
+    verdicts: dict[str, RemovalVerdict | None] = {}
+    for row in rows:
+        state = row["lifecycle_state"] or "active"
+        worker = row["spawned_by"] is not None and not row["agent_enabled"]
+        if state == "purged":
+            verdicts[str(row["id"])] = RemovalVerdict.DISCARD
+        elif worker and state == "archived":
+            verdicts[str(row["id"])] = RemovalVerdict.SALVAGE
+        else:
+            verdicts[str(row["id"])] = None
+    return verdicts
 
 
 @dataclass
@@ -49,6 +87,63 @@ class CheckContext:
     _threads_loaded: bool = field(default=False, init=False)
     _open_prs: set[str] | None = field(default=None, init=False)
     _prs_loaded: bool = field(default=False, init=False)
+    _lifecycles: dict[str, RemovalVerdict | None] | None = field(default=None, init=False)
+    _lifecycles_loaded: bool = field(default=False, init=False)
+
+    def owner_verdict(self, owner: str | None, *, fresh: bool = False) -> RemovalVerdict | None:
+        """How a gone owner's worktree leaves, or None while any thread it can mean may return.
+
+        A short owner matches by prefix. A name no thread row matches, or an unreadable
+        thread table, answers None, so the worktree keeps the ordinary checks: a tree made
+        by hand, or a database restored from before its owner existed, is never discarded.
+        """
+        if owner is None:
+            return None
+        if fresh or not self._lifecycles_loaded:
+            self._lifecycles_loaded = True
+            try:
+                self._lifecycles = _load_thread_lifecycles()
+            except Exception as exc:
+                logger.warning("worktree_reaper: thread lifecycle read failed: {}", exc)
+                self._lifecycles = None
+        if self._lifecycles is None:
+            return None
+        matches = [verdict for thread, verdict in self._lifecycles.items()
+                   if thread == owner or thread.startswith(owner)]
+        if not matches or None in matches:
+            return None
+        if all(verdict is RemovalVerdict.DISCARD for verdict in matches):
+            return RemovalVerdict.DISCARD
+        return RemovalVerdict.SALVAGE
+
+    def gone_owner_verdict(
+        self, candidate: Candidate, idle: float, *, fresh: bool = False,
+    ) -> str | RemovalVerdict | None:
+        """DISCARD, SALVAGE or CLEAN for an idle worktree of a gone owner; None when the rule does not apply.
+
+        Idle means nothing anywhere in the tree changed for the hour, not only
+        Git's files: someone may be finishing the work in an editor. A tree with
+        nothing uncommitted is CLEAN for any owner: its branch keeps every commit,
+        so it takes the ordinary clean removal, re-checked in the quarantine.
+        """
+        if self.now - idle < GONE_OWNER_IDLE_SECONDS:
+            return None
+        verdict = self.owner_verdict(candidate.owner_thread, fresh=fresh)
+        if verdict is None:
+            return None
+        newest = newest_tree_mtime(candidate.path)
+        if newest is None:
+            return "unreadable"
+        if self.now - newest < GONE_OWNER_IDLE_SECONDS:
+            return "recent"
+        status = _status_reason(self, candidate, False)
+        if status == "status_error":
+            return status
+        if status is None:
+            verdict = RemovalVerdict.CLEAN
+        if fresh:
+            self.probe.refresh()
+        return self.probe.skip_reason(candidate.path) or verdict
 
     def open_pr_branches(self, *, fresh: bool = False) -> set[str] | None:
         """Open-PR head branches, read once per pass; None when unknown.
@@ -133,6 +228,10 @@ def _entry_reason(entry: WorktreeEntry | None) -> str | None:
 
 class RemovalVerdict(Enum):
     SALVAGE = "salvage"
+    # The owner is purged: remove without copying anything out.
+    DISCARD = "discard"
+    # A gone owner's tree with nothing uncommitted: the ordinary clean removal.
+    CLEAN = "clean"
 
 
 def _status_verdict(
@@ -174,6 +273,9 @@ def candidate_verdict(
         return "git_lock"
     if has_worktree_config(candidate.admin):
         return "worktree_config"
+    gone = ctx.gone_owner_verdict(candidate, candidate.idle_since)
+    if gone is not None:
+        return gone
     if not merged and ctx.is_recent(
         candidate.entry, candidate.idle_since, threshold_seconds, short_threshold_seconds,
     ):
@@ -223,6 +325,9 @@ def recheck_before_removal(
     if has_worktree_config(candidate.admin):
         return "worktree_config"
     idle = idle_since(candidate.path, candidate.admin)
+    gone = ctx.gone_owner_verdict(candidate, idle, fresh=True)
+    if gone is not None:
+        return gone
     if not merged and ctx.is_recent(entry, idle, threshold_seconds, short_threshold_seconds):
         return "recent"
     if expected_head is not None:
@@ -242,33 +347,3 @@ def recheck_before_removal(
     return (ctx.probe.skip_reason(candidate.path)
             or ctx.thread_skip_reason(candidate.owner_thread, fresh=True)
             or verdict)
-
-
-def orphan_skip_reason(
-    ctx: CheckContext, orphan: Orphan, threshold_seconds: float,
-) -> tuple[str | None, float | None]:
-    """Return why an unregistered ``.worktrees/`` entry must be kept, and its age.
-
-    An orphan is deleted only when it has no ``.git`` entry, Git does not
-    list it, nothing anywhere inside changed for the threshold, and no live
-    process uses it. Every check reads live state, so it doubles as the recheck.
-    """
-    path = orphan.path
-    if path.is_symlink():
-        return "symlink", None
-    if os.path.lexists(path / ".git"):
-        return "git_entry_present", None
-    try:
-        registered = {item.path for item in list_worktrees(ctx.repo)}
-    except ReaperGitError:
-        return "status_error", None
-    if path.resolve(strict=False) in registered:
-        return "registered", None
-    newest = newest_tree_mtime(path)
-    if newest is None:
-        return "unreadable", None
-    idle_days = round(max(ctx.now - newest, 0.0) / 86400, 2)
-    if ctx.now - newest < threshold_seconds:
-        return "recent", idle_days
-    ctx.probe.refresh()
-    return ctx.probe.skip_reason(path), idle_days

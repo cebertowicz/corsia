@@ -204,15 +204,21 @@ def _superseded_sources_drop_sql() -> str:
 
     The guard is statement text so SQLite reads only the rows in the
     installed-boundary index; a bound key would scan the whole thread while
-    the write lock is held.
+    the write lock is held. The index also holds rows whose text merely
+    mentions the key (tool output quoting it), and SQLite rewrites every row
+    an UPDATE matches even when ``json_remove`` changes nothing, so the
+    ``json_type`` check limits the write to rows that really carry the key.
+    ``json_type`` raises on malformed text and SQLite does not order AND terms,
+    so the ``CASE`` makes ``json_valid`` run first.
+    Parameters: ``?1`` key path, ``?2`` thread id, ``?3`` kept record id.
     """
     # learning_schema imports this module, so its guard is imported here.
     from infra.learning_schema import installed_boundary_guard
 
     return (
-        "UPDATE messages SET metadata=json_remove(metadata, ?) "
-        f"WHERE thread_id=? AND id<>? AND {installed_boundary_guard('metadata')} "
-        "AND json_valid(metadata)"
+        "UPDATE messages SET metadata=json_remove(metadata, ?1) "
+        f"WHERE thread_id=?2 AND id<>?3 AND {installed_boundary_guard('metadata')} "
+        "AND CASE WHEN json_valid(metadata) THEN json_type(metadata, ?1) END IS NOT NULL"
     )
 
 

@@ -5,6 +5,7 @@ import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 import { apiFetch } from '$lib/api/request';
+import { keepReadAnswers } from '$lib/chatCommentTypes';
 
 /** Show the server's comment threads on the loaded rows they name; a row not loaded here has nothing to show them on. */
 export function adoptCommentThreads(threadId: string, fresh: Message[]): void {
@@ -12,7 +13,7 @@ export function adoptCommentThreads(threadId: string, fresh: Message[]): void {
 	const byId = new Map(fresh.map(row => [row.id, row]));
 	messages.update(currentRows => currentRows.map(row => {
 		const next = row.thread_id === threadId ? byId.get(row.id) : undefined;
-		return next ? { ...row, chat_comments: next.chat_comments ?? [], chat_visible_content: next.chat_visible_content, chat_answer_cids: next.chat_answer_cids } : row;
+		return next ? { ...row, chat_comments: keepReadAnswers(row.chat_comments, next.chat_comments ?? []) ?? [], chat_visible_content: next.chat_visible_content, chat_answer_cids: next.chat_answer_cids } : row;
 	}));
 }
 

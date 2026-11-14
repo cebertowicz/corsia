@@ -3,7 +3,7 @@ import { expect, test } from './support/test';
 import { createSession, openAppPastLanding, sidebarThread, waitForWsConnected, TEST_TOKEN } from './support/corsia';
 import { injectMessage, releaseMockGate, seedMockResponses } from './support/mock';
 import { setFocusMode } from './support/focusMode';
-import { commentEditor, commentEditorClosed, commentOnMessage, postedComments } from './support/chatComments';
+import { closeCommentThread, commentEditor, commentEditorClosed, commentOnMessage, postedComments } from './support/chatComments';
 
 test.use({ seedPerTest: true });
 
@@ -119,6 +119,8 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   }
   await page.screenshot({ path: path.join(frames, `unread-${mode}.png`), animations: 'disabled' });
   // Activating it lands on the comment and opens its thread, where the answer reads.
+  // The jump is a pick: it records the answer read as its thread opens.
+  const viewed = page.waitForResponse((response) => response.request().method() === 'POST' && /\/comments\/[^/]+\/viewed$/.test(new URL(response.url()).pathname) && response.ok());
   await control.click();
   // Nothing is added under the message: the thread is the surface the highlight opens.
   await expect(row.locator('.chat-comment-thread')).toHaveCount(0);
@@ -129,8 +131,12 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await expect(card.locator('.ct-msg-author')).toHaveText('CORSIA');
   await expect(card.locator('.ct-msg-author')).not.toHaveText(thread);
   await page.screenshot({ path: path.join(frames, `landed-${mode}.png`), animations: 'disabled' });
-  // Opening the thread marks the reply read: the unread mark and the control's notice both go.
+  // Opening the thread marks the reply read: the control's notice goes at once, while the highlight keeps its unread mark
+  // until the thread closes, so the sign the reader came to see does not vanish under them.
   await expect(page.getByRole('button', { name: /next new reply/ })).toHaveCount(0, { timeout: 10_000 });
+  await expect(row.locator('[data-highlight-dot]')).toHaveCount(1);
+  await viewed;
+  await closeCommentThread(page, surface);
   await expect(row.locator('[data-highlight-dot]')).toHaveCount(0);
   await page.screenshot({ path: path.join(frames, `read-${mode}.png`), animations: 'disabled' });
 });

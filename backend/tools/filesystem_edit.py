@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from eval.tool_allowlist import carry_in_hides
-from infra.db_async import run_off_db
+from infra.db_async import run_in_db, run_off_db
 from infra.guidance_targets import history_target
 from infra.guidance_history_paths import read_regular
+from registry.promoted_path import moved_message
 from tools.base import Tool
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
@@ -24,6 +25,12 @@ from tools.filesystem_gate import _resolve_path_for_action
 from tools.filesystem_match import match_edits
 from doceditor.live_lane import TextEdit
 from doceditor.live_tools import write_live
+
+
+async def _not_found(path: str, resolved: Path | None) -> str:
+    """The missing-file error; for a path a promote moved, it points at where the document went."""
+    moved = None if resolved is None else await run_in_db(moved_message, resolved, "edit")
+    return f"Error: {moved or f'File not found: {path}'}"
 
 
 class EditFileTool(Tool):
@@ -85,6 +92,7 @@ class EditFileTool(Tool):
     async def execute(self, path: str, old_string: str, new_string: str, replace_all: bool = False, **kwargs: Any) -> str:
         # Ordinary writes register from the persisted result observer; governed
         # shared writes register atomically inside the durable-write transaction.
+        file_path = None
         try:
             authorized = await _resolve_path_for_action(
                 tool=self,
@@ -130,7 +138,7 @@ class EditFileTool(Tool):
                 file_path, new_content, target, kwargs, expected=expected, **write_args,
             )
         except FileNotFoundError:
-            return f"Error: File not found: {path}"
+            return await _not_found(path, file_path)
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -196,6 +204,7 @@ class MultiEditTool(Tool):
         }
 
     async def execute(self, path: str, edits: list[dict[str, Any]], **kwargs: Any) -> str:
+        file_path = None
         try:
             authorized = await _resolve_path_for_action(
                 tool=self,
@@ -235,7 +244,7 @@ class MultiEditTool(Tool):
                 file_path, content, target, kwargs, expected=expected, **write_args,
             )
         except FileNotFoundError:
-            return f"Error: File not found: {path}"
+            return await _not_found(path, file_path)
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:

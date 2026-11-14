@@ -98,16 +98,24 @@ def asks_user_from_facts(
     state: str, condition: str, assignee: str | None, review_kind: str | None,
     *, has_attention: bool, causes: list[dict],
 ) -> bool:
-    """Whether the row asks the person, independently of a pause ``ask_deferred`` counts."""
+    """Whether the row asks the person, independently of a pause ``ask_deferred`` counts.
+
+    The person's own task still asks them while all that holds it is a pause
+    (``ask_deferred`` defers its attention) or an agent's check-back watch: that
+    watch is the agent's follow-up, not something the person waits on (#2631),
+    the same split ``wait_causes.working_child`` makes (#2373). A blocker armed
+    as a wait, a dependency or a hold still defers the ask.
+    """
     from plans import user_steering
 
-    pause_only = bool(causes) and all(
+    soft_only = bool(causes) and all(
         cause.get("reason_key") == "plan_paused"
         or (cause.get("placed") and user_steering.is_user_pause(cause))
+        or (cause.get("watch_id") is not None and not cause.get("blocked_wait"))
         for cause in causes
     )
     return state not in TERMINAL_DISPLAY and bool(
-        (assignee == "user" and (condition == "ready" or (condition == "paused" and pause_only)))
+        (assignee == "user" and (condition == "ready" or (condition in {"paused", "waiting"} and soft_only)))
         or review_kind in _HUMAN_REVIEWS or has_attention
     )
 

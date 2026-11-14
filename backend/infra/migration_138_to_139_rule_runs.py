@@ -34,8 +34,9 @@ def _copy_back(conn: sqlite3.Connection, table: str) -> None:
 
 
 def _next_run_required(conn: sqlite3.Connection) -> bool:
+    # Read every row: a cursor left mid-step and kept alive past the commit pins a read snapshot.
     return any(row[1] == "next_run_at" and row[3] for row in conn.execute(
-        "PRAGMA table_info(automation_schedules)"))
+        "PRAGMA table_info(automation_schedules)").fetchall())
 
 
 def migrate_138_to_139(conn: sqlite3.Connection) -> None:

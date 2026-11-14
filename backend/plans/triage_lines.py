@@ -9,7 +9,8 @@ write carry neither.
 Rank is a top-level node's position among the plan's open top-level nodes in
 plan order. Ready is ``selection_validity``'s own answer (``slot_blockers``) for
 each open leaf task, less a task that already holds its slot (it is running,
-not waiting to be picked), so this module holds no second readiness check: a
+not waiting to be picked) and a Later task (never picked, so never passed
+over), so this module holds no second readiness check: a
 top-level task is ready when it is, and a top-level phase when a task under it
 is. Nothing here writes; the one durable fact, ``JUMPED_READY_NODE_ID``, is
 handed to the start's existing transition event by its caller.
@@ -105,7 +106,7 @@ def standing(db, plan) -> Standing:
     }
     leaves = [
         row for row, _path in ordered
-        if not row["has_child_in_work"]
+        if not row["has_child_in_work"] and not row["later"]
         and row["kind"] == "task" and row["state"] in node_order.OPEN_TASK_STATES
     ]
     blockers = validity.slot_blockers(db, [(row, plan) for row in leaves])
