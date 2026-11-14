@@ -84,7 +84,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: set())
     # Every owner a test names is a live thread unless the test says otherwise.
     monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles",
-                        lambda: {"0123abcd-1111-2222-3333-444455556666": False})
+                        lambda: {"0123abcd-1111-2222-3333-444455556666": None})
     events: list[dict[str, Any]] = []
     monkeypatch.setattr(
         worktree_reaper, "emit_product_event",

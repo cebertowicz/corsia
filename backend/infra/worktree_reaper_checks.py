@@ -30,9 +30,9 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_scan import Candidate, Orphan, idle_since, newest_tree_mtime
 
 
-# A worktree whose owning worker is gone is deleted once idle this long,
-# uncommitted and unpublished work included: nobody is left to finish it, and
-# its pushed branch outlives the tree.
+# A worktree whose owning worker is gone leaves once idle this long, uncommitted
+# and unpublished work included (copied out first for a settled worker, which
+# can be sent back); its branch outlives the tree.
 GONE_OWNER_IDLE_SECONDS = 3600
 
 
@@ -42,27 +42,34 @@ def _load_active_threads() -> set[str]:
     return active_turn_thread_ids()
 
 
-def _load_thread_lifecycles() -> dict[str, bool]:
-    """Map every thread id to whether it is gone for good as a worktree owner.
+def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
+    """Map every thread id to how a gone owner's idle worktree leaves; None while it may return.
 
-    Gone: purged, or a temporary worker (spawned, not a roster agent) that is
-    archived. A durable agent's or a root thread's worktree is never gone here.
+    DISCARD: purged, or a temporary worker (spawned, not a roster agent) archived by
+    the person or by dormancy. A worker archived on settling its assignment can be
+    sent back, so its tree is SALVAGEd: removed after its uncommitted work is copied
+    out. A durable agent's or a root thread's worktree is never gone here.
     """
+    from core.thread_lifecycle import SETTLED_WORKER_REASON
     from infra.database import get_db
 
     connection = get_db()
     try:
         rows = connection.execute(
-            "SELECT id, spawned_by, agent_enabled, lifecycle_state FROM threads",
+            "SELECT id, spawned_by, agent_enabled, lifecycle_state, archived_reason FROM threads",
         ).fetchall()
     finally:
         connection.close()
-    gone: dict[str, bool] = {}
+    verdicts: dict[str, RemovalVerdict | None] = {}
     for row in rows:
         state = row["lifecycle_state"] or "active"
         worker = row["spawned_by"] is not None and not row["agent_enabled"]
-        gone[str(row["id"])] = state == "purged" or (worker and state == "archived")
-    return gone
+        if state == "purged" or (worker and state == "archived"):
+            settled = state == "archived" and row["archived_reason"] == SETTLED_WORKER_REASON
+            verdicts[str(row["id"])] = RemovalVerdict.SALVAGE if settled else RemovalVerdict.DISCARD
+        else:
+            verdicts[str(row["id"])] = None
+    return verdicts
 
 
 @dataclass
@@ -78,17 +85,18 @@ class CheckContext:
     _threads_loaded: bool = field(default=False, init=False)
     _open_prs: set[str] | None = field(default=None, init=False)
     _prs_loaded: bool = field(default=False, init=False)
-    _lifecycles: dict[str, bool] | None = field(default=None, init=False)
+    _lifecycles: dict[str, RemovalVerdict | None] | None = field(default=None, init=False)
     _lifecycles_loaded: bool = field(default=False, init=False)
 
-    def owner_gone(self, owner: str | None, *, fresh: bool = False) -> bool:
-        """Whether every thread the worktree name can mean is gone, or none exists.
+    def owner_verdict(self, owner: str | None, *, fresh: bool = False) -> RemovalVerdict | None:
+        """How a gone owner's worktree leaves, or None while any thread it can mean may return.
 
-        A short owner matches by prefix. An unreadable thread table answers
-        False, so the worktree keeps the ordinary checks.
+        A short owner matches by prefix. A name no thread row matches, or an unreadable
+        thread table, answers None, so the worktree keeps the ordinary checks: a tree made
+        by hand, or a database restored from before its owner existed, is never discarded.
         """
         if owner is None:
-            return False
+            return None
         if fresh or not self._lifecycles_loaded:
             self._lifecycles_loaded = True
             try:
@@ -97,22 +105,27 @@ class CheckContext:
                 logger.warning("worktree_reaper: thread lifecycle read failed: {}", exc)
                 self._lifecycles = None
         if self._lifecycles is None:
-            return False
-        matches = [gone for thread, gone in self._lifecycles.items()
+            return None
+        matches = [verdict for thread, verdict in self._lifecycles.items()
                    if thread == owner or thread.startswith(owner)]
-        return all(matches)
+        if not matches or None in matches:
+            return None
+        if all(verdict is RemovalVerdict.DISCARD for verdict in matches):
+            return RemovalVerdict.DISCARD
+        return RemovalVerdict.SALVAGE
 
     def gone_owner_verdict(
         self, candidate: Candidate, idle: float, *, fresh: bool = False,
     ) -> str | RemovalVerdict | None:
-        """DISCARD for an idle worktree of a gone owner; None when the rule does not apply."""
+        """DISCARD or SALVAGE for an idle worktree of a gone owner; None when the rule does not apply."""
         if self.now - idle < GONE_OWNER_IDLE_SECONDS:
             return None
-        if not self.owner_gone(candidate.owner_thread, fresh=fresh):
+        verdict = self.owner_verdict(candidate.owner_thread, fresh=fresh)
+        if verdict is None:
             return None
         if fresh:
             self.probe.refresh()
-        return self.probe.skip_reason(candidate.path) or RemovalVerdict.DISCARD
+        return self.probe.skip_reason(candidate.path) or verdict
 
     def open_pr_branches(self, *, fresh: bool = False) -> set[str] | None:
         """Open-PR head branches, read once per pass; None when unknown.

@@ -1,9 +1,11 @@
 """Worktree reaper: a gone worker's worktree, and what a removal left behind.
 
-A temporary worker that is archived or purged, or an owner with no thread at
-all, cannot come back to its worktree. Its tree goes once idle for an hour,
-uncommitted and unpublished work included, without a salvage copy. Every
-other owner keeps the ordinary checks.
+A purged thread, or a temporary worker archived by the person or by dormancy,
+cannot come back to its worktree. Its tree goes once idle for an hour,
+uncommitted and unpublished work included, without a salvage copy. A worker
+archived on settling its assignment can be sent back, so its tree goes after an
+hour too, but with its work copied out first. Every other owner, including a
+name no thread matches, keeps the ordinary checks.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import sqlite3
 import pytest
 
 from infra import worktree_reaper_checks
+from infra.worktree_reaper_checks import RemovalVerdict
 from tests.test_worktree_reaper import (  # noqa: F401  (fixtures)
     DAY,
     FakeProbe,
@@ -33,12 +36,13 @@ _REAL_LIFECYCLES = worktree_reaper_checks._load_thread_lifecycles
 
 GONE = "feedc0de-1111-2222-3333-444455556666"
 LIVE = "0123abcd-1111-2222-3333-444455556666"
+SETTLED = "5e771ed0-1111-2222-3333-444455556666"
 HOUR = 3600
 
 
 @pytest.fixture
 def owners(monkeypatch):
-    table = {GONE: True, LIVE: False}
+    table = {GONE: RemovalVerdict.DISCARD, LIVE: None, SETTLED: RemovalVerdict.SALVAGE}
     monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles", lambda: dict(table))
     return table
 
@@ -60,17 +64,32 @@ def test_a_gone_workers_unfinished_worktree_is_removed_without_a_copy(repo, owne
     report = _run(repo)
 
     assert report.removed == 1 and not wt.exists()
-    assert report.salvaged == []
+    assert report.salvaged == [] and report.discarded == [f"{GONE}-task"]
     assert _git(repo, "rev-parse", "--verify", f"b-{GONE}-task")  # the branch stays
 
 
-def test_an_owner_with_no_thread_counts_as_gone(repo, owners):
-    wt = _unfinished(repo, "deadbeef-task")
+def test_a_settled_workers_unfinished_worktree_is_removed_after_its_work_is_copied_out(
+    repo, owners,
+):
+    wt = _unfinished(repo, f"{SETTLED}-task")
     _age_all(repo, wt, 2 * HOUR)
 
     report = _run(repo)
 
     assert report.removed == 1 and not wt.exists()
+    assert [item.name for item in report.salvaged] == [f"{SETTLED}-task"]
+    assert report.discarded == []
+
+
+def test_a_name_no_thread_matches_keeps_the_ordinary_checks(repo, owners):
+    # A tree made by hand, or a database restored from before its owner existed.
+    wt = _unfinished(repo, "deadbeef-task")
+    _age_all(repo, wt, 2 * HOUR)
+
+    report = _run(repo)
+
+    assert report.removed == 0 and wt.is_dir()
+    assert _reasons(report) == {"deadbeef-task": "recent"}
 
 
 def test_a_live_owners_unfinished_worktree_keeps_the_ordinary_checks(repo, owners):
@@ -84,7 +103,7 @@ def test_a_live_owners_unfinished_worktree_keeps_the_ordinary_checks(repo, owner
 
 
 def test_a_short_name_any_live_thread_could_mean_is_kept(repo, owners):
-    owners["feedc0de-9999-2222-3333-444455556666"] = False
+    owners["feedc0de-9999-2222-3333-444455556666"] = None
     wt = _unfinished(repo, "feedc0de-task")
     _age_all(repo, wt, 2 * HOUR)
 
@@ -152,14 +171,17 @@ def test_thread_rows_are_classified_by_lifecycle(monkeypatch):
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     connection.execute(
-        "CREATE TABLE threads (id TEXT, spawned_by TEXT, agent_enabled INT, lifecycle_state TEXT)")
-    connection.executemany("INSERT INTO threads VALUES (?,?,?,?)", [
-        ("settled-worker", "parent", 0, "archived"),
-        ("running-worker", "parent", 0, "active"),
-        ("archived-agent", "parent", 1, "archived"),
-        ("archived-root", None, 0, "archived"),
-        ("purged-root", None, 0, "purged"),
-        ("legacy-row", None, None, None),
+        "CREATE TABLE threads (id TEXT, spawned_by TEXT, agent_enabled INT, lifecycle_state TEXT,"
+        " archived_reason TEXT)")
+    connection.executemany("INSERT INTO threads VALUES (?,?,?,?,?)", [
+        ("settled-worker", "parent", 0, "archived", "assignment_settled"),
+        ("user-archived-worker", "parent", 0, "archived", "user"),
+        ("dormant-worker", "parent", 0, "archived", "dormancy"),
+        ("running-worker", "parent", 0, "active", None),
+        ("archived-agent", "parent", 1, "archived", "user"),
+        ("archived-root", None, 0, "archived", "user"),
+        ("purged-root", None, 0, "purged", None),
+        ("legacy-row", None, None, None, None),
     ])
 
     class _Unclosable:
@@ -174,6 +196,7 @@ def test_thread_rows_are_classified_by_lifecycle(monkeypatch):
     monkeypatch.setattr(infra.database, "get_db", lambda: _Unclosable())
 
     assert _REAL_LIFECYCLES() == {
-        "settled-worker": True, "running-worker": False, "archived-agent": False,
-        "archived-root": False, "purged-root": True, "legacy-row": False,
+        "settled-worker": RemovalVerdict.SALVAGE, "user-archived-worker": RemovalVerdict.DISCARD,
+        "dormant-worker": RemovalVerdict.DISCARD, "running-worker": None, "archived-agent": None,
+        "archived-root": None, "purged-root": RemovalVerdict.DISCARD, "legacy-row": None,
     }
