@@ -86,14 +86,8 @@ def list_for_project(
             f"WHERE {' AND '.join(where)}"
         )
         total = conn.execute(f"SELECT COUNT(*) {source}", params).fetchone()[0]
-        projected = (
-            ", CASE WHEN i.state='active' THEN 'archived' "
-            "ELSE i.state END AS projected_state"
-            if state == "archived"
-            else ""
-        )
         rows = conn.execute(
-            f"{_projection()}{projected}, s.title AS parent_thread_title {source} "
+            f"{_projection()}, s.title AS parent_thread_title {source} "
             "ORDER BY i.updated_at DESC, i.id ASC LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
@@ -124,15 +118,10 @@ def list_for_thread(
             relationship_clause = (
                 f"((r.relationship_state IN ({owner_states})) OR ({released}))"
             )
-            projected = (
-                ", CASE WHEN r.relationship_state IN ('owner-pinned', 'owner-active') "
-                "THEN i.state ELSE 'archived' END AS projected_state"
-            )
         else:
             relationship_clause = f"r.relationship_state IN ({owner_states})"
-            projected = ""
         rows = conn.execute(
-            f"""{_projection()}{projected}
+            f"""{_projection()}
                 FROM artifact_identities i
                 JOIN artifact_registrations r ON r.artifact_id=i.id
                 WHERE r.parent_thread_id=?
