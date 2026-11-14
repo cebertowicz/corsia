@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { isPaneShortcut, paneCollapsed } from '$lib/stores/paneCollapsed';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
 import { placeAnchorAt } from '$lib/documentReadingPlace';
+import { restoringPlace } from '$lib/documentImagePlace';
 import { commentRanges } from '$lib/cm/comment-marks';
 
 /** The reader's own input, which ends a hold. */
@@ -107,6 +108,9 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		if (offset === null) return;
 		panelPlace = !pane ? { view, pos, offset, table: !!row } : null;
 		const hold = (here: number | null) => {
+			// An image Back or a tab return is laying its own saved place through this same move (the image viewer hid the
+			// panel and its Back brings it back); two writers of one scroll offset would pull the text between their lines.
+			if (restoringPlace(view)) return;
 			const drift = here === null ? 0 : here - scroller.getBoundingClientRect().top - offset;
 			if (Math.abs(drift) > 0.5) scroller.scrollTop += drift;
 		};

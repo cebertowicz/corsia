@@ -45,7 +45,7 @@ async function keepsReplyFocusAcrossThePanel(page: Page, request: Parameters<typ
 	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
 	if (!await pane.evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
 	await page.waitForTimeout(1200);
-	if (!await page.locator('.canvas-comment-drawer').count()) await page.getByRole('button', { name: '13 threads' }).click();
+	if (!await page.locator('.canvas-comment-drawer').count()) await page.getByRole('button', { name: '13 comments' }).click();
 	const { id, caret } = await typeAReply(page);
 	await toggle.click();
 	await page.waitForTimeout(1800);
@@ -100,7 +100,9 @@ test('keeps the first whole line while the panel opens and closes', async ({ pag
 	expect(Math.abs(closed.y - before.y)).toBeLessThan(2);
 });
 
-test('keeps the same reply and focus when a margin list becomes a sheet', async ({ page, request }) => {
+// The column shown on load, with a reply being written in one of its cards: when the panel's trip leaves no room for the
+// column, the list takes its narrow form (a popover on desktop) with that reply, rather than closing under it.
+test('keeps the same reply and focus when the margin list stops fitting', async ({ page, request }) => {
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 1360, height: 900 });
 	await seedDocument(page, request, true);
@@ -108,7 +110,7 @@ test('keeps the same reply and focus when a margin list becomes a sheet', async 
 	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
 	if (await pane.evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
 	const drawer = page.locator('.canvas-comment-drawer.margin:not(.leaving)');
-	if (!await drawer.count()) await page.getByRole('button', { name: '13 threads' }).click();
+	if (!await drawer.count()) await page.getByRole('button', { name: '13 comments' }).click();
 	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
 	if (!await card.locator('.ct-input').count()) await card.locator('.ct-head').click({ position: { x: 14, y: 10 } });
 	const input = card.locator('.ct-input');
@@ -116,7 +118,7 @@ test('keeps the same reply and focus when a margin list becomes a sheet', async 
 	const id = await input.evaluate((el) => el.closest('[data-comment-id]')?.getAttribute('data-comment-id'));
 	expect(id).toBeTruthy();
 	await toggle.click();
-	const reply = page.locator('.canvas-comment-drawer.sheet').locator(`[data-comment-id="${id}"] .ct-input`);
+	const reply = page.locator('.canvas-comment-drawer:not(.margin):not(.leaving)').locator(`[data-comment-id="${id}"] .ct-input`);
 	await expect(reply).toHaveValue('A half-written reply');
 	await expect(reply).toBeFocused();
 });
@@ -144,7 +146,7 @@ async function closeList(page: Page) {
 	if (!await page.locator('.drawer-backdrop, .canvas-comment-drawer:not(.leaving)').count()) return;
 	await page.keyboard.press('Escape');
 	await expect.poll(() => page.locator('.drawer-backdrop').count(), { timeout: 6000 }).toBe(0);
-	if (await page.locator('.canvas-comment-drawer:not(.leaving)').count()) await page.getByRole('button', { name: '13 threads' }).click();
+	if (await page.locator('.canvas-comment-drawer:not(.leaving)').count()) await page.getByRole('button', { name: '13 comments' }).click();
 	await page.waitForTimeout(600);
 }
 
@@ -153,7 +155,7 @@ const writing = {
 	list: {
 		open: async (page: Page) => {
 			const drawer = page.locator('.canvas-comment-drawer:not(.leaving)');
-			if (!await drawer.count()) await page.getByRole('button', { name: '13 threads' }).click();
+			if (!await drawer.count()) await page.getByRole('button', { name: '13 comments' }).click();
 			const card = drawer.locator('[data-comment-id]').first();
 			if (!await card.locator('.ct-input').count()) await card.locator('.ct-head').click({ position: { x: 14, y: 10 } });
 			return card.locator('.ct-input');
@@ -438,7 +440,7 @@ test('keeps an open thread\'s line in view when the panel opens on a slow move',
 	if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
 	await page.waitForTimeout(1500);
 	await closeList(page);
-	await page.getByRole('button', { name: '13 threads' }).click();
+	await page.getByRole('button', { name: '13 comments' }).click();
 	await page.waitForTimeout(1000);
 	// The reader looks down the whole list and back up before opening the first thread.
 	const listTo = (end: boolean) => page.locator('.canvas-comment-drawer:not(.leaving)').evaluate((drawer, end) => {
