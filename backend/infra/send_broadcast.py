@@ -124,6 +124,11 @@ def project_input_message(row: InputBroadcastRow) -> dict:
     if isinstance(metadata, dict):
         for key in _PRIVATE_METADATA_KEYS:
             metadata.pop(key, None)
+        if row.role == "system":
+            from infra.focus_rows import is_usage_limit_notice
+
+            if is_usage_limit_notice(metadata, row.content):
+                metadata["chat_drawn"] = False
     return {
         "id": row.message_id,
         "role": row.role,

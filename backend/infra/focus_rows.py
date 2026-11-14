@@ -29,7 +29,7 @@ ACTIVITY_SYSTEM_TYPES = (
 NEVER_DRAWN_SYSTEM_TYPES = ("seed",)
 # Events the transcript never draws: the continue input that re-runs a Turn its
 # provider refused for size is the agent's, and the checkpoint row already shows it.
-NEVER_DRAWN_EVENT_TYPES = (CONTEXT_OVERFLOW_REASON,)
+NEVER_DRAWN_EVENT_TYPES = (CONTEXT_OVERFLOW_REASON, "vendor_usage_limit_refusal")
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.
 ERROR_SYSTEM_TYPES = (
@@ -59,7 +59,15 @@ def is_result_notice(meta: dict, content: object) -> bool:
     return _system_type(meta) == "result" and meta.get("is_error") is True and bool(content)
 
 
-def is_focus_visible(row: dict) -> bool:
+def is_usage_limit_notice(meta: dict, content: object) -> bool:
+    from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
+
+    return (_system_type(meta) in ("llm_error", "cc_error") or is_result_notice(meta, content)) and (
+        meta.get("cause_kind") == "usage_limit" or is_provider_usage_or_quota_limit(content)
+    )
+
+
+def is_focus_visible(row: dict, *, hide_usage_limit: bool = True) -> bool:
     """Whether Focus shows `row` as its own item (it closes a run)."""
     role = row.get("role")
     meta = _metadata(row.get("metadata"))
@@ -69,6 +77,8 @@ def is_focus_visible(row: dict) -> bool:
         return meta.get("for_user") is True and bool(row.get("content"))
     if role == "system":
         kind = _system_type(meta)
+        if hide_usage_limit and is_usage_limit_notice(meta, row.get("content")):
+            return False
         if kind == "context_event" and str(meta.get("event_type") or "").startswith("held_reply."):
             return True
         if kind in ERROR_SYSTEM_TYPES:
@@ -141,9 +151,22 @@ RESULT_NOTICE_SQL = (
     "AND COALESCE(content, '') != '')"
 )
 
+def _usage_limit_notice_sql(metadata: str, content: str) -> str:
+    kind = f"CASE WHEN json_valid({metadata}) THEN json_extract({metadata}, '$.type') END"
+    is_error = f"CASE WHEN json_valid({metadata}) THEN json_type({metadata}, '$.is_error') END"
+    cause = f"COALESCE(CASE WHEN json_valid({metadata}) THEN json_extract({metadata}, '$.cause_kind') END, '')"
+    return (
+        f"(CASE WHEN {kind} IN ('llm_error','cc_error') OR "
+        f"({kind} = 'result' AND {is_error} = 'true' AND COALESCE({content}, '') != '') "
+        f"THEN ({cause} = 'usage_limit' OR is_provider_usage_limit({content})) ELSE 0 END)"
+    )
+
+
+USAGE_LIMIT_NOTICE_SQL = _usage_limit_notice_sql('metadata', 'content')
+
 # The same rule in SQL. `for_user`, `recovered` and `is_error` must be JSON `true`,
 # not merely truthy.
-FOCUS_VISIBLE_SQL = f"""
+RECOVERY_VISIBLE_SQL = f"""
 CASE WHEN (CASE role
     WHEN 'user' THEN {_meta_text("$.sender_kind")} != 'agent'
     WHEN 'assistant' THEN {_meta_json_type("$.for_user")} = 'true'
@@ -156,6 +179,9 @@ CASE WHEN (CASE role
     ELSE 0 END) THEN 1 ELSE 0 END
 """
 
+
+FOCUS_VISIBLE_SQL = f"CASE WHEN ({RECOVERY_VISIBLE_SQL}) AND NOT (role='system' AND {USAGE_LIMIT_NOTICE_SQL}) THEN 1 ELSE 0 END"
+
 # A `WHERE` clause continuation that drops the rows the transcript never draws.
 # A user input whose chat text was saved as empty is a chat comment: it lives in
 # its comment thread (infra/chat_comment_index.place_comments), never in chat.
@@ -163,7 +189,18 @@ CASE WHEN (CASE role
 # stamper; subagents/assistant_step_tool_append clears it) answered comments and has nothing left for chat.
 NEVER_DRAWN_FILTER = (
     f"AND NOT (role = 'system' AND ({_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST}) "
-    f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}))) "
+    f"OR {_meta_text('$.event_type')} IN ({_NEVER_DRAWN_EVENT_LIST}) OR {USAGE_LIMIT_NOTICE_SQL})) "
+    # A historical retry must not outlive the notice it paired with.
+    f"AND NOT (role = 'system' AND {_meta_text('$.event_type')} = 'system.turn.unanswered_input' "
+    f"AND COALESCE((SELECT {_usage_limit_notice_sql('notice.metadata', 'notice.content')} "
+    "FROM messages AS notice WHERE notice.thread_id = messages.thread_id "
+    "AND notice.role = 'system' AND json_valid(notice.metadata) "
+    "AND json_extract(notice.metadata, '$.turn_id') = "
+    "CASE WHEN json_valid(messages.metadata) THEN json_extract(messages.metadata, '$.failed_turn_id') END "
+    "AND (json_extract(notice.metadata, '$.type') IN ('llm_error','cc_error') "
+    "OR (json_extract(notice.metadata, '$.type') = 'result' "
+    "AND json_type(notice.metadata, '$.is_error') = 'true' AND COALESCE(notice.content, '') != '')) "
+    "ORDER BY notice.seq DESC, notice.rowid DESC LIMIT 1), 0)) "
     # One primary-key lookup per user row; a bounded page never scans the table.
     "AND NOT (role = 'user' AND EXISTS (SELECT 1 FROM chat_visible_content cv "
     "WHERE cv.message_id = id AND cv.content = '')) "

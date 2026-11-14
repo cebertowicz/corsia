@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 
-from infra.focus_rows import ERROR_SYSTEM_TYPES, FOCUS_VISIBLE_SQL, is_focus_visible
+from infra.focus_rows import ERROR_SYSTEM_TYPES, RECOVERY_VISIBLE_SQL, is_focus_visible
 
 _ERROR_TYPE_LIST = ",".join(f"'{kind}'" for kind in ERROR_SYSTEM_TYPES)
 _TYPE = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.type') END"
@@ -28,7 +28,7 @@ _OPEN_ERROR = (
 )
 # A later row the user must read. Another open error is not one: it is stamped by the
 # same turn start, so it never holds an earlier error visible.
-_BLOCKING = f"({FOCUS_VISIBLE_SQL}) = 1 AND NOT (role='system' AND COALESCE({_TYPE}, '') IN ({_ERROR_TYPE_LIST}))"
+_BLOCKING = f"({RECOVERY_VISIBLE_SQL}) = 1 AND NOT (role='system' AND COALESCE({_TYPE}, '') IN ({_ERROR_TYPE_LIST}))"
 _STAMP = "metadata=json_set(metadata, '$.recovered', json('true'))"
 
 
@@ -42,7 +42,7 @@ def stamp_at_turn_start(
     error and nothing is stamped. The caller publishes the stamped rows, so a live
     client reads `recovered` without a reload.
     """
-    if any(is_focus_visible(dict(row)) for row in claimed):
+    if any(is_focus_visible(dict(row), hide_usage_limit=False) for row in claimed):
         return []
     # An error at or before the newest blocking row can never be stamped, so find that
     # row walking back from the tail and touch only the rows after it. Cost follows the
