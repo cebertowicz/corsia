@@ -170,13 +170,14 @@ def _validated_move(
 
 def relocate_artifact(
     artifact_id: str, target_path: str, *, actor_thread_id: str, db=None,
+    held_path: Path | None = None,
 ) -> dict:
     """Move one artifact's backing file, preserving its identity.
 
     Workspace artifacts and same-filesystem targets only; a non-workspace
     integration or a cross-device target is rejected loud. Its owner or scope
     conductor may relocate it. A supplied connection must be clean: no outer
-    transaction may span the filesystem move.
+    transaction may span the filesystem move. ``held_path``: refuse if moved off it.
     """
     _db = db if db is not None else get_db()
     if _db.in_transaction:
@@ -185,6 +186,8 @@ def relocate_artifact(
         )
     try:
         identity = _authorized_identity(_db, artifact_id, actor_thread_id)
+        if held_path is not None and Path(identity["path"] or "") != held_path:
+            raise RelocationError("this file was moved while the move waited; try again")
         move = _validated_move(_db, identity, target_path, actor_thread_id)
 
         now = _now()

@@ -282,7 +282,7 @@ class ArtifactRelocateTool(Tool):
 
         from registry.relocate import RelocationError, checked_source_path, relocate_artifact
 
-        def _relocate(*, move: bool):
+        def _relocate(*, move: bool, held: Path | None = None):
             db = get_db()
             try:
                 art = models.get_artifact(artifact_id, db=db)
@@ -298,7 +298,7 @@ class ArtifactRelocateTool(Tool):
                         )
                     artifact = relocate_artifact(
                         artifact_id, tool_path(target_path, self._workspace),
-                        actor_thread_id=actor_thread_id, db=db,
+                        actor_thread_id=actor_thread_id, db=db, held_path=held,
                     )
                 except RelocationError as exc:
                     return "bad_request", str(exc)
@@ -314,12 +314,13 @@ class ArtifactRelocateTool(Tool):
         if status == "ok":
             try:
                 documents = get_documents()
+                held = result
                 if documents is None:
-                    status, result = await run_in_db(_relocate, move=True)
+                    status, result = await run_in_db(_relocate, move=True, held=held)
                 else:
                     # A person may have this file open: their typing is saved into it before it moves.
-                    async with hold_for_move(documents, result):
-                        status, result = await run_in_db(_relocate, move=True)
+                    async with hold_for_move(documents, held):
+                        status, result = await run_in_db(_relocate, move=True, held=held)
             except DocumentNotSaved as error:
                 return f"Error: {error}"
         if status == "not_found":

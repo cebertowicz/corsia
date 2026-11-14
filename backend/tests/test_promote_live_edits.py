@@ -12,6 +12,8 @@ from tests.test_durable_writes import _working_file
 from tests.test_durable_writes import durable_scope as durable_scope
 
 NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
+NO_VIEWER = "This document has unsaved changes and no one has it open to save them, so it wasn’t moved. Open it, then try again."
+STILL_TYPING = "This document is still being typed in, so it wasn’t moved. Try again in a moment."
 CARRIED_AND_STALE = pytest.mark.parametrize("stale", [False, True], ids=["carried", "stale"])
 
 
@@ -108,7 +110,7 @@ async def test_a_failed_save_moves_nothing(durable_scope, tmp_path, monkeypatch,
     entry.live.viewer_actor = lambda: None  # no writable viewer can save the typing
     try:
         receipt = await _promote(workspace, thread_id, source)
-        assert receipt.startswith("Error: " + NOT_SAVED)
+        assert receipt.startswith("Error: " + NO_VIEWER)
         assert "Errno" not in receipt and str(workspace) not in receipt
         assert source.read_text() == before
         assert not (workspace / "projects" / "alpha" / "shared" / "planning" / "live.md").exists()
@@ -183,7 +185,7 @@ async def test_a_failed_save_stops_a_relocate_and_moves_nothing(durable_scope, t
     before = source.read_text()
     try:
         receipt = await _relocate_with_tool(workspace, thread_id, source_id, target)
-        assert receipt.startswith("Error: " + NOT_SAVED)
+        assert receipt.startswith("Error: " + NO_VIEWER)
         assert source.read_text() == before and not target.exists()
         assert manager.documents.get(source_id) is entry
     finally:
@@ -362,5 +364,98 @@ async def test_typing_that_arrives_while_the_document_closes_refuses_the_move(du
         assert not shared.exists()
         assert source.read_text().startswith("TYPED ") and "LATE" not in source.read_text()
         assert "during-close" in entry.live.received  # still the browser's to resend: it was never acknowledged
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_typing_that_never_stops_says_the_document_is_still_being_typed_in(durable_scope, tmp_path, monkeypatch):
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+    original, rounds = entry.lane.submit, []
+
+    async def submit_then_type(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        rounds.append(True)
+        _typing(entry, f"round-{len(rounds)}", "MORE ")
+        return result
+    entry.lane.submit = submit_then_type
+    try:
+        receipt = await _promote(workspace, thread_id, source)
+        assert receipt.startswith("Error: " + STILL_TYPING), receipt
+        assert len(rounds) == 5 and source.exists()
+        assert source.read_text().count("MORE ") == 4 and entry.live.text.count("MORE ") == 5  # the last keystroke is unsaved
+        assert manager.documents.get(source_id) is entry
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_save_failure_is_logged_and_still_moves_nothing(durable_scope, tmp_path, monkeypatch, caplog):
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("store exploded")
+    entry.lane.submit = broken
+    try:
+        with caplog.at_level("ERROR", logger="doceditor.live_move_hold"):
+            receipt = await _promote(workspace, thread_id, source)
+        assert receipt.startswith("Error: " + NOT_SAVED), receipt
+        assert "store exploded" not in receipt
+        failures = [record for record in caplog.records if record.name == "doceditor.live_move_hold"]
+        assert len(failures) == 1 and failures[0].exc_info[1].args == ("store exploded",)
+        assert source.exists() and manager.documents.get(source_id) is entry
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+def _another_relocation_wins_the_race(monkeypatch, thread_id, source_id, winner_target):
+    """Before the loser takes its hold, a second relocation of the same artifact has already moved the file."""
+    from contextlib import asynccontextmanager
+
+    import doceditor.live_move_hold as hold_module
+    from registry.relocate import relocate_artifact
+
+    real = hold_module.hold_for_move
+
+    @asynccontextmanager
+    async def raced(documents, path):
+        relocate_artifact(source_id, str(winner_target), actor_thread_id=thread_id)
+        async with real(documents, path):
+            yield
+    monkeypatch.setattr(hold_module, "hold_for_move", raced)
+
+
+@pytest.mark.asyncio
+async def test_a_relocate_that_waited_on_a_move_of_the_same_file_is_refused(
+    durable_scope, tmp_path, monkeypatch, relocation_context,
+):
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False, typed=False)
+    relocation_context(thread_id)
+    winner, loser = source.parent / "first.md", source.parent / "second.md"
+    _another_relocation_wins_the_race(monkeypatch, thread_id, source_id, winner)
+    try:
+        receipt = await _relocate_with_tool(workspace, thread_id, source_id, loser)
+        assert receipt == "Error: this file was moved while the move waited; try again", receipt
+        assert winner.exists() and not loser.exists() and not source.exists()
+    finally:
+        await asyncio.wait_for(manager.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_a_pane_relocate_that_waited_on_a_move_of_the_same_file_is_refused(durable_scope, tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import registry_pane
+
+    manager, entry, workspace, thread_id, source, source_id = await _open(durable_scope, tmp_path, monkeypatch, False, typed=False)
+    monkeypatch.setattr(registry_pane, "authenticate", lambda token: {"id": _user_of(thread_id)})
+    winner, loser = source.parent / "first.md", source.parent / "second.md"
+    _another_relocation_wins_the_race(monkeypatch, thread_id, source_id, winner)
+    try:
+        with pytest.raises(HTTPException) as refused:
+            await registry_pane.relocate_artifact_endpoint(
+                source_id, "token", registry_pane.ArtifactRelocateBody(thread_id=thread_id, target_path=str(loser)))
+        assert refused.value.status_code == 400
+        assert winner.exists() and not loser.exists() and not source.exists()
     finally:
         await asyncio.wait_for(manager.close(), 20)

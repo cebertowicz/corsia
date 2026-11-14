@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from doceditor.live_lane import Operation
 from doceditor.live_runtime import LiveDocuments, LiveEntry
+
+log = logging.getLogger(__name__)
 
 
 class DocumentNotSaved(RuntimeError):
@@ -46,6 +49,8 @@ def _refuse_late_typing(entry: LiveEntry) -> None:
 
 
 _NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
+_NO_VIEWER = "This document has unsaved changes and no one has it open to save them, so it wasn’t moved. Open it, then try again."
+_STILL_TYPING = "This document is still being typed in, so it wasn’t moved. Try again in a moment."
 
 
 SAVE_ROUNDS = 5
@@ -64,9 +69,12 @@ async def _save_open_text(entry: LiveEntry) -> None:
                 return
             actor = live.viewer_actor()
             if actor is None:
-                raise DocumentNotSaved("no writable viewer holds the unsaved text")
+                raise DocumentNotSaved(_NO_VIEWER)
             (await entry.lane.submit(Operation("flush", actor=actor))).require_landed()
         if live.text != live.on_disk[1]:
-            raise DocumentNotSaved("typing kept arriving while the document was being saved")
+            raise DocumentNotSaved(_STILL_TYPING)
+    except DocumentNotSaved:
+        raise
     except Exception as error:
+        log.exception("saving the open document before a move failed: %s", live.path)
         raise DocumentNotSaved(_NOT_SAVED) from error

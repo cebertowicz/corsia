@@ -191,7 +191,7 @@ async def relocate_artifact_endpoint(
 
     from registry.relocate import RelocationError, checked_source_path, relocate_artifact
 
-    def _relocate(*, move: bool):
+    def _relocate(*, move: bool, held=None):
         db = get_db()
         try:
             if get_thread_for_user(body.thread_id, user["id"], db=db) is None:
@@ -203,7 +203,7 @@ async def relocate_artifact_endpoint(
                     )
                 artifact = relocate_artifact(
                     artifact_id, body.target_path,
-                    actor_thread_id=body.thread_id, db=db,
+                    actor_thread_id=body.thread_id, db=db, held_path=held,
                 )
             except RelocationError as exc:
                 return "bad_request", str(exc)
@@ -219,12 +219,13 @@ async def relocate_artifact_endpoint(
     if status == "ok":
         try:
             documents = get_documents()
+            held = result
             if documents is None:
-                status, result = await run_in_db(_relocate, move=True)
+                status, result = await run_in_db(_relocate, move=True, held=held)
             else:
                 # A person may have this file open: their typing is saved into it before it moves.
-                async with hold_for_move(documents, result):
-                    status, result = await run_in_db(_relocate, move=True)
+                async with hold_for_move(documents, held):
+                    status, result = await run_in_db(_relocate, move=True, held=held)
         except DocumentNotSaved as error:
             raise HTTPException(409, str(error))
     if status == "not_found":
