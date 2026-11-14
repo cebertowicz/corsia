@@ -17,7 +17,9 @@ Accepts recorded before the trailer existed read by their author, as ``person_ed
 
 History holds only recorded versions. When ``as_of`` is at or after the document's latest version, the
 working file is read once and bytes that differ from that version count as one more ``outside_edit``
-version; for an earlier ``as_of``, history is all there is.
+version; for an earlier ``as_of``, history is all there is. That edit may have landed any time between
+the latest version and the read, so it alone ends the run only when ``as_of`` is at or after the read's
+second; for an earlier ``as_of`` it is weighed beside the latest recorded version.
 
 Version times are whole seconds, so a version saved in the same second as ``first_round_at`` or
 ``as_of`` may fall on either side of it. Every version that may have been current is weighed; when
@@ -29,13 +31,14 @@ A run's outcome is None, never a partial answer, when:
 - no version is certainly at or before ``first_round_at`` (including the first version landing in
   that same second);
 - the versions that may have been current give different answers (a version saved in the same second
-  as ``first_round_at`` or ``as_of``), so it can't be told.
+  as ``first_round_at`` or ``as_of``, or an outside edit read after ``as_of``), so it can't be told.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import math
+import time
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass
@@ -86,15 +89,15 @@ def went_ahead_outcomes(
     repo = repository(root)
     relative = _relative_paths(repo, root, paths) if repo is not None else {}
     versions = _versions(repo, set(relative.values())) if relative else {}
-    working: dict[str, str | None] = {}
+    working: dict[str, tuple[str | None, float]] = {}
     outcomes: dict[Run, WentAhead | None] = {}
     for run in runs:
         rel = relative.get(run[0])
         history = versions.get(rel, []) if rel is not None else []
         if rel is not None and history and rel not in working and _seconds(run[2]) >= history[-1].at:
             working[rel] = _working_blob(repo, rel, len(history[-1].blob or "") or _hash_length(versions))
-        current = working.get(rel, _UNREAD) if rel is not None else _UNREAD
-        outcomes[run] = _outcome(history, _seconds(run[1]), _seconds(run[2]), current)
+        current = working.get(rel, (_UNREAD, 0.0)) if rel is not None else (_UNREAD, 0.0)
+        outcomes[run] = _outcome(history, _seconds(run[1]), _seconds(run[2]), *current)
     return outcomes
 
 
@@ -117,7 +120,7 @@ def _possible(history: list[_Version], moment: float) -> list[int] | None:
     return [before[-1], *(index for index, version in enumerate(history) if version.at == second)]
 
 
-def _outcome(history: list[_Version], first: float, as_of: float, working) -> WentAhead | None:
+def _outcome(history: list[_Version], first: float, as_of: float, working, read_at: float) -> WentAhead | None:
     bases = _possible(history, first)
     if bases is None or any(history[index].blob is None for index in bases):
         return None
@@ -127,7 +130,10 @@ def _outcome(history: list[_Version], first: float, as_of: float, working) -> We
     if working is not _UNREAD and as_of >= history[-1].at and working != history[-1].blob:
         blobs.append(working)
         writers.append(OUTSIDE_EDIT)
-        ends = [len(history)]
+        if as_of >= math.floor(read_at):  # the read is certainly what was current at as_of
+            ends = [len(history)]
+        elif ends is not None:  # the edit may have landed after as_of
+            ends = [*ends, len(history)]
     if ends is None:
         return None
     same = {blobs[base] == blobs[end] for base in bases for end in ends if end >= base}
@@ -214,14 +220,16 @@ def _hash_length(versions: dict[str, list[_Version]]) -> int:
     return next((len(v.blob) for rows in versions.values() for v in rows if v.blob), 40)
 
 
-def _working_blob(repo: Path, relative: str, length: int) -> str | None:
-    """The Git blob id of the working file's bytes, or None when it is gone; read once per document."""
+def _working_blob(repo: Path, relative: str, length: int) -> tuple[str | None, float]:
+    """The Git blob id of the working file's bytes (None when it is gone) and when they were read; read
+    once per document."""
+    read_at = time.time()
     try:
         data = (repo / relative).read_bytes()
     except FileNotFoundError:
-        return None
+        return None, read_at
     digest = hashlib.sha256 if length == 64 else hashlib.sha1
-    return digest(b"blob %d\0" % len(data) + data).hexdigest()
+    return digest(b"blob %d\0" % len(data) + data).hexdigest(), read_at
 
 
 def _seconds(value: Any) -> float:

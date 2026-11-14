@@ -197,20 +197,45 @@ def test_a_past_as_of_gives_the_same_answer_after_later_versions_and_outside_edi
     }
 
 
-def test_an_unrecorded_outside_edit_after_the_latest_version_is_never_clean(history_scope):
-    workspace, _ = history_scope
+LIVE = 4_000_000_000  # an as_of at or after any read of the working file
+
+
+def outside_edits(workspace: Path) -> tuple[str, str, str, str]:
+    """Four documents whose working files changed after their latest recorded version: edited, reverted
+    to what a first round at 150 saw, reverted away from what a first round at 250 saw, and deleted."""
     commit(workspace, "notes/a.md", "One.\n", AGENT, 100)
     commit(workspace, "notes/b.md", "B.\n", AGENT, 100)
     commit(workspace, "notes/b.md", "B, revised.\n", AGENT, 200)
-    a, b = register(workspace, "notes/a.md"), register(workspace, "notes/b.md")
+    commit(workspace, "notes/c.md", "C.\n", AGENT, 100)
+    commit(workspace, "notes/c.md", "C, revised.\n", AGENT, 200)
+    commit(workspace, "notes/d.md", "D.\n", AGENT, 100)
+    a, b, c, d = (register(workspace, f"notes/{name}.md") for name in "abcd")
     (workspace / "notes" / "a.md").write_text("One, edited outside.\n")
-    (workspace / "notes" / "b.md").write_text("B.\n")  # back to what the person first saw
-    assert went_ahead_outcomes([(a, 150, 300), (b, 150, 300)]) == {
-        (a, 150, 300): {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]},
-        (b, 150, 300): {"went_ahead_unchanged": True, "changed_by": []},
+    (workspace / "notes" / "b.md").write_text("B.\n")
+    (workspace / "notes" / "c.md").write_text("C.\n")
+    (workspace / "notes" / "d.md").unlink()
+    return a, b, c, d
+
+
+def test_an_unrecorded_outside_edit_is_never_clean_for_an_as_of_before_the_read(history_scope):
+    """The edit may have landed after as_of, when the latest recorded version was still current."""
+    workspace, _ = history_scope
+    a, b, c, d = outside_edits(workspace)
+    runs = [(a, 150, 300), (b, 150, 300), (c, 250, 300), (d, 150, 300)]
+    assert went_ahead_outcomes(runs) == dict.fromkeys(runs)
+    assert went_ahead_outcome(b, 150, 300) is None
+
+
+def test_an_unrecorded_outside_edit_ends_a_run_whose_as_of_is_at_or_after_the_read(history_scope):
+    workspace, _ = history_scope
+    a, b, c, d = outside_edits(workspace)
+    runs = [(a, 150, LIVE), (b, 150, LIVE), (c, 250, LIVE), (d, 150, LIVE)]
+    assert went_ahead_outcomes(runs) == {
+        runs[0]: {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]},
+        runs[1]: {"went_ahead_unchanged": True, "changed_by": []},  # the same bytes the person first saw
+        runs[2]: {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]},
+        runs[3]: {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]},
     }
-    (workspace / "notes" / "a.md").unlink()
-    assert went_ahead_outcome(a, 150, 300) == {"went_ahead_unchanged": False, "changed_by": ["outside_edit"]}
 
 
 def test_a_batch_costs_the_same_queries_for_one_run_as_for_fifty(history_scope, monkeypatch):
