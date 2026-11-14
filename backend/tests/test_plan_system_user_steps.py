@@ -318,7 +318,7 @@ def test_a_step_opened_with_no_selected_task_still_wakes_the_agent_when_it_ends(
     assert wake_currency.is_current("owner", json.loads(wake["continuation_condition"]), db=db)
 
 
-SESSION_ENDED = "The browser session ended before this step was finished."
+SESSION_ENDED = "The shared browser closed before this task was finished."
 
 
 def _close(db, node_id: str) -> bool:

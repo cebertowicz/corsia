@@ -99,7 +99,7 @@ def open_user_step(
 
 def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> bool:
     """Settle the person's step as done; False when it had already ended."""
-    return _end(db, node_id, "mark_done", {}, provenance, evidence=evidence)
+    return _end(db, node_id, "settle_user_step", "mark_done", {}, provenance, evidence=evidence)
 
 
 def close_user_step(db, node_id: str, *, reason: str, provenance: str) -> bool:
@@ -107,16 +107,18 @@ def close_user_step(db, node_id: str, *, reason: str, provenance: str) -> bool:
     reason = str(reason).strip()
     if not reason:
         raise errors.PlanInputError("close_user_step needs a reason")
-    return _end(db, node_id, "close_node", {"reason": reason}, provenance)
+    return _end(db, node_id, "close_user_step", "close_node", {"reason": reason}, provenance)
 
 
-def _end(db, node_id: str, operation: str, params: dict, provenance: str, **word) -> bool:
+def _end(
+    db, node_id: str, caller: str, operation: str, params: dict, provenance: str, **word,
+) -> bool:
     from plans import user_settle
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
         if not opened(connection, node["plan_id"], node_id):
-            raise errors.PlanInputError(f"{operation} ends only a step open_user_step opened")
+            raise errors.PlanInputError(f"{caller} ends only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
         user_settle.settle(

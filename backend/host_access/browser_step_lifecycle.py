@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 REPROBE_AFTER_INPUT = 0.5
 REPROBE_EVERY = 2.0
 # Why a step's row closes when its browser session ends first; the agent's wake carries it.
-SESSION_ENDED_REASON = "The browser session ended before this step was finished."
+SESSION_ENDED_REASON = "The shared browser closed before this task was finished."
 Kind = Literal["password", "person"]
 
 

@@ -972,7 +972,7 @@ _CASES = {
     ),
     (
         "system_user_steps.py",
-        'f"{operation} ends only a step open_user_step opened"',
+        'f"{caller} ends only a step open_user_step opened"',
     ): lambda db, scene: partial(
         system_user_steps.settle_user_step, db, scene.own,
         evidence="E", provenance="test",
