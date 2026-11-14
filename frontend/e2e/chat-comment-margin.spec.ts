@@ -77,7 +77,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	const highlight = row.locator('.cm-comment-anchor').filter({ hasText: QUOTE });
 	await highlight.click();
 	await expect(card).toHaveClass(/selected/);
-	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
+	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
 	await page.waitForTimeout(500);
 	expect(Math.abs((await highlight.boundingBox())!.y - mark.y), 'the clicked text stays put').toBeLessThanOrEqual(2);
 	await capture(page, 'chat-margin-1920');

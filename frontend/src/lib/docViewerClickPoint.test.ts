@@ -32,6 +32,16 @@ describe('clickAnchor', () => {
 		const rect = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 230 }), () => null)!()!;
 		expect([rect.x, rect.top, rect.height]).toEqual([90, 222, 24]);
 	});
+	it('sits against the whole of a highlight up to three lines tall, and against the pressed line of a taller one', () => {
+		const line = document.body.appendChild(document.createElement('div'));
+		line.textContent = 'alpha beta gamma';
+		line.style.lineHeight = '24px';
+		Range.prototype.getClientRects = () => [new DOMRect(0, 200, 300, 20), new DOMRect(0, 224, 300, 20)] as unknown as DOMRectList;
+		const short = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 205 }), () => new DOMRect(0, 200, 300, 44))!()!;
+		expect([short.top, short.bottom]).toEqual([198, 244]);
+		const tall = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 205 }), () => new DOMRect(0, 200, 300, 200))!()!;
+		expect([tall.top, tall.height]).toEqual([198, 24]);
+	});
 	it('follows its comment’s text as it moves, and hides when the text’s box does', () => {
 		const marker = document.body.appendChild(document.createElement('button'));
 		marker.className = 'cm-comment-marker';

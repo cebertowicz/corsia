@@ -70,7 +70,7 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 	// A real touch tap needs a touch-enabled context; the caller asks for it where the spec runs as a phone.
 	if (how.tap) await mark.tap(); else await mark.click();
 	if (narrow) {
-		const drawer = page.getByRole('dialog', { name: 'Comment thread' });
+		const drawer = page.getByRole('dialog', { name: 'Comment', exact: true });
 		await expect(drawer).toBeVisible();
 		await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
 		return drawer;
@@ -81,7 +81,7 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 		await expect(card).toBeVisible();
 		return card;
 	}
-	const thread = page.getByRole('dialog', { name: 'Comment thread', exact: true });
+	const thread = page.getByRole('dialog', { name: 'Comment', exact: true });
 	await expect(thread).toBeVisible();
 	return thread;
 }
@@ -95,6 +95,6 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 export async function closeCommentThread(page: Page, thread: Locator): Promise<void> {
 	if (await page.locator('[data-adaptive-drawer]').count()) await thread.getByRole('button', { name: 'Close', exact: true }).click();
 	else await page.keyboard.press('Escape');
-	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
+	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
 	await expect(page.locator('.chat-margin .chat-margin-card.selected')).toHaveCount(0);
 }

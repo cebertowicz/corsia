@@ -1,5 +1,6 @@
 import type { Thread } from '$lib/stores/threads';
 import type { View } from '$lib/homePaneConfig';
+import { TRANSCRIPT_MOVED } from '$lib/sheetClearance';
 
 interface ChatViewportRef {
 	captureBottomOffset: () => void;
@@ -93,6 +94,13 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 	};
 
 	let blurTimer: ReturnType<typeof setTimeout> | undefined;
+	// Puts the transcript back against its bottom edge after the keyboard moved it. With a comment sheet open the sheet keeps the passage
+	// above itself and a restore would drop it back under the sheet, so the sheet is told to place it again instead. Only a comment sheet
+	// (`data-keeps-text`) does that; with another kind of drawer open or none the transcript goes back to its bottom edge.
+	const restoreTranscript = () => {
+		if (document.querySelector('[data-keeps-text]')) document.dispatchEvent(new Event(TRANSCRIPT_MOVED));
+		else options.chatPanel()?.restoreBottomOffset();
+	};
 	const onFocusIn = (e: FocusEvent) => {
 		if (!isEditableTarget(e.target)) return;
 		if (blurTimer !== undefined) clearTimeout(blurTimer);
@@ -107,7 +115,7 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		options.chatPanel()?.captureBottomOffset();
 		requestAnimationFrame(() => requestAnimationFrame(() => {
 			updateCanvasShift();
-			options.chatPanel()?.restoreBottomOffset();
+			restoreTranscript();
 		}));
 	};
 
@@ -118,9 +126,7 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		document.documentElement.style.removeProperty('--messages-pad-top');
 		document.documentElement.style.setProperty('--empty-parallax-offset', '0px');
 		options.chatPanel()?.captureBottomOffset();
-		requestAnimationFrame(() => requestAnimationFrame(() => {
-			options.chatPanel()?.restoreBottomOffset();
-		}));
+		requestAnimationFrame(() => requestAnimationFrame(restoreTranscript));
 	};
 	const onFocusOut = (e: FocusEvent) => {
 		if (!isEditableTarget(e.target)) return;

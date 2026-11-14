@@ -32,7 +32,15 @@ for (const author of ['person', 'agent'] as const) {
 			await expect(target).toBeVisible();
 			if (phone) await target.tap(); else await target.click();
 			await expect.poll(() => cardText(page, phone).then((text) => text.length), { message: `a press on the ${label} stack opens a card` }).toBeGreaterThan(0);
-			await page.waitForTimeout(500);
+			await expect.poll(() => cardText(page, phone), { message: `the ${label} card shows its comments` }).toContain(`${label} note`);
+			// A phone's sheet leaves the pressed text visible above it, in prose and in a cell at the end of the document alike.
+			if (phone) {
+				await expect.poll(async () => {
+					const pressedText = label === 'Cell' ? page.locator('td', { hasText: CELL }).first() : target; // a pressed cell turns into its editor, so measure the cell
+					const box = await pressedText.boundingBox(), sheet = await page.locator('[data-adaptive-drawer] .drawer-panel').first().boundingBox();
+					return !!box && !!sheet && box.y >= 0 && box.y + box.height <= sheet.y;
+				}, { message: `the pressed ${label} text is above the sheet` }).toBe(true);
+			}
 			const pressed = await cardText(page, phone);
 			const reachedByPress = bodies(label).filter((body) => pressed.includes(body));
 			await page.keyboard.press('Escape');
@@ -44,7 +52,6 @@ for (const author of ['person', 'agent'] as const) {
 				const inList = (await drawer.innerText()).includes(body);
 				expect(inPress || inList, `${label} stack, ${author}: "${body}" is reachable by the press or the document's list`).toBe(true);
 			}
-			console.log(`STACKREACH ${author} ${phone ? 393 : 1440} ${label} press reached ${reachedByPress.length} of 3`);
 			await closeComments(page);
 			await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toHaveCount(0);
 		}

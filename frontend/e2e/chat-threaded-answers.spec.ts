@@ -124,7 +124,7 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
   await control.click();
   // Nothing is added under the message: the thread is the surface the highlight opens.
   await expect(row.locator('.chat-comment-thread')).toHaveCount(0);
-  const surface = page.getByRole('dialog', { name: 'Comment thread', exact: true });
+  const surface = page.getByRole('dialog', { name: 'Comment', exact: true });
   await expect(surface).toBeVisible();
   const card = surface.locator('[data-chat-comment="c2.1"]');
   await expect(card).toContainText('This is the answer.');

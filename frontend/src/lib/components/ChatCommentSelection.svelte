@@ -5,15 +5,16 @@
 	import { needsAttention, replySending } from '$lib/chatCommentDelivery';
 	import { chatCommentDrafts } from '$lib/chatCommentDrafts.svelte';
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
-	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
+	import { commentIdsAt, keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
 	import { transcriptTextChanged } from './chatTranscriptMutations';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
-	import ChatCommentThreads from './ChatCommentThreads.svelte';
+	import ChatThreadSheet from './ChatThreadSheet.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
+	import { createChatSheetReveal } from '$lib/chatSheetReveal.svelte';
 	import { keepAboveSheet, transcriptBounds } from './chatCommentViewport';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import type { MarginComposer } from '$lib/docMarginSource';
@@ -25,16 +26,23 @@
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
 	const threadBounds = () => transcriptBounds(messageRoot());
-	// On a phone the sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
+	// On a phone the comment-writing sheet covers the lower part of the transcript, so the passage it is about scrolls into the space above it.
 	let sheet = $state<HTMLElement | null>(null);
-	$effect(() => keepAboveSheet(sheet, messageRoot, () => open ? writingRect() : threadAnchor()));
 	type Pick = { messageId: string; seq: number; anchor: ChatCommentAnchor; rect: DOMRect; root_user_message_id?: string; root_cid?: string };
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
-	let viewing = $state<{ messageId: string; commentId: string } | null>(null);
+	// `list` is every thread on the pressed text when there are two or more; `listed` says the list, not one of its threads, is showing.
+	let viewing = $state<{ messageId: string; commentId: string; list?: string[]; listed?: boolean } | null>(null);
 	const viewedMessage = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId));
 	const viewedComment = $derived(viewedMessage?.chat_comments?.find(comment => comment.id === viewing?.commentId));
+	const listedComments = $derived(viewing?.listed ? (viewing.list ?? []).flatMap(id => viewedMessage?.chat_comments?.find(comment => comment.id === id) ?? []) : []);
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
+	const fromList = $derived(!!viewing?.list && !viewing.listed);
+	let sheetPanel = $state<HTMLElement | null>(null);
+	let sheetDialog = $state<HTMLElement | null>(null);
+	const sheetReveal = createChatSheetReveal(() => sheetPanel, () => viewing?.list ? (viewing.listed ? 'list' : 'thread') : null, () => viewing?.commentId, () => sheetDialog);
+	// The same keeping for an opened comment's sheet: the pressed text (after the sheet is capped above it) rises into the space above the sheet.
+	$effect(() => keepAboveSheet(sheet ?? sheetPanel, messageRoot, () => sheet ? writingRect() : sheetReveal.pressedText() ?? threadAnchor(), sheet ? undefined : sheetReveal.pressedText));
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	const rootDraft = $derived(threadId && draft ? chatCommentDrafts.root(threadId, draft.messageId, draft.anchor) : undefined);
@@ -257,19 +265,28 @@
 			const { threadId: sourceThread, messageId, commentId, target } = (event as CustomEvent<{ threadId: string; messageId: string; commentId: string; target: HTMLElement }>).detail;
 			const message = $messages.find(item => item.id === messageId && item.thread_id === threadId);
 			const comment = message?.chat_comments?.find(item => item.id === commentId);
-			if (open || sourceThread !== threadId || !messageRoot()?.contains(target)) return;
+			if (open || sourceThread !== threadId || !(messageRoot()?.contains(target) || viewing?.listed)) return;
 			// One reply behavior: a thread's Reply opens that comment's thread, whose send goes straight through onSendReply, the same as the popover and the drawer. It never routes through the composer.
-			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id }; }
+			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id, list: viewing?.list }; }
 		};
-		const openHighlight = (ids: string[], source: HTMLElement) => {
+		const openHighlight = (ids: string[], source: HTMLElement, row: number) => {
+			// Two or more threads on the pressed text open as a list of them; a row's Reply opens that thread, and Back returns to the list.
+			if (!marginComments) {
+				for (const message of $messages) {
+					if (message.thread_id !== threadId) continue;
+					const stacked = (message.chat_comments ?? []).filter(item => ids.includes(item.id)).map(item => item.id);
+					if (stacked.length > 1) { sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: stacked[0], list: stacked, listed: true }; return; }
+				}
+			}
 			for (const message of $messages) {
 				if (message.thread_id !== threadId) continue;
-				const comment = message.chat_comments?.find(item => ids.includes(item.id));
+				// The press's own thread first, then the ones around it, so a press on an inner highlight picks it.
+				const comment = ids.map(id => message.chat_comments?.find(item => item.id === id)).find(item => !!item);
 				if (!comment) continue;
 				// With the column up the thread is already on screen beside its text: the highlight picks it, as a highlight picks a card
 				// in a document, and every press reads it, so an answer that arrived while its card stayed picked is read by the next press.
 				if (marginComments) { selectedCommentId = comment.id; pickedComments.set(new Set([chatPickKey(comment.id)])); return; }
-				returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
+				sheetReveal.notePress(source, row); returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return;
 			}
 		};
 		const click = (event: MouseEvent) => {
@@ -277,13 +294,15 @@
 			const target = event.target as Element | null;
 			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
 			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
-			const ids = hit.dataset.commentIds?.split(',') ?? [];
+			const row = Math.max(0, [...hit.getClientRects()].findIndex(rect => event.clientY >= rect.top && event.clientY <= rect.bottom));
+			// Highlights on overlapping text are nested spans: every comment on the pressed text is on the press's own span or one around it.
+			const ids = commentIdsAt(root, hit);
 			if (closing) {
 				const finish = afterClose;
-				afterClose = () => { finish?.(); openHighlight(ids, hit); };
+				afterClose = () => { finish?.(); openHighlight(ids, hit, row); };
 				return;
 			}
-			if (!open) openHighlight(ids, hit);
+			if (!open) openHighlight(ids, hit, row);
 		};
 		const keydown = (event: KeyboardEvent) => {
 			// In the column the thread is already on screen, so the first Escape lets the picked card go, as it does in a document's margin.
@@ -343,16 +362,8 @@
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
 {/if}
-{#if viewing && viewedComment && threadId && !open}
-	{#if narrow}
-		<AdaptiveDrawer bind:panel={sheet} ariaLabel="Comment thread" doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} opened keepReplyVisible />
-		</AdaptiveDrawer>
-	{:else}
-		<Popover anchor={threadAnchor} bounds={threadBounds} placement="bottom" clearAnchor open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} opened /></div>
-		</Popover>
-	{/if}
+{#if viewing && (viewing.listed ? listedComments.length > 0 : viewedComment) && threadId && !open}
+	<ChatThreadSheet bind:panel={sheetPanel} bind:dialog={sheetDialog} messageId={viewing.messageId} {threadId} comments={viewing.listed ? listedComments : [viewedComment!]} listed={!!viewing.listed} {fromList} {closing} {narrow} anchor={threadAnchor} bounds={threadBounds} onReply={replyInThread} onBack={() => { if (viewing) viewing = { ...viewing, listed: true }; }} onClose={requestClose} onClosed={closed} />
 {/if}
 {#snippet composerBody()}
 	<CommentComposer mentions={false} quote={draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : rootDraft?.text ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; if (draft && threadId) chatCommentDrafts.setRoot(threadId, draft.messageId, draft.anchor, text); }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={isReply ? 'Reply' : 'Comment'} submittingLabel={isReply ? 'Replying…' : 'Posting…'} pending={!!rootDraft?.posting} error={rootDraft?.error ?? ''} retryable={!rootDraft?.final} retainText={!!draft} onSubmit={submit} onCancel={cancel} onEscape={requestClose} />
@@ -363,7 +374,7 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer bind:panel={sheet} fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer bind:panel={sheet} keepsText fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}

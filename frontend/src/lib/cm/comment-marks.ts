@@ -5,6 +5,7 @@ import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
+import { keptWhole } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -24,7 +25,7 @@ export interface CommentRange {
 	to: number;
 	id: string;
 	focused?: boolean;
-	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
+	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent, fromText?: boolean) => void;
 	suggestion?: InlineSuggestion;
 	/** A point, not a passage: drawn as a margin marker only, with no highlight (its text was deleted, or an accepted suggestion deleted it). */
 	point?: boolean;
@@ -47,40 +48,7 @@ export const setCommentRanges = StateEffect.define<CommentRange[]>();
  */
 export const paintSignature = (ranges: CommentRange[]): string => JSON.stringify(ranges);
 
-/**
- * The highlight under a press, read only from where it landed, never from the caret: a phone puts the caret at the nearest end of
- * the tapped word, which lies outside a highlight that stops short of its word, and beside a highlight when the tap was on the space
- * or punctuation next to it. The position nearest a press is a highlight's end both when the press is on that end of its last
- * character and when it is on the character after, and a soft wrap makes one position the end of a row and the start of the next,
- * so at an end the press must also be on the highlight's side of it and on that end's own row.
- */
-export function highlightAtPress(view: EditorView, press: { clientX: number; clientY: number }, ranges: CommentRange[], tapOpensSuggestion = true): CommentRange | undefined {
-	const at = view.posAtCoords({ x: press.clientX, y: press.clientY }, false);
-	const onRow = (edge: { top: number; bottom: number } | null) => !edge || (press.clientY >= edge.top && press.clientY <= edge.bottom);
-	return pickHighlight(ranges.filter((r) => {
-		if (r.point || at < r.from || at > r.to) return false;
-		if (at === r.to && r.to > r.from) {
-			const edge = view.coordsAtPos(r.to, -1);
-			return onRow(edge) && press.clientX <= (edge?.right ?? Infinity);
-		}
-		if (at === r.from) {
-			const edge = view.coordsAtPos(r.from, 1);
-			return onRow(edge) && press.clientX >= (edge?.left ?? -Infinity);
-		}
-		return true;
-	}), tapOpensSuggestion);
-}
-
-/**
- * The one rule for which highlight the reader is in, for a press and for a caret that arrived by keys alike. Of the highlights held at
- * a position, the one covering the least text, the earliest on a tie: a one-word comment inside a longer suggestion's quote is what the
- * reader pressed. Where a tap opens no suggestion's card (the phone's sheet), a comment is preferred to a suggestion however they nest,
- * so a tap never lands on a highlight that opens nothing while another one at that spot could open.
- */
-export function pickHighlight(held: CommentRange[], suggestionOpens: boolean): CommentRange | undefined {
-	const openable = suggestionOpens ? held : held.filter((r) => !r.suggestion);
-	return (openable.length ? openable : held).reduce<CommentRange | undefined>((best, r) => (!best || r.to - r.from < best.to - best.from ? r : best), undefined);
-}
+export { highlightAtPress, highlightsAtPress, pickHighlight } from './comment-press';
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
@@ -144,6 +112,29 @@ const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && b
 
 // Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
 const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof widgetTarget>): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
+
+/** A pressed highlight's text, from its first line to its last. A widget (a table cell, a diagram) or a point is its one box. */
+function spanBoxAt(current: EditorView, from: number, to: number, widget: ReturnType<typeof widgetTarget>): Box | null {
+	const first = boxAt(current, from, widget);
+	if (!first || widget || to <= from) return first;
+	const end = current.coordsAtPos(Math.min(to, current.state.doc.length), -1);
+	return end ? { top: first.top, bottom: Math.max(first.bottom, end.bottom) } : first;
+}
+
+/**
+ * What a sheet opened from a pressed highlight keeps visible above itself: the whole highlight when `keptWhole` says so (at most three lines),
+ * else the line that was pressed (`at`): its box in the viewport, with `regionTop` where the visible document starts, which together
+ * tell the sheet how far up it may rise and where the text has to be put.
+ */
+export function pressSpan(view: EditorView, range: { from: number; to: number }, at: number): { top: number; bottom: number; height: number; regionTop: number } | null {
+	const length = view.state.doc.length;
+	const whole = spanBoxAt(view, Math.min(range.from, length), Math.min(range.to, length), widgetTarget(view, Math.min(range.from, length)));
+	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
+	if (!whole || !line) return null;
+	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
+	const box = keptWhole(whole.bottom - whole.top, lineHeight) ? whole : line;
+	return { top: box.top, bottom: box.bottom, height: box.bottom - box.top, regionTop };
+}
 
 /**
  * Whether a sheet or keyboard movement has just covered the text at `from`: the reader had it in view before, inside `before` (the
