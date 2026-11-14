@@ -25,18 +25,20 @@
 	} = $props();
 
 	// The band owns the read because it owns the row: an empty row must never stand between the text and a drawer.
-	const mayJump = $derived(ready && !covered && !sheetModalOpen && !!artifactId && threads.length > 0);
+	const rowFree = $derived(ready && !covered && !sheetModalOpen && !!artifactId);
+	const mayJump = $derived(rowFree && threads.length > 0);
 	const jump = createJumpRead(() => (mayJump ? root : undefined), () => threads);
 	const jumped = $derived(jumpedThread(threads, jump().target));
 	const hasJump = $derived(mayJump && !!jumped);
 	const hasToast = $derived(confirmsDelivery && !!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
 	// The name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
 	const label = $derived(`${jump().count} new, next ${jump().direction}: ${jump().target?.label ?? ''}`);
-	// Runs before the DOM update, while the control still holds the focus it is about to lose.
+	// Runs before the DOM update, while the control still holds the focus it is about to lose. Only when the row is still free for a control
+	// and has nothing left to point at: a sheet or a draft covering the canvas hides the control too, and the focus then belongs to what opened.
 	let hadJump = false;
 	$effect.pre(() => {
 		const has = hasJump;
-		if (hadJump && !has && document.activeElement?.closest('[data-doc-jump]')) onControlGone?.();
+		if (hadJump && !has && rowFree && document.activeElement?.closest('[data-doc-jump]')) onControlGone?.();
 		hadJump = has;
 	});
 	// The jump control stands over a document's foot: the canvas keeps a line brought into view above it while it shows (DocViewer.css).

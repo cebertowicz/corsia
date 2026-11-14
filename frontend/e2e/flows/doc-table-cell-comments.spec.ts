@@ -167,7 +167,7 @@ for (const layout of LAYOUTS) {
 			await expect(page.locator('.cm-md-cell-editor'), 'setup: no cell opened').toHaveCount(0);
 			return { line, offer };
 		};
-		/** The boxes the selection is drawn in, and the cells of the table, as the browser draws them now. */
+		/** The boxes the selection is drawn in, as the browser draws them now. */
 		const selectedBoxes = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.cm-selectionBackground')].map((el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, right: r.right, bottom: r.bottom }; }).filter((b) => b.right > b.x && b.bottom > b.y));
 		const overlaps = (a: Box, b: Box) => a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
 
