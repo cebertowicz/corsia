@@ -25,14 +25,20 @@ PASSWORD_READ_REFUSED = (
     "Other commands still work."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
-# A failed plan write loses only the person's task for the page, never the browser itself.
+# A failed plan write loses at most the person's task for the page, never the browser itself. What became of
+# the row is unknown (a failed read or emit leaves it in place), so the wording claims neither state.
 STEP_NOT_RECORDED = (
-    "Note: the sign-in step for this page couldn't be recorded, so the person has no task for it; "
-    "if you need them to sign in, tell them in chat."
+    "Note: the sign-in task for this page may not have been recorded. If you need the person to sign in and "
+    "haven't told them, say so in chat."
 )
 DECLARATION_NOT_RECORDED = (
-    "The person step couldn't be recorded, so the person has no task for this page. "
+    "The person step may not have been recorded, so the person may have no task for this page. "
     "Tell them in chat what you need from the page and stop."
+)
+# A visible password field is the person's to fill in; with no task recorded for it, the command is refused.
+PASSWORD_PAGE_UNRECORDED = (
+    "This page is waiting for the person to sign in, and their sign-in task couldn't be recorded. "
+    "Ask them in chat to sign in in the shared browser, then try again."
 )
 PERSON_STEP = (
     "This browser step is the person's to complete. They already see a task in their attention list, and you "
@@ -91,7 +97,7 @@ async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, a
                               resolve: Resolve | None = None, session: str | None = None) -> str | None:
     """Enforce page ownership, then the independent password-visit read guard.
 
-    Returns STEP_NOT_RECORDED when the page's step couldn't be written; the command still runs.
+    Returns STEP_NOT_RECORDED when a non-password page's step couldn't be written; the command still runs.
     """
     result, note = await _guarded_probe(thread_id, probe, session=session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
@@ -114,9 +120,9 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
                          instruction: str | None = None) -> tuple[PasswordProbe, str | None]:
     """Share the agent probe and failure mapping between commands and declarations.
 
-    A step that can't be written never fails the command: the failure is logged, a live step is kept (the next
-    call or re-probe recovers it, and browser_close clears it), the page's password guard still applies, and
-    the agent gets STEP_NOT_RECORDED to pass on.
+    A step that can't be written is logged and a live step is kept (the next call or re-probe recovers it, and
+    browser_close clears it); the page's password guard still applies. A page showing a password field refuses
+    the command, as an open step would; any other page runs it and the agent gets STEP_NOT_RECORDED to pass on.
     """
     try:
         result = await probe(_known_nodes(thread_id))
@@ -132,8 +138,12 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
     try:
         decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
     except Exception:
-        log.exception("browser step for thread %s could not be recorded; a live step is kept for the next call", thread_id)
+        log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
+                    thread_id, exc_info=True)
         _observe_read_guard(thread_id, result, False, False)
+        # The same visible-password test the lifecycle's own refusal (R9) uses: that page is the person's.
+        if result.visible_nodes:
+            raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
         return result, STEP_NOT_RECORDED
     messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,
                 "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}

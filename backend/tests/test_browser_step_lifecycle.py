@@ -210,7 +210,11 @@ async def test_row_read_failure_preserves_the_live_step_and_retry_recovers(plan,
         raise PlanError("fixture row read failure")
 
     monkeypatch.setattr(lifecycle, "_step_row_state", fail)
-    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) == browser_control.STEP_NOT_RECORDED
+    if kind == "person":
+        assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) == browser_control.STEP_NOT_RECORDED
+    else:  # the page still shows its password field, so it stays the person's
+        with pytest.raises(BrowserSessionError, match="sign-in task couldn't be recorded"):
+            await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert lifecycle._steps[THREAD] is step
     assert row(plan["db"], step.node_id)["state"] == "pending"
     assert plan["events"] == [f"{kind}_step_opened"]
