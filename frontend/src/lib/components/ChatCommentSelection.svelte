@@ -267,7 +267,8 @@
 			const comment = message?.chat_comments?.find(item => item.id === commentId);
 			if (open || sourceThread !== threadId || !(messageRoot()?.contains(target) || viewing?.listed)) return;
 			// One reply behavior: a thread's Reply opens that comment's thread, whose send goes straight through onSendReply, the same as the popover and the drawer. It never routes through the composer.
-			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id, list: viewing?.list }; }
+			// A Reply from the list keeps the press's focus return: that button leaves the page once the thread opens.
+			if (message && comment) { if (!viewing?.listed) returnFocus = target; viewing = { messageId: message.id, commentId: comment.id, list: viewing?.list }; }
 		};
 		const openHighlight = (ids: string[], source: HTMLElement, row: number) => {
 			// Two or more threads on the pressed text open as a list of them; a row's Reply opens that thread, and Back returns to the list.
