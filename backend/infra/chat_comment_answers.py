@@ -166,23 +166,12 @@ def _reaches_the_person(db: sqlite3.Connection, metadata: dict | None) -> bool:
     return bool(isinstance(metadata, dict) and metadata.get("for_user")) or not focus_mode_on(db)
 
 
-def place_answers(
-    db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
-    metadata: dict | None = None,
-) -> None:
-    """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
-
-    A comment is answered only by words the person is shown: a ``post_update`` message, or a message
-    the Focus fallback turns into one (``place_flipped_answers``). Other closing text places nothing.
-
-    This is the one stamper of ``metadata.chat_drawn``; the appender clears it (``assistant_step_tool_append``).
-    A step that placed answers and has nothing left for chat is stamped ``false`` here, in the transaction
-    that saves it.
-    """
-    if role != "assistant" or "[c" not in content or not _reaches_the_person(db, metadata):
-        return
-    placed = []
-    for cid in parse_answers(content, message_id):
+def placeable_answers(
+    db: sqlite3.Connection, message_id: str, thread_id: str, content: str, seq: int,
+) -> list[tuple[str, str, str]]:
+    """(cid, comment's message id, answer text) for each tagged section that answers a known comment."""
+    found = []
+    for cid, sections in parse_answers(content, message_id).items():
         parsed = parse_cid(cid)
         if parsed is None:
             continue
@@ -193,11 +182,40 @@ def place_answers(
         if row is None or row[2] is None or row[2] >= seq:
             continue
         if has_comment_cid(row[1], cid):
-            db.execute(
-                "INSERT OR IGNORE INTO chat_comment_answers VALUES (?,?,?,?,?)",
-                (thread_id, row[0], cid, message_id, created_at),
-            )
-            placed.append(cid)
+            found.append((cid, row[0], sections[0]["text"]))
+    return found
+
+
+def place_answers(
+    db: sqlite3.Connection, message_id: str, thread_id: str, role: str, content: str, seq: int, created_at: str,
+    metadata: dict | None = None, *, hidden_step: bool = False,
+) -> None:
+    """Index known comments, save the chat text left without them, and stamp a step that draws nothing.
+
+    A comment is answered only by words the person is shown: a ``post_update`` message, or a message
+    the Focus fallback turns into one (``place_flipped_answers``). Other closing text places nothing,
+    except a hidden step of the Turn the fallback is showing the last words of (``hidden_step``): its
+    answers go to their comment threads and its text stays out of chat, and a comment already
+    answered keeps that answer.
+
+    This is the one stamper of ``metadata.chat_drawn``; the appender clears it (``assistant_step_tool_append``).
+    A step that placed answers and has nothing left for chat is stamped ``false`` here, in the transaction
+    that saves it.
+    """
+    if role != "assistant" or "[c" not in content or not (hidden_step or _reaches_the_person(db, metadata)):
+        return
+    placed = []
+    for cid, user_message_id, _text in placeable_answers(db, message_id, thread_id, content, seq):
+        if hidden_step and db.execute(
+            "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? AND cid=?",
+            (thread_id, user_message_id, cid),
+        ).fetchone():
+            continue  # a comment gets one answer: the newest words, placed first
+        db.execute(
+            "INSERT OR IGNORE INTO chat_comment_answers VALUES (?,?,?,?,?)",
+            (thread_id, user_message_id, cid, message_id, created_at),
+        )
+        placed.append(cid)
     if placed:
         visible = visible_answer_content(content, placed)
         save_visible_content(db, message_id, thread_id, visible)
@@ -208,8 +226,11 @@ def place_answers(
             )
 
 
-def place_flipped_answers(db: sqlite3.Connection, thread_id: str, message_id: str) -> None:
-    """Place the answers in a message just made ``for_user``, in the transaction that flipped it."""
+def place_flipped_answers(
+    db: sqlite3.Connection, thread_id: str, message_id: str, *, hidden_step: bool = False,
+) -> None:
+    """Place the answers in a message just made ``for_user``, or in a hidden step of the same Turn
+    (``hidden_step``), in the transaction that flipped the Turn's last words."""
     row = db.execute(
         "SELECT role,content,seq,created_at,metadata FROM messages WHERE id=? AND thread_id=?",
         (message_id, thread_id),
@@ -220,7 +241,7 @@ def place_flipped_answers(db: sqlite3.Connection, thread_id: str, message_id: st
         metadata = json.loads(row[4] or "{}")
     except ValueError:
         metadata = {}
-    place_answers(db, message_id, thread_id, row[0], row[1] or "", row[2], row[3], metadata)
+    place_answers(db, message_id, thread_id, row[0], row[1] or "", row[2], row[3], metadata, hidden_step=hidden_step)
 
 
 def save_visible_content(db: sqlite3.Connection, message_id: str, thread_id: str, content: str) -> None:

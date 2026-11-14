@@ -514,3 +514,57 @@ async def test_the_fallback_shows_tagged_closing_text_as_one_answer_never_a_bubb
         "JOIN chat_visible_content v ON v.message_id=m.id WHERE m.id=?", (closing,),
     ).fetchone()
     assert tuple(stored) == ("", 0)
+
+
+def _placed(db) -> list[tuple]:
+    return [tuple(r) for r in db.execute(
+        "SELECT user_message_id,cid,assistant_message_id FROM chat_comment_answers ORDER BY cid")]
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_places_an_earlier_tagged_step_with_the_untagged_closing_words(db) -> None:
+    # An answer tagged in an earlier hidden step is not lost when the Turn closes with untagged words:
+    # the fallback that shows the closing words places it in the same write, and its text stays hidden.
+    cid = _comment_on(db, "")
+    earlier = _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    _say(db, "All done.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    closing = _say(db, "All done, nothing else needed.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert _for_user(db, closing)
+    assert not _for_user(db, earlier)
+    assert _placed(db) == [("m1", cid, earlier)]
+    stored = db.execute(
+        "SELECT v.content,json_extract(m.metadata,'$.chat_drawn') FROM messages m "
+        "JOIN chat_visible_content v ON v.message_id=m.id WHERE m.id=?", (earlier,),
+    ).fetchone()
+    assert tuple(stored) == ("", 0)  # the answer left chat; the step draws nothing
+
+
+@pytest.mark.asyncio
+async def test_the_nudge_names_the_unplaced_answer_and_a_no_reply_places_nothing(db, monkeypatch) -> None:
+    # The nudge tells the Turn which comment answers it wrote and the person did not get; answering
+    # NO_REPLY after that is an informed decline, so nothing is placed.
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    earlier = _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.\nMore detail here.")
+    _say(db, "All done.")
+
+    await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(
+        nudge_text("1:19", "All done.", [(cid, "Moved. Tonight runs at 4 AM.")]))
+    assert f'{cid} "Moved. Tonight runs at 4 AM."' in nudge["content"]
+    _take_nudge(db, "t2")
+    _say(db, "NO_REPLY", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert _placed(db) == []
+    assert not _for_user(db, earlier)

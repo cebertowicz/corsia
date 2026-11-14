@@ -5,7 +5,9 @@ a Turn ends while the person's newest message has no such reply after it, the ag
 is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
 its last words become the reply (``for_user``), so the person still sees them, and
-any comment answers tagged in them are placed in the same write; a
+any comment answers tagged in them, and in the Turn's earlier hidden steps, are placed in the
+same write (those steps' text stays out of chat); the nudge names the answers still pending, so
+a NO_REPLY after it is an informed decline; a
 woken Turn that leaves no words of its own (it errored first) shows the words it
 was woken about instead.
 
@@ -28,7 +30,7 @@ from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 from infra.chat_comment_answers import (
-    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, place_flipped_answers,
+    VISIBLE_CONTENT, VISIBLE_CONTENT_JOIN, focus_mode_on, place_flipped_answers, placeable_answers,
 )
 
 EVENT = "turn.reply_not_visible"
@@ -51,9 +53,21 @@ _HIDDEN_TEXT = (
 )
 
 
-def nudge_text(hhmm: str, hidden: str | None) -> str:
-    """The approved #1904 wording; the quote sentence only when there are hidden words."""
-    seen = f' Your last words, which they did not see: "{hidden}"' if hidden else ""
+def _pending_sentence(pending: list[tuple[str, str]] | None) -> str:
+    """Comment answers the Turn wrote that the person has not been sent, by comment and first line."""
+    if not pending:
+        return ""
+    listed = "; ".join(f'{cid} "{line}"' for cid, line in pending)
+    return (
+        f" Comment answers you wrote that they did not see: {listed}."
+        " They reach the comment thread when you send them with post_update."
+    )
+
+
+def nudge_text(hhmm: str, hidden: str | None, pending: list[tuple[str, str]] | None = None) -> str:
+    """The approved #1904 wording; the quote sentence only when there are hidden words, and the
+    pending-answers sentence only when the Turn holds tagged answers the person was not sent."""
+    seen = (f' Your last words, which they did not see: "{hidden}"' if hidden else "") + _pending_sentence(pending)
     return (
         f"No reply is visible to the user after their {hhmm} message.{seen} If you intended to "
         "send a visible response, please use post_update now. If no reply to their last "
@@ -126,7 +140,7 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
 def _replied_after(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
-    """A message sent for the person after theirs; a comment answer is one, as it is only placed from one."""
+    """A message sent for the person after theirs; with Focus on, a comment answer is one, as it is only placed from one."""
     return db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
         (thread_id, person["seq"]),
@@ -165,13 +179,43 @@ def _last_hidden(
     ).fetchone()
 
 
+def _hidden_answer_steps(
+    db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None = None,
+) -> list[sqlite3.Row]:
+    """Hidden text steps since the person's message that tag an answer to a known comment, oldest first."""
+    rows = db.execute(
+        f"SELECT id, content, seq FROM messages WHERE thread_id=? AND seq>? AND id<>? "
+        f"AND {_HIDDEN_TEXT} AND instr(content,'[c')>0 ORDER BY seq DESC",
+        (thread_id, after_seq, exclude_id or ""),
+    ).fetchall()
+    return [r for r in rows if placeable_answers(db, str(r["id"]), thread_id, str(r["content"]), r["seq"])]
+
+
+def _pending_answers(
+    db: sqlite3.Connection, thread_id: str, after_seq: int, exclude_id: str | None,
+) -> list[tuple[str, str]]:
+    """(comment id, first line of its answer) for answers tagged in hidden steps, each comment once."""
+    pending: dict[str, str] = {}
+    for row in _hidden_answer_steps(db, thread_id, after_seq, exclude_id):
+        for cid, _user, text in placeable_answers(db, str(row["id"]), thread_id, str(row["content"]), row["seq"]):
+            first = text.strip().splitlines()[0].strip() if text.strip() else ""
+            pending.setdefault(cid, first[:80])
+    return list(pending.items())
+
+
 def _woken_about(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row):
     """The hidden words the nudge was sent about: the last ones between the message and it."""
     return _last_hidden(db, thread_id, person["seq"], nudge["seq"])
 
 
-def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> None:
-    """Make the nudged Turn's last words its reply, as if it had sent them."""
+def _show_hidden_words(
+    db: sqlite3.Connection, thread_id: str, row: sqlite3.Row, person_seq: int,
+) -> None:
+    """Make the nudged Turn's last words its reply, as if it had sent them.
+
+    The answers tagged in the Turn's earlier hidden steps are placed in the same write; those steps'
+    text stays out of chat and the answers go only to their comment threads.
+    """
     from infra import thread_updates
     from infra.send_broadcast import broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
@@ -182,18 +226,22 @@ def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row)
         (row["id"],),
     )
     place_flipped_answers(db, thread_id, str(row["id"]))
+    earlier = [str(step["id"]) for step in _hidden_answer_steps(db, thread_id, person_seq)]
+    for step_id in earlier:
+        place_flipped_answers(db, thread_id, step_id, hidden_step=True)
     thread_updates.record_marked(
         db, thread_id=thread_id, message_id=str(row["id"]), node_id=None,
         created_at=str(row["created_at"]),
     )
-    projected = read_input_broadcast_row(str(row["id"]), db=db)
+    projected = [read_input_broadcast_row(message_id, db=db) for message_id in (str(row["id"]), *earlier)]
     owner = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
 
     def publish() -> None:
         if owner is not None:
             thread_updates.notify_changed(str(owner["user_id"]), [thread_id])
-        if projected is not None:
-            broadcast_input_rows(thread_id, (projected,))
+        rows = tuple(item for item in projected if item is not None)
+        if rows:
+            broadcast_input_rows(thread_id, rows)
 
     after_commit(db, publish)
 
@@ -210,7 +258,7 @@ def _settle_nudged_turn(
     if hidden is None or str(hidden["content"]).strip() == NO_REPLY:
         logger.info("focus.nudge_settled thread={} result=no_reply", thread_id)
         return
-    _show_hidden_words(db, thread_id, hidden)
+    _show_hidden_words(db, thread_id, hidden, person["seq"])
     logger.info("focus.nudge_settled thread={} result=shown", thread_id)
 
 
@@ -245,9 +293,10 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     from infra.onboarding_events import first_run_message_id
 
     words = (_unseen(db, thread_id, hidden) or None) if hidden is not None else None
+    pending = _pending_answers(db, thread_id, person["seq"], str(hidden["id"]) if hidden is not None else None)
     text = (
         _first_run_nudge_text(words) if person["id"] == first_run_message_id(thread_id)
-        else nudge_text(_clock(str(person["created_at"])), words)
+        else nudge_text(_clock(str(person["created_at"])), words, pending)
     )
     try:
         enqueue_event_wake(
@@ -334,7 +383,7 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
             hidden = _woken_about(connection, thread_id, *nudged)
             if hidden is None or str(hidden["content"]).strip() == NO_REPLY:
                 return
-            _show_hidden_words(connection, thread_id, hidden)
+            _show_hidden_words(connection, thread_id, hidden, nudged[0]["seq"])
             logger.info("focus.nudge_settled thread={} result=shown_on_stop", thread_id)
     except Exception as error:
         if is_lock_refusal(error):
