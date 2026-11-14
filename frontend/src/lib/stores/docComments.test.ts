@@ -73,10 +73,16 @@ describe('comment loading presentation', () => {
 	it('keeps whether the document has an owner a re-open can reach', async () => {
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: 'Documents' } });
 		await loadComments('artifact');
-		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents' });
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: [] });
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: null } });
 		await loadComments('artifact');
-		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: null });
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: null, goesTo: [] });
+	});
+
+	it('carries who a new comment goes to, by name, from the document and not from the owner label', async () => {
+		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: 'Documents', goes_to: [{ id: 'sup', name: 'Supervisor' }, { id: 'docs', name: 'Documents' }] } });
+		await loadComments('artifact');
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: ['Supervisor', 'Documents'] });
 	});
 
 	it('runs one more load for a burst of changes, after the one already running', async () => {
@@ -219,6 +225,16 @@ describe('comment-thread view projection', () => {
 		expect(fromServer({ ...row, acknowledged_by: [agent] })).toMatchObject({ acked: false, acknowledgedBy: [agent] });
 		expect(fromServer({ ...row, acknowledged_by: [agent, person] })).toMatchObject({ acked: true, acknowledgedBy: [agent, person] });
 		expect(fromServer(row)).toMatchObject({ acked: false, acknowledgedBy: [] });
+	});
+
+	it('keeps "the server did not say who a reply goes to" apart from "no agent", so a new comment shows no line instead of a wrong one', () => {
+		const row = {
+			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user' as const, body: 'Root', anchor_text: 'quote',
+			from_off: 0, to_off: 5, review: 0, resolved: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
+		};
+		expect(fromServer(row).replyGoesTo).toBeUndefined();
+		expect(fromServer({ ...row, reply_goes_to: [] }).replyGoesTo).toEqual([]);
+		expect(fromServer({ ...row, reply_goes_to: [{ id: 'docs', name: 'Docs lane' }] }).replyGoesTo).toEqual([{ id: 'docs', name: 'Docs lane' }]);
 	});
 
 	it('drops every acknowledgement as soon as a thread is re-opened, and restores them if the re-open fails', async () => {

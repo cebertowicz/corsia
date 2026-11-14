@@ -59,6 +59,8 @@ export interface CommentFeedback {
 	document_held_count?: number;
 	image_held_count?: number;
 	owner_label: string | null;
+	/** Who a new comment on the document goes to, by name: the agents delivery wakes. */
+	goes_to?: { id: string; name: string }[];
 	undelivered_batches: UndeliveredBatch[];
 }
 

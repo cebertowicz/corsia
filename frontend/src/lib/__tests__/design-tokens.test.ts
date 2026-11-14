@@ -39,9 +39,6 @@ const RUNTIME_PROVIDED = new Set([
 	'--drawer-bottom',
 	'--drawer-left',
 	'--drawer-h',
-	// The comment sheet's measured room (docCommentDrawer, written on the panel): the height left above the highlight, and the height a half sheet grows to.
-	'--drawer-cap',
-	'--drawer-half-fit',
 	'--depth',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',

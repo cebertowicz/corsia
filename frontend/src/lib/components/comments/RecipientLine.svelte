@@ -35,7 +35,7 @@
 </div>
 
 <style>
-	.rl { margin-top: var(--space-1); }
+	.rl { flex: none; margin-top: var(--space-1); }
 	/* Two columns: the names wrap inside the first, Retry (when the check failed) stays at the top of the second. */
 	.rl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--space-2); min-height: var(--space-5); }
 	/* Names are never cut: they wrap to the next line, and one wider than the row breaks inside the name, because a phone has no hover to read it in full. */
@@ -45,8 +45,9 @@
 	.rl-link { background: none; border: none; padding: var(--space-px-3) var(--space-2); font: inherit; font-size: var(--text-caption); color: var(--text-secondary); cursor: pointer; text-decoration: underline; text-underline-offset: var(--space-px-2); white-space: nowrap; border-radius: var(--radius-xs); }
 	.rl-link:hover { color: var(--text-primary); }
 	.rl-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* A short window (a phone on its side, a short desktop window) has no room for a second row under a reply that already scrolls: the line sits against the field on one row and ends in a single ellipsis, its full text in the hover title. */
-	@media (max-height: 28.125rem) {
+	/* A short desktop window has no room for a second row under a reply that already scrolls: the line sits against the field on one row and ends in a single ellipsis, its full text in the hover title.
+	   Touch cannot hover to read a cut name, so a phone on its side wraps instead. */
+	@media (max-height: 28.125rem) and (pointer: fine) {
 		.rl { margin-top: 0; }
 		.rl-row { min-height: var(--space-4); }
 		.rl-who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

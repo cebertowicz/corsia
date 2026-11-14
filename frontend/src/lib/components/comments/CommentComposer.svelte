@@ -26,7 +26,7 @@
 		retainText?: boolean;
 		mentions?: boolean;
 		/** Who a new comment goes to, from the document's resolver; absent where the caller does not know (chat comments). */
-		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; name?: string };
+		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; names?: string[] };
 		onRetry?: () => void;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
@@ -39,7 +39,7 @@
 	const explanationId = $props.id();
 	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
 	const tagged = $derived(mentions && picker ? picker.occurrences(text).map(item => text.slice(item.start, item.end).replace(/^@/, '')) : []);
-	const names = $derived([...new Set([...(goesTo?.state === 'agent' && goesTo.name ? [goesTo.name] : []), ...tagged])]);
+	const names = $derived([...new Set([...(goesTo?.state === 'agent' ? goesTo.names ?? [] : []), ...tagged])]);
 	let posting = $state(false);
 	$effect(() => {
 		text;
@@ -63,8 +63,8 @@
 
 <div class="composer">
 	<div class="quote-wrap"><CommentQuote {quote} {label} /></div>
+	{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 	<div class="input-wrap">
-		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
 			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
 		</Field>
@@ -81,7 +81,10 @@
 <style>
 	.composer { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
 	.quote-wrap { flex: none; }
-	.input-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+	/* In a box with less room than its parts, only the field gives: it shrinks and scrolls its own text down to one row, and below that the popover or sheet scrolls as a whole.
+	   The picker, the recipient line and the actions never shrink into what is beside them, so nothing overlaps. The picker sits at the composer's level, its top padding doing the gap the field's wrapper used to. */
+	.composer > :global(.mention-region) { flex: none; margin-bottom: calc(-1 * var(--space-2)); }
+	.input-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: var(--space-7); }
 	.input-wrap :global(.field) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; align-items: stretch; }
 	.input-wrap :global(.c) { flex: 1 1 auto; flex-direction: column; min-height: 0; align-items: stretch; }
 	.input-wrap textarea { flex: 1 1 auto; min-height: 0; overflow-y: auto !important; }
