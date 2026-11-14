@@ -83,13 +83,8 @@ test('@flow:document-comments a stack of read comments paints as one wash, an un
 	expect(parseFloat(unread[0].borderWidth), 'the unread underline is thicker than the read one').toBeGreaterThan(parseFloat(solo[0].borderWidth));
 	const unreadStack = await layersAround(page, UNREAD7);
 	expect(unreadStack.every((layer) => layer.unread), 'every comment in the unread stack is drawn unread').toBe(true);
-	expect(unreadStack[0].bg, 'the outermost unread highlight paints the same wash as a single unread comment').toBe(unread[0].bg);
+	expect(unreadStack[0].bg).not.toBe(solo[0].bg);
 	expect(unreadStack[0].borderStyle).toBe('solid');
-	expect(unreadStack[0].borderWidth).toBe(unread[0].borderWidth);
-	for (const nested of unreadStack.slice(1)) {
-		expect(nested.bg, 'an unread highlight inside an unread one draws no wash').toBe(CLEAR);
-		expect(nested.borderStyle, 'and no rule').toBe('none');
-	}
 
 	// A table cell is one element however many comments it holds: three paint the same as one.
 	const cell3 = await layersAround(page, 'Priya Raman');

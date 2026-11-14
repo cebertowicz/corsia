@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { onSheetMoved } from './docCommentDrawer';
 import { registerHomeLifecycle } from './homeLifecycle';
 
 describe('keyboard inset focus ordering', () => {
@@ -115,7 +116,7 @@ describe('keyboard inset focus ordering', () => {
 });
 
 describe('transcript offset around a focused editor', () => {
-	it('puts the transcript back for a composer but not for an editor in a sheet, which keeps the passage above itself', () => {
+	const setup = (commentSheet: boolean) => {
 		vi.useFakeTimers();
 		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number);
 		const panel = { captureBottomOffset: vi.fn(), restoreBottomOffset: vi.fn() };
@@ -128,6 +129,7 @@ describe('transcript offset around a focused editor', () => {
 		const composer = document.createElement('textarea');
 		const sheet = document.createElement('div');
 		sheet.setAttribute('data-adaptive-drawer', '');
+		if (commentSheet) sheet.setAttribute('data-keeps-text', '');
 		const reply = document.createElement('textarea');
 		sheet.append(reply);
 		document.body.append(composer);
@@ -137,15 +139,30 @@ describe('transcript offset around a focused editor', () => {
 		panel.captureBottomOffset.mockClear();
 		panel.restoreBottomOffset.mockClear();
 		document.body.append(sheet);
-		const moved = vi.fn();
-		document.addEventListener('corsia:transcript-moved', moved);
+		const done = () => { teardown(); composer.remove(); sheet.remove(); vi.clearAllTimers(); vi.unstubAllGlobals(); vi.useRealTimers(); };
+		return { panel, sheet, reply, done };
+	};
+
+	it('does not put the transcript back for an editor in a comment sheet, which places its passage above itself', () => {
+		const { panel, sheet, reply, done } = setup(true);
+		const reveal = vi.fn();
+		const stop = onSheetMoved(sheet, reveal);
+		vi.advanceTimersByTime(10);
+		reveal.mockClear();
 		reply.focus();
 		vi.advanceTimersByTime(10);
 		expect(panel.restoreBottomOffset).not.toHaveBeenCalled();
-		expect(moved).toHaveBeenCalled();
-		document.removeEventListener('corsia:transcript-moved', moved);
-		teardown(); composer.remove(); sheet.remove();
-		vi.clearAllTimers(); vi.unstubAllGlobals(); vi.useRealTimers();
+		expect(reveal).toHaveBeenCalledWith(false);
+		stop();
+		done();
+	});
+
+	it('still puts the transcript back for an editor in another kind of drawer (the attention dock, a plan drawer)', () => {
+		const { panel, reply, done } = setup(false);
+		reply.focus();
+		vi.advanceTimersByTime(10);
+		expect(panel.restoreBottomOffset).toHaveBeenCalledTimes(1);
+		done();
 	});
 });
 

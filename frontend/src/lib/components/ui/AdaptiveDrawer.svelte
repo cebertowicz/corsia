@@ -35,8 +35,11 @@
 		onClosed = () => {},
 		covered = false,
 		panel = $bindable(null),
+		keepsText = false,
 	}: {
 		ariaLabel: string;
+		/** A comment sheet that keeps the text it was opened from above itself; the keyboard handler leaves the page's own scroll to it. */
+		keepsText?: boolean;
 		/**
 		 * Optional chrome-level title. Omit it when the drawer's content already
 		 * carries its own titled header, so the two never say the same thing twice.
@@ -163,6 +166,7 @@
 	style:--drawer-left="{box?.left ?? 0}px"
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
+	data-keeps-text={keepsText || undefined}
 	onpointerdown={onBackdropDown}
 	onclick={onBackdrop}
 		in:fade|global={fadeParams}

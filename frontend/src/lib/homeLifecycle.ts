@@ -95,9 +95,10 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 
 	let blurTimer: ReturnType<typeof setTimeout> | undefined;
 	// Puts the transcript back against its bottom edge after the keyboard moved it. With a comment sheet open the sheet keeps the passage
-	// above itself (`keepAboveSheet`) and a restore would drop it back under the sheet, so the sheet is told to place it again instead.
+	// above itself and a restore would drop it back under the sheet, so the sheet is told to place it again instead. Only a comment sheet
+	// (`data-keeps-text`) does that; with another kind of drawer open or none the transcript goes back to its bottom edge.
 	const restoreTranscript = () => {
-		if (document.querySelector('[data-adaptive-drawer]')) document.dispatchEvent(new Event(TRANSCRIPT_MOVED));
+		if (document.querySelector('[data-keeps-text]')) document.dispatchEvent(new Event(TRANSCRIPT_MOVED));
 		else options.chatPanel()?.restoreBottomOffset();
 	};
 	const onFocusIn = (e: FocusEvent) => {
