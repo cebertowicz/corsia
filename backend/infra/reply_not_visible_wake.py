@@ -55,10 +55,10 @@ def _pending_sentence(pending: list[tuple[str, str]] | None) -> str:
     """Comment answers the Turn wrote that the person has not been sent, by comment and first line."""
     if not pending:
         return ""
-    listed = "; ".join(f'{cid} "{line}"' for cid, line in pending)
+    listed = "; ".join(f'[{cid}] "{line}"' for cid, line in pending)
     return (
-        f" Comment answers you wrote that they did not see: {listed}."
-        " They reach the comment thread when you send them with post_update."
+        f" Comment answers you wrote that they did not see: {listed}. NO_REPLY leaves them unsent."
+        " To send them, use post_update with each answer in full, starting with its id in brackets."
     )
 
 

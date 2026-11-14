@@ -560,7 +560,8 @@ async def test_the_nudge_names_the_unplaced_answer_and_a_no_reply_places_nothing
     (nudge,) = _nudges(db)
     assert nudge["content"].endswith(
         nudge_text("1:19", "All done.", [(cid, "Moved. Tonight runs at 4 AM.")]))
-    assert f'{cid} "Moved. Tonight runs at 4 AM."' in nudge["content"]
+    assert f'[{cid}] "Moved. Tonight runs at 4 AM."' in nudge["content"]  # the form a send must carry
+    assert "NO_REPLY leaves them unsent." in nudge["content"]
     _take_nudge(db, "t2")
     _say(db, "NO_REPLY", turn="t2")
 

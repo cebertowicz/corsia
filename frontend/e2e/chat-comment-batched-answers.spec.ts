@@ -11,6 +11,11 @@ const lead = 'Untagged lead.';
 test.use({ video: 'off', colorScheme: 'light', seedPerTest: true });
 test.describe.configure({ timeout: 120_000 });
 
+// Focus is a persisted server setting; a spec that turns it off restores it here, which runs on failure too.
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
+});
+
 const narrow = (page: Page) => (page.viewportSize()?.width ?? 0) <= 768;
 
 async function capture(page: Page, stage: string) {
