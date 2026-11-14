@@ -218,10 +218,6 @@ def clear_write(
     from plans import user_ask
 
     user_ask.hold_cleared(db, hold)
-    if detail is not None and "verdict" in detail:
-        from plans import gate_handoff
-
-        gate_handoff.after_answer(db, node_id)
     return event_id, now
 
 

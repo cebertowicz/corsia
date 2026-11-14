@@ -117,13 +117,26 @@ def test_no_gate_read_scans_a_table() -> None:
     assert {scan for scan in scans if not scan.startswith("SCAN json_each")} <= {"SCAN below", "SCAN CONSTANT ROW"}, scans
 
 
-def _approved_runs(scale, count: int) -> None:
+def _approved_runs(scale, count: int, verdict: str = "approved") -> list[str]:
+    nodes = []
     for _ in range(count):
         _phase, steps = _start_run(scale)
         holds.clear_write(
             steps[1]["id"], _hold(scale, steps[1]["id"]), expected_kind="blocked", actor_id=None,
-            provenance="user.ask_cleared", detail={"verdict": "approved"}, db=scale.db,
+            provenance="user.ask_cleared", detail={"verdict": verdict}, db=scale.db,
         )
+        nodes.append(steps[1]["id"])
+        service._transition(scale.db, steps[1]["id"], "active", actor_id=None, provenance="t",
+                            verification_result=None, verified_by=None)
+        service._transition(scale.db, steps[1]["id"], "review_requested", actor_id=None, provenance="t",
+                            verification_result=None, verified_by=None)
+        from plans import review_evidence
+
+        review_evidence.record_verdict(steps[1]["id"], "done", verdict="Accepted", actor_id=None,
+                                       provenance="t", db=scale.db)
+        service._transition(scale.db, steps[1]["id"], "accepted", actor_id=None, provenance="t",
+                            verification_result="passed", verified_by="test")
+    return nodes
 
 
 def _statements(db, key) -> int:
@@ -135,11 +148,23 @@ def _statements(db, key) -> int:
 
 
 def test_reading_a_gate_is_a_fixed_number_of_statements_whatever_its_age() -> None:
-    """10 runs and 30 runs of one gate, each with its one open offer, cost the same statements."""
+    """A scope change stays excluded with the same number of statements at 14 and 30 runs."""
+    from core.sent_back_corrections import record_rejection_correction
+
     scale = build(0)
     key = (gate_handoff_record.project_of(scale.db, scale.plan_id), "gated", "gate")
-    _approved_runs(scale, 10)
+    (scope_node,) = _approved_runs(scale, 1, "approved_with_changes")
+    event = service._event(scale.db, scope_node, "review_rejected", actor_id="owner", provenance="test")
+    assert record_rejection_correction(scale.db, event)
+    scale.db.execute(
+        "INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes)"
+        " VALUES ('triage-scale','triage-scale','learning_loop.correction_triage','corsia','instrumented',"
+        " '2026-11-01','2026-11-01',?,?)",
+        (f"plan-review-rejected:{event}", '{"tier":"instruction"}'),
+    )
+    _approved_runs(scale, 13)
+    assert len(gate_handoff.derive(scale.db, key, "v1").excluded) == 1
     young = _statements(scale.db, key)
-    _approved_runs(scale, 20)
+    _approved_runs(scale, 16)
     assert gate_handoff.derive(scale.db, key, "v1").open_offer is not None
     assert _statements(scale.db, key) == young
