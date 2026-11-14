@@ -38,7 +38,7 @@ Source: `backend/infra/analytics_db.py`.
 | `dbq_bulk_ms` | DOUBLE | No | No | — | — |
 | `db_bulk_ms` | DOUBLE | No | No | — | — |
 
-Indexes: `idx_request_slow_ts` (ts).
+Indexes: None.
 
 ### `request_timing_daily`
 
