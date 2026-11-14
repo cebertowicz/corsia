@@ -45,15 +45,6 @@ export async function bindConductorFromPicker(threadId: string, accountId: strin
 	return { ok: true };
 }
 
-export type LinkOutcome = 'linked' | 'already_linked' | 'not_found' | 'timed_out' | 'conflict';
-
-/** Link an installed CLI where CORSIA's service can see it; `outcome` says why a failed link failed. */
-export async function linkCli(vendor: string): Promise<{ ok: boolean; outcome: LinkOutcome | null }> {
-	const response = await apiFetch(`/api/providers/cli/${vendor}/link`, { method: 'POST' });
-	const body = await response.json().catch(() => null);
-	return { ok: response.ok && body?.ok === true, outcome: body?.outcome ?? null };
-}
-
 export type CliInstallState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface CliInstall { state: CliInstallState; reason: string | null; cause: 'connection' | 'site_refused' | 'download_unverified' | 'installer_failed' | null; ref: string | null; path_shadowed_by: string | null }
 
@@ -67,7 +58,7 @@ function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	};
 }
 
-export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_installed' | 'package_managed';
+export type CliInstallRefusal = 'already_installed' | 'not_installed' | 'package_managed';
 
 /**
  * Start one vendor CLI installation; callers poll its bounded per-vendor flight. A CLI that is
@@ -79,7 +70,7 @@ async function startCliJob(vendor: string, operation: 'install' | 'update'): Pro
 	});
 	if (response.status === 409) {
 		const reason = (await response.json().catch(() => null))?.reason;
-		if (reason === 'already_installed' || reason === 'invisible_binary' || reason === 'not_installed' || reason === 'package_managed') return reason;
+		if (reason === 'already_installed' || reason === 'not_installed' || reason === 'package_managed') return reason;
 	}
 	if (!response.ok) throw new Error(`CLI ${operation} ${response.status}`);
 	return null;
