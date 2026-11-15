@@ -106,12 +106,12 @@ def asks_user_from_facts(
     the same split ``wait_causes.working_child`` makes (#2373). A blocker armed
     as a wait, a dependency or a hold still defers the ask.
     """
-    from plans import user_steering
+    from plans import node_waits, user_steering
 
     soft_only = bool(causes) and all(
         cause.get("reason_key") == "plan_paused"
         or (cause.get("placed") and user_steering.is_user_pause(cause))
-        or (cause.get("watch_id") is not None and not cause.get("blocked_wait"))
+        or node_waits.is_check_back(cause)
         for cause in causes
     )
     return state not in TERMINAL_DISPLAY and bool(
