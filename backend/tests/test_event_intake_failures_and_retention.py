@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -82,6 +83,19 @@ def _flaky_intake(monkeypatch, outcomes: list[str]):
     monkeypatch.setattr("events.intake.admit_event", admit)
     monkeypatch.setattr(script_event_lines, "_ADMIT_PAUSE_SECONDS", (0, 0, 0))
     return seen
+
+
+def test_unreachable_intake_retries_the_same_line_and_logs_the_try(intake_world, tmp_path, monkeypatch, caplog):
+    seen = _flaky_intake(monkeypatch, ["refuse"])
+    monkeypatch.setattr(script_event_lines, "_ADMIT_PAUSE_SECONDS", (0,))
+    schedule = _schedule(intake_world, tmp_path)
+    with caplog.at_level(logging.WARNING, logger="events.intake_retry"):
+        report = asyncio.run(script_event_lines.admit_events(
+            schedule, RunReport("ok", [], [], events=[_LINE], run_id="r1")))
+    assert report.status == "ok" and len(seen) == 2 and len(set(seen)) == 1
+    retried = [r.getMessage() for r in caplog.records if r.name == "events.intake_retry"]
+    assert len(retried) == 1 and seen[0] in retried[0] and "try 1 of 2" in retried[0]
+    assert intake_world.execute("SELECT count(*) FROM event_intake_records WHERE event_id=?", (seen[0],)).fetchone()[0] == 1
 
 
 def _route_rows(db, event_id: str) -> list[tuple]:
@@ -246,8 +260,15 @@ def test_agent_emit_reports_a_defect_as_internal_error_and_an_outage_as_retryabl
     ))
     monkeypatch.setattr("events.intake.admit_event", _raising(RuntimeError("boom")))
     defect = run()
-    monkeypatch.setattr("events.intake.admit_event", _raising(sqlite3.OperationalError("database is locked")))
+    calls = []
+
+    async def unavailable(**kwargs):
+        calls.append(kwargs["event_id"])
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("events.intake.admit_event", unavailable)
     outage = run()
+    assert len(calls) == 1
 
     assert defect.startswith("Error: internal_error:") and "report it instead of retrying" in defect
     assert outage.startswith("Error: intake_unreachable:") and "Retry with the same event id." in outage

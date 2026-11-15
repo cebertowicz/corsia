@@ -95,7 +95,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 196:
+    if SCHEMA_VERSION == 197:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
