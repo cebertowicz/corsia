@@ -37,6 +37,9 @@ _EARLY = "2026-10-01T10:00:00+00:00"
 @pytest.fixture
 def db():
     connection = sqlite3.connect(":memory:")
+    from infra.db_connection import register_message_sql_functions
+
+    register_message_sql_functions(connection)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
     connection.executescript(SCHEMA_SQL)

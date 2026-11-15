@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import contextlib
 import logging
-import os
 import sqlite3
-import sys
 import threading
 import time
 import uuid
@@ -15,10 +12,13 @@ import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
 from infra import write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
+from infra.db_hold_callers import hold_callers
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
-from infra.db_connection import (_NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane,
-                                 checkpoint_and_close, refuse_lane_write)
+from infra.db_connection import (
+    _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close,
+    refuse_lane_write, register_message_sql_functions,
+)
 
 log = logging.getLogger(__name__)
 
@@ -34,28 +34,14 @@ CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 # so a lock refusal is a ticket wait past its bound or another process's writer, and the ticket
 # names the holder; errorcode/errorname tell SQLITE_BUSY, SQLITE_BUSY_SNAPSHOT, SQLITE_LOCKED and
 # CORSIA_ADMISSION_* (errorcode=None) apart. _log_database_lock, write_admission.sqlite_errorname_tag
-# and write_admission._log_slow_wait are that fix's acceptance evidence: delete them in the change
+# and write_admission._log_slow_wait, plus write_lock_window, are that fix's acceptance evidence: delete them in the change
 # that settles it (24 h of production with zero in-process lock refusals), and no later than
 # 2026-12-14.
 # (2) Slow write holds stall every other writer on the file. The slow-hold warning names the
-# holding callers (_hold_callers) so each slow writer can be fixed: delete it once production
+# holding callers (hold_callers) so each slow writer can be fixed: delete it once production
 # logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than
 # 2026-12-14. Keeping either past its date needs a reviewed change that says why and sets a new one.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
-_HOLD_PLUMBING_FILES = frozenset({os.path.normcase(__file__), os.path.normcase(contextlib.__file__)})
-
-
-def _hold_callers() -> str:
-    """The nearest four frames that held a slow write, skipping context-manager plumbing: one
-    scope can cover many operations (every plan write is ``plan_service``)."""
-    frames: list[str] = []
-    frame = sys._getframe(1)
-    while frame is not None and len(frames) < 4:
-        code = frame.f_code
-        if os.path.normcase(code.co_filename) not in _HOLD_PLUMBING_FILES:
-            frames.append(f"{os.path.basename(code.co_filename)}:{frame.f_lineno}:{code.co_name}")
-        frame = frame.f_back
-    return " < ".join(frames) or "unknown"
 
 
 def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None) -> None:
@@ -67,7 +53,7 @@ def _finish_write_hold(scope: str, started_at: float | None, admission: write_ad
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
         log.warning(
             "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
-            scope, held_for, _hold_callers(),
+            scope, held_for, hold_callers(),
         )
 
 
@@ -107,6 +93,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn))
         conn.commit()
         apply_thread_lane(conn)
+        register_message_sql_functions(conn)
         startup_progress.watch(conn)
     except BaseException:
         conn.close()
@@ -368,6 +355,7 @@ def init_db():
 
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
+
     from infra.config import WORKSPACE
     from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
     carry_workspace_conductor_role_files(WORKSPACE)

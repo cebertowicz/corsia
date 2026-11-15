@@ -32,8 +32,10 @@ ERROR_TYPES = (
 
 def _db():
     from infra.database import initialize_schema
+    from infra.db_connection import register_message_sql_functions
 
     connection = sqlite3.connect(":memory:")
+    register_message_sql_functions(connection)
     connection.row_factory = sqlite3.Row
     initialize_schema(connection)
     connection.execute(
@@ -232,6 +234,25 @@ def test_recovered_next_step_uses_the_real_recovery_stamp():
         }]
         finish_display(db, "t", history, include_tool_results=True)
         assert history[0]["metadata"]["next_step"] == "recovered"
+
+
+def test_limit_result_keeps_existing_error_recovery_barrier():
+    from infra.error_recovery import stamp_at_turn_start
+
+    with closing(_db()) as db:
+        _error(db, "error", "llm_error")
+        db.execute("UPDATE messages SET seq=1 WHERE id='error'")
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+            "VALUES ('limit','t','system',?,?,'y',2)",
+            ("You've hit your 5-hour limit", json.dumps({"type": "result", "is_error": True, "cause_kind": "usage_limit"})),
+        )
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+            "VALUES ('claim','t','system','wake','{\"type\":\"context_event\"}','z',3)"
+        )
+        claim = db.execute("SELECT * FROM messages WHERE id='claim'").fetchall()
+        assert stamp_at_turn_start(db, "t", claim) == []
 
 
 def test_held_applies_only_to_the_error_of_the_latest_failed_turn():

@@ -23,6 +23,7 @@ export const threadUpdateCards = writable<Record<string, ThreadCards>>({});
 export const visitDividers = writable<Record<string, VisitDividerState>>({});
 
 const readSeq = new Map<string, number>();
+const requestedWindows = new Map<string, number>();
 /** Identifies the visit whose one opening divider read may still commit. */
 const visitSeq = new Map<string, number>();
 
@@ -33,6 +34,7 @@ export async function loadUpdateCards(
 	options: { divider?: boolean } = {},
 ): Promise<void> {
 	if (!get(token)) return;
+	requestedWindows.set(threadId, fromSeq);
 	const mine = (readSeq.get(threadId) ?? 0) + 1;
 	readSeq.set(threadId, mine);
 	const visit = options.divider ? (visitSeq.get(threadId) ?? 0) + 1 : null;
@@ -54,6 +56,7 @@ export async function loadUpdateCards(
 
 /** The visit ended: the next open reads a fresh divider. */
 export function endVisit(threadId: string): void {
+	requestedWindows.delete(threadId);
 	// Invalidate an opening read that may still be in flight for the old visit.
 	visitSeq.set(threadId, (visitSeq.get(threadId) ?? 0) + 1);
 	readSeq.set(threadId, (readSeq.get(threadId) ?? 0) + 1);
@@ -76,9 +79,9 @@ export function watchUpdateCardNudges(): void {
 	if (watching) return;
 	watching = true;
 	const reload = (ids: string[]) => {
-		const loaded = get(threadUpdateCards);
 		for (const id of new Set(ids)) {
-			if (loaded[id]) void loadUpdateCards(id, loaded[id].fromSeq);
+			const fromSeq = requestedWindows.get(id);
+			if (fromSeq !== undefined) void loadUpdateCards(id, fromSeq);
 		}
 	};
 	on('plans_changed', (message: PlansChangedMessage) => {

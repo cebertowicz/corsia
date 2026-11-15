@@ -40,6 +40,10 @@ def _make_db():
         INSERT INTO threads (id, user_id, created_at, updated_at)
         VALUES ('s1', 'u1', 't', 't');
     """)
+    from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
+    from infra.presence_schema import PRESENCE_SCHEMA_SQL
+
+    conn.executescript(PRESENCE_SCHEMA_SQL + MESSAGE_UPDATE_SCHEMA_SQL)
     conn.commit()
     return conn
 
@@ -353,6 +357,10 @@ def _make_file_db(path: pathlib.Path) -> None:
         VALUES ('s1','u','t','t');
         """
     )
+    from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
+    from infra.presence_schema import PRESENCE_SCHEMA_SQL
+
+    conn.executescript(PRESENCE_SCHEMA_SQL + MESSAGE_UPDATE_SCHEMA_SQL)
     conn.commit()
     conn.close()
 

@@ -7,6 +7,9 @@ import time
 log = logging.getLogger(__name__)
 
 
+# Temporary acceptance evidence for issue #1077: delete in the change that
+# settles that fix (24 h of production with zero in-process lock refusals),
+# and no later than 2026-12-14. See the diagnosis note in infra.database.
 class WriteLockWindow:
     def __init__(self) -> None:
         self._lock = threading.Lock()
