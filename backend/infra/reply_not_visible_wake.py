@@ -67,12 +67,15 @@ def nudge_text(hhmm: str, hidden: str | None) -> str:
 
 
 def comment_nudge_text(cids: list[str]) -> str:
-    """The wake for a comment whose tagged answer is not in its thread; the person did get an update."""
-    tags = " ".join(f"[{cid}]" for cid in cids)
-    return (
-        f"Your answer to the comment {tags} is not in its thread. Send it with post_update, "
-        f"starting with [{cids[0]}] and then your answer."
-    )
+    """The wake for comments whose tagged answer is not in their thread; the person did get an update."""
+    first = f"[{cids[0]}]"
+    if len(cids) == 1:
+        return (f"Your answer to the comment {first} is not in its thread. Send it with "
+                f"post_update, starting with {first} and then your answer.")
+    more = ", and so on" if len(cids) > 2 else ""
+    return (f"Your answers to the comments {' '.join(f'[{c}]' for c in cids)} are not in their "
+            f"threads. Send them with post_update, each starting with its own tag ({first} first, "
+            f"then a blank line and [{cids[1]}]{more}).")
 
 
 def _first_run_nudge_text(hidden: str | None) -> str:
