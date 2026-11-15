@@ -29,8 +29,9 @@ _all_connections: list[sqlite3.Connection] = []
 CONNECTION_BUSY_TIMEOUT_MS = 5000
 CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 
-# Temporary diagnosis (log only; no retries, recovery, or suppression). Issue #1077: in-process writers
-# queue FIFO (infra.write_admission); refusal means a wait past its bound or another process's writer. The ticket
+# Temporary diagnosis, log only; must never grow into retries, recovery, or suppression.
+# (1) Issue #1077: in-process writers queue FIFO on their file's ticket (infra.write_admission),
+# so a lock refusal is a ticket wait past its bound or another process's writer, and the ticket
 # names the holder; errorcode/errorname tell SQLITE_BUSY, SQLITE_BUSY_SNAPSHOT, SQLITE_LOCKED and
 # CORSIA_ADMISSION_* (errorcode=None) apart. _log_database_lock, write_admission.sqlite_errorname_tag
 # and write_admission._log_slow_wait, plus write_lock_window, are that fix's acceptance evidence: delete them in the change
