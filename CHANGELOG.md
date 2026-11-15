@@ -9,7 +9,7 @@ the earlier line instead of adding another.
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
-- A chat no longer shows provider usage-limit errors or a resume chip when it continues after an account limit.
+- A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A chat whose Claude Code session can't be resumed now sends your message again instead of sometimes ending with an error.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
