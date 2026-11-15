@@ -13,8 +13,8 @@ _BASE = "https://token-plan.example.com/compatible-mode/v1"
 _LIST = "/compatible-mode/v1/models"
 _SERVER = {"id": "ns-tp", "kind": "external", "dialect": "openai", "port": 443,
            "status": "online", "provider": "external"}
-# Any unexpected image checks from Test connection.
-_PROBES: list[tuple] = []
+# Any unexpected image probe from Test connection, at the actual probe boundary.
+_PROBES: list[str] = []
 
 
 def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
@@ -29,9 +29,9 @@ def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
     swept: list = []
     _PROBES.clear()
 
-    async def detect(sid):
-        _PROBES.append(("probe", sid))
-        return 0
+    async def probe(sid, pmid, **_kw):
+        _PROBES.append(f"{sid}/{pmid}")
+        return "no", "Test connection must not probe"
 
     async def sweep(_client, srv):
         swept.append(srv["id"])
@@ -44,8 +44,7 @@ def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
     monkeypatch.setattr(nd, "read_server_metadata", lambda sid: next(reads))
     monkeypatch.setattr(nd, "_sweep_one", sweep)
     monkeypatch.setattr(nd, "_discover_and_notify", rediscover)
-    monkeypatch.setattr(eii, "detect_image_input", detect)
-    monkeypatch.setattr(eii, "mark_for_recheck", lambda sid: _PROBES.append(("mark", sid)))
+    monkeypatch.setattr(eii, "probe_image_input", probe)
     monkeypatch.setattr(check, "image_input_summary", lambda sid: "Images: glm-5.3.")
     monkeypatch.setattr(product_events, "emit_product_event", lambda *a, **k: None)
     wire = _Router({("GET", _LIST): reply})

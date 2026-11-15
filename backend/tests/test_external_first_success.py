@@ -187,6 +187,7 @@ def test_concurrent_successes_share_one_claim_and_stream_callbacks(isolated_db, 
         return LLMResponse(content=None, tool_calls=[ToolCallRequest("1", "tool", {})], finish_reason="tool_calls")
 
     _install_provider(monkeypatch, dialect, provider)
+    notices = _notices(monkeypatch)
 
     async def run():
         replies = await asyncio.gather(*(_call(params, on_content_chunk=chunk) for _ in range(5)))
@@ -197,6 +198,7 @@ def test_concurrent_successes_share_one_claim_and_stream_callbacks(isolated_db, 
     assert chunks == ["part"] * 5
     assert calls.count(True) == 1
     assert _row(isolated_db, "chosen")[1]["result"] == "yes"
+    assert notices == [{}]  # Only the attempt that committed its answer says anything.
 
 
 @pytest.mark.parametrize("failure", ["response", "exception", "cancelled"])
@@ -262,6 +264,7 @@ def test_user_choice_wins_over_automatic_check(isolated_db, monkeypatch, when):
     _seed(isolated_db, "chosen")
     params = _params(monkeypatch, "openai")
     calls = []
+    notices = _notices(monkeypatch)
 
     async def run():
         started, finish = asyncio.Event(), asyncio.Event()
@@ -289,3 +292,128 @@ def test_user_choice_wins_over_automatic_check(isolated_db, monkeypatch, when):
     assert calls == ([False] if when == "before" else [False, True])
     assert _row(isolated_db, "chosen")[1]["source"] == "user"
     assert _row(isolated_db, "chosen")[0] == 0
+    assert notices == []  # A fenced-out automatic answer is stale: it notifies nothing.
+
+
+# ── the corrections: notice after commit, cheap steady state, honest abort ─────
+
+def _notices(monkeypatch) -> list[dict]:
+    """Capture the canonical catalog notice (``infra.state.ws.notify_models_changed``)."""
+    notices: list[dict] = []
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda **kw: notices.append(kw))
+    return notices
+
+
+def test_a_committed_check_notifies_the_catalog_once(isolated_db, monkeypatch):
+    _seed(isolated_db, "chosen")
+    params = _params(monkeypatch, "openai")
+
+    async def provider(messages, *args, **kwargs):
+        return LLMResponse(content="green" if isinstance(messages[0]["content"], list) else "hello")
+
+    _install_provider(monkeypatch, "openai", provider)
+    notices = _notices(monkeypatch)
+
+    async def run():
+        await _call(params)
+        await asyncio.gather(*list(image._PENDING))
+
+    asyncio.run(run())
+    assert _row(isolated_db, "chosen")[1]["result"] == "yes"
+    assert notices == [{}]
+
+
+def test_an_answered_model_costs_no_write_transaction_and_no_probe(isolated_db, monkeypatch):
+    """Steady state for a reply is one indexed read: the writer is never entered."""
+    _seed(isolated_db, "chosen")
+    params = _params(monkeypatch, "openai")
+    calls = []
+
+    async def provider(messages, *args, **kwargs):
+        probe = isinstance(messages[0]["content"], list)
+        calls.append(probe)
+        return LLMResponse(content="green" if probe else "hello")
+
+    _install_provider(monkeypatch, "openai", provider)
+
+    async def first():
+        await _call(params)
+        await asyncio.gather(*list(image._PENDING))
+
+    asyncio.run(first())
+    assert calls == [False, True]  # the first reply claimed, probed once and answered
+
+    entered: list[str] = []
+    real_writer = image.write_transaction
+
+    def counting_writer(*args, **kwargs):
+        entered.append(kwargs.get("scope", ""))
+        return real_writer(*args, **kwargs)
+
+    monkeypatch.setattr(image, "write_transaction", counting_writer)
+
+    async def later():
+        for _ in range(3):
+            await _call(params)
+            await asyncio.gather(*list(image._PENDING))
+
+    asyncio.run(later())
+    assert calls.count(True) == 1  # still exactly one probe, ever
+    assert calls.count(False) == 4  # every later reply still reached the model
+    assert entered == []
+    assert _row(isolated_db, "chosen")[1]["result"] == "yes"
+
+
+def test_a_model_with_no_row_costs_no_write_transaction(isolated_db, monkeypatch):
+    """An unknown model is answered by the read alone, not by a failed claim write."""
+    _seed(isolated_db, "chosen")
+    entered: list[str] = []
+    real_writer = image.write_transaction
+
+    def counting_writer(*args, **kwargs):
+        entered.append(kwargs.get("scope", ""))
+        return real_writer(*args, **kwargs)
+
+    monkeypatch.setattr(image, "write_transaction", counting_writer)
+    probed: list[str] = []
+
+    async def probe(*_args, **_kwargs):
+        probed.append("probed")
+        return "no", "must not be reached"
+
+    monkeypatch.setattr(image, "probe_image_input", probe)
+    asyncio.run(image._detect_first_use(_SID, "not-in-the-catalog"))
+    assert entered == []
+    assert probed == []
+
+
+def test_an_interrupted_check_stays_unknown_and_is_never_retried(isolated_db, monkeypatch):
+    """An aborted check persists a fact, never a promise that work is still running."""
+    _seed(isolated_db, "chosen")
+    params = _params(monkeypatch, "openai")
+    calls = []
+
+    async def provider(messages, *args, **kwargs):
+        calls.append(False)
+        return LLMResponse(content="hello")
+
+    _install_provider(monkeypatch, "openai", provider)
+
+    async def aborting_probe(*_args, **_kwargs):
+        calls.append(True)
+        raise RuntimeError("the backend stopped mid-check")
+
+    monkeypatch.setattr(image, "probe_image_input", aborting_probe)
+
+    async def run():
+        for _ in range(2):
+            await _call(params)
+            await asyncio.gather(*list(image._PENDING))
+
+    asyncio.run(run())
+    assert calls == [False, True, False]  # the abort is never retried automatically
+    vision, state = _row(isolated_db, "chosen")
+    assert vision == 0
+    assert state["result"] == "unknown"
+    assert state["detail"] == "" and "checking" not in state["detail"].lower()
+    assert state["automatic_claim"] and state["checked_at"]

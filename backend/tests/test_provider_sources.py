@@ -837,13 +837,9 @@ class TestRecheck:
             steps.append("discover")
             return {"ok": True, "discovered": 1, "updated": 0}
 
-        async def no_images(_server_id):
-            return False
-
         monkeypatch.setattr(check, "_probe_external", probe)
         monkeypatch.setattr(nd, "_sweep_one", sweep)
         monkeypatch.setattr(nd, "_discover_and_notify", discover)
-        monkeypatch.setattr("llm.external_image_input.detect_image_input", no_images)
         assert _sources(client)[f"external:{sid}"]["state"] == "unverified"
 
         body = client.post("/api/providers/sources/recheck").json()

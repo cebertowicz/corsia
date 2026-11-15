@@ -166,11 +166,6 @@ def test_real_health_and_test_recovery_are_readable_without_overlay(
         ("GET", "/v1/models"): _resp(200, {"data": [{"id": "m"}]}),
     }))
 
-    async def no_images(_sid):
-        return False
-
-    monkeypatch.setattr("llm.external_image_input.detect_image_input", no_images)
-
     async def recover():
         server = nd.get_server(sid)
         if recovery == "health":
@@ -218,7 +213,6 @@ async def test_enrichment_failure_preserves_core_discovery_receipt(monkeypatch, 
     monkeypatch.setattr(nd, "_notify_models_changed_safe", lambda: None)
     monkeypatch.setattr("llm.external_provider.discover_external_models", discovered)
     monkeypatch.setattr("llm.catalog.discover_network_models", discovered)
-    monkeypatch.setattr("llm.external_image_input.detect_image_input", failed_enrichment)
     monkeypatch.setattr("llm.network_endpoints.build_api_base", lambda _sid: "http://test/v1")
     monkeypatch.setattr("llm.providers.omlx_introspection.warm_cache", failed_enrichment)
     assert await nd.discover_and_notify("enrichment") is receipt

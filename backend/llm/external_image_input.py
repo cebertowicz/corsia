@@ -131,31 +131,6 @@ def image_input_state(metadata_json: str | None) -> dict | None:
     return _meta({"metadata_json": metadata_json}).get("image_input")
 
 
-def models_to_probe(server_id: str) -> list[str]:
-    """Served ids whose image support detection should settle now.
-
-    A user's choice is never probed over, and a row they turned off is never
-    called; a checked row only when marked for a re-check. Probing a row
-    replaces its record, which clears the mark, so one Test connection never
-    probes a model twice."""
-    db = get_db()
-    try:
-        rows = _rows(db, server_id)
-    finally:
-        db.close()
-    ids = []
-    for row in rows:
-        if not row["enabled"]:
-            continue
-        state = _meta(row).get("image_input") or {}
-        if state.get("source") == USER:
-            continue
-        if state and not state.get("recheck"):
-            continue
-        ids.append(served_model_id(row["litellm_model"]))
-    return ids
-
-
 def image_input_summary(server_id: str) -> str:
     """One sentence naming which of the endpoint's models accept images."""
     db = get_db()
@@ -219,8 +194,32 @@ def record_image_input(
     return True
 
 
+def _needs_first_use_claim(server_id: str, pmid: str) -> bool:
+    """Whether this model still needs a first-use claim, from one read-only lookup.
+
+    Every reply on a model that is already answered, claimed, user-owned or
+    absent costs this single indexed read and no write transaction: that is the
+    steady state once a model has been checked. It only admits the claim; the
+    recheck inside :func:`_claim_first_use` is what arbitrates concurrent
+    successes."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT metadata_json FROM models WHERE provider = ? AND provider_model_id = ?",
+            (PROVIDER, catalog_model_id(server_id, pmid)),
+        ).fetchone()
+    finally:
+        db.close()
+    return row is not None and not _meta(row).get("image_input")
+
+
 def _claim_first_use(server_id: str, pmid: str, claim: str) -> bool:
-    """Persist a single claim before any outbound request, even if it fails."""
+    """Persist a single claim before any outbound request, even if it fails.
+
+    The claim asserts nothing beyond the attempt: an unknown answer, no detail,
+    the attempt time and the token that fences its late result. So a check that
+    never finishes leaves the honest "not determined" reading, not a claim that
+    work is still running."""
     with write_transaction(None, scope="external_image_first_use") as db:
         row = db.execute(
             "SELECT id, metadata_json FROM models WHERE provider = ? AND provider_model_id = ?",
@@ -232,8 +231,8 @@ def _claim_first_use(server_id: str, pmid: str, claim: str) -> bool:
         if meta.get("image_input"):
             return False
         meta["image_input"] = {
-            "source": DETECTED, "result": UNKNOWN,
-            "detail": "Checking image support.", "automatic_claim": claim,
+            "source": DETECTED, "result": UNKNOWN, "detail": "",
+            "checked_at": _now(), "automatic_claim": claim,
         }
         db.execute("UPDATE models SET metadata_json = ? WHERE id = ?", (json.dumps(meta), row["id"]))
     return True
@@ -244,12 +243,25 @@ async def _detect_first_use(server_id: str, pmid: str) -> None:
 
     claim = uuid.uuid4().hex
     try:
+        if not await run_in_db(_needs_first_use_claim, server_id, pmid):
+            return
         if not await run_in_db(_claim_first_use, server_id, pmid, claim):
             return
         result, detail = await probe_image_input(server_id, pmid, automatic=True)
-        await run_in_db(record_image_input, server_id, pmid, result, detail, claim=claim)
+        committed = await run_in_db(
+            record_image_input, server_id, pmid, result, detail, claim=claim,
+        )
     except Exception:
         log.exception("External first-use image check failed for %s/%s", server_id, pmid)
+        return
+    if not committed:
+        return  # A user answer or another attempt won: this result is stale, so it says nothing.
+    from infra.state.ws import notify_models_changed
+
+    try:
+        notify_models_changed()
+    except Exception as e:  # The answer is stored; a lost notice cannot undo it or relabel the check.
+        log.warning("notify_models_changed failed after image check on %s/%s: %s", server_id, pmid, e)
 
 
 def schedule_first_use_detection(server_id: str, pmid: str) -> None:
@@ -257,35 +269,6 @@ def schedule_first_use_detection(server_id: str, pmid: str) -> None:
     task = asyncio.create_task(_detect_first_use(server_id, pmid))
     _PENDING.add(task)
     task.add_done_callback(_PENDING.discard)
-
-
-def mark_for_recheck(server_id: str) -> None:
-    """Have the next detection pass probe every detected model again.
-
-    The last answer stays visible (and in force) until the new one lands."""
-    with write_transaction(None, scope="external_image_recheck") as db:
-        for row in _rows(db, server_id):
-            meta = _meta(row)
-            state = meta.get("image_input")
-            if not state or state.get("source") == USER:
-                continue
-            meta["image_input"] = {**state, "recheck": True}
-            db.execute(
-                "UPDATE models SET metadata_json = ? WHERE id = ?",
-                (json.dumps(meta), row["id"]),
-            )
-
-
-async def detect_image_input(server_id: str) -> int:
-    """Probe the models that need it, one at a time; returns how many were probed."""
-    from infra.db_async import run_in_db
-
-    pmids = await run_in_db(models_to_probe, server_id)
-    for pmid in pmids:
-        result, detail = await probe_image_input(server_id, pmid)
-        log.info("external image probe %s/%s: %s", server_id, pmid, result)
-        await run_in_db(record_image_input, server_id, pmid, result, detail)
-    return len(pmids)
 
 
 async def set_image_input(server_id: str, pmid: str, mode: str) -> bool:
