@@ -52,10 +52,10 @@ describe('an AutoFill suggestion that replaces the whole value', () => {
 	});
 
 	it('inserts at a caret in the middle', () => {
-		typed('Call  tomorrow', 5);
+		typed('Call me  tomorrow', 8);
 		edit('insertReplacementText', '555 0100');
-		expect(field.value).toBe('Call 555 0100 tomorrow');
-		expect(field.selectionStart).toBe('Call 555 0100'.length);
+		expect(field.value).toBe('Call me 555 0100 tomorrow');
+		expect(field.selectionStart).toBe('Call me 555 0100'.length);
 	});
 
 	it('brings back the whole suggestion when it shares a few letters with the typed text', () => {
@@ -109,6 +109,12 @@ describe('edits that stand', () => {
 		typed('I think their is ');
 		edit('insertReplacementText', 'I think there is ');
 		expect(field.value).toBe('I think there is ');
+	});
+
+	it('a spelling-menu fix of a word away from the caret', () => {
+		typed('I recieved the file and will reply soon');
+		edit('insertReplacementText', 'I received the file and will reply soon');
+		expect(field.value).toBe('I received the file and will reply soon');
 	});
 
 	it('a QuickType completion of the word at the caret', () => {

@@ -11,8 +11,8 @@
  * 3. its `inputType` is `insertText`, `insertReplacementText` or empty (never a delete, undo/redo, paste, drop, line
  *    break or transpose);
  * 4. the field held text and the selection did not cover all of it (select-all then type replaces on purpose);
- * 5. the text it removed reaches outside the last two words up to the caret, counting the word the caret is in
- *    (autocorrect, QuickType, text replacement and a contextual fix of the word before stay inside those);
+ * 5. it replaced the whole value, and that value held more than two words (a fix of some words, wherever the caret
+ *    is, leaves the rest standing; in a field of one or two words a word fix looks the same, so it is left alone);
  * 6. the incoming text looks like a contact suggestion: one line, at most 120 characters (so a dictated paragraph or
  *    a whole-field rewrite is left alone).
  *
@@ -51,14 +51,8 @@ export function keptValue(prior: Snapshot, next: string, maxLength = -1): { valu
 	const removedStart = head;
 	const removedEnd = old.length - tail;
 	if (removedEnd <= removedStart) return null;
-	let wordStart = prior.start;
-	for (let word = 0; word < 2; word++) {
-		while (blank(old[wordStart - 1])) wordStart--;
-		while (wordStart > 0 && !blank(old[wordStart - 1])) wordStart--;
-	}
-	let wordEnd = prior.end;
-	while (wordEnd < old.length && !blank(old[wordEnd])) wordEnd++;
-	if (removedStart >= wordStart && removedEnd <= wordEnd) return null;
+	if (old.slice(0, removedStart).trim() || old.slice(removedEnd).trim()) return null;
+	if (old.trim().split(/\s+/).length <= 2) return null;
 	const incoming = next.slice(head, next.length - tail).trim();
 	if (!incoming || incoming.length > CONTACT_MAX || /[\r\n]/.test(incoming)) return null;
 	const before = old.slice(0, prior.start);
