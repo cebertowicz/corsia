@@ -5,6 +5,10 @@ a read is exact whatever their state, so a refresh that never catches up shows n
 slow Measurement reads. After each refresh this reads how far each rollup covers and, when either
 is more than ``LAG_WARNING`` behind, logs one WARNING (at most every 15 minutes per process) with
 the coverage, how the refresh ended and the oldest open visit, which bounds the focus rollup.
+
+This is a temporary diagnostic for issue #2759, not a second rollup mechanism. It should stop
+firing once that issue's root-cause fix ships; delete this module and its call in
+``api.usage_rollup`` once production has logged no such warning for 7 days after that fix.
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ def coverage_job() -> tuple[str, int, str, str]:
     try:
         dirty = db.execute("SELECT COUNT(*) FROM llm_usage_hourly_dirty").fetchone()[0]
         focus = db.execute("SELECT definition,built_through FROM presence_focus_rollup_state WHERE id=1").fetchone()
-        opened = db.execute("SELECT MIN(last_entered_at) FROM thread_presence WHERE present=1").fetchone()[0]
+        opened = presence_rollup.oldest_open_visit(db)
         covered = str(focus[1]) if focus is not None and focus[0] == presence_rollup.DEFINITION else ""
         return rollup_through(db), int(dirty), covered, str(opened or "")
     finally:

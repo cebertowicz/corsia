@@ -295,7 +295,7 @@ def test_a_dirty_hour_planned_before_a_reset_is_not_written_after_it(isolated_db
 
 
 @pytest.mark.asyncio
-async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_other():
+async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_other(monkeypatch):
     from api import rollup_lag, usage_rollup
 
     started = asyncio.Event()
@@ -316,7 +316,7 @@ async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_othe
         finished.set()
         return True
 
-    rollup_lag._last_warning[0] = float("-inf")
+    monkeypatch.setattr(rollup_lag, "_last_warning", [float("-inf")])
     usage_rollup.schedule_refresh(read, write)
     usage_rollup.schedule_refresh(read, write)  # a second page load while the first refresh runs
     await asyncio.wait_for(started.wait(), 1)
