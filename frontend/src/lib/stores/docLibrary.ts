@@ -47,9 +47,12 @@ export function dirDescription(dir: string): string {
 	return DIR_DESCRIPTIONS[dir] ?? '';
 }
 
-export function secondaryDocumentText(entry: Pick<DocEntry, 'descState' | 'description' | 'ownerName'>): string {
-	if (entry.descState === 'pending') return `No description${entry.ownerName ? ` · Owner: ${entry.ownerName}` : ''}`;
-	return [entry.description, entry.ownerName ? `Owner: ${entry.ownerName}` : ''].filter(Boolean).join(' · ');
+/** A document row's second line in two parts, so the owner can stay whole while the description gives way. */
+export function secondaryDocumentParts(entry: Pick<DocEntry, 'descState' | 'description' | 'ownerName'>): { lead: string; owner: string } {
+	return {
+		lead: entry.descState === 'pending' ? 'No description' : (entry.description ?? ''),
+		owner: entry.ownerName ? `Owner: ${entry.ownerName}` : '',
+	};
 }
 
 export const docSources = writable<DocSource[]>([]);

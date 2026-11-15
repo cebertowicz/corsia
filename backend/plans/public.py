@@ -27,8 +27,9 @@ from plans.service import (
 
 # Plan tool and decision schemas (tools/plan_schemas, tools/plan_field_schemas).
 from plans.boundary_fields import (
-    HUMAN_OPERATIONS, MAX_ARCHIVE_NODES, OPERATION_FIELDS, OPERATION_REQUIRED_FIELDS,
+    HUMAN_OPERATIONS, OPERATION_FIELDS, OPERATION_REQUIRED_FIELDS,
 )
+from plans.bulk_fields import MAX_BULK_NODES
 from plans.scheduled_wait import PAUSE_OPERATIONS, pause_refusal
 
 # Continuation sources (automation/continuation/sources/*).
@@ -261,8 +262,9 @@ from plans.review_requests import (
 )
 from plans.service import add_node, transition_node
 
-# A step the system opens for the person and settles when it sees it done (host_access/browser).
-from plans.system_user_steps import open_user_step, settle_user_step
+# A step the system opens for the person, settles when it sees it done, and closes
+# when it can no longer finish (host_access/browser).
+from plans.system_user_steps import close_user_step, open_user_step, settle_user_step
 
 # Lesson trial and captured-hypothesis reviews (core/lesson_*).
 from plans.lesson_review_history import read_batch as lesson_review_history
@@ -321,7 +323,8 @@ from plans.lifecycle import archive_ended_owner
 from plans.service import touch_node
 from plans.admission import release as release_attempt
 from plans.delegation_harvest import returned_steps as returned_worker_steps
-from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdicts
+from plans.delegation_owed_verdict import notify_owed_verdicts, owed_verdict_ages, owed_verdicts
+from plans import automated_mutation_keys
 from plans.hierarchy import shown_worker_plan
 from plans.service import _transition as transition_node_in
 from plans.worker_retirement import (

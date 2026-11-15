@@ -14,7 +14,8 @@ export interface OperatorCommitmentCost {
 	tokens: { known: number | null; unknown_rows: number };
 	model_cost_usd: { known: number | null; unknown_rows: number };
 	usage_recording_failures: number;
-	elapsed_seconds: { known: number; status: 'in_progress' | 'complete' };
+	/** Ended time only; add `now - start` for each `open_starts` entry (one while the commitment is open). */
+	elapsed_seconds: { settled_seconds: number; status: 'in_progress' | 'complete'; open_starts: string[] };
 	user_effort: { known_plan_actions: number; status: 'partial' };
 }
 
@@ -23,13 +24,15 @@ export interface OperatorCostAmount {
 	tokens: { known: number | null; unknown_rows: number };
 	model_cost_usd: { known: number | null; unknown_rows: number };
 	usage_recording_failures: number;
+	/** Time that has ended (`settled_seconds`) plus one start per span still running; read through `liveSeconds`. */
 	execution: {
-		seconds: number;
+		settled_seconds: number;
+		open_starts: string[];
 		unknown_turns: number;
 		turns: { completed: number; error: number; cancelled: number; running: number; waiting_retry: number };
 	};
 	/** Wall clock spent in an agent, external, dependency or PR-review wait; never spend. */
-	waiting: { seconds: number };
+	waiting: { settled_seconds: number; open_starts: string[] };
 }
 
 /** A node's own figure, and its own plus every descendant's (`rolled`). */

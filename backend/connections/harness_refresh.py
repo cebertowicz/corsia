@@ -177,12 +177,33 @@ async def refresh_for_selection(model: str | None, *, db=None) -> dict | None:
 
 
 async def refresh_harness_catalogs(*, reason: RefreshReason) -> list[dict[str, Any]]:
-    """Re-ask available harnesses whatever the cache age: releases skip CLI bumps."""
+    """Re-ask available harnesses whatever the cache age: releases skip CLI bumps.
+
+    Each provider's forced re-ask runs as that provider's background check, so a
+    stale check requested meanwhile (the model list asks for one on every read)
+    finds it running instead of re-asking every account a second time. Selectors
+    requested meanwhile are checked once it finishes, as ``_drain`` does.
+    """
     results = await asyncio.gather(*(
-        _refresh_if_needed(provider, forced=reason)
-        for provider in harness_models._ADAPTERS
+        _forced_check(provider, reason) for provider in harness_models._ADAPTERS
     ))
     return [result for result in results if result is not None]
+
+
+async def _forced_check(provider: str, reason: RefreshReason) -> dict[str, Any] | None:
+    outcome: dict[str, dict[str, Any] | None] = {}
+
+    async def check() -> None:
+        outcome["result"] = await _refresh_if_needed(provider, forced=reason)
+        if _PENDING.get(provider):
+            await _drain(provider)
+
+    task = harness_models.start_background_check(provider, check)
+    if task is None:
+        # A check was already running; the forced re-ask still runs, as it always has.
+        return await _refresh_if_needed(provider, forced=reason)
+    await task
+    return outcome.get("result")
 
 
 async def _drain(provider: str) -> None:

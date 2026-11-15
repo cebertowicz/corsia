@@ -36,6 +36,31 @@ const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((e
 	}
 	throw new Error(`no "${words}" drawn`);
 }, words);
+/**
+ * Scrolls the document, if it has to, until `words` in `root` are drawn above the phone sheet that covers the bottom of the
+ * screen, so a tap on them is a tap outside the sheet. Where on the screen a table lies depends on what is drawn above it
+ * (a row more in the document's header moves it down), so the spec brings the words clear of the sheet instead of relying on
+ * where they happen to land.
+ */
+const scrollClearOfSheet = async (page: Page, root: Locator, words: string) => {
+	const sheet = page.locator('[data-adaptive-drawer] .drawer-panel');
+	// Once the first tap has closed the sheet there is nothing to be clear of.
+	if (!(await sheet.count())) return;
+	const sheetTop = await sheet.evaluate((el) => el.getBoundingClientRect().top);
+	const room = 12;
+	const behind = (await wordsIn(root, words)).bottom - (sheetTop - room);
+	if (behind <= 0) return;
+	await root.evaluate((el, by) => {
+		let scroller: Element | null = el.parentElement;
+		while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+		if (!scroller) throw new Error('nothing around the table scrolls');
+		scroller.scrollTop += by;
+	}, behind);
+	await settled(page);
+	const after = await wordsIn(root, words);
+	expect(after.bottom, `"${words}" is above the sheet (${sheetTop}) once scrolled`).toBeLessThanOrEqual(sheetTop - room + 1);
+	expect(after.y, `"${words}" is still on the screen once scrolled`).toBeGreaterThan(0);
+};
 const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
 /** Where the offer sits against the selected words: across from where they end, and its middle from their top. */
 /** Where the composer opened: its left, and its top below the selected words; on the screen when it opened in the phone's sheet. */
@@ -212,7 +237,9 @@ for (const layout of LAYOUTS) {
 			const seeded = await openTableDocument(page, layout, { quoted: 'Plain words in a cell.' });
 			// A whole-cell comment is drawn on all of the cell's text, as a text comment is.
 			const mark = page.locator(`td [data-comment-ids*="${seeded.commentId}"]`).first();
-			const whole = page.locator('td', { has: mark });
+			// The cell is named by its place: once its editor opens, the cell no longer holds the mark, so a locator that finds
+			// the cell by the mark finds nothing.
+			const whole = cell(page, 2, 1);
 			await expect(mark, 'the comment is drawn on all of the cell\'s text').toHaveText('Plain words in a cell.');
 			const phone = layout.project === 'chromium-mobile';
 			if (phone) await mark.tap(); else await mark.click({ delay: 80 });
@@ -260,7 +287,11 @@ for (const layout of LAYOUTS) {
 				// line, so the caret goes in front of it and nowhere else. The cell wraps over several lines, so its editor has to
 				// wrap them at the same words for the click to land on the word that was drawn there.
 				const target = cell(page, 3, 1);
-				const pointAtWord = async () => { const word = await wordsIn(target, 'few'); return { x: word.x + 1, y: (word.y + word.bottom) / 2 }; };
+				const pointAtWord = async () => {
+					if (card && phone) await scrollClearOfSheet(page, target, 'few');
+					const word = await wordsIn(target, 'few');
+					return { x: word.x + 1, y: (word.y + word.bottom) / 2 };
+				};
 				const press = async () => {
 					const point = await pointAtWord();
 					if (phone) await page.touchscreen.tap(point.x, point.y);

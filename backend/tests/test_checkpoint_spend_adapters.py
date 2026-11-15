@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
+# These calls report both cache counts as zero; an omitted count would be unknown.
+_CACHE_MEASURED_ZERO = {"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+
 
 @pytest.mark.asyncio
 async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
@@ -96,7 +99,7 @@ async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
     await boundary.observe({"type": "assistant", "message": {
         "id": "response-1", "stop_reason": "tool_use", "content": [
             {"type": "tool_use", "id": "edit", "name": "edit", "input": {}},
-        ], "usage": {"input_tokens": 100, "output_tokens": 20},
+        ], "usage": {"input_tokens": 100, "output_tokens": 20, **_CACHE_MEASURED_ZERO},
     }})
 
     async def edit():
@@ -104,7 +107,7 @@ async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
         return "done"
 
     assert await boundary.execute(edit, "edit", "edit", {}) == "done"
-    await boundary.observe({"type": "result", "usage": {"input_tokens": 100, "output_tokens": 20}})
+    await boundary.observe({"type": "result", "usage": {"input_tokens": 100, "output_tokens": 20, **_CACHE_MEASURED_ZERO}})
     assert len(observed) == 1
 
 
@@ -115,7 +118,7 @@ async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
         ({"type": "stream_event", "event": {"type": "message_stop"}}, None, "response-1", "claude-sonnet-5-5"),
         # The aggregate is no one call, so it names no vendor model and the
         # ledger owner keys the target's expected one.
-        ({"type": "result"}, {"input_tokens": 100, "output_tokens": 20}, "aggregate", None),
+        ({"type": "result"}, {"input_tokens": 100, "output_tokens": 20, **_CACHE_MEASURED_ZERO}, "aggregate", None),
     ],
 )
 async def test_cc_terminal_usage_keeps_the_vendor_reported_model(terminal, terminal_usage, expected_key, expected_model):
@@ -133,7 +136,7 @@ async def test_cc_terminal_usage_keeps_the_vendor_reported_model(terminal, termi
                              on_usage=usage)
     await boundary.observe({"type": "stream_event", "event": {"type": "message_start", "message": {
         "id": "response-1", "model": "claude-sonnet-5-5",
-        "usage": {"input_tokens": 100},
+        "usage": {"input_tokens": 100, **_CACHE_MEASURED_ZERO},
     }}})
     if terminal_usage is None:
         await boundary.observe({"type": "stream_event", "event": {

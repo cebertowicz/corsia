@@ -38,6 +38,7 @@ class MovedFileRecovery:
 
     identity: dict[str, Any]
     move: dict[str, str | None]
+    by_promote: bool = False
 
 
 @dataclass(frozen=True, slots=True)
