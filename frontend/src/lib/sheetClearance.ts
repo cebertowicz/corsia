@@ -23,8 +23,21 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 /** Sheets the reader pulled up past their cap; each one is forgotten with its element, when the sheet closes. */
 const raised = new WeakSet<HTMLElement>();
 
-/** Whether a sheet is held below its height by `capSheetAboveText`, so pulling its grabber up grows it. */
-export const sheetCapped = (panel: HTMLElement | null): boolean => !!panel && !raised.has(panel) && panel.style.getPropertyValue('--drawer-text-cap') !== '';
+/**
+ * Whether `capSheetAboveText` holds a sheet below the height it would have without the cap, so pulling its grabber up grows it.
+ * Measured: the cap is set on every opened comment, but a short thread under a tall cap is not held. The cap comes off and goes back
+ * in the same task, so nothing paints without it.
+ */
+export function sheetCapped(panel: HTMLElement | null): boolean {
+	if (!panel || raised.has(panel)) return false;
+	const value = panel.style.getPropertyValue('--drawer-text-cap');
+	const cap = Number.parseFloat(value);
+	if (!Number.isFinite(cap)) return false;
+	panel.style.removeProperty('--drawer-text-cap');
+	const natural = panel.getBoundingClientRect().height;
+	panel.style.setProperty('--drawer-text-cap', value);
+	return natural > cap + 1;
+}
 
 /** Whether the reader pulled this sheet up: until it closes, nothing caps it again or moves the page for it. */
 export const sheetRaised = (panel: HTMLElement | null): boolean => !!panel && raised.has(panel);

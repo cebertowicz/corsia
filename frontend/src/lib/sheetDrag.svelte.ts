@@ -5,7 +5,7 @@ import { releaseSheetDrag } from '$lib/sheetMotion';
  * and what letting go does (`releaseSheetDrag`). One pointer at a time; a press with any button but the primary one is ignored.
  */
 export function createSheetDrag(props: {
-	/** The sheet is shorter than it may be, so pulling it up grows it. */
+	/** The sheet is shorter than it may be, so pulling it up grows it. Read once as the drag starts. */
 	expandable: () => boolean;
 	/** The sheet's height when the drag ends, for its dismiss distance. */
 	height: () => number;
@@ -19,6 +19,7 @@ export function createSheetDrag(props: {
 	let dragStartY = 0;
 	let dragStartedAt = 0;
 	let dragRaw = 0;
+	let canGrow = false;
 
 	function startDrag(event: PointerEvent): void {
 		if (event.button !== 0) return;
@@ -29,6 +30,7 @@ export function createSheetDrag(props: {
 		dragY = 0;
 		pullY = 0;
 		dragRaw = 0;
+		canGrow = props.expandable();
 		dragging = true;
 		handle.setPointerCapture?.(event.pointerId);
 	}
@@ -37,12 +39,12 @@ export function createSheetDrag(props: {
 		if (!dragging || dragPointer !== event.pointerId) return;
 		dragRaw = event.clientY - dragStartY;
 		dragY = Math.max(0, dragRaw);
-		pullY = props.expandable() ? Math.max(0, -dragRaw) : 0;
+		pullY = canGrow ? Math.max(0, -dragRaw) : 0;
 	}
 
 	function finishDrag(event: PointerEvent): void {
 		if (!dragging || dragPointer !== event.pointerId) return;
-		const release = releaseSheetDrag({ expandable: props.expandable(), released: event.type === 'pointerup', raw: dragRaw, elapsed: performance.now() - dragStartedAt, height: props.height() });
+		const release = releaseSheetDrag({ expandable: canGrow, released: event.type === 'pointerup', raw: dragRaw, elapsed: performance.now() - dragStartedAt, height: props.height() });
 		dragging = false;
 		dragPointer = null;
 		pullY = 0;

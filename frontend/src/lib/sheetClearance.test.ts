@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { capSheetAboveText, giveBackRoom, keptWhole, liftSheetCap, placeAboveSheet, SHEET_GAP, sheetCapped, sheetRaised } from './sheetClearance';
 
-function sheet(backdropBottom: number): HTMLElement {
+/** A sheet in a drawer whose content is `natural` px tall: it lays out at that height, or at its cap when the cap is lower. */
+function sheet(backdropBottom: number, natural = 600): HTMLElement {
 	const backdrop = document.createElement('div');
 	backdrop.setAttribute('data-adaptive-drawer', '');
 	backdrop.getBoundingClientRect = () => ({ bottom: backdropBottom, top: 0, left: 0, right: 393, width: 393, height: backdropBottom, x: 0, y: 0, toJSON: () => ({}) });
 	const panel = document.createElement('div');
+	panel.getBoundingClientRect = () => {
+		const cap = Number.parseFloat(panel.style.getPropertyValue('--drawer-text-cap'));
+		const height = Number.isFinite(cap) ? Math.min(natural, cap) : natural;
+		return { bottom: backdropBottom, top: backdropBottom - height, left: 0, right: 393, width: 393, height, x: 0, y: backdropBottom - height, toJSON: () => ({}) };
+	};
 	backdrop.append(panel);
 	document.body.append(backdrop);
 	return panel;
@@ -52,6 +58,24 @@ describe('liftSheetCap', () => {
 		expect(sheetCapped(panel)).toBe(false);
 		capSheetAboveText(panel, { height: 400, regionTop: 100 });
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+
+	it('a short thread under a tall cap is not held by it, so it cannot be pulled up, and the cap stays as it was', () => {
+		const panel = sheet(852, 150);
+		capSheetAboveText(panel, { height: 21, regionTop: 125 });
+		const cap = panel.style.getPropertyValue('--drawer-text-cap');
+		expect(Number.parseFloat(cap)).toBeGreaterThan(150);
+		expect(sheetCapped(panel)).toBe(false);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe(cap);
+		expect(sheetRaised(panel)).toBe(false);
+	});
+
+	it('a sheet exactly as tall as its cap is not held by it', () => {
+		const panel = sheet(852, 300);
+		panel.style.setProperty('--drawer-text-cap', '300px');
+		expect(sheetCapped(panel)).toBe(false);
+		panel.style.setProperty('--drawer-text-cap', '298px');
+		expect(sheetCapped(panel)).toBe(true);
 	});
 
 	it('a new sheet starts capped again', () => {
