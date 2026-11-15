@@ -322,7 +322,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await first.openComments();
 	await failOneDecision(page, first.loose, 'accept');
 	await first.accept(first.loose).click();
-	await expect(first.row(first.loose).getByRole('alert')).toHaveText('Couldn’t accept this suggestion. Try again.');
+	await expect(first.row(first.loose).getByRole('alert')).toHaveText('Synthetic accept failure');
 	await expect(first.accept(first.fine)).toBeEnabled();
 	await expect(first.row(first.loose).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-failure', { failure: { target: first.row(first.loose).getByRole('alert'), min: TEXT } });
@@ -331,7 +331,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await expect(first.row(first.loose).getByRole('alert')).toHaveCount(0);
 	await failOneDecision(page, first.fine, 'reject');
 	await first.reject(first.fine).click();
-	await expect(first.row(first.fine).getByRole('alert')).toHaveText('Couldn’t reject this suggestion. Try again.');
+	await expect(first.row(first.fine).getByRole('alert')).toHaveText('Synthetic reject failure');
 	await expect(first.reject(first.fine)).toBeEnabled();
 	await first.reject(first.fine).click();
 	await inResolved(first.drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${first.fine}"]`).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
@@ -340,7 +340,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	const acceptAll = second.drawer.getByRole('button', { name: `Accept all from ${second.reviewerTitle}`, exact: true });
 	await failOneDecision(page, second.loose, 'accept');
 	await acceptAll.click();
-	await expect(second.drawer.getByRole('alert')).toHaveText('Couldn’t accept the suggestions. Try again.');
+	await expect(second.drawer.getByRole('alert')).toHaveText('Synthetic accept failure');
 	await expect(acceptAll).toHaveText(`Accept all from ${second.reviewerTitle}`);
 	await expect(second.drawer.getByText(/skipped$/)).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-failure', { failure: { target: second.drawer.getByRole('alert'), min: TEXT } });
