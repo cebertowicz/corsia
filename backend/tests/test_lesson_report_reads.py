@@ -50,6 +50,7 @@ def test_lifetime_candidate_stream_never_materializes_tool_metadata(db):
     from core.lesson_report_reads import _candidate_groups
 
     read_call(db)
+    load(db)
 
     class StreamingCursor:
         def __init__(self, cursor):
@@ -169,3 +170,103 @@ def test_installed_boundary_tuple_keeps_exact_orphan_version_without_prompt_disc
         "kind": "lesson", "id": current["id"], "version": current["version"],
     }
     assert identity_for_raw([fact, fact | {"version": "other"}], digest=current["raw_sha256"], path=PATH) is None
+
+
+def no_receipt_turn_reads(db, count, *, thread="owner"):
+    """``count`` read_file results in Turns that recorded no guidance load."""
+    for index in range(count):
+        call_id = f"quiet-{index}"
+        insert_message(thread, "assistant", "", {
+            "turn_id": f"quiet-turn-{index}",
+            "tool_calls": [{"id": call_id, "name": "read_file", "arguments": {"path": f"/work/file-{index}.md"}}],
+        }, msg_id=f"step-{call_id}", db=db)
+        persist_tool_execution_result(
+            thread_id=thread, turn_id=f"quiet-turn-{index}", invocation_id=call_id,
+            assistant_step_id=f"step-{call_id}", provider_tool_call_id=call_id, name="read_file",
+            arguments={"path": f"/work/file-{index}.md"}, content="body", is_error=False, db=db,
+        )
+
+
+def test_reads_in_turns_without_a_receipt_are_never_candidates(db):
+    no_receipt_turn_reads(db, 3)
+    read_call(db)
+    current = load(db)
+    projection = bodies(db, [current])
+    [read] = projection["reads"]
+    assert read["path"] == PATH
+    assert projection["unavailable_reads"] == {}
+    assert "reads examined only in Turns that recorded a guidance load or a failed receipt write" in (
+        projection["coverage"])
+
+
+def test_a_turn_whose_receipt_write_failed_still_counts_its_unlinked_read(db):
+    from core.guidance_manifest import STATUS_WRITE_FAILED
+
+    read_call(db)
+    db.execute(
+        "INSERT INTO active_turns(id,thread_id,execution_epoch,model,started_at,boot_epoch,guidance_load_status) "
+        "VALUES('turn','owner',0,'test/model','t','boot',?)", (STATUS_WRITE_FAILED,),
+    )
+    projection = bodies(db, [])
+    assert projection["reads"] == []
+    assert projection["unavailable_reads"] == {"repeated or missing call/load linkage": 1}
+
+
+def _candidate_statement(db):
+    from collections import Counter
+    from core.lesson_report_reads import _candidate_groups
+
+    seen = []
+
+    class RecordingDB:
+        def execute(self, sql, params=()):
+            seen.append((sql, params))
+            return db.execute(sql, params)
+
+    _candidate_groups(RecordingDB(), "user", ("owner",), Counter())
+    [statement] = seen
+    return statement
+
+
+def test_candidate_scan_seeks_each_receipt_turn_on_the_turn_index(db):
+    read_call(db)
+    load(db)
+    sql, params = _candidate_statement(db)
+    details = [row["detail"] for row in db.execute("EXPLAIN QUERY PLAN " + sql, params)]
+    assert "SEARCH m USING INDEX idx_messages_meta_turn_seq (thread_id=? AND <expr>=?)" in details, details
+
+
+def test_candidate_scan_cost_does_not_grow_with_reads_in_turns_without_a_receipt(db):
+    from collections import Counter
+    from core.lesson_report_reads import _candidate_groups
+
+    read_call(db)
+    load(db)
+    no_receipt_turn_reads(db, 400)
+    db.commit()
+
+    steps = 0
+
+    def cap() -> int:
+        nonlocal steps
+        steps += 1
+        # The whole-thread scan took ~56k steps here (~225k at 1,600 reads); the seek takes <1k.
+        return int(steps > 10)
+
+    db.set_progress_handler(cap, 1000)
+    try:
+        groups = _candidate_groups(db, "user", ("owner",), Counter())
+    finally:
+        db.set_progress_handler(None, 0)
+    assert list(groups) == [("owner", "turn", PATH)]
+
+
+def test_a_read_whose_metadata_is_not_canonical_json_is_named_in_coverage_not_counted(db):
+    result = read_call(db)
+    current = load(db)
+    row = db.execute("SELECT metadata FROM messages WHERE id=?", (result.message_id,)).fetchone()
+    metadata = json.loads(row["metadata"]) | {"cost": float("nan")}
+    db.execute("UPDATE messages SET metadata=? WHERE id=?", (json.dumps(metadata), result.message_id))
+    projection = bodies(db, [current])
+    assert projection["reads"] == [] and projection["unavailable_reads"] == {}
+    assert "only results whose stored metadata is canonical JSON (not NaN or Infinity)" in projection["coverage"]

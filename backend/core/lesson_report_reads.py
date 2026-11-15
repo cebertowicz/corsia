@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core import tool_result_binding
+from core.guidance_manifest import STATUS_WRITE_FAILED
 from core.tool_result_report import canonical_result_reasons
 from core.lesson_report_boundaries import identity_for_raw
 from core.lesson_report_files import recorded_source
@@ -106,19 +107,41 @@ def identify_recorded_reads(reads: list[dict[str, Any]], blob_reader,
     return result
 
 
+def _receipt_turns_sql(placeholders: str) -> str:
+    """The Turns whose read_file calls can join a body receipt, for one chunk of threads.
+
+    A receipt is written only for a ``SKILL.md`` read, so a Turn with neither a receipt nor a
+    failed receipt write has no read to join, and its tool rows are never read. Every other
+    Turn keeps today's candidates and linkage counts exactly.
+    """
+    return (
+        "SELECT g.thread_id AS thread_id,g.turn_id AS turn_id FROM guidance_loads g "
+        "WHERE g.thread_id IN (" + placeholders + ") AND g.turn_id IS NOT NULL "
+        "UNION SELECT a.thread_id,a.id FROM active_turns a "
+        "WHERE a.thread_id IN (" + placeholders + ") AND a.guidance_load_status=?"
+    )
+
+
 def _candidate_groups(db, user_id: str, thread_ids: tuple[str, ...], unavailable: Counter[str]):
     candidates: dict[tuple[str, str, str], list[tuple[Any, dict[str, Any]]]] = defaultdict(list)
     unique_threads = tuple(dict.fromkeys(thread_ids))
     for offset in range(0, len(unique_threads), 499):
         chunk = unique_threads[offset:offset + 499]
         placeholders = ",".join("?" for _ in chunk)
+        # CROSS JOIN keeps the receipt Turns outermost, and INDEXED BY makes each Turn's tool rows
+        # a seek on idx_messages_meta_turn_seq (key and partial predicate repeated below); without
+        # it the planner can walk every tool row of the thread on idx_messages_tool_lineage. The
+        # unary + strips w.turn_id's TEXT affinity, which would otherwise be applied to the
+        # indexed expression and leave the seek on thread_id alone.
         rows = json_row_chunks(
             db,
             "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.seq AS seq "
-            "FROM threads t JOIN messages m ON m.thread_id=t.id "
-            "WHERE t.user_id=? AND t.id IN (" + placeholders + ") AND m.role='tool' "
-            "AND " + read_file_metadata_predicate("m.metadata"),
-            (user_id, *chunk), ("id", "thread_id", "metadata"), "thread_id,seq,id",
+            "FROM (" + _receipt_turns_sql(placeholders) + ") w "
+            "CROSS JOIN threads t ON t.id=w.thread_id "
+            "CROSS JOIN messages m INDEXED BY idx_messages_meta_turn_seq ON m.thread_id=w.thread_id "
+            "AND json_extract(m.metadata,'$.turn_id')=+w.turn_id AND json_valid(m.metadata) "
+            "WHERE t.user_id=? AND m.role='tool' AND " + read_file_metadata_predicate("m.metadata"),
+            (*chunk, *chunk, STATUS_WRITE_FAILED, user_id), ("id", "thread_id", "metadata"), "thread_id,seq,id",
         ) if chunk else ()
         for row in rows:
             arguments, metadata = _read_call(row)
@@ -208,7 +231,9 @@ def read_bodies(
                 unavailable[str(reason)] += 1
     return {"reads": reads, "unavailable_reads": dict(unavailable),
             "coverage": (
-                "canonical read_file only; shell reads and unrecorded lineage unavailable; "
+                "canonical read_file only; reads examined only in Turns that recorded a guidance "
+                "load or a failed receipt write, and only results whose stored metadata is canonical "
+                "JSON (not NaN or Infinity); shell reads and unrecorded lineage unavailable; "
                 "native results before the native-writer fix lack invocation lineage and are "
                 "counted as unavailable rather than reads; predecessor Turn lineage refuses "
                 "provider-call-id reuse across Turns"
