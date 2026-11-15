@@ -49,7 +49,7 @@ export function createViewerHeader(shown: () => { target: DocViewerTarget | null
 	return {
 		get freshness() { return freshness; },
 		get ownership() { return ownership; },
-		/** True while the row is the remembered one: its pickers and Mark verified wait for the load. */
+		/** True while the row is the remembered one: its pickers and Mark verified wait for a load that answers. A load that fails leaves it as it is, so the header holds its height and only the body shows the error. */
 		get standIn() { return standIn; },
 		/** A load starts: draw the row this tab last showed, if it showed one. */
 		begin(target: DocViewerTarget) {
@@ -64,12 +64,6 @@ export function createViewerHeader(shown: () => { target: DocViewerTarget | null
 			ownership = value.ownership ?? null;
 			standIn = false;
 			rememberHeader(target, { freshness, ownership });
-		},
-		/** The load failed: no answer confirms no row. */
-		cleared() {
-			freshness = null;
-			ownership = null;
-			standIn = false;
 		},
 		settling: (started: DocViewerTarget | null, startedId: string | null) => headerSettler(started, startedId, shown, (patch) => {
 			if (patch.ownership) ownership = patch.ownership;

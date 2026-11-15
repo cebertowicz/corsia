@@ -236,7 +236,7 @@
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
 {#if (freshness && freshnessPresentation) || showOwnership}
-	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} data-ownership-row={showOwnership || undefined}>
+	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} class:held={headerStandIn} data-ownership-row={showOwnership || undefined}>
 		{#if ownership && artifactId}<div class="metadata-owner">{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
 		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 		{#if freshnessPresentation?.datetime}
@@ -287,6 +287,9 @@
 	/* The owner and supervisor items draw their own hover fill and focus ring, which a clipped cell would cut off. */
 	.has-ownership .metadata-owner { overflow: visible; }
 	.verification-action { margin-left: -10px; }
+	/* A remembered row waiting for its load is drawn exactly as the loaded one, so its controls are neither dimmed nor filled on hover; they only don't act yet. */
+	.document-metadata.held :global(button:disabled) { opacity: 1; cursor: default; }
+	.document-metadata.held :global(button.item:disabled:hover) { background: transparent; color: var(--text-secondary); }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
 	.metadata-error { color: var(--red); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

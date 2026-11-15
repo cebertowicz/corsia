@@ -245,7 +245,6 @@
 			})
 				.catch((e) => {
 					if (seq !== loadSeq) return;
-					header.cleared();
 					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
 						fail: (failure) => { openRefusal = failure.refusal; docState = failure.state;
 							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },

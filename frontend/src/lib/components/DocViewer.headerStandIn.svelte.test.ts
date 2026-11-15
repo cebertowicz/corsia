@@ -120,12 +120,24 @@ describe('the owner and supervisor row on a tab return', () => {
 		await vi.waitFor(() => expect(ownerLabel()).toBeNull());
 	});
 
-	it('goes when the load fails, so its pickers do not stay waiting', async () => {
+	it('stays, still waiting, when the load fails, so the header keeps its height and only the body shows the error', async () => {
 		await returnToNotes();
 		expect(ownerLabel()).toBe('Owner: Release planning');
 		failNotes!();
-		await vi.waitFor(() => expect(ownerLabel()).toBeNull());
-		expect(host.querySelectorAll('[data-ownership-row] button.item').length).toBe(0);
+		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't open notes.md."));
+		expect(ownerLabel()).toBe('Owner: Release planning');
+		const buttons = [...host.querySelectorAll<HTMLButtonElement>('[data-ownership-row] button.item')];
+		expect(buttons.length).toBeGreaterThan(0);
+		for (const button of buttons) expect(button.disabled).toBe(true);
+		expect(host.querySelector('[data-ownership-row]')?.classList.contains('held')).toBe(true);
+	});
+
+	it('marks the held row, so its disabled controls are drawn like the loaded ones, and unmarks it when the load answers', async () => {
+		await returnToNotes();
+		const row = () => host.querySelector('[data-ownership-row]');
+		expect(row()?.classList.contains('held')).toBe(true);
+		answerNotes!(ownedBy('Release planning'));
+		await vi.waitFor(() => expect(row()?.classList.contains('held')).toBe(false));
 	});
 
 	it('closes an owner picker opened on one tab when another tab\'s held load starts, and writes nothing', async () => {
