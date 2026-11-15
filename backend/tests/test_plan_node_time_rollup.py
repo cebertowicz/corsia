@@ -22,6 +22,20 @@ T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
 MINUTE = 60
 
 
+def test_stable_union_excludes_open_segment_but_keeps_closed_intervals():
+    from math import inf, nextafter
+
+    now = T0 + timedelta(seconds=20)
+    t = T0.timestamp()
+    spans = [(t, t + 3), (t + 2, t + 5), (t + 10, nextafter(now.timestamp(), inf))]
+    assert node_time.stable_amount(spans, now) == {
+        "seconds": 5, "open_starts": [(T0 + timedelta(seconds=10)).isoformat()],
+    }
+    assert node_time.stable_amount([(t, t + 5), (t + 10, now.timestamp())], now) == {
+        "seconds": 15, "open_starts": [],
+    }
+
+
 def _at(minutes: float) -> str:
     return (T0 + timedelta(minutes=minutes)).isoformat()
 
