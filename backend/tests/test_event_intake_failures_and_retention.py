@@ -151,7 +151,9 @@ def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
     message = "event line refused: " + intake_errors.format_event_error(
         "intake_unreachable", "event intake is unavailable", fix)
     assert report.status == "error" and report.error == message
-    assert ("Run the script again" in message) == (rule_decision_id is None)
+    # Neither owner is told to run the script again: no tool starts it, and a run by hand sends no lines.
+    assert "Run the script again" not in message and "start it yourself" in message
+    assert ("If the schedule runs again" in message) == (rule_decision_id is None)
 
     # The wake the owner reads: the intake failed, not the script, so nothing in it says to fix the script.
     assert script_readings.emit_report(
