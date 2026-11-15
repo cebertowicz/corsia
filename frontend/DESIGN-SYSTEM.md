@@ -20,8 +20,8 @@ support, and the live token split in `app-tokens.css` + `app.css`.
   converted screens match it and never use a treatment §0.2 lists as out. On
   a screen not yet converted, no §0.2 treatment appears in the area a change
   touches, controls the change keeps there included; the rest of that screen
-  keeps its own look until its pass. §0.2 items 7 and 9 are refused
-  everywhere (§0).
+  keeps its own look until its pass. No addition anywhere may use §0.2
+  items 7 and 9 (§0).
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
   `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
   Don't roll your own. (`StatePill` still exists; on new and converted
@@ -52,9 +52,10 @@ with it, one screen at a time. Until a screen is, anything added to it matches
 that screen's own current look, element by element, and moves to §0 only when
 the whole screen does, with one limit: no §0.2 treatment appears anywhere in
 the area a change touches, including controls the change keeps there
-(2026-11-15). Outside that area the screen keeps its look until its pass.
-§0.2 items 7 and 9 are refused on every screen, changed area or not. Where
-the screen already uses both looks for the
+(2026-11-15). That area is the bar, row group, panel or dialog holding what
+the change adds or alters. Outside it the screen keeps its look until its
+pass. No addition on any screen may use §0.2 items 7 and 9, outside a changed
+area included. Where the screen already uses both looks for the
 same role (an error as coloured text in one place and a banner in another),
 the addition uses §0's. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
@@ -105,8 +106,8 @@ first needs it, from what that screen gets approved with.
 These are the old treatments the chat view removed. Review refuses them on
 new and converted screens, and on an unconverted screen anywhere in the area
 a change touches, controls the change keeps there included. Outside a changed
-area, an unconverted screen keeps them until its pass. Items 7 and 9 are
-refused on every screen.
+area, an unconverted screen keeps them until its pass. No addition on any
+screen may use items 7 and 9.
 
 CI's design-token ratchet (`scripts/design_token_ratchet.py`) detects only
 part of this, and only stops a file's count from rising: borders of 2px or
