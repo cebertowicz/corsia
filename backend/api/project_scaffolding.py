@@ -190,7 +190,7 @@ def link_repo_into_source(
         raise ValueError("Repo path must be under your home directory")
     if _within(unresolved, src_unresolved) or _within(resolved, source_dir.resolve()):
         raise ValueError(
-            "Target is inside this project's source/ — already a native repo"
+            "Target is inside this project's source/; register that entry where it is"
         )
 
     repo_name = name or _default_repo_name(resolved)

@@ -25,6 +25,7 @@ compensated flow Project settings uses — with two agent-specific restrictions:
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +113,10 @@ class ProjectRepoRegisterTool(Tool):
         if refusal := await asyncio.to_thread(repo_config_refusal, target):
             return f"Error: {refusal}"
 
-        body = RepoAdd(mode="link", path=str(target), name=name)
+        # The path as written, made absolute, so a link entry already in the project's
+        # source/ is recognised as that entry; the procedure resolves it again itself.
+        written = os.path.normpath(Path(raw_path).expanduser().absolute())
+        body = RepoAdd(mode="link", path=written, name=name)
         try:
             repo = await run_in_db(
                 lambda: register_source_repo(project_id, body)
