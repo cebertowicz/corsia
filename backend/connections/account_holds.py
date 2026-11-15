@@ -83,9 +83,11 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
     judged by that account's hold reason, which costs one account read and one policy read per such
     candidate: both answer from the scoped read memo the caller already opened, and only an account
     still signed in reaches the readiness evaluator's home check.
-    """
-    from connections.account_policy import scoped_turn_account
 
+    Given the binding row it already read, the owner's answer for a candidate depends only on its
+    project, its model and that binding, so each distinct combination is judged once and the
+    answer applies to every candidate that shares it.
+    """
     account = get_account(account_id, db=db)
     provider = account['provider']
     rows = db.execute("""SELECT t.id,t.model,t.project_id,b.account_id AS bound,b.pending_account_id AS pending
@@ -97,26 +99,40 @@ def affected_thread_ids(account_id: str, *, db) -> list[str]:
                OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id
                           AND m.input_order IS NOT NULL AND m.delivery_state='queued'
                           AND m.active_turn_id IS NULL))""", (provider, provider)).fetchall()
+    judged: dict[tuple, bool] = {}
     affected = []
     for row in rows:
-        binding = None if row['bound'] is None else {'account_id': row['bound'], 'pending_account_id': row['pending']}
-        selected, _ = scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
-                                           account_id=None, model=str(row['model']), db=db, binding=binding)
-        if selected == account_id:
+        key = (row['project_id'], str(row['model']), row['bound'], row['pending'])
+        if key not in judged:
+            judged[key] = _is_subject(account_id, provider, *key, db=db)
+        if judged[key]:
             affected.append(str(row['id']))
-        elif row['project_id'] != '' and row['bound'] is not None and str(row['bound']) == account_id:
-            # The claim moves off its own account only for a project denial or a usage limit, so any
-            # other reason keeps this thread on the account being changed: it is a subject of the
-            # change even though the next turn runs elsewhere. A literal empty project is left to
-            # the canonical selection, which already answers it as a missing project, not a subject.
-            from connections.account_rollover import NOT_PERMITTED
-
-            reason = _binding_hold({'account_id': account_id, 'provider': provider}, missing=None,
-                                   project=row['project_id'], model=str(row['model']),
-                                   provider=provider, db=db)
-            if reason not in (None, NOT_PERMITTED):
-                affected.append(str(row['id']))
     return affected
+
+
+def _is_subject(account_id: str, provider: str, project, model: str, bound, pending, *, db) -> bool:
+    """Whether a candidate with this project, model and binding is a subject of ``account_id``'s change.
+
+    The canonical selection reads nothing of the thread beyond these once its binding is given.
+    """
+    from connections.account_policy import scoped_turn_account
+
+    binding = None if bound is None else {'account_id': bound, 'pending_account_id': pending}
+    selected, _ = scoped_turn_account(provider, thread_id=None, project=project,
+                                       account_id=None, model=model, db=db, binding=binding)
+    if selected == account_id:
+        return True
+    if project != '' and bound is not None and str(bound) == account_id:
+        # The claim moves off its own account only for a project denial or a usage limit, so any
+        # other reason keeps this thread on the account being changed: it is a subject of the
+        # change even though the next turn runs elsewhere. A literal empty project is left to
+        # the canonical selection, which already answers it as a missing project, not a subject.
+        from connections.account_rollover import NOT_PERMITTED
+
+        reason = _binding_hold({'account_id': account_id, 'provider': provider}, missing=None,
+                               project=project, model=model, provider=provider, db=db)
+        return reason not in (None, NOT_PERMITTED)
+    return False
 
 
 def workspace_policy_thread_ids(provider: str, *, db) -> list[str]:

@@ -15,8 +15,8 @@ An unhashable argument fails loudly inside the scope; a missing or ``None`` conn
 bypasses it, so a reader that opens its own connection cannot cache a stale snapshot.
 
 Only facts that do not vary by thread are wrapped: project policy, project
-existence, account rows, the account an identity resolves to, and a model's
-vendor and catalog row. A thread's own binding, project scope, pending account
+existence, account rows, the account an identity resolves to, whether an account's
+home can launch, and a model's vendor and catalog row. A thread's own binding, project scope, pending account
 and queued head are never memoized -- the projection must see each thread's own
 state, and those reads stay per thread.
 

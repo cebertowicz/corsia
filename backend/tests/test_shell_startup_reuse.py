@@ -29,6 +29,8 @@ def test_argv_grants_come_from_the_callers_policy_snapshot(monkeypatch, tmp_path
     monkeypatch.setattr(sandbox_config, "thread_bind_roots", lambda _thread_id: [])
     monkeypatch.setattr(shell_guard, "_safehouse_executable", lambda: Path("/opt/safehouse"))
     monkeypatch.setattr(shell_guard, "agent_account_ro_dirs", lambda _view: [])
+    # The host's own tool folders (its runtime cache, once anything is installed) are not under test.
+    monkeypatch.setattr(shell_guard, "agent_tool_ro_dirs", lambda: [])
 
     argv = shell_guard.safehouse_argv(
         "printf ok",

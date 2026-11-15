@@ -10,7 +10,7 @@ one row has one API-equivalent price wherever it is shown. Nothing here reads or
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
@@ -100,6 +100,42 @@ ADMISSION_SQL = (
 _ADMITTED = ",".join(f"SUM(CASE WHEN admission='ok' THEN {bucket} ELSE 0 END) AS {bucket}" for bucket in TOKEN_BUCKETS)
 
 
+# What one group of calls carries before its identity is resolved, in order.
+_SHAPE = ("model", "context_manifest_id", "admission", "input_tier", "idle_hours", "records", *TOKEN_BUCKETS)
+
+
+def _shapes_sql(source: str, leading: Mapping[str, str]) -> str:
+    """The calls in ``source`` grouped on ``leading`` and on what classifies them, with counts and token sums."""
+    selected = "".join(f"{expression} AS {name}," for name, expression in leading.items())
+    grouped = "".join(f"{expression}," for expression in leading.values())
+    sums = ",".join(f"SUM(u.{bucket}) AS {bucket}" for bucket in TOKEN_BUCKETS)
+    return f"""
+        SELECT {selected}u.model AS model,u.context_manifest_id AS context_manifest_id,
+          {ADMISSION_SQL} AS admission,{INPUT_TIER_SQL} AS input_tier,{IDLE_HOURS_SQL} AS idle_hours,
+          COUNT(*) AS records,{sums}
+        FROM {source}
+        GROUP BY {grouped}u.model,u.context_manifest_id,admission,input_tier,idle_hours
+    """
+
+
+def _classified_sql(names: Collection[str], shapes: str) -> str:
+    """``shapes`` (columns ``names`` plus ``_SHAPE``) with their manifest identity, summed per key and class.
+
+    One key's calls may arrive split across several ``shapes`` rows; the sums add them. Only admitted
+    token sums are kept."""
+    keys = ",".join(names)
+    carried = ",".join(f"g.{name} AS {name}" for name in names)
+    classes = ",".join(f"g.{name} AS {name}" for name in ("admission", "input_tier", "idle_hours", "records", *TOKEN_BUCKETS))
+    return f"""
+        SELECT {keys},{IDENTITY_GROUP},admission,input_tier,idle_hours,SUM(records) AS records,{_ADMITTED}
+        FROM (
+          SELECT {carried},{identity_columns("g")},{classes}
+          FROM ({shapes}) g {identity_join("g")}
+        )
+        GROUP BY {keys},{IDENTITY_GROUP},admission,input_tier,idle_hours
+    """
+
+
 def grouped_usage_sql(keys: Mapping[str, str], source: str) -> str:
     """The grouped, classifiable usage read over ``source``: the shape ``classify_usage_rows`` prices.
 
@@ -109,26 +145,28 @@ def grouped_usage_sql(keys: Mapping[str, str], source: str) -> str:
     ``llm_usage`` alias is ``u``. Calls are grouped on what classifies them first, and the context
     manifest is joined afterwards, onto those few groups instead of onto every call.
     """
-    names = ",".join(keys)
-    expressions = ",".join(keys.values())
-    selected = ",".join(f"{expression} AS {name}" for name, expression in keys.items())
-    carried = ",".join(f"g.{name} AS {name}" for name in keys)
-    classes = ",".join(f"g.{name} AS {name}" for name in ("admission", "input_tier", "idle_hours", "records", *TOKEN_BUCKETS))
-    sums = ",".join(f"SUM(u.{bucket}) AS {bucket}" for bucket in TOKEN_BUCKETS)
-    return f"""
-        SELECT {names},{IDENTITY_GROUP},admission,input_tier,idle_hours,SUM(records) AS records,{_ADMITTED}
-        FROM (
-          SELECT {carried},{identity_columns("g")},{classes}
-          FROM (
-            SELECT {selected},u.model AS model,u.context_manifest_id AS context_manifest_id,
-              {ADMISSION_SQL} AS admission,{INPUT_TIER_SQL} AS input_tier,{IDLE_HOURS_SQL} AS idle_hours,
-              COUNT(*) AS records,{sums}
-            FROM {source}
-            GROUP BY {expressions},u.model,u.context_manifest_id,admission,input_tier,idle_hours
-          ) g {identity_join("g")}
-        )
-        GROUP BY {names},{IDENTITY_GROUP},admission,input_tier,idle_hours
+    return _classified_sql(list(keys), _shapes_sql(source, keys))
+
+
+def grouped_usage_per_row_sql(keys: Mapping[str, str], rows: str, calls: str) -> str:
+    """The rows of ``grouped_usage_sql(keys, f"{rows} JOIN llm_usage u ON {calls}")``, grouped one row at a time.
+
+    ``rows`` is a FROM clause the ``keys`` expressions read; ``calls`` picks each of its rows' calls from
+    ``llm_usage u``. A single grouping sorts every call the rows reach at once, which spills to disk once
+    they number in the millions; here each row's calls are classified and grouped on their own, packed
+    into one JSON value, and only those few groups are regrouped. The packing is exact for what is
+    kept: text, NULL and integers round-trip, and the token sums kept are admitted ones, which
+    admission proves are integers; an unadmitted group's sums are dropped by ``_classified_sql``.
     """
+    packed = ",".join(_SHAPE)
+    unpacked = ",".join(f"json_extract(j.value,'$[{index}]') AS {name}" for index, name in enumerate(_SHAPE))
+    selected = ",".join(f"{expression} AS {name}" for name, expression in keys.items())
+    return _classified_sql(list(keys), f"""
+        SELECT {selected},{unpacked}
+        FROM {rows}, json_each((
+          SELECT json_group_array(json_array({packed})) FROM ({_shapes_sql(f"llm_usage u WHERE {calls}", {})})
+        )) j
+    """)
 
 
 def endpoint_listings(db) -> dict[str, str]:
