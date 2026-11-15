@@ -2,7 +2,7 @@
 
 A promote retires the working file's identity and carries its comment state to the successor. A
 pane that had the document open keeps the old id, so its writes either follow the document to the
-live successor or are refused with the MOVED text, which leaves the browser holding the draft.
+live successor or are refused with ``NOT_COMMENTABLE``, which leaves the browser holding the draft.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_USER, OWNER_TOKEN, OWNER_USER
+from api.doc_comment_access import NOT_COMMENTABLE
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from infra.database import get_db, write_transaction
-from plans.public import PERSON_COMMENT_MOVED as MOVED
 from registry import models
 
 TOKEN = {"token": OWNER_TOKEN}
@@ -117,7 +117,7 @@ def test_a_reply_is_idempotent_across_a_promote(client, isolated_db):
         db.close()
 
 
-def test_a_write_is_refused_with_moved_when_the_chain_ends_in_a_retired_document(client, isolated_db):
+def test_a_write_is_refused_when_the_chain_ends_in_a_retired_document(client, isolated_db):
     db = get_db()
     try:
         artifact, root = _document_with_thread(db)
@@ -125,13 +125,13 @@ def test_a_write_is_refused_with_moved_when_the_chain_ends_in_a_retired_document
         models.retire(successor, tombstone=True, cause="file_gone", db=db)
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert (response.status_code, response.json()["detail"]) == (409, MOVED)
+        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
         assert _rows(db, artifact) == [] and _rows(db, successor) == before
     finally:
         db.close()
 
 
-def test_a_write_is_refused_with_moved_when_the_caller_cannot_use_the_successor(client, isolated_db):
+def test_a_write_is_refused_when_the_caller_cannot_use_the_successor(client, isolated_db):
     db = get_db()
     try:
         artifact, root = _document_with_thread(db)
@@ -140,7 +140,7 @@ def test_a_write_is_refused_with_moved_when_the_caller_cannot_use_the_successor(
         successor = _promote(db, artifact, owner="stranger")
         before = _rows(db, successor)
         response = _reply(client, artifact, root)
-        assert (response.status_code, response.json()["detail"]) == (409, MOVED)
+        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
         assert _rows(db, successor) == before
     finally:
         db.close()
@@ -233,7 +233,24 @@ def test_accept_all_from_a_pane_on_a_document_promoted_nowhere_is_refused(client
         successor = _promote(db, artifact)
         models.retire(successor, tombstone=True, cause="file_gone", db=db)
         response = client.post(f"/api/artifacts/{artifact}/suggestions/accept-all", params=TOKEN)
-        assert (response.status_code, response.json()["detail"]) == (409, MOVED)
+        assert (response.status_code, response.json()["detail"]) == (409, NOT_COMMENTABLE)
+    finally:
+        db.close()
+
+
+def test_accept_all_gives_a_caller_who_may_not_use_the_document_the_same_refusal_whether_or_not_it_was_promoted(
+    client, isolated_db,
+):
+    """A foreign id stays non-enumerable: promoted or unknown, the answer is the same 404."""
+    db = get_db()
+    try:
+        seed_thread(db, "stranger")
+        db.execute("UPDATE threads SET user_id=? WHERE id='stranger'", (OTHER_USER,))
+        foreign = seed_document(db, "stranger")
+        _promote(db, foreign, owner="stranger")
+        for artifact in (foreign, "no-such-identity"):
+            response = client.post(f"/api/artifacts/{artifact}/suggestions/accept-all", params=TOKEN)
+            assert response.status_code == 404, (artifact, response.text)
     finally:
         db.close()
 
@@ -272,6 +289,23 @@ def test_the_list_a_pane_on_the_old_id_reads_shows_the_comments_on_the_live_docu
         assert _reply(client, artifact, root).status_code == 200
         thread = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN).json()["comments"][0]
         assert "from the open pane" in [reply["body"] for reply in thread["replies"]]
+    finally:
+        db.close()
+
+
+def test_the_list_a_pane_on_the_old_id_reads_includes_comments_saved_on_the_retired_id(client, isolated_db):
+    """A write saved on the retired row before any promote carried comments is still shown to its writer."""
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        successor = _promote(db, artifact)
+        stray, _ = add_comment(db, artifact, author_kind="user", author="Steve")
+        stray_reply, _ = add_comment(db, artifact, author_kind="user", author="Steve", parent_id=stray["id"])
+        stale = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN).json()["comments"]
+        assert [thread["id"] for thread in stale] == [root["id"], stray["id"]]
+        assert [reply["id"] for reply in stale[1]["replies"]] == [stray_reply["id"]]
+        live = client.get(f"/api/artifacts/{successor}/comments", params=TOKEN).json()["comments"]
+        assert [thread["id"] for thread in live] == [root["id"]]
     finally:
         db.close()
 

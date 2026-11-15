@@ -42,7 +42,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, require_user_header_only
 from infra.database import get_db, write_transaction
-from api.doc_comment_access import _artifact_for_read, _artifact_for_write, _assert_owns_artifact, _live_artifact_id
+from api.doc_comment_access import _artifact_for_write, _artifacts_for_read, _assert_owns_artifact
 from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
@@ -61,13 +61,18 @@ async def list_comments(artifact_id: str, token: str):
     def _list():
         db = get_db()
         try:
-            artifact_id_read = _artifact_for_read(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id_read, db=db)
+            read_ids = _artifacts_for_read(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(read_ids[0], db=db)
             path = artifact["path"] if artifact else None
-            comments, anchors_checked = anchored_threads(artifact_id_read, path, db)
+            comments: list[dict] = []
+            anchors_checked = True
+            for read_id in read_ids:  # the live document's threads, then any left on the retired id
+                threads, checked = anchored_threads(read_id, path, db)
+                feedback_state.annotate_thread_attention(db, user["id"], read_id, threads)
+                comments += threads
+                anchors_checked = anchors_checked and checked
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
-            feedback_state.annotate_thread_attention(db, user["id"], artifact_id_read, comments)
-            feedback = feedback_batches.user_feedback_for_document(db, artifact_id_read)
+            feedback = feedback_batches.user_feedback_for_document(db, read_ids[0])
             return comments, anchors_checked, feedback
         finally:
             db.close()
@@ -238,7 +243,7 @@ async def accept_all_suggestions(artifact_id: str, token: str):
     def _live():
         db = get_db()
         try:
-            return _live_artifact_id(artifact_id, user["id"], db)
+            return _artifact_for_write(artifact_id, user["id"], db)
         finally:
             db.close()
 

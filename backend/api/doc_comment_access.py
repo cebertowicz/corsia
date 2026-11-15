@@ -1,8 +1,8 @@
 """Who may use a document's comments, and which document a pane's comment request belongs to.
 
 The comment routes share one ownership gate. A pane still open on a promoted document's retired id
-is followed to its live successor: writes land there or are refused with the MOVED text, and the list
-a stale pane reads is the live document's, where the comments moved with the promote.
+is followed to its live successor: writes land there or are refused with ``NOT_COMMENTABLE``, and the list
+a stale pane reads is the live document's comments plus any left on the retired id itself.
 """
 
 from __future__ import annotations
@@ -10,8 +10,10 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from infra.auth import may_access_artifact
-from plans.public import PERSON_COMMENT_MOVED as MOVED
 from registry import models as registry_models
+
+# The refusal of a comment write whose document moved to a place the writer can't use; the browser keeps the draft.
+NOT_COMMENTABLE = "Comments can’t be added to this document. Your comment wasn’t sent, and your text is still here."
 
 
 def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
@@ -34,7 +36,7 @@ def _live_artifact_id(artifact_id: str, user_id: str, db) -> str:
     A promote retires the working file's identity and carries its comment state to the successor
     (``doceditor.comment_transfer``), so a write keyed by the old id follows it there: ``artifact_id``
     itself unless it was promoted, else the active identity its successor chain ends at. Refuses with
-    409 and the MOVED text when the chain ends nowhere the caller may write, so the browser keeps
+    409 and ``NOT_COMMENTABLE`` when the chain ends nowhere the caller may write, so the browser keeps
     the draft instead of the write landing on a row nobody reads.
     """
     live = registry_models.live_identity(artifact_id, db=db)
@@ -44,7 +46,7 @@ def _live_artifact_id(artifact_id: str, user_id: str, db) -> str:
         except HTTPException:
             live = None
     if live is None:
-        raise HTTPException(409, MOVED)
+        raise HTTPException(409, NOT_COMMENTABLE)
     return live
 
 
@@ -54,18 +56,19 @@ def _artifact_for_write(artifact_id: str, user_id: str, db) -> str:
     return _live_artifact_id(artifact_id, user_id, db)
 
 
-def _artifact_for_read(artifact_id: str, user_id: str, db) -> str:
-    """The artifact whose comments a pane on ``artifact_id`` shows: the live document when it was promoted.
+def _artifacts_for_read(artifact_id: str, user_id: str, db) -> list[str]:
+    """The artifacts whose comments a pane on ``artifact_id`` shows: the live document, then the id itself.
 
-    The comments moved there with the promote, so the list a stale pane reads follows them. When no
-    live document the caller may read exists, the id named is read as it always was.
+    A promote carries the comments to the live document, but a retired id can still hold comments
+    saved there before the promote carried any, so a stale pane reads both. Comment ids are unique,
+    so the two sets never collide. When no live document the caller may read exists, only the id named.
     """
     _assert_owns_artifact(artifact_id, user_id, db)
     live = registry_models.live_identity(artifact_id, db=db)
     if live is None or live == artifact_id:
-        return artifact_id
+        return [artifact_id]
     try:
         _assert_owns_artifact(live, user_id, db)
     except HTTPException:
-        return artifact_id
-    return live
+        return [artifact_id]
+    return [live, artifact_id]
