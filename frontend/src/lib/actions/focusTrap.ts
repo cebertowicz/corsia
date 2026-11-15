@@ -85,7 +85,9 @@ export function focusTrap(node: HTMLElement, options: FocusTrapOptions = {}) {
 			// focus, and a trap that outlives an outro (the dock drawer's 260ms) would
 			// otherwise pull focus off the control that already took it back.
 			if (!focusStillOurs(node, document.activeElement)) return;
-			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus();
+			// Handing focus back never scrolls: a bare focus() brings the element's caret into view, which in an editor
+			// whose selection was cleared is the start of the document, and the page leaves the place the person was reading.
+			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
 		},
 	};
 }

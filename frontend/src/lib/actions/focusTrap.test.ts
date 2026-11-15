@@ -81,6 +81,14 @@ describe('focusTrap', () => {
 		expect(document.activeElement).toBe(outside);
 	});
 
+	it('hands focus back without scrolling the page', async () => {
+		const trap = focusTrap(node);
+		await tick();
+		const focus = vi.spyOn(outside, 'focus');
+		trap.destroy();
+		expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+	});
+
 	it('never calls focus on <body> when nothing was focused at mount', async () => {
 		// The trigger can already be unmounted when the trap mounts, leaving <body> as the
 		// previous element. In a real browser body.focus() blurs the control that holds focus.
