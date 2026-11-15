@@ -5,8 +5,8 @@
 	let { head, onAgree, onResolve }: { head: DocComment; onAgree: (id: string, on: boolean) => void; onResolve: (id: string) => void } = $props();
 </script>
 
-{#if !head.replacement && !head.resolved}<button type="button" class="sheet-act ack" class:on={head.acked} aria-pressed={head.acked} title="Agree" onclick={() => onAgree(head.id, !head.acked)}>Agree</button>{/if}
-{#if (!head.replacement && !head.resolved) || decidedOpen(head)}<button type="button" class="sheet-act" title="Resolve — close the thread" onclick={() => onResolve(head.id)}>Resolve</button>{/if}
+{#if head.replacement == null && !head.resolved}<button type="button" class="sheet-act ack" class:on={head.acked} aria-pressed={head.acked} title="Agree" onclick={() => onAgree(head.id, !head.acked)}>Agree</button>{/if}
+{#if (head.replacement == null && !head.resolved) || decidedOpen(head)}<button type="button" class="sheet-act" title="Resolve — close the thread" onclick={() => onResolve(head.id)}>Resolve</button>{/if}
 
 <style>
 	.sheet-act { box-sizing: border-box; min-height: var(--touch-target); padding: 0 var(--space-2); border: 0; background: none; color: var(--accent-text); font: inherit; font-size: var(--text-subhead); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap; border-radius: var(--radius-sm); }

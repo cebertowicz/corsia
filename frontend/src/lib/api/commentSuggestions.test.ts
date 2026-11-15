@@ -15,10 +15,18 @@ describe('decideSuggestion', () => {
 		await expect(refusal).rejects.toMatchObject({ status: 409, kind: 'stale' });
 	});
 
-	it('leaves the kind empty when the server sends none, and shows the fallback sentence, not its text', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, json: vi.fn().mockResolvedValue({ detail: 'Bad' }) }));
+	it('shows a bare `{detail}` body’s sentence with no kind, as a document-save refusal sends it', async () => {
+		const detail = 'The document changed while these suggestions were being applied. Nothing was changed; try again.';
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409, json: vi.fn().mockResolvedValue({ detail }) }));
 		const refusal = decideSuggestion('comment-1', 'accept');
-		await expect(refusal).rejects.toMatchObject({ status: 400, kind: null });
+		await expect(refusal).rejects.toMatchObject({ status: 409, kind: null });
+		await expect(refusal).rejects.toThrow(detail);
+	});
+
+	it('shows the fallback sentence when the answer carries no string detail', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: vi.fn().mockResolvedValue({}) }));
+		const refusal = decideSuggestion('comment-1', 'accept');
+		await expect(refusal).rejects.toMatchObject({ status: 500, kind: null });
 		await expect(refusal).rejects.toThrow('Couldn’t accept this suggestion. Try again.');
 	});
 

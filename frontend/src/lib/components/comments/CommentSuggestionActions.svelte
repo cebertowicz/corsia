@@ -49,8 +49,8 @@
 
 <style>
 	.ct-suggestion-pin { display: flex; flex-direction: column; gap: var(--space-1); }
-	/* Pinned only where the card is the whole surface: a popover, or the sheet holding one thread (a flat card). A card in a list sits in the list's own scroller, where a pinned row would lie over the next card, so there it follows the card's content like any other row. */
-	:global([data-popover]) .ct-suggestion-pin, :global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { position: sticky; bottom: 0; z-index: 1; padding-block: var(--space-1); background: var(--bg-elevated); }
+	/* Pinned only where the card is the whole surface: a popover holding one thread (never the list popover, `.list-pop`, whose cards share one scroller), or the sheet holding one thread (a flat card). A card in a list sits in the list's own scroller, where a pinned row would lie over the next card, so there it follows the card's content like any other row. */
+	:global([data-popover]:not(:has(.list-pop))) .ct-suggestion-pin, :global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { position: sticky; bottom: 0; z-index: 1; padding-block: var(--space-1); background: var(--bg-elevated); }
 	:global([data-adaptive-drawer]) :global(.ct.flat) .ct-suggestion-pin { background: var(--bg-secondary); }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: var(--space-2); margin-top: 2px; }
 	/* IconButton transitions every property; the focus ring, and the colours when the theme changes, must be final the moment they land (the plain text buttons these replace did not animate). The name sits beside the icon, so the button grows from its square to fit it. */

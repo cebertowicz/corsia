@@ -137,7 +137,10 @@ export const MAX_SCROLL_PASSES = 8;
 const centreKey = {};
 const STEADY_CHECKS = 2;
 
-/** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
+/**
+ * `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. `comment-save` never scrolls a
+ * target already in view (a saved comment, a draft, or an opened thread brought out from under the phone sheet).
+ */
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 
 const QUOTE_MARGIN = 8;

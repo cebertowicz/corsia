@@ -146,7 +146,7 @@
 		<span class="rb-row2">
 			<div class="rb-capsule" class:suppressed class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
-				<span class="rb-status" class:busy={busy || (!status && hint !== '')} class:hint={!status && hint !== ''} role="status">{status || hint}</span>
+				<span class="rb-status" class:busy={busy} class:hint={!status && hint !== ''} role="status">{status || hint}</span>
 				{@render actions()}
 			</div>
 		</span>
@@ -205,7 +205,7 @@
 	.rb-others strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
-	.rb-status.busy { color: var(--text-secondary); }
+	.rb-status.busy, .rb-status.hint { color: var(--text-secondary); }
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }

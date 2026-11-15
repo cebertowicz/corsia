@@ -1,10 +1,12 @@
-import { untrack } from 'svelte';
+import { tick, untrack } from 'svelte';
 import type { DocComment } from '$lib/stores/docComments';
 
 /**
  * Closes a phone thread sheet when the person's own Resolve or Agree takes its thread from open to resolved: nothing is left in it
  * to act on, and the resolved list is one tap away. Someone else resolving the thread while it is read leaves the sheet up, and an
- * unsent reply keeps it up so its text is not lost. Call `acted(id)` from the person's own Agree and Resolve; call during component setup.
+ * unsent reply keeps it up so its text is not lost. Call `resolving(id, answered)` from the person's own Resolve only, with the promise of its
+ * answer: the mark lasts until that request is answered, so a refused Resolve, or one that settles with the thread still open, leaves
+ * nothing behind to close the sheet on someone else's later resolve. Agree never marks. Call during component setup.
  */
 export function closeOnOwnResolve(shown: () => DocComment | undefined, hasDraft: (id: string) => boolean, close: () => void) {
 	let actedOn: string | null = null;
@@ -17,5 +19,12 @@ export function closeOnOwnResolve(shown: () => DocComment | undefined, hasDraft:
 		was = { id: head.id, open };
 		if (closing) { actedOn = null; close(); }
 	});
-	return { acted: (id: string) => { actedOn = id; } };
+	return {
+		resolving: (id: string, answered: Promise<unknown>) => {
+			actedOn = id;
+			// Everything the answer changes has been seen by the effect after a tick, so a mark still standing then belongs to a Resolve that did not close the thread.
+			const settle = () => tick().then(() => { if (actedOn === id) actedOn = null; });
+			void answered.then(settle, settle);
+		},
+	};
 }

@@ -3,8 +3,8 @@
 
 	/**
 	 * The one Close for a sheet's top right: a bare X, named "Close", 44 px on a touch screen, with the accent focus ring the
-	 * rest of the comment surfaces draw. The comment list, a card or thread sheet, a chat comment sheet and the image sheet
-	 * all use it, so the same job is drawn, named and focused the same way.
+	 * rest of the comment surfaces draw. A document's thread sheet and a chat comment sheet (`AdaptiveDrawer` `doneIcon`) use it,
+	 * so the same job is drawn, named and focused the same way. The comment list's heading keeps its own X, named "Close comments".
 	 */
 	let { onclick, label = 'Close' }: { onclick: (e: MouseEvent) => void; label?: string } = $props();
 </script>

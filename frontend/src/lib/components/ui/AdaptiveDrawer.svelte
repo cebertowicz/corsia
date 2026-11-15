@@ -56,7 +56,7 @@
 		compact?: boolean;
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
-		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as the comment list's heading does. */
+		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */
 		doneIcon?: boolean;
 		onClose: () => void;
 		children: Snippet;
