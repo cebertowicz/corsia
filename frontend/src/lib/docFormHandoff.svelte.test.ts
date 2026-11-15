@@ -98,3 +98,37 @@ it('focuses the handed-off reply once in the margin column, and not over a field
 	await tick();
 	expect(document.activeElement).toBe(other);
 });
+
+it('waits for a margin card still hidden for want of a place, then focuses its reply once it is placed', async () => {
+	document.body.innerHTML = `${reply('a')}<div class="col"><div class="margin-card" data-margin-card="a">${reply('a')}</div></div>`;
+	const old = document.querySelector<HTMLElement>('.ct-input')!;
+	const column = document.querySelector<HTMLElement>('.col')!;
+	const { shown } = create();
+	old.focus();
+	shown.form = 'margin';
+	shown.drawer = column;
+	flushSync();
+	old.closest('[data-thread-id]')!.remove();
+	await tick();
+	// A browser drops focus on a hidden field; it is not tried until the card has its place.
+	expect(document.activeElement).toBe(document.body);
+	column.querySelector('[data-margin-card]')!.classList.add('placed');
+	await Promise.resolve();
+	expect(document.activeElement).toBe(column.querySelector('.ct-input'));
+});
+
+it('takes no focus on placement once the reader has moved on', async () => {
+	document.body.innerHTML = `${reply('a')}<div class="col"><div class="margin-card" data-margin-card="a">${reply('a')}</div></div><button>Elsewhere</button>`;
+	const old = document.querySelector<HTMLElement>('.ct-input')!;
+	const column = document.querySelector<HTMLElement>('.col')!;
+	const { shown } = create();
+	old.focus();
+	shown.form = 'margin';
+	shown.drawer = column;
+	flushSync();
+	await tick();
+	document.querySelector<HTMLElement>('button')!.focus();
+	column.querySelector('[data-margin-card]')!.classList.add('placed');
+	await Promise.resolve();
+	expect(document.activeElement).toBe(document.querySelector('button'));
+});

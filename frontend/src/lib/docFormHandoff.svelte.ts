@@ -62,14 +62,32 @@ export function createFormHandoff(inputs: {
 		handoffFrom = form === 'margin' ? field?.from ?? null : null;
 	});
 	// The margin column is on the canvas once it mounts: the handed-off field takes focus there, unless the reader has moved on.
+	let stopFocus = () => {};
+	$effect(() => () => stopFocus());
 	$effect(() => {
 		const selector = handoff, from = handoffFrom, drawer = inputs.drawer();
 		if (!selector || inputs.formKey() !== 'margin' || !drawer) return;
 		handoff = null; handoffFrom = null;
 		void tick().then(() => {
-			const now = document.activeElement, into = drawer.querySelector<HTMLElement>(selector);
-			if (into && (!now || now === document.body || now === from || !now.isConnected)) into.focus({ preventScroll: true });
+			const into = drawer.querySelector<HTMLElement>(selector);
+			if (!into) return;
+			stopFocus();
+			stopFocus = focusWhenPlaced(into, () => { const now = document.activeElement; return !now || now === document.body || now === from || !now.isConnected; });
 		});
 	});
 	return { note, get redrawn() { return redrawn; }, get handoff() { return handoff; } };
+}
+
+/**
+ * Focuses a field in a margin card once the card is placed. DocMarginStack keeps a card hidden until it has a place, which
+ * waits for its column to be drawn on the canvas, and a browser drops focus on a hidden field. `free` says, when the card is
+ * placed, that the reader has not moved on. The wait ends with the card's placement, or with the stop it returns.
+ */
+export function focusWhenPlaced(field: HTMLElement, free: () => boolean): () => void {
+	const card = field.closest<HTMLElement>('[data-margin-card]');
+	const focus = () => { if (free()) field.focus({ preventScroll: true }); };
+	if (!card || card.classList.contains('placed')) { focus(); return () => {}; }
+	const placed = new MutationObserver(() => { if (card.classList.contains('placed')) { placed.disconnect(); focus(); } });
+	placed.observe(card, { attributes: true, attributeFilter: ['class'] });
+	return () => placed.disconnect();
 }
