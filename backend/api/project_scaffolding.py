@@ -167,16 +167,11 @@ def _repo_row(name: str, path: Path, kind: str, missing: bool) -> dict:
 
 
 def within(child: Path, parent: Path) -> bool:
-    """Whether ``child`` is ``parent`` or below it, comparing the paths as given."""
     return child == parent or parent in child.parents
 
 
 def require_under_home(resolved: Path) -> None:
-    """Refuse a repository folder outside the home folder, for every route that adds one.
-
-    Raises:
-        ValueError: when the resolved folder is outside the home folder.
-    """
+    """Raise ``ValueError`` for a repository folder outside home; every add route calls it."""
     if not within(resolved, Path.home().resolve()):
         raise ValueError("Repo path must be under your home directory")
 

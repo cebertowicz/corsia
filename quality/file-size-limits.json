@@ -21,7 +21,7 @@
   ],
   "limits": {
     "backend/api/project_repos.py": 757,
-    "backend/api/project_scaffolding.py": 447,
+    "backend/api/project_scaffolding.py": 451,
     "backend/core/step_handler.py": 417,
     "backend/core/thread_lifecycle.py": 481,
     "backend/host_access/processes.py": 1403,

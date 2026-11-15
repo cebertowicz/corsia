@@ -39,7 +39,7 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
-from api.project_repo_claim import add_transition, confirm_narrow_claim
+from api.project_repo_claim import add_transition, confirmed_repo_path
 from api.project_repo_add_source import resolve_add_source
 from api.project_repo_sync import sync_sources
 from api.project_scaffolding import (
@@ -465,11 +465,7 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
                 project_id, ws_dir, mode=body.mode, path=body.path, name=body.name,
             )
             _require_owned_source(identity)
-            # The one view every later step uses; a narrowed add confirms it first.
-            repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
-            confirm_narrow_claim(
-                claim, project_id, ws_dir, repo_path, ws_dir / "source" / str(row["name"]),
-            )
+            repo_path = confirmed_repo_path(claim, project_id, ws_dir, row)
             pinned_branch, protected, switched = _select_add_policy(
                 row,
                 body,

@@ -13,7 +13,7 @@ touching another project, or any read that fails.
 
 The claim is read before the transition admits; the add resolves its paths again
 inside it. A narrowed add checks what it resolved with the same predicate
-(:func:`confirm_narrow_claim`) and refuses, to be retried, if a folder or link
+(:func:`confirmed_repo_path`) and refuses, to be retried, if a folder or link
 changed in between and the paths now leave the project's folder.
 """
 
@@ -126,19 +126,22 @@ def registration_claim(
     return _paths_claim(project_id, ws_dir, paths, workspace=workspace, db=db)
 
 
-def confirm_narrow_claim(
-    claim: frozenset[str] | None, project_id: str, ws_dir: Path, repo_path: Path, binding: Path,
-) -> None:
-    """Refuse a narrowed add whose resolved folder or binding now leaves the project's folder.
+def confirmed_repo_path(
+    claim: frozenset[str] | None, project_id: str, ws_dir: Path, row: dict,
+) -> Path:
+    """The add's one resolved repository folder, which every later step of the add uses.
 
-    Called inside the transition with the paths the add resolved there, once. An add
-    admitted everywhere (``claim is None``) needs no check.
+    Called inside the transition, once. Under a narrowed claim, the folder and its
+    ``source/`` binding must still earn that claim; an add admitted everywhere
+    (``claim is None``) needs no check.
 
     Raises:
         HTTPException: 409, retryable, when the paths no longer earn the narrowed claim.
     """
+    repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
     if claim is None:
-        return
+        return repo_path
+    binding = ws_dir / "source" / str(row["name"])
     from infra import config
     from infra.database import get_db
 
@@ -155,6 +158,7 @@ def confirm_narrow_claim(
             "The repository's folder changed while it was being registered and is no longer "
             "inside this project's folder; try again.",
         )
+    return repo_path
 
 
 def owned_process_holders() -> tuple[Holder, ...]:
@@ -206,7 +210,7 @@ def add_transition(
 ) -> AbstractContextManager[frozenset[str] | None]:
     """The repo policy transition one registration runs under, claiming what it changes.
 
-    It yields the claim it was admitted under; pass that to :func:`confirm_narrow_claim`.
+    It yields the claim it was admitted under; pass that to :func:`confirmed_repo_path`.
     """
     generation = transition_generation()
     return repo_policy_transition(
