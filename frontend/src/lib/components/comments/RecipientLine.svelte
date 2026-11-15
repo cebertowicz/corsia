@@ -48,7 +48,7 @@
 	/* On touch the link's own box is the 44px target, so it takes real room instead of an invisible area that would cover the field above it;
 	   the names sit on the link's first line. */
 	@media (pointer: coarse) {
-		.rl-link { display: inline-flex; align-items: center; min-height: var(--touch-target); }
+		.rl-link { display: inline-flex; align-items: center; min-height: var(--touch-target); min-width: var(--touch-target); justify-content: center; }
 		.has-link .rl-who { padding-top: calc((var(--touch-target) - 1lh) / 2); }
 	}
 </style>
