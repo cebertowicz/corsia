@@ -37,8 +37,12 @@ NO_FOLDED: Folded = (0, 0, 0)
 WORK_NAMES = ("done", "failed", "closed", "in_work")
 TONES = ("done", "failed", "closed")
 
-#: ``touch_node`` columns that are aggregate inputs (with row insert, delete,
-#: ``parent_id`` and ``plan_id``, which no runtime code rewrites).
+#: ``touch_node`` columns that are aggregate inputs (with row insert, delete and
+#: ``plan_id``, which no runtime code rewrites). ``parent_id`` is an input too,
+#: and is deliberately absent: a move changes no figure of the moved row, so
+#: ``apply`` measures zero and pushes nothing, and ``plans.aggregates_move`` is
+#: what re-derives the two branches instead. See the gate in
+#: ``tests/test_plan_aggregate_input_writers.py``.
 INPUT_COLUMNS = frozenset({"state", "archived_at", "spawned_thread_id", "sent_back"})
 
 _CHAIN_SQL = """
@@ -214,6 +218,18 @@ def open_siblings_sql(connection: sqlite3.Connection, alias: str = "plan_nodes")
     return node_states.unarchived_sql(alias)
 
 
+def ancestors(connection: sqlite3.Connection, node_id: str) -> list[dict]:
+    """One node and its ancestors, nearest first, cut where the next ancestor is archived.
+
+    ``apply`` walks this chain to push a row's change upward, and
+    ``plans.aggregates_move`` walks it twice for the two branches a regroup hangs
+    a node between.
+    """
+    return node_states.live_chain(
+        [dict(row) for row in connection.execute(_CHAIN_SQL, (node_id,))]
+    )
+
+
 def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     """Re-derive ``node_id`` and push what changed to every ancestor and the plan.
 
@@ -225,10 +241,9 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     """
     if not ready(connection):
         return
-    chain = [dict(row) for row in connection.execute(_CHAIN_SQL, (node_id,))]
+    chain = ancestors(connection, node_id)
     if not chain:
         return
-    chain = node_states.live_chain(chain)
     head = chain[0]
     d_open, d_work, d_folded, child_delta = refresh(head, at)
     listed = int(head["archived_at"] is None)
@@ -254,16 +269,21 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
         d_open, d_work, d_folded, _ = refresh(parent, at)
         visited.append(parent)
     if reached_top:
-        _push_to_plan(connection, head["plan_id"], d_open, d_work, d_folded, roots)
+        push_to_plan(connection, head["plan_id"], d_open, d_work, d_folded, roots)
     else:
-        _push_to_plan(connection, head["plan_id"], 0, NO_WORK, NO_FOLDED, roots)
+        push_to_plan(connection, head["plan_id"], 0, NO_WORK, NO_FOLDED, roots)
     persist(connection, visited)
 
 
-def _push_to_plan(
+def push_to_plan(
     connection: sqlite3.Connection, plan_id: str, d_open: int, d_work: Work, d_folded: Folded, roots: int,
 ) -> None:
-    """Add the top-level deltas to the plan's counters; no statement when nothing moved."""
+    """Add the top-level deltas to the plan's counters; no statement when nothing moved.
+
+    The one writer of ``plans.top_*``, shared by the row hook and by
+    ``plans.aggregates_move``, so a node that joins or leaves the plan's top
+    level moves the plan's figures through the same statement.
+    """
     deltas = (d_open, *d_work, roots, *d_folded)
     if not any(deltas):
         return

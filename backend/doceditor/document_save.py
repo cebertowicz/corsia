@@ -109,7 +109,7 @@ def _saved_payload(resolved: Path, actor_thread_id: str, extra: dict) -> dict:
 
 async def _save_validated(
     path: Path, text: str, author: Callable[[], str], reason: str | None, write, *,
-    expected_sha256: str | None = None, history_required: bool = False,
+    expected_sha256: str | None = None, history_required: bool = False, accepted: tuple[str, ...] = (),
 ) -> dict:
     """Write a validated editor save. Guidance and recorded documents go through history off the DB
     executor, whose workers its lock wait and sweep would otherwise hold (issue #2272)."""
@@ -119,12 +119,12 @@ async def _save_validated(
             raise DocumentSaveError("history_off", "This file has no recorded history")
         _refuse_invalid_skill(path, text)
         return await run_in_db(write, path, expected_sha256)
-    return await run_off_db(_guided_write, path, target, text, author, reason, write, expected_sha256, history_required)
+    return await run_off_db(_guided_write, path, target, text, author, reason, write, expected_sha256, history_required, accepted)
 
 
 def _guided_write(
     path: Path, target: HistoryTarget, text: str, author: Callable[[], str], reason: str | None, write,
-    expected_sha256: str | None = None, history_required: bool = False,
+    expected_sha256: str | None = None, history_required: bool = False, accepted: tuple[str, ...] = (),
 ) -> dict:
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
@@ -137,6 +137,7 @@ def _guided_write(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
         atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
+        accepted_suggestions=accepted,
     )
     if saved.outcome == "refused":
         assert saved.line is not None
@@ -327,8 +328,9 @@ def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None)
 async def save_document_text(
     body: DocumentSave, user_id: str, *, by_agent: bool = False, reason: str | None = None,
     expected_sha256: str | None = None, author: str | None = None, history_required: bool = False,
+    accepted: tuple[str, ...] = (),
 ) -> dict:
-    """Shared validated document writer for editor saves and accepted suggestions.
+    """Shared validated document writer for editor saves and accepted suggestions (``accepted``: their ids).
 
     ``by_agent`` saves as ``body.thread_id``, not as the user: guidance history is authored
     by that thread, and the scope-structure rules apply as they do to its file tools.
@@ -339,7 +341,7 @@ async def save_document_text(
     from doceditor.live_tools import find_live
     manager = get_documents()
     if manager is None or await run_off_db(guidance_target, resolved, config.WORKSPACE) is not None:
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted)
     async with manager.admission_lock(resolved):
         if (entry := find_live(resolved)) is not None:
             from doceditor import live_events
@@ -350,13 +352,13 @@ async def save_document_text(
         if refused is not None and not falls_back_to_plain(refused["code"]):
             # The file must not move away from acknowledged text the store still holds.
             raise DocumentSaveError(refused["code"], refused["message"], dict(refused))
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required, accepted)
 
 
 async def _save_legacy_document(
     body: DocumentSave, resolved: Path, user_id: str, by_agent: bool,
     reason: str | None, expected_sha256: str | None, author: str | None = None,
-    history_required: bool = False,
+    history_required: bool = False, accepted: tuple[str, ...] = (),
 ) -> dict:
     """Keep the validated legacy writer intact under the admission boundary."""
     thread_id = body.thread_id if by_agent else None
@@ -368,7 +370,7 @@ async def _save_legacy_document(
         lambda path, expected, reports=None: _write_document(
             body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
         ),
-        expected_sha256=expected_sha256, history_required=history_required,
+        expected_sha256=expected_sha256, history_required=history_required, accepted=accepted,
     )
     notification = result.pop("_notification")
     if notification is not None:
@@ -380,11 +382,11 @@ def agent_document_writer(thread_id: str, user_id: str) -> DocumentWriter:
     """Writer for a suggestion an agent accepts, preserving a person suggestion's author."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
-        suggestion_author: str | None,
+        suggestion_author: str | None, accepted: tuple[str, ...],
     ) -> dict:
         author = saver_author(user_id=suggestion_author) if suggestion_author else None
         return await save_document_text(
             DocumentSave(path=path, text=text, thread_id=thread_id, project_id=project_id),
-            user_id, by_agent=True, reason=reason, expected_sha256=expected_sha256, author=author,
+            user_id, by_agent=True, reason=reason, expected_sha256=expected_sha256, author=author, accepted=accepted,
         )
     return write

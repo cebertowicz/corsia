@@ -101,6 +101,37 @@ def _would_cycle(connection, node_id: str, depends_on_node_id: str) -> bool:
     ).fetchone() is not None
 
 
+def placement_would_cycle(connection, node_id: str) -> bool:
+    """Whether the node, where it now hangs, leaves work waiting on itself.
+
+    Hanging a node under a parent adds two kinds of wait link and nothing else:
+    the parent finishing only after it, and its branch inheriting each
+    ancestor's edge to a prerequisite outside that ancestor
+    (``node_waits.inherited_sql``). Each is one edge ``_would_cycle`` judges, so
+    a move is refused exactly where ``add_dependency`` would refuse that edge.
+    Read after the write: the old branch's links are gone by then, and a check
+    before it would refuse moves that leave no cycle.
+    """
+    parent = connection.execute(
+        "SELECT parent_id FROM plan_nodes WHERE id=?", (node_id,),
+    ).fetchone()["parent_id"]
+    if parent is None:
+        return False
+    if _would_cycle(connection, str(parent), node_id):
+        return True
+    inherited = connection.execute(
+        f"""WITH RECURSIVE above(id) AS (
+              SELECT parent_id FROM plan_nodes WHERE id=?1
+              UNION SELECT a.parent_id FROM plan_nodes a JOIN above ON a.id=above.id
+                WHERE a.parent_id IS NOT NULL)
+            SELECT DISTINCT d.depends_on_node_id FROM plan_node_dependencies d
+              JOIN above ON d.node_id=above.id
+            WHERE {node_waits.inherited_sql('d.depends_on_node_id', 'above.id')}""",
+        (node_id,),
+    ).fetchall()
+    return any(_would_cycle(connection, node_id, str(row[0])) for row in inherited)
+
+
 def add_dependency(node_id: str, depends_on_node_id: str, *, actor_id: str | None = None,
                    provenance: str = "plan_service", expected_revision: int | None = None,
                    causing_executor: str | None = None, db=None) -> None:

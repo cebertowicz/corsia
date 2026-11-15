@@ -353,8 +353,8 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     writes = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None, suggestion_author=None):
-        writes.append((expected_sha256, suggestion_author))
+    async def write(_path, _text, _project, _reason, expected_sha256=None, suggestion_author=None, accepted=()):
+        writes.append((expected_sha256, suggestion_author, accepted))
 
     await decide_suggestion(
         suggestion["id"],
@@ -365,7 +365,7 @@ async def test_single_accept_passes_the_snapshot_hash_to_its_writer(
         write=write,
     )
 
-    assert writes == [(expected, "Person")]
+    assert writes == [(expected, "Person", (suggestion["id"],))]
 
 
 @pytest.mark.asyncio
@@ -378,7 +378,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
 
     owner, _ = await _own(integration_client, doc)
     first = await _suggest(owner, doc, quote="# Design", replacement="# New design")
-    await _suggest(
+    second = await _suggest(
         owner,
         doc,
         quote="A unique tail sentence",
@@ -387,9 +387,11 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     user_id = _thread_facts(owner)[0]
     expected = hashlib.sha256(doc.read_bytes()).hexdigest()
     hashes = []
+    accepted_ids = []
 
-    async def write(_path, _text, _project, _reason, expected_sha256=None, _suggestion_author=None):
+    async def write(_path, _text, _project, _reason, expected_sha256=None, _suggestion_author=None, accepted=()):
         hashes.append(expected_sha256)
+        accepted_ids.append(sorted(accepted))
         return {"revision": "r2"}
 
     result = await decide_all_from_author(
@@ -402,6 +404,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     )
 
     assert hashes == [expected]
+    assert accepted_ids == [sorted([first["id"], second["id"]])]
     assert result["revision"] == "r2"
 
 
@@ -420,7 +423,7 @@ async def _accept_all_with_author_rows(integration_client, doc, rows):
         )
     credited = []
 
-    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author, _accepted):
         credited.append(suggestion_author)
         return {"revision": "r2"}
 
@@ -474,7 +477,7 @@ async def test_closed_batch_credits_the_accepted_person_when_another_row_is_skip
     )
     credited = []
 
-    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author, _accepted):
         credited.append(suggestion_author)
         return {"revision": "r2"}
 
@@ -518,7 +521,7 @@ async def test_closed_batch_credits_the_accepted_person_when_another_row_is_reje
     )
     credited = []
 
-    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author):
+    async def write(_path, _text, _project, _reason, _expected_sha256, suggestion_author, _accepted):
         credited.append(suggestion_author)
         return {"revision": "r2"}
 

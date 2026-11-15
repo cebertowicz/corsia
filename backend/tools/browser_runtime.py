@@ -85,6 +85,8 @@ async def _run_owned(args: list[str], *, thread_id: str, lease_id: str | None = 
     except BrowserSessionError as exc:
         raise BrowserOwnerError(f"Error: {exc}") from exc
     except Exception as exc:
+        # The message names only the thread and the subcommand, never the other arguments; the traceback carries the exception's own text.
+        log.exception("browser command %s failed for thread %s", args[0] if args else "", thread_id)
         raise BrowserOwnerError(f"Error: {COMMAND_FAILED}") from exc
 
 
@@ -131,6 +133,7 @@ class BrowserCloseTool(Tool):
         except BrowserSessionError as exc:
             return f"Error: {exc}"
         except Exception:
+            log.exception("browser close failed for thread %s", thread_id)
             return "Error: browser cleanup could not be verified. Stop retrying browser tools and inform the user."
 
 

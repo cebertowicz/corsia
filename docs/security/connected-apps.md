@@ -72,7 +72,7 @@ To stop it, switch CORSIA off under Full Disk Access and Automation.
 
 ## GitHub
 
-You can give agents their own GitHub account, separate from yours. Its GitHub CLI login sits in its own folder, which agent shells can read; once CORSIA has checked that it isn't your login, agent shells' `git push` and `gh` run as that account, and your own GitHub CLI login is hidden from them (`backend/connections/github_agent.py`, [Agent sandbox](agent-sandbox.md)). Without one, agent shells use your SSH agent and your GitHub CLI login ([Limits](limits.md)).
+You can give agents their own GitHub account, separate from yours. Its GitHub CLI login sits in its own folder, which agent shells can read. CORSIA checks that it isn't the GitHub CLI login of yours on this computer; when this computer has no such login to compare, CORSIA can't make that check, so the agent tells you which login your agents now act as and signs it out if you say it's yours. Once the account is ready, agent shells' `git push` and `gh` run as that account, and your own GitHub CLI login is hidden from them (`backend/connections/github_agent.py`, [Agent sandbox](agent-sandbox.md)). Without one, agent shells use your SSH agent and your GitHub CLI login ([Limits](limits.md)).
 
 ## Sending email and invites
 
