@@ -206,8 +206,12 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
 	}
 }
 
-/** The reader's own scrolling input on the scroller; keyboard scrolling reaches the place through the editor's own transactions. */
-const BY_HAND = ['wheel', 'touchstart', 'pointerdown'] as const;
+/**
+ * The reader's own input on the scroller. Keys count too: with focus on a margin card or field drawn inside the scroller,
+ * Space, Page Down and the arrows scroll it natively, not through the editor's transactions. A key that moves the layout
+ * (a panel shortcut) comes before the width it changes, and that change clears the mark.
+ */
+const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
 /**
  * Holds the reader's place in this editor until the returned stop is called: takes it at first open and from every
@@ -217,8 +221,9 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown'] as const;
  * While the text rewraps at another width, CodeMirror scrolls to keep its own anchor, the top of the line block at the
  * edge, from inside its measure and its scroll handler. That block is the paragraph the place skips when it is cut off,
  * so its scroll is not the reader's: at a width other than the one the place was taken at, a scroll lays the place again
- * instead of taking it, unless the reader has scrolled by hand (wheel, touch, a press on the scroller) since the width
- * last changed.
+ * instead of taking it, unless the reader has scrolled by hand (wheel, touch, a press or a key on the scroller) since the
+ * width last changed. A scroll with no input on the page at all (the browser's find bar, a screen reader's cursor) is
+ * still laid back until the reader's next input there.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	const scroller = view.scrollDOM;

@@ -228,6 +228,36 @@ describe('keepPlaceWhenEditorMoves', () => {
 		page.stop();
 	});
 
+	// A keyboard reader on a margin card: Space or Page Down scrolls the scroller natively, with no editor transaction.
+	it('takes the place from a key pressed on a card inside the scroller at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		const card = document.createElement('button');
+		page.scroller.appendChild(card);
+		card.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true }));
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		card.remove();
+		page.stop();
+	});
+
+	it('still lays the place again over a key pressed before the width changes', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		page.scroller.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 37;
+		await page.frame();
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
 	it('observes the scroller and its text through one resize observation', () => {
 		const page = pane();
 		// CodeMirror observes the scroller too, for its own measuring; only this module observes the text.
