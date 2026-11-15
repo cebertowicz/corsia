@@ -19,6 +19,11 @@ PASSWORD_PAGE = (
     "page and a task in their attention list, and you get a turn once they finish or decline it; end your "
     "turn. If they decline, tell them in chat what you needed the page for and stop."
 )
+# A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
+PASSWORD_READ_REFUSED = (
+    "This page has shown a password field, so running scripts on it and reading that field stay refused. "
+    "Other commands still work."
+)
 PAGE_CHECK_FAILED = "This page couldn't be checked"
 PERSON_STEP = (
     "This browser step is the person's to complete. They already see a task in their attention list, and you "
@@ -150,9 +155,13 @@ def browser_closed(thread_id: str) -> None:
 
 
 async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...], resolve: Resolve | None) -> None:
-    """Keep a password visit's DOM reads unavailable after its field is hidden (AR2)."""
+    """Keep a password visit's DOM reads unavailable after its field is hidden (AR2).
+
+    Reached only with no step open (an open step refuses every command first), so the refusal names
+    the guard alone, never the person's step.
+    """
     if args and args[0] == "eval":
-        raise BrowserSessionError(PASSWORD_PAGE)
+        raise BrowserSessionError(PASSWORD_READ_REFUSED)
     if len(args) >= 3 and args[0] == "get" and args[1] in {"value", "attr"}:
         try:
             node = await resolve(args[2]) if resolve is not None else None
@@ -161,7 +170,7 @@ async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...
             node = None
         # A target that can't be located may be the hidden password input itself, so it fails closed.
         if node is None or node in guarded.seen_nodes:
-            raise BrowserSessionError(PASSWORD_PAGE)
+            raise BrowserSessionError(PASSWORD_READ_REFUSED)
 
 
 def password_page(thread_id: str) -> bool:

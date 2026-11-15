@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import socket
 import subprocess
 
@@ -23,8 +24,15 @@ async def _empty_asgi_app(scope, receive, send) -> None:
     await send({"type": "http.response.body", "body": b""})
 
 
+# Below the ephemeral range (49152-65535 on macOS), so between the probe closing
+# and the listener binding, no outgoing connection or bind(0) elsewhere on the
+# machine can be handed the fallback port; an OS-picked port (bind 0) sat inside
+# that range and its neighbour could be taken in the gap.
+_PAIR_PORTS = range(20000, 40000)
+
+
 def _reserve_adjacent_port_pair() -> tuple[socket.socket, int, int]:
-    """Hold an OS-selected port until the listener proves its fallback."""
+    """Hold a port outside the ephemeral range until the listener proves its fallback."""
     for _ in range(32):
         holder = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         probe = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
@@ -32,12 +40,8 @@ def _reserve_adjacent_port_pair() -> tuple[socket.socket, int, int]:
             for candidate in (holder, probe):
                 candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 candidate.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-            holder.bind(("::", 0))
-            primary = holder.getsockname()[1]
-            if primary == 65535:
-                holder.close()
-                probe.close()
-                continue
+            primary = random.choice(_PAIR_PORTS)
+            holder.bind(("::", primary))
             probe.bind(("::", primary + 1))
             probe.close()
             return holder, primary, primary + 1
@@ -96,7 +100,7 @@ async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(mo
     announcement = None
 
     try:
-        assert await listener.start() is True
+        assert await listener.start() is True, f"start refused: {listener.reason}: {listener.error}"
         assert listener.port == fallback
         announcement = listener.announcement
         assert announcement is not None

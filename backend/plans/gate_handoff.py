@@ -54,6 +54,23 @@ GATE_HOW = {
 }
 
 
+def _clip(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters, ending in an ellipsis when cut."""
+    return text if len(text) <= limit else text[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def offer_title(step: str, workflow: str) -> str:
+    """The offer's title, its names shortened to fit a plan row: the offer is raised inside the person's answer,
+    so a title the row refuses would fail that answer. Each name keeps at least half the room; the context
+    line under it names both in full."""
+    title = OFFER_TITLE.format(step=step, workflow=workflow)
+    if len(title) <= service.MAX_NODE_TITLE:
+        return title
+    room = service.MAX_NODE_TITLE - len(OFFER_TITLE.format(step="", workflow=""))
+    short_step = _clip(step, max(room // 2, room - len(workflow)))
+    return OFFER_TITLE.format(step=short_step, workflow=_clip(workflow, room - len(short_step)))
+
+
 @dataclass
 class GateState:
     """Where a gate stands: ``kind`` is person, spot, none or drop.
@@ -271,7 +288,7 @@ def _offer(db, node_id: str) -> None:
     decision = decisions.raise_offer(
         db, plan_id=phase["plan_id"], source_node_id=phase["id"], provenance=PROVENANCE,
         content={
-            "title": OFFER_TITLE.format(**names), "context": _fit_context(context, details),
+            "title": offer_title(**names), "context": _fit_context(context, details),
             "tradeoff": OFFER_TRADEOFF, "recommendation": OFFER_RECOMMENDATION, "rationale": OFFER_RATIONALE,
             "options": [{"id": option_id, "label": label} for option_id, label in zip("ABCD", OFFER_OPTIONS)],
             "other_enabled": True,

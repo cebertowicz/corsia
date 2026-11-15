@@ -91,8 +91,8 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       tokens: { known: 1_800_000, unknown_rows: 56 },
       model_cost_usd: { known: null, unknown_rows: 56 },
       usage_recording_failures: 0,
-      execution: { seconds: 392, unknown_turns: 0, turns },
-      waiting: { seconds: 10_320 },
+      execution: { settled_seconds: 392, open_starts: [], unknown_turns: 0, turns },
+      waiting: { settled_seconds: 10_320, open_starts: [] },
     };
     const plan = envelope(
       threadId,

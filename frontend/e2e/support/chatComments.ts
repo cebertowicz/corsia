@@ -39,6 +39,9 @@ export async function commentOnMessage(row: Locator, quote: string): Promise<voi
  * above the composer. Opening a chat scrolls its transcript to the latest message, and a side pane closing
  * slides it sideways, so a click aimed at the highlight before then lands on the moved transcript instead.
  * A covered highlight is scrolled back to the middle of the transcript and read again.
+ * The box is compared exactly, as Playwright's own stability check compares it: rounded, the last pixel of a pane's eased
+ * slide reads as still, the click's stability check then fails, and its retry scrolls the highlight to the scroller's
+ * end (`scrollIntoView({ block: 'end' })`) before it clicks, which moves the transcript under the text being measured.
  */
 export async function settleHighlight(page: Page, mark: Locator): Promise<void> {
 	const read = () => mark.evaluate((anchor) => {
@@ -47,14 +50,14 @@ export async function settleHighlight(page: Page, mark: Locator): Promise<void> 
 		const hits = anchor.getClientRects().length ? document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2) : [];
 		const clear = hits.some((node) => node === anchor || anchor.contains(node)) && (!floater || box.bottom <= floater.top);
 		if (!clear) anchor.scrollIntoView({ block: 'center' });
-		return clear ? `settled:${Math.round(box.x)},${Math.round(box.y)}` : 'covered';
+		return clear ? `settled:${box.x},${box.y},${box.width},${box.height}` : 'covered';
 	});
 	await expect.poll(async () => {
 		const before = await read();
 		await page.waitForTimeout(80);
 		const after = await read();
 		return before === after ? before : `moved:${before}>${after}`;
-	}, { message: 'the highlight stopped moving and cleared the composer' }).toMatch(/^settled:-?\d+,-?\d+$/);
+	}, { message: 'the highlight stopped moving and cleared the composer' }).toMatch(/^settled:/);
 }
 
 /**
@@ -70,7 +73,7 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 	// A real touch tap needs a touch-enabled context; the caller asks for it where the spec runs as a phone.
 	if (how.tap) await mark.tap(); else await mark.click();
 	if (narrow) {
-		const drawer = page.getByRole('dialog', { name: 'Comment thread' });
+		const drawer = page.getByRole('dialog', { name: 'Comment', exact: true });
 		await expect(drawer).toBeVisible();
 		await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
 		return drawer;
@@ -81,7 +84,7 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 		await expect(card).toBeVisible();
 		return card;
 	}
-	const thread = page.getByRole('dialog', { name: 'Comment thread', exact: true });
+	const thread = page.getByRole('dialog', { name: 'Comment', exact: true });
 	await expect(thread).toBeVisible();
 	return thread;
 }
@@ -95,6 +98,6 @@ export async function openCommentThread(row: Locator, page: Page, quote: string,
 export async function closeCommentThread(page: Page, thread: Locator): Promise<void> {
 	if (await page.locator('[data-adaptive-drawer]').count()) await thread.getByRole('button', { name: 'Close', exact: true }).click();
 	else await page.keyboard.press('Escape');
-	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
+	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
 	await expect(page.locator('.chat-margin .chat-margin-card.selected')).toHaveCount(0);
 }

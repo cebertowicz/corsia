@@ -359,6 +359,41 @@ async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_p
     assert decision["title"] == gate_handoff.OFFER_TITLE.format(step=step["title"], workflow=reply["node"]["title"])
 
 
+async def test_the_settlement_that_earns_the_offer_commits_whatever_the_titles(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(gate_handoff.WINDOW[0] - 1):
+        await _go(run)
+    reply = await run.start("gated")
+    gate, phase = reply["steps"][1]["id"], reply["node"]["id"]
+    step_title, workflow_title = "S" * 30 + " step title of sixty characters long", "W" * 25 + " workflow title of sixty characters"
+    for node, title in ((gate, step_title[:60]), (phase, workflow_title[:60])):
+        await run.update("edit", {"node_id": node, "expected_revision": run.revision(node), "title": title})
+    _answer(gate, "approved")
+    assert _run_db(
+        "SELECT json_extract(payload_json,'$.detail.verdict') AS v FROM plan_node_events WHERE node_id=? AND event='hold_cleared'",
+        gate,
+    ) == [{"v": "approved"}]
+    assert _offers() == []
+    result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
+                                            "evidence": "done", "verification_result": "passed"})
+    assert not isinstance(result, str), result
+    db = get_db()
+    try:
+        decision = decisions.read(json.loads(_offers()[-1]["payload_json"])["decision_id"], db=db)
+    finally:
+        db.close()
+    assert len(decision["title"]) <= service.MAX_NODE_TITLE
+    assert decision["title"].startswith("Hand the SSSS") and "in WWWW" in decision["title"]
+    assert step_title[:60] in decision["context"] and workflow_title[:60] in decision["context"]
+
+
+async def test_a_short_title_is_never_cut():
+    assert gate_handoff.offer_title("Accept note", "Support digest") == "Hand the Accept note review in Support digest to an agent?"
+    assert gate_handoff.offer_title("Person accepts the note", "Weekly digest") == (
+        "Hand the Person accept… review in Weekly digest to an agent?"
+    )
+
+
 async def test_a_gate_value_must_be_acceptance_or_alignment():
     from core.skill_workflow_validation import validate_workflow
 

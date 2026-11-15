@@ -59,7 +59,7 @@ describe('a click on comments drawn inside a table', () => {
 		(await painted()).click();
 		// The click goes on with them, so the cards open at it, as a click on one comment's text does.
 		// Marks on the same words nest, so the ids come innermost first.
-		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent), false);
 		expect(onMarkerFocus.mock.calls[0][0]).toHaveLength(2);
 		expect(onAnchorFocus).not.toHaveBeenCalled();
 	});
@@ -132,7 +132,7 @@ describe('a click on a comment that covers a whole table cell', () => {
 		const onMarkerFocus = vi.fn();
 		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus), comment('b', onMarkerFocus)], vi.fn(), { cardMode: 'popover' });
 		(await markedCell()).click();
-		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent), false);
 		expect(onAnchorFocus, 'the cell editor taking focus does not also open a card of its own').not.toHaveBeenCalled();
 		expect(cellEditor(), 'the cell is open for editing').not.toBeNull();
 	});

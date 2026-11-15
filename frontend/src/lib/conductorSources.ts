@@ -47,8 +47,6 @@ export interface ModelSource {
 	reason_code?: 'not_running' | 'no_models' | null;
 	/** Set when an unusable CLI belongs to Homebrew or npm; setup leaves it to that manager. */
 	cli_package_manager?: 'homebrew' | 'npm';
-	/** Set when the CLI is installed but the service cannot see it; Fix links it. */
-	invisible_binary?: string | null;
 	accounts?: SourceAccount[];
 	/** The conductor's bound account when it can no longer run here: removed, or turned off for the project. */
 	lost_binding?: { label: string; reason: 'removed' | 'turned_off' } | null;
