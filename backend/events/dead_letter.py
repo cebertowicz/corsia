@@ -23,14 +23,19 @@ def park(
     external_id: str | None = None,
     *,
     db=None,
+    expected: bool = False,
 ) -> str:
-    """Park an unroutable event and return the row id."""
-    if reason != "check_suite_noise_parked":
-        logger.error(
-            "event-routing: UNROUTABLE {} (external_id={!r}, reason={}) — "
-            "parked in dead-letter, NOT delivered to any thread",
-            internal_event, external_id, reason,
-        )
+    """Park an unroutable event and return the row id.
+
+    ``expected`` is for a caller that parks on purpose (known noise); the row
+    is stored the same, but the line is logged at INFO instead of ERROR.
+    """
+    logger.log(
+        "INFO" if expected else "ERROR",
+        "event-routing: UNROUTABLE {} (external_id={!r}, reason={}) — "
+        "parked in dead-letter, NOT delivered to any thread",
+        internal_event, external_id, reason,
+    )
     try:
         row_id = str(uuid.uuid4())[:12]
         with write_transaction(db, scope="dead_letter_park") as connection:
