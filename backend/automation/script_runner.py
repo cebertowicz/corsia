@@ -26,7 +26,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from automation import script_rule_runs, script_tree
+from automation import script_event_lines, script_rule_runs, script_tree
 from automation import script_schedules as store
 from automation.schedules import Schedule, get
 from automation.script_readings import (
@@ -48,12 +48,14 @@ from infra.queries import get_thread, thread_gone_for_good, thread_unavailable_r
 SCRIPT_RUN_CAP = 2
 WORKSPACE_SCOPE = "__workspace__"
 
+
+class _StoppedByShutdown(Exception):
+    """CORSIA's own shutdown stopped the script: the run has no result and is not settled."""
+
+
 _in_flight: dict[str, asyncio.Task] = {}
 #: The script schedule each in-flight rule run holds the claim of, by its key.
 _holds: dict[str, str] = {}
-
-#: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
-_RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
 
 
 def _forget(key: str, _task: asyncio.Task) -> None:
@@ -186,12 +188,19 @@ async def run_claimed(
         report = await _execute(schedule, rule_run)
     except asyncio.CancelledError:
         raise
+    except _StoppedByShutdown:
+        # A stopped script is not a failed one. Its rows stay as they are, and the next sweep
+        # ends them as it ends any run the backend lost: a rule's owner is told which item.
+        logger.warning("script schedule {} was stopped by shutdown; its run is left for recovery", schedule.id)
+        return
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
     report = await _stamped(schedule, report)
-    report = await _admit_events(schedule, report, rule_run.trace if rule_run else (),
-                                 rule_run.decision_id if rule_run else None)
+    report = await script_event_lines.admit_events(
+        schedule, report, rule_run.trace if rule_run else (), rule_run.decision_id if rule_run else None,
+        started_by=rule_run.started_by if rule_run else None,
+    )
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db, rule_run=rule_run,
@@ -205,66 +214,6 @@ async def run_claimed(
         return
     if woken:
         await _drive_owner(schedule.thread_id)
-
-
-async def _admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
-                        rule_decision_id: int | None = None) -> RunReport:
-    """Route parsed event lines before synchronous settlement; one refusal wakes the owner once.
-
-    ``trace`` is the rule chain of a rule-started run; each event it sends carries it.
-    """
-    if not report.events:
-        return report
-    from automation.script_measures import run_stamps
-    from events.intake import admit_event
-    from events.intake_errors import failure_code, format_event_error
-
-    stamps = run_stamps(schedule, report)
-    producer = f"script:{schedule.id}"
-    refusals: dict[str, str] = {}  # each distinct code, with the first text it came with
-    for index, event in enumerate(report.events):
-        try:
-            result = await admit_event(
-                event_type=event["type"], facts=event["facts"], origin="emitter",
-                producer=producer, event_id=f"{producer}:{report.run_id}:{index}", stamps=stamps,
-                **({"trace": trace} if trace else {}),
-                **({"rule_decision_id": rule_decision_id} if rule_decision_id is not None else {}),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
-            logger.exception("script schedule {} event line {} failed inside the intake", schedule.id, index)
-            code = failure_code(exc)
-            refusals.setdefault(code, (
-                "the event intake failed unexpectedly" if code == "internal_error"
-                else "event intake is unavailable"))
-        else:
-            if result.refusal is not None:
-                refusals.setdefault(result.refusal.code, result.refusal.text)
-        finally:
-            if (schedule.payload or {}).get("event_type") == event["type"] and event["facts"].get("staging_path"):
-                from automation.worker_inputs import remove_unclaimed_staging
-
-                await run_in_db_unless_owned(
-                    None, lambda: remove_unclaimed_staging(
-                        schedule.thread_id, schedule.scope_id, f"{producer}:{report.run_id}:{index}",
-                        event["facts"]["staging_path"], get_db()),
-                )
-    if not refusals:
-        return report
-    shown = [
-        format_event_error(code, refusals[code], _RERUN_FIX if code == "intake_unreachable" else None)
-        for code in sorted(refusals)[:2]
-    ]
-    more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
-    message = f"event line refused: {' '.join(shown)}{more}"
-    return dataclasses.replace(
-        report, status="error", error=message,
-        signals=[*report.signals, Signal(
-            "error", None, f'Script "{(schedule.script_path or "script").rsplit("/", 1)[-1]}": {message}',
-            {"message": message},
-        )],
-    )
 
 
 async def _stamped(schedule: Schedule, report: RunReport) -> RunReport:
@@ -356,6 +305,8 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
+    if run.stopped_by_shutdown:
+        raise _StoppedByShutdown
     return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked)
 
 

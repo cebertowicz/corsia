@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import hashlib
 import logging
 from pathlib import Path
@@ -21,8 +20,11 @@ from registry import durable_write_intents as intents
 from registry.durable_write_recovery import recovery_shared_target
 from registry import models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority
+from registry.promote_recovery_notice import INTERRUPTED, announce_undone_promote, recovery_path
+from registry.shared_file_scan import similar_files
 from registry.shared_target import SharedTarget
-from registry.promoted_path import write_authority_unless_promoted
+from registry.promoted_path import mark_carried, settle_promoted_source, write_authority_unless_promoted
+from registry.promotion_source import promotion_source
 from registry.shared_documents import _scope_root, resolve_shared_target as _shared_target
 from registry.shared_write_errors import DurableWritePolicyError, SuccessorHoldsComments
 from tools.filesystem_effects import (
@@ -116,52 +118,6 @@ def _cleanup_undo(stage: Path, backup: Path | None) -> None:
     _remove_if_present(backup)
 
 
-def _bounded_shared_files(shared_root: Path, *, limit: int = 2000):
-    pending = [shared_root]
-    visited = 0
-    while pending and visited < limit:
-        current = pending.pop()
-        try:
-            children = sorted(
-                current.iterdir(),
-                key=lambda path: path.name.casefold(),
-            )
-        except OSError:
-            continue
-        directories: list[Path] = []
-        for candidate in children:
-            visited += 1
-            if visited > limit:
-                break
-            try:
-                if candidate.is_symlink():
-                    continue
-                if candidate.is_dir():
-                    directories.append(candidate)
-                elif candidate.is_file():
-                    yield candidate
-            except OSError:
-                continue
-        pending.extend(reversed(directories))
-
-
-def _similar_files(target: Path, shared_root: Path) -> list[str]:
-    scored: list[tuple[float, str]] = []
-    target_stem = target.stem.casefold()
-    for candidate in _bounded_shared_files(shared_root):
-        if (
-            candidate == target
-            or candidate.name == "INDEX.md"
-            or candidate.name.startswith(".")
-        ):
-            continue
-        score = SequenceMatcher(None, target_stem, candidate.stem.casefold()).ratio()
-        if score >= 0.45:
-            scored.append((score, str(candidate)))
-    scored.sort(key=lambda item: (-item[0], item[1].casefold()))
-    return [path for _score, path in scored[:5]]
-
-
 def _intent_identity(target: Path, *, db) -> tuple[str, str]:
     identity = service.prepare_file_identity(str(target), db=db)
     if identity is None:
@@ -191,7 +147,7 @@ def _recover_unpublished_claim(
         return None
     if restored:
         return source
-    collision = source.with_name(f"{source.name}.promotion-recovery-{intent_id}")
+    collision = recovery_path(source, intent_id)
     if restore_claimed_file(claim, collision):
         return collision
     return claim
@@ -220,6 +176,7 @@ def _register_applied(
         service.prepare_file_identity(str(source), db=db)
         if source is not None and not source.exists() else None
     )
+    prepared, left = mark_carried(prepared, source_identity, db=db)
     metadata = {"last_written_sha256": content_hash}
     if shared.update_trigger:
         metadata["update_trigger"] = shared.update_trigger
@@ -234,12 +191,7 @@ def _register_applied(
         )
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
-        source_artifact = (
-            service.find_file_identity(source_identity, db=db)
-            if source_identity is not None else None
-        )
-        if source_artifact is not None:
-            models.retire(source_artifact["id"], tombstone=True, cause="promoted", successor=artifact["id"], db=db)
+        settle_promoted_source(source_identity, left, artifact, db=db)
         record_post_write_events(
             shared,
             artifact,
@@ -404,7 +356,7 @@ def _complete_publication(
                 intent_id,
                 index_error,
             )
-    similar = _similar_files(shared.path, shared.category_root.parent)
+    similar = similar_files(shared.path, shared.category_root.parent)
     if notify:
         service.notify_changed(artifact)
     result_index: dict[str, str] = (
@@ -626,36 +578,13 @@ def promote_file(
     notify: bool = True,
 ) -> dict:
     """Move one exact working-tray file into an approved shared category."""
-    if not isinstance(category, str) or not category or Path(category).name != category:
-        raise DurableWritePolicyError(
-            "Promotion requires one approved shared category name."
-        )
     db = get_db()
     if db.in_transaction:
         raise TransactionOwnershipError("durable promotion requires a clean connection")
     try:
-        scope_root, _authoritative_project = _scope_root(
-            workspace=workspace,
-            thread_id=thread_id,
-            project_id=project_id,
-            direct_user=False,
-            db=db,
+        scope_root, source_path = promotion_source(
+            source, category, thread_id=thread_id, project_id=project_id, workspace=workspace, db=db,
         )
-        working_root = resolve_thread_working_root(scope_root, thread_id).resolve(
-            strict=False
-        )
-        source_input = source.expanduser()
-        if not source_input.is_absolute():
-            source_input = workspace / source_input
-        source_path = source_input.resolve(strict=False)
-        if not source_path.is_file() or source_path.is_symlink():
-            raise DurableWritePolicyError(
-                f"Promotion source is not a regular file: {source}"
-            )
-        if source_path == working_root or not source_path.is_relative_to(working_root):
-            raise DurableWritePolicyError(
-                "Only a file under the exact owning thread working root can be promoted."
-            )
         target = scope_root / "shared" / category / source_path.name
         if target.exists():
             raise DurableWritePolicyError(
@@ -689,7 +618,7 @@ def promote_file(
         db.close()
 
 
-def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
+def _recover_one_intent(row: dict, *, workspace: Path, db, why: str = INTERRUPTED) -> None:
     target, stage, backup, source, claim = _validated_intent_paths(
         row, workspace=workspace, db=db,
     )
@@ -710,6 +639,8 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
             )
         if recovered_source not in (None, source):
             logger.warning("Recovered promotion source collision at %s.", recovered_source)
+        if row["operation"] == "promote":
+            announce_undone_promote(db, row, why=why, source=source, target=target)
         _cleanup_undo(stage, backup)
         intents.delete(db, row["id"])
         return
@@ -722,6 +653,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
             )
         if recovered_source not in (None, source):
             logger.warning("Recovered promotion source collision at %s.", recovered_source)
+            announce_undone_promote(db, row, why=why, source=source, target=target)
         _remove_if_present(stage)
         _remove_if_present(backup)
         if row["created_parent"]:
@@ -749,7 +681,7 @@ def _recover_one_intent(row: dict, *, workspace: Path, db) -> None:
         # retried, so letting it raise here would stop startup on every boot. Announce the undo and
         # finish it now, through the same path an intent takes after the live write refused.
         intents.mark_undoing(db, row["id"], 1)
-        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db)
+        _recover_one_intent({**row, "undoing": 1}, workspace=workspace, db=db, why=str(exc))
         logger.warning("Rolled back durable promotion %s: %s", row["id"], exc)
         return
     try:

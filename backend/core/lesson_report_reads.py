@@ -14,6 +14,7 @@ from core import tool_result_binding
 from core.tool_result_report import canonical_result_reasons
 from core.lesson_report_boundaries import identity_for_raw
 from core.lesson_report_files import recorded_source
+from core.lesson_report_phases import PhaseTimes, timed
 from core.lesson_report_sql import json_row_chunks, read_file_metadata_predicate
 from core.tool_result_projection import tool_result_reference
 from tools.catalog import normalize_tool_name
@@ -154,11 +155,14 @@ def _loads_by_group(db, candidates):
 
 def read_bodies(
     db, *, user_id: str, thread_ids: tuple[str, ...], facts: list[dict[str, Any]],
+    phases: PhaseTimes | None = None,
 ) -> dict[str, Any]:
     """Batch scoped potential reads before loading bodies or binding predecessors."""
     unavailable: Counter[str] = Counter()
-    candidates = _candidate_groups(db, user_id, thread_ids, unavailable)
-    loads_by_group = _loads_by_group(db, candidates)
+    with timed(phases, "read_bodies.candidates"):
+        candidates = _candidate_groups(db, user_id, thread_ids, unavailable)
+    with timed(phases, "read_bodies.loads"):
+        loads_by_group = _loads_by_group(db, candidates)
 
     surviving: list[tuple[Any, dict[str, Any], Any]] = []
     for key, calls in candidates.items():
@@ -172,33 +176,36 @@ def read_bodies(
     bodies: dict[str, Any] = {}
     wanted = json.dumps([list(pair) for pair in dict.fromkeys(
         (str(row["thread_id"]), str(row["id"])) for row, _metadata, _load in surviving)])
-    for row in json_row_chunks(
-        db, "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.content AS content "
-        "FROM messages m JOIN (SELECT json_extract(value,'$[0]') AS thread_id,json_extract(value,'$[1]') AS id "
-        "FROM json_each(?)) w ON m.thread_id=w.thread_id AND m.id=w.id WHERE m.role='tool'",
-        (wanted,), ("id", "thread_id", "metadata", ("content", "hex(content)")), "id",
-    ) if surviving else ():
-        # Content travels as hex so embedded NUL bytes survive SQLite's JSON text functions.
-        row["content"] = bytes.fromhex(row["content"]).decode() if row["content"] else None
-        bodies[str(row["id"])] = row
+    with timed(phases, "read_bodies.bodies"):
+        for row in json_row_chunks(
+            db, "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.content AS content "
+            "FROM messages m JOIN (SELECT json_extract(value,'$[0]') AS thread_id,json_extract(value,'$[1]') AS id "
+            "FROM json_each(?)) w ON m.thread_id=w.thread_id AND m.id=w.id WHERE m.role='tool'",
+            (wanted,), ("id", "thread_id", "metadata", ("content", "hex(content)")), "id",
+        ) if surviving else ():
+            # Content travels as hex so embedded NUL bytes survive SQLite's JSON text functions.
+            row["content"] = bytes.fromhex(row["content"]).decode() if row["content"] else None
+            bodies[str(row["id"])] = row
 
     rows = [bodies[str(row["id"])] for row, _metadata, _load in surviving if str(row["id"]) in bodies]
-    canonical = canonical_result_reasons(db, rows)
+    with timed(phases, "read_bodies.canonical"):
+        canonical = canonical_result_reasons(db, rows)
     reads: list[dict[str, Any]] = []
-    for row, metadata, load in surviving:
-        body = bodies.get(str(row["id"]))
-        if body is None:
-            unavailable["canonical invocation lineage unavailable"] += 1
-            continue
-        reason = canonical[str(body["id"])]
-        if reason is not None:
-            unavailable[reason] += 1
-            continue
-        record, reason = _joined_read(db, body, metadata, load, facts)
-        if record is not None:
-            reads.append(record)
-        else:
-            unavailable[str(reason)] += 1
+    with timed(phases, "read_bodies.join"):
+        for row, metadata, load in surviving:
+            body = bodies.get(str(row["id"]))
+            if body is None:
+                unavailable["canonical invocation lineage unavailable"] += 1
+                continue
+            reason = canonical[str(body["id"])]
+            if reason is not None:
+                unavailable[reason] += 1
+                continue
+            record, reason = _joined_read(db, body, metadata, load, facts)
+            if record is not None:
+                reads.append(record)
+            else:
+                unavailable[str(reason)] += 1
     return {"reads": reads, "unavailable_reads": dict(unavailable),
             "coverage": (
                 "canonical read_file only; shell reads and unrecorded lineage unavailable; "

@@ -1,12 +1,16 @@
 """A rule-started script run the backend loses before it settles reaches its rule's owner.
 
 The real intake, evaluation, claim sweep and wake send. Only the sandboxed process is
-faked, and a restart is the runner losing its tasks: the next process holds none."""
+faked, and a restart is the runner losing its tasks: the next process holds none.
+
+A script CORSIA's own shutdown stops is such a run too. There the runner's task is not
+lost: the process owner hands it an ordinary result with the signal's exit code, which
+the runner must not settle as a script that failed."""
 from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -17,7 +21,7 @@ from automation.script_sandbox import ScriptRun
 from events import rule_runs
 from infra.database import get_db
 from tests.test_event_rules_run_script import (  # noqa: F401 - the run-script world and its helpers
-    OWNER, _emit, _outcomes, _rule, _script, _sweep, _write, runs, world,
+    _START, OWNER, _emit, _outcomes, _rule, _script, _sweep, _write, runs, spawned, world,
 )
 
 
@@ -195,3 +199,77 @@ def test_a_cut_run_whose_owner_is_gone_is_parked_and_the_sweep_goes_on(cut):
     payload = json.loads(parked["payload_json"])
     assert payload["owner"] == OWNER and [run["event_id"] for run in payload["runs"]] == [event_id]
     assert _wakes() == [] and cut["idle_drives"] == []
+
+
+@pytest.fixture
+def stopped(world, spawned, monkeypatch):  # noqa: F811 - the imported fixtures
+    """The run-script world through the real sandbox call, where the process owner answers
+    that its shutdown moved to stop the script, with the exit code in ``code``."""
+    from automation import script_sandbox
+    from host_access.processes import ForegroundProcessResult
+
+    world["code"], world["idle_drives"], world["commands"] = -15, [], spawned["commands"]
+
+    async def spawn(_argv, **_kwargs):
+        return ForegroundProcessResult(None, b"", b"", world["code"], stop_reason="backend_shutdown")
+
+    async def record(thread_id, *args, **kwargs):
+        world["idle_drives"].append(thread_id)
+
+    monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
+    monkeypatch.setattr(thread_execution, "drive_idle_thread", record)
+    monkeypatch.setattr(app_loop, "submit", lambda coroutine: asyncio.run(coroutine))
+    return world
+
+
+def _row(script_id: str):
+    db = get_db()
+    try:
+        return db.execute("SELECT last_status, last_error, running_since FROM automation_schedules WHERE id=?",
+                          (script_id,)).fetchone()
+    finally:
+        db.close()
+
+
+def test_a_rule_run_corsias_shutdown_stopped_is_a_lost_run_and_never_a_failed_script(stopped):
+    script_id = _script(stopped, "stopped.sh")
+    rule = _rule(script_id)
+    event_id = _emit()
+
+    _sweep()  # the run starts and is stopped; the sweep after it ends the rows it left
+
+    assert _outcomes(rule["id"]) == [("failed", rule_runs.INTERRUPTED)]
+    assert _wakes("script.error") == []  # the script did not fail, so nothing tells its owner to fix it
+    [(summary, details)] = _wakes()
+    assert summary.startswith("CORSIA lost track of a script run your event rule started")
+    assert details["runs"] == [{"rule_id": rule["id"], "event_id": event_id, "event_type": "qa.route"}]
+    assert stopped["idle_drives"] == [OWNER] and stopped["driven"] == []
+    assert tuple(_row(script_id))[::2] == ("interrupted", None)
+
+    _sweep()  # nothing runs it again and nothing wakes twice
+    assert len(stopped["commands"]) == 1 and len(_wakes()) == 1
+
+
+def test_a_script_that_ended_with_0_as_shutdown_began_keeps_its_result(stopped):
+    stopped["code"] = 0
+    rule = _rule(_script(stopped, "finished.sh"))
+    _emit()
+    _sweep()
+
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert _wakes() == [] and _wakes("script.error") == []
+
+
+def test_a_scheduled_run_shutdown_stopped_is_interrupted_and_wakes_nobody(stopped):
+    script_id = _script(stopped, "nightly.sh", cadence=3600)
+    _sweep(_START + timedelta(hours=2))
+
+    row = _row(script_id)
+    assert (row["last_status"], row["running_since"]) == ("interrupted", None)
+    assert row["last_error"] == "the backend restarted during this run; it is not replayed"
+    db = get_db()
+    try:
+        sent = db.execute("SELECT COUNT(*) FROM messages WHERE thread_id=?", (OWNER,)).fetchone()[0]
+    finally:
+        db.close()
+    assert sent == 0 and stopped["driven"] == [] and len(stopped["commands"]) == 1

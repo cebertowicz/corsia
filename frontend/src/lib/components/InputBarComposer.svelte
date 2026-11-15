@@ -78,84 +78,82 @@
 	}
 </script>
 
-<div>
-	<QueuedInputStack {threadId} />
+<QueuedInputStack {threadId} />
 
-	<div class="input-chip" class:multi-line={isMultiLine}>
-		{#if pendingAttachments.length > 0}
-			<div class="attachment-previews">
-				{#each pendingAttachments as att}
-					<div class="attachment-chip">
-						{#if att.is_image && att.preview_url && !previewFailed(att)}
-							<img
-								src={att.preview_url}
-								alt={att.filename}
-								class="attachment-thumb"
-								onerror={() => markPreviewFailed(att)}
-							/>
-						{:else if att.is_image}
-							<div class="attachment-icon" role="img" aria-label="Image attachment">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-							</div>
-						{:else}
-							<div class="attachment-icon">
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-							</div>
-						{/if}
-						<span class="attachment-name">{att.filename}</span>
-						<button
-							class="attachment-remove"
-							aria-label="Remove attachment"
-							onclick={() => removeAttachment(att.file_id)}
-						>
-							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-						</button>
-					</div>
-				{/each}
-			</div>
-		{/if}
+<div class="input-chip" class:multi-line={isMultiLine}>
+	{#if pendingAttachments.length > 0}
+		<div class="attachment-previews">
+			{#each pendingAttachments as att}
+				<div class="attachment-chip">
+					{#if att.is_image && att.preview_url && !previewFailed(att)}
+						<img
+							src={att.preview_url}
+							alt={att.filename}
+							class="attachment-thumb"
+							onerror={() => markPreviewFailed(att)}
+						/>
+					{:else if att.is_image}
+						<div class="attachment-icon" role="img" aria-label="Image attachment">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+						</div>
+					{:else}
+						<div class="attachment-icon">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+						</div>
+					{/if}
+					<span class="attachment-name">{att.filename}</span>
+					<button
+						class="attachment-remove"
+						aria-label="Remove attachment"
+						onclick={() => removeAttachment(att.file_id)}
+					>
+						<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
 
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="composer"
-			bind:this={inputEl}
-			contenteditable={$updateRestarting ? 'false' : 'plaintext-only'}
-			role="textbox"
-			aria-multiline="true"
-			aria-label="Message CORSIA"
-			aria-disabled={$updateRestarting}
-			tabindex={$updateRestarting ? -1 : 0}
-			data-placeholder={composerPlaceholder}
-			enterkeyhint="enter"
-			inputmode="text"
-			autocapitalize="sentences"
-			{...{ autocorrect: 'on' }}
-			spellcheck="true"
-			onkeydown={handleKeydown}
-			onfocus={handleFocus}
-			oninput={handleInput}
-			onpaste={handlePaste}
-			oncompositionstart={onCompositionStart}
-			oncompositionend={onCompositionEnd}
-		></div>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="composer"
+		bind:this={inputEl}
+		contenteditable={$updateRestarting ? 'false' : 'plaintext-only'}
+		role="textbox"
+		aria-multiline="true"
+		aria-label="Message CORSIA"
+		aria-disabled={$updateRestarting}
+		tabindex={$updateRestarting ? -1 : 0}
+		data-placeholder={composerPlaceholder}
+		enterkeyhint="enter"
+		inputmode="text"
+		autocapitalize="sentences"
+		{...{ autocorrect: 'on' }}
+		spellcheck="true"
+		onkeydown={handleKeydown}
+		onfocus={handleFocus}
+		oninput={handleInput}
+		onpaste={handlePaste}
+		oncompositionstart={onCompositionStart}
+		oncompositionend={onCompositionEnd}
+	></div>
 
-		<InputBarControls
-			surface="row"
-			{threadId}
-			{sheetView}
-			{toggleSheet}
-			{isMobile}
-			{hasImageAttachments}
-			{inputText}
-			pendingAttachmentCount={pendingAttachments.length}
-			{hasMessageToSend}
-			canSendToModel={canSendToModel && !$updateRestarting}
-			{queueUntilSwitch}
-			{onAttachFile}
-			{onAttachCamera}
-			{onAttachPhotos}
-			{onSendClick}
-			{onQueueAfterTurn}
-		/>
-	</div>
+	<InputBarControls
+		surface="row"
+		{threadId}
+		{sheetView}
+		{toggleSheet}
+		{isMobile}
+		{hasImageAttachments}
+		{inputText}
+		pendingAttachmentCount={pendingAttachments.length}
+		{hasMessageToSend}
+		canSendToModel={canSendToModel && !$updateRestarting}
+		{queueUntilSwitch}
+		{onAttachFile}
+		{onAttachCamera}
+		{onAttachPhotos}
+		{onSendClick}
+		{onQueueAfterTurn}
+	/>
 </div>

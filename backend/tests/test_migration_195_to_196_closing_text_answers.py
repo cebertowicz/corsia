@@ -1,4 +1,4 @@
-"""Schema 195: a closing-text answer that repeats a sent answer in the same Turn is dropped; a different one stays."""
+"""Schema 196: a closing-text answer that repeats a sent answer in the same Turn is dropped; a different one stays."""
 import json
 import sqlite3
 from contextlib import closing
@@ -6,7 +6,7 @@ from contextlib import closing
 from loguru import logger
 
 from infra.database import initialize_schema
-from infra.migration_194_to_195_closing_text_answers import migrate_194_to_195
+from infra.migration_195_to_196_closing_text_answers import migrate_195_to_196
 
 
 def _message(db, message_id, turn, text="Moved it.", cid="c1.1", for_user=False):
@@ -29,7 +29,7 @@ def _run(db):
     lines: list[str] = []
     sink = logger.add(lines.append, level="INFO", format="{message}")
     try:
-        migrate_194_to_195(db)
+        migrate_195_to_196(db)
     finally:
         logger.remove(sink)
     return [line.strip() for line in lines if "closing-text answers" in line]
@@ -46,7 +46,7 @@ def test_an_exact_repeat_is_dropped_and_a_different_closing_answer_stays():
         _message(db, "partial", "t2", text="Moved it, and tonight runs at 4 AM.")
         for message_id in ("sent", "repeat", "sent-2", "partial"):
             _answer(db, message_id, user_message="q1" if message_id in ("sent", "repeat") else "q2")
-        migrate_194_to_195(db)
+        migrate_195_to_196(db)
         assert _left(db) == [("partial", "c1.1"), ("sent", "c1.1"), ("sent-2", "c1.1")]
 
 
@@ -74,8 +74,8 @@ def test_only_a_repeat_in_the_same_turn_of_the_same_comment_is_dropped():
         for message_id in ("sent", "closing", "other-turn-closing", "only-closing"):
             _answer(db, message_id)
         _answer(db, "closing-other-comment", cid="c1.2")
-        migrate_194_to_195(db)
-        migrate_194_to_195(db)
+        migrate_195_to_196(db)
+        migrate_195_to_196(db)
         assert _left(db) == [
             ("closing-other-comment", "c1.2"), ("only-closing", "c1.1"),
             ("other-turn-closing", "c1.1"), ("sent", "c1.1"),
@@ -92,5 +92,5 @@ def test_a_closing_row_with_malformed_metadata_is_kept_and_does_not_abort_the_st
         )
         _answer(db, "sent")
         _answer(db, "broken")
-        migrate_194_to_195(db)
+        migrate_195_to_196(db)
         assert _left(db) == [("broken", "c1.1"), ("sent", "c1.1")]

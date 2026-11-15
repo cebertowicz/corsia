@@ -318,17 +318,21 @@ class LiveDocuments:
                 log.error("Document close left uncommitted updates unacknowledged for client resend: %s", error)
             finally:
                 if can_evict():
-                    try:
-                        await entry.lane.close()
-                        await self._compact(entry.live, force=True)
-                    finally:
-                        # Compaction can itself classify damage and stop this owner.
-                        if entry.publisher.closed:
-                            await entry.publisher.close()
-                        self.documents.pop(artifact_id, None)
-                        self._drop_drained_publisher(entry.live.store.path, entry.publisher)
-                        entry.publisher.store.observe_refusal = lambda error: None
-                        entry.live.close()
+                    await self.release(artifact_id, entry)
+
+    async def release(self, artifact_id: str, entry: LiveEntry) -> None:
+        """Close one entry's lane, squash its journal and drop it; the caller holds its path's lock."""
+        try:
+            await entry.lane.close()
+            await self._compact(entry.live, force=True)
+        finally:
+            # Compaction can itself classify damage and stop this owner.
+            if entry.publisher.closed:
+                await entry.publisher.close()
+            self.documents.pop(artifact_id, None)
+            self._drop_drained_publisher(entry.live.store.path, entry.publisher)
+            entry.publisher.store.observe_refusal = lambda error: None
+            entry.live.close()
 
     async def close(self) -> None:
         """Finish owned tasks and stop publication retries on application shutdown."""

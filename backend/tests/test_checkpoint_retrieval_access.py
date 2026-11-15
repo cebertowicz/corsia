@@ -17,6 +17,7 @@ reading, which is the vulnerability rather than the fix.
 
 from __future__ import annotations
 
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 from infra.thread_confinement import Reader
 
 import asyncio
@@ -264,6 +265,7 @@ def test_search_tool_labels_only_older_epoch_as_historical(fresh_db):
         " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT,"
         " seq INTEGER)"
     )
+    fresh_db.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
     _install_checkpoint(
         fresh_db, thread_id="t1", narrative="Current event routing.", checkpoint_id="cp-current"
     )
@@ -296,6 +298,7 @@ def test_search_reports_omitted_checkpoints_rather_than_hiding_them(fresh_db):
         " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT,"
         " seq INTEGER)"
     )
+    fresh_db.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
     fresh_db.commit()
     _install_checkpoint(
         fresh_db, thread_id="t1", narrative="We chose event routing."

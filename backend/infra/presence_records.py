@@ -49,6 +49,9 @@ def enter(
     stamp = iso(now)
     fresh: Focus = ("[]", stamp if focused else None)
     with write_transaction(db, scope="presence_enter"):
+        from infra.message_update_seen import latch
+
+        latch(db, thread_id, stamp, "visit")
         current = row(db, user_id, thread_id)
         if current is None:
             db.execute(
@@ -207,6 +210,10 @@ def mark_restart_exits(db: sqlite3.Connection, now: datetime) -> None:
     merge window restarts now, so a browser that reconnects within 2 min continues the visit.
     """
     with write_transaction(db, scope="presence_reconcile"):
+        from infra.message_update_seen import latch
+
+        for current in db.execute("SELECT thread_id FROM thread_presence WHERE present=1").fetchall():
+            latch(db, current[0], iso(now), "unknown")
         close_open_focus_at_restart(db)
         db.execute(
             "UPDATE thread_presence SET "
@@ -224,8 +231,13 @@ def mark_seen(
     """Mark read through ``now`` or unread; False with no record, never a new visit."""
     stamp = iso(now)
     with write_transaction(db, scope="presence_mark_seen"):
-        return db.execute(
+        changed = db.execute(
             "UPDATE thread_presence SET marked_read_at=CASE WHEN ? THEN marked_read_at ELSE ? END, "
             "marked_unread_at=CASE WHEN ? THEN ? END, updated_at=? WHERE user_id=? AND thread_id=?",
             (unread, stamp, unread, stamp, stamp, user_id, thread_id),
         ).rowcount == 1
+        if changed and not unread:
+            from infra.message_update_seen import latch
+
+            latch(db, thread_id, stamp, "mark_read")
+        return changed

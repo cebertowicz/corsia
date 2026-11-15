@@ -170,6 +170,29 @@ def test_no_reminder_for_a_paused_plan_until_it_resumes(db):
     assert _sweep(db) == ["parent"]
 
 
+def test_owed_verdict_ages_counts_every_owed_step_by_age_for_the_user(db):
+    """K21: reminded and paused steps still count; the threshold doesn't apply."""
+    empty = public.owed_verdict_ages(db, user_id="user-1", now=NOW)
+    assert empty["owed"] == 0 and set(empty["by_age"]) == {
+        "under_1h", "1h_to_6h", "6h_to_1d", "1d_to_7d", "over_7d"}
+    step, _plan, _node = _harvested(db)
+    _age_return(db, step.id, at="2099-12-30T00:00:00+00:00")
+    assert _sweep(db) == ["parent"]  # reminded: still owed, still counted
+    db.execute("UPDATE plans SET state='paused' WHERE owner_id='parent'")
+
+    paused = public.owed_verdict_ages(db, user_id="user-1", now=NOW)
+    assert paused == {
+        "owed": 1, "over_1h": 1, "parent_plans_over_1h": 1, "over_1d_on_unpaused_plans": 0,
+        "by_age": {"under_1h": 0, "1h_to_6h": 0, "6h_to_1d": 0, "1d_to_7d": 1, "over_7d": 0},
+    }
+    db.execute("UPDATE plans SET state='active' WHERE owner_id='parent'")
+    assert public.owed_verdict_ages(
+        db, user_id="user-1", now=NOW)["over_1d_on_unpaused_plans"] == 1
+    assert public.owed_verdict_ages(db, user_id="user-2", now=NOW)["owed"] == 0
+    _settle(db, step)
+    assert public.owed_verdict_ages(db, user_id="user-1", now=NOW)["owed"] == 0
+
+
 def test_no_reminder_once_the_step_is_accepted_or_rejected(db):
     step, _plan, _node = _harvested(db)
     _age_return(db, step.id)

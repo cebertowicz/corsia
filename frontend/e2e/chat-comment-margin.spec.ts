@@ -75,10 +75,25 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	// The highlight picks its card instead of opening a popover, as a highlight picks a card in a document, and the text clicked
 	// stays where it was: the column is already up, so picking moves the card to the text, never the text.
 	const highlight = row.locator('.cm-comment-anchor').filter({ hasText: QUOTE });
+	// Every frame from just before the pick until its card has settled: the transcript's scroll and the clicked text's line.
+	await highlight.evaluate((anchor) => {
+		const scroller = document.querySelector<HTMLElement>('.messages')!;
+		const frames: { scrollTop: number; y: number }[] = [];
+		const start = performance.now();
+		const step = () => {
+			frames.push({ scrollTop: scroller.scrollTop, y: anchor.getBoundingClientRect().top });
+			if (performance.now() - start < 1500) requestAnimationFrame(step);
+		};
+		step();
+		(window as unknown as { pickFrames: typeof frames }).pickFrames = frames;
+	});
 	await highlight.click();
 	await expect(card).toHaveClass(/selected/);
-	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
-	await page.waitForTimeout(500);
+	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
+	await page.waitForTimeout(1500);
+	const frames = await page.evaluate(() => (window as unknown as { pickFrames: { scrollTop: number; y: number }[] }).pickFrames);
+	const moved = frames.filter((frame) => Math.abs(frame.scrollTop - frames[0].scrollTop) > 0.5 || Math.abs(frame.y - frames[0].y) > 0.5);
+	expect(moved, `the transcript holds still on every frame of the pick (${frames.length} frames from ${JSON.stringify(frames[0])})`).toEqual([]);
 	expect(Math.abs((await highlight.boundingBox())!.y - mark.y), 'the clicked text stays put').toBeLessThanOrEqual(2);
 	await capture(page, 'chat-margin-1920');
 
@@ -160,6 +175,73 @@ for (const width of [1440, 1920] as const) for (const theme of ['light', 'dark']
 	await send.click();
 	await expect(card).toContainText('second margin reply 0');
 
+});
+
+test('a margin card level with the chat composer takes a click on its reply field and Send', async ({ page, request }, info) => {
+	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name !== 'chromium-desktop');
+	test.setTimeout(120_000);
+	const { row } = await commentedMessage(page, request, 1440);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.getByRole('button', { name: /^Toggle sidebar/ }).click();
+	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
+	const card = page.locator('.chat-margin .chat-margin-card');
+	await expect(card).toHaveCount(1);
+	await centerAndSettle(page, row);
+	await openMarginCard(row, card);
+	const field = card.getByPlaceholder('Reply…');
+	const send = card.getByRole('button', { name: 'Send reply' });
+	// Scrolls the transcript so the control's centre sits a little below the composer's top edge: still on screen, and
+	// right of the composer's box, so nothing drawn covers it. Returns that centre.
+	const placeInComposerBand = (control: typeof field) => control.evaluate((el) => {
+		const scroller = el.closest<HTMLElement>('.messages')!;
+		const band = document.querySelector('.input-floater')!.getBoundingClientRect();
+		const box = el.getBoundingClientRect();
+		scroller.scrollTop += box.top + box.height / 2 - (band.top + 20);
+		const at = el.getBoundingClientRect();
+		const chip = document.querySelector('.input-floater .input-chip')!.getBoundingClientRect();
+		return { x: at.left + at.width / 2, y: at.top + at.height / 2, bandTop: band.top, chipRight: chip.right };
+	});
+	const assertInBand = (at: { x: number; y: number; bandTop: number; chipRight: number }) => {
+		expect(at.y, 'the control sits in the composer band').toBeGreaterThan(at.bandTop);
+		expect(at.y, 'and stays on screen').toBeLessThan(900);
+		expect(at.x, 'right of the composer box, so nothing drawn covers it').toBeGreaterThan(at.chipRight);
+	};
+	// Focusing, blurring and typing each set off a scroll a few frames later: the composer's focus inset re-pins the transcript,
+	// the field eases to its new height, and the column and the field keep the card's end clear of the composer. A control is
+	// placed only once the transcript and the card have held still for several frames, or one of those scrolls moves it out
+	// of the band between the measure and the click.
+	const untilStill = () => card.evaluate((el) => new Promise<void>((resolve) => {
+		const scroller = el.closest<HTMLElement>('.messages')!;
+		let last = '', still = 0;
+		const step = () => {
+			const box = el.getBoundingClientRect();
+			const now = `${scroller.scrollTop}|${box.top}|${box.height}`;
+			still = now === last ? still + 1 : 0;
+			last = now;
+			if (still >= 5) resolve(); else requestAnimationFrame(step);
+		};
+		requestAnimationFrame(step);
+	}));
+	const placeStill = async (control: typeof field) => {
+		await untilStill();
+		const at = await placeInComposerBand(control);
+		await untilStill();
+		const now = await control.evaluate((el) => { const box = el.getBoundingClientRect(); return box.top + box.height / 2; });
+		expect(now, 'nothing scrolled the control after it was placed').toBe(at.y);
+		assertInBand(at);
+		return at;
+	};
+	// A real pointer at the visible field focuses it; the composer's empty band beside its box never takes the click.
+	await field.evaluate((el) => (el as HTMLElement).blur());
+	const fieldAt = await placeStill(field);
+	await page.mouse.click(fieldAt.x, fieldAt.y);
+	await expect(field).toBeFocused();
+	await page.keyboard.type('Answer beside the composer');
+	await expect(send).toBeVisible();
+	const sendAt = await placeStill(send);
+	await page.mouse.click(sendAt.x, sendAt.y);
+	await expect(card).toContainText('Answer beside the composer');
+	await expect(page.locator('.messages .message.user')).toHaveCount(0);
 });
 
 test('a chat column too narrow for the card keeps the popover at the highlight', async ({ page, request }) => {

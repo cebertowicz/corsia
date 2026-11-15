@@ -14,6 +14,8 @@ from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_K
 from infra.chat_comment_answers import message_answer_fields
 from infra.chat_comment_index import comment_only
 from infra.database import get_db
+from infra.message_update_schema import not_replaced_sql
+from infra.message_update_state import projection_fields
 from infra.db_async import run_in_db
 from infra.turn_errors import apply_error_next_steps, last_turn_error_id
 
@@ -72,7 +74,8 @@ def read_input_broadcast_row(
             "SELECT id,thread_id,role,content,metadata,created_at,delivery_state,delivery_error,"
             "delivery_revision,seq,active_turn_id,write_outcome,delivery_intent FROM messages WHERE id=? "
             "AND (role IN ('user','system') "
-            "OR (role='assistant' AND json_extract(metadata,'$.for_user')=1))",
+            "OR (role='assistant' AND json_extract(metadata,'$.for_user')=1)) "
+            f"AND {not_replaced_sql()}",
             (message_id,),
         ).fetchone()
         if row is None:
@@ -104,9 +107,8 @@ def read_input_broadcast_row(
             write_outcome=row["write_outcome"],
             delivery_intent=row["delivery_intent"],
             # An update can answer chat comments mid-turn; the page must not wait for the turn's end to place them.
-            answer_fields=message_answer_fields(
-                str(row["thread_id"]), str(row["id"]), connection,
-            ) if row["role"] == "assistant" else None,
+            answer_fields={**message_answer_fields(str(row["thread_id"]), str(row["id"]), connection),
+                           **projection_fields(connection, str(row["id"]))} if row["role"] == "assistant" else None,
         )
     finally:
         if owns_connection:
@@ -174,6 +176,16 @@ def broadcast_input_row(
         exclude_ws=exclude_ws,
         broadcast=broadcast,
     )
+
+
+async def broadcast_replacement(thread_id: str, message_id: str, removed_ids) -> None:
+    """Publish one atomic remove-and-add frame from the committed canonical projection."""
+    from infra import state
+
+    row = await run_in_db(read_input_broadcast_row, message_id)
+    if row is not None:
+        state.broadcast_to_thread(thread_id, {"type": "messages_replaced", "thread_id": thread_id,
+            "removed_message_ids": list(removed_ids), "message": project_input_message(row)})
 
 
 def input_rows_payload(thread_id: str, rows: tuple[InputBroadcastRow, ...]) -> dict:

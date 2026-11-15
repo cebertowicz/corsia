@@ -1,6 +1,6 @@
-"""Schema 194 -> 195: drop a closing-text answer that repeats an answer a sent message already gave.
+"""Schema 195 -> 196: drop a closing-text answer that repeats an answer a sent message already gave.
 
-From 195 on, ``chat_comment_answers.place_answers`` places an answer only from words the person is
+From 196 on, ``chat_comment_answers.place_answers`` places an answer only from words the person is
 shown. Before, an agent that answered a comment with ``post_update`` and again in its closing text
 had both stored, and the comment thread showed the answer twice. This step deletes the stored row
 of a closing-text answer (no ``for_user``) only when a ``for_user`` message in the same Turn gave
@@ -48,7 +48,7 @@ def _words(cache: dict[str, dict[str, str]], message_id: str, content: str | Non
     return cache[message_id]
 
 
-def migrate_194_to_195(conn: sqlite3.Connection) -> None:
+def migrate_195_to_196(conn: sqlite3.Connection) -> None:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"chat_comment_answers", "messages"} <= tables:
         return
@@ -67,6 +67,6 @@ def migrate_194_to_195(conn: sqlite3.Connection) -> None:
     different -= repeats
     conn.executemany("DELETE FROM chat_comment_answers WHERE rowid=?", [(rowid,) for rowid in repeats])
     logger.info(
-        "migration 194->195 closing-text answers: deleted={} kept_different={} total={} elapsed_ms={}",
+        "migration 195->196 closing-text answers: deleted={} kept_different={} total={} elapsed_ms={}",
         len(repeats), len(different), total, round((time.monotonic() - started) * 1000),
     )

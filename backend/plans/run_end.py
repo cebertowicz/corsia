@@ -114,7 +114,15 @@ def record_if_ended(db, node_id: str, new_state: str) -> None:
     """
     if new_state == "accepted_with_followup":
         return
-    parent_id = service._node_row(db, node_id)["parent_id"]
+    record_from(db, service._node_row(db, node_id)["parent_id"])
+
+
+def record_from(db, parent_id: str | None) -> None:
+    """Record each run at or above ``parent_id`` that has no open work left.
+
+    A settle reaches it through ``record_if_ended``; a regroup calls it on the branch
+    a node left, since moving the last open work out of a run ends that run too.
+    """
     while parent_id is not None:
         parent = service._node_row(db, parent_id)
         if _run_phase(db, parent):

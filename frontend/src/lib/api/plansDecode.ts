@@ -37,9 +37,9 @@ const isMeasure = (v: unknown): boolean => isObject(v) && isNumOrNull(v.known) &
 const isAmount = (v: unknown): boolean => {
 	if (!isObject(v) || !isMeasure(v.tokens) || !isMeasure(v.model_cost_usd)) return false;
 	if (!isNum(v.usage_recording_failures) || !isObject(v.execution)) return false;
-	if (!isObject(v.waiting) || !isNum(v.waiting.seconds)) return false;
+	if (!isObject(v.waiting) || !isNum(v.waiting.settled_seconds) || !isStrArray(v.waiting.open_starts)) return false;
 	const execution = v.execution as Record<string, unknown>;
-	return isNum(execution.seconds) && isNum(execution.unknown_turns) && isObject(execution.turns);
+	return isNum(execution.settled_seconds) && isStrArray(execution.open_starts) && isNum(execution.unknown_turns) && isObject(execution.turns);
 };
 const isNodeCost = (v: unknown): boolean =>
 	isObject(v) && isAmount(v.own) && isAmount(v.rolled);
@@ -49,7 +49,7 @@ const isCommitmentCost = (v: unknown): boolean =>
 	v === null || (isObject(v) && isStr(v.commitment_id) && isObject(v.attempts) && isNum(v.attempts.total)
 		&& isMeasure(v.tokens) && isMeasure(v.model_cost_usd) && isNum(v.usage_recording_failures)
 		&& isObject(v.elapsed_seconds)
-		&& isNumOrNull(v.elapsed_seconds.known) && isObject(v.user_effort) && isNum(v.user_effort.known_plan_actions));
+		&& isNum(v.elapsed_seconds.settled_seconds) && isStrArray(v.elapsed_seconds.open_starts) && isObject(v.user_effort) && isNum(v.user_effort.known_plan_actions));
 const isEvidence = (v: unknown): boolean =>
 	v === null || (isObject(v) && isStr(v.evidence) && isStrArray(v.artifact_ids));
 

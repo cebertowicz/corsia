@@ -172,7 +172,8 @@ def env(tmp_path: Path) -> dict[str, str]:
     (checkout / "backend").mkdir()
     shutil.copytree(REPO / "backend" / "infra", checkout / "backend" / "infra")
     (checkout / "backend" / "tools").mkdir()
-    shutil.copy2(REPO / "backend" / "tools" / "gws_release.py", checkout / "backend" / "tools" / "gws_release.py")
+    for module in ("gws_release.py", "runtime_download.py"):
+        shutil.copy2(REPO / "backend" / "tools" / module, checkout / "backend" / "tools" / module)
     runtime = checkout / "backend" / "tools" / "managed_runtime.py"
     shutil.copy2(REPO / "backend" / "tools" / "managed_runtime.py", runtime)
     with runtime.open("a") as file:
@@ -186,7 +187,7 @@ for _kind in ("node", "uv", "gws"):
         if os.environ.get("STUB_BAD_CHECKSUM") == _kind:
             _digest = "0" * 64
         RUNTIME_PINS[_kind][_key] = replace(_pin_value, sha256=_digest)
-def _download(url, destination):
+def _download(url, destination, should_stop=None):
     with open(os.environ["STUB_LOG"], "a") as log:
         log.write("curl " + url + "\\n")
     source = Path(os.environ["STUB_DOWNLOADS"]) / url.rsplit("/", 1)[-1]

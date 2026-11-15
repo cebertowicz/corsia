@@ -363,6 +363,9 @@ def delete_thread_updates(db: sqlite3.Connection, thread_id: str) -> None:
     SQLite foreign keys are off at runtime, so thread deletion calls this
     explicitly, inside its transaction, before the thread row goes.
     """
+    from infra.message_update_state import delete_thread
+
+    delete_thread(db, thread_id)
     db.execute("DELETE FROM thread_updates WHERE thread_id=?", (thread_id,))
 
 
