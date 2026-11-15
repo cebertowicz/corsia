@@ -184,14 +184,15 @@ export function tickUpdateScreen(now = Date.now()): void {
 	const progress = get(startupProgress);
 	const file = progress?.file ?? null;
 	const confirmation = get(updateConfirmed);
-	// The store confirms only an outcome no device has shown yet. A page that slept through its own update (a phone with
-	// its screen off) finds the outcome already shown elsewhere; that completed outcome ends this screen too.
-	const shownElsewhere = own?.status === 'complete' && own.outcome_seen_at ? { operationId: l.operationId, version: own.target_version ?? null } : null;
-	const currentConfirmation = confirmation?.operationId === l.operationId ? confirmation : shownElsewhere;
 	l.toVersion = own?.target_version ?? l.toVersion;
 	// The progress file's schema and version fields are intentionally never used as app-version labels.
 
 	l.failure = currentFailure(l, own);
+	// The store confirms only an outcome no device has shown yet. A page that slept through its own update (a phone with
+	// its screen off) finds the outcome already shown elsewhere; that completed outcome ends this screen too, unless this
+	// page found its own failure (a version mismatch marks the outcome seen as it fails).
+	const shownElsewhere = !l.failure && own?.status === 'complete' && own.outcome_seen_at ? { operationId: l.operationId, version: own.target_version ?? null } : null;
+	const currentConfirmation = confirmation?.operationId === l.operationId ? confirmation : shownElsewhere;
 	if (l.failure && !currentConfirmation) {
 		updateScreenView.set({ operationId: l.operationId, mode: 'failed', step: l.model.step, label: STEP_LABEL[l.model.step], percent: l.model.percent, estimated: false, fromVersion: l.fromVersion, toVersion: l.toVersion, failure: copyFor(l.failure, own, unreachable), serviceDown: unreachable, startupProgressUnavailable: false });
 		return;

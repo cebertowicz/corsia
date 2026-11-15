@@ -6,7 +6,7 @@ import { clearStartupProgress, refreshStartupProgress, startupProgress } from '.
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
 import { CREEP_STALE_MS, PHASE_SECONDS, remoteCeiling } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, NO_HISTORY_LONGER_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
-import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
+import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateFailureVerdict, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
 type ShellWindow = Window & {
@@ -367,6 +367,22 @@ describe('update screen store', () => {
 		await loadUpdateStatus();
 		vi.advanceTimersByTime(5_000);
 		expect(get(updateScreenView)).toBeNull();
+	});
+
+	it('keeps its own version-mismatch failure when a later read finds the outcome seen', () => {
+		updateStatus.set(status(inFlight('update-mismatch')));
+		tickUpdateScreen(1_000);
+		updateStatus.set(status({ ...inFlight('update-mismatch'), status: 'complete', phase: undefined }));
+		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'Versions differ.' });
+		tickUpdateScreen(2_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
+
+		updateStatus.set(status({ ...inFlight('update-mismatch'), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' }));
+		tickUpdateScreen(32_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
+		vi.advanceTimersByTime(EXIT_HOLD_MS);
+		tickUpdateScreen(34_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
 	});
 
 	it('dismisses its matching terminal screen and toast together', async () => {
