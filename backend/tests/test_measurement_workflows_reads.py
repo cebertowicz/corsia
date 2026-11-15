@@ -13,7 +13,9 @@ import sys
 import pytest
 
 from core.measurement_scope import MeasurementScope, resolve_grain
-from tests.test_measurement_workflows import NOW, db, measured_owners, seed  # noqa: F401  (fixtures)
+from core.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
+from core.measurement_pricing import grouped_usage_per_row_sql, grouped_usage_sql
+from tests.test_measurement_workflows import NOW, db, measured_owners, seed, usage  # noqa: F401  (fixtures)
 
 #: Every module that reads its rows through ``fetch_all`` for this route.
 _READERS = (
@@ -26,13 +28,14 @@ _SCOPES = (
 )
 
 
-def _body(scope: MeasurementScope, grain_name: str) -> str:
+def _body(scope: MeasurementScope, grain_name: str, *, coverage_only: bool = False) -> str:
     from api.measurement_workflows import workflow_runs
     from infra.database import get_db
 
     connection = get_db()
     try:
-        body = workflow_runs(connection, "steve", scope, resolve_grain(grain_name, "UTC", now=NOW), now=NOW)
+        body = workflow_runs(connection, "steve", scope, resolve_grain(grain_name, "UTC", now=NOW), now=NOW,
+                             coverage_only=coverage_only)
     finally:
         connection.close()
     return json.dumps(body, sort_keys=True, default=str)
@@ -72,3 +75,92 @@ def test_the_model_read_uses_the_node_index_without_statistics(db) -> None:  # n
     plan = " ".join(str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + MODEL_GROUPS_SQL, {"ids": "[]"}))
     assert "idx_llm_usage_plan_node" in plan
     assert "idx_llm_usage_session" not in plan
+
+
+def test_the_cost_read_probes_the_node_index_once_per_chain_row_without_statistics(db) -> None:  # noqa: F811
+    """Each chain row's calls are one probe of the node index, never a pass over the whole usage table."""
+    from api.measurement_model_cost import _cost_sql
+    from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
+
+    db.execute(CHAIN_DDL)
+    assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat1'").fetchone()
+    details = [str(row[-1]) for row in db.execute("EXPLAIN QUERY PLAN " + _cost_sql(CHAIN_TABLE))]
+    usage = [detail for detail in details if detail.startswith(("SEARCH u ", "SCAN u"))]
+    assert usage == ["SEARCH u USING INDEX idx_llm_usage_plan_node (plan_node_id=?)"], details
+
+
+# The two usage reads as one grouping over every call, as they were before each call set was grouped on its own.
+_ONE_GROUPING_MODELS = f"""
+    SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
+      SELECT u.plan_node_id AS node_id,{identity_columns("u")},
+        COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0) AS fresh
+      FROM llm_usage u INDEXED BY idx_llm_usage_plan_node {identity_join("u")}
+      JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
+      WHERE u.plan_node_id IN (SELECT value FROM json_each(:ids))
+    ) GROUP BY node_id,{IDENTITY_GROUP}
+"""
+
+
+def _one_grouping_cost(chain_rows: str) -> str:
+    return grouped_usage_sql(
+        {"period": "x.period", "task_id": "x.task_id"},
+        f"{chain_rows} x JOIN llm_usage u ON u.plan_node_id=x.node_id AND u.created_at<=x.settled_at",
+    )
+
+
+def _odd_usage() -> None:
+    """Calls the plain seed lacks: a second manifest and none, a second model, a call after the run settled,
+    and calls admission refuses (a fractional count, a missing bucket, a contract the source does not prove)."""
+    from infra.database import get_db
+
+    connection = get_db()
+    try:
+        usage(connection, "u-a-gather-2", "a-gather", "2026-10-07T09:21:00Z", prompt=7, manifest="m-other")
+        usage(connection, "u-a-gather-3", "a-gather", "2026-10-07T09:22:00Z", prompt=11, manifest=None)
+        usage(connection, "u-a-gather-late", "a-gather", "2026-10-09T09:00:00Z", prompt=13)
+        usage(connection, "u-c-gather-2", "c-gather", "2026-10-15T09:16:00Z", prompt=17,
+              model="codex/gpt-5.6-terra")
+        usage(connection, "u-c-gather-3", "c-gather", "2026-10-15T09:17:00Z", prompt=19)
+        usage(connection, "u-b-gather-real", "b-gather", "2026-10-14T09:21:00Z", prompt=23)
+        connection.execute("UPDATE llm_usage SET prompt_tokens=0.1, total_tokens=0.1 WHERE id='u-b-gather-real'")
+        usage(connection, "u-b-gather-null", "b-gather", "2026-10-14T09:22:00Z", prompt=29)
+        connection.execute("UPDATE llm_usage SET completion_tokens=NULL WHERE id='u-b-gather-null'")
+        connection.commit()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("read", ["days", "weeks", "coverage-days", "coverage-weeks"])
+@pytest.mark.parametrize("scope", _SCOPES, ids=lambda scope: f"{scope.project}-{scope.agent}")
+def test_the_route_answers_the_same_grouping_each_call_set_alone(db, monkeypatch, scope, read) -> None:  # noqa: F811
+    """Grouping each task's calls on their own, then their few groups, answers what one grouping of every call did."""
+    import api.measurement_model_cost as model_cost
+    import core.workflow_verdict_read as verdict_read
+
+    seed()
+    _odd_usage()
+    grain_name, coverage_only = read.removeprefix("coverage-"), read.startswith("coverage-")
+    per_set = _body(scope, grain_name, coverage_only=coverage_only)
+    monkeypatch.setattr(model_cost, "_cost_sql", _one_grouping_cost)
+    monkeypatch.setattr(verdict_read, "MODEL_GROUPS_SQL", _ONE_GROUPING_MODELS)
+    assert _body(scope, grain_name, coverage_only=coverage_only) == per_set
+    assert json.loads(per_set)["coverage"]
+
+
+def test_grouping_each_row_alone_returns_the_rows_and_order_of_one_grouping(db) -> None:  # noqa: F811
+    """Row for row and in order, including a row read twice, a row with no calls and refused admissions."""
+    seed()
+    _odd_usage()
+    rows = ("(SELECT 'k1' AS key,'a-gather' AS node_id,'2026-10-08T00:00:00Z' AS settled_at"
+            " UNION ALL SELECT 'k1','a-gather','2026-10-08T00:00:00Z'"
+            " UNION ALL SELECT 'k1','c-gather','2026-10-16T00:00:00Z'"
+            " UNION ALL SELECT 'k2','b-gather','2026-10-15T00:00:00Z'"
+            " UNION ALL SELECT 'k2','d-report','2026-10-17T00:00:00Z'"
+            " UNION ALL SELECT 'k3','plain-1','2026-10-17T00:00:00Z')")
+    calls = "u.plan_node_id=x.node_id AND u.created_at<=x.settled_at"
+    keys = {"key": "x.key"}
+    expected = [tuple(row) for row in db.execute(grouped_usage_sql(keys, f"{rows} x JOIN llm_usage u ON {calls}"))]
+    actual = [tuple(row) for row in db.execute(grouped_usage_per_row_sql(keys, f"{rows} x", calls))]
+    assert actual == expected
+    assert {row[0] for row in expected} == {"k1", "k2"}
+    assert {row[5] for row in expected} >= {"ok", "tokens_unreported"}, "admitted and refused calls both"

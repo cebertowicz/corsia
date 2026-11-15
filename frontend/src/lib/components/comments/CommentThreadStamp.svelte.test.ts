@@ -7,309 +7,145 @@ type Reply = NonNullable<CommentThreadData['replies']>[number];
 const reply = (id: string, createdAt = '2026-10-16T18:00:00Z'): Reply => ({ id, author: 'agent-1', authorKind: 'agent', text: `reply ${id}`, at: 'later', createdAt });
 const state = $state<{ comment: CommentThreadData }>({ comment: { id: 'c1', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] } });
 
-class FakeObserver {
-	static all: FakeObserver[] = [];
-	// Geometry of whatever is observed at the moment observe() runs; a callback reports it.
-	static visibleOnObserve = false;
-	disconnected = false;
-	target: Element | null = null;
-	constructor(private callback: IntersectionObserverCallback, options?: IntersectionObserverInit) { this.root = options?.root ?? null; FakeObserver.all.push(this); }
+/** An observer that reports everything it observes as fully on screen at once: being seen must read nothing. */
+class SeenObserver {
+	constructor(private callback: IntersectionObserverCallback) {}
 	observe(target: Element) {
-		this.target = target;
-		if (FakeObserver.visibleOnObserve) this.report(true);
+		this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
 	}
-	report(visible: boolean) {
-		if (this.disconnected || !this.target) return;
-		this.callback([{ isIntersecting: visible, intersectionRatio: visible ? 1 : 0, target: this.target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-	}
-	reportTall(shown = 599, viewport = 600) {
-		if (!this.target) return;
-		this.callback([{ isIntersecting: true, intersectionRatio: 0.5, target: this.target, intersectionRect: { height: shown }, boundingClientRect: { height: shown / 0.5 }, rootBounds: { top: 0, height: viewport } } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-	}
-	disconnect() { this.disconnected = true; }
+	disconnect() {}
 	unobserve() {}
 	takeRecords() { return []; }
-	root: Element | Document | null = null; rootMargin = ''; thresholds = [];
-	static live() { return FakeObserver.all.filter((observer) => !observer.disconnected); }
+	root = null; rootMargin = ''; thresholds = [];
 }
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
-const surface = $state({ active: true });
-function setVisibility(value: 'visible' | 'hidden') {
-	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
-}
-function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true) {
-	vi.stubGlobal('IntersectionObserver', FakeObserver);
+/** How the caller presents the thread: a chat margin card picked or at rest, or a popover opened on it. */
+const shown = $state({ opened: false, hideReply: false });
+function render(onViewed: (id: string, replyId: string) => Promise<void>, props: Record<string, unknown> = {}) {
+	vi.stubGlobal('IntersectionObserver', SeenObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, chatSurface: true, get opened() { return shown.opened; }, get hideReply() { return shown.hideReply; }, ...props } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {
 	state.comment = { ...state.comment, ...comment }; flushSync();
 }
 const newMarks = () => host.querySelectorAll('.ct-new').length;
-async function settle() { await Promise.resolve(); flushSync(); await Promise.resolve(); flushSync(); }
-const dwell = () => new Promise((resolve) => setTimeout(resolve, 1_550));
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 afterEach(() => {
-	vi.useRealTimers();
 	if (component) unmount(component);
 	component = null; host?.remove();
-	FakeObserver.all = []; FakeObserver.visibleOnObserve = false; surface.active = true;
+	shown.opened = false; shown.hideReply = false;
 	state.comment = { id: 'c1', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] };
-	delete (document as unknown as Record<string, unknown>).visibilityState;
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });
 
-describe('CommentThread stamping', () => {
-	it('stamps each dwelled chat reply independently, including a tall reply', async () => {
+describe('chat thread read stamps', () => {
+	it('reads nothing when the thread loads and stays on screen', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(onViewed, true);
-		const observers = FakeObserver.live();
-		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r2')!.reportTall();
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
-		observers.find(observer => (observer.target as HTMLElement)?.dataset.replyId === 'r1')!.report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });
-	});
-
-	it('stamps a tall reply filling the visible area', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
 		render(onViewed);
-		FakeObserver.live()[0].reportTall();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-	});
-
-	it('stamps a tall reply filling a scroller shorter than the viewport, and not one that falls short of it', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		const original = window.getComputedStyle.bind(window);
-		vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
-			const style = original(element);
-			return element === host ? new Proxy(style, { get: (target, property) => property === 'overflowY' ? 'auto' : Reflect.get(target, property) }) : style;
-		});
-		render(onViewed);
-		vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 400, height: 300 } as DOMRect);
-		FakeObserver.live()[0].reportTall(200, 800);
-		await dwell();
+		// Well past any timer the thread runs, so a read on a delay would have landed.
+		await wait(1_800);
 		expect(onViewed).not.toHaveBeenCalled();
-		FakeObserver.live()[0].reportTall(300, 800);
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-	});
-
-	it('preserves an in-progress dwell across an identical unread projection', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		FakeObserver.live()[0].report(true);
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		arrive({ newReplyIds: ['r1'] });
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 1100 });
-	});
-	it('preserves an existing dwell when another unread reply arrives', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		FakeObserver.live()[0].report(true);
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		arrive({ replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] });
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 1100 });
-	});
-
-	it('observes against the viewport even inside a scroll container', () => {
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		const original = window.getComputedStyle.bind(window);
-		vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
-			const style = original(element);
-			return element === host ? new Proxy(style, { get: (target, property) => property === 'overflowY' ? 'auto' : Reflect.get(target, property) }) : style;
-		});
-		render(vi.fn().mockResolvedValue(undefined));
-		expect(FakeObserver.live()[0].root).toBeNull();
-	});
-	it('observes each unread reply so a later one cannot clear an unseen earlier reply', () => {
-		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(vi.fn().mockResolvedValue(undefined));
-		expect(FakeObserver.live().map((observer) => (observer.target as HTMLElement).dataset.replyId)).toEqual(['r1', 'r2']);
-	});
-
-	it('stamps only the visible chat reply when an earlier reply is unseen', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(onViewed);
-		FakeObserver.live()[1].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
-	});
-
-	it('stamps chat replies independently when the later one is seen first', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(onViewed);
-		FakeObserver.live()[1].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
-		FakeObserver.live()[1].report(false);
-		FakeObserver.live()[0].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });
-	});
-
-	it('stamps only the earliest unread reply when it alone is visible', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(onViewed);
-		FakeObserver.live()[0].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
-	});
-
-	it('stamps a resolved thread\'s unread reply only once the thread is expanded and the reply dwells', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, resolved: true, replies: [reply('r1')], newReplyIds: ['r1'] };
-		FakeObserver.visibleOnObserve = true;
-		render(onViewed);
-		expect(FakeObserver.live()).toHaveLength(0);
-		host.querySelector<HTMLButtonElement>('.ct-res-head')!.click(); flushSync();
-		expect(newMarks()).toBe(1);
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-	});
-
-	it('cancels a resolved thread\'s dwell when it is collapsed before the reply has dwelled', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, resolved: true, replies: [reply('r1')], newReplyIds: ['r1'] };
-		FakeObserver.visibleOnObserve = true;
-		render(onViewed);
-		const head = host.querySelector<HTMLButtonElement>('.ct-res-head')!;
-		head.click(); flushSync();
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		head.click(); flushSync();
-		await settle();
-		expect(FakeObserver.live()).toHaveLength(0);
-		await dwell();
-		expect(onViewed).not.toHaveBeenCalled();
-	});
-
-	it('cancels dwell while the comment surface is covered and restarts on return', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		FakeObserver.visibleOnObserve = true;
-		render(onViewed);
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		surface.active = false; flushSync();
-		await dwell();
-		expect(onViewed).not.toHaveBeenCalled();
-		surface.active = true; flushSync();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-	});
-
-	it('does not stamp a reply that arrives while the previous newest was visible, until its own element is fully visible', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		FakeObserver.live()[0].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
-
-		// The store answers the stamp, then another reply arrives; its element has not reported yet.
-		arrive({ newReplyIds: ['r2'], replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')] });
-		await settle();
-		expect(onViewed).toHaveBeenCalledTimes(1);
-		expect(FakeObserver.live()).toHaveLength(1);
-		FakeObserver.live()[0].report(false);
-		expect(onViewed).toHaveBeenCalledTimes(1);
-		FakeObserver.live()[0].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]), { timeout: 3000 });
-	});
-
-	it('does not stamp in a hidden document, and stamps once when it becomes visible with the reply still fully visible', async () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		setVisibility('hidden');
-		FakeObserver.visibleOnObserve = true;
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		expect(onViewed).not.toHaveBeenCalled();
-
-		setVisibility('visible');
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r1']]), { timeout: 3000 });
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		// A reply stamped from this mount is not stamped again by a later visibility change.
-		expect(onViewed).toHaveBeenCalledTimes(1);
-	});
-
-	it('does not stamp from the old geometry when the document returns with the reply scrolled out of view', () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		setVisibility('hidden');
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		FakeObserver.live()[0].report(true);
-		setVisibility('visible');
-		FakeObserver.visibleOnObserve = false;
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		expect(onViewed).not.toHaveBeenCalled();
-	});
-
-	it('retries a failed stamp on the next visibility change and not in a loop', async () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		FakeObserver.visibleOnObserve = true;
-		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
-		render(onViewed);
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
-		await settle(); await settle();
-		expect(onViewed).toHaveBeenCalledTimes(1);
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
-		await settle();
-		expect(onViewed).toHaveBeenCalledTimes(2);
-		warn.mockRestore();
-	});
-
-	it('stamps the earlier reply while a later reply is still dwelling', () => {
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
-		render(onViewed);
-		vi.useFakeTimers();
-		try {
-			const observers = FakeObserver.live();
-			observers[0].report(true);
-			vi.advanceTimersByTime(100);
-			observers[1].report(true);
-			vi.advanceTimersByTime(1401);
-			expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
-			vi.advanceTimersByTime(100);
-			expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	it('stamps both visible chat replies and keeps the collapse point stable', async () => {
-		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
-		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
-		vi.useFakeTimers();
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		const replies = Array.from({ length: 6 }, (_, index) => reply(`r${index}`, `2026-10-16T18:0${index}:00Z`));
-		state.comment = { ...state.comment, replies, newReplyIds: ['r4', 'r5'] };
-		render(onViewed);
 		expect(newMarks()).toBe(2);
-		expect(host.textContent).toContain('Show 4 earlier replies');
+	});
 
-		for (const observer of FakeObserver.live()) observer.report(true);
-		await vi.advanceTimersByTimeAsync(1_499);
+	it('reads nothing on a resting margin card, and reads every unread answer once the card is picked', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r0'), reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		shown.hideReply = true;
+		render(onViewed, { inMargin: true });
 		expect(onViewed).not.toHaveBeenCalled();
-		// The dwells end at 1500 ms and their shared stamp timer runs on the next tick.
-		await vi.advanceTimersByTimeAsync(2);
-		expect(onViewed.mock.calls).toEqual([['c1', 'r4'], ['c1', 'r5']]);
+		shown.hideReply = false; shown.opened = true; flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('reads every unread answer when the thread mounts opened (a popover or sheet)', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
+		shown.opened = true;
+		render(onViewed);
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('reads the unread answers when the card is pressed, or its reply field takes focus', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		expect(onViewed).toHaveBeenCalledTimes(1);
+		host.querySelector('textarea')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('leaves an answer that arrives while the thread is open unread until the next press', () => {
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		shown.opened = true;
+		render(onViewed);
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
+		arrive({ replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r2'] });
+		expect(onViewed).toHaveBeenCalledTimes(1);
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1'], ['c1', 'r2']]);
+	});
+
+	it('keeps the New marks the thread opened with after the stamp clears them, until it is no longer open', () => {
+		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };
+		shown.hideReply = true;
+		render(vi.fn().mockResolvedValue(undefined), { inMargin: true });
+		expect(newMarks()).toBe(2);
+		shown.hideReply = false; shown.opened = true; flushSync();
+		// The stamp lands: the server names no new answers, and the open card still shows which ones were new.
 		arrive({ newReplyIds: [] });
+		expect(newMarks()).toBe(2);
+		shown.hideReply = true; shown.opened = false; flushSync();
 		expect(newMarks()).toBe(0);
-		expect(host.textContent).toContain('Show 4 earlier replies');
-		expect(host.textContent).toContain('reply r4');
-		expect(host.textContent).not.toContain('reply r0');
+		shown.hideReply = false; shown.opened = true; flushSync();
+		expect(newMarks()).toBe(0);
+	});
+
+	it('retries a failed stamp on the next opening, not in a loop', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const onViewed = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		render(onViewed);
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+		await wait(50);
+		expect(onViewed).toHaveBeenCalledTimes(1);
+		host.querySelector<HTMLElement>('[data-comment-card]')!.click(); flushSync();
+		expect(onViewed).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('document thread stamps', () => {
+	it('reads nothing when a selected image-region card focuses its own reply field, and reads once the person moves focus there', () => {
+		const card = $state({ focused: false });
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		state.comment = { ...state.comment, replies: [reply('r1')], newReplyIds: ['r1'] };
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed, selectable: true, drawerCard: true, scrollOnFocus: false, get focused() { return card.focused; } } });
+		flushSync();
+		// Selected by something other than a pick (a restored tab's landing): the card puts the caret in its field, and reads nothing.
+		card.focused = true; flushSync();
+		expect(document.activeElement).toBe(host.querySelector('textarea'));
+		expect(onViewed).not.toHaveBeenCalled();
+		// The person moving focus into the field opens the thread.
+		host.querySelector('textarea')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); flushSync();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r1']]);
 	});
 
 	it('keeps the New marks a picked document card opened with after the viewed stamp clears them, until the card rests again', () => {
 		const card = $state({ resting: true });
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };
-		vi.stubGlobal('IntersectionObserver', FakeObserver);
 		host = document.createElement('div'); document.body.appendChild(host);
 		component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, onViewed: vi.fn().mockResolvedValue(undefined), inMargin: true, get hideReply() { return card.resting; } } });
 		flushSync();
@@ -323,17 +159,6 @@ describe('CommentThread stamping', () => {
 		card.resting = true; flushSync();
 		expect(newMarks()).toBe(0);
 		card.resting = false; flushSync();
-		expect(newMarks()).toBe(0);
-	});
-
-	it('shows only the server-reported unread reply while the thread is open', () => {
-		const replies = [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')];
-		state.comment = { ...state.comment, replies, newReplyIds: ['r1'] };
-		render(vi.fn().mockResolvedValue(undefined));
-		expect(newMarks()).toBe(1);
-		arrive({ newReplyIds: ['r2'] });
-		expect(newMarks()).toBe(1);
-		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(0);
 	});
 });

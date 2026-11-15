@@ -25,6 +25,10 @@ function transcript() {
 	at(scroller.querySelector<HTMLElement>('[data-comment-ids]')!, 120);
 	at(scroller.querySelector<HTMLElement>('.long-message-body')!, 300);
 	at(scroller, 0);
+	// jsdom draws nothing; the column has a box once it is on the canvas, as a browser gives it.
+	vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function (this: Element) {
+		return (this.classList.contains('chat-margin') && !this.classList.contains('on-canvas') ? [] : [{}]) as unknown as DOMRectList;
+	});
 }
 
 function thread() {
@@ -46,18 +50,27 @@ afterEach(() => {
 	host?.remove();
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 it('puts one card per comment of the thread in the column, each beside where its comment is drawn', () => {
-	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	const resized: Array<() => void> = [];
+	vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized.push(callback); } observe() {} unobserve() {} disconnect() {} });
+	vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => { step(0); return 1; });
 	transcript(); thread();
 	const picks: string[] = [];
 	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
 	flushSync();
+	// No card is shown before the column is on the canvas, where its top is known.
+	expect(scroller.querySelectorAll('[data-margin-card].placed')).toHaveLength(0);
 
-	// The column is drawn on the canvas: inside the transcript's scroller, so its cards scroll with their messages.
+	// The column is drawn on the canvas: inside the transcript's scroller, so its cards scroll with their messages. Being drawn
+	// resizes it, and the cards are placed from there.
 	expect(scroller.querySelector('.chat-margin')?.classList.contains('on-canvas')).toBe(true);
+	resized.forEach((callback) => callback());
+	flushSync();
 	const cards = scroller.querySelectorAll<HTMLElement>('[data-margin-card]');
+	expect([...cards].every((card) => card.classList.contains('placed'))).toBe(true);
 	expect([...cards].map(card => card.dataset.marginCard)).toEqual(['kept', 'lost']);
 	// The painted highlight holds its card; the comment whose text is gone is placed at the message body its text left.
 	expect(cards[0].style.top).toBe('120px');

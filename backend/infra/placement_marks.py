@@ -131,10 +131,13 @@ def selected_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     is the selecting checkpoint's ref, or null when the thread proposed the
     lesson in-turn. Neither route selects without an answer, and schema 46
     unmarked every selection made before the fork had to give one.
+    ``revised_at`` is when the entry's current revision was written. A
+    placement commit for that revision cannot be older, and the time does not
+    move when a failed save clears the mark and the revision is selected again.
     """
     rows = conn.execute(
         "SELECT e.thread_id,e.history_epoch,e.entry_id,e.field,e.body,e.revision,"
-        f"e.placement_detail {_QUEUED} ORDER BY e.created_at,e.entry_id LIMIT ?",
+        f"e.placement_detail,e.updated_at {_QUEUED} ORDER BY e.created_at,e.entry_id LIMIT ?",
         (OUTSTANDING_CAP,),
     ).fetchall()
     queue = []
@@ -149,6 +152,7 @@ def selected_entries(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "revision": int(row["revision"]),
             "checkpoint": detail["checkpoint"],
             "answer": detail["answer"],
+            "revised_at": row["updated_at"],
         })
     return queue
 

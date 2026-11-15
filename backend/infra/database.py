@@ -13,13 +13,12 @@ from typing import Callable, Iterator
 
 import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
-from infra import write_effects
+from infra import write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
-from infra.db_connection import (
-    _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close, refuse_lane_write,
-)
+from infra.db_connection import (_NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane,
+                                 checkpoint_and_close, refuse_lane_write)
 
 log = logging.getLogger(__name__)
 
@@ -30,18 +29,18 @@ _all_connections: list[sqlite3.Connection] = []
 CONNECTION_BUSY_TIMEOUT_MS = 5000
 CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 
-# Temporary diagnosis for issue #1077: "database is locked" killed Codex bridge
-# sessions with no record of the holder. In-process writers now queue in FIFO
-# order on their database file's ticket (infra.write_admission), so a refusal is
-# a ticket wait past its bound or a writer in another process, and the ticket
-# names the holder. The refusal's errorcode/errorname tell SQLITE_BUSY,
-# SQLITE_BUSY_SNAPSHOT and SQLITE_LOCKED apart; an admission refusal carries
-# errorcode=None and a CORSIA_ADMISSION_* errorname. This slow-hold warning,
-# _log_database_lock, write_admission.sqlite_errorname_tag (the bridge
-# turn-error suffix) and write_admission._log_slow_wait are the evidence for that fix's acceptance:
-# delete them in the change that settles Phase B's production acceptance (24 h
-# with zero in-process lock refusals after deploy), and no later than
-# 2026-10-23. Must never grow into retries, recovery, or suppression -- log only.
+# Temporary diagnosis, log only; must never grow into retries, recovery, or suppression.
+# (1) Issue #1077: in-process writers queue FIFO on their file's ticket (infra.write_admission),
+# so a lock refusal is a ticket wait past its bound or another process's writer, and the ticket
+# names the holder; errorcode/errorname tell SQLITE_BUSY, SQLITE_BUSY_SNAPSHOT, SQLITE_LOCKED and
+# CORSIA_ADMISSION_* (errorcode=None) apart. _log_database_lock, write_admission.sqlite_errorname_tag
+# and write_admission._log_slow_wait are that fix's acceptance evidence: delete them in the change
+# that settles it (24 h of production with zero in-process lock refusals), and no later than
+# 2026-12-14.
+# (2) Slow write holds stall every other writer on the file. The slow-hold warning names the
+# holding callers (_hold_callers) so each slow writer can be fixed: delete it once production
+# logs show no hold over WRITE_TRANSACTION_SLOW_SECONDS for 7 consecutive days, and no later than
+# 2026-12-14. Keeping either past its date needs a reviewed change that says why and sets a new one.
 WRITE_TRANSACTION_SLOW_SECONDS = 1.0
 _HOLD_PLUMBING_FILES = frozenset({os.path.normcase(__file__), os.path.normcase(contextlib.__file__)})
 
@@ -59,10 +58,12 @@ def _hold_callers() -> str:
     return " < ".join(frames) or "unknown"
 
 
-def _finish_write_hold(scope: str, started_at: float | None) -> None:
+def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None) -> None:
     if started_at is None:  # BEGIN never succeeded, so nothing was held
         return
     held_for = time.monotonic() - started_at
+    if admission is not None and admission.ticket is write_admission.MAIN_TICKET:
+        write_lock_window.window.hold(scope, held_for, held_for < WRITE_TRANSACTION_SLOW_SECONDS)
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
         log.warning(
             "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
@@ -257,7 +258,7 @@ def write_transaction(
                 connection.rollback()
             raise
         finally:
-            _finish_write_hold(scope, started_at)
+            _finish_write_hold(scope, started_at, admission)
             write_admission.release(admission)  # before effects, which may write
             if owns_connection:
                 connection.close()
@@ -367,7 +368,6 @@ def init_db():
 
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
-
     from infra.config import WORKSPACE
     from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
     carry_workspace_conductor_role_files(WORKSPACE)
