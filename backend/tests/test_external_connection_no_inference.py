@@ -12,14 +12,19 @@ from omlx_provider_fixtures import _patch_httpx, _resp, _Router
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dialect", ["openai", "anthropic"])
 @pytest.mark.parametrize("count", [10, 100])
-async def test_catalog_journeys_only_read_metadata(isolated_db, monkeypatch, dialect, count):
+@pytest.mark.parametrize("list_status", [200, 404, 405])
+async def test_catalog_journeys_only_read_metadata(isolated_db, monkeypatch, dialect, count, list_status):
     from api import external_connection_check as check, network_server_helpers as helpers
     from api.network_servers import AddServerBody, UpdateExternalServerBody
     from llm import external_image_input as images, network_discovery as nd, router
     from llm.external_catalog_view import external_catalog_models
 
     listed = [{"id": f"model-{i:03}", "max_model_len": 32768} for i in range(count)]
-    wire = _Router({("GET", "/v1/models"): _resp(200, {"data": listed})})
+    wire = _Router({
+        ("GET", "/v1/models"): _resp(list_status, {"data": listed}),
+        ("POST", "/v1/chat/completions"): _resp(200),
+        ("POST", "/v1/messages"): _resp(200),
+    })
     _patch_httpx(monkeypatch, wire)
     inferred = []
 
@@ -46,6 +51,7 @@ async def test_catalog_journeys_only_read_metadata(isolated_db, monkeypatch, dia
 
     added = await helpers.add_external_server(AddServerBody(
         name="Local lab", base_url="http://127.0.0.1:8000/v1", dialect=dialect,
+        model_ids=[m["id"] for m in listed] if list_status != 200 else None,
     ))
     sid = added["server_id"]
     await drain()

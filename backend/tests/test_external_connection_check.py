@@ -48,10 +48,11 @@ def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
     monkeypatch.setattr(eii, "mark_for_recheck", lambda sid: _PROBES.append(("mark", sid)))
     monkeypatch.setattr(check, "image_input_summary", lambda sid: "Images: glm-5.3.")
     monkeypatch.setattr(product_events, "emit_product_event", lambda *a, **k: None)
-    # A declared model answers, so a missing list call is the provider's, not a bad path.
-    chat = ("POST", "/compatible-mode/v1/chat/completions")
-    _patch_httpx(monkeypatch, _Router({("GET", _LIST): reply, chat: _resp(200)}))
-    return asyncio.run(check.check_external_server("ns-tp", server or _SERVER)), swept
+    wire = _Router({("GET", _LIST): reply})
+    _patch_httpx(monkeypatch, wire)
+    result = asyncio.run(check.check_external_server("ns-tp", server or _SERVER))
+    assert all(method == "GET" for method, _url, _body in wire.calls)
+    return result, swept
 
 
 def test_a_reachable_endpoint_is_swept_rediscovered_and_counted(monkeypatch) -> None:
