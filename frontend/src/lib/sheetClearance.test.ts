@@ -54,7 +54,7 @@ describe('capSheetAboveText', () => {
 });
 
 describe('liftSheetCap', () => {
-	it('only a capped sheet can be pulled up, and once it is, it stays up: nothing caps it again', () => {
+	it('only a capped sheet can be pulled up, and once it is, it reads as raised and no longer capped', () => {
 		const panel = sheet(852);
 		expect(sheetCapped(panel)).toBe(false);
 		capSheetAboveText(panel, { height: 400, regionTop: 100 });
@@ -64,8 +64,6 @@ describe('liftSheetCap', () => {
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
 		expect(sheetRaised(panel)).toBe(true);
 		expect(sheetCapped(panel)).toBe(false);
-		capSheetAboveText(panel, { height: 400, regionTop: 100 });
-		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
 	});
 
 	it('a short thread under a tall cap is not held by it, so it cannot be pulled up, and the cap stays as it was', () => {

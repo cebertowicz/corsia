@@ -10,10 +10,10 @@ const MIN_SHEET = 200;
 /**
  * Lets a bottom sheet rise only as far as leaves room above it for the text it was opened from (`height` tall, with a gap each side), under
  * the top of the visible page (`regionTop`). The sheet's own content scrolls. A sheet that is shorter than the room is not changed.
- * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled. A sheet the reader pulled up stays up.
+ * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled. Callers skip a sheet the reader pulled
+ * up (`sheetRaised`), so it stays up.
  */
 export function capSheetAboveText(panel: HTMLElement, text: { height: number; regionTop: number }): void {
-	if (raised.has(panel)) return;
 	const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
 	if (!backdrop) return;
 	const room = backdrop.getBoundingClientRect().bottom - (text.regionTop + SHEET_GAP + text.height + SHEET_GAP);
