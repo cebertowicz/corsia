@@ -355,6 +355,25 @@ describe('Popover', () => {
 		window.dispatchEvent(new Event(ANCHOR_MOVED));
 		expect(scrollTop).toBe(120);
 	});
+	it('watches content swapped in while it stays open, and re-places the card when that content grows', async () => {
+		const watching: Element[] = []; let resized: () => void = () => {};
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback; } observe(el: Element) { watching.push(el); } unobserve(el: Element) { watching.splice(watching.indexOf(el), 1); } disconnect() {} });
+		const onPlace = vi.fn();
+		render({ onPlace });
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		const draft = document.createElement('div'); surface.append(draft);
+		await vi.waitFor(() => expect(watching).toContain(draft));
+		// The draft is replaced by the thread inside the same open card.
+		const thread = document.createElement('div'); draft.replaceWith(thread);
+		await vi.waitFor(() => expect(watching).toContain(thread));
+		expect(watching).not.toContain(draft);
+		await vi.waitFor(() => expect(onPlace).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 50)); // let the swap's own placement finish
+		const settled = onPlace.mock.calls.length;
+		resized();
+		await vi.waitFor(() => expect(onPlace.mock.calls.length).toBeGreaterThan(settled));
+		vi.unstubAllGlobals();
+	});
 	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
 		const { fromStore, writable } = await import('svelte/store');
 		const cover = writable(false);

@@ -218,9 +218,18 @@
 		if (!open || !surface) return;
 		const observer = new ResizeObserver(() => position());
 		observer.observe(surface);
-		// A card already at its height cap keeps its own size while its content grows, so the content is watched too.
+		// A card already at its height cap keeps its own size while its content grows, so the content is watched too,
+		// and so is content swapped in while the card stays open (an image draft that becomes its thread).
 		for (const child of surface.children) observer.observe(child);
-		return () => observer.disconnect();
+		const swaps = new MutationObserver((records) => {
+			for (const record of records) {
+				for (const node of record.removedNodes) if (node instanceof Element) observer.unobserve(node);
+				for (const node of record.addedNodes) if (node instanceof Element) observer.observe(node);
+			}
+			position();
+		});
+		swaps.observe(surface, { childList: true });
+		return () => { swaps.disconnect(); observer.disconnect(); };
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
