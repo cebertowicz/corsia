@@ -224,8 +224,16 @@ async def test_never_healthy_retry_does_not_admit_held_call(isolated_db, monkeyp
     monkeypatch.setattr(omlx_supervisor, "_port_owner_pid", lambda *_args: 123)
     monkeypatch.setattr(omlx_supervisor, "watch", lambda *_args: None)
     monkeypatch.setattr(omlx_supervisor, "_failed_boot_result", lambda *_args, **_kwargs: {"ok": False})
-    monkeypatch.setattr(omlx_supervisor, "MANAGED_HEALTH_STARTUP_CAP_S", 0.03)
-    monkeypatch.setattr(omlx_supervisor, "HEALTH_POLL_INTERVAL_S", 0.001)
+    # Exercise the real health loop and retry budget without racing its outer
+    # wall-clock deadline. Only supervisor polls see simulated elapsed time.
+    now = [0.0]
+
+    async def health_poll(_seconds):
+        now[0] += omlx_supervisor.MANAGED_HEALTH_STARTUP_CAP_S / 2
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(omlx_supervisor, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(omlx_supervisor, "asyncio", SimpleNamespace(**{**vars(asyncio), "sleep": health_poll}))
     monkeypatch.setattr("llm.providers.omlx_public_auth.public_headers", AsyncMock(return_value={}))
     seen = []
     client_type = _HTTPX_CLIENT
@@ -248,7 +256,7 @@ async def test_never_healthy_retry_does_not_admit_held_call(isolated_db, monkeyp
         with pytest.raises(RuntimeError, match="Check the server in Settings. Restart CORSIA to retry the upgrade"):
             await asyncio.wait_for(waiter, 3)
         assert (await upgrade)["reason"] == "start_failed"
-        assert seen and set(seen) == {"/health"}
+        assert seen == ["/health"] * (2 * omlx_restart.MAX_RESTARTS)
     finally:
         await _finish(waiter, upgrade)
 

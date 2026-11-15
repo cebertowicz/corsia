@@ -1,7 +1,6 @@
 """Additional repository-isolation attacks and exact path-pattern checks."""
 from __future__ import annotations
 
-import json
 import re
 import shlex
 
@@ -24,7 +23,8 @@ def test_worktree_pointer_pattern_matches_only_its_repository(tmp_path, monkeypa
     monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
     text = shell_guard.pinned_repo_sandbox_profile("printf probe", str(repo), policies=[policy])
     rule = next(line for line in text.splitlines() if "/[^/]+/[.][Gg][Ii][Tt]" in line)
-    pattern = json.loads(rule.partition("regex #")[2][:-2])
+    # SBPL #"..." is a regex literal, not a JSON/string-escaped pattern.
+    pattern = rule.partition('regex #"')[2][:-3]
     assert re.search(pattern, str(repo / ".worktrees/own/.git"))
     assert re.search(pattern, str(repo / ".worktrees/own/.git/config"))
     assert not re.search(pattern, str(repo.parent / sibling / ".worktrees/own/.git"))

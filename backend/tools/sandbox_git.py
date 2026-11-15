@@ -31,8 +31,9 @@ def sandbox_any_case(path: Path, *, exact: bool = False) -> str:
 
     A literal rule misses a differently cased name that doesn't exist yet. Other
     ASCII punctuation matches any one character, so an odd path can over-deny a
-    sibling but can't break the profile. ``exact`` escapes metacharacters and
-    the Seatbelt string instead, for boundaries that must not affect siblings.
+    sibling but can't break the profile. ``exact`` escapes metacharacters for
+    boundaries that must not affect siblings. SBPL #"..." is a regex literal:
+    its backslashes must not be escaped again as if it were a string.
     """
     def spell(char: str) -> str:
         if char == ".":
@@ -44,8 +45,7 @@ def sandbox_any_case(path: Path, *, exact: bool = False) -> str:
                 return r"\x22"
             return f"\\{char}" if char in r"\^$*+?{}[]|()" else char
         return char if not char.isascii() or char.isdigit() or char in "/-_ " else "."
-    pattern = "".join(spell(char) for char in str(path))
-    return pattern.replace("\\", "\\\\").replace('"', '\\"') if exact else pattern
+    return "".join(spell(char) for char in str(path))
 
 
 def verified_worktree_marker(
