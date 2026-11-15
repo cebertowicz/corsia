@@ -12,6 +12,16 @@ CREATE INDEX IF NOT EXISTS idx_artifact_identities_decision_source
     WHERE integration='local' AND type='plan-decision' AND json_valid(metadata);
 """
 
+#: A retired document's comments live on the identity its promote handed it to, so a read of the
+#: document finds every identity whose successor is a given one (``registry.retirement_state``).
+#: Partial: only the few identities a promote retired carry a successor, and the guard on
+#: ``json_valid`` keeps the expression from being evaluated on a row that is not JSON.
+SUCCESSOR_INDEX_SQL = """\
+CREATE INDEX IF NOT EXISTS idx_artifact_identities_successor
+    ON artifact_identities(json_extract(metadata, '$.successor_id'))
+    WHERE json_valid(metadata) AND json_extract(metadata, '$.successor_id') IS NOT NULL;
+"""
+
 ARTIFACT_IDENTITY_SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS artifact_identities (
         id TEXT PRIMARY KEY,
@@ -31,4 +41,4 @@ CREATE TABLE IF NOT EXISTS artifact_identities (
     );
 CREATE INDEX IF NOT EXISTS idx_artifact_identities_upload_path
     ON artifact_identities(path) WHERE integration='upload';
-""" + DECISION_SOURCE_INDEX_SQL
+""" + DECISION_SOURCE_INDEX_SQL + SUCCESSOR_INDEX_SQL
