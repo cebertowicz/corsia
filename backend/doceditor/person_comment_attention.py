@@ -1,6 +1,7 @@
 """Person-directed document comment counts and dismissal."""
 
 import json
+from collections.abc import Sequence
 
 from doceditor import feedback_state
 
@@ -37,12 +38,12 @@ def counts(db, artifact_id: str, user_id: str) -> tuple[int, int]:
     return counts_many(db, [artifact_id], user_id).get(artifact_id, (0, 0))
 
 
-def dismiss(db, artifact_id: str, user_id: str) -> None:
-    """Mark directed items read without deciding suggestions: one read, then one stamp per thread."""
+def dismiss(db, artifact_id: str | Sequence[str], user_id: str) -> None:
+    """Mark directed items on the documents read without deciding suggestions: one read, then one stamp per thread."""
     latest = {}
     for row in db.execute(
         f"SELECT item.id, item.parent_id, item.created_at {_DIRECTED} {_UNREAD} ORDER BY item.created_at, item.id",
-        _params([artifact_id], user_id),
+        _params(feedback_state.artifact_scope(artifact_id), user_id),
     ).fetchall():
         latest[row['parent_id'] or row['id']] = (row['created_at'], row['id'])
     for root_id, (seen_at, item_id) in latest.items():

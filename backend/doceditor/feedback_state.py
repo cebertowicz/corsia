@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -261,8 +262,8 @@ def unread_comment_rows(
                  else (user_id, user_id, user_id, *directed))
 
 
-def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
-    """One document's unread items as (root id, item id), ordered by time and id.
+def _unread_items(db, user_id: str, artifact_id: str | tuple[str, ...]) -> list[tuple[str, str]]:
+    """One document's (or one lineage's) unread items as (root id, item id), ordered by time and id.
 
     The comments delivered to the person are among them, so the items that make their plan task
     actionable get a read stamp when their comment card is read.
@@ -322,16 +323,22 @@ def stamp_thread_view(db, user_id: str, root_id: str, seen_at: str, seen_item_id
     )
 
 
+def artifact_scope(artifact_id: str | Sequence[str]) -> tuple[str, ...]:
+    """One document's id, or a lineage's ids, as the tuple a scoped query binds."""
+    return (artifact_id,) if isinstance(artifact_id, str) else tuple(artifact_id)
+
+
 def mark_thread_viewed(
-    db, user_id: str, artifact_id: str, root_id: str, seen_item_id: str,
+    db, user_id: str, artifact_id: str | Sequence[str], root_id: str, seen_item_id: str,
 ) -> list[str]:
-    """Persist the newest rendered item for one root, never moving its stamp back.
+    """Persist the newest rendered item for one root on any of the lineage's ids, never moving its stamp back.
 
     Returns the root's new reply ids that remain after the stamp.
     """
+    artifact_ids = artifact_scope(artifact_id)
     root = db.execute(
-        "SELECT id FROM doc_comments WHERE id=? AND artifact_id=? AND parent_id IS NULL",
-        (root_id, artifact_id),
+        f"SELECT id FROM doc_comments WHERE id=? AND artifact_id IN ({','.join('?' * len(artifact_ids))}) AND parent_id IS NULL",
+        (root_id, *artifact_ids),
     ).fetchone()
     if root is None:
         raise ValueError("root_not_found")
@@ -343,7 +350,7 @@ def mark_thread_viewed(
     if item is None:
         raise ValueError("reply_not_found")
     stamp_thread_view(db, user_id, root_id, item["created_at"], item["id"])
-    return [item_id for waiting_root, item_id in _unread_items(db, user_id, artifact_id)
+    return [item_id for waiting_root, item_id in _unread_items(db, user_id, artifact_ids)
             if waiting_root == root_id and item_id != root_id]
 
 

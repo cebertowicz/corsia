@@ -255,6 +255,22 @@ def test_accept_all_gives_a_caller_who_may_not_use_the_document_the_same_refusal
         db.close()
 
 
+def test_live_identity_follows_a_twelve_step_chain(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        chain = [seed_document(db, "owner") for _ in range(13)]
+        for source, target in zip(chain, chain[1:]):
+            db.execute(
+                "UPDATE artifact_identities SET state='tombstone', metadata=json_set(metadata, '$.successor_id', ?) WHERE id=?",
+                (target, source),
+            )
+        assert models.live_identity(chain[0], db=db) == chain[-1]
+        assert sorted(models.predecessors(chain[-1], db=db)) == sorted(chain[:-1])
+    finally:
+        db.close()
+
+
 def test_live_identity_follows_one_hop_and_stops_at_a_loop(isolated_db):
     db = get_db()
     try:
@@ -293,8 +309,8 @@ def test_the_list_a_pane_on_the_old_id_reads_shows_the_comments_on_the_live_docu
         db.close()
 
 
-def test_the_list_a_pane_on_the_old_id_reads_includes_comments_saved_on_the_retired_id(client, isolated_db):
-    """A write saved on the retired row before any promote carried comments is still shown to its writer."""
+def test_every_pane_of_a_document_reads_the_same_lineage_including_comments_saved_on_retired_ids(client, isolated_db):
+    """A write saved on a retired row before any promote carried comments is still part of the document."""
     db = get_db()
     try:
         artifact, root = _document_with_thread(db)
@@ -305,7 +321,31 @@ def test_the_list_a_pane_on_the_old_id_reads_includes_comments_saved_on_the_reti
         assert [thread["id"] for thread in stale] == [root["id"], stray["id"]]
         assert [reply["id"] for reply in stale[1]["replies"]] == [stray_reply["id"]]
         live = client.get(f"/api/artifacts/{successor}/comments", params=TOKEN).json()["comments"]
-        assert [thread["id"] for thread in live] == [root["id"]]
+        assert [thread["id"] for thread in live] == [thread["id"] for thread in stale]
+    finally:
+        db.close()
+
+
+def test_a_lineage_of_three_ids_reads_the_same_from_each_and_a_stray_thread_can_be_viewed(client, isolated_db):
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        first = _promote(db, artifact)
+        last = _promote(db, first)
+        stray, _ = add_comment(db, first, author_kind="user", author="Steve")
+        stray_reply, _ = add_comment(db, first, author_id="owner", author="Owner", parent_id=stray["id"])
+        listed = [_listed(client, name) for name in (artifact, first, last)]
+        assert listed[0] == listed[1] == listed[2] and len(listed[0]) == 2
+        for pane in (artifact, last):
+            response = client.post(
+                f"/api/artifacts/{pane}/comments/{stray['id']}/viewed",
+                headers=HEADERS, json={"seen_reply_id": stray_reply["id"]},
+            )
+            assert response.status_code == 200, (pane, response.text)
+        response = client.post(f"/api/artifacts/{artifact}/comments/dismiss-all", headers=HEADERS)
+        assert response.status_code == 200, response.text
+        threads = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN).json()["comments"]
+        assert all(not thread["new_reply_ids"] and not thread["new_comment"] for thread in threads)
     finally:
         db.close()
 

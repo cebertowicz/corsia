@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.doc_comment_access import _artifact_for_write
+from api.doc_comment_access import _lineage_for_write
 from doceditor import comment_thread_views
 from infra.auth import require_user_header_only
 from infra.database import get_db
@@ -18,11 +18,11 @@ class CommentThreadViewed(BaseModel):
     seen_reply_id: str
 
 
-def _check_access(artifact_id: str, user_id: str) -> str:
-    """Apply the comment routes' single write gate off the event loop; returns the artifact to write to."""
+def _check_access(artifact_id: str, user_id: str) -> list[str]:
+    """Apply the comment routes' single write gate off the event loop; returns the document's lineage, live id first."""
     db = get_db()
     try:
-        return _artifact_for_write(artifact_id, user_id, db)
+        return _lineage_for_write(artifact_id, user_id, db)
     finally:
         db.close()
 
@@ -30,8 +30,8 @@ def _check_access(artifact_id: str, user_id: str) -> str:
 @router.post("/artifacts/{artifact_id}/comments/dismiss-all")
 async def dismiss_comment_attention(artifact_id: str, user: dict = Depends(require_user_header_only)):
     """Clear comment attention while leaving suggestions undecided."""
-    artifact_id = await run_in_db(_check_access, artifact_id, user["id"])
-    await run_in_db(comment_thread_views.dismiss_all, user["id"], artifact_id)
+    lineage = await run_in_db(_check_access, artifact_id, user["id"])
+    await run_in_db(comment_thread_views.dismiss_all, user["id"], lineage)
     return {"dismissed": True}
 
 
@@ -41,9 +41,9 @@ async def mark_comment_thread_viewed(
     user: dict = Depends(require_user_header_only),
 ):
     """Store the newest reply actually rendered in one disclosed thread."""
-    artifact_id = await run_in_db(_check_access, artifact_id, user["id"])
+    lineage = await run_in_db(_check_access, artifact_id, user["id"])
     remaining = await run_in_db(
-        comment_thread_views.mark_viewed, user["id"], artifact_id, root_id, body.seen_reply_id,
+        comment_thread_views.mark_viewed, user["id"], lineage, root_id, body.seen_reply_id,
     )
     if remaining is None:
         raise HTTPException(404, "Comment thread or reply not found")
