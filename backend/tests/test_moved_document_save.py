@@ -1,7 +1,7 @@
 """A person's save to the path a promote left is refused as "moved" and names where the document is.
 
-Today that save fails with "No such file", which does not say the document moved, so the person closes
-the tab and loses the text it still holds. The refusal writes nothing and redirects nothing.
+Before this refusal the save failed with "No such file", which does not say the document moved, so the
+person closed the tab and lost the text it still held. The refusal writes nothing and redirects nothing.
 """
 
 from __future__ import annotations
@@ -146,10 +146,32 @@ def test_a_new_document_at_the_path_a_promote_left_is_unchanged(durable_scope):
     assert source.read_text(encoding="utf-8") == "my edits\n"
 
 
-def test_a_probe_outside_the_scope_learns_nothing_about_a_promote(durable_scope, tmp_path):
-    """A path outside this project's roots is refused by the scope rules, never answered with a successor."""
+def test_a_probe_outside_the_scope_learns_nothing_about_a_promote(durable_scope, monkeypatch):
+    """Even when the lookup would answer for a path, one outside this project's roots is never told."""
+    from registry import promoted_path
+
     workspace, _root, thread_id, db, source, _source_id, _text = _working_file(durable_scope, "probe.md")
     _promote(workspace, thread_id, db, source)
     other = workspace / "projects" / "beta" / source.name
+    monkeypatch.setattr(promoted_path, "promoted_to", lambda *_a, **_k: "projects/alpha/shared/planning/probe.md")
 
-    assert _refusal(db, thread_id, other).kind != "moved"
+    assert _refusal(db, thread_id, source).kind == "moved"
+    assert _refusal(db, thread_id, other).kind == "no_such_file"
+
+
+def test_the_lookup_is_a_few_indexed_reads_on_the_error_path_only(durable_scope):
+    """The scale budget: at most 6 reads (5 today), each a key lookup, and only after a save found no file."""
+    from registry.promoted_path import moved_save_message
+
+    workspace, _root, thread_id, db, source, _source_id, _text = _working_file(durable_scope, "budget.md")
+    _promote(workspace, thread_id, db, source)
+    statements: list[str] = []
+    db.set_trace_callback(statements.append)
+    assert moved_save_message(source, db=db) is not None
+    db.set_trace_callback(None)
+    reads = [sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]
+
+    assert 0 < len(reads) <= 6
+    for sql in reads:
+        plan = " ".join(row[-1] for row in db.execute("EXPLAIN QUERY PLAN " + sql))
+        assert "SCAN" not in plan, plan
