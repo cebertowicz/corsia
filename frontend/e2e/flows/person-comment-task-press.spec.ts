@@ -249,6 +249,16 @@ test.describe('comment task highlight taps', () => {
 			const box = await anchor.evaluate((el) => { const r = el.getClientRects()[0]; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
 			await page.touchscreen.tap(box.x, box.y);
 			await expect(sheet.getByText(body), `the tap on "${quote}" opens its card`).toBeVisible();
+			// The task's Dismiss all capsule is tucked away while the sheet is up: the card's text takes the touch, not a capsule over it.
+			const cardText = sheet.getByText(body).first();
+			const textBox = await cardText.boundingBox();
+			if (!textBox) throw new Error(`The card text "${body}" has no bounds`);
+			const hit = await cardText.evaluate((el, at) => {
+				const found = document.elementFromPoint(at.x, at.y);
+				return { onText: !!found && el.contains(found), capsule: !!found?.closest('.rb-capsule') };
+			}, { x: textBox.x + textBox.width / 2, y: textBox.y + textBox.height / 2 });
+			expect(hit.capsule, `a capsule covers the card text for "${quote}"`).toBe(false);
+			expect(hit.onText, `the touch point at the centre of "${body}" lands on that text`).toBe(true);
 			await expect(bar).toContainText(`${after} to review`);
 			console.log(`TAP "${quote}": bar=${JSON.stringify(await bar.first().innerText())}`);
 			await light(`${name}-after`);
