@@ -16,7 +16,8 @@ from infra.db_hold_callers import hold_callers
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
 from infra.db_connection import (
-    _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close, refuse_lane_write,
+    _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close,
+    refuse_lane_write, register_message_sql_functions,
 )
 
 log = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn))
         conn.commit()
         apply_thread_lane(conn)
+        register_message_sql_functions(conn)
         startup_progress.watch(conn)
     except BaseException:
         conn.close()

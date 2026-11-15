@@ -19,6 +19,9 @@ _SID = "sess-route"
 
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
+    from infra.db_connection import register_message_sql_functions
+
+    register_message_sql_functions(conn)
     conn.row_factory = sqlite3.Row
     conn.execute(
         "CREATE TABLE messages ("

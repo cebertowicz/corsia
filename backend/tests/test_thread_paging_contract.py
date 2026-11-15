@@ -16,6 +16,7 @@ import sqlite3
 import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.db_connection import register_message_sql_functions
 from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 _ID_TEST_SIZE = 400
 
@@ -36,6 +37,7 @@ class _Thread:
 
     def __init__(self) -> None:
         self.conn = sqlite3.connect(":memory:")
+        register_message_sql_functions(self.conn)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute(
             "CREATE TABLE messages ("
@@ -325,6 +327,7 @@ def test_bounded_page_queries_seek_indexes_without_sorting_the_thread():
     from infra.schema import SCHEMA_SQL
 
     conn = sqlite3.connect(":memory:")
+    register_message_sql_functions(conn)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
     thread = _Thread.__new__(_Thread)
