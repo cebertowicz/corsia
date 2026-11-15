@@ -215,6 +215,12 @@ export function isResolvedFailure(op: UpdateOperation | null | undefined): boole
 	return isFailedOperation(op) && op.activated_by_restart === true;
 }
 
+/** Only these durable results prove the restart began and failed; preparation failures stay in the toast and Settings. */
+export function failedAfterRestart(operation: UpdateOperation | null | undefined): boolean {
+	return operation?.failure_code === 'rolled_back' || operation?.failure_code === 'version_unverified'
+		|| operation?.failure_code === 'wrong_version_running';
+}
+
 /** The one rule for which operation a surface treats as current: a settled one targeting an older version than the offer, or a failure a restart resolved, is history. */
 export function currentOperation(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateOperation | null {
 	if (!op || isInFlight(op)) return op ?? null;

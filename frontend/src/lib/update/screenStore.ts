@@ -3,7 +3,7 @@ import { derived, get, writable } from 'svelte/store';
 import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
 import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf, type FailureCopy } from './failureCopy';
-import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
+import { failedAfterRestart, isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
 import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
 import type { ScreenHandoff } from './shellHandoff';
@@ -73,12 +73,6 @@ function activeOperation(operation: UpdateOperation | null | undefined): operati
 	// The existing holding phase stays in the toast. The screen begins only when the operation enters restart work.
 	return operation.phase === 'steering' || operation.phase === 'draining' || operation.phase === 'ready'
 		|| operation.phase === 'restarting' || operation.phase === 'resuming' || operation.phase === 'verifying';
-}
-
-/** Only these durable results prove the restart began and failed; preparation failures stay in the toast and Settings. */
-function failedAfterRestart(operation: UpdateOperation | null | undefined): boolean {
-	return operation?.failure_code === 'rolled_back' || operation?.failure_code === 'version_unverified'
-		|| operation?.failure_code === 'wrong_version_running';
 }
 
 function httpStep(operation: UpdateOperation | null): StepId {
@@ -190,7 +184,10 @@ export function tickUpdateScreen(now = Date.now()): void {
 	const progress = get(startupProgress);
 	const file = progress?.file ?? null;
 	const confirmation = get(updateConfirmed);
-	const currentConfirmation = confirmation?.operationId === l.operationId ? confirmation : null;
+	// The store confirms only an outcome no device has shown yet. A page that slept through its own update (a phone with
+	// its screen off) finds the outcome already shown elsewhere; that completed outcome ends this screen too.
+	const shownElsewhere = own?.status === 'complete' && own.outcome_seen_at ? { operationId: l.operationId, version: own.target_version ?? null } : null;
+	const currentConfirmation = confirmation?.operationId === l.operationId ? confirmation : shownElsewhere;
 	l.toVersion = own?.target_version ?? l.toVersion;
 	// The progress file's schema and version fields are intentionally never used as app-version labels.
 

@@ -353,6 +353,22 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toBeNull();
 	});
 
+	it('leaves when its update finished and another device already showed the outcome', async () => {
+		updateStatus.set(status(inFlight('update-seen')));
+		vi.advanceTimersByTime(60_000);
+		expect(get(updateScreenView)?.mode).not.toBe('done');
+		const response = status({ ...inFlight('update-seen'), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' });
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => response })));
+
+		await loadUpdateStatus();
+		expect(get(updateScreenView)).toMatchObject({ mode: 'done', percent: 100, toVersion: '2026.10.13' });
+		vi.advanceTimersByTime(EXIT_HOLD_MS);
+		expect(get(updateScreenView)).toBeNull();
+		await loadUpdateStatus();
+		vi.advanceTimersByTime(5_000);
+		expect(get(updateScreenView)).toBeNull();
+	});
+
 	it('dismisses its matching terminal screen and toast together', async () => {
 		const response = status({ ...inFlight('update-1'), status: 'failed', failure_code: 'rolled_back', settled_at: '2026-10-13T00:00:00Z' });
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => response })));
