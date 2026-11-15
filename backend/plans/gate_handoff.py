@@ -243,7 +243,8 @@ def after_correction(db, source_node_id: str) -> None:
 def refuse_rejected(db, node_id: str, operation: str) -> None:
     """Refuse closing an acceptance gate step whose latest answer is Reject, until a later answer replaces it.
 
-    No answer at all is not refused: some real workflows end a gate as N/A.
+    No answer at all is not refused here: the person may end their own gate as N/A. An agent
+    closing an unanswered person's gate is refused by ``workflow_fields.refuse_unasked_person_gate``.
     """
     if operation not in {"mark_done", "accept", "accept_with_follow_up"}:
         return

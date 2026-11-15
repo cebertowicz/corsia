@@ -204,6 +204,10 @@ REVIEWER_ROUTE = (
     "This step is checked by someone else: hand it to a reviewer "
     "(delegate_task with plan_node_id) and accept or send back what they return."
 )
+PERSON_GATE_ROUTE = (
+    "This step is the person's review: ask them with block_node on it (owner_kind user, "
+    "ask_artifact_id: the file they review). Close it after they answer that ask, not on a chat reply."
+)
 
 
 def _open_step(db, node_id: str):
@@ -318,11 +322,39 @@ def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
     raise service.PlanError(REVIEWER_ROUTE)
 
 
-def refuse_unready_close(db, node_id: str, operation: str) -> None:
-    """Refuse a close the step isn't ready for: a reviewer step without a return, or a rejected gate."""
+def person_gate(db, node_id: str) -> bool:
+    """Whether ``node_id`` is an unfinished workflow step the person answers as a gate."""
+    _node, created = _open_step(db, node_id)
+    return created.get("workflow_by") == "person" and created.get("workflow_gate") is not None
+
+
+def refuse_unasked_person_gate(db, node_id: str, operation: str) -> None:
+    """Refuse an agent closing a person's gate step before the person answered it.
+
+    The gate's answer is the person's choice in its review ask, so no agent judges it; the
+    count of clean answers that hands a gate off reads only that answer.
+    """
+    from plans import gate_handoff_record
+
+    if operation not in {"mark_done", "accept", "accept_with_follow_up"} or not person_gate(db, node_id):
+        return
+    node = service._node_row(db, node_id)
+    steps = [row["id"] for row in db.execute(
+        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
+        (node["parent_id"], node["workflow_step"]),
+    )]
+    if gate_handoff_record.latest_verdict(db, steps) is None:
+        raise service.PlanError(PERSON_GATE_ROUTE)
+
+
+def refuse_unready_close(db, node_id: str, operation: str, *, by_agent: bool = True) -> None:
+    """Refuse a close the step isn't ready for: a reviewer step without a return, a person's
+    gate an agent closes before the person answered, or a rejected gate."""
     from plans import gate_handoff
 
     refuse_reviewer_self_close(db, node_id, operation)
+    if by_agent:
+        refuse_unasked_person_gate(db, node_id, operation)
     gate_handoff.refuse_rejected(db, node_id, operation)
 
 
