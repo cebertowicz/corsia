@@ -6,6 +6,7 @@ LATER_REVIEW_UNTIL = " set aside until {until}"
 LATER_REVIEW_REASON = ": {reason}"
 LATER_REVIEW_MORE = "+{count} more: plan_read(section='later')"
 LATER_REVIEW_MOVES = (
-    "Promote one with plan_update edit later=false, re-rank with reorder, "
-    "or close several with close_node node_ids."
+    "Close every one no longer needed in one close_node call with node_ids. "
+    "Promote one only if it is due now (plan_update edit later=false), "
+    "re-rank with reorder, and leave the rest in Later."
 )
