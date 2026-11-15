@@ -69,6 +69,20 @@ def _overrides(table: str) -> dict:
     return found
 
 
+#: Tables keyed by an assistant message: their rows point at real fixture messages, so the transcript's
+#: not-replaced probe and the unseen-update reads meet rows they actually join.
+MESSAGE_KEYED = ("message_update_state", "message_update_nodes")
+
+
+def _message_overrides(db: sqlite3.Connection, table: str, count: int) -> dict:
+    picked = db.execute("SELECT id, thread_id FROM messages WHERE role = 'assistant' ORDER BY id LIMIT ?",
+                        (count,)).fetchall()
+    found = {"message_id": lambda i, r, p: picked[i % len(picked)][0]}
+    if table == "message_update_state":
+        found["thread_id"] = lambda i, r, p: picked[i % len(picked)][1]
+    return found
+
+
 def _seed_generic(db: sqlite3.Connection, rng: random.Random, pools: rows.Pools,
                   manifest: dict) -> None:
     tables = [r[0] for r in db.execute(
@@ -83,10 +97,13 @@ def _seed_generic(db: sqlite3.Connection, rng: random.Random, pools: rows.Pools,
             continue
         have = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         need = max(0, want - have)
+        overrides = _overrides(table)
+        if table in MESSAGE_KEYED:
+            overrides.update(_message_overrides(db, table, need))
         try:
             db.execute("SAVEPOINT seed_table")
             stored = rows.insert_batched(
-                db, table, rows.generate_rows(db, table, need, rng, pools, _overrides(table)))
+                db, table, rows.generate_rows(db, table, need, rng, pools, overrides))
             db.execute("RELEASE seed_table")
         except sqlite3.Error as error:
             db.execute("ROLLBACK TO seed_table")
