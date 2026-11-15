@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from core.tool_result_settlement import settle_turn_tool_lineage
 from infra.database import write_transaction
 from infra.plan_limit_continue import queue_terminal_continue
 from infra.completed_tool_results import (
@@ -353,12 +354,9 @@ def _persist_before_terminal(
     """Persist terminal usage and settle account limits before successor admission."""
 
     _persist_completed_tool_results(connection, thread_id, turn_id, error)
-    from core.tool_result_settlement import settle_turn_tool_lineage
     settle_turn_tool_lineage(connection, thread_id, turn_id)
     usage.settle(connection, thread_id)
-    return settle_terminal_limits(
-        connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error,
-    )
+    return settle_terminal_limits(connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error)
 
 
 def _write_idle_marker(
