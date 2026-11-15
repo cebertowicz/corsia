@@ -16,6 +16,7 @@ from tools.skill_library_common import (
     confirmed_bundle as _confirmed_bundle,
     current_library_item as _current_library_item,
     discard_confirmation as _discard_confirmation,
+    edits_lead as _edits_lead,
     emit_action as _emit_action,
     effective as _effective,
     index as _index,
@@ -273,7 +274,7 @@ def _update(
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths if exact else [], local_edits_digest)
+            return _discard_confirmation(owner_id, name, folder, local_paths, exact, local_edits_digest)
     try:
         bundle = fetch_bundle(item)
     except LibraryMainChangedError as error:
@@ -300,11 +301,9 @@ def _update(
 
 
 def _local_edits_refusal(owner_id: str, name: str, folder: Path, paths: list[str], exact: bool) -> dict[str, Any]:
-    listed = ", ".join(paths) or "skill folder"
-    lead = f"your changed files: {listed}" if exact else f"this copy was edited, but CORSIA can't tell which file; its files: {listed}"
     return {
         "error": "local_edits",
-        "message": f"{lead}; review them before choosing whether to discard them",
+        "message": f"{_edits_lead(paths, exact)}; review them before choosing whether to discard them",
         "changed_files": paths if exact else [],
         "local_edits_digest": _local_edits_digest(owner_id, name, folder),
     }
@@ -331,7 +330,7 @@ def _remove(
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths if exact else [], local_edits_digest)
+            return _discard_confirmation(owner_id, name, folder, local_paths, exact, local_edits_digest)
     result = remove_skill_bundle(
         _workspace(), name, author_thread_id=owner_id, thread_id=owner_id, project_id=project_id, db=db,
         reason="reviewed library skill removal", confirmed_files=confirmed_files,
