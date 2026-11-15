@@ -62,8 +62,9 @@ def is_result_notice(meta: dict, content: object) -> bool:
 def is_usage_limit_notice(meta: dict, content: object) -> bool:
     from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
 
+    cause = meta.get("cause_kind")
     return (_system_type(meta) in ("llm_error", "cc_error") or is_result_notice(meta, content)) and (
-        meta.get("cause_kind") == "usage_limit" or is_provider_usage_or_quota_limit(content)
+        cause == "usage_limit" or (cause in (None, "", "unknown") and is_provider_usage_or_quota_limit(content))
     )
 
 
@@ -158,7 +159,7 @@ def _usage_limit_notice_sql(metadata: str, content: str) -> str:
     return (
         f"(CASE WHEN {kind} IN ('llm_error','cc_error') OR "
         f"({kind} = 'result' AND {is_error} = 'true' AND COALESCE({content}, '') != '') "
-        f"THEN ({cause} = 'usage_limit' OR is_provider_usage_limit({content})) ELSE 0 END)"
+        f"THEN ({cause} = 'usage_limit' OR ({cause} IN ('', 'unknown') AND is_provider_usage_limit({content}))) ELSE 0 END)"
     )
 
 

@@ -20,6 +20,13 @@ describe('usage limit transcript visibility', () => {
 		expect(isFocusVisible(message)).toBe(false);
 	});
 
+	it.each(['llm_error', 'cc_error', 'result'])('retains classified non-limit %s with quota wording', (type) => {
+		const message = row({ type, is_error: true, cause_kind: 'sign_in_expired' }, 'Sign in failed while checking billing quota');
+		expect(isNeverDrawn(message)).toBe(false);
+		expect(isSystemNotice(message)).toBe(true);
+		expect(isFocusVisible(message)).toBe(true);
+	});
+
 	it.each(['sign_in_expired', 'context_overflow', 'rate_limited', 'process_exited'])('retains %s notices', (kind) => {
 		const message = row({ type: 'cc_error', cause_kind: kind });
 		expect(isNeverDrawn(message)).toBe(false);

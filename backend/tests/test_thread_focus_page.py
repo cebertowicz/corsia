@@ -150,6 +150,26 @@ class TestUsageLimitRows:
         page = page_focus(conn, _SID, 10, None)
         assert len(page["messages"]) == 2
 
+    @pytest.mark.parametrize("content", ["You've hit your usage limit", "Process exited while checking billing quota"])
+    @pytest.mark.parametrize("kind", ["llm_error", "cc_error", "result"])
+    @pytest.mark.parametrize("cause, hidden", [(None, True), ("", True), ("unknown", True),
+                                               ("usage_limit", True), ("process_exited", False),
+                                               ("sign_in_expired", False), ("rate_limited", False)])
+    def test_limit_wording_respects_stored_cause_in_all_read_paths(self, kind, cause, hidden, content):
+        conn = _db()
+        t = _Thread(conn)
+        meta = {"type": kind, "is_error": True}
+        if cause is not None:
+            meta["cause_kind"] = cause
+        # No continuation is added: stopped usage rows must still be hidden.
+        notice = t.add("c", "T1", content=content, meta=meta)
+        row = {"role": "system", "content": content, "metadata": meta}
+        assert is_focus_visible(row) is not hidden
+        focus_ids = {row["id"] for row in page_focus(conn, _SID, 20, None)["messages"]}
+        transcript_ids = {row["id"] for row in paging._fetch_display_anchors(conn, _SID, 20, None, None, None)}
+        assert (notice not in focus_ids) is hidden
+        assert (notice not in transcript_ids) is hidden
+
     def test_hidden_in_focus_and_transcript_with_no_orphan_retry(self):
         conn = _db()
         t = _Thread(conn)
