@@ -360,7 +360,7 @@ async def test_typing_that_arrives_while_the_document_closes_refuses_the_move(du
     monkeypatch.setattr(manager, "release", type_then_release)
     try:
         receipt = await _promote(workspace, thread_id, source)
-        assert receipt.startswith("Error: " + NOT_SAVED), receipt
+        assert receipt.startswith("Error: " + STILL_TYPING), receipt
         shared = workspace / "projects" / "alpha" / "shared" / "planning" / "live.md"
         assert not shared.exists()
         assert source.read_text().startswith("TYPED ") and "LATE" not in source.read_text()

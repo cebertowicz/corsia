@@ -45,7 +45,7 @@ def _refuse_late_typing(entry: LiveEntry) -> None:
     """Typing that arrived while the entry was closing is not in the file, so the file must not move."""
     live = entry.live
     if live.received or live.text != live.on_disk[1]:
-        raise DocumentNotSaved(_NOT_SAVED)
+        raise DocumentNotSaved(_STILL_TYPING)
 
 
 _NOT_SAVED = "This document has changes that couldn’t be saved, so it wasn’t moved. Try again in a moment."
