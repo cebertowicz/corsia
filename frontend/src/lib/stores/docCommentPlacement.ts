@@ -32,9 +32,8 @@ class LivePlacement {
 	private rows: Rows;
 	private seq = 0;
 	private inFlight: { seq: number; requestId: string; reload: boolean } | null = null;
+	/** The one ask queued behind the one in flight. A reload asked while another is in flight queues here, so a comment lost since that one was sent is asked about too. */
 	private marked: { reload: boolean } | null = null;
-	/** A reload is queued or in flight. A refusal is logged; the next time comments are shown can ask again. */
-	private reloading = false;
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
@@ -83,10 +82,9 @@ class LivePlacement {
 		this.ask(true);
 	}
 
-	/** Re-resolve lost quotes when comments are shown again through this placement lifecycle. */
+	/** Re-resolve lost quotes when comments are shown again through this placement lifecycle. A refusal is logged; the next show asks again. */
 	private reload(): boolean {
-		if (this.destroyed || this.session.connection !== 'connected' || this.reloading) return false;
-		this.reloading = true;
+		if (this.destroyed || this.session.connection !== 'connected') return false;
 		this.write(markReloading);
 		this.ask(true);
 		return true;
@@ -94,7 +92,6 @@ class LivePlacement {
 
 	destroy(): void {
 		this.destroyed = true;
-		this.settleReload();
 		for (const stop of this.stops) stop();
 		this.session.text.unobserve(this.moved);
 		this.positions.clear();
@@ -113,7 +110,6 @@ class LivePlacement {
 		const seq = ++this.seq;
 		const requestId = this.session.requestPositions(seq, reload);
 		if (requestId) this.inFlight = { seq, requestId, reload };
-		else if (reload) this.settleReload();
 	}
 
 	/** Sends the marked ask, if any (or a fresh one when `force`). */
@@ -127,7 +123,6 @@ class LivePlacement {
 	private observed(): void {
 		if (this.session.connection === 'connected') return;
 		const reload = this.inFlight?.reload || this.marked?.reload;
-		if (reload) this.settleReload();
 		this.inFlight = null;
 		this.marked = reload ? { reload: true } : null;
 	}
@@ -144,10 +139,7 @@ class LivePlacement {
 			const request = this.inFlight;
 			this.inFlight = null;
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
-			if (request.reload) {
-				console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
-				this.settleReload();
-			}
+			if (request.reload) console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
 			this.next();
 		} else if (frame.type === 'doc_opened') {
 			if (this.current().some(row => row.placement === 'placing' || row.placement === 'not_placed') || this.marked?.reload) {
@@ -202,7 +194,6 @@ class LivePlacement {
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 		}
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
-		if (reload) this.settleReload();
 		this.next();
 	}
 
@@ -227,8 +218,6 @@ class LivePlacement {
 			return { ...unplaced(row), from: undefined, to: undefined };
 		}));
 	}
-
-	private settleReload(): void { this.reloading = false; }
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {
