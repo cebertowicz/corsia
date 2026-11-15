@@ -353,20 +353,34 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toBeNull();
 	});
 
-	it('leaves when its update finished and another device already showed the outcome', async () => {
-		updateStatus.set(status(inFlight('update-seen')));
+	/** A page that watched its update run, then slept while another device showed the outcome. */
+	async function wakeAfterOutcomeShownElsewhere(operationId: string, frontendHash: string): Promise<void> {
+		const hash = 'a'.repeat(40);
+		const versions = { frontend: { full_hash: frontendHash }, backend: { full_hash: hash, current_head: { full_hash: hash } } };
+		let row = status(inFlight(operationId));
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => (String(url).startsWith('/api/version') ? versions : row) })));
+		await loadUpdateStatus();
 		vi.advanceTimersByTime(60_000);
 		expect(get(updateScreenView)?.mode).not.toBe('done');
-		const response = status({ ...inFlight('update-seen'), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' });
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => response })));
+		row = status({ ...inFlight(operationId), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' });
+		await loadUpdateStatus();
+	}
 
-		await loadUpdateStatus();
+	it('leaves when its update finished and another device already showed the outcome', async () => {
+		await wakeAfterOutcomeShownElsewhere('update-seen', 'a'.repeat(40));
+		await vi.advanceTimersByTimeAsync(10);
 		expect(get(updateScreenView)).toMatchObject({ mode: 'done', percent: 100, toVersion: '2026.10.13' });
-		vi.advanceTimersByTime(EXIT_HOLD_MS);
+		await vi.advanceTimersByTimeAsync(EXIT_HOLD_MS);
 		expect(get(updateScreenView)).toBeNull();
 		await loadUpdateStatus();
-		vi.advanceTimersByTime(5_000);
+		await vi.advanceTimersByTimeAsync(5_000);
 		expect(get(updateScreenView)).toBeNull();
+	});
+
+	it('fails rather than finishes when its own versions disagree after another device showed the outcome', async () => {
+		await wakeAfterOutcomeShownElsewhere('update-seen-mismatch', 'b'.repeat(40));
+		await vi.advanceTimersByTimeAsync(12_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
 	});
 
 	it('keeps its own version-mismatch failure when a later read finds the outcome seen', () => {
