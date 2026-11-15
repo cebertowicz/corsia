@@ -238,7 +238,11 @@ def _read_audit_metric(
             if metric in ("agent_hours", "agent_day_levels"):
                 assert start is not None and end is not None
                 if agent_hours_reader is None:
-                    raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.")
+                    raise AuditReadError(
+                        "unavailable",
+                        "This metric's reader was not supplied by the caller; report it as a defect. "
+                        "A host lease will not fix it.",
+                    )
                 rows = agent_hours_reader(
                     db, metric, actor["user_id"], actor["project_id"], start, end, MAX_ROWS + 1,
                 )
