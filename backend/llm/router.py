@@ -235,7 +235,10 @@ async def _dispatch_anthropic(
     )
 
 
-async def _observed(api_base: str | None, dispatch: Awaitable[LLMResponse]) -> LLMResponse:
+async def _observed(
+    api_base: str | None, dispatch: Awaitable[LLMResponse],
+    external_model_identity: tuple[str, str] | None = None,
+) -> LLMResponse:
     """Return one dispatch's outcome unchanged, handing a copy to the endpoint observer.
 
     Every External dispatch passes here; the observer records it in a separate
@@ -249,14 +252,11 @@ async def _observed(api_base: str | None, dispatch: Awaitable[LLMResponse]) -> L
         observe_dispatch(api_base, exc)
         raise
     observe_dispatch(api_base, response)
-    return response
-
-
-def _detect_external_after_success(response: LLMResponse, identity: tuple[str, str] | None) -> None:
-    if identity and response.finish_reason != "error":
+    if external_model_identity and response.finish_reason != "error":
         from llm.external_image_input import schedule_first_use_detection
 
-        schedule_first_use_detection(*identity)
+        schedule_first_use_detection(*external_model_identity)
+    return response
 
 
 async def chat_completion(
@@ -312,15 +312,13 @@ async def chat_completion(
         )
 
     if model.startswith("anthropic/"):
-        response = await _observed(api_base, _dispatch_anthropic(
+        return await _observed(api_base, _dispatch_anthropic(
             messages, tools, model=model, api_key=api_key, api_base=api_base,
             output_budget=output_budget, reasoning_effort=reasoning_effort,
             on_reasoning_chunk=on_reasoning_chunk, on_content_chunk=on_content_chunk,
             on_tool_call_chunk=on_tool_call_chunk, on_response_started=on_response_started,
             retry_transient_errors=retry_transient_errors,
-        ))
-        _detect_external_after_success(response, external_model_identity)
-        return response
+        ), external_model_identity)
 
     extra_body = (
         _omlx_prompt_extras(messages, reasoning_effort, preserve_thinking, model)
@@ -339,8 +337,6 @@ async def chat_completion(
         thread_id=thread_id,
         extra_body=extra_body,
         retry_transient_errors=retry_transient_errors,
-    ))
+    ), external_model_identity)
     response.effort_sent = (extra_body or {}).get("reasoning_effort")
-    response = await mark_own_server(response, omlx_server_id)
-    _detect_external_after_success(response, external_model_identity)
-    return response
+    return await mark_own_server(response, omlx_server_id)
