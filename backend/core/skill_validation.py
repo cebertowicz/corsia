@@ -114,6 +114,15 @@ def _origin_errors(origin: Any) -> list[str]:
         or not re.fullmatch(r"[0-9a-fA-F]{64}", origin["installed_digest"])
     ):
         errors.append("corsia.origin.installed_digest must be 64 hexadecimal characters")
+    installed_files = origin.get("installed_files")
+    if "installed_files" in origin and not (
+        isinstance(installed_files, dict)
+        and all(
+            isinstance(path, str) and isinstance(digest, str) and re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+            for path, digest in installed_files.items()
+        )
+    ):
+        errors.append("corsia.origin.installed_files must map file paths to 64 hexadecimal characters")
     adopted_at = origin.get("adopted_at")
     if adopted_at is None or adopted_at == "":
         errors.append("corsia.origin.adopted_at is required")
