@@ -343,11 +343,11 @@ async def refresh_provider(
     return await asyncio.shield(task)
 
 
-def start_background_check(provider: str, check) -> None:
-    """Run ``check()`` off the request path unless one is already running."""
+def start_background_check(provider: str, check) -> asyncio.Task | None:
+    """Run ``check()`` off the request path unless one is already running; return the new task or None."""
     running = _CHECK_TASKS.get(provider)
     if running is not None and not running.done():
-        return
+        return None
     task = asyncio.create_task(check())
     _CHECK_TASKS[provider] = task
 
@@ -359,6 +359,7 @@ def start_background_check(provider: str, check) -> None:
                         key, done.exception())
 
     task.add_done_callback(_settle)
+    return task
 
 
 async def shutdown_refresh_tasks() -> None:

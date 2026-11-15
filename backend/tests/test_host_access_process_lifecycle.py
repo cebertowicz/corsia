@@ -288,6 +288,32 @@ async def test_cc_admitted_bash_cancellation_converges_on_process_owner_cleanup(
     await owner.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_a_foreground_result_names_shutdown_only_when_shutdown_stopped_it(tmp_path) -> None:
+    from host_access.processes import ProcessOwner
+
+    owner = ProcessOwner(runtime_dir=tmp_path, term_grace_seconds=0.05, kill_grace_seconds=1.0)
+
+    def spawn(code: str):
+        return owner.spawn(
+            [sys.executable, "-c", code], thread_id="script-owner", turn_id="script:run",
+            cwd=Path.cwd(), env=os.environ, timeout_seconds=30.0, background=False,
+        )
+
+    finished = await spawn("pass")
+    assert (finished.stop_reason, finished.returncode) == (None, 0)
+
+    sleeping = asyncio.create_task(spawn("import time;time.sleep(30)"))
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while owner.live_count() != 1:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError("the foreground process did not start")
+        await asyncio.sleep(0.01)
+    await owner.shutdown()
+    stopped = await sleeping
+    assert (stopped.stop_reason, stopped.returncode) == ("backend_shutdown", -15)
+
+
 class _Levels:
     """Record the level each runtime-owner Stop outcome is logged at."""
 

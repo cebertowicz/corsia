@@ -24,21 +24,33 @@ from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.cost_identity import IDENTITY_GROUP, ModelIdentity, identity_columns, identity_join
-from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_sql
+from core.measurement_pricing import classify_usage_rows, endpoint_listings, grouped_usage_per_row_sql
 from infra.packed_rows import fetch_all
 
 
 # The tasks' own usage, read through the node index. ``INDEXED BY``: production never runs ANALYZE, and with no
 # statistics the planner drives this join from each plan owner's whole usage history (``idx_llm_usage_session``)
 # and filters to the tasks afterwards, so the read grew with every call the install ever recorded instead of with
-# the tasks asked for. The index is partial (``plan_node_id IS NOT NULL``), which the ``IN`` term proves.
+# the tasks asked for. The index is partial (``plan_node_id IS NOT NULL``), which the equality term proves.
+# Each task's calls are summed on their own and packed into one JSON value, so the final grouping sorts those few
+# sums instead of every call (millions at all-projects scope, a sort that spills to disk). ``:ids`` holds distinct
+# ids (``json_ids``). The token columns are INTEGER and ``fresh`` an integer sum, which JSON carries exactly.
 MODEL_GROUPS_SQL = f"""
     SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
-      SELECT u.plan_node_id AS node_id,{identity_columns("u")},
-        COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0) AS fresh
-      FROM llm_usage u INDEXED BY idx_llm_usage_plan_node {identity_join("u")}
-      JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
-      WHERE u.plan_node_id IN (SELECT value FROM json_each(:ids))
+      SELECT g.node_id AS node_id,{identity_columns("g")},g.fresh AS fresh FROM (
+        SELECT n.value AS node_id,json_extract(k.value,'$[0]') AS model,
+          json_extract(k.value,'$[1]') AS context_manifest_id,json_extract(k.value,'$[2]') AS fresh
+        FROM json_each(:ids) n, json_each((
+          SELECT json_group_array(json_array(model,context_manifest_id,fresh)) FROM (
+            SELECT u.model AS model,u.context_manifest_id AS context_manifest_id,
+              SUM(COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0)) AS fresh
+            FROM llm_usage u INDEXED BY idx_llm_usage_plan_node
+            JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
+            WHERE u.plan_node_id=n.value
+            GROUP BY u.model,u.context_manifest_id
+          )
+        )) k
+      ) g {identity_join("g")}
     ) GROUP BY node_id,{IDENTITY_GROUP}
 """
 
@@ -58,10 +70,10 @@ _SEEDED_CHAIN_ROWS = f"({_ACCEPTED_ROWS} UNION ALL {_SEED_ROWS})"
 
 
 def _cost_sql(chain_rows: str) -> str:
-    """The grouped, classifiable usage of each task's chain calls up to its settlement."""
-    return grouped_usage_sql(
+    """The grouped, classifiable usage of each task's chain calls up to its settlement, one chain row at a time."""
+    return grouped_usage_per_row_sql(
         {"period": "x.period", "task_id": "x.task_id"},
-        f"{chain_rows} x JOIN llm_usage u ON u.plan_node_id=x.node_id AND u.created_at<=x.settled_at",
+        f"{chain_rows} x", "u.plan_node_id=x.node_id AND u.created_at<=x.settled_at",
     )
 
 

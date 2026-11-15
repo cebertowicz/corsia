@@ -18,12 +18,11 @@ import plans.service as service
 from plans.delegation_epoch import attached_since, open_leaves, open_row_sql, return_rows
 from plans.harvest_review_event import HARVEST_EVENT, latest_review_event_sql
 from plans.delegation import (
-    _HARVESTABLE_STATES,
-    _live_attachment,
+    _harvest_candidates,
     _valid_structured_epoch,
     attachment_payload,
 )
-from infra.database import write_transaction
+from infra.database import claim_connection, write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -326,20 +325,15 @@ def _harvest(node, attachment, payload, child_event, db, reply: str = "") -> boo
     return accepted is not None
 
 
-def _harvest_row(node, db) -> bool:
-    """Harvest this attachment's return if it is ready and not yet harvested."""
+def _ready_return(node, db):
+    """This attachment's unharvested ready return, else None; reads only."""
     epoch = _valid_structured_epoch(node, db)
-    if epoch is None:
-        return False
-    attachment, payload = epoch
-    if _harvested(node["id"], attachment["id"], db):
-        return False
-    if not _ready(node, payload, db):
-        return False
-    child_event = _latest_child_event(payload["child_plan_id"], db)
-    if child_event is None:
-        return False
-    return _harvest(node, attachment, payload, child_event, db)
+    if epoch is None or _harvested(node["id"], epoch[0]["id"], db):
+        return None
+    if not _ready(node, epoch[1], db):
+        return None
+    child_event = _latest_child_event(epoch[1]["child_plan_id"], db)
+    return None if child_event is None else (*epoch, child_event)
 
 
 def harvest_ready_children(
@@ -358,28 +352,39 @@ def harvest_ready_children(
 
     This function only writes and collects. Its caller owns the outer commit,
     then delivers ``changed_plan_ids`` and starts ``drives`` after that commit.
+
+    Readiness is first read with no write open, so a pass with nothing ready
+    takes no write lock. Rows found ready (or whose read raised) are decided
+    again under the lock by the same check, exactly as before. A caller already
+    inside a write reads its own uncommitted state in both passes.
     """
+    reader, _ = claim_connection(db, "plan_service")
+    ready = []
+    for node in _harvest_candidates(reader, worker_thread_id):
+        try:
+            is_ready = _ready_return(node, reader) is not None
+        except Exception:
+            is_ready = True  # the locked pass decides this row and logs its error
+        if is_ready:
+            ready.append(node["id"])
+    if not ready:
+        return []
     harvested = []
     changed = []
     with (
         plan_write.transaction(db) as db,
         notifications.collect_wake_recipients(db, drives),
     ):
-        live, states = _live_attachment(_HARVESTABLE_STATES)
-        worker_filter = "" if worker_thread_id is None else " AND spawned_thread_id=?"
-        params = states if worker_thread_id is None else (*states, worker_thread_id)
-        rows = db.execute(
-            f"""SELECT * FROM plan_nodes
-                WHERE spawned_thread_id IS NOT NULL AND {live}{worker_filter}
-                ORDER BY id""",
-            params,
-        ).fetchall()
-        for node in rows:
+        for node in _harvest_candidates(db, worker_thread_id, ready):
             # One row that raises rolls back alone and is logged; the other
             # returns, and every other wake source on this clock, still run.
             try:
                 with write_transaction(db, scope="harvest_row"):
-                    done = _harvest_row(node, db)
+                    found = _ready_return(node, db)
+                    done = False
+                    if found is not None:
+                        attachment, payload, child_event = found
+                        done = _harvest(node, attachment, payload, child_event, db)
             except Exception:
                 logger.exception("delegation harvest of node %s failed", node["id"])
                 continue
