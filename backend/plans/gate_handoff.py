@@ -33,6 +33,8 @@ OFFER_CONTEXT = "In {clean} of your last {n} reviews of {step} in {workflow}, th
 OFFER_FORGIVEN_SUFFIX = " or only a fix that held"
 OFFER_FORGIVEN = "{title}: needed a fix, and the next review needed none."
 OFFER_SCOPE = "{title}: not counted, because you changed what you wanted."
+#: Closes the offer's list when the rest would not fit the decision's context limit.
+OFFER_MORE = "{count} more not listed here."
 OFFER_TRADEOFF = "Handing it off saves your review time. If you later correct its work, the review comes back to you."
 OFFER_RATIONALE = "Spot checks keep some review of it without asking you every time."
 OFFER_OPTIONS = (
@@ -75,6 +77,9 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
     runs = gate_runs(db, key)
     for run in runs:
         items.append((run.created, 0, "start", run))
+        if run.mode == "spot" and run.rejected_at is not None:
+            # A spot check the person turns down hands the gate back when they answer, not when the run ends.
+            items.append((run.rejected_at, 2, "spot_rejected", run))
         if run.settled_at is not None and run.answer is not None:
             items.append((run.settled_at, 2, "answer", run))
         items.extend((stamp, 3, "correction", run) for stamp in run.corrections)
@@ -97,6 +102,8 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
         elif name == "correction":
             if state.open_offer is not None:
                 state.voided_offer, state.open_offer = state.open_offer, None
+            _hand_back(state)
+        elif name == "spot_rejected":
             _hand_back(state)
         elif name == "answer":
             _apply_run(db, state, data, data.version == current)
@@ -131,7 +138,8 @@ def _apply_run(db, state: GateState, run: Run, current_version: bool) -> None:
     if run.mode == "spot":
         if outcome == "clean" and current_version:
             state.spot_clean += 1
-        elif outcome == "failed":
+        elif outcome == "failed" and run.rejected_at is None:
+            # Approved, but the work then changed before it went ahead; a turned-down one was handed back already.
             _hand_back(state)
     elif run.mode == "person" and state.kind == "person" and outcome is not None:
         if outcome == "failed" and run.tiers and all(tier in ("instruction", "not_correction") for tier in run.tiers):
@@ -140,11 +148,17 @@ def _apply_run(db, state: GateState, run: Run, current_version: bool) -> None:
             state.window.append((run, "miss" if outcome == "failed" and run.tiers else outcome))
 
 
-def _window(state: GateState) -> tuple[list[tuple[Run, str]], list[Run]]:
+def _window(state: GateState) -> tuple[list[tuple[Run, str]], list[Run], list[Run]]:
+    """The counted runs, the forgiven misses among them, and the scope changes left out over the same span."""
     counted = state.window[-WINDOW[0]:]
     forgiven = [run for index, (run, result) in enumerate(counted)
                 if result == "miss" and index + 1 < len(counted) and counted[index + 1][1] == "clean"]
-    return counted, forgiven
+    dropped = state.window[:-WINDOW[0]]
+    # The span starts after the last run that fell out of the window, so a scope change between it
+    # and the first counted run is still listed.
+    since = (dropped[-1][0].settled_at or "") if dropped else None
+    excluded = [run for run in state.excluded if since is None or (run.settled_at or "") > since]
+    return counted, forgiven, excluded
 
 
 def mode_for(db, phase, step_id: str) -> tuple[str, GateState]:
@@ -194,18 +208,24 @@ def after_settlement(db, node_id: str) -> None:
     try:
         after_commit(db, lambda: _read_then_offer(db, node_id))
     except TransactionOwnershipError:
-        # A settlement outside an owned write has no commit to follow; the run stays unread and
-        # counts neither way, and the settlement itself must not fail over it.
+        # A transaction nobody here owns has no commit to follow, and Git must not run inside it:
+        # keep the run's read as a fault (it counts neither way, visibly) and weigh the offer in place.
         logging.getLogger(__name__).warning(
-            "gate %s settled outside an owned write; its document read and offer were not run", node_id,
+            "gate %s settled outside an owned write; its document read is kept as a fault", node_id,
         )
+        _read_then_offer(db, node_id, in_place=True)
 
 
-def _read_then_offer(db, node_id: str) -> None:
+#: The kept fault for a run settled inside a transaction no plan write owns.
+UNOWNED_FAULT = "settled outside an owned write, so the document was not read"
+
+
+def _read_then_offer(db, node_id: str, *, in_place: bool = False) -> None:
     """Keep the settled run's document read, then offer a handoff if the window qualifies.
 
     Runs on the settlement's connection once its write has committed, so it reads that
-    database and opens a write of its own.
+    database and opens a write of its own. ``in_place`` runs inside the settlement's own
+    transaction instead, with no Git: the read is kept as a fault.
     """
     from plans import gate_document_outcome, plan_write
     from plans.gate_handoff_record import document_ask
@@ -215,6 +235,11 @@ def _read_then_offer(db, node_id: str) -> None:
     key = (project_of(db, phase["plan_id"]), phase["workflow_ref"], node["workflow_step"])
     run = next((run for run in gate_runs(db, key) if run.phase == phase["id"]), None)
     asked = document_ask(run) if run is not None else None
+    if in_place:
+        if asked:
+            gate_document_outcome.keep(db, phase["id"], {"fault": UNOWNED_FAULT})
+        _offer(db, node_id)
+        return
     answer = gate_document_outcome.read(db, *asked) if asked else None
     with plan_write.transaction(db) as write:
         if answer is not None:
@@ -233,7 +258,7 @@ def _offer(db, node_id: str) -> None:
     phase = service._node_row(db, node["parent_id"])
     key = (project_of(db, phase["plan_id"]), phase["workflow_ref"], node["workflow_step"])
     state = derive(db, key, phase["workflow_version"])
-    counted, forgiven = _window(state)
+    counted, forgiven, excluded = _window(state)
     clean = sum(result == "clean" for _, result in counted) + len(forgiven)
     if state.kind != "person" or state.open_offer or len(counted) < WINDOW[0] or clean < WINDOW[1]:
         return
@@ -241,13 +266,12 @@ def _offer(db, node_id: str) -> None:
     context = OFFER_CONTEXT.format(clean=clean, n=len(counted), **names)
     if forgiven:
         context = context[:-1] + OFFER_FORGIVEN_SUFFIX + "."
-    lines = [context]
-    lines.extend(OFFER_FORGIVEN.format(title=run.title) for run in forgiven)
-    lines.extend(OFFER_SCOPE.format(title=run.title) for run in state.excluded)
+    details = [OFFER_FORGIVEN.format(title=run.title) for run in forgiven]
+    details.extend(OFFER_SCOPE.format(title=run.title) for run in excluded)
     decision = decisions.raise_offer(
         db, plan_id=phase["plan_id"], source_node_id=phase["id"], provenance=PROVENANCE,
         content={
-            "title": OFFER_TITLE.format(**names), "context": "\n".join(lines),
+            "title": OFFER_TITLE.format(**names), "context": _fit_context(context, details),
             "tradeoff": OFFER_TRADEOFF, "recommendation": OFFER_RECOMMENDATION, "rationale": OFFER_RATIONALE,
             "options": [{"id": option_id, "label": label} for option_id, label in zip("ABCD", OFFER_OPTIONS)],
             "other_enabled": True,
@@ -257,6 +281,24 @@ def _offer(db, node_id: str) -> None:
         db, phase["id"], OFFER_EVENT, actor_id=None, provenance=PROVENANCE,
         payload={"key": list(key), "version": phase["workflow_version"], "decision_id": decision["id"]},
     )
+
+
+def _fit_context(head: str, details: list[str]) -> str:
+    """The offer's context within the decision limit: whole lines while they fit, then a count of the rest.
+
+    The offer is raised inside the person's answer, so a context over the limit would fail that answer.
+    """
+    from plans.decision_fields import MAX_CONTEXT
+
+    text = head
+    for index, line in enumerate(details):
+        if len(text) + 1 + len("\n".join(details[index:])) <= MAX_CONTEXT:
+            return text + "\n" + "\n".join(details[index:])
+        left_after = len(details) - index - 1
+        if len(text) + 1 + len(line) + 1 + len(OFFER_MORE.format(count=left_after)) > MAX_CONTEXT:
+            return text + "\n" + OFFER_MORE.format(count=len(details) - index)
+        text += "\n" + line
+    return text
 
 
 def after_correction(db, source_node_id: str) -> None:

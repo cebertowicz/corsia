@@ -41,9 +41,9 @@ async def test_thirteen_settled_clean_runs_offer(isolated_db, tmp_path, monkeypa
         assert len(_offers()) == (1 if index == 12 else 0)
 
 
-def _record(details, document=None):
+def _record(details, document=None, settled_state="accepted"):
     return Run("p", "plan", "v", "start", "person", [], answers=details,
-               settled_at="end", document_outcome=document)
+               settled_at="end", settled_state=settled_state, document_outcome=document)
 
 
 @pytest.mark.parametrize(("detail", "document", "outcome"), [
@@ -265,3 +265,123 @@ async def test_miss_is_forgiven_only_by_next_counted_clean_run(tiers, forgiven):
     state.window.pop()
     gate_handoff._apply_run(None, state, miss, True)
     assert gate_handoff._window(state)[1] == []
+
+
+async def _settle_twelve_clean(run):
+    for _ in range(12):
+        await _go(run)
+    assert not _offers()
+
+
+async def test_a_gate_accepted_with_a_follow_up_counts_and_offers(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    await _settle_twelve_clean(run)
+    _, gate = await _go(run, "approved", settle=False)
+    await run.update("start", {"node_id": gate, "expected_revision": run.revision(gate)})
+    await run.update("request_review", {"node_id": gate, "expected_revision": run.revision(gate), "evidence": "done"})
+    result = await run.update("accept_with_follow_up", {
+        "node_id": gate, "expected_revision": run.revision(gate), "verification_result": "passed",
+        "title": "Tidy the note", "acceptance_criteria": "Tidied", "size": "XS",
+    })
+    assert not isinstance(result, str), result
+    assert len(_offers()) == 1
+
+
+def _settled_run(gate):
+    db = get_db()
+    try:
+        (record,) = [record for record in gate_handoff_record.gate_runs(db, ("", "gated", "gate"))
+                     if record.phase == gate_handoff.service._node_row(db, gate)["parent_id"]]
+        return record.settled_state, gate_handoff_record.run_outcome(db, record)
+    finally:
+        db.close()
+
+
+async def test_a_rejected_gate_that_fails_counts_as_failed(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    _, gate = await _go(run, "changes_requested")
+    result = await run.update("fail", {"node_id": gate, "expected_revision": run.revision(gate)})
+    assert not isinstance(result, str), result
+    assert _settled_run(gate) == ("failed", "failed")
+
+
+async def test_a_gate_closed_without_a_rejection_counts_neither_way(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    _, gate = await _go(run, "approved", settle=False)
+    result = await run.update("close_node", {"node_id": gate, "expected_revision": run.revision(gate),
+                                              "reason": "the run was called off"})
+    assert not isinstance(result, str), result
+    state, outcome = _settled_run(gate)
+    assert state != "accepted" and outcome is None
+
+
+async def test_a_turned_down_spot_check_hands_the_gate_back_when_answered(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(13):
+        await _go(run)
+    from tests.test_workflow_gate_handoff import _answer_offer, _state
+    _answer_offer("A")
+    monkeypatch.setattr(gate_handoff, "drawn", lambda *_: True)
+    _, gate = await _go(run, "changes_requested")
+    assert _state().kind == "person"
+
+
+async def test_scope_changes_before_the_window_are_not_listed():
+    state = gate_handoff.GateState()
+    early = _record([{"verdict": "approved_with_changes"}])
+    early.settled_at, early.title = "2026-01-01T00:00:00", "Early"
+    state.excluded.append(early)
+    for day in range(2, 2 + gate_handoff.WINDOW[0] + 1):
+        clean = _record([{"verdict": "approved"}])
+        clean.settled_at = f"2026-01-{day:02d}T00:00:00"
+        gate_handoff._apply_run(None, state, clean, True)
+    inside = _record([{"verdict": "approved_with_changes"}])
+    inside.settled_at, inside.title = "2026-01-20T00:00:00", "Inside"
+    state.excluded.append(inside)
+    assert gate_handoff._window(state)[2] == [inside]
+
+
+async def test_a_settlement_in_an_unowned_transaction_keeps_a_fault(isolated_db, tmp_path, monkeypatch):
+    from infra import document_went_ahead
+    from plans import gate_document_outcome, holds, service
+
+    def git(*_args, **_kwargs):
+        raise AssertionError("Git must not run inside a transaction nobody here owns")
+    from plans import mutations
+    monkeypatch.setattr(document_went_ahead, "went_ahead_outcomes", git)
+    run = _make(tmp_path, monkeypatch)
+    _, gate = await _go(run, None)
+    db = get_db()
+    try:
+        holds.place_hold(gate, kind="blocked", reason_key="needs_review", reason="review", owner_kind="user",
+                         owner_id="document-1", expected_revision=service._node_row(db, gate)["revision"],
+                         actor_id=None, provenance="test.ask", db=db)
+        hold = holds.active_holds(gate, db=db)[-1]["id"]
+        holds.clear_write(gate, hold, expected_kind="blocked", actor_id=None, provenance="user.ask_cleared",
+                          detail={"verdict": "approved", "feedback_counts": {"comments": 0}}, db=db)
+        db.commit()
+        db.execute("BEGIN IMMEDIATE")
+        if service._node_row(db, gate)["state"] == "pending":
+            service.transition_node(gate, "active", actor_id=None, provenance="test.raw", db=db)
+        mutations.request_review(gate, evidence="done", provenance="test.raw", db=db)
+        service.transition_node(gate, "accepted", actor_id=None, provenance="test.raw",
+                                verification_result="passed", verified_by="reviewer", db=db)
+        db.commit()
+        (record,) = gate_handoff_record.gate_runs(db, ("", "gated", "gate"))
+        assert gate_document_outcome.kept(db, [record.phase])[record.phase] == {"fault": gate_handoff.UNOWNED_FAULT}
+        assert gate_handoff_record.run_outcome(db, record) is None
+    finally:
+        db.close()
+
+
+def test_the_offer_context_fits_the_decision_limit_and_counts_what_it_leaves_out():
+    from plans.decision_fields import MAX_CONTEXT
+
+    head = gate_handoff.OFFER_CONTEXT.format(clean=12, n=13, step="S" * 60, workflow="W" * 60)
+    details = [gate_handoff.OFFER_SCOPE.format(title=f"{index:02d}" + "T" * 58) for index in range(30)]
+    context = gate_handoff._fit_context(head, details)
+    assert len(context) <= MAX_CONTEXT
+    lines = context.splitlines()
+    assert lines[0] == head and lines[1:-1] == details[:len(lines) - 2]
+    assert lines[-1] == gate_handoff.OFFER_MORE.format(count=len(details) - (len(lines) - 2))
+    assert gate_handoff._fit_context(head, details[:3]) == "\n".join([head, *details[:3]])

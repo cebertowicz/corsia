@@ -15,7 +15,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
+
 OFFER_EVENT = "gate_handoff_offered"
+_CHANGES_REQUESTED = "changes_requested"
 _ANSWERED_BY_PERSON = "user.ask_cleared"
 #: An offer's decision states that end it: answered, or withdrawn (the person's Won't do, a closed run, an archive).
 _SETTLED = ("answered", "invalidated")
@@ -36,6 +39,10 @@ class Run:
     title: str = ""
     tiers: list[str] = field(default_factory=list)
     settled_at: str | None = None
+    #: The state the gate step settled in: accepted (with or without a follow-up), failed or closed.
+    settled_state: str | None = None
+    #: When the person first asked for changes in this run, if they did.
+    rejected_at: str | None = None
     artifact_id: str | None = None
     first_round_at: str | None = None
     answer_holds: set[str] = field(default_factory=set)
@@ -95,12 +102,17 @@ def gate_runs(db, key: tuple[str, str, str]) -> list[Run]:
             run_of[node].answer_holds.add(hold_id)
         if run_of[node].answer is None:
             run_of[node].answer, run_of[node].answered_at = verdict, stamp
+        if verdict == _CHANGES_REQUESTED and run_of[node].rejected_at is None:
+            run_of[node].rejected_at = stamp
     for row in db.execute(
         "SELECT node_id,created_at,new_state FROM plan_node_events WHERE event='state_transition'"
-        " AND new_state='accepted'"
-        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid", (_ids(run_of),),
+        " AND new_state IN (SELECT value FROM json_each(?))"
+        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
+        (_ids(sorted(_TERMINAL_STATES)), _ids(run_of)),
     ):
-        run_of[row["node_id"]].settled_at = row["created_at"]
+        settled = run_of[row["node_id"]]
+        if settled.settled_at is None:
+            settled.settled_at, settled.settled_state = row["created_at"], row["new_state"]
     first_shown: dict[tuple[str, str], str] = {}
     for row in db.execute(
         "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event='hold_placed'"
@@ -126,8 +138,12 @@ def run_outcome(db, run: Run) -> str | None:
     answers = run.answers
     if not answers or run.settled_at is None or run.document_unread:
         return None
-    if any(detail.get("verdict") == "changes_requested" for detail in answers):
+    if any(detail.get("verdict") == _CHANGES_REQUESTED for detail in answers):
         return "failed"
+    if run.settled_state not in _ACCEPTED_STATES:
+        # Closed or failed without the person asking for changes: the work never went ahead, so
+        # there is nothing to judge the review by.
+        return None
     go_ahead = next((detail for detail in reversed(answers) if detail.get("verdict") in ("approved", "approved_with_changes")), None)
     if go_ahead is not None and run.document_outcome is not None:
         return "clean" if run.document_outcome["went_ahead_unchanged"] else "failed"
@@ -142,7 +158,7 @@ def document_ask(run: Run) -> tuple[str, str, str] | None:
 
     That is a run asked on a document, answered and settled; any other run gives None.
     """
-    if run.artifact_id and run.first_round_at and run.settled_at and run.answers:
+    if run.artifact_id and run.first_round_at and run.settled_at and run.answers and run.settled_state in _ACCEPTED_STATES:
         return run.artifact_id, run.first_round_at, run.settled_at
     return None
 

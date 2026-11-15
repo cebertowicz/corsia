@@ -67,7 +67,7 @@ def settle_terminal(
         from plans import gate_handoff, run_end
 
         run_end.record_if_ended(connection, node_id, new_state)
-        if new_state == "accepted":
+        if new_state in service._ACCEPTED_STATES:
             gate_handoff.after_settlement(connection, node_id)
 
 
