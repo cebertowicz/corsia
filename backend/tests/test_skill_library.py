@@ -361,4 +361,5 @@ def test_local_edits_refusal_calls_files_changed_only_when_it_knows(tmp_path):
     unknown = skill_library._local_edits_refusal("owner", "pdf", folder, ["SKILL.md", "notes.md"], False)
     assert "your changed files" not in unknown["message"]
     assert unknown["message"].startswith("this copy was edited, but CORSIA can't tell which file; its files: SKILL.md, notes.md;")
+    assert unknown["changed_files"] == []
     assert len(unknown["local_edits_digest"]) == 64

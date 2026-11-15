@@ -117,6 +117,21 @@ def test_a_wrong_file_map_never_hides_an_edit(library_skill):
     assert (edited, exact) == (True, False)
 
 
+def test_a_partly_rewritten_file_map_lists_every_file(library_skill):
+    from core.skill_sidecar import installed_file_digests
+    from library.installed import local_bundle, local_edits
+
+    _, target = library_skill
+    origin = _origin(target)
+    (target / "SKILL.md").write_bytes((target / "SKILL.md").read_bytes() + b"edited\n")
+    (target / "notes.md").write_bytes(b"my notes\n")
+    files, _ = local_bundle(target)
+    partial = {**origin, "installed_files": {**origin["installed_files"], "SKILL.md": installed_file_digests(files)["SKILL.md"]}}
+    edited, paths, exact = local_edits(target, partial)
+    assert (edited, exact) == (True, False)
+    assert {"SKILL.md", "notes.md"} <= set(paths)
+
+
 @pytest.mark.parametrize("sidecar, detail", [
     (b"workflow:\n  steps: nope\n", "corsia.workflow.steps must be a list"),
     (b"workflow: [broken", "corsia.yaml parse failed"),
