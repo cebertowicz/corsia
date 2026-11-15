@@ -1,16 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { cell, openTableDocument, settled } from '../support/tableCells';
-import { openDocument, openImage, seedImageDocument } from '../support/docImageComments';
+import { bar, imageSurface, openDocument, openImage, seedImageDocument } from '../support/docImageComments';
+import { touchDrag } from '../support/imageRegionComments';
 
 /**
  * A phone's browser zooms the page in when a field under the input size (16px) takes focus, and the person has to pinch
  * back out to see the right edge. It also shrinks the page to fit anything wider than the screen. At 393 every artifact
  * view keeps the page at its own width, and every place a person types (the document's text, a table cell, a code file,
- * a comment's reply field) is at least the input size when it takes focus.
+ * a comment's reply field, a new comment) is at least the input size when it takes focus, with the comment sheet open
+ * and closed.
  *
  * Emulated Chromium never zooms on focus, so the font size is what is asserted; the page scale is asserted as well.
  */
@@ -74,7 +76,7 @@ const overflow = (page: Page) => page.evaluate(() => {
 		})
 		.slice(0, 10)
 		.map((el) => `${name(el)} ${Math.round(el.getBoundingClientRect().left)}..${Math.round(el.getBoundingClientRect().right)}`);
-	return { escaping, pageWidth: document.documentElement.scrollWidth, vw };
+	return { escaping, pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, vw };
 });
 
 async function expectNoZoomOnFocus(page: Page, where: string) {
@@ -89,6 +91,38 @@ async function expectFitsScreen(page: Page, where: string) {
 	const now = await overflow(page);
 	expect(now.escaping, `${where}: elements past the screen's edge`).toEqual([]);
 	expect(now.pageWidth, `${where}: the page is no wider than the screen`).toBeLessThanOrEqual(now.vw);
+	expect(now.pageWidth, `${where}: the page scrolls no wider than its own width`).toBeLessThanOrEqual(now.clientWidth);
+}
+
+const COMPOSER = 'Comment, or @ to tag an agent';
+const sheet = (page: Page) => page.locator('[data-adaptive-drawer].drawer-backdrop');
+
+/** The person opens the comments from the document header: the sheet covers the view. */
+async function openCommentSheet(page: Page) {
+	await page.locator('.document-header .comment-status').tap();
+	await expect(sheet(page)).toBeVisible();
+	await settled(page);
+}
+
+/** The person puts the sheet away: one card's sheet closes with Close, the list's with Close comments. */
+async function closeCommentSheet(page: Page) {
+	await page.locator('.drawer-panel').getByRole('button', { name: /^Close( comments)?$/ }).tap();
+	await expect(sheet(page)).toHaveCount(0);
+	await settled(page);
+}
+
+/** The person double-taps a word in `line` and taps Comment: the new-comment field opens, and they tap into it. */
+async function startNewComment(page: Page, line: Locator, where: string) {
+	await line.dblclick({ position: { x: 20, y: 8 } });
+	await page.locator('.sel-comment').tap();
+	const composer = page.getByPlaceholder(COMPOSER);
+	await expect(composer).toBeVisible();
+	await settled(page);
+	await composer.tap();
+	await expect(composer).toBeFocused();
+	await expectNoZoomOnFocus(page, where);
+	await expectFitsScreen(page, where);
+	return composer;
 }
 
 test('@flow:phone-no-focus-zoom a document with a wide table and code fits the screen, and typing in it does not zoom', async ({ page }, testInfo) => {
@@ -121,6 +155,11 @@ test('@flow:phone-no-focus-zoom a document with a wide table and code fits the s
 	await expect(reply).toBeFocused();
 	await expectNoZoomOnFocus(page, 'comment reply');
 	await expectFitsScreen(page, 'comment reply');
+
+	// They put the sheet away and start a new comment on the closing paragraph.
+	await closeCommentSheet(page);
+	await expectFitsScreen(page, 'comment sheet closed');
+	await startNewComment(page, page.locator('.cm-line', { hasText: 'Closing paragraph' }).first(), 'new comment on the document');
 });
 
 test('@flow:phone-no-focus-zoom a code file fits the screen, and typing in it does not zoom', async ({ page, request }, testInfo) => {
@@ -151,6 +190,12 @@ test('@flow:phone-no-focus-zoom a code file fits the screen, and typing in it do
 	await page.locator('.cm-line').first().tap();
 	await expectNoZoomOnFocus(page, 'code text');
 	await expectFitsScreen(page, 'code text');
+
+	// They open the comments, then put them away and comment on the signature.
+	await openCommentSheet(page);
+	await expectFitsScreen(page, 'code: comment sheet open');
+	await closeCommentSheet(page);
+	await startNewComment(page, page.locator('.cm-line').first(), 'new comment on the code');
 });
 
 test('@flow:phone-no-focus-zoom a document with an image, and the image opened, fit the screen', async ({ page, request }, testInfo) => {
@@ -160,7 +205,38 @@ test('@flow:phone-no-focus-zoom a document with an image, and the image opened, 
 	const seeded = await seedImageDocument(page, request, `phonezoomimg${Date.now()}`, null);
 	await openDocument(page, seeded, PHONE.width);
 	await expectFitsScreen(page, 'image document');
+
+	// The document around the image is ordinary prose: the person taps into it to type.
+	const prose = page.locator('.cm-line', { hasText: 'Paragraph 1:' }).first();
+	await prose.tap();
+	await expectNoZoomOnFocus(page, 'image document text');
+	await expectFitsScreen(page, 'image document text');
+	await openCommentSheet(page);
+	await expectFitsScreen(page, 'image document: comment sheet open');
+	await closeCommentSheet(page);
+
 	await openImage(page);
 	await expectFitsScreen(page, 'image viewer');
 	expect((await typing(page)).scale, 'image viewer: the page stays at scale 1').toBe(1);
+
+	// They comment on part of the image: a finger draws the box, and the comment field opens.
+	await bar(page).locator('[data-image-comment]').tap();
+	const box = (await imageSurface(page).boundingBox())!;
+	await touchDrag(page, { x: box.x + box.width * 0.2, y: box.y + box.height * 0.25 }, { x: box.x + box.width * 0.45, y: box.y + box.height * 0.5 });
+	const composer = page.getByPlaceholder(COMPOSER);
+	await expect(composer).toBeVisible();
+	await settled(page);
+	await composer.tap();
+	await expect(composer).toBeFocused();
+	await expectNoZoomOnFocus(page, 'new comment on the image');
+	await expectFitsScreen(page, 'new comment on the image');
+
+	// They post it: on a phone it stays open in a sheet over the viewer.
+	await composer.fill('Tap target too small');
+	await page.keyboard.press('ControlOrMeta+Enter');
+	await expect(composer).toHaveCount(0);
+	await expect(sheet(page)).toBeVisible();
+	await settled(page);
+	await expectFitsScreen(page, 'image viewer: comment sheet open');
+	expect((await typing(page)).scale, 'image viewer, sheet open: the page stays at scale 1').toBe(1);
 });
