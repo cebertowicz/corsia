@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 from pathlib import Path
 from threading import Thread
@@ -18,6 +18,7 @@ from api.self_restart_response import self_restart_response as _self_restart_res
 from api.settings_restart import prelaunch_settings_restart
 from api.system_admin_helpers import own_backend_port as _own_backend_port
 from api.system_admin_helpers import restart_log_path as _restart_log_path
+from api.system_admin_helpers import update_status_details
 from infra.auth import authenticate, require_human_user, require_user
 
 
@@ -321,32 +322,14 @@ async def system_update_status(
     remote is contacted. ``available: null`` means the check could not be
     completed — the UI must not present that as up to date.
     """
-    from automation import self_restart
-    from automation.update_outcome import staged_update_activated
-    from core.turn_core import active_turn_count
-    from infra import build_info, drain
-    from infra.db_async import run_in_db
-    from infra.update_operation import project_update_operation
+    from infra import drain
+    from infra.db_async import run_read
     from infra.update_status import update_status
 
     status = await asyncio.to_thread(update_status, refresh)
     result = status.to_dict()
     result["drain_cap_seconds"] = drain.drain_wait_seconds()
-    result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
-    result["agents_working"] = await run_in_db(active_turn_count)
-    result["server_time"] = datetime.now(timezone.utc).isoformat()
-    # The running process's version; `current_version` is what is on disk, which changes before the restart.
-    result["running_version"] = build_info.running_app_version()
-    from infra.settings import get_update_schedule
-
-    result["schedule"] = await run_in_db(get_update_schedule)
-    operation = await run_in_db(self_restart.latest_update_operation)
-    if operation is not None:
-        activated = await run_in_db(staged_update_activated, operation)
-        result["operation"] = await run_in_db(
-            lambda: project_update_operation(operation, activated_by_restart=activated)
-        )
-    return result
+    return await run_read(update_status_details, result)
 
 
 @router.put("/system/update-schedule")

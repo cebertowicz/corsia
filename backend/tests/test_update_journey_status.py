@@ -180,8 +180,8 @@ def test_operation_projection_limits_logs_and_reports_live_blocking(tmp_path, mo
 def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypatch):
     from api.system_admin import system_update_status
     from automation import self_restart
-    from core.turn_core import active_turn_count
-    from infra import db_async, drain, settings, update_status
+    from core import turn_core
+    from infra import settings, update_status
 
     class Status:
         def to_dict(self):
@@ -189,19 +189,11 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
 
     schedule = {"automatic": True, "time": "04:05", "tonight_at": None}
 
-    async def run_in_db(function):
-        if function is settings.get_update_schedule:
-            return schedule
-        if function is self_restart.usual_update_seconds:
-            return None
-        if function is self_restart.latest_update_operation:
-            return None
-        if function is active_turn_count:
-            return 3
-        raise AssertionError(f"unexpected database function: {function}")
-
+    monkeypatch.setattr(settings, "get_update_schedule", lambda: schedule)
+    monkeypatch.setattr(self_restart, "usual_update_seconds", lambda: None)
+    monkeypatch.setattr(self_restart, "latest_update_operation", lambda: None)
+    monkeypatch.setattr(turn_core, "active_turn_count", lambda: 3)
     monkeypatch.setattr(update_status, "update_status", lambda refresh: Status())
-    monkeypatch.setattr(db_async, "run_in_db", run_in_db)
     monkeypatch.setattr("infra.build_info._RUNNING_APP_VERSION", "0.4.3-dev.1288")
     monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "17")
 

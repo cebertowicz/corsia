@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_read
 from tools.base import Tool
 from tools.query_helpers import (
     SENDER_CLASSES,
@@ -175,7 +175,10 @@ class SearchHistoryTool(Tool):
             db.close()
             return rows, cp_rows, None, notice
 
-        rows, cp_rows, refusal, notice = await run_in_db(_query)
+        # Checkpoint retrieval logs an outcome even if its caller is cancelled.
+        # Keep that job on the lane that completes queued work after cancellation.
+        run_query = run_in_db if search_checkpoints_here else run_read
+        rows, cp_rows, refusal, notice = await run_query(_query)
         if refusal is not None:
             return refusal
         formatted = format_history_results(rows, query, thread_id, sender)
