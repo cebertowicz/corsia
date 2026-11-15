@@ -266,14 +266,9 @@ def _update(
     if _current_library_item(origin, item):
         return {"outcome": "up_to_date", "name": name, "version": item["version"]}
     folder = Path(local.path).parent
-    edited, local_paths = local_edits(folder, origin)
+    edited, local_paths, exact = local_edits(folder, origin)
     if edited and not discard:
-        return {
-            "error": "local_edits",
-            "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
-            "changed_files": local_paths,
-            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
-        }
+        return _local_edits_refusal(owner_id, name, folder, local_paths, exact)
     confirmed_files = None
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
@@ -304,6 +299,17 @@ def _update(
     return _write_result(result)
 
 
+def _local_edits_refusal(owner_id: str, name: str, folder: Path, paths: list[str], exact: bool) -> dict[str, Any]:
+    listed = ", ".join(paths) or "skill folder"
+    lead = f"your changed files: {listed}" if exact else f"this copy was edited, but CORSIA can't tell which file; its files: {listed}"
+    return {
+        "error": "local_edits",
+        "message": f"{lead}; review them before choosing whether to discard them",
+        "changed_files": paths,
+        "local_edits_digest": _local_edits_digest(owner_id, name, folder),
+    }
+
+
 def _remove(
     name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_digest: object,
 ) -> dict[str, Any]:
@@ -318,14 +324,9 @@ def _remove(
     if origin is None:
         return _error("not_installed", f"{name} is not a library copy owned by this thread")
     folder = Path(local.path).parent
-    edited, local_paths = local_edits(folder, origin)
+    edited, local_paths, exact = local_edits(folder, origin)
     if edited and not discard:
-        return {
-            "error": "local_edits",
-            "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
-            "changed_files": local_paths,
-            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
-        }
+        return _local_edits_refusal(owner_id, name, folder, local_paths, exact)
     confirmed_files = None
     if edited and discard:
         confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)

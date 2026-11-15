@@ -17,6 +17,7 @@ from core.skill_sidecar import (
     SIDECAR_FILE,
     SIDECAR_FORMAT,
     installed_digest,
+    installed_file_digests,
     parse_sidecar,
 )
 from core.skill_validation import parse_frontmatter
@@ -59,7 +60,7 @@ def installed_skill_text(name: str, upstream: bytes, description: str) -> str | 
     return "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n" + body
 
 
-def _sidecar(origin: Mapping[str, str], workflow: dict[str, Any]) -> str:
+def _sidecar(origin: Mapping[str, Any], workflow: dict[str, Any]) -> str:
     """Keep only the local origin and validated upstream workflow."""
     return yaml.safe_dump({"origin": dict(origin), **workflow}, sort_keys=False, allow_unicode=True)
 
@@ -133,7 +134,10 @@ def _bundle_files(
             return None
         taken.add(relative.casefold())
         files[relative] = data
-    installed_origin = {**origin, "installed_digest": installed_digest(files)}
+    # The per-file map only names which files an adopter changed; the whole digest decides whether they did.
+    installed_origin = {
+        **origin, "installed_digest": installed_digest(files), "installed_files": installed_file_digests(files),
+    }
     files[SIDECAR_FILE] = _sidecar(installed_origin, workflow).encode("utf-8")
     return files
 

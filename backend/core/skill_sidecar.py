@@ -45,13 +45,21 @@ def installed_digest_part(relative: str, data: bytes) -> bytes | None:
     ).encode("utf-8")
 
 
-def installed_digest(files: Mapping[str, bytes]) -> str:
-    """Digest an installed skill folder while excluding mutable origin metadata."""
-    digest = hashlib.sha256()
+def installed_file_digests(files: Mapping[str, bytes]) -> dict[str, str]:
+    """Return each installed file's SHA-256 over its digest input, excluding origin metadata."""
+    digests: dict[str, str] = {}
     for relative in sorted(files):
         part = installed_digest_part(relative, files[relative])
         if part is not None:
-            digest.update(relative.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
+            digests[relative] = hashlib.sha256(part).hexdigest()
+    return digests
+
+
+def installed_digest(files: Mapping[str, bytes]) -> str:
+    """Digest an installed skill folder while excluding mutable origin metadata."""
+    digest = hashlib.sha256()
+    for relative, file_digest in installed_file_digests(files).items():
+        digest.update(relative.encode("utf-8") + b"\0" + bytes.fromhex(file_digest))
     return digest.hexdigest()
 
 

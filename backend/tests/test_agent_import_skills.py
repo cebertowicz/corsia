@@ -182,12 +182,13 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
         "sha256": hashlib.sha256(upstream).hexdigest(),
         "adopted_at": "2026-10-18T12:00:00+00:00",
         "installed_digest": sidecar["origin"]["installed_digest"],
+        "installed_files": sidecar["origin"]["installed_files"],
     }
-    from core.skill_sidecar import installed_digest
+    from core.skill_sidecar import installed_digest, installed_file_digests
 
-    assert sidecar["origin"]["installed_digest"] == installed_digest({
-        path.relative_to(target).as_posix(): path.read_bytes() for path in target.rglob("*") if path.is_file()
-    })
+    files = {path.relative_to(target).as_posix(): path.read_bytes() for path in target.rglob("*") if path.is_file()}
+    assert sidecar["origin"]["installed_digest"] == installed_digest(files)
+    assert sidecar["origin"]["installed_files"] == installed_file_digests(files)
     assert stat.S_IMODE(os.stat(target / "scripts" / "new.py").st_mode) == 0o644
     assert not (target / ".DS_Store").exists()
     from core.skill_validation import validate_skill_file

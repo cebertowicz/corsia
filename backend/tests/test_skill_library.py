@@ -347,3 +347,18 @@ def test_refusals_name_the_missing_argument_and_exact_search_recovery():
 
     assert skill_library._error("query_required", "search requires query")["error"] == "query_required"
     assert skill_library._error("not_in_library", "search first; names are exact")["message"] == "search first; names are exact"
+
+
+def test_local_edits_refusal_calls_files_changed_only_when_it_knows(tmp_path):
+    from tools import skill_library
+
+    folder = tmp_path / "pdf"
+    folder.mkdir()
+    (folder / "SKILL.md").write_bytes(b"first")
+    exact = skill_library._local_edits_refusal("owner", "pdf", folder, ["notes.md"], True)
+    assert exact["message"].startswith("your changed files: notes.md;")
+    assert exact["changed_files"] == ["notes.md"]
+    unknown = skill_library._local_edits_refusal("owner", "pdf", folder, ["SKILL.md", "notes.md"], False)
+    assert "your changed files" not in unknown["message"]
+    assert unknown["message"].startswith("this copy was edited, but CORSIA can't tell which file; its files: SKILL.md, notes.md;")
+    assert len(unknown["local_edits_digest"]) == 64

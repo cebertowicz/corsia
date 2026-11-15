@@ -68,6 +68,20 @@ def test_installed_digest_is_optional_but_must_be_a_sha256(suffix: str, valid: b
         assert "corsia.origin.installed_digest must be 64 hexadecimal characters" in result.errors
 
 
+@pytest.mark.parametrize(("suffix", "valid"), [
+    ("  installed_files:\n    SKILL.md: " + "c" * 64 + "\n", True),
+    ("  installed_files: {}\n", True),
+    ("  installed_files:\n    SKILL.md: short\n", False),
+    ("  installed_files: [SKILL.md]\n", False),
+])
+def test_installed_files_is_optional_but_must_map_paths_to_sha256(suffix: str, valid: bool):
+    result = _validate(VALID_ORIGIN + suffix)
+
+    assert result.ok is valid
+    if not valid:
+        assert "corsia.origin.installed_files must map file paths to 64 hexadecimal characters" in result.errors
+
+
 def test_invalid_origin_reaches_the_existing_not_loaded_error_block(tmp_path, monkeypatch):
     from core.lesson_index import LessonPartition
     from core.skill_registry_types import SkillResolution
