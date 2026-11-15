@@ -25,11 +25,12 @@ def park(
     db=None,
 ) -> str:
     """Park an unroutable event and return the row id."""
-    logger.error(
-        "event-routing: UNROUTABLE {} (external_id={!r}, reason={}) — "
-        "parked in dead-letter, NOT delivered to any thread",
-        internal_event, external_id, reason,
-    )
+    if reason != "check_suite_noise_parked":
+        logger.error(
+            "event-routing: UNROUTABLE {} (external_id={!r}, reason={}) — "
+            "parked in dead-letter, NOT delivered to any thread",
+            internal_event, external_id, reason,
+        )
     try:
         row_id = str(uuid.uuid4())[:12]
         with write_transaction(db, scope="dead_letter_park") as connection:
