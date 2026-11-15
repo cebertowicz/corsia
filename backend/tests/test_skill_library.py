@@ -47,8 +47,8 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
     assert TOOL_CATALOG["skill_library"].category == "memory"
     assert tool_pack("skill_library") == "memory"
     assert tool.parameters["properties"]["action"]["enum"] == ["search", "install", "update", "remove", "fetch_pack"]
-    assert "local_edits_token" in tool.parameters["properties"]
-    assert "local_edits_token" in tool.parameters["properties"]["discard_local_edits"]["description"]
+    assert "local_edits_digest" in tool.parameters["properties"]
+    assert "local_edits_digest" in tool.parameters["properties"]["discard_local_edits"]["description"]
 
 
 def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
@@ -290,7 +290,7 @@ def test_discard_token_is_bound_to_the_exact_local_files(tmp_path):
     folder = tmp_path / "pdf"
     folder.mkdir()
     (folder / "SKILL.md").write_bytes(b"first")
-    token = skill_library._local_edits_token("owner", "pdf", folder)
+    token = skill_library._local_edits_digest("owner", "pdf", folder)
 
     assert skill_library._discard_confirmation("owner", "pdf", folder, ["SKILL.md"], token) == {}
     (folder / "SKILL.md").write_bytes(b"changed")

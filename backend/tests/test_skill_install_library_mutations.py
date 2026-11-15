@@ -272,7 +272,7 @@ def test_token_confirmed_snapshot_refuses_later_text_and_binary_edits(library_sk
     asset = target / "assets" / "image.bin"
     asset.parent.mkdir()
     asset.write_bytes(b"\x89PNG\x00original")
-    token = skill_library._local_edits_token("owner", "example", target)
+    token = skill_library._local_edits_digest("owner", "example", target)
     confirmed = skill_library._confirmed_bundle("owner", "example", target, token)
     assert confirmed is not None
     original_save = skill_install.save_with_history
