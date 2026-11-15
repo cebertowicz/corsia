@@ -255,6 +255,27 @@ def test_accept_all_gives_a_caller_who_may_not_use_the_document_the_same_refusal
         db.close()
 
 
+def test_accept_all_leaves_a_suggestion_on_an_earlier_identity_open_listed_marked_and_decidable_alone(
+    client, isolated_db,
+):
+    """Approve all covers the current document's suggestions; one left on an earlier location stays open."""
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        successor = _promote(db, artifact)
+        stray, _ = add_comment(db, artifact, author_kind="user", author="Steve", replacement="a rewrite")
+        response = client.post(f"/api/artifacts/{successor}/suggestions/accept-all", params=TOKEN)
+        assert response.status_code == 200, response.text
+        assert response.json()["accepted"] == []
+        listed = {t["id"]: t for t in client.get(f"/api/artifacts/{successor}/comments", params=TOKEN).json()["comments"]}
+        assert listed[stray["id"]]["earlier_location"] is True and listed[stray["id"]]["decision"] is None
+        assert listed[root["id"]]["earlier_location"] is False
+        rejected = client.post(f"/api/comments/{stray['id']}/decision", params=TOKEN, json={"decision": "reject"})
+        assert rejected.status_code == 200, rejected.text
+    finally:
+        db.close()
+
+
 def test_live_identity_follows_a_twelve_step_chain(isolated_db):
     db = get_db()
     try:

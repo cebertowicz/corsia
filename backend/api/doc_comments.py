@@ -66,9 +66,11 @@ async def list_comments(artifact_id: str, token: str):
             path = artifact["path"] if artifact else None
             comments: list[dict] = []
             anchors_checked = True
-            for read_id in read_ids:  # the live document's threads, then any left on the retired id
+            for read_id in read_ids:  # the live document's threads, then any left on its earlier identities
                 threads, checked = anchored_threads(read_id, path, db)
                 feedback_state.annotate_thread_attention(db, user["id"], read_id, threads)
+                for thread in threads:
+                    thread["earlier_location"] = read_id != read_ids[0]
                 comments += threads
                 anchors_checked = anchors_checked and checked
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)

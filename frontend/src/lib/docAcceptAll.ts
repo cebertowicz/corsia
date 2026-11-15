@@ -4,9 +4,12 @@ import { loadComments, type DocComment } from '$lib/stores/docComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { pendingSuggestion } from '$lib/docCanvasComments';
 
-/** Open suggestions the review bar's accept can apply: the ones the comments pane offers to accept, not orphaned ones. */
+/**
+ * Open suggestions the review bar's accept can apply: the ones the comments pane offers to accept, not orphaned ones,
+ * and not ones left on an earlier identity of the document, which accept-all leaves open to be decided one at a time.
+ */
 export function openSuggestionCount(comments: DocComment[]): number {
-	return comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged).length;
+	return comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged && !comment.earlierLocation).length;
 }
 
 /**

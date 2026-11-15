@@ -38,6 +38,8 @@ export interface DocComment {
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
 	textChanged?: boolean;
+	/** Left on an earlier identity of the document: shown and decided one at a time, never part of an accept-all. */
+	earlierLocation?: boolean;
 	/** Text captured with the server's live status flags. */
 	statusText?: string;
 	/** When the thread last changed; a resolve sets it. The server keeps no separate resolve time, so this orders the resolved list. */
@@ -100,6 +102,7 @@ export function fromServer(r: ServerComment): DocComment {
 		resolved: !!r.resolved,
 		orphaned: !!r.orphaned,
 		textChanged: !!r.text_changed,
+		earlierLocation: !!r.earlier_location,
 		acked: (r.acknowledged_by ?? []).some((ack) => ack.kind === 'user'),
 		acknowledgedBy: r.acknowledged_by ?? [],
 		review: !!r.review,

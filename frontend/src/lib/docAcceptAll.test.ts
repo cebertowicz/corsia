@@ -32,6 +32,12 @@ describe('openSuggestionCount', () => {
 	});
 });
 
+describe('openSuggestionCount with suggestions left on an earlier identity', () => {
+	it("counts only the current document's suggestions: two live and one earlier is two", () => {
+		expect(openSuggestionCount([comment({}), comment({}), comment({ earlierLocation: true })])).toBe(2);
+	});
+});
+
 describe('acceptAllOpen', () => {
 	it('saves the document, accepts, puts the accepted text on screen and reloads the comments', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: ['c1'], skipped: [], text: 'new text', revision: 'r2' });
