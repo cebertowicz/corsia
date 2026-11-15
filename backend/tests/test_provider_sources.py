@@ -843,7 +843,7 @@ class TestRecheck:
         monkeypatch.setattr(check, "_probe_external", probe)
         monkeypatch.setattr(nd, "_sweep_one", sweep)
         monkeypatch.setattr(nd, "_discover_and_notify", discover)
-        monkeypatch.setattr(check, "detect_image_input", no_images)
+        monkeypatch.setattr("llm.external_image_input.detect_image_input", no_images)
         assert _sources(client)[f"external:{sid}"]["state"] == "unverified"
 
         body = client.post("/api/providers/sources/recheck").json()

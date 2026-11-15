@@ -170,7 +170,6 @@ def test_real_health_and_test_recovery_are_readable_without_overlay(
         return False
 
     monkeypatch.setattr("llm.external_image_input.detect_image_input", no_images)
-    monkeypatch.setattr(check, "detect_image_input", no_images)
 
     async def recover():
         server = nd.get_server(sid)

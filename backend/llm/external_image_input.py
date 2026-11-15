@@ -8,9 +8,8 @@ dispatch path a real turn uses. The answer lands on the row's
 in ``metadata_json['image_input']``. A user's choice wins over detection and
 survives rediscovery; nothing is inferred from a model's name.
 
-Probes run only for a model never checked, or when the user tests the endpoint
-or asks to detect again; never on a timer, and never for a model the user
-turned off.
+Connection, Test connection and rediscovery never run image probes. The person
+can explicitly detect image support for one model with Detect now.
 """
 
 from __future__ import annotations
@@ -167,7 +166,9 @@ def image_input_summary(server_id: str) -> str:
     }
     accepting = sorted(pmid for pmid, result in results.items() if result == YES)
     unknown = sorted(pmid for pmid, result in results.items() if result in (None, UNKNOWN))
-    parts = [f"Images: {', '.join(accepting) if accepting else 'no model accepts them'}."]
+    parts = [f"Images: {', '.join(accepting)}."] if accepting else []
+    if not accepting and not unknown:
+        parts.append("Images: no model accepts them.")
     if unknown:
         parts.append(f"Not determined: {', '.join(unknown)}.")
     return " ".join(parts)

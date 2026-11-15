@@ -13,7 +13,7 @@ _BASE = "https://token-plan.example.com/compatible-mode/v1"
 _LIST = "/compatible-mode/v1/models"
 _SERVER = {"id": "ns-tp", "kind": "external", "dialect": "openai", "port": 443,
            "status": "online", "provider": "external"}
-# The image re-check steps the last Test connection took, in order.
+# Any unexpected image checks from Test connection.
 _PROBES: list[tuple] = []
 
 
@@ -21,6 +21,7 @@ def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
     from api import external_connection_check as check
     from infra import product_events
     from llm import network_discovery as nd
+    from llm import external_image_input as eii
 
     stored = {"base_url": _BASE, "declared_models": ["glm-5.3"]} if meta is None else meta
     after = {**(stored or {}), "discovery": discovery or {"models": 1, "error": None}}
@@ -43,8 +44,8 @@ def _check(monkeypatch, reply, *, meta=None, server=None, discovery=None):
     monkeypatch.setattr(nd, "read_server_metadata", lambda sid: next(reads))
     monkeypatch.setattr(nd, "_sweep_one", sweep)
     monkeypatch.setattr(nd, "_discover_and_notify", rediscover)
-    monkeypatch.setattr(check, "detect_image_input", detect)
-    monkeypatch.setattr(check, "mark_for_recheck", lambda sid: _PROBES.append(("mark", sid)))
+    monkeypatch.setattr(eii, "detect_image_input", detect)
+    monkeypatch.setattr(eii, "mark_for_recheck", lambda sid: _PROBES.append(("mark", sid)))
     monkeypatch.setattr(check, "image_input_summary", lambda sid: "Images: glm-5.3.")
     monkeypatch.setattr(product_events, "emit_product_event", lambda *a, **k: None)
     # A declared model answers, so a missing list call is the provider's, not a bad path.
@@ -57,8 +58,7 @@ def test_a_reachable_endpoint_is_swept_rediscovered_and_counted(monkeypatch) -> 
     out, swept = _check(monkeypatch, _resp(200, {"data": []}), discovery={"models": 2, "error": None})
     assert out == {"ok": True, "message": "Reachable. 2 models found. Images: glm-5.3."}
     assert swept == ["ns-tp"]
-    # The test marks every detected model for a re-check before rediscovering.
-    assert _PROBES == [("mark", "ns-tp"), ("probe", "ns-tp")]
+    assert _PROBES == []
 
 
 def test_a_missing_list_call_passes_when_ids_are_declared(monkeypatch) -> None:
@@ -105,7 +105,6 @@ def test_a_failed_discovery_receipt_is_not_hidden_by_old_saved_metadata(
 
     # Exercise the actual discovery -> failed save -> Test receipt boundary.
     monkeypatch.setattr(check, "_probe_external", probe)
-    monkeypatch.setattr(check, "mark_for_recheck", lambda _sid: None)
     monkeypatch.setattr(nd, "_sweep_one", sweep)
     monkeypatch.setattr(nd, "get_server", lambda _sid: _SERVER)
     monkeypatch.setattr(nd, "read_server_metadata", lambda _sid: {

@@ -364,15 +364,8 @@ async def _discover_and_notify(server_id: str) -> dict:
         if not result.get("ok"):
             return result
         if is_external:
-            # External is observe-only: no KV-cache to warm. Models never
-            # checked get their one image probe, then the selector refreshes.
-            from llm.external_image_input import detect_image_input
-
-            try:
-                if await detect_image_input(server_id):
-                    _notify_models_changed_safe()
-            except Exception as e:
-                log.warning("external image probe (%s) failed: %s", server_id, e)
+            # Catalog discovery never grants permission to run a model.
+            # Image detection requires the person's per-model Detect now action.
             return result
         try:
             from llm.network_endpoints import build_api_base

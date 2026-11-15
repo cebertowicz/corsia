@@ -1,8 +1,8 @@
 """External image support is detected per model, and a user's choice sticks.
 
-A generic model list reports no input types, so every External row used to say
-text-only. Each model is now asked once, with a test image; rediscovery keeps
-the answer, and a user's choice outranks detection.
+A generic model list reports no input types. Connection and discovery leave
+image support unchecked; explicit detection can send a test image. Rediscovery
+keeps saved answers, and a user's choice outranks detection.
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ def test_an_unknown_model_is_reported_not_created(isolated_db, monkeypatch) -> N
     assert asyncio.run(eii.set_image_input(_SID, "nope", "no")) is False
 
 
-def test_discovery_of_an_external_endpoint_probes_its_unchecked_models(monkeypatch) -> None:
+def test_discovery_of_an_external_endpoint_never_probes_unchecked_models(monkeypatch) -> None:
     from llm import external_provider as ep
     from llm import network_discovery as nd
 
@@ -242,7 +242,7 @@ def test_discovery_of_an_external_endpoint_probes_its_unchecked_models(monkeypat
 
     asyncio.run(nd._discover_and_notify(_SID))
 
-    assert probed == [_SID]
+    assert probed == []
 
 
 def test_the_route_pins_a_choice_and_refuses_an_unknown_model(isolated_db) -> None:
@@ -258,6 +258,23 @@ def test_the_route_pins_a_choice_and_refuses_an_unknown_model(isolated_db) -> No
     with pytest.raises(HTTPException) as missing:
         asyncio.run(routes.set_model_image_input(_SID, "nope", routes.ImageInputBody(mode="no")))
     assert missing.value.status_code == 404
+
+
+def test_unchecked_image_support_is_not_reported_as_text_only(isolated_db) -> None:
+    _seed(isolated_db, "loaded", "unloaded")
+
+    assert eii.image_input_summary(_SID) == "Not determined: loaded, unloaded."
+    assert _row(isolated_db, "loaded")[1] == {}
+    assert _row(isolated_db, "unloaded")[1] == {}
+
+
+def test_a_rejected_model_does_not_make_unchecked_models_text_only(isolated_db) -> None:
+    _seed(isolated_db, "a", "b")
+    asyncio.run(eii.set_image_input(_SID, "a", "no"))
+
+    assert eii.image_input_summary(_SID) == "Not determined: b."
+    asyncio.run(eii.set_image_input(_SID, "b", "no"))
+    assert eii.image_input_summary(_SID) == "Images: no model accepts them."
 
 
 def test_the_summary_names_the_models_that_accept_images(isolated_db, monkeypatch) -> None:
