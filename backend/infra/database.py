@@ -18,7 +18,7 @@ from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
 from infra.db_connection import (_NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane,
-                                 checkpoint_and_close, refuse_lane_write)
+                                 checkpoint_and_close, refuse_lane_write, register_message_sql_functions)
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +29,8 @@ _all_connections: list[sqlite3.Connection] = []
 CONNECTION_BUSY_TIMEOUT_MS = 5000
 CONNECTION_BUSY_TIMEOUT_SECONDS = CONNECTION_BUSY_TIMEOUT_MS / 1000
 
-# Temporary diagnosis, log only; must never grow into retries, recovery, or suppression.
-# (1) Issue #1077: in-process writers queue FIFO on their file's ticket (infra.write_admission),
-# so a lock refusal is a ticket wait past its bound or another process's writer, and the ticket
+# Temporary diagnosis (log only; no retries, recovery, or suppression). Issue #1077: in-process writers
+# queue FIFO (infra.write_admission); refusal means a wait past its bound or another process's writer. The ticket
 # names the holder; errorcode/errorname tell SQLITE_BUSY, SQLITE_BUSY_SNAPSHOT, SQLITE_LOCKED and
 # CORSIA_ADMISSION_* (errorcode=None) apart. _log_database_lock, write_admission.sqlite_errorname_tag
 # and write_admission._log_slow_wait are that fix's acceptance evidence: delete them in the change
@@ -107,6 +106,7 @@ def _make_connection(path: str) -> sqlite3.Connection:
         setattr(conn, "wal_checkpoint", WalCheckpoint.configure(conn))
         conn.commit()
         apply_thread_lane(conn)
+        register_message_sql_functions(conn)
         startup_progress.watch(conn)
     except BaseException:
         conn.close()

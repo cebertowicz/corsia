@@ -69,6 +69,13 @@ def _bulk_authorizer(action: int, arg1: str | None, arg2: str | None, db_name: s
     return sqlite3.SQLITE_DENY
 
 
+def register_message_sql_functions(conn: sqlite3.Connection) -> None:
+    """Register the shared provider-limit classifier for transcript reads."""
+    from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
+
+    conn.create_function("is_provider_usage_limit", 1, is_provider_usage_or_quota_limit, deterministic=True)
+
+
 def apply_thread_lane(conn: "PooledConnection") -> None:
     """Make a new pooled connection read-only when its thread serves the read or bulk lane.
 
