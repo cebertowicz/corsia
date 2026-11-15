@@ -294,13 +294,10 @@ async def chat_completion(
             model, messages, tools, destination_fit_input_identity,
             destination_fit_current_input,
         )
-    requested_max_tokens = (
-        max(1, int(max_tokens)) if max_tokens is not None else None
-    )
-
     is_omlx = api_key == "omlx"
-
-    output_budget = _resolve_output_budget(model, requested_max_tokens)
+    output_budget = _resolve_output_budget(
+        model, max(1, int(max_tokens)) if max_tokens is not None else None,
+    )
 
     if model.startswith("openai/") and api_base is None:
         return await _dispatch_openai(
