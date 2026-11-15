@@ -41,13 +41,14 @@ def test_a_domain_that_just_fits_keeps_the_wording_unclipped(kind):
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_a_domain_one_character_over_is_clipped_from_its_start_to_exactly_the_cap(kind):
+    """The one-over boundary: 61 characters unclipped, so 60 with the ellipsis in front."""
     make, template = KINDS[kind]
     room = MAX_NODE_TITLE - len(template.format(""))
     host = _host(room + 1)
     title = make(host).title()
-    assert title == template.format(host[:room - 1] + "…")
+    assert title == template.format("…" + host[-(room - 1):])
     assert len(title) == MAX_NODE_TITLE
-    assert title.endswith("…)")
+    assert title.endswith(SUFFIX + ")")
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -55,7 +56,22 @@ def test_a_host_with_no_registrable_domain_is_clipped_too(kind):
     make, _template = KINDS[kind]
     title = make("[2001:db8:85a3:8d3:1319:8a2e:370:7348]").title()
     assert len(title) == MAX_NODE_TITLE
-    assert title.endswith("…)")
+    assert title.endswith(":7348])")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("host, site_end", [
+    ("accounts.google.com.secure-login-evil-phishing-site.com", "site.com"),
+    ("accounts.google.com.secure-login-evil-phishing-site.example", "site.example"),
+])
+def test_a_phishing_shaped_host_keeps_the_end_that_names_the_site(kind, host, site_end):
+    """The trusted-looking name sits on the left of a phishing host; the clip must drop it, never the right end."""
+    make, _template = KINDS[kind]
+    title = make(host).title()
+    assert len(title) == MAX_NODE_TITLE
+    assert title.endswith(site_end + ")")
+    assert "google" not in title
+    assert "(…" in title
 
 
 @pytest.mark.asyncio
@@ -74,4 +90,4 @@ async def test_a_long_domain_still_writes_the_row_and_the_step_is_held(plan, kin
     assert lifecycle.has_step(THREAD)
     [step] = _steps(db)
     assert len(step["title"]) <= MAX_NODE_TITLE
-    assert "longersite" in step["title"]
+    assert "sitename12.org)" in step["title"]

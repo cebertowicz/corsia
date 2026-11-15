@@ -53,13 +53,13 @@ class BrowserStep:
     def _titled(self, wording: str) -> str:
         """``wording`` and the page's domain in parentheses, never over the plan's title cap.
 
-        The wording is fixed; a domain too long for the room left is clipped from its start, so the title is
-        exactly the cap and the plan row is always written.
+        The wording is fixed; a domain too long for the room left is clipped from its start (an ellipsis in front), so the
+        registrable end that names the site survives and the title is exactly the cap; the plan row is always written.
         """
         domain = self.domain()
         room = MAX_NODE_TITLE - len(wording) - len(" ()")
         if len(domain) > room:
-            domain = f"{domain[:room - 1]}…"
+            domain = f"…{domain[-(room - 1):]}"
         return f"{wording} ({domain})"
 
     def description(self) -> str:
