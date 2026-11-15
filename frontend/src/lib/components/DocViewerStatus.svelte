@@ -35,6 +35,7 @@
 		onOpenComments,
 		freshness,
 		ownership = null,
+		headerStandIn = false,
 		onOwnershipChanged,
 		onFeedbackChanged,
 		onMarkVerified,
@@ -75,6 +76,8 @@
 		freshness: DocumentFreshness | null;
 		/** Who owns and supervises a registered document; its row shows both, each with its own picker. */
 		ownership?: DocOwnership | null;
+		/** The row is the one this tab last showed, drawn before the load answered: its owner pickers and Mark verified wait for the load. */
+		headerStandIn?: boolean;
 		onOwnershipChanged?: (value: DocOwnership) => void;
 		onFeedbackChanged?: () => void | Promise<void>;
 		onMarkVerified?: () => Promise<void>;
@@ -118,6 +121,7 @@
 		detailsOpen = false;
 		verificationError = '';
 		verificationNotice = '';
+		verifying = false;
 	});
 
 	async function changeImmediateDelivery(value: boolean): Promise<void> {
@@ -129,15 +133,16 @@
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
+		const started = artifactId; // the answer belongs to the document it started on
 		verifying = true;
 		verificationError = '';
 		try {
 			await onMarkVerified();
-			verificationNotice = 'Document marked verified.';
+			if (artifactId === started) verificationNotice = 'Document marked verified.';
 		} catch (error) {
-			verificationError = error instanceof Error ? error.message : 'Could not mark this document verified.';
+			if (artifactId === started) verificationError = error instanceof Error ? error.message : 'Could not mark this document verified.';
 		} finally {
-			verifying = false;
+			if (artifactId === started) verifying = false;
 		}
 	}
 
@@ -232,8 +237,8 @@
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
 {#if (freshness && freshnessPresentation) || showOwnership}
-	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} data-ownership-row={showOwnership || undefined}>
-		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={showOwnership} class:held={headerStandIn} data-ownership-row={showOwnership || undefined}>
+		{#if ownership && artifactId}<div class="metadata-owner">{#key artifactId}<DocOwnerControl {artifactId} {ownership} inert={headerStandIn} onChange={onOwnershipChanged ?? (() => {})} />{/key}</div>
 		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
 		{#if freshnessPresentation?.datetime}
 			<time datetime={freshnessPresentation.datetime}>
@@ -245,7 +250,7 @@
 		{/if}
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if freshness && shouldOfferVerification(freshness)}
-			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
+			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying} disabled={headerStandIn}>Mark verified</Button></span>
 		{/if}
 		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
 	</div>
@@ -283,6 +288,9 @@
 	/* The owner and supervisor items draw their own hover fill and focus ring, which a clipped cell would cut off. */
 	.has-ownership .metadata-owner { overflow: visible; }
 	.verification-action { margin-left: -10px; }
+	/* A remembered row waiting for its load is drawn exactly as the loaded one, so its controls are neither dimmed nor filled on hover; they only don't act yet. */
+	.document-metadata.held :global(button:disabled) { opacity: 1; cursor: default; }
+	.document-metadata.held :global(button.item:disabled:hover) { background: transparent; color: var(--text-secondary); }
 	.metadata-secondary, .document-metadata time { color: var(--text-secondary); }
 	.metadata-error { color: var(--red); }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
