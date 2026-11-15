@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { keepAboveSheet } from './chatCommentViewport';
+import { liftSheetCap } from '$lib/sheetClearance';
 
 function setup(sheetHeight: number) {
 	document.body.innerHTML = '<header class="shell-header"></header><div class="messages"></div><div data-adaptive-drawer><div class="drawer-panel"></div></div>';
@@ -57,5 +58,32 @@ describe('keepAboveSheet', () => {
 		expect(scroller.style.paddingBottom).not.toBe('10px');
 		stop();
 		expect(scroller.style.paddingBottom).toBe('10px');
+	});
+
+	it('once the reader pulls a capped sheet up, neither its growth nor the keyboard after it moves the transcript or caps it again', () => {
+		const { panel, scroller } = setup(300);
+		const resized: ResizeObserverCallback[] = [];
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { resized.push(callback); } observe() {} disconnect() {} });
+		const viewport = new EventTarget();
+		Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+		vi.stubGlobal('cancelAnimationFrame', () => {});
+		const flush = () => frames.splice(0).forEach(callback => callback(0));
+		const pressed = new DOMRect(0, 600, 200, 300);
+		const stop = keepAboveSheet(panel, () => scroller, () => pressed, () => pressed);
+		flush();
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('460px');
+		const placed = scroller.scrollTop;
+		expect(placed).not.toBe(500);
+		liftSheetCap(panel);
+		resized.forEach(callback => callback([], {} as ResizeObserver));
+		flush();
+		viewport.dispatchEvent(new Event('resize'));
+		flush();
+		expect(scroller.scrollTop).toBe(placed);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		stop();
+		delete (window as { visualViewport?: unknown }).visualViewport;
 	});
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dismissDistance, releaseSheetDrag, sheetFly } from './sheetMotion';
 
-const base = { detent: 'full' as const, released: true, raw: 0, elapsed: 500, height: 500 };
+const base = { expandable: false, released: true, raw: 0, elapsed: 500, height: 500 };
 
 describe('sheetFly', () => {
 	it('slides 72px over 260ms, or not at all under reduced motion', () => {
@@ -21,21 +21,21 @@ describe('dismissDistance', () => {
 });
 
 describe('releaseSheetDrag', () => {
-	it('expands a half sheet on a 40px rise or a quick tap', () => {
-		expect(releaseSheetDrag({ ...base, detent: 'half', raw: -40 })).toBe('expand');
-		expect(releaseSheetDrag({ ...base, detent: 'half', raw: 3, elapsed: 200 })).toBe('expand');
-		expect(releaseSheetDrag({ ...base, detent: 'half', raw: 3, elapsed: 400 })).toBe('settle');
+	it('expands a sheet that can grow on a 40px rise or a quick tap', () => {
+		expect(releaseSheetDrag({ ...base, expandable: true, raw: -40 })).toBe('expand');
+		expect(releaseSheetDrag({ ...base, expandable: true, raw: 3, elapsed: 200 })).toBe('expand');
+		expect(releaseSheetDrag({ ...base, expandable: true, raw: 3, elapsed: 400 })).toBe('settle');
 	});
 
-	it('never expands a full sheet or on a cancelled pointer', () => {
+	it('never expands a sheet that cannot grow, or on a cancelled pointer', () => {
 		expect(releaseSheetDrag({ ...base, raw: -60 })).toBe('settle');
-		expect(releaseSheetDrag({ ...base, detent: 'half', released: false, raw: -60 })).toBe('settle');
+		expect(releaseSheetDrag({ ...base, expandable: true, released: false, raw: -60 })).toBe('settle');
 	});
 
 	it('dismisses past the dismiss distance', () => {
 		expect(releaseSheetDrag({ ...base, raw: 119 })).toBe('settle');
 		expect(releaseSheetDrag({ ...base, raw: 120 })).toBe('dismiss');
-		expect(releaseSheetDrag({ ...base, detent: 'half', released: false, raw: 120 })).toBe('dismiss');
+		expect(releaseSheetDrag({ ...base, expandable: true, released: false, raw: 120 })).toBe('dismiss');
 	});
 
 	it('dismisses a fast flick past 64px', () => {

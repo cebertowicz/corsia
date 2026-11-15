@@ -10,13 +10,29 @@ const MIN_SHEET = 200;
 /**
  * Lets a bottom sheet rise only as far as leaves room above it for the text it was opened from (`height` tall, with a gap each side), under
  * the top of the visible page (`regionTop`). The sheet's own content scrolls. A sheet that is shorter than the room is not changed.
- * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled.
+ * Idempotent: it depends only on the sheet's bottom edge, never on where the page is scrolled. A sheet the reader pulled up stays up.
  */
 export function capSheetAboveText(panel: HTMLElement, text: { height: number; regionTop: number }): void {
+	if (raised.has(panel)) return;
 	const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
 	if (!backdrop) return;
 	const room = backdrop.getBoundingClientRect().bottom - (text.regionTop + SHEET_GAP + text.height + SHEET_GAP);
 	panel.style.setProperty('--drawer-text-cap', `${Math.max(MIN_SHEET, Math.floor(room))}px`);
+}
+
+/** Sheets the reader pulled up past their cap; each one is forgotten with its element, when the sheet closes. */
+const raised = new WeakSet<HTMLElement>();
+
+/** Whether a sheet is held below its height by `capSheetAboveText`, so pulling its grabber up grows it. */
+export const sheetCapped = (panel: HTMLElement | null): boolean => !!panel && !raised.has(panel) && panel.style.getPropertyValue('--drawer-text-cap') !== '';
+
+/** Whether the reader pulled this sheet up: until it closes, nothing caps it again or moves the page for it. */
+export const sheetRaised = (panel: HTMLElement | null): boolean => !!panel && raised.has(panel);
+
+/** The reader pulled a capped sheet up: it grows to its full height, over the text if it must, and stays there until it closes. */
+export function liftSheetCap(panel: HTMLElement): void {
+	raised.add(panel);
+	panel.style.removeProperty('--drawer-text-cap');
 }
 
 const roomAdded = new WeakMap<HTMLElement, string>();

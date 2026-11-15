@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capSheetAboveText, giveBackRoom, keptWhole, placeAboveSheet, SHEET_GAP } from './sheetClearance';
+import { capSheetAboveText, giveBackRoom, keptWhole, liftSheetCap, placeAboveSheet, SHEET_GAP, sheetCapped, sheetRaised } from './sheetClearance';
 
 function sheet(backdropBottom: number): HTMLElement {
 	const backdrop = document.createElement('div');
@@ -36,6 +36,32 @@ describe('capSheetAboveText', () => {
 		const panel = document.createElement('div');
 		capSheetAboveText(panel, { height: 21, regionTop: 125 });
 		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+});
+
+describe('liftSheetCap', () => {
+	it('only a capped sheet can be pulled up, and once it is, it stays up: nothing caps it again', () => {
+		const panel = sheet(852);
+		expect(sheetCapped(panel)).toBe(false);
+		capSheetAboveText(panel, { height: 400, regionTop: 100 });
+		expect(sheetCapped(panel)).toBe(true);
+		expect(sheetRaised(panel)).toBe(false);
+		liftSheetCap(panel);
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+		expect(sheetRaised(panel)).toBe(true);
+		expect(sheetCapped(panel)).toBe(false);
+		capSheetAboveText(panel, { height: 400, regionTop: 100 });
+		expect(panel.style.getPropertyValue('--drawer-text-cap')).toBe('');
+	});
+
+	it('a new sheet starts capped again', () => {
+		const first = sheet(852);
+		capSheetAboveText(first, { height: 400, regionTop: 100 });
+		liftSheetCap(first);
+		const next = sheet(852);
+		capSheetAboveText(next, { height: 400, regionTop: 100 });
+		expect(sheetCapped(next)).toBe(true);
+		expect(sheetRaised(null)).toBe(false);
 	});
 });
 

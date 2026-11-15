@@ -8,7 +8,10 @@ const { pressSpan, visibleRegion, releasePlace, capSheetAboveText, placeAboveShe
 vi.mock('$lib/cm/comment-marks', () => ({ pressSpan }));
 vi.mock('$lib/cm/visible-region', () => ({ visibleRegion }));
 vi.mock('$lib/documentReadingPlace', () => ({ releasePlace }));
-vi.mock('$lib/sheetClearance', () => ({ capSheetAboveText, placeAboveSheet, giveBackRoom }));
+// The real raised-sheet record, so the test pulls a sheet up as AdaptiveDrawer does; the cap and the placement are watched.
+vi.mock('$lib/sheetClearance', async (actual) => ({ ...(await actual<typeof import('$lib/sheetClearance')>()), capSheetAboveText, placeAboveSheet, giveBackRoom }));
+
+import { liftSheetCap } from '$lib/sheetClearance';
 
 import { createPressReveal } from './docPressReveal.svelte';
 
@@ -43,6 +46,24 @@ describe('createPressReveal', () => {
 		expect(capSheetAboveText).toHaveBeenCalledWith(panel, span);
 		expect(placeAboveSheet).toHaveBeenCalledWith(scroller, span, { top: 100, sheetTop: 500 }, true);
 		expect(releasePlace).toHaveBeenCalledWith(view);
+	});
+
+	it('moves nothing once the reader pulls the sheet up: not the growth itself, not the keyboard opening after it', () => {
+		pressSpan.mockReturnValue(span);
+		visibleRegion.mockReturnValue({ scroller, band: { top: 100, bottom: 500 } });
+		const panel = document.createElement('div');
+		const { reveal } = setup();
+		reveal.notePress(['c1'], new MouseEvent('click', { detail: 1 }));
+		reveal.revealCard(true, panel);
+		expect(placeAboveSheet).toHaveBeenCalledTimes(1);
+		liftSheetCap(panel);
+		// The sheet's growth (its ResizeObserver tick), then the keyboard opening under Reply (a visual viewport resize): each re-runs the reveal.
+		reveal.revealCard(false, panel);
+		visibleRegion.mockReturnValue({ scroller, band: { top: 100, bottom: 300 } });
+		reveal.revealCard(false, panel);
+		expect(capSheetAboveText).toHaveBeenCalledTimes(1);
+		expect(placeAboveSheet).toHaveBeenCalledTimes(1);
+		expect(releasePlace).toHaveBeenCalledTimes(1);
 	});
 
 	it('places nothing for a comment that was not opened by a press, and forgets a press once its sheet is gone, giving back the room it added', () => {

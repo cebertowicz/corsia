@@ -6,10 +6,10 @@ function pointer(type: string, clientY: number, { pointerId = 7, button = 0 } = 
 	return { type, clientY, pointerId, button, currentTarget: handle } as unknown as PointerEvent;
 }
 
-function drag(detent: 'full' | 'half' = 'full') {
+function drag(expandable = false) {
 	const onExpand = vi.fn();
 	const onDismiss = vi.fn();
-	const sheet = createSheetDrag({ detent: () => detent, height: () => 500, onExpand, onDismiss });
+	const sheet = createSheetDrag({ expandable: () => expandable, height: () => 500, onExpand, onDismiss });
 	return { sheet, onExpand, onDismiss };
 }
 
@@ -20,6 +20,7 @@ describe('createSheetDrag', () => {
 		expect(sheet.dragging).toBe(true);
 		sheet.move(pointer('pointermove', 80));
 		expect(sheet.y).toBe(0);
+		expect(sheet.pull).toBe(0);
 		sheet.move(pointer('pointermove', 140));
 		expect(sheet.y).toBe(40);
 		sheet.finish(pointer('pointerup', 140));
@@ -36,8 +37,38 @@ describe('createSheetDrag', () => {
 		expect(onDismiss).toHaveBeenCalledOnce();
 	});
 
-	it('expands a half sheet on a quick tap, but not on a cancelled pointer', () => {
-		const { sheet, onExpand } = drag('half');
+	it('grows with the pointer while it can, expands on a 40px rise, and drops the pull on release', () => {
+		const { sheet, onExpand, onDismiss } = drag(true);
+		sheet.start(pointer('pointerdown', 300));
+		sheet.move(pointer('pointermove', 270));
+		expect(sheet.pull).toBe(30);
+		expect(sheet.y).toBe(0);
+		sheet.move(pointer('pointermove', 240));
+		expect(sheet.pull).toBe(60);
+		sheet.finish(pointer('pointerup', 240));
+		expect(onExpand).toHaveBeenCalledOnce();
+		expect(onDismiss).not.toHaveBeenCalled();
+		expect(sheet.pull).toBe(0);
+	});
+
+	it('a short pull settles back, and a pull that turns down still dismisses', () => {
+		const { sheet, onExpand, onDismiss } = drag(true);
+		sheet.start(pointer('pointerdown', 300));
+		sheet.move(pointer('pointermove', 280));
+		sheet.finish(pointer('pointerup', 280));
+		expect(onExpand).not.toHaveBeenCalled();
+		expect(sheet.pull).toBe(0);
+		sheet.start(pointer('pointerdown', 300));
+		sheet.move(pointer('pointermove', 260));
+		sheet.move(pointer('pointermove', 430));
+		expect(sheet.pull).toBe(0);
+		expect(sheet.y).toBe(130);
+		sheet.finish(pointer('pointerup', 430));
+		expect(onDismiss).toHaveBeenCalledOnce();
+	});
+
+	it('expands a sheet that can grow on a quick tap, but not on a cancelled pointer', () => {
+		const { sheet, onExpand } = drag(true);
 		sheet.start(pointer('pointerdown', 100));
 		sheet.finish(pointer('pointercancel', 100));
 		expect(onExpand).not.toHaveBeenCalled();

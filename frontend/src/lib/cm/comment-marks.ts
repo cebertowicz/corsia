@@ -129,7 +129,9 @@ function spanBoxAt(current: EditorView, from: number, to: number, widget: Return
 export function pressSpan(view: EditorView, range: { from: number; to: number }, at: number): { top: number; bottom: number; height: number; regionTop: number } | null {
 	const length = view.state.doc.length;
 	const whole = spanBoxAt(view, Math.min(range.from, length), Math.min(range.to, length), widgetTarget(view, Math.min(range.from, length)));
-	const line = boxAt(view, Math.min(at, length), widgetTarget(view, Math.min(at, length)));
+	const widget = widgetTarget(view, Math.min(at, length)), drawn = boxAt(view, Math.min(at, length), widget);
+	// A table row or a diagram is one box with no lines of its own: it is measured in the document's lines, and past three of them only its top line is kept.
+	const line = widget && drawn ? { top: drawn.top, bottom: drawn.top + view.defaultLineHeight } : drawn;
 	if (!whole || !line) return null;
 	const lineHeight = line.bottom - line.top, regionTop = visibleRegion(view).band.top;
 	const box = keptWhole(whole.bottom - whole.top, lineHeight) ? whole : line;

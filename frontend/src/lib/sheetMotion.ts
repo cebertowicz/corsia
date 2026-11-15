@@ -17,12 +17,14 @@ export function dismissDistance(height: number): number {
 export type SheetRelease = 'expand' | 'dismiss' | 'settle';
 
 /**
- * Where a released grabber drag leaves the sheet. A half sheet goes full on a pointer-up that rose 40 px, or on a
- * quick tap (under 6 px within 350 ms). Any sheet dismisses past its dismiss distance, or past 64 px on a flick faster
- * than 0.75 px/ms. Anything else settles back. A cancelled pointer never expands the sheet.
+ * Where a released grabber drag leaves the sheet. A sheet that can grow (a half sheet, or one held below its height to
+ * leave its text room) grows on a pointer-up that rose 40 px, or on a quick tap (under 6 px within 350 ms). Any sheet
+ * dismisses past its dismiss distance, or past 64 px on a flick faster than 0.75 px/ms. Anything else settles back.
+ * A cancelled pointer never expands the sheet.
  */
-export function releaseSheetDrag({ detent, released, raw, elapsed, height }: {
-	detent: 'full' | 'half';
+export function releaseSheetDrag({ expandable, released, raw, elapsed, height }: {
+	/** The sheet is shorter than it may be: a half sheet, or one capped above its text. */
+	expandable: boolean;
 	/** The pointer was lifted, rather than cancelled. */
 	released: boolean;
 	/** Vertical travel since the press, negative upwards. */
@@ -32,7 +34,7 @@ export function releaseSheetDrag({ detent, released, raw, elapsed, height }: {
 }): SheetRelease {
 	const time = Math.max(1, elapsed);
 	const down = Math.max(0, raw);
-	if (detent === 'half' && released && (raw <= -40 || (Math.abs(raw) < 6 && time < 350))) return 'expand';
+	if (expandable && released && (raw <= -40 || (Math.abs(raw) < 6 && time < 350))) return 'expand';
 	if (down >= dismissDistance(height) || (down >= 64 && down / time > 0.75)) return 'dismiss';
 	return 'settle';
 }
