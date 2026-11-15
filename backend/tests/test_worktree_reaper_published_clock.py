@@ -83,7 +83,7 @@ def _run(repo: Path):
 
 
 def test_threshold_constants_are_literal():
-    assert worktree_reaper.PUBLISHED_IDLE_THRESHOLD_SECONDS == 24 * HOUR
+    assert worktree_reaper.SHORT_IDLE_THRESHOLD_SECONDS == 24 * HOUR
     assert worktree_reaper.IDLE_THRESHOLD_SECONDS == 7 * 24 * HOUR
 
 

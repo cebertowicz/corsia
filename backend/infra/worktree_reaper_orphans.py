@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from infra.worktree_reaper_checks import GONE_OWNER_IDLE_SECONDS, CheckContext, RemovalVerdict
+from infra.worktree_reaper_checks import SHORT_IDLE_THRESHOLD_SECONDS, CheckContext, RemovalVerdict
 from infra.worktree_reaper_probe import ReaperGitError, list_worktrees
 from infra.worktree_reaper_scan import Orphan, newest_tree_mtime, owner_thread
 
@@ -48,7 +48,7 @@ def orphan_skip_reason(
     worktree records, at one that no longer exists, does not keep a tree Git
     has already forgotten when either it is a shell a removal left behind (no
     subdirectory) or its owner is purged; it then goes once idle for
-    ``GONE_OWNER_IDLE_SECONDS``. Orphans are never salvaged, so a full tree whose
+    ``SHORT_IDLE_THRESHOLD_SECONDS``. Orphans are never salvaged, so a full tree whose
     record was pruned while its owner lives or can come back (archived) keeps its
     ``.git`` entry's protection. Every check reads live
     state, so it doubles as the recheck.
@@ -63,7 +63,7 @@ def orphan_skip_reason(
     if not forgotten and os.path.lexists(path / ".git"):
         return "git_entry_present", None
     if forgotten:
-        threshold_seconds = min(threshold_seconds, GONE_OWNER_IDLE_SECONDS)
+        threshold_seconds = min(threshold_seconds, SHORT_IDLE_THRESHOLD_SECONDS)
     try:
         registered = {item.path for item in list_worktrees(ctx.repo)}
     except ReaperGitError:

@@ -78,12 +78,18 @@ async def wait_for_headed_window(endpoint, socket_dir):
             frames = asyncio.Queue()
             cast = browser_screencast.PaneScreencast(endpoint, lambda message: frames.put_nowait(json.loads(message)))
             running = asyncio.create_task(cast.run())
+            arrived = asyncio.ensure_future(frames.get())
             try:
-                frame = await frames.get()
-                assert frame['data']
+                await asyncio.wait({arrived, running}, return_when=asyncio.FIRST_COMPLETED)
+                if not arrived.done():
+                    # A screencast that ended explains the missing frame better than a timeout.
+                    error = running.exception()
+                    raise AssertionError(f'headed fixture screencast ended before its first frame: {error!r}') from error
+                assert arrived.result()['data']
             finally:
+                arrived.cancel()
                 running.cancel()
-                await asyncio.gather(running, return_exceptions=True)
+                await asyncio.gather(arrived, running, return_exceptions=True)
     except TimeoutError as exc:
         if owned is None:
             raise AssertionError('headed fixture has no owned X display') from exc

@@ -119,9 +119,9 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
         assert person_owner_label("project:p1", db=db, multi_person=False) == "Not set"
         assert person_owner_label(None, db=db, multi_person=False) == "Not set"
         assert person_owner_label("agent-1", db=db, multi_person=False) == "Document agent"
-        # Shared by everyone while more than one person uses CORSIA, as the picker's refusal says.
-        assert person_owner_label("ui", db=db, multi_person=True) == "Everyone"
-        assert person_owner_label("project:p1", db=db, multi_person=True) == "Everyone"
+        # While more than one person uses CORSIA, no person owns a shared document: no agent owns it yet.
+        assert person_owner_label("ui", db=db, multi_person=True) == "Not set"
+        assert person_owner_label("project:p1", db=db, multi_person=True) == "Not set"
         assert person_owner_label(None, db=db, multi_person=True) == "Not set"
         assert person_owner_label("agent-1", db=db, multi_person=True) == "Document agent"
     finally:
@@ -136,11 +136,11 @@ def test_the_owner_reads_the_same_word_on_every_person_facing_surface(owned_docu
         # Agents keep their own wording; every person-facing read asks for the person's.
         assert artifact_freshness(artifact, path, db=db)["owner_name"] == "the user"
         assert artifact_freshness(artifact, path, db=db, multi_person=False)["owner_name"] == "You"
-        assert artifact_freshness(artifact, path, db=db, multi_person=True)["owner_name"] == "Everyone"
+        assert artifact_freshness(artifact, path, db=db, multi_person=True)["owner_name"] == "Not set"
     finally:
         db.close()
     seed_account(OTHER_USER, OTHER_TOKEN)
-    assert _view(artifact_id)["owner"]["label"] == "Everyone"
+    assert _view(artifact_id)["owner"]["label"] == "Not set"
     _one_person_account()
     _set_owner(artifact_id, "project:p1")
     assert _view(artifact_id)["owner"]["label"] == "Not set"
@@ -382,5 +382,5 @@ def test_a_pick_on_a_shared_document_keeps_routing_when_the_install_becomes_mult
 
     seed_account(OTHER_USER, OTHER_TOKEN)
     view = _view(artifact_id)
-    assert (view["supervisor"]["id"], view["can_change"], view["choices"], view["owner"]["label"]) == ("agent-2", False, [], "Everyone")
+    assert (view["supervisor"]["id"], view["can_change"], view["choices"], view["owner"]["label"]) == ("agent-2", False, [], "Not set")
     assert _comment_recipients(artifact_id) == ("agent-2",)

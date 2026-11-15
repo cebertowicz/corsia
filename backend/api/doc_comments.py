@@ -227,12 +227,12 @@ def _person_writer(user: dict, saved: dict):
     """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
-        _suggestion_author: str | None,
+        _suggestion_author: str | None, accepted: tuple[str, ...],
     ) -> dict:
         try:
             receipt = await save_document_text(
                 DocumentSave(path=path, text=text, project_id=project_id), user["id"], reason=reason,
-                expected_sha256=expected_sha256,
+                expected_sha256=expected_sha256, accepted=accepted,
             )
         except DocumentSaveError as exc:
             raise document_save_http_exception(exc) from exc

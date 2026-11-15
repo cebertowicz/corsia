@@ -73,7 +73,7 @@ async def test_password_step_settles_then_keeps_eval_and_hidden_password_reads_r
     assert not browser_control.password_page("thread")
 
     for command in (("eval", "document.body.innerText"), ("get", "value", "42"), ("get", "attr", "42", "value")):
-        with pytest.raises(BrowserSessionError, match="asks for a password"):
+        with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access("thread", probe, command)
 
     # Snapshot does not request a password value, and a fresh document has no guard of its own.
@@ -225,7 +225,7 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
         return located[selector]
 
     for selector in ("@e3", "#password", "#gone", "@broken"):
-        with pytest.raises(BrowserSessionError, match="asks for a password"):
+        with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access("thread", probe, ("get", "value", selector), resolve=resolve)
     await browser_control.require_page_access("thread", probe, ("get", "value", "@e4"), resolve=resolve)
     await browser_control.require_page_access("thread", probe, ("get", "attr", "@e4", "href"), resolve=resolve)

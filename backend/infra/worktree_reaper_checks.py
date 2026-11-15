@@ -29,10 +29,11 @@ from infra.worktree_reaper_probe import (
 from infra.worktree_reaper_scan import Candidate, idle_since, newest_tree_mtime
 
 
-# A worktree whose owning worker is gone leaves once idle this long, uncommitted
-# and unpublished work included (copied out first unless the owner is purged,
-# since an archived worker can come back); its branch outlives the tree.
-GONE_OWNER_IDLE_SECONDS = 3600
+# The one short idle clock, a full day. A published worktree with no open PR
+# leaves once idle this long. So does a worktree whose owning worker is gone,
+# uncommitted and unpublished work included (copied out first unless the owner
+# is purged, since an archived worker can come back); its branch outlives the tree.
+SHORT_IDLE_THRESHOLD_SECONDS = 86400
 
 
 def _load_active_threads() -> set[str]:
@@ -44,11 +45,13 @@ def _load_active_threads() -> set[str]:
 def _load_thread_lifecycles() -> dict[str, RemovalVerdict | None]:
     """Map every thread id to how a gone owner's idle worktree leaves; None while it may return.
 
-    DISCARD: purged, so it cannot come back. SALVAGE: a temporary worker (spawned,
-    not a roster agent) archived for any reason; every archive can be undone (the
-    person unarchives it, new activity wakes a dormant one, a settled one is sent
-    back), so its tree is removed only after its uncommitted work is copied out.
-    A durable agent's or a root thread's worktree is never gone here.
+    DISCARD: any purged thread (worker, roster agent or root thread), so it cannot
+    come back; its tree goes with nothing copied out. SALVAGE: a temporary worker
+    (spawned, not a roster agent) archived for any reason; every archive can be
+    undone (the person unarchives it, new activity wakes a dormant one, a settled
+    one is sent back), so its tree is removed only after its uncommitted work is
+    copied out. None: every other thread, including an archived roster agent or
+    root thread; its worktree is never gone here.
     """
     from infra.database import get_db
 
@@ -119,12 +122,12 @@ class CheckContext:
     ) -> str | RemovalVerdict | None:
         """DISCARD, SALVAGE or CLEAN for an idle worktree of a gone owner; None when the rule does not apply.
 
-        Idle means nothing anywhere in the tree changed for the hour, not only
+        Idle means nothing anywhere in the tree changed for the day, not only
         Git's files: someone may be finishing the work in an editor. A tree with
         nothing uncommitted is CLEAN for any owner: its branch keeps every commit,
         so it takes the ordinary clean removal, re-checked in the quarantine.
         """
-        if self.now - idle < GONE_OWNER_IDLE_SECONDS:
+        if self.now - idle < SHORT_IDLE_THRESHOLD_SECONDS:
             return None
         verdict = self.owner_verdict(candidate.owner_thread, fresh=fresh)
         if verdict is None:
@@ -132,7 +135,7 @@ class CheckContext:
         newest = newest_tree_mtime(candidate.path)
         if newest is None:
             return "unreadable"
-        if self.now - newest < GONE_OWNER_IDLE_SECONDS:
+        if self.now - newest < SHORT_IDLE_THRESHOLD_SECONDS:
             return "recent"
         status = _status_reason(self, candidate, False)
         if status == "status_error":

@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 # JSON flag exits non-zero with "unknown flag: --json".
 MIN_GH_VERSION = "2.81.0"
 UPDATE_GH_REASON = f"Update gh to {MIN_GH_VERSION} or later"
+#: GitHub row config key: the last answered check found no GitHub login of the person's own.
+NO_OWN_LOGIN = "no_own_login"
 
 
 class GhUpdateRequired(Exception):
@@ -35,7 +37,9 @@ def gh_status(binary: str) -> tuple[bool | None, str | None]:
     """Sign-in and login from one ``gh auth status --json hosts``; (None, None) if the probe failed.
 
     Read by the same parser as the agents' account, so the login comes from the
-    same subprocess. A gh too old for ``--json`` falls back to ``_status_without_json``.
+    same subprocess. Not signed in, a login is still returned when ``gh`` lists one
+    whose token failed its check. A gh too old for ``--json`` falls back to
+    ``_status_without_json``.
     """
     result = _run([binary, *AUTH_PROBE, "--json", "hosts"])
     if result is None:
