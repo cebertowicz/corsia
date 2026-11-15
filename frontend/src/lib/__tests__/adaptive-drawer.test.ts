@@ -2,7 +2,8 @@ import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
-import { phoneNavOver } from "$lib/stores/phoneNav.svelte";
+import { closesPhoneNav, phoneNavOver } from "$lib/stores/phoneNav.svelte";
+import { resetBackLayers } from "$lib/historyBackLayer";
 
 // The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
 const reduced = vi.hoisted(() => ({ current: false }));
@@ -39,6 +40,8 @@ beforeEach(() => {
   // The drawer portals to document.body, so the host is the body itself.
   host = document.body;
   component = null;
+  // A drawer an earlier test unmounted leaves a pending history cleanup that would swallow this test's Back.
+  resetBackLayers();
 });
 
 afterEach(() => {
@@ -192,6 +195,78 @@ describe("AdaptiveDrawer", () => {
     const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
     expect(backdrop.classList.contains("covered")).toBe(false);
     expect(backdrop.inert).toBeFalsy();
+  });
+
+  describe("under the phone navigation", () => {
+    let releaseNav: () => void = () => {};
+    beforeEach(() => {
+      releaseNav = closesPhoneNav(() => phoneNavOver.set(false));
+    });
+    afterEach(() => releaseNav());
+
+    async function draftUnderNav(onClose: () => void) {
+      component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose, draft: true } });
+      await settle();
+      const field = host.querySelector("[data-draft]") as HTMLTextAreaElement;
+      field.value = "Half a thought";
+      field.focus();
+      phoneNavOver.set(true);
+      await settle();
+      // Covering makes the drawer inert, which takes focus away in a browser; jsdom has no inert, so do what it does.
+      field.blur();
+      const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+      expect(backdrop.classList.contains("covered")).toBe(true);
+      return { field, backdrop };
+    }
+
+    it("Back closes the navigation, not the hidden draft sheet, and the next Back closes the sheet", async () => {
+      const onClose = vi.fn();
+      const { field, backdrop } = await draftUnderNav(onClose);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      await settle();
+      expect(get(phoneNavOver)).toBe(false);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(host.querySelector("[data-adaptive-drawer]")).toBe(backdrop);
+      expect(backdrop.classList.contains("covered")).toBe(false);
+      expect(field.value).toBe("Half a thought");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      await settle();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("Escape closes the navigation before anything else hears it, and the sheet comes back as it was", async () => {
+      const onClose = vi.fn();
+      const { field, backdrop } = await draftUnderNav(onClose);
+      const laterListener = vi.fn();
+      window.addEventListener("keydown", laterListener);
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      window.removeEventListener("keydown", laterListener);
+      await settle();
+      expect(get(phoneNavOver)).toBe(false);
+      expect(laterListener).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(backdrop.classList.contains("covered")).toBe(false);
+      expect(field.value).toBe("Half a thought");
+    });
+
+    it("gives focus back to the field it was on when the navigation goes", async () => {
+      const { field } = await draftUnderNav(vi.fn());
+      expect(document.activeElement).toBe(document.body);
+      phoneNavOver.set(false);
+      await settle();
+      expect(document.activeElement).toBe(field);
+    });
+
+    it("a drawer opened over the navigation keeps today's Back", async () => {
+      phoneNavOver.set(true);
+      const onClose = vi.fn();
+      component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose } });
+      await settle();
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      await settle();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(get(phoneNavOver)).toBe(true);
+    });
   });
 
   it("calls onClosed once after the local outro", async () => {

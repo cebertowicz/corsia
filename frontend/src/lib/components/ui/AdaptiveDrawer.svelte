@@ -105,7 +105,7 @@
 		onExpand: () => { if (detent === 'half') onDetent?.('full'); else if (panel) liftSheetCap(panel); },
 		onDismiss: () => onClose(),
 	});
-	const underNav = coverUnderNav(() => open);
+	const underNav = coverUnderNav(() => open, () => panel);
 
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.

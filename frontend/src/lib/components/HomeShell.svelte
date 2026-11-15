@@ -10,7 +10,7 @@
 	import { paneDragging } from '$lib/stores/paneOpen';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { createMainDrawerController } from '$lib/mainDrawerController';
-	import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
+	import { closesPhoneNav, phoneNavOver } from '$lib/stores/phoneNav.svelte';
 	import { get } from 'svelte/store';
 	import {
 		threadWorkspaces, emptyWorkspace, openSubagentConversationTab,
@@ -119,6 +119,7 @@
 		phoneNavOver.set($isMobile && (sidebarOpen || sidebarDragging));
 		return () => phoneNavOver.set(false);
 	});
+	$effect(() => closesPhoneNav(() => { sidebarOpen = false; }));
 	const workspace = $derived($activeThreadId ? ($threadWorkspaces[$activeThreadId] ?? emptyWorkspace()) : emptyWorkspace());
 	// Only a composed chat surface with a visible leaf may protect split minima.
 	const protectArtifactSplit = $derived(activeView === 'chat' && workspace.tabs.length > 0 && workspace.visible);
