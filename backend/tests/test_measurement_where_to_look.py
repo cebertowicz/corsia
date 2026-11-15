@@ -456,9 +456,11 @@ async def test_one_failed_page_read_raises_its_error_and_leaves_no_other_read_ru
 
     async def failing(*args, **kwargs):
         # Fail only once every other read is in flight, so the cancellation path is what is tested.
-        while len(started) < 3:
+        for _ in range(1000):
+            if len(started) == 3:
+                raise RuntimeError("cost read failed")
             await asyncio.sleep(0)
-        raise RuntimeError("cost read failed")
+        raise AssertionError(f"the other page reads never all started alongside the cost read: {sorted(started)}")
 
     monkeypatch.setattr(page, "series_payload", waiting("series"))
     monkeypatch.setattr(page, "models_read", waiting("models"))
@@ -466,7 +468,8 @@ async def test_one_failed_page_read_raises_its_error_and_leaves_no_other_read_ru
     monkeypatch.setattr(route, "cost_read", failing)
 
     with pytest.raises(RuntimeError, match="cost read failed"):
-        await route.measurement_where_to_look(
-            project="all", agent="none", grain="days", timezone_name="UTC", user={"id": "steve"})
+        # Bounded, so a route that stops running the reads together fails here instead of hanging the run.
+        await asyncio.wait_for(route.measurement_where_to_look(
+            project="all", agent="none", grain="days", timezone_name="UTC", user={"id": "steve"}), timeout=10)
     assert sorted(cancelled) == ["agents", "models", "series"]
     assert all(task.done() for task in pending) and len(pending) == 3
