@@ -27,6 +27,43 @@ async def _script_rule(script_id: str, kind: str) -> str:
     return created["id"]
 
 
+@pytest.mark.asyncio
+async def test_unreachable_intake_keeps_worker_result_for_next_pass(world, monkeypatch):
+    import sqlite3
+    from automation import worker_runner
+    from events import intake
+
+    rule = await make_rule()
+    await request()
+    real, attempts = intake.admit_event, []
+
+    async def unavailable(**kwargs):
+        if kwargs["event_type"] == "worker.result":
+            attempts.append(kwargs["event_id"])
+            raise sqlite3.OperationalError("database is locked")
+        return await real(**kwargs)
+
+    monkeypatch.setattr(intake, "admit_event", unavailable)
+    for _ in range(300):
+        try:
+            await worker_runner.drive()
+        except sqlite3.OperationalError:
+            break
+        await asyncio.sleep(0.02)
+    assert attempts and starts(rule)[0][0] == "started" and not worker_events()
+    recovered = []
+
+    async def capture(**kwargs):
+        recovered.append(kwargs)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(intake, "admit_event", capture)
+    await settle_all()
+    assert starts(rule)[0][0] == "returned"
+    assert worker_events() == [("worker.result", attempts[0])]
+    assert json.loads(recovered[0]["facts"]["result"])["findings"][0]["title"] == "Off by one"
+
+
 # 3 -- a worker killed mid-run: worker.no_result, the identity released, a re-request starts one.
 @pytest.mark.asyncio
 async def test_a_killed_worker_returns_no_result_and_releases_its_request(world):

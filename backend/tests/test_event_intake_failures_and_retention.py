@@ -84,6 +84,24 @@ def _flaky_intake(monkeypatch, outcomes: list[str]):
     return seen
 
 
+def test_unreachable_refusal_retries_the_same_line(intake_world, tmp_path, monkeypatch):
+    real, seen = intake.admit_event, []
+
+    async def admit(**kwargs):
+        seen.append(kwargs["event_id"])
+        if len(seen) == 1:
+            return intake.IntakeResult(False, False, intake.IntakeRefusal("intake_unreachable", "unavailable"), 0)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(intake, "admit_event", admit)
+    monkeypatch.setattr(script_event_lines, "_ADMIT_PAUSE_SECONDS", (0,))
+    schedule = _schedule(intake_world, tmp_path)
+    report = asyncio.run(script_event_lines.admit_events(
+        schedule, RunReport("ok", [], [], events=[_LINE], run_id="r1")))
+    assert report.status == "ok" and len(seen) == 2 and len(set(seen)) == 1
+    assert intake_world.execute("SELECT count(*) FROM event_intake_records WHERE event_id=?", (seen[0],)).fetchone()[0] == 1
+
+
 def _route_rows(db, event_id: str) -> list[tuple]:
     return [tuple(row) for row in db.execute(
         "SELECT rule_id, outcome FROM event_route_decisions WHERE event_id=? ORDER BY id", (event_id,))]
@@ -246,8 +264,15 @@ def test_agent_emit_reports_a_defect_as_internal_error_and_an_outage_as_retryabl
     ))
     monkeypatch.setattr("events.intake.admit_event", _raising(RuntimeError("boom")))
     defect = run()
-    monkeypatch.setattr("events.intake.admit_event", _raising(sqlite3.OperationalError("database is locked")))
+    calls = []
+
+    async def unavailable(**kwargs):
+        calls.append(kwargs["event_id"])
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("events.intake.admit_event", unavailable)
     outage = run()
+    assert len(calls) == 1
 
     assert defect.startswith("Error: internal_error:") and "report it instead of retrying" in defect
     assert outage.startswith("Error: intake_unreachable:") and "Retry with the same event id." in outage
