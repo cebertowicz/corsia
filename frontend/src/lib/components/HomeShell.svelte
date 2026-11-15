@@ -10,6 +10,7 @@
 	import { paneDragging } from '$lib/stores/paneOpen';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { createMainDrawerController } from '$lib/mainDrawerController';
+	import { phoneNavOver } from '$lib/stores/phoneNav.svelte';
 	import { get } from 'svelte/store';
 	import {
 		threadWorkspaces, emptyWorkspace, openSubagentConversationTab,
@@ -103,6 +104,7 @@
 	let artifactHeaderInset = $state<number | null>(null);
 	let headerRightControlsInset = $state(0);
 	let statusBannersHeight = $state(0);
+	let sidebarDragging = $state(false);
 	const mainDrawer = createMainDrawerController({
 		getMainEl: () => mainEl,
 		getSidebarOpen: () => sidebarOpen,
@@ -110,6 +112,12 @@
 		getPaneOpen: () => get(paneOpen) && viewHasPane,
 		setPaneOpen: (open) => paneOpen.set(open),
 		setPaneDragging: (dragging) => paneDragging.set(dragging),
+		setSidebarDragging: (dragging) => { sidebarDragging = dragging; },
+	});
+	// On a phone the navigation slides in over the app: a drawer it comes over is covered until it goes (AdaptiveDrawer).
+	$effect(() => {
+		phoneNavOver.set($isMobile && (sidebarOpen || sidebarDragging));
+		return () => phoneNavOver.set(false);
 	});
 	const workspace = $derived($activeThreadId ? ($threadWorkspaces[$activeThreadId] ?? emptyWorkspace()) : emptyWorkspace());
 	// Only a composed chat surface with a visible leaf may protect split minima.

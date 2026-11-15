@@ -2,6 +2,7 @@ import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
+import { phoneNavOver } from "$lib/stores/phoneNav.svelte";
 
 // The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
 const reduced = vi.hoisted(() => ({ current: false }));
@@ -42,6 +43,7 @@ beforeEach(() => {
 
 afterEach(() => {
   reduced.current = false;
+  phoneNavOver.set(false);
   if (component) unmount(component);
   component = null;
   host.replaceChildren();
@@ -139,6 +141,57 @@ describe("AdaptiveDrawer", () => {
     expect(covered.querySelector('[role="dialog"]')).not.toBeNull();
     expect(covered.classList.contains("covered")).toBe(true);
     expect(covered.inert).toBe(true);
+  });
+
+  it("is covered while the phone navigation is over it, its place kept, and back in reach once the navigation goes", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), detent: "half", tall: true } });
+    await settle();
+    const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    const body = backdrop.querySelector(".drawer-body") as HTMLElement;
+    body.scrollTop = 120;
+    phoneNavOver.set(true);
+    await settle();
+    expect(host.querySelector("[data-adaptive-drawer]")).toBe(backdrop);
+    expect(backdrop.classList.contains("covered")).toBe(true);
+    expect(backdrop.inert).toBe(true);
+    phoneNavOver.set(false);
+    await settle();
+    expect(backdrop.classList.contains("covered")).toBe(false);
+    expect(backdrop.inert).toBeFalsy();
+    expect(backdrop.querySelector(".drawer-body")).toBe(body);
+    expect(body.scrollTop).toBe(120);
+  });
+
+  it("stays in reach when it opened while the phone navigation was already up, until the navigation goes and comes back", async () => {
+    phoneNavOver.set(true);
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+    const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(backdrop.classList.contains("covered")).toBe(false);
+    expect(backdrop.inert).toBeFalsy();
+    phoneNavOver.set(false);
+    await settle();
+    phoneNavOver.set(true);
+    await settle();
+    expect(backdrop.classList.contains("covered")).toBe(true);
+  });
+
+  it("a kept-mounted drawer reopened while the phone navigation is up stays in reach", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), callerControlled: true, keepMounted: true } });
+    await settle();
+    const trigger = host.querySelector("[data-drawer-trigger]") as HTMLButtonElement;
+    trigger.click();
+    await settle();
+    (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    phoneNavOver.set(true);
+    await settle();
+    trigger.click();
+    await settle();
+    const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(backdrop.classList.contains("covered")).toBe(false);
+    expect(backdrop.inert).toBeFalsy();
   });
 
   it("calls onClosed once after the local outro", async () => {

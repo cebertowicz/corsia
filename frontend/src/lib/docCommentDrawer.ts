@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 import type { DocComment } from '$lib/stores/docCommentProjection';
 import { pendingSuggestion } from '$lib/docCanvasComments';
-import { TRANSCRIPT_MOVED } from '$lib/sheetClearance';
+import { sheetHeld, TRANSCRIPT_MOVED } from '$lib/sheetClearance';
 
 /** Image comments follow their tag numbers. */
 export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
@@ -98,14 +98,15 @@ export function presence(report: (shown: boolean) => void) {
 /**
  * Calls `reveal(true)` once a sheet has come up and `reveal(false)` whenever it then moves or changes size (the keyboard rising or
  * falling under a followKeyboard sheet, its content settling) or the transcript beneath it is moved by the keyboard (`TRANSCRIPT_MOVED`), in the next frame so the layout it reads is current. The caller decides
- * what a movement needs: it must not undo a scroll the reader chose. Returns the stop; with no sheet or nothing to call, there is
- * nothing to watch.
+ * what a movement needs: it must not undo a scroll the reader chose. While the reader's drag on the grabber holds the sheet
+ * (`sheetHeld`), nothing is called: the call waits until the sheet settles, then runs once against where it rests. Returns the stop;
+ * with no sheet or nothing to call, there is nothing to watch.
  */
 export function onSheetMoved(panel: HTMLElement | null, reveal?: (opening: boolean) => void): () => void {
 	if (!panel || !reveal) return () => {};
 	const viewport = panel.ownerDocument.defaultView?.visualViewport;
 	let frame = 0, opening = true;
-	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { reveal(opening); opening = false; }); };
+	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { if (sheetHeld(panel)) return schedule(); reveal(opening); opening = false; }); };
 	const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
 	observer?.observe(panel);
 	viewport?.addEventListener('resize', schedule);

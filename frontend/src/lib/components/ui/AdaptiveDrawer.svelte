@@ -11,6 +11,7 @@
 	import { sheetFly } from '$lib/sheetMotion';
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 	import { liftSheetCap, sheetCapped } from '$lib/sheetClearance';
+	import { coverUnderNav } from '$lib/stores/phoneNav.svelte';
 
 	let {
 		ariaLabel,
@@ -100,10 +101,11 @@
 	// A half sheet, or one held below its height to leave its text room above it, grows when pulled up: the one drag path for both.
 	const drag = createSheetDrag({
 		expandable: () => detent === 'half' || sheetCapped(panel),
-		height: () => panel?.clientHeight ?? 480,
+		panel: () => panel,
 		onExpand: () => { if (detent === 'half') onDetent?.('full'); else if (panel) liftSheetCap(panel); },
 		onDismiss: () => onClose(),
 	});
+	const underNav = coverUnderNav(() => open);
 
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.
@@ -146,9 +148,8 @@
 </script>
 
 <!--
-	The backdrop is portaled to `document.body` so no ancestor can clip it, lift
-	or sink it, or decide its stacking by a `:has()` rule. Mounted inside the chat
-	band it was painted only over the chat column in a WebKit webview, leaving the
+	The backdrop is portaled to `document.body` so no ancestor can clip it, lift or sink it, or decide its stacking by a
+	`:has()` rule. Mounted inside the chat band it was painted only over the chat column in a WebKit webview, leaving the
 	rail, the open document and the right pane uncovered.
 -->
 {#if open}
@@ -160,8 +161,8 @@
 	class:within={!!box}
 	class:half={detent === 'half'}
 	class:nonmodal={!modal || detent === 'half'}
-	class:covered
-	inert={covered}
+	class:covered={covered || underNav.covers}
+	inert={covered || underNav.covers}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
 	style:--drawer-bottom="{box?.bottom ?? 0}px"
@@ -234,7 +235,6 @@
 		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
 	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: color-mix(in srgb, var(--glass-scrim) 88%, transparent); }
-	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
 	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
 	.drawer-backdrop.covered { visibility: hidden; }

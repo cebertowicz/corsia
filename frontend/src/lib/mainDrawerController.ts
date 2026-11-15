@@ -14,6 +14,8 @@ interface DrawerControllerOptions {
 	getPaneOpen: () => boolean;
 	setPaneOpen: (open: boolean) => void;
 	setPaneDragging: (dragging: boolean) => void;
+	/** A committed drag is moving the sidebar, so the phone navigation is coming over the app. */
+	setSidebarDragging?: (dragging: boolean) => void;
 }
 
 export function createMainDrawerController(options: DrawerControllerOptions) {
@@ -41,6 +43,10 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		// Marks which drawer the finger is moving, so the phone card rounds its left edge
 		// during a sidebar drag as it does once open (HomeShell.svelte).
 		mainEl.dataset.drawerDrag = dragKind ?? 'sidebar';
+	};
+	const endDragging = () => {
+		options.setPaneDragging(false);
+		options.setSidebarDragging?.(false);
 	};
 	const clearDragTransform = () => {
 		const mainEl = options.getMainEl();
@@ -109,6 +115,7 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		if (!dragCommitted) return;
 		e.preventDefault();
 		if (dragKind === 'pane') options.setPaneDragging(true);
+		else options.setSidebarDragging?.(true);
 		const raw = dragBaseDx + dx;
 		dragCurrentDx = trackDrag(dragKind === 'pane' ? 'pane' : 'sidebar', raw, getSlideWidth(), getPaneWidth());
 		applyDragTransform(dragCurrentDx);
@@ -122,7 +129,7 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		dragActive = false;
 		if (!dragCommitted) {
 			dragKind = null;
-			options.setPaneDragging(false);
+			endDragging();
 			return;
 		}
 		clearDragTransform();
@@ -131,7 +138,7 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		if (dragKind === 'pane') options.setPaneOpen(open);
 		else options.setSidebarOpen(open);
 		dragKind = null;
-		options.setPaneDragging(false);
+		endDragging();
 	};
 
 	// transitionstart/transitionend bubble, so without the target check below
@@ -165,7 +172,7 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		releaseTargetListeners?.();
 		dragActive = false;
 		dragKind = null;
-		options.setPaneDragging(false);
+		endDragging();
 		clearDragTransform();
 	};
 

@@ -24,20 +24,30 @@ export function capSheetAboveText(panel: HTMLElement, text: { height: number; re
 const raised = new WeakSet<HTMLElement>();
 
 /**
- * Whether `capSheetAboveText` holds a sheet below the height it would have without the cap, so pulling its grabber up grows it.
- * Measured: the cap is set on every opened comment, but a short thread under a tall cap is not held. The cap comes off and goes back
- * in the same task, so nothing paints without it.
+ * Whether `capSheetAboveText` holds a sheet below the height its content would take, so pulling its grabber up grows it: the sheet
+ * rests at its cap and its body has more content than it shows. The cap is set on every opened comment, but a short thread under a
+ * tall cap is not held, and a sheet held by the screen's own limit is not held by the cap. Read from the layout as it stands: nothing
+ * is changed to measure it, so no transition starts.
  */
 export function sheetCapped(panel: HTMLElement | null): boolean {
 	if (!panel || raised.has(panel)) return false;
-	const value = panel.style.getPropertyValue('--drawer-text-cap');
-	const cap = Number.parseFloat(value);
-	if (!Number.isFinite(cap)) return false;
-	panel.style.removeProperty('--drawer-text-cap');
-	const natural = panel.getBoundingClientRect().height;
-	panel.style.setProperty('--drawer-text-cap', value);
-	return natural > cap + 1;
+	const cap = Number.parseFloat(panel.style.getPropertyValue('--drawer-text-cap'));
+	const body = panel.querySelector<HTMLElement>(':scope > .drawer-body');
+	if (!Number.isFinite(cap) || !body) return false;
+	return Math.abs(panel.getBoundingClientRect().height - cap) <= 1 && body.scrollHeight - body.clientHeight > 1;
 }
+
+/** Sheets whose grabber is held, or that are settling after it was let go. */
+const pulled = new WeakSet<HTMLElement>();
+
+/** A grabber drag holds the sheet from its press until it settles: while held, nothing places the page or caps the sheet for it (`onSheetMoved`). */
+export function holdSheet(panel: HTMLElement, held: boolean): void {
+	if (held) pulled.add(panel);
+	else pulled.delete(panel);
+}
+
+/** Whether a grabber drag holds this sheet. */
+export const sheetHeld = (panel: HTMLElement | null): boolean => !!panel && pulled.has(panel);
 
 /** Whether the reader pulled this sheet up: until it closes, nothing caps it again or moves the page for it. */
 export const sheetRaised = (panel: HTMLElement | null): boolean => !!panel && raised.has(panel);
