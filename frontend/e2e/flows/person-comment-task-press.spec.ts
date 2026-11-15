@@ -8,6 +8,19 @@ import { shoot, useScheme } from '../support/comment-count-probe';
 
 const repo = path.resolve(process.cwd(), '..');
 
+/** The task's Dismiss all capsule is tucked away while a comment sheet is up: a touch at the centre of `target` lands on it, never on a capsule over it. */
+async function expectTouchLands(target: Locator, what: string) {
+	await target.scrollIntoViewIfNeeded();
+	const box = await target.boundingBox();
+	if (!box) throw new Error(`${what} has no bounds`);
+	const hit = await target.evaluate((el, at) => {
+		const found = document.elementFromPoint(at.x, at.y);
+		return { onTarget: !!found && el.contains(found), capsule: !!found?.closest('.rb-capsule') };
+	}, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+	expect(hit.capsule, `a capsule covers ${what}`).toBe(false);
+	expect(hit.onTarget, `the touch point at the centre of ${what} lands on it`).toBe(true);
+}
+
 // The person's own presses lower the count, as they clear "New": opening a thread (a card press) and deciding a
 // suggestion (Accept, Reject). Reading everything settles the task; a new reply brings it back, after Dismiss all too.
 for (const width of [1440, 393]) test(`comment task press walk at ${width}px`, async ({ page, request }, testInfo) => {
@@ -249,21 +262,27 @@ test.describe('comment task highlight taps', () => {
 			const box = await anchor.evaluate((el) => { const r = el.getClientRects()[0]; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
 			await page.touchscreen.tap(box.x, box.y);
 			await expect(sheet.getByText(body), `the tap on "${quote}" opens its card`).toBeVisible();
-			// The task's Dismiss all capsule is tucked away while the sheet is up: the card's text takes the touch, not a capsule over it.
-			const cardText = sheet.getByText(body).first();
-			const textBox = await cardText.boundingBox();
-			if (!textBox) throw new Error(`The card text "${body}" has no bounds`);
-			const hit = await cardText.evaluate((el, at) => {
-				const found = document.elementFromPoint(at.x, at.y);
-				return { onText: !!found && el.contains(found), capsule: !!found?.closest('.rb-capsule') };
-			}, { x: textBox.x + textBox.width / 2, y: textBox.y + textBox.height / 2 });
-			expect(hit.capsule, `a capsule covers the card text for "${quote}"`).toBe(false);
-			expect(hit.onText, `the touch point at the centre of "${body}" lands on that text`).toBe(true);
+			await expectTouchLands(sheet.getByText(body).first(), `the card text "${body}" of a thread opened from a highlight`);
+			await expectTouchLands(sheet.getByPlaceholder('Reply…').first(), `the reply box of the thread opened from "${quote}"`);
 			await expect(bar).toContainText(`${after} to review`);
 			console.log(`TAP "${quote}": bar=${JSON.stringify(await bar.first().innerText())}`);
 			await light(`${name}-after`);
 			await sheet.getByRole('button', { name: /^Close( comments)?$/ }).tap();
 			await expect(sheet).toHaveCount(0);
 		}
+
+		// The list sheet, opened the way a person does: the comments count in the document header.
+		await page.locator('[data-comments-entry]').tap();
+		await expect(sheet).toBeVisible();
+		const firstCard = sheet.locator('[data-comment-card]').first();
+		await expect(firstCard).toBeVisible();
+		const cardTextAll = await firstCard.innerText();
+		const listBody = ['Which details?', 'Who signs off?', 'Launch when?'].find((known) => cardTextAll.includes(known));
+		if (!listBody) throw new Error(`The first card of the list holds none of the seeded comments: ${cardTextAll}`);
+		await expectTouchLands(firstCard.getByText(listBody).first(), `the first card's text "${listBody}" in the comments list sheet`);
+		// Its reply box shows once the person picks the card, as in the thread case.
+		await firstCard.getByText(listBody).first().tap();
+		await expect(sheet.getByPlaceholder('Reply…').first()).toBeVisible();
+		await expectTouchLands(sheet.getByPlaceholder('Reply…').first(), 'the reply box in the comments list sheet');
 	});
 });
