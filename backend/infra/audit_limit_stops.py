@@ -38,7 +38,7 @@ WITH windows AS (
     FROM readings
     WINDOW w AS (PARTITION BY account_id, window_key ORDER BY julianday(observed_at), id)
 )
-SELECT o.account_id, a.name AS account_name, o.window_key, max(o.window_kind) AS window_kind,
+SELECT o.account_id, o.window_key, max(o.window_kind) AS window_kind,
        coalesce(sum(o.opening=0),0) AS observations,
        coalesce(sum(o.opening=0 AND o.used_percent>=100 AND (
            o.prev_percent IS NULL OR o.prev_percent<100
@@ -46,7 +46,7 @@ SELECT o.account_id, a.name AS account_name, o.window_key, max(o.window_kind) AS
        coalesce(sum(CASE WHEN o.used_percent>=100 THEN max(0,
            min(coalesce(o.next_t,:until_j), coalesce(o.reset_t,:until_j), :until_j)
            - max(o.t,:since_j)) END),0) * 24 AS hours_at_limit
-FROM ordered o LEFT JOIN vendor_accounts a ON a.id=o.account_id
+FROM ordered o
 GROUP BY o.account_id, o.window_key
 ORDER BY o.account_id, o.window_key
 """
@@ -66,10 +66,14 @@ def limit_stops(db: sqlite3.Connection, since: str, until: str) -> list[dict]:
         "since_hi": (start + timedelta(days=1)).date().isoformat(),
         "until_hi": (end + timedelta(days=1)).date().isoformat(),
     }
+    # Names come from their own read: the stops query uses row wildcards, and
+    # no statement touching vendor_accounts may (harness_usage owns usage).
+    names = {row["id"]: row["name"] for row in db.execute("SELECT id, name FROM vendor_accounts")}
     accounts: dict[str, dict] = {}
     for row in db.execute(_LIMIT_STOPS_SQL, params):
         account = accounts.setdefault(row["account_id"], {
-            "account_id": row["account_id"], "account_name": row["account_name"], "windows": [],
+            "account_id": row["account_id"], "account_name": names.get(row["account_id"]),
+            "windows": [],
         })
         account["windows"].append({
             "window_key": row["window_key"], "window_kind": row["window_kind"],
