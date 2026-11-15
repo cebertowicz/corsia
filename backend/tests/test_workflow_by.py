@@ -6,10 +6,15 @@ import uuid
 import pytest
 
 from core.skill_workflow_validation import validate_workflow
+from infra.database import get_db
 from plans import boundary, delegation, mutations, service
 from plans.boundary import PlanActor
+from plans.close_next_bounds import REASON_MAX_BYTES
+from plans.workflow_fields import PERSON_GATE_READY, PERSON_GATE_ROUTE
+from prompts.plan_tools import PERSON_GATE_NAMED
 from tests.child_parent_notice_helpers import db
 from tests.plan_review_helpers import submit_review_evidence
+from tests.test_workflow_gate_handoff import _answer
 from tests.test_workflow_runs import Run, SHIP_BODY
 
 __all__ = ["db"]
@@ -189,3 +194,74 @@ async def test_person_step_after_earlier_steps_is_asked_when_they_finish(isolate
         "verification_result": "passed",
     })
     assert asked() == [first, approve]
+
+
+PERSON_GATE = (
+    "    - {id: work, check: Done, difficulty: {default: routine}}\n"
+    "    - {id: gate, by: person, gate: acceptance, title: Approve the note, check: Approved,"
+    " instruction: '## Review', after: [work], difficulty: {default: routine}}\n"
+)
+
+
+async def _person_gate(tmp_path, monkeypatch, steps=PERSON_GATE):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, steps)})
+    work, gate = (step["id"] for step in (await run.start("ship"))["steps"])
+    return run, work, gate
+
+
+def _done(run, node: str) -> dict:
+    return {"node_id": node, "expected_revision": run.revision(node), "evidence": "d", "verification_result": "passed"}
+
+
+@pytest.mark.asyncio
+async def test_an_agent_cannot_close_the_persons_gate_before_they_answer_its_ask(isolated_db, tmp_path, monkeypatch):
+    run, _work, gate = await _person_gate(tmp_path, monkeypatch)
+    assert (await run.update("mark_done", _done(run, gate))).endswith(PERSON_GATE_ROUTE)
+    _answer(gate, "approved")
+    assert not isinstance(await run.update("mark_done", _done(run, gate)), str)
+
+
+@pytest.mark.asyncio
+async def test_the_persons_own_close_of_their_gate_is_not_refused(isolated_db, tmp_path, monkeypatch):
+    run, _work, gate = await _person_gate(tmp_path, monkeypatch)
+    db = get_db()
+    try:
+        boundary.mutate(
+            run.plan_id, "mark_done", _done(run, gate),
+            actor=PlanActor(None, "user-1", None, kind="user"), provenance="api.plans", mutation_id="person-close", db=db,
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert run.rows("SELECT state FROM plan_nodes WHERE id=?", gate) == [{"state": "accepted"}]
+
+
+@pytest.mark.asyncio
+async def test_a_person_step_that_is_no_gate_keeps_its_agent_close(isolated_db, tmp_path, monkeypatch):
+    run, _work, step = await _person_gate(tmp_path, monkeypatch, PERSON_GATE.replace("gate: acceptance, ", ""))
+    assert not isinstance(await run.update("mark_done", _done(run, step)), str)
+
+
+@pytest.mark.asyncio
+async def test_naming_the_persons_gate_as_next_says_how_to_ask_them(isolated_db, tmp_path, monkeypatch):
+    run, work, gate = await _person_gate(tmp_path, monkeypatch)
+    await run.update("start", {"node_id": work, "expected_revision": run.revision(work)})
+    reply = await run.update("mark_done", {**_done(run, work), "next_node_id": gate})
+    named = reply["next"]["named"]
+    assert (named["started"], named["refusal"], named["reason"]) == (False, "user_assigned", PERSON_GATE_NAMED)
+    assert len(PERSON_GATE_NAMED.encode()) <= REASON_MAX_BYTES
+
+
+@pytest.mark.asyncio
+async def test_closing_the_step_before_the_persons_gate_says_to_ask_them_now(isolated_db, tmp_path, monkeypatch):
+    run, work, gate = await _person_gate(tmp_path, monkeypatch)
+    await run.update("start", {"node_id": work, "expected_revision": run.revision(work)})
+    reply = await run.update("mark_done", _done(run, work))
+    assert reply["person_gate"] == PERSON_GATE_READY.format(title="Approve the note", id=gate)
+
+
+@pytest.mark.asyncio
+async def test_a_person_step_that_is_no_gate_gets_no_ask_line(isolated_db, tmp_path, monkeypatch):
+    run, work, _step = await _person_gate(tmp_path, monkeypatch, PERSON_GATE.replace("gate: acceptance, ", ""))
+    await run.update("start", {"node_id": work, "expected_revision": run.revision(work)})
+    assert "person_gate" not in await run.update("mark_done", _done(run, work))

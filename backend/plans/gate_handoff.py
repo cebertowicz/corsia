@@ -243,7 +243,8 @@ def after_correction(db, source_node_id: str) -> None:
 def refuse_rejected(db, node_id: str, operation: str) -> None:
     """Refuse closing an acceptance gate step whose latest answer is Reject, until a later answer replaces it.
 
-    No answer at all is not refused: some real workflows end a gate as N/A.
+    No answer at all is not refused here: the person may end their own gate as N/A. An agent
+    closing an unanswered person's gate is refused by ``workflow_fields.refuse_unasked_person_gate``.
     """
     if operation not in {"mark_done", "accept", "accept_with_follow_up"}:
         return
@@ -252,9 +253,5 @@ def refuse_rejected(db, node_id: str, operation: str) -> None:
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or creation_payload(db, node_id).get("workflow_gate") != "acceptance":
         return
-    siblings = [row["id"] for row in db.execute(
-        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
-        (node["parent_id"], node["workflow_step"]),
-    )]
-    if latest_verdict(db, siblings) == _REJECTED:
+    if latest_verdict(db, node) == _REJECTED:
         raise service.PlanError(GATE_REJECTED)
