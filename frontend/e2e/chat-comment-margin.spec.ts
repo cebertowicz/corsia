@@ -89,7 +89,7 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	});
 	await highlight.click();
 	await expect(card).toHaveClass(/selected/);
-	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
+	await expect(page.getByRole('dialog', { name: 'Comment', exact: true })).toHaveCount(0);
 	await page.waitForTimeout(1500);
 	const frames = await page.evaluate(() => (window as unknown as { pickFrames: { scrollTop: number; y: number }[] }).pickFrames);
 	const moved = frames.filter((frame) => Math.abs(frame.scrollTop - frames[0].scrollTop) > 0.5 || Math.abs(frame.y - frames[0].y) > 0.5);

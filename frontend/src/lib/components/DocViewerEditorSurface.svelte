@@ -139,6 +139,7 @@
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
 	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
+	export function editorView() { return editor?.editorView(); }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.

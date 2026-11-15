@@ -121,27 +121,33 @@ export function costLine(amount: OperatorCostAmount): string | null {
 	return parts.filter((part): part is string => part !== null).join(' · ') || null;
 }
 
+/** A settled figure plus the time its open spans have run until `now`. */
+export function liveSeconds(part: { settled_seconds: number; open_starts: string[] }, now: number): number {
+	return part.settled_seconds + part.open_starts.reduce((total, start) => total + Math.max(0, Math.floor((now - Date.parse(start)) / 1000)), 0);
+}
+
 /** Time spent in model Turns, separate from cost and wall-clock waiting. */
-export function workingTime(amount: OperatorCostAmount): string | null {
+export function workingTime(amount: OperatorCostAmount, now = Date.now()): string | null {
 	const ran = Object.values(amount.execution.turns).some((count) => count > 0)
-		|| amount.execution.seconds > 0;
+		|| liveSeconds(amount.execution, now) > 0;
 	return ran
-		? lowerBound(duration(amount.execution.seconds), amount.execution.unknown_turns > 0)
+		? lowerBound(duration(liveSeconds(amount.execution, now)), amount.execution.unknown_turns > 0)
 		: null;
 }
 
 /** Wall-clock waiting, separate from both execution time and spend. */
-export function waitingTime(amount: OperatorCostAmount): string | null {
-	return amount.waiting.seconds > 0 ? duration(amount.waiting.seconds) : null;
+export function waitingTime(amount: OperatorCostAmount, now = Date.now()): string | null {
+	const seconds = liveSeconds(amount.waiting, now);
+	return seconds > 0 ? duration(seconds) : null;
 }
 
 /** Whether sub-steps add a known fact this human summary renders. */
-export function ownDiffers(node: OperatorNode): boolean {
+export function ownDiffers(node: OperatorNode, now = Date.now()): boolean {
 	const { own, rolled } = node.node_cost;
 	return own.tokens.known !== rolled.tokens.known
 		|| own.model_cost_usd.known !== rolled.model_cost_usd.known
-		|| own.execution.seconds !== rolled.execution.seconds
-		|| own.waiting.seconds !== rolled.waiting.seconds;
+		|| liveSeconds(own.execution, now) !== liveSeconds(rolled.execution, now)
+		|| liveSeconds(own.waiting, now) !== liveSeconds(rolled.waiting, now);
 }
 
 /**
@@ -180,7 +186,7 @@ export function withFollowUps(node: OperatorNode): string | null {
  * no dollars. Each fragment is the amount's own wording, so "at least" and
  * a missing figure follow the same rules as the lines above it.
  */
-export function initiativeLine(node: OperatorNode): { label: string; segments: string[] } | null {
+export function initiativeLine(node: OperatorNode, now = Date.now()): { label: string; segments: string[] } | null {
 	const initiative = node.initiative;
 	if (!initiative) return null;
 	const { cost, follow_ups: count, open } = initiative;
@@ -188,7 +194,7 @@ export function initiativeLine(node: OperatorNode): { label: string; segments: s
 	const segments: string[] = [];
 	if (cost.tokens.known !== null) segments.push(lowerBound(tokens(cost.tokens.known), incomplete));
 	else if (incomplete) segments.push('tokens not recorded');
-	const working = workingTime(cost);
+	const working = workingTime(cost, now);
 	if (working) segments.push(`${working} working`);
 	segments.push(`${count} ${count === 1 ? 'follow-up' : 'follow-ups'}`);
 	return { label: `Initiative total${open ? ' so far' : ''}:`, segments };

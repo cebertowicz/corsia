@@ -13,13 +13,12 @@ from typing import Callable, Iterator
 
 import infra.startup_progress as startup_progress
 import infra.write_admission as write_admission  # mypy resolves a new submodule only this way
-from infra import write_effects
+from infra import write_effects, write_lock_window
 from infra.db_loop_guard import guard_write_off_event_loop
 from infra.db_wal_checkpoint import WalCheckpoint, checkpoint_after_write
 from infra.config import DB_PATH
-from infra.db_connection import (
-    _NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane, checkpoint_and_close, refuse_lane_write,
-)
+from infra.db_connection import (_NoOpClose, PooledConnection, ThreadConnectionLifetime, apply_thread_lane,
+                                 checkpoint_and_close, refuse_lane_write)
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +58,12 @@ def _hold_callers() -> str:
     return " < ".join(frames) or "unknown"
 
 
-def _finish_write_hold(scope: str, started_at: float | None) -> None:
+def _finish_write_hold(scope: str, started_at: float | None, admission: write_admission.Admission | None) -> None:
     if started_at is None:  # BEGIN never succeeded, so nothing was held
         return
     held_for = time.monotonic() - started_at
+    if admission is not None and admission.ticket is write_admission.MAIN_TICKET:
+        write_lock_window.window.hold(scope, held_for, held_for < WRITE_TRANSACTION_SLOW_SECONDS)
     if held_for >= WRITE_TRANSACTION_SLOW_SECONDS:
         log.warning(
             "SQLite write transaction held: scope=%s held=%.3fs callers=%s",
@@ -257,7 +258,7 @@ def write_transaction(
                 connection.rollback()
             raise
         finally:
-            _finish_write_hold(scope, started_at)
+            _finish_write_hold(scope, started_at, admission)
             write_admission.release(admission)  # before effects, which may write
             if owns_connection:
                 connection.close()
@@ -367,7 +368,6 @@ def init_db():
 
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
-
     from infra.config import WORKSPACE
     from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
     carry_workspace_conductor_role_files(WORKSPACE)

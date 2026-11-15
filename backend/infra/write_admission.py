@@ -29,6 +29,9 @@ import weakref
 from collections import deque
 from dataclasses import dataclass, field
 
+from infra.config import DB_PATH
+from infra.write_lock_window import window
+
 log = logging.getLogger(__name__)
 
 # How long an outermost write waits for its turn before it is refused. The
@@ -181,6 +184,10 @@ def _canonical(path: str) -> str:
     return os.path.realpath(path)
 
 
+# Keep the main ticket alive so callers can identify it with one comparison.
+MAIN_TICKET = ticket_for(str(DB_PATH))
+
+
 def ticket_of(connection: sqlite3.Connection) -> WriteTicket | None:
     """The ticket for the file behind ``connection``'s main database, as SQLite reports it."""
     cursor = connection.execute("PRAGMA database_list")
@@ -233,5 +240,7 @@ def _wait_bound() -> float:
 # diagnosis note in infra.database.
 def _log_slow_wait(admission: Admission) -> None:
     waited = (admission.acquired_at or admission.requested_at) - admission.requested_at
+    if admission.ticket is MAIN_TICKET:
+        window.wait(waited)
     if waited >= SLOW_WAIT_SECONDS:
         log.warning("SQLite write admission waited: scope=%s waited=%.3fs", admission.scope, waited)

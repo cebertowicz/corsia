@@ -145,7 +145,11 @@ def test_the_fixture_the_frontend_decodes_has_the_projections_shape():
     assert any(node["branch_progress"] for node in nodes)
     assert any(node.get("browser_thread_id") for node in nodes)
     if os.environ.get("CORSIA_WRITE_CONTRACT_FIXTURES") == "1":
-        FIXTURE.write_text(json.dumps(envelope, indent=1, sort_keys=True) + "\n")
+        # The token is a hash of this run's values and the contract is its shape, so the
+        # fixture keeps a fixed one: a fresh hash named "token" in every regeneration
+        # reads as a committed key to the pull request key scan.
+        written = {**envelope, "revision_token": "fixture"}
+        FIXTURE.write_text(json.dumps(written, indent=1, sort_keys=True) + "\n")
     committed = json.loads(FIXTURE.read_text())
     assert _shape(envelope) == _shape(committed), (
         "The operator envelope changed shape. Regenerate the frontend fixture with "

@@ -4,6 +4,7 @@
  * finished work is paged here, newest first, and one row's place is found by
  * its path. Same read boundary as the operator envelope (`planRead`).
  */
+import { onClientClock } from './planClock';
 import { readPlan, type ReadOutcome } from './planRead';
 import { decodeOperatorNode } from './plansDecode';
 import type { OperatorDisplay, OperatorNode, OperatorNodeLabelKey } from './plansTypes';
@@ -118,5 +119,7 @@ export async function readFoldedNode(planId: string, nodeId: string,
 	const outcome = await readPlan(
 		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}`, null, decodeOperatorNode,
 	);
+	// A finished node can still sit in an open initiative, whose total counts live.
+	if (outcome.status === 'fresh') onClientClock(outcome.payload);
 	return outcome as FoldedReadOutcome<OperatorNode>;
 }

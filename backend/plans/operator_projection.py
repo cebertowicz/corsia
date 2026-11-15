@@ -173,7 +173,7 @@ def _child_waits(projected: list[rollup.PlanRollup], *, db) -> dict[str, dict]:
 def presented_plans(
     projected: list[rollup.PlanRollup], actor: PlanActor, *, db, include_archived: bool = False,
     costs: bool = True, memo: dict | None = None, lean: bool = False,
-    detail_ids: frozenset[str] | None = None,
+    detail_ids: frozenset[str] | None = None, stable: bool = False,
 ) -> list[dict]:
     """Present each visible top-level plan; ``lean`` is ``operator_node_state.project``'s.
 
@@ -188,7 +188,7 @@ def presented_plans(
     opened = bool(projected) and all(item.tree is not None for item in projected)
     review_targets = _review_targets(projected, actor, db=db, open_nodes=opened)
     node_states = operator_node_state.project(
-        projected, review_targets, db=db, costs=costs, memo=memo, lean=lean,
+        projected, review_targets, db=db, costs=costs, memo=memo, lean=lean, stable=stable,
         detail_ids=(
             detail_ids if detail_ids is not None
             else frozenset(node["id"] for item in projected for node in item.nodes)
@@ -231,7 +231,7 @@ def _envelope(
     memo: dict | None = None,
 ):
     plans = presented_plans(
-        projected, actor, db=db, include_archived=include_archived, costs=costs, memo=memo,
+        projected, actor, db=db, include_archived=include_archived, costs=costs, memo=memo, stable=True,
     )
     attention = {
         # The plan's whole relationship to a decision: it can be waiting on one
