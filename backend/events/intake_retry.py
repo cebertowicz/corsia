@@ -17,16 +17,11 @@ async def admit_with_retry(admit: Callable[..., Awaitable[Any]], *, pauses: Sequ
     tries = len(pauses) + 1
     for attempt, pause in enumerate((*pauses, None), start=1):
         try:
-            result = await admit(**event)
-        except Exception as exc:
+            return await admit(**event)
+        except Exception as exc:  # the intake reports an outage only by raising
             if pause is None or failure_code(exc) != "intake_unreachable":
                 raise
-            reason: object = exc
-        else:
-            if result.refusal is None or result.refusal.code != "intake_unreachable" or pause is None:
-                return result
-            reason = result.refusal.code
-        log.warning("intake unreachable for %s %s, try %s of %s: %s",
-                    event.get("event_type"), event.get("event_id"), attempt, tries, reason)
+            log.warning("intake unreachable for %s %s, try %s of %s: %s",
+                        event.get("event_type"), event.get("event_id"), attempt, tries, exc)
         await sleep(pause)
     raise AssertionError("unreachable")

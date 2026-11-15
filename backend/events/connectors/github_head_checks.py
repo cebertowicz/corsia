@@ -174,7 +174,6 @@ class HeadCheckAggregator:
                 )
                 if result.refusal is not None:
                     log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
-                    keep = result.refusal.code == "intake_unreachable"
             except Exception:
                 log.warning("github-head-checks: could not admit settled head %s@%s", *key, exc_info=True)
                 keep = True

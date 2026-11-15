@@ -85,16 +85,8 @@ def _flaky_intake(monkeypatch, outcomes: list[str]):
     return seen
 
 
-def test_unreachable_refusal_retries_the_same_line(intake_world, tmp_path, monkeypatch, caplog):
-    real, seen = intake.admit_event, []
-
-    async def admit(**kwargs):
-        seen.append(kwargs["event_id"])
-        if len(seen) == 1:
-            return intake.IntakeResult(False, False, intake.IntakeRefusal("intake_unreachable", "unavailable"), 0)
-        return await real(**kwargs)
-
-    monkeypatch.setattr(intake, "admit_event", admit)
+def test_unreachable_intake_retries_the_same_line_and_logs_the_try(intake_world, tmp_path, monkeypatch, caplog):
+    seen = _flaky_intake(monkeypatch, ["refuse"])
     monkeypatch.setattr(script_event_lines, "_ADMIT_PAUSE_SECONDS", (0,))
     schedule = _schedule(intake_world, tmp_path)
     with caplog.at_level(logging.WARNING, logger="events.intake_retry"):
