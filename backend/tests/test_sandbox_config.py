@@ -876,7 +876,7 @@ def test_profile_folder_grant_covers_legacy_worktrees_and_keeps_invalid_repos_cl
     grant = lines.index(f'(allow file-read* file-write* (subpath "{trees}"))')
     pattern = sandbox_any_case(trees)
     marker_deny = lines.index(
-        f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
+        f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt](/|$)"))'
     )
     assert base_deny < grant < marker_deny
 

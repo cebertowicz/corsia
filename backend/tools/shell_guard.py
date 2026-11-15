@@ -807,11 +807,11 @@ def pinned_repo_sandbox_profile(
         rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
         if repo != worktree_control_repo:
             # Pin immediate folders too, so a prepared .git cannot be renamed up.
-            pattern = sandbox_any_case(repo / ".worktrees")
+            pattern = sandbox_any_case(repo / ".worktrees", exact=True)
             rules.extend([
                 f'(deny file-write* (literal "{sandbox_literal(repo / ".worktrees")}"))',
                 f'(deny file-write* (regex #"^{pattern}/[^/]+$"))',
-                f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))',
+                f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt](/|$)"))',
             ])
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(

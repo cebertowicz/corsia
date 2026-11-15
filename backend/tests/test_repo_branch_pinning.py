@@ -2193,7 +2193,7 @@ def test_worktree_git_access_does_not_reopen_base_git_identity(
         assert deny in base_pull
     hooks_deny = workspace_git_rules((repo / ".git" / "hooks",))[0]
     pattern = sandbox_any_case(repo / ".worktrees")
-    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
+    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt](/|$)"))'
     assert worktree_commit.index(hooks_deny) > worktree_commit.index(git_allow)
     assert worktree_commit.index(marker_deny) > worktree_commit.index(git_allow)
     assert hooks_deny in base_pull

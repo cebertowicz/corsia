@@ -117,7 +117,7 @@ def test_profile_worktree_rules_pin_lexical_container_under_resolved_repo(tmp_pa
         assert f'(deny file-write* (literal "{trees}"))' in profile
         pattern = sandbox_git.sandbox_any_case(trees)
         assert f'(deny file-write* (regex #"^{pattern}/[^/]+$"))' in profile
-        assert f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))' in profile
+        assert f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt](/|$)"))' in profile
     assert profile.count("(allow file-read* file-write* (subpath") == len(policies)
     assert str(behind_link.resolve()) not in profile
     assert "hidden" not in profile

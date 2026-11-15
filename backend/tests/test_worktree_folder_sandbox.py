@@ -5,6 +5,7 @@ sandboxes cannot apply, so a local skip proves nothing about confinement.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import shlex
@@ -17,6 +18,9 @@ import pytest
 from infra.project_repo_policy import RepoPolicy
 from tools import shell_guard
 from tools.base_git_paths import base_git_control_paths, base_git_identity_paths
+from tests.worktree_sandbox_baseline import (
+    ConfinementBreach, compare_per_worktree, per_worktree_renderer, unchanged,
+)
 
 
 def test_worktree_profile_is_identical_at_zero_and_400_worktrees(tmp_path, monkeypatch):
@@ -35,9 +39,10 @@ def test_worktree_profile_is_identical_at_zero_and_400_worktrees(tmp_path, monke
 
 
 class RepositorySandbox:
-    def __init__(self, root, policy, safehouse):
+    def __init__(self, root, policy, safehouse, renderer):
         self.root, self.policy, self.safehouse = root, policy, safehouse
         self.repo = policy.path
+        self.renderer = renderer
         self.trees = self.repo / ".worktrees"
         self.own = self.trees / "own"
         self.peer = self.trees / "peer"
@@ -58,11 +63,11 @@ class RepositorySandbox:
             capture_output=True, text=True, timeout=20, check=True,
         )
 
-    def run(self, command, *, cwd=None):
+    def run(self, command, *, cwd=None, before_rules=""):
         cwd = cwd or self.own
         profile = self.root / "repo.sb"
         # Exercise the strongest ordinary metadata grant as well as direct Git.
-        profile.write_text(shell_guard.pinned_repo_sandbox_profile(
+        profile.write_text(before_rules + self.renderer(
             command, str(cwd), policies=[self.policy], grant_policies=[self.policy],
         ))
         return subprocess.run(
@@ -79,14 +84,20 @@ class RepositorySandbox:
 
     def denied(self, command):
         result = self.run(command)
-        assert result.returncode != 0, f"sandbox allowed: {command}"
+        if result.returncode == 0:
+            raise ConfinementBreach(f"sandbox allowed: {command}")
         assert "Operation not permitted" in result.stderr or "Permission denied" in result.stderr, (
             command, result.returncode, result.stderr,
         )
 
 
 @pytest.fixture
-def repository_sandbox(monkeypatch):
+def repo_name():
+    return "repo"
+
+
+@pytest.fixture
+def repository_sandbox(monkeypatch, repo_name):
     required = os.environ.get("CORSIA_REQUIRE_SAFEHOUSE") == "1"
     reason = None
     if os.environ.get("CORSIA_THREAD_ID"):
@@ -98,23 +109,30 @@ def repository_sandbox(monkeypatch):
         if required:
             pytest.fail(f"CORSIA_REQUIRE_SAFEHOUSE=1: {reason}")
         pytest.skip(reason)
-    with tempfile.TemporaryDirectory(dir="/tmp") as directory:
-        root = Path(directory).resolve()
-        repo = root / "repo"
-        repo.mkdir()
-        policy = RepoPolicy("project", "repo", repo, "main", True)
-        sandbox = RepositorySandbox(root, policy, safehouse)
-        sandbox.setup_git("init", "-b", "main")
-        (repo / "base.txt").write_text("base\n")
-        sandbox.setup_git("add", "base.txt")
-        sandbox.setup_git("commit", "-m", "Initial fixture")
-        sandbox.setup_git("worktree", "add", "-b", "own", str(sandbox.own))
-        sandbox.setup_git("worktree", "add", "-b", "peer", str(sandbox.peer))
-        monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [policy])
-        monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
-        # Fail on a broken sandbox launch instead of mistaking it for denial.
-        sandbox.allowed("printf launched > launch-check && cat launch-check")
-        yield sandbox
+    with ExitStack() as stack:
+        def make(renderer):
+            directory = stack.enter_context(tempfile.TemporaryDirectory(dir="/tmp"))
+            root = Path(directory).resolve()
+            repo = root / repo_name
+            repo.mkdir()
+            policy = RepoPolicy("project", "repo", repo, "main", True)
+            sandbox = RepositorySandbox(root, policy, safehouse, renderer)
+            sandbox.setup_git("init", "-b", "main")
+            (repo / "base.txt").write_text("base\n")
+            sandbox.setup_git("add", "base.txt")
+            sandbox.setup_git("commit", "-m", "Initial fixture")
+            sandbox.setup_git("worktree", "add", "-b", "own", str(sandbox.own))
+            sandbox.setup_git("worktree", "add", "-b", "peer", str(sandbox.peer))
+            monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [policy])
+            monkeypatch.setattr(shell_guard, "list_unsupported_pinned_repos", lambda _: [])
+            if renderer is not shell_guard.pinned_repo_sandbox_profile:
+                renderer.__globals__["list_registered_repo_policies"] = lambda: [policy]
+                renderer.__globals__["list_unsupported_pinned_repos"] = lambda _: []
+            # Fail on a broken launch instead of mistaking it for confinement.
+            sandbox.allowed("printf launched > launch-check && cat launch-check")
+            sandbox.make_baseline = lambda: make(per_worktree_renderer())
+            return sandbox
+        yield make(shell_guard.pinned_repo_sandbox_profile)
 
 
 @pytest.mark.integration
@@ -125,17 +143,19 @@ def repository_sandbox(monkeypatch):
     ".git/commondir", ".git/config", ".git/config.lock", ".git/packed-refs",
     ".git/packed-refs.lock", ".git/COMMONDIR", ".git/HoOkS/pre-commit",
 ])
+@compare_per_worktree
 def test_real_worktree_folder_keeps_base_and_git_controls_readonly(repository_sandbox, relative):
     sandbox = repository_sandbox
     target = sandbox.repo / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     before = target.read_bytes() if target.exists() else None
     sandbox.denied(f"printf changed > {shlex.quote(str(target))}")
-    assert (target.read_bytes() if target.exists() else None) == before
+    unchanged(target.read_bytes() if target.exists() else None, before)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("attack", ["rename", "delete-empty", "replace-empty"])
+@compare_per_worktree
 def test_real_worktree_folder_container_cannot_move_or_disappear(repository_sandbox, attack):
     sandbox = repository_sandbox
     trees = shlex.quote(str(sandbox.trees))
@@ -151,7 +171,8 @@ def test_real_worktree_folder_container_cannot_move_or_disappear(repository_sand
                    f"/usr/bin/perl -e 'rename($ARGV[0], $ARGV[1]) or die $!' {shlex.quote(str(replacement))} {trees}")
     # cwd must survive the empty-container setup.
     result = sandbox.run(command, cwd=sandbox.repo)
-    assert result.returncode != 0, command
+    if result.returncode == 0:
+        raise ConfinementBreach(command)
     assert "Operation not permitted" in result.stderr or "Permission denied" in result.stderr, result.stderr
     assert sandbox.trees.is_dir()
 
@@ -159,6 +180,7 @@ def test_real_worktree_folder_container_cannot_move_or_disappear(repository_sand
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
 @pytest.mark.parametrize("attack", ["write", "unlink", "replace", "rename-away"])
+@compare_per_worktree
 def test_real_worktree_folder_existing_pointer_cannot_mutate(repository_sandbox, spelling, attack):
     sandbox = repository_sandbox
     marker = sandbox.own / ".git"
@@ -177,13 +199,14 @@ def test_real_worktree_folder_existing_pointer_cannot_mutate(repository_sandbox,
         "rename-away": f"mv {target} {shlex.quote(str(sandbox.own / 'stolen'))}",
     }
     sandbox.denied(commands[attack])
-    assert marker.read_bytes() == before
-    assert alternate.read_bytes() == before
+    unchanged(marker.read_bytes(), before)
+    unchanged(alternate.read_bytes(), before)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
 @pytest.mark.parametrize("kind", ["file", "directory"])
+@compare_per_worktree
 def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, spelling, kind):
     sandbox = repository_sandbox
     fresh = sandbox.trees / "fresh"
@@ -197,10 +220,10 @@ def test_real_worktree_folder_new_pointer_cannot_be_created(repository_sandbox, 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("spelling", [".git", ".GIT", ".Git"])
+@compare_per_worktree
 def test_real_worktree_folder_prepared_pointer_cannot_be_renamed_up(repository_sandbox, spelling):
     sandbox = repository_sandbox
-    parent = sandbox.trees / "x"
-    parent.mkdir()
+    parent = sandbox.own
     prepared = parent / "y"
     target = sandbox.trees / "z"
     # Preparation itself remains allowed, including nested Git repositories.
@@ -214,6 +237,7 @@ def test_real_worktree_folder_prepared_pointer_cannot_be_renamed_up(repository_s
 @pytest.mark.parametrize("destination", ["base", "base-git", "peer"])
 @pytest.mark.parametrize("location", ["immediate", "nested"])
 @pytest.mark.parametrize("attack", ["write", "unlink", "replace"])
+@compare_per_worktree
 def test_real_worktree_folder_symlink_cannot_bypass_denies(repository_sandbox, destination, location, attack):
     sandbox = repository_sandbox
     link = (sandbox.trees if location == "immediate" else sandbox.own) / "alias"
@@ -233,13 +257,14 @@ def test_real_worktree_folder_symlink_cannot_bypass_denies(repository_sandbox, d
         "replace": f"mv {shlex.quote(str(replacement))} {shlex.quote(str(target))}",
     }
     sandbox.denied(commands[attack])
-    assert (actual / relative).read_bytes() == before
+    unchanged((actual / relative).read_bytes(), before)
     if destination == "peer":
         sandbox.allowed(f"printf allowed > {shlex.quote(str(link / 'ordinary'))}")
         assert (sandbox.peer / "ordinary").read_text() == "allowed"
 
 
 @pytest.mark.integration
+@compare_per_worktree
 def test_real_worktree_folder_preserves_worktree_git_and_nested_repositories(repository_sandbox):
     sandbox = repository_sandbox
     snapshot = {path: path.read_bytes() if path.exists() else None for path in (
@@ -268,10 +293,11 @@ def test_real_worktree_folder_preserves_worktree_git_and_nested_repositories(rep
     sandbox.allowed("git add file", cwd=nested)
     sandbox.allowed("git commit -m nested", cwd=nested)
     for path, before in snapshot.items():
-        assert (path.read_bytes() if path.exists() else None) == before
+        unchanged(path.read_bytes() if path.exists() else None, before)
 
 
 @pytest.mark.integration
+@compare_per_worktree
 def test_real_worktree_folder_preserves_authorized_base_worktree_add_remove(repository_sandbox):
     sandbox = repository_sandbox
     sandbox.setup_git("branch", "existing")
@@ -283,6 +309,7 @@ def test_real_worktree_folder_preserves_authorized_base_worktree_add_remove(repo
 
 
 @pytest.mark.integration
+@compare_per_worktree
 def test_real_worktree_folder_symlink_container_cannot_grant_the_base(repository_sandbox):
     sandbox = repository_sandbox
     sandbox.trees.rename(sandbox.root / "original-trees")
@@ -290,6 +317,7 @@ def test_real_worktree_folder_symlink_container_cannot_grant_the_base(repository
     target = sandbox.repo / "base.txt"
     before = target.read_bytes()
     result = sandbox.run(f"printf forged > {shlex.quote(str(target))}", cwd=sandbox.repo)
-    assert result.returncode != 0, "redirected .worktrees reopened the protected base"
+    if result.returncode == 0:
+        raise ConfinementBreach("redirected .worktrees reopened the protected base")
     assert "Operation not permitted" in result.stderr or "Permission denied" in result.stderr, result.stderr
-    assert target.read_bytes() == before
+    unchanged(target.read_bytes(), before)

@@ -72,7 +72,7 @@ def _assert_verified_worktree_grant_keeps_controls_denied(
         assert profile.index(deny) > profile.index(git_allow)
     commondir_deny, hooks_deny = workspace_git_rules((repo / ".git" / "commondir", repo / ".git" / "hooks"))
     pattern = sandbox_any_case(repo / ".worktrees")
-    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
+    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt](/|$)"))'
     assert profile.index(hooks_deny) > profile.index(git_allow)
     assert profile.index(commondir_deny) > profile.index(git_allow)
     assert profile.index(marker_deny) > profile.index(git_allow)

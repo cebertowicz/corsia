@@ -138,6 +138,7 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
     monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [rw])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [ro])
+    monkeypatch.setattr(shell_guard, "agent_tool_ro_dirs", lambda: [])
 
     argv = shell_guard.safehouse_argv(
         "printf '%s' ok",

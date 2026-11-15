@@ -26,20 +26,26 @@ def sandbox_literal(path: Path) -> str:
     return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def sandbox_any_case(path: Path) -> str:
+def sandbox_any_case(path: Path, *, exact: bool = False) -> str:
     """Spell ``path`` for a Seatbelt regex, which has no case-insensitive flag.
 
     A literal rule misses a differently cased name that doesn't exist yet. Other
     ASCII punctuation matches any one character, so an odd path can over-deny a
-    sibling but can't break the profile.
+    sibling but can't break the profile. ``exact`` escapes metacharacters and
+    the Seatbelt string instead, for boundaries that must not affect siblings.
     """
     def spell(char: str) -> str:
         if char == ".":
             return "[.]"
         if char.isascii() and char.isalpha():
             return f"[{char.upper()}{char.lower()}]"
+        if exact:
+            if char == '"':
+                return r"\x22"
+            return f"\\{char}" if char in r"\^$*+?{}[]|()" else char
         return char if not char.isascii() or char.isdigit() or char in "/-_ " else "."
-    return "".join(spell(char) for char in str(path))
+    pattern = "".join(spell(char) for char in str(path))
+    return pattern.replace("\\", "\\\\").replace('"', '\\"') if exact else pattern
 
 
 def verified_worktree_marker(
