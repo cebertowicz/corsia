@@ -166,6 +166,21 @@ def _repo_row(name: str, path: Path, kind: str, missing: bool) -> dict:
     }
 
 
+def within(child: Path, parent: Path) -> bool:
+    """Whether ``child`` is ``parent`` or below it, comparing the paths as given."""
+    return child == parent or parent in child.parents
+
+
+def require_under_home(resolved: Path) -> None:
+    """Refuse a repository folder outside the home folder, for every route that adds one.
+
+    Raises:
+        ValueError: when the resolved folder is outside the home folder.
+    """
+    if not within(resolved, Path.home().resolve()):
+        raise ValueError("Repo path must be under your home directory")
+
+
 def link_repo_into_source(
     workspace_dir: Path,
     target: Path,
@@ -176,19 +191,13 @@ def link_repo_into_source(
     """Symlink an existing directory into ``source/`` as a linked repo."""
     source_dir = workspace_dir / "source"
     source_dir.mkdir(parents=True, exist_ok=True)
-
-    def _within(child: Path, parent: Path) -> bool:
-        return child == parent or parent in child.parents
-
     unresolved = Path(os.path.normpath(target.expanduser().absolute()))
     src_unresolved = Path(os.path.normpath(source_dir.absolute()))
     resolved = target.expanduser().resolve()
     if not resolved.is_dir():
         raise ValueError(f"Not a directory: {resolved}")
-    home = Path.home().resolve()
-    if not _within(resolved, home):
-        raise ValueError("Repo path must be under your home directory")
-    if _within(unresolved, src_unresolved) or _within(resolved, source_dir.resolve()):
+    require_under_home(resolved)
+    if within(unresolved, src_unresolved) or within(resolved, source_dir.resolve()):
         raise ValueError(
             "Target is inside this project's source/; register that entry where it is"
         )

@@ -10,6 +10,11 @@ so the registration makes no path newly writable for anyone outside it.
 Anything else claims everywhere (``None``), the instance-wide fence: a target
 outside the workspace, inside the workspace but outside every project folder,
 touching another project, or any read that fails.
+
+The claim is read before the transition admits; the add resolves its paths again
+inside it. A narrowed add checks what it resolved with the same predicate
+(:func:`confirm_narrow_claim`) and refuses, to be retried, if a folder or link
+changed in between and the paths now leave the project's folder.
 """
 
 from __future__ import annotations
@@ -76,21 +81,14 @@ def _other_roots(workspace: Path, project_id: str, db) -> list[tuple[Path, ...]]
     return roots
 
 
-def registration_claim(
-    project_id: str,
-    ws_dir: Path,
-    *,
-    mode: str,
-    path: str | None,
-    name: str | None,
-    workspace: Path,
-    db,
+def _paths_claim(
+    project_id: str, ws_dir: Path, paths: list[Path], *, workspace: Path, db,
 ) -> frozenset[str] | None:
-    """``{project_id}`` when the registration stays inside that project's folder, else ``None``."""
+    """``{project_id}`` when every path stays inside that project's folder and no other's.
+
+    ``paths[0]`` is the repository folder; the rest are the source bindings.
+    """
     try:
-        paths = _registration_paths(ws_dir, mode, path, name)
-        if paths is None:
-            return None
         projects_root = canonical(Path(workspace)) / "projects"
         own = canonical(ws_dir)
         # Only a direct child of ``projects/`` is a folder the project fence walls.
@@ -109,6 +107,54 @@ def registration_claim(
     except Exception:
         log.exception("repo registration claim read failed for project=%s", project_id)
         return None
+
+
+def registration_claim(
+    project_id: str,
+    ws_dir: Path,
+    *,
+    mode: str,
+    path: str | None,
+    name: str | None,
+    workspace: Path,
+    db,
+) -> frozenset[str] | None:
+    """``{project_id}`` when the registration stays inside that project's folder, else ``None``."""
+    paths = _registration_paths(ws_dir, mode, path, name)
+    if paths is None:
+        return None
+    return _paths_claim(project_id, ws_dir, paths, workspace=workspace, db=db)
+
+
+def confirm_narrow_claim(
+    claim: frozenset[str] | None, project_id: str, ws_dir: Path, repo_path: Path, binding: Path,
+) -> None:
+    """Refuse a narrowed add whose resolved folder or binding now leaves the project's folder.
+
+    Called inside the transition with the paths the add resolved there, once. An add
+    admitted everywhere (``claim is None``) needs no check.
+
+    Raises:
+        HTTPException: 409, retryable, when the paths no longer earn the narrowed claim.
+    """
+    if claim is None:
+        return
+    from infra import config
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        holds = _paths_claim(
+            project_id, ws_dir, [repo_path, binding], workspace=Path(config.WORKSPACE), db=db,
+        ) == claim
+    finally:
+        db.close()
+    if not holds:
+        raise HTTPException(
+            409,
+            "The repository's folder changed while it was being registered and is no longer "
+            "inside this project's folder; try again.",
+        )
 
 
 def owned_process_holders() -> tuple[Holder, ...]:
@@ -157,8 +203,11 @@ def add_transition(
     *,
     ws_dir_for: Callable[[str], Path],
     active_process_count: Callable[[], int],
-) -> AbstractContextManager[None]:
-    """The repo policy transition one registration runs under, claiming what it changes."""
+) -> AbstractContextManager[frozenset[str] | None]:
+    """The repo policy transition one registration runs under, claiming what it changes.
+
+    It yields the claim it was admitted under; pass that to :func:`confirm_narrow_claim`.
+    """
     generation = transition_generation()
     return repo_policy_transition(
         active_process_count=active_process_count,

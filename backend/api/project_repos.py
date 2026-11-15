@@ -39,7 +39,7 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
-from api.project_repo_claim import add_transition
+from api.project_repo_claim import add_transition, confirm_narrow_claim
 from api.project_repo_add_source import resolve_add_source
 from api.project_repo_sync import sync_sources
 from api.project_scaffolding import (
@@ -453,7 +453,7 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
 def register_source_repo(project_id: str, body: RepoAdd) -> dict:
     """Add-repo procedure shared by Project settings and project_repo_register."""
 
-    def _add():
+    def _add(claim: frozenset[str] | None):
         ws_dir = _workspace_dir_for(project_id)
         connection = None
         identity: SourceEntryIdentity | None = None
@@ -465,7 +465,11 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
                 project_id, ws_dir, mode=body.mode, path=body.path, name=body.name,
             )
             _require_owned_source(identity)
+            # The one view every later step uses; a narrowed add confirms it first.
             repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
+            confirm_narrow_claim(
+                claim, project_id, ws_dir, repo_path, ws_dir / "source" / str(row["name"]),
+            )
             pinned_branch, protected, switched = _select_add_policy(
                 row,
                 body,
@@ -517,8 +521,8 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
             with add_transition(
                 project_id, body.mode, body.path, body.name,
                 ws_dir_for=_workspace_dir_for, active_process_count=_active_owned_process_count,
-            ):
-                return _add()
+            ) as claim:
+                return _add(claim)
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc
 

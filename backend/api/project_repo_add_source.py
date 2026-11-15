@@ -3,8 +3,10 @@
 A link-mode target outside ``source/`` is linked in, and create mode makes a new repo.
 A top-level entry of ``<project>/source/`` (a folder, or a link to one) that has no
 registration is registered where it is, under its own name: no link is created and
-nothing moves. A path nested inside an entry, an entry that is already registered,
-and a link that points nowhere are refused with what to do instead.
+nothing moves. It meets the rules the other routes apply: a safe repository name,
+and a link's folder under the home folder. A path nested inside an entry, an entry
+that is already registered, and a link that points nowhere are refused with what
+to do instead.
 """
 
 from __future__ import annotations
@@ -20,11 +22,10 @@ from api.project_scaffolding import (
     capture_source_entry,
     create_repo_in_source,
     link_repo_into_source,
+    require_under_home,
+    validate_repo_name,
+    within,
 )
-
-
-def _within(child: Path, parent: Path) -> bool:
-    return child == parent or parent in child.parents
 
 
 def source_entry_for(ws_dir: Path, target: Path) -> Path | None:
@@ -39,7 +40,7 @@ def source_entry_for(ws_dir: Path, target: Path) -> Path | None:
     unresolved = Path(os.path.normpath(target.expanduser().absolute()))
     resolved = target.expanduser().resolve()
     for candidate, root in ((unresolved, source_unresolved), (resolved, source_resolved)):
-        if not _within(candidate, root):
+        if not within(candidate, root):
             continue
         if candidate == root:
             raise HTTPException(400, "Register one repository inside source/, not source/ itself")
@@ -62,8 +63,8 @@ def capture_in_place_entry(
             400,
             f"'{entry.name}' is already in source/ and keeps its name; leave out the repository name",
         )
-    if entry.name.startswith("."):
-        raise HTTPException(400, f"'{entry.name}' is a hidden entry in source/, not a repository")
+    if err := validate_repo_name(entry.name):
+        raise HTTPException(400, err)
     if entry.name in registered:
         raise HTTPException(409, f"Repository '{entry.name}' is already registered for this project")
     if entry.is_symlink():
@@ -73,6 +74,10 @@ def capture_in_place_entry(
             raise HTTPException(400, f"source/{entry.name} is a link that points nowhere") from exc
         if not target.is_dir():
             raise HTTPException(400, f"source/{entry.name} is a link that does not point to a folder")
+        try:
+            require_under_home(target)
+        except ValueError as exc:
+            raise HTTPException(400, f"Bad repository path: {exc}") from exc
         kind = "linked"
     elif entry.is_dir():
         target, kind = entry.resolve(), "native"

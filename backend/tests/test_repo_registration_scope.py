@@ -235,6 +235,44 @@ async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monke
 
 
 @pytest.mark.asyncio
+async def test_live_connected_app_call_from_another_project_refuses(env, monkeypatch):
+    """A connected app's local server is not project-fenced, so its call reaches everywhere."""
+    from types import SimpleNamespace
+
+    from tools.mcp import MCPToolWrapper
+
+    class _HoldConnectedApp(MCPToolWrapper):
+        async def execute(self, **_kwargs: Any) -> str:
+            env["hold"].entered.set()
+            await env["hold"].release.wait()
+            return "released"
+
+    app = _HoldConnectedApp(
+        None, "files", SimpleNamespace(name="hold", description="Hold.", inputSchema=None),
+        app_id="app-files",
+    )
+    env["registry"].register(app)
+    # Beta's agent was granted this connected app; the grant itself is not under test.
+    monkeypatch.setattr(
+        "tools.tool_execution_context.mcp_tool_reaches_thread",
+        lambda _tool, thread_id, *, db: thread_id == "q-agent",
+    )
+    target = _own_target(env)
+    env["hold"].entered.clear()
+    task = asyncio.create_task(_call(env["registry"], "q-agent", app.name, {}))
+    entered = asyncio.ensure_future(env["hold"].entered.wait())
+    await asyncio.wait({task, entered}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+    assert entered.done() and not task.done(), task.result() if task.done() else "never entered"
+    try:
+        result = await _register(env, target)
+    finally:
+        await _release(env, task)
+    assert "Repository policy transition is blocked by an active tool effect." in result, result
+    assert f'Blocked by tool `{app.name}` from agent "Beta worker".' in result, result
+    assert _registered(env) == 0
+
+
+@pytest.mark.asyncio
 async def test_person_session_effect_refuses(env):
     from infra.repo_policy_transition import admit_repo_effect, caller_reach
 
@@ -330,7 +368,8 @@ async def test_effect_arriving_during_a_narrowed_registration_is_refused_only_if
     )
 
     with repo_policy_transition(
-        owned_processes=lambda: (), claim=frozenset({"pa"}), claim_generation=transition_generation(),
+        active_process_count=lambda: 0, owned_processes=lambda: (),
+        claim=frozenset({"pa"}), claim_generation=transition_generation(),
     ):
         with admit_repo_effect(Reach(frozenset({"pa"}))):
             pass
@@ -482,3 +521,72 @@ async def test_failed_in_place_registration_leaves_the_entry(env, monkeypatch):
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
     assert entry.is_dir() and (entry / "tracked.txt").is_file()
     assert _registered(env) == 0
+
+
+@pytest.mark.asyncio
+async def test_link_entry_resolving_outside_home_is_refused(env, tmp_path_factory):
+    from fastapi import HTTPException
+
+    from api import project_repos
+
+    outside_home = tmp_path_factory.mktemp("outside-home") / "app"
+    _git_repo(outside_home)
+    entry = env["alpha"] / "source" / "app"
+    entry.symlink_to(outside_home, target_is_directory=True)
+    with pytest.raises(HTTPException) as raised:
+        project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "Bad repository path: Repo path must be under your home directory"
+    assert entry.is_symlink() and entry.readlink() == outside_home
+    assert _registered(env) == 0
+
+
+@pytest.mark.parametrize("entry_name", ["my app", ".cache", "-app"])
+@pytest.mark.asyncio
+async def test_entry_without_a_safe_repo_name_is_refused(env, entry_name):
+    from fastapi import HTTPException
+
+    from api import project_repos
+    from api.project_scaffolding import validate_repo_name
+
+    entry = env["alpha"] / "source" / entry_name
+    _git_repo(entry)
+    with pytest.raises(HTTPException) as raised:
+        project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
+    assert raised.value.status_code == 400
+    assert raised.value.detail == validate_repo_name(entry_name)
+    assert entry.is_dir() and _registered(env) == 0
+
+
+@pytest.mark.asyncio
+async def test_entry_that_leaves_the_project_after_the_claim_is_refused_to_retry(env, monkeypatch):
+    """The claim is read before admission; a folder swapped for an outside link after it fails closed."""
+    from fastapi import HTTPException
+
+    from api import project_repos
+
+    entry = env["alpha"] / "source" / "app"
+    _git_repo(entry)
+    outside = env["tmp"] / "external" / "app"
+    _git_repo(outside)
+    real = project_repos.resolve_add_source
+
+    def swap_then_resolve(project_id, ws_dir, **kwargs):
+        parked = env["tmp"] / "parked-app"
+        entry.rename(parked)
+        entry.symlink_to(outside, target_is_directory=True)
+        return real(project_id, ws_dir, **kwargs)
+
+    monkeypatch.setattr(project_repos, "resolve_add_source", swap_then_resolve)
+    with pytest.raises(HTTPException) as raised:
+        project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
+    # Only an add admitted under the narrowed claim checks, so this refusal shows it was.
+    assert raised.value.status_code == 409
+    assert "no longer inside this project's folder; try again" in raised.value.detail
+    assert _registered(env) == 0
+    assert entry.is_symlink() and entry.readlink() == outside
+    # The retry claims everywhere and registers it, as any outside link.
+    monkeypatch.setattr(project_repos, "resolve_add_source", real)
+    result = project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
+    assert Path(result["path"]) == outside.resolve()
+    assert _registered(env) == 1

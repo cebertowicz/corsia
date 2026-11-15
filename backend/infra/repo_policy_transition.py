@@ -163,7 +163,7 @@ class _RepoPolicyTransitionCoordinator:
     def _process_blocker(
         self,
         claim: frozenset[str] | None,
-        active_process_count: Callable[[], int] | None,
+        active_process_count: Callable[[], int],
         owned_processes: Callable[[], Iterable[Holder]] | None,
     ) -> tuple[bool, Holder | None]:
         """Whether a live owned process meets the claim, and which one to name."""
@@ -181,8 +181,6 @@ class _RepoPolicyTransitionCoordinator:
                 raise unverified
             meeting = [holder for holder in holders if holder.reach.meets(claim)]
             return bool(meeting), (meeting[0] if meeting else None)
-        if active_process_count is None:
-            return bool(holders), (holders[0] if holders else None)
         try:
             process_count = active_process_count()
         except Exception as exc:
@@ -199,11 +197,11 @@ class _RepoPolicyTransitionCoordinator:
     def transition(
         self,
         *,
-        active_process_count: Callable[[], int] | None = None,
+        active_process_count: Callable[[], int],
         owned_processes: Callable[[], Iterable[Holder]] | None = None,
         claim: frozenset[str] | None = None,
         claim_generation: int | None = None,
-    ) -> Iterator[None]:
+    ) -> Iterator[frozenset[str] | None]:
         blocker: RepoPolicyTransitionBusy | None = None
         with self._lock:
             if self._transition_active:
@@ -233,7 +231,7 @@ class _RepoPolicyTransitionCoordinator:
             blocker = _busy(prefix, blocker_holder)
             raise blocker
         try:
-            yield
+            yield claim
         finally:
             with self._lock:
                 self._transition_active = False
@@ -269,21 +267,23 @@ def admit_repo_effect(
 @contextmanager
 def repo_policy_transition(
     *,
-    active_process_count: Callable[[], int] | None = None,
+    active_process_count: Callable[[], int],
     owned_processes: Callable[[], Iterable[Holder]] | None = None,
     claim: frozenset[str] | None = None,
     claim_generation: int | None = None,
-) -> Iterator[None]:
+) -> Iterator[frozenset[str] | None]:
     """Quarantine durable repo policy changes from the effects and processes they meet.
 
     ``claim`` is ``None`` (everywhere) unless the caller read a narrower one, with the
     :func:`transition_generation` it read it at; a narrowed claim also needs
-    ``owned_processes`` so each live process is judged by its own reach.
+    ``owned_processes`` so each live process is judged by its own reach. Yields the
+    claim the transition was admitted under (``None`` once widened to everywhere), so
+    the caller can check what it resolves inside the transition against it.
     """
     with _COORDINATOR.transition(
         active_process_count=active_process_count,
         owned_processes=owned_processes,
         claim=claim,
         claim_generation=claim_generation,
-    ):
-        yield
+    ) as admitted:
+        yield admitted
