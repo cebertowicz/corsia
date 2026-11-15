@@ -18,6 +18,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A document's owner and supervisor pickers list the agents of the document's own workspace or project and tell agents with the same name apart by their responsibility. A document no one owns says so before you pick and suggests asking CORSIA to give it an owner; and a change that fails says Couldn’t change.
+- A document's owner in the Documents list now shows in full on a phone, and the description is shortened first; before, the end of the line, the owner, was cut off. When the owner's name alone fills the line, the description is left out and the name is shortened.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
 - A document you open and close without changing it keeps its modified time, and its owner is no longer told it was edited; the same holds when an agent saves a document with the text it already has.
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
