@@ -694,8 +694,9 @@ their scope. `checkpoint_health`, `lease_reviews` and `stored_message_pressure`
 are scoped to the caller's user and project. `seat_usage`, `plan_activity`,
 `agent_hours` and `agent_day_levels` are scoped to the caller's user alone and
 count archived threads: subscription accounts are shared across projects, and
-`agent_hours` reports each row's place as the caller's project, another project
-or no project. The readers for `agent_hours` and `agent_day_levels` live in
+`agent_day_levels` reports each row's place as the caller's project, another
+project or no project (`agent_hours` rows are grouped by account and provider
+only). The readers for `agent_hours` and `agent_day_levels` live in
 `backend/api/audit_agent_hours.py`, because they read Measurement's hourly usage
 rollup (`api/usage_rollup.py`); the HTTP route and the agent tool pass them in.
 Their token sums cover every call, where `seat_usage` sums only calls
