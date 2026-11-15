@@ -21,8 +21,8 @@ from infra.db_async import run_in_db_unless_owned
 #: A scheduled run's lost line: no agent tool starts a scheduled script, and a clock schedule or one at
 #: its last run has no next run, so the owner is told what still works whichever schedule it is.
 _SCHEDULED_RUN_FIX = ("The script finished, and this line is not sent again. If the schedule runs again, that run "
-              "sends the lines it prints; running the script yourself does not send its lines. "
-              "If what this event would have started cannot wait, start it yourself.")
+                      "sends the lines it prints; running the script yourself does not send its lines. "
+                      "If what this event would have started cannot wait, start it yourself.")
 #: A run a rule started has no next run and its owner cannot start it with the same event. The script
 #: itself finished: what is lost is the event its line would have sent, not the script's own work.
 #: Only a run the runner starts has its printed lines sent, so running the script by hand sends none.
