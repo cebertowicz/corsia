@@ -11,8 +11,11 @@ from core.measurement_scope import Grain
 def requested_series(ids: str) -> list[str]:
     """Return requested ids plus their registry-defined companions."""
     requested = list(dict.fromkeys(part for part in ids.split(",") if part))
-    if not requested or any(metric not in REGISTRY or not REGISTRY[metric].available for metric in requested):
-        raise HTTPException(400, "unknown or unavailable series id")
+    refused = [metric for metric in requested if metric not in REGISTRY or not REGISTRY[metric].available]
+    if not requested or refused:
+        named = f": {', '.join(refused)}" if refused else ": none given"
+        raise HTTPException(400, f"unknown or unavailable series id{named}; "
+                                 "GET /api/measurement/series/index lists the available ids")
     for metric in tuple(requested):
         companion = REGISTRY[metric].companion
         if companion and companion not in requested:

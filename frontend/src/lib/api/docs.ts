@@ -19,11 +19,12 @@ export class RequestRefused extends Error {
 export async function ok(res: Response) {
 	if (!res.ok) {
 		const detail = await res.text().catch(() => '');
-		let parsed: unknown, kind: unknown;
-		try { ({ detail: parsed, kind } = JSON.parse(detail) ?? {}); } catch { /* Non-JSON failures keep the HTTP status below. */ }
+		let parsed: unknown, kind: unknown, wellFormed = false;
+		try { ({ detail: parsed, kind } = JSON.parse(detail) ?? {}); wellFormed = true; } catch { /* Non-JSON failures keep the HTTP status below. */ }
 		const refusal = docOpenFailure(parsed);
 		if (refusal) throw refusal;
-		throw new RequestRefused(`${res.status} ${detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
+		// A JSON body stays whole so readers can parse it; only raw text (an HTML error page) is cut.
+		throw new RequestRefused(`${res.status} ${wellFormed ? detail : detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
 }

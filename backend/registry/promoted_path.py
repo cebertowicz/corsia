@@ -50,6 +50,25 @@ def promoted_to(path: str | Path, *, db=None) -> str | None:
             _db.close()
 
 
+MOVED_SAVE = (
+    "Couldn't save: this document is at {where}. Your changes are still in this tab. "
+    "Copy them into the document there."
+)
+MOVED_SAVE_ELSEWHERE = "Couldn't save: this document is in another folder. Your changes are still in this tab."
+
+
+def moved_save_message(path: str | Path, *, db=None) -> str | None:
+    """What a person's tab is told when it saves to a promoted-away path, else None.
+
+    Names the document's workspace-relative path; a successor outside the workspace has no such
+    path to show, so that case says only that it is in another folder.
+    """
+    where = promoted_to(path, db=db)
+    if where is None:
+        return None
+    return MOVED_SAVE_ELSEWHERE if Path(where).is_absolute() else MOVED_SAVE.format(where=where)
+
+
 def moved_message(path: str | Path, verb: str, *, db=None) -> str | None:
     """The one sentence plus next step for a caller that named a promoted-away path, else None."""
     where = promoted_to(path, db=db)

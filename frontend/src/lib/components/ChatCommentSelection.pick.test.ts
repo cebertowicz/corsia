@@ -111,3 +111,30 @@ it('writes a new comment in the column, as a card level with its text, while the
 	expect(host.querySelector<HTMLElement>('[data-margin-composer]')!.dataset.marginComposer).toBe('');
 	Reflect.deleteProperty(Range.prototype, 'getClientRects');
 });
+
+it('returns focus to the pressed highlight when a thread opened from the list closes', async () => {
+	setupSurface();
+	vi.stubGlobal('innerWidth', 390);
+	const comment = (id: string) => ({ id, cid: `c-${id}`, user_message_id: 'u1', quote: 'text', note: 'Why?', from_off: 0, to_off: 4, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-05T00:00:00Z', answers: [] });
+	messages.set([{ id: 'm1', thread_id: 'thread', role: 'assistant', seq: 1, chat_comments: [comment('one'), comment('two')] }] as never);
+	component = mount(ChatCommentSelectionPickHost, { target: host.querySelector('#mount')! });
+	// Narrow: the host starts with the column up, so toggle it away and the press opens the list in a sheet.
+	host.querySelector<HTMLButtonElement>('[data-toggle-margin]')!.click();
+	flushSync();
+	await vi.waitFor(() => expect(host.querySelector('.long-message-body [data-comment-ids]')).not.toBeNull());
+	// Press the innermost highlight: every comment on the text is on it or on a span around it.
+	const highlight = host.querySelector<HTMLElement>('.long-message-body [data-comment-ids="two"]')!;
+	highlight.click();
+	flushSync();
+	await tick();
+	flushSync();
+	// Two comments on the pressed text open as a list; a row's Reply opens that thread and the button leaves the page.
+	const reply = document.querySelector<HTMLButtonElement>('[role="dialog"] [data-reply-comment="two"]')!;
+	reply.click();
+	flushSync();
+	await tick();
+	flushSync();
+	expect(reply.isConnected).toBe(false);
+	document.querySelector<HTMLButtonElement>('[role="dialog"] button.drawer-done')!.click();
+	await vi.waitFor(() => expect(document.activeElement).toBe(highlight));
+});
