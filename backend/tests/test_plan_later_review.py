@@ -321,7 +321,7 @@ def test_review_wake_bulk_close_uses_the_real_plan_boundary(db):
     pile = _pile_below(db, plan.id, 3)
     _arm(db, plan.id, DUE)
     _sweep(db)
-    assert "close_node node_ids" in _wakes(db)[0]["content"]
+    assert "one close_node call with node_ids" in _wakes(db)[0]["content"]
 
     ids = [node["id"] for node in pile]
     result = plan_update(db, plan.id, "close_node", {
