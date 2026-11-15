@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "The chat-list read omits 19 engine columns no list caller reads (turn, model-switch, compaction, confinement and local-only state); thread detail and the owning routes still serve them.",
+  "reason": "The lesson report reads candidate read_file rows only from Turns with a guidance receipt, seeking each Turn on its index; its coverage line names that scope (a few more bytes).",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -157,9 +157,9 @@
       "steps": 1257513
     },
     "/api/measurement/lessons": {
-      "bytes": 104075,
+      "bytes": 104241,
       "statements": 850,
-      "steps": 5459206
+      "steps": 4016667
     },
     "/api/measurement/limits": {
       "bytes": 509,

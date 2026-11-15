@@ -10,6 +10,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
+- A chat no longer shows provider usage-limit errors or the resume chip, including in earlier messages and when work does not continue. The held message above the composer remains.
 - A chat that hits Claude Code's 5-hour limit now moves to another account, or waits for the reset, as it does for other usage limits; before, it stopped as an ordinary failure.
 - A chat whose Claude Code session can't be resumed now sends your message again instead of sometimes ending with an error.
 - A click on a comment highlighted in a table or diagram opens its card and keeps it open; before, it could close again at once. Clicking it a second time no longer sends your next typing to the top of the document.
@@ -25,6 +26,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A document's status line stays on one line while a reply is unread, on a standard-size phone such as a current iPhone and when the document area is narrow: the comment count shortens to "N unread", and the text below no longer jumps down. On smaller phones it can still take two lines.
 - A document's owner in the Documents list now shows in full on a phone, and the description is shortened first; before, the end of the line, the owner, was cut off. When the owner's name alone fills the line, the description is left out and the name is shortened.
 - A document you are reading stays still when someone else edits a table in it, and clicking a commented table row keeps that row where you clicked.
+- A document you have open keeps your latest typing when an agent promotes it into a shared folder or moves it elsewhere: the typing is saved first and you reopen it at its new place. If it can’t be saved yet, the move is refused and the agent is told to try again shortly; before, the typing could be lost.
 - A document you open and close without changing it keeps its modified time, and its owner is no longer told it was edited; the same holds when an agent saves a document with the text it already has.
 - A failed update now says it failed and which version CORSIA is on, with no percentage or progress bar; one that couldn’t begin says Couldn’t start the update, and one whose restart failed says CORSIA didn’t restart.
 - A folded working line in chat now counts the same steps as the list it opens; before, a step that only answered comments was counted but showed nothing.

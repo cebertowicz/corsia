@@ -3,7 +3,8 @@
 A repeated id cannot name one declared call, so the canonical writer refuses
 its result. Whether the batch ran, was stopped before it ran, or was stopped
 part-way, the Turn ends in error instead of staying open; no second effect
-runs, and a result is kept only when it can be told apart.
+runs, and a result is kept only when it can be told apart. A call left without
+one gets exactly one durable missing-result row from the Turn's terminal.
 
 Drives the real ``run_tracked_turn`` (finalize, terminal claim, settlement
 drive, runtime retire) around the real ``execute_tool_calls`` and Step handler.
@@ -129,9 +130,7 @@ async def test_repeated_call_id_reaches_an_error_terminal(lab, monkeypatch, shap
             "SELECT status,ended_at FROM active_turns WHERE id=?", (lab.identity.turn_id,),
         ).fetchone()
         assert row["status"] == "error" and row["ended_at"] is not None
-        stored = [r["content"] for r in db.execute(
-            "SELECT content FROM messages WHERE thread_id='thread-1' AND role='tool' ORDER BY seq",
-        )]
+        stored, closes = _tool_rows(db, "thread-1")
         projection = render_portable_history("thread-1", db=db)
     finally:
         db.close()
@@ -146,10 +145,29 @@ async def test_repeated_call_id_reaches_an_error_terminal(lab, monkeypatch, shap
         for t in projection.turns for m in t.messages if m.role == "tool"
     }
     first_kept = shape == "executed" and not identical
+    assert closes == ([] if first_kept else ["dup-1"])
     assert projected["dup-1"][1] is (not first_kept)
     assert (projected["dup-1"][0] == "effect-result:first") is first_kept
     if shape == "mixed":
         assert projected["unique-1"] == ("effect-result:unique", False)
+
+
+def _tool_rows(db, thread_id):
+    """Real result contents, and the call ids the terminal closed as never recorded."""
+    from infra.delivery_states import TURN_ENDED_WITHOUT_RESULT_REASON
+
+    stored, closes = [], []
+    for row in db.execute(
+        "SELECT content, json_extract(metadata,'$.synthetic_reason') AS reason, "
+        "json_extract(metadata,'$.tool_call_id') AS call_id FROM messages "
+        "WHERE thread_id=? AND role='tool' ORDER BY seq", (thread_id,),
+    ):
+        if row["reason"] is None:
+            stored.append(row["content"])
+        else:
+            assert row["reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
+            closes.append(row["call_id"])
+    return stored, closes
 
 
 def _native_target():
@@ -168,7 +186,10 @@ def _native_target():
 async def test_real_stop_before_any_effect_ends_the_turn(
     isolated_db, monkeypatch, tmp_path, second_tag,
 ):
-    """A user Stop through the ws chain ends the Turn; nothing ran, nothing is stored."""
+    """A user Stop through the ws chain ends the Turn; nothing ran, no result is stored.
+
+    The repeated id gets one durable missing-result row from the terminal.
+    """
     from contextlib import closing
     from unittest.mock import AsyncMock
 
@@ -240,6 +261,4 @@ async def test_real_stop_before_any_effect_ends_the_turn(
             "SELECT status,ended_at FROM active_turns WHERE id=?", (turn_ids[0],),
         ).fetchone()
         assert turn["status"] != "running" and turn["ended_at"] is not None
-        assert db.execute(
-            "SELECT COUNT(*) FROM messages WHERE thread_id=? AND role='tool'", (thread_id,),
-        ).fetchone()[0] == 0
+        assert _tool_rows(db, thread_id) == ([], ["dup-1"])

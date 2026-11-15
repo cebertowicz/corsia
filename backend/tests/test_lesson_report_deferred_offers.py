@@ -24,14 +24,16 @@ SCOPE = ReportScope("user", ("owner",), "self", "2026-09-21", "2026-09-28")
 # Strings that exercise every escape decision between SQLite's and Python's canonical JSON.
 AWKWARD = ["plain", 'quo"te', "back\\slash", "sl/ash", "ctl\x01\x1f\t\n\r", "del\x7f", "unié中\U0001f600",
            "sep  ", "", "tab\ttab"]
-# Digests of what origin/dev (merge-base 8468cd650) produced for each label below.
+# Digests of what origin/dev (merge-base 8468cd650) produced for each label below. The full-* labels
+# were re-frozen when the body-read coverage line began naming the receipt-Turn scope; with the
+# earlier line they still matched origin/dev exactly.
 FROZEN: dict[str, str] = {
-    "full-list": "8bb8fd673086eb9c18c8d1564381be93611038524cdc01c1e17bdf0543c8d716",
-    "full-preview": "8bb8fd673086eb9c18c8d1564381be93611038524cdc01c1e17bdf0543c8d716",
-    "full-subject-a": "3cd396ea5cfe47c2b8fca93ac8ff852f6bf10f80d2e7f46023fc05d50c5af4e2",
-    "full-other-b": "24c178a94c459b728037696364913da5bb9a0f96ef4e2295469466c69871192e",
-    "full-subject": "f68058f51912dcc769c6d44a0e9a2728644fbd49d3ff34726c4f7255a66503da",
-    "full-current": "8bd6cd065a86d4b3d074f9157823d82df85261d3f35216a6b5ac13f90a3fa104",
+    "full-list": "461c29c2b7738b752b441b1a55aa6fca71c446593ec69c818c5c3272e4c747fd",
+    "full-preview": "461c29c2b7738b752b441b1a55aa6fca71c446593ec69c818c5c3272e4c747fd",
+    "full-subject-a": "025ae9bd0c700ad0252e9dba0418c03c1e4c7ce8d73f9328e557ea4f665375ff",
+    "full-other-b": "fa3351c8929d0401f1c615bb30af74194388afbbc95c36d31c1de7058d075ef0",
+    "full-subject": "13c675e891b8a3498dacc82f5f6a305780b62409c70a656fcad30c4f34b91a35",
+    "full-current": "b134d570740cba74e12036f97ca1027f5ab9bf0bc28b912a5a7d6dd65aae56d7",
     "shape-list": "292d3f92d7ba125c0cd9e9dde2275d91801e657dfd8c7806ddca5286c955d7ac",
     "shape-preview": "292d3f92d7ba125c0cd9e9dde2275d91801e657dfd8c7806ddca5286c955d7ac",
     "shape-subject-a": "9d05788418c43dfb69e13183c14c2b30bdd6a1f904c857bb6653ce1ce95eb567",
