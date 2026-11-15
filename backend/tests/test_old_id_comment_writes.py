@@ -276,6 +276,36 @@ def test_accept_all_leaves_a_suggestion_on_an_earlier_identity_open_listed_marke
         db.close()
 
 
+def test_the_startup_line_counts_retired_identities_holding_comments_and_held_batches_on_them(isolated_db):
+    from registry.retirement_state import lineage_counts, log_lineage_counts
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact = seed_document(db, "owner")
+        add_comment(db, artifact, author_kind="user", author="Steve", delivery_policy="document-held")
+        assert lineage_counts(db) == (0, 0)
+        _promote(db, artifact)  # the promote carries the comment and the batch to the successor
+        assert lineage_counts(db) == (0, 0)
+        add_comment(db, artifact, author_kind="user", author="Steve", delivery_policy="document-held")
+        assert lineage_counts(db) == (1, 1)
+        lines: list[str] = []
+
+        class _Log:
+            def info(self, message, *args):
+                lines.append(message.format(*args))
+
+            def warning(self, message, *args):
+                lines.append(message.format(*args))
+
+        log_lineage_counts(_Log())
+        assert lines == [
+            "document lineage: retired_identities_with_comments=1 held_feedback_batches_on_retired_identities=1"
+        ]
+    finally:
+        db.close()
+
+
 def test_live_identity_follows_a_twelve_step_chain(isolated_db):
     db = get_db()
     try:

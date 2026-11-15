@@ -53,6 +53,43 @@ def predecessors(artifact_id: str, *, db) -> list[str]:
     return [row["id"] for row in rows]
 
 
+def lineage_counts(db) -> tuple[int, int]:
+    """What the lineage read still serves, read-only: (retired identities with a successor that hold
+    comments, held feedback batches not yet sent that sit on a retired identity).
+
+    The first is the removal condition for reading earlier identities' comments: at zero no retired
+    identity holds any, so the read can go. The second is feedback that cannot close (its artifact is
+    not active) and so never reaches its agent; zero means nothing to re-key.
+    """
+    stray_comments = db.execute(
+        "SELECT COUNT(*) FROM artifact_identities i"
+        " WHERE json_valid(i.metadata) AND json_extract(i.metadata, '$.successor_id') IS NOT NULL"
+        " AND EXISTS (SELECT 1 FROM doc_comments c WHERE c.artifact_id = i.id)"
+    ).fetchone()[0]
+    stray_batches = db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_batches b JOIN artifact_identities i ON i.id = b.artifact_id"
+        " WHERE b.state IN ('open', 'undelivered') AND i.state != 'active'"
+    ).fetchone()[0]
+    return stray_comments, stray_batches
+
+
+def log_lineage_counts(logger) -> None:
+    """Write the :func:`lineage_counts` line at startup; a failure to count never stops startup."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        comments, batches = lineage_counts(db)
+        logger.info(
+            "document lineage: retired_identities_with_comments={} held_feedback_batches_on_retired_identities={}",
+            comments, batches,
+        )
+    except Exception as exc:  # noqa: BLE001 - a count must never block startup
+        logger.warning("document lineage count failed: {}", exc)
+    finally:
+        db.close()
+
+
 def live_identity(artifact_id: str, *, db) -> str | None:
     """The identity this document's comment state lives on now.
 
