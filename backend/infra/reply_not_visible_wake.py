@@ -5,12 +5,10 @@ a Turn ends while the person's newest message has no such reply after it, the ag
 is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
 its last words become the reply (``for_user``), so the person still sees them, and
-any comment answers tagged in them are placed in the same write; a
-woken Turn that leaves no words of its own (it errored first) shows the words it
-was woken about instead.
-
-The original Turn's check (``_original_turn_replied``) decides whether to wake; the woken
-Turn's (``_woken_turn_replied``) is any message sent after the nudge.
+any comment answers tagged in them are placed in the same write; a woken Turn that
+leaves no words of its own (it errored first) shows the words it was woken about
+instead. ``_original_turn_replied`` decides whether to wake; ``_woken_turn_replied``
+(any message sent after the nudge) settles the woken Turn.
 
 Before any person message, the delivered first-run event can anchor the same rule.
 Both run inside the terminal write (``automation.turn_end_effects``). A person's
@@ -229,6 +227,7 @@ def _woken_about(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nu
 def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> None:
     """Make the nudged Turn's last words its reply, as if it had sent them."""
     from infra import thread_updates
+    from infra.message_update_state import register
     from infra.send_broadcast import broadcast_input_rows, read_input_broadcast_row
     from infra.write_effects import after_commit
 
@@ -237,8 +236,6 @@ def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row)
         "WHERE id=?",
         (row["id"],),
     )
-    from infra.message_update_state import register
-
     register(db, str(row["id"]), thread_id, "reminder_fallback")
     place_flipped_answers(db, thread_id, str(row["id"]))
     thread_updates.record_marked(
