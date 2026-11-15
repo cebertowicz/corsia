@@ -154,6 +154,36 @@ describe('DocMarginStack', () => {
 		raf.mockRestore();
 	});
 
+	it('leaves focus with a field the reader moved to before the composer card was placed', async () => {
+		const observed: Array<() => void> = [];
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { observed.push(callback); } observe() {} unobserve() {} disconnect() {} });
+		const scroller = document.createElement('div');
+		const column = document.createElement('div');
+		const chatInput = document.createElement('textarea');
+		scroller.append(column);
+		document.body.append(scroller, chatInput);
+		let drawn = false;
+		column.getClientRects = () => (drawn ? [{}] : []) as unknown as DOMRectList;
+		column.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+		const source: MarginAnchorSource = { scroller: () => scroller, column: () => column, anchor: () => null, moved: () => [], resized: () => [] };
+		const body = createRawSnippet(() => ({ render: () => '<div><textarea aria-label="Comment"></textarea></div>' }));
+		const composer: MarginComposer = { id: 'composer', anchor: () => ({ top: 160 }) as DOMRect, body };
+		const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => { step(0); return 1; });
+		component = mount(DocMarginStack, { target: column, props: { source, pinned: [], selectedId: null, card, composer } });
+		flushSync();
+		await Promise.resolve();
+
+		chatInput.focus();
+		drawn = true;
+		observed.forEach((callback) => callback());
+		flushSync();
+		await Promise.resolve();
+		const writing = column.querySelector<HTMLElement>('[data-margin-card="composer"]')!;
+		expect(writing.classList.contains('placed')).toBe(true);
+		expect(document.activeElement).toBe(chatInput);
+		raf.mockRestore();
+	});
+
 	it('brings a picked card into view from the place it is given, not the place its box held before the pick', () => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 		const scroller = document.createElement('div');

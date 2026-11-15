@@ -73,7 +73,7 @@ export function createFormHandoff(inputs: {
 			const into = drawer.querySelector<HTMLElement>(selector);
 			if (!into) return;
 			stopFocus();
-			stopFocus = focusWhenPlaced(into, () => { const now = document.activeElement; return !now || now === document.body || now === from || !now.isConnected; });
+			stopFocus = focusWhenPlaced(into, from);
 		});
 	});
 	return { note, get redrawn() { return redrawn; }, get handoff() { return handoff; } };
