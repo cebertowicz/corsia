@@ -44,24 +44,17 @@ async def _admit_line(schedule_id: str, index: int, tries: int, **event) -> tupl
     """
     from events.intake import admit_event
     from events.intake_errors import failure_code
+    from events.intake_retry import admit_with_retry
 
-    for attempt in range(1, tries + 1):
-        try:
-            result = await admit_event(**event)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
-            code = failure_code(exc)
-            if code == "intake_unreachable" and attempt < tries:
-                logger.warning("script schedule {} event line {} could not reach the intake, try {} of {}: {}",
-                               schedule_id, index, attempt, tries, exc)
-                await asyncio.sleep(_ADMIT_PAUSE_SECONDS[attempt - 1])
-                continue
-            logger.exception("script schedule {} event line {} failed inside the intake", schedule_id, index)
-            return code, ("the event intake failed unexpectedly" if code == "internal_error"
-                          else "event intake is unavailable")
-        return (result.refusal.code, result.refusal.text) if result.refusal is not None else None
-    return None  # unreachable: the last try returns
+    try:
+        result = await admit_with_retry(admit_event, pauses=_ADMIT_PAUSE_SECONDS[:tries - 1],
+                                        sleep=asyncio.sleep, **event)
+    except Exception as exc:  # noqa: BLE001 - the run settles as an error
+        code = failure_code(exc)
+        logger.exception("script schedule {} event line {} failed inside the intake", schedule_id, index)
+        return code, ("the event intake failed unexpectedly" if code == "internal_error"
+                      else "event intake is unavailable")
+    return (result.refusal.code, result.refusal.text) if result.refusal is not None else None
 
 
 async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
