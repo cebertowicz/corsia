@@ -20,7 +20,7 @@ export function createResolvedDrawer(inputs: { enabled: () => boolean; resolved:
 		closed() {
 			mounted = false;
 			const active = document.activeElement;
-			if (!active || active === document.body) inputs.entry()?.focus();
+			if (!active || active === document.body) inputs.entry()?.focus({ preventScroll: true });
 		},
 	};
 }

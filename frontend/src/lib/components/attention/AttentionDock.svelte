@@ -109,7 +109,7 @@
 		const back = priorFocus?.isConnected ? priorFocus : openTrigger?.isConnected ? openTrigger
 			: heldDecision ? document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]') : null;
 		priorFocus = null;
-		back?.focus();
+		back?.focus({ preventScroll: true });
 	}
 
 	const deferredId = 'attention-dock-deferred';

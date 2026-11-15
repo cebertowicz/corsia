@@ -192,7 +192,7 @@
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
 	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
-	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus()); };
+	const closeRow = (id: string): void => { openId = null; void refresh(); void tick().then(() => [...document.querySelectorAll<HTMLElement>('[data-connected-account-id]')].find((item) => item.dataset.connectedAccountId === id)?.querySelector<HTMLElement>('.face.open')?.focus({ preventScroll: true })); };
 
 	/** The button a chat link lands on: an account's Sign in or Where it works…, an app waiting on approval's Approve or Choose where it works…. */
 	function linkLabel(row: ConnectedAppsRow): string | null {

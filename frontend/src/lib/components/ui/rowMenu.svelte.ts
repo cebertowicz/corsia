@@ -59,7 +59,7 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 	function close() {
 		const trigger = open?.trigger;
 		open = null;
-		if (trigger?.isConnected) trigger.focus();
+		if (trigger?.isConnected) trigger.focus({ preventScroll: true });
 	}
 
 	const api = {

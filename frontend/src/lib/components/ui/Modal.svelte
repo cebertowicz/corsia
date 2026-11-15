@@ -98,7 +98,7 @@
 
 		return () => {
 			mounted = false;
-			if (previousFocus?.isConnected && focusStillOurs(element, document.activeElement)) previousFocus.focus();
+			if (previousFocus?.isConnected && focusStillOurs(element, document.activeElement)) previousFocus.focus({ preventScroll: true });
 		};
 	});
 </script>

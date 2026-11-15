@@ -156,7 +156,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
-		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => opener.focus();
+		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => opener.focus({ preventScroll: true });
 		pickedComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {
@@ -197,7 +197,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		anchor = opener;
 		atClick = false;
 		// The column sits beside the text, so focus leaving it goes back to the caret; a list over the text hands it back to its button.
-		restoreFocus = marginUp?.() ? restoreEditor : () => opener.focus();
+		restoreFocus = marginUp?.() ? restoreEditor : () => opener.focus({ preventScroll: true });
 	}
 	return {
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; bump(); }, get opened() { return opened; },

@@ -90,7 +90,7 @@
 		pick = null; draft = null; viewing = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
-		if (focus) void tick().then(() => focus.focus());
+		if (focus) void tick().then(() => focus.focus({ preventScroll: true }));
 	}
 	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
 	/** Cancel lets the passage's typed text and any failure go, so they never come back on the next comment. */

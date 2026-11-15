@@ -150,7 +150,7 @@
 
 	function closeActiveDrawer(): void {
 		openActiveLeaseId = null;
-		openActiveTrigger?.focus();
+		openActiveTrigger?.focus({ preventScroll: true });
 		openActiveTrigger = null;
 	}
 
@@ -160,7 +160,7 @@
 
 	function closePendingDrawer(): void {
 		pendingOpen = false;
-		pendingTriggerEl?.focus();
+		pendingTriggerEl?.focus({ preventScroll: true });
 	}
 
 	async function reconcileAuthoritativeLeases(

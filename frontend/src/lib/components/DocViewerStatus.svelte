@@ -153,7 +153,7 @@
 			event.preventDefault();
 			event.stopPropagation();
 			detailsOpen = false;
-			toggle?.focus();
+			toggle?.focus({ preventScroll: true });
 		};
 		element.addEventListener('keydown', onKey);
 		return { destroy() { element.removeEventListener('keydown', onKey); } };

@@ -225,7 +225,7 @@
 		if (open) void tick().then(() => position());
 	});
 	function onScrollInput(event: Event) { if (!(event.target instanceof Node && surface?.contains(event.target))) lastScrollInput = performance.now(); }
-	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
+	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus({ preventScroll: true }); }
 	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
 	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
 </script>

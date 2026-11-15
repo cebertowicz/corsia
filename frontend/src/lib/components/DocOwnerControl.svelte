@@ -48,7 +48,7 @@
 	function close() { picker = null; }
 	// A row turns inert whenever it waits on a load, a switch to another document or a reload of this one; a picker left open would offer a pick that choose() drops without a word.
 	$effect(() => { if (inert) picker = null; });
-	function restoreFocus() { void tick().then(() => (anchor?.isConnected ? anchor : null)?.focus()); }
+	function restoreFocus() { void tick().then(() => (anchor?.isConnected ? anchor : null)?.focus({ preventScroll: true })); }
 	function keys(event: KeyboardEvent) {
 		if (event.key === 'Enter' && matches.length) { event.preventDefault(); void choose(matches[Math.min(active, matches.length - 1)]); return; }
 		const index = agentOptionIndex(event.key, active, matches.length);

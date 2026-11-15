@@ -45,7 +45,7 @@
 		// Capture the fallback before closing the last request removes this control's root.
 		const fallback = requestTrigger ?? root?.closest('.document-tools')?.querySelector<HTMLButtonElement>('.comment-status');
 		const trigger = anchor;
-		void tick().then(() => (trigger?.isConnected ? trigger : fallback)?.focus());
+		void tick().then(() => (trigger?.isConnected ? trigger : fallback)?.focus({ preventScroll: true }));
 	}
 	function sent() {
 		const reviewers = model.lastSent;
