@@ -10,7 +10,7 @@ from infra.database import get_db
 from plans import boundary, delegation, mutations, service
 from plans.boundary import PlanActor
 from plans.close_next_bounds import REASON_MAX_BYTES
-from plans.workflow_fields import PERSON_GATE_ROUTE
+from plans.workflow_fields import PERSON_GATE_READY, PERSON_GATE_ROUTE
 from prompts.plan_tools import PERSON_GATE_NAMED
 from tests.child_parent_notice_helpers import db
 from tests.plan_review_helpers import submit_review_evidence
@@ -250,3 +250,18 @@ async def test_naming_the_persons_gate_as_next_says_how_to_ask_them(isolated_db,
     named = reply["next"]["named"]
     assert (named["started"], named["refusal"], named["reason"]) == (False, "user_assigned", PERSON_GATE_NAMED)
     assert len(PERSON_GATE_NAMED.encode()) <= REASON_MAX_BYTES
+
+
+@pytest.mark.asyncio
+async def test_closing_the_step_before_the_persons_gate_says_to_ask_them_now(isolated_db, tmp_path, monkeypatch):
+    run, work, gate = await _person_gate(tmp_path, monkeypatch)
+    await run.update("start", {"node_id": work, "expected_revision": run.revision(work)})
+    reply = await run.update("mark_done", _done(run, work))
+    assert reply["person_gate"] == PERSON_GATE_READY.format(title="Approve the note", id=gate)
+
+
+@pytest.mark.asyncio
+async def test_a_person_step_that_is_no_gate_gets_no_ask_line(isolated_db, tmp_path, monkeypatch):
+    run, work, _step = await _person_gate(tmp_path, monkeypatch, PERSON_GATE.replace("gate: acceptance, ", ""))
+    await run.update("start", {"node_id": work, "expected_revision": run.revision(work)})
+    assert "person_gate" not in await run.update("mark_done", _done(run, work))

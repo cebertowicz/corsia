@@ -40,7 +40,7 @@ The `by` field says who does a step (`backend/core/skill_workflow_validation.py`
 |---|---|---|
 | `agent` (default) | The agent that started the run | The agent closes it with evidence, or hands work back for review when a worker did it |
 | `reviewer` | A separate worker | The agent cannot mark it done itself. It hands the step to a worker with `delegate_task`, then accepts or sends back what returns |
-| `person` | The person | The step is assigned to them with its instruction and check. A person step that comes after others reaches them only once those are done. When the step is also a gate, the agent asks for it with a review ask (`block_node` on the step, `owner_kind` user, the file they review); it cannot mark the step done before the person answers that ask, and a chat reply does not count |
+| `person` | The person | The step is assigned to them with its instruction and check. A person step that comes after others reaches them only once those are done. When the step is also a gate, the reply that closes the step before it tells the agent to ask now, and the agent asks for it with a review ask (`block_node` on the step, `owner_kind` user, the file they review); it cannot mark the step done before the person answers that ask, and a chat reply does not count |
 
 A person step's instruction and check must together fit 400 characters.
 

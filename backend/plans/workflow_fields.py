@@ -208,6 +208,24 @@ PERSON_GATE_ROUTE = (
     "This step is the person's review: ask them with block_node on it (owner_kind user, "
     "ask_artifact_id: the file they review). Close it after they answer that ask, not on a chat reply."
 )
+PERSON_GATE_READY = (
+    'Next: "{title}" ({id}) is the person\'s review. Ask them now with block_node on it (owner_kind user, '
+    "ask_artifact_id: the file they review), not in chat, and close it after they answer that ask."
+)
+
+
+def person_gates_ready(db, closed_id: str) -> list[str]:
+    """The ask line for each person's gate step that closing ``closed_id`` just made ready."""
+    from plans import node_waits
+
+    waiting = [row["node_id"] for row in db.execute(
+        "SELECT node_id FROM plan_node_dependencies WHERE depends_on_node_id=?", (closed_id,),
+    ) if person_gate(db, row["node_id"])]
+    unmet = node_waits.unmet_prerequisites(db, waiting, compact=True)
+    return [
+        PERSON_GATE_READY.format(title=service._node_row(db, node_id)["title"], id=node_id)
+        for node_id in waiting if not unmet.get(node_id)
+    ]
 
 
 def _open_step(db, node_id: str):
@@ -338,12 +356,7 @@ def refuse_unasked_person_gate(db, node_id: str, operation: str) -> None:
 
     if operation not in {"mark_done", "accept", "accept_with_follow_up"} or not person_gate(db, node_id):
         return
-    node = service._node_row(db, node_id)
-    steps = [row["id"] for row in db.execute(
-        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
-        (node["parent_id"], node["workflow_step"]),
-    )]
-    if gate_handoff_record.latest_verdict(db, steps) is None:
+    if gate_handoff_record.latest_verdict(db, service._node_row(db, node_id)) is None:
         raise service.PlanError(PERSON_GATE_ROUTE)
 
 

@@ -253,9 +253,5 @@ def refuse_rejected(db, node_id: str, operation: str) -> None:
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or creation_payload(db, node_id).get("workflow_gate") != "acceptance":
         return
-    siblings = [row["id"] for row in db.execute(
-        "SELECT id FROM plan_nodes WHERE parent_id IS ? AND workflow_step=?",
-        (node["parent_id"], node["workflow_step"]),
-    )]
-    if latest_verdict(db, siblings) == _REJECTED:
+    if latest_verdict(db, node) == _REJECTED:
         raise service.PlanError(GATE_REJECTED)
