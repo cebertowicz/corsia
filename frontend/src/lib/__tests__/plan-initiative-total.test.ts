@@ -16,8 +16,8 @@ function amount(over: Partial<OperatorCostAmount> = {}): OperatorCostAmount {
 		tokens: { known: 6_400_000, unknown_rows: 0 },
 		model_cost_usd: { known: 3.1, unknown_rows: 0 },
 		usage_recording_failures: 0,
-		execution: { seconds: 19_200, unknown_turns: 0, turns: TURNS },
-		waiting: { seconds: 0 },
+		execution: { settled_seconds: 19_200, open_starts: [], unknown_turns: 0, turns: TURNS },
+		waiting: { settled_seconds: 0, open_starts: [] },
 		...over,
 	};
 }
@@ -63,7 +63,7 @@ describe('initiativeLine copy', () => {
 		);
 		const failed = amount({ usage_recording_failures: 1 });
 		expect(text(initiative({ cost: failed }))).toContain('at least 6.4M tokens');
-		const unknownTurn = amount({ execution: { seconds: 19_200, unknown_turns: 1, turns: TURNS } });
+		const unknownTurn = amount({ execution: { settled_seconds: 19_200, open_starts: [], unknown_turns: 1, turns: TURNS } });
 		expect(text(initiative({ cost: unknownTurn }))).toBe(
 			'Initiative total: 6.4M tokens · at least 5h 20m working · 3 follow-ups',
 		);
@@ -77,7 +77,7 @@ describe('initiativeLine copy', () => {
 	});
 
 	it('omits the working fragment when no turn ran', () => {
-		const idle = amount({ execution: { seconds: 0, unknown_turns: 0, turns: NO_TURNS } });
+		const idle = amount({ execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: NO_TURNS } });
 		expect(text(initiative({ cost: idle }))).toBe('Initiative total: 6.4M tokens · 3 follow-ups');
 	});
 
@@ -86,7 +86,7 @@ describe('initiativeLine copy', () => {
 		expect(text(initiative({ cost: none }))).toBe('Initiative total: 5h 20m working · 3 follow-ups');
 		const nothing = amount({
 			tokens: { known: null, unknown_rows: 0 },
-			execution: { seconds: 0, unknown_turns: 0, turns: NO_TURNS },
+			execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: NO_TURNS },
 		});
 		expect(text(initiative({ cost: nothing }))).toBe('Initiative total: 3 follow-ups');
 	});
@@ -94,7 +94,7 @@ describe('initiativeLine copy', () => {
 	it('reads a recorded zero as 0 tokens', () => {
 		const zero = amount({
 			tokens: { known: 0, unknown_rows: 0 },
-			execution: { seconds: 0, unknown_turns: 0, turns: NO_TURNS },
+			execution: { settled_seconds: 0, open_starts: [], unknown_turns: 0, turns: NO_TURNS },
 		});
 		expect(text(initiative({ cost: zero }))).toBe('Initiative total: 0 tokens · 3 follow-ups');
 	});
@@ -129,7 +129,7 @@ describe('the Initiative total line in details', () => {
 		tokens: { known: 25_000_000, unknown_rows: 0 },
 		model_cost_usd: { known: null, unknown_rows: 0 },
 		usage_recording_failures: 0,
-		elapsed_seconds: { known: 60, status: 'in_progress' as const },
+		elapsed_seconds: { settled_seconds: 60, status: 'in_progress' as const, open_starts: [] },
 		user_effort: { known_plan_actions: 0, status: 'partial' as const },
 	};
 	const small = amount({ tokens: { known: 100, unknown_rows: 0 } });

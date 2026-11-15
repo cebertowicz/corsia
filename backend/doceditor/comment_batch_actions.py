@@ -177,7 +177,7 @@ async def _accept_batch(
         suggestion_author = _accepted_user_author(rows, accepted)
         receipt = await write(
             artifact["path"], text, project_id, f"Accepted {len(accepted)} suggestions from {authors}",
-            hashlib.sha256(source.encode()).hexdigest(), suggestion_author,
+            hashlib.sha256(source.encode()).hexdigest(), suggestion_author, tuple(accepted),
         )
         if suggestion_accept:
             await run_in_db(_drop_edit_feedback, artifact["id"], text)

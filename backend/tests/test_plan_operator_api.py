@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -527,6 +527,81 @@ def test_operator_fields_have_absolute_freshness_revisions_and_unwitnessed_compl
     assert completed["completion"]["event_id"]
     assert completed["completion"]["witnessed"] is False
     assert len(payload["revision_token"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_operator_revalidates_open_durations_across_clock_advance(db, monkeypatch):
+    from api import plans as api_plans
+    from plans import commitment_cost, node_cost, operator_node_state, status
+
+    ids = _seed_operator_tree(db)
+    clock = [datetime.now(timezone.utc) + timedelta(seconds=10)]
+    class ProjectionClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+
+    monkeypatch.setattr(operator_node_state, "datetime", ProjectionClock)
+    db.execute(
+        """INSERT INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,
+            plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role)
+           VALUES ('live-turn','parent',0,'test','running',?,'test',?,?,?,?,'execution')""",
+        ((clock[0] - timedelta(seconds=5)).isoformat(), ids["parent_plan"], ids["next"],
+         'test-attempt', ids["next"]),
+    )
+    db.commit()
+    monkeypatch.setattr(api_plans, "get_db", lambda: _DbProxy(db))
+    monkeypatch.setattr(api_plans, "run_in_db", _immediate)
+    app = FastAPI()
+    app.include_router(api_plans.router)
+    app.dependency_overrides[api_plans.require_user] = lambda: {"id": "user-1"}
+    with TestClient(app) as client:
+        first = client.get("/api/plans/operator/threads/parent")
+        assert first.status_code == 200
+        clock[0] += timedelta(seconds=3)
+        second = client.get("/api/plans/operator/threads/parent")
+        assert second.status_code == 200
+        assert first.json()["plans"] == second.json()["plans"]
+        assert first.json()["revision_token"] == second.json()["revision_token"]
+        nodes = {node["id"]: node for node in first.json()["plans"][0]["nodes"]}
+        assert nodes[ids["next"]]["node_cost"]["own"]["execution"]["open_starts"]
+        assert nodes[ids["blocked"]]["node_cost"]["own"]["waiting"]["open_starts"]
+        assert nodes[ids["phase"]]["commitment_cost"]["elapsed_seconds"]["open_starts"]
+        # Settled time is named apart from the agent path's total up to now.
+        for node in nodes.values():
+            for side in ("own", "rolled"):
+                amount = node["node_cost"][side]
+                if amount is None:
+                    continue
+                for part in ("execution", "waiting"):
+                    assert "seconds" not in amount[part]
+                    assert isinstance(amount[part]["settled_seconds"], int)
+                    assert isinstance(amount[part]["open_starts"], list)
+        assert "known" not in nodes[ids["phase"]]["commitment_cost"]["elapsed_seconds"]
+        assert nodes[ids["phase"]]["commitment_cost"]["elapsed_seconds"]["settled_seconds"] == 0
+        agent_now = node_cost.project_many([ids["parent_plan"]], db=db, now=clock[0])
+        agent_before = node_cost.project_many([ids["parent_plan"]], db=db, now=clock[0] - timedelta(seconds=3))
+        assert agent_now[ids["parent_plan"]][ids["next"]]["own"]["execution"]["seconds"] == 8
+        assert agent_before[ids["parent_plan"]][ids["next"]]["own"]["execution"]["seconds"] == 5
+        assert (agent_now[ids["parent_plan"]][ids["blocked"]]["own"]["waiting"]["seconds"]
+                - agent_before[ids["parent_plan"]][ids["blocked"]]["own"]["waiting"]["seconds"]) == 3
+        assert (commitment_cost.project(ids["phase"], db=db, now=clock[0])["elapsed_seconds"]["known"]
+                - commitment_cost.project(ids["phase"], db=db, now=clock[0] - timedelta(seconds=3))["elapsed_seconds"]["known"]) == 3
+        plan_row = service._plan_row(db, ids["parent_plan"])
+        agent = PlanActor("parent", "user-1", "project-1")
+        before_detail = status.node_detail(db, plan_row, ids["next"], actor=agent,
+                                           clock=(clock[0] - timedelta(seconds=3)).isoformat())
+        after_detail = status.node_detail(db, plan_row, ids["next"], actor=agent, clock=clock[0].isoformat())
+        assert before_detail["execution_time"]["seconds"] == 5
+        assert after_detail["execution_time"]["seconds"] == 8
+        unchanged = client.get("/api/plans/operator/threads/parent", headers={"If-None-Match": first.headers["etag"]})
+        assert unchanged.status_code == 304
+        service.transition_node(ids["next"], "active", db=db)
+        db.commit()
+        changed = client.get("/api/plans/operator/threads/parent", headers={"If-None-Match": first.headers["etag"]})
+        assert changed.status_code == 200
+        assert changed.headers["etag"] != first.headers["etag"]
 
 
 @pytest.mark.asyncio

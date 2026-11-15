@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import random
 import sqlite3
+import uuid
 from collections.abc import Callable
 
 import pytest
@@ -25,6 +26,9 @@ import pytest
 from infra.schema import SCHEMA_SQL
 from plans import archival, closure, mutations, rejection, service
 from plans.aggregates_recount import stored_mismatches
+from plans.boundary import PlanActor, mutate
+
+OWNER = PlanActor("owner", "user", "p")
 
 SEQUENCES = int(os.environ.get("CORSIA_PLAN_PROPERTY_SEQUENCES", "300"))
 MAX_OPS = 40
@@ -151,7 +155,11 @@ class World:
             ids.append(current)
 
         walk(node_id)
-        return self.step(f"archive_branch {node_id}", lambda: archival.archive_nodes(ids, db=self.db))
+        # The bulk archive the boundary runs, children named before their parent.
+        return self.step(f"archive_branch {node_id}", lambda: mutate(
+            self.plan.id, "archive_node", {"node_ids": ids}, actor=OWNER,
+            provenance="test", mutation_id=uuid.uuid4().hex, db=self.db,
+        ))
 
     def attach(self, node_id: str) -> bool:
         self.workers += 1

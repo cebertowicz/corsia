@@ -360,8 +360,6 @@
 		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
-	/* While a comment sheet is open over the transcript (chatCommentViewport), its height again as room at the end, so the last row can scroll up clear of the sheet. */
-	.messages::after { content: ''; display: block; flex: none; height: var(--comment-sheet-space, 0px); }
 	@media (max-width: 768px) {
 		.messages {
 			--sticky-top: calc(var(--header-bottom) + 8px);

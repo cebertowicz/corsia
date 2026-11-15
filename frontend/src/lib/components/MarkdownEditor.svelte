@@ -16,7 +16,7 @@
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { CaretRule, releasesPress } from '$lib/cm/caret-rule';
-	import { commentMarks, coveredByMove, highlightAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, highlightAtPress, highlightsAtPress, pickHighlight, openCommentIds, paintSignature, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
@@ -172,9 +172,9 @@
 	export function editorView(): EditorView | undefined { return view; }
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
-	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent) {
+	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent, fromText = false) {
 		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;
-		if (open) open(ids, opener, undefined, click); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
+		if (open) open(ids, opener, undefined, click, fromText); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
 	}
 
 	/** Which highlight the reader is in: a press decides until a key or a later press moves the caret (`caret-rule.ts`). */
@@ -190,7 +190,9 @@
 			const { hit, arrived } = read;
 			// Where a card would cover the text (sheet, popover), only a tap or click opens it; keys and typing are editing. A caret in a suggestion opens none on the phone; a press on its insert does (suggestionMarks).
 			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
-			if (hit && opens && v.coordsAtPos(r.from)) {
+			const stacked = hit && !hit.suggestion && click ? highlightsAtPress(v, click, curHighlights).filter((h) => !h.suggestion) : [];
+			if (hit && opens && stacked.length > 1 && v.coordsAtPos(r.from)) focusWidgetComments(stacked.map((h) => h.id), (click!.target as Element | null)?.closest<HTMLElement>('.cm-comment-anchor') ?? v.dom, click, true);  // two or more threads on the pressed text open as a list, as their margin marker does; a press whose innermost highlight is a suggestion opens that suggestion, as on dev
+			else if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {
@@ -341,11 +343,11 @@
 		// A marker's card anchors to the rows of the comment's text, read again as the canvas scrolls.
 		const ranges = highlights.map((h) => ({
 			...h,
-			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement, _anchor?: () => DOMRect | null, click?: MouseEvent) => h.onMarkerFocus!(ids, opener, () => {
+			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement, _anchor?: () => DOMRect | null, click?: MouseEvent, fromText?: boolean) => h.onMarkerFocus!(ids, opener, () => {
 				const focused = get(focusedDocComment);
 				const id = focused && ids.includes(focused) ? focused : ids.find((candidate) => curHighlights.some((highlight) => highlight.id === candidate));
 				return id ? liveAnchor(id)() : null;
-			}, click)),
+			}, click, fromText)),
 		}));
 		const sig = paintSignature(ranges);
 		if (sig === lastPainted) return;

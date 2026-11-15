@@ -9,6 +9,8 @@ member's rolled Tokens line.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from plans import commitment_cost, followups, mutations, node_cost, operator_node_state, rollup, service
@@ -65,6 +67,48 @@ def _chain(db, plan, count, *, tokens=10):
     for index, node in enumerate(nodes):
         _usage(db, node, tokens=tokens, cost=0.01, usage_id=f"u-chain-{node.id}")
     return nodes
+
+
+def test_initiative_stable_total_preserves_two_concurrent_turns(db):
+    plan = _plan(db)
+    step = _task(db, plan.id, "Delegate", spawn_kind="claude-code")
+    service.transition_node(step.id, "active", db=db)
+    child_plan = service.ensure_plan("thread", "child", db=db)
+    child = _task(db, child_plan.id, "Child work")
+    follow_up = _follow_up(db, child)
+    mutations.attach_spawned_thread(step.id, "child", db=db)
+    child = service.get_node(child.id, db=db)
+    _turn(db, step, "parent-live", started="2026-01-01T00:00:01+00:00", ended=None, status_="running")
+    _turn(db, child, "child-live", started="2026-01-01T00:00:03+00:00", ended=None,
+          status_="running", thread_id="child")
+    now = datetime(2026, 1, 1, 0, 0, 10, tzinfo=timezone.utc)
+    _, initiatives, _ = node_cost.project_with_commitments([child_plan.id], (), db=db, now=now, stable=True)
+    execution = initiatives[follow_up.id]["cost"]["execution"]
+    assert execution["seconds"] == 0
+    assert execution["open_starts"] == ["2026-01-01T00:00:01+00:00", "2026-01-01T00:00:03+00:00"]
+    _, agent_initiatives = node_cost.project_with_initiatives([child_plan.id], db=db, now=now)
+    assert agent_initiatives[follow_up.id]["cost"]["execution"]["seconds"] == 16
+
+
+def test_initiative_stable_waiting_sums_each_member_wait_as_the_agent_path_does(db):
+    plan = _plan(db)
+    root = _task(db, plan.id, "Root")
+    follow_up = _follow_up(db, root)
+    first_dependency = _task(db, plan.id, "First prerequisite")
+    second_dependency = _task(db, plan.id, "Second prerequisite")
+    service.add_dependency(root.id, first_dependency.id, db=db)
+    service.add_dependency(follow_up.id, second_dependency.id, db=db)
+    now = datetime.now(timezone.utc) + timedelta(seconds=20)
+    _, initiatives, _ = node_cost.project_with_commitments([plan.id], (), db=db, now=now, stable=True)
+    waiting = initiatives[root.id]["cost"]["waiting"]
+    assert waiting["seconds"] == 0
+    assert len(waiting["open_starts"]) == 2, "each member's open wait keeps its own start"
+    _, agent = node_cost.project_with_initiatives([plan.id], db=db, now=now)
+    live = waiting["seconds"] + sum(
+        int((now - datetime.fromisoformat(start)).total_seconds()) for start in waiting["open_starts"]
+    )
+    assert live == agent[root.id]["cost"]["waiting"]["seconds"]
+    assert live >= 40
 
 
 def test_a_a_parent_with_sub_steps_and_no_follow_ups_has_no_initiative(db):
