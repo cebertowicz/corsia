@@ -44,6 +44,45 @@ def test_success_checks_only_chosen_model(isolated_db, monkeypatch, dialect):
     assert _row(isolated_db, "other")[1] == {}
 
 
+def test_metadata_only_declared_connection_then_first_use(isolated_db, monkeypatch):
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm import network_discovery
+    from llm.external_catalog_view import external_catalog_models
+    from omlx_provider_fixtures import _patch_httpx, _Router
+
+    wire = _Router({})  # Model listing returns 404; only declared ids are available.
+    _patch_httpx(monkeypatch, wire)
+    monkeypatch.setattr(network_discovery, "discover_and_notify", lambda sid: asyncio.sleep(0))
+    calls = []
+
+    async def provider(messages, *args, **kwargs):
+        probe = isinstance(messages[0]["content"], list)
+        calls.append(probe)
+        return LLMResponse(content="green" if probe else "hello")
+
+    _install_provider(monkeypatch, "openai", provider)
+
+    async def run():
+        added = await add_external_server(AddServerBody(
+            name="Declared", base_url="http://127.0.0.1:8000/v1", dialect="openai",
+            model_ids=["chosen", "other"],
+        ))
+        sid = added["server_id"]
+        assert (await external_provider.discover_external_models(sid))["ok"]
+        assert calls == []
+        params = external_provider.build_external_params(sid, "chosen")
+        await _call(params)
+        await asyncio.gather(*list(image._PENDING))
+        models = {row["model_id"]: row for row in external_catalog_models(sid)["loaded"]}
+        assert models["chosen"]["image_input"]["result"] == "yes"
+        assert models["other"]["image_input"] is None
+
+    asyncio.run(run())
+    assert calls == [False, True]
+    assert wire.calls and all(method == "GET" for method, _, _ in wire.calls)
+
+
 def test_same_wire_model_on_another_server_is_untouched(isolated_db, monkeypatch):
     import json
     import sqlite3
