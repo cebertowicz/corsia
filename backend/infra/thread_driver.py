@@ -55,7 +55,9 @@ def admit_input(
     db: sqlite3.Connection | None = None,
 ) -> InputAdmission:
     """Accept one FIFO input and atomically choose the idle Turn winner."""
-    with write_transaction(db, scope="admit_input") as connection:
+    from connections.fact_memo import fact_reads
+    # Shared account, catalog, policy and home facts stay unchanged; close before commit.
+    with write_transaction(db, scope="admit_input") as connection, fact_reads():
         from automation.self_restart import restart_holds_new_work
         from infra.passive_changes import materialize_pending_digest
         passive = materialize_pending_digest(connection, thread_id) if materialize_passive_digest else None

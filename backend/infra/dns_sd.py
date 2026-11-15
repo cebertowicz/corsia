@@ -29,6 +29,8 @@ class DNSServiceAnnouncement:
     """Own one names-only registration and its event-loop reader."""
 
     port: int
+    # None announces the computer's name, as the product does; only tests pass one.
+    name: str | None = None
     announced_name: str | None = None
     error: str | None = None
     # Called when the registration changes announced_name or error after
@@ -79,7 +81,8 @@ class DNSServiceAnnouncement:
         register.restype = ctypes.c_int
         error = register(
             ctypes.byref(reference), _KDNS_SERVICE_FLAGS_NO_AUTO_RENAME, 0,
-            None, _SERVICE_TYPE, None, None, socket.htons(self.port), 0, None,
+            self.name.encode("utf-8") if self.name else None, _SERVICE_TYPE, None, None,
+            socket.htons(self.port), 0, None,
             self._callback, None,
         )
         if error != _KDNS_SERVICE_ERR_NO_ERROR:

@@ -1,15 +1,19 @@
 """Resolve existing caller visibility and sources for both lesson-report adapters."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 from threading import Event
+import time
 from typing import Any
 
+from loguru import logger
+
 from core.lesson_corrections import correction_facts, source_subjects
-from core.lesson_report import ReportScope, collect_report, detail_request, read_report
+from core.lesson_report import PhaseTimes, ReportScope, collect_report, detail_request, read_report
 from core.lesson_report_db import report_snapshot
 from core.lesson_report_offers import LessonReportCollectionCancelled
 from core.lesson_report_projects import attach_project_ids
@@ -66,7 +70,7 @@ class ReportCollection:
 def collect_for_identity(*, user_id: str | None = None, workspace: Path, caller_thread_id: str | None = None,
                         scope: str = "self", project: str = "all", agent: str | None = None,
                         range: str = "12w", cancellation_event: Event | None = None,
-                        **options: Any) -> ReportCollection:
+                        phases: PhaseTimes | None = None, **options: Any) -> ReportCollection:
     """Collect database-only facts for a later immutable render."""
     snapshot = (report_snapshot(cancellation_event=cancellation_event)
                 if cancellation_event is not None else report_snapshot())
@@ -82,7 +86,7 @@ def collect_for_identity(*, user_id: str | None = None, workspace: Path, caller_
         detail = detail_request(options.get("lesson_id"), options.get("version"), options.get("cursor"),
                                 options.get("evidence"))
         collected = collect_report(db, scope=selected, sources=[], detail=detail,
-                                   cancellation_event=cancellation_event)
+                                   cancellation_event=cancellation_event, phases=phases)
         if cancellation_event is not None and cancellation_event.is_set():
             raise LessonReportCollectionCancelled
     return ReportCollection(selected, inputs, collected, dict(options), range, scope, project, agent)
@@ -141,11 +145,59 @@ def render_collection(collection: ReportCollection, workspace: Path,
     return result
 
 
+# The request arguments a call's log line names. Some are caller-supplied strings, so the
+# line is one serialized payload (as ``context_preview_timing`` logs) and no value can forge a field.
+_LOGGED_ARGUMENTS = ("scope", "project", "agent", "range", "state", "preview", "lesson_id", "version", "evidence")
+
+
+def _log_call(kwargs: dict[str, Any], phases: PhaseTimes, outcome: str, seconds: float,
+              collection: ReportCollection | None) -> None:
+    """One line per report call: who asked, with what, how it ended and where the time went.
+
+    The ``collect`` stage includes the wait for a bulk-lane worker; the stages inside it do not.
+    """
+    payload: dict[str, Any] = {
+        "event": "lesson_report_call",
+        "caller": kwargs.get("caller_thread_id") or ("http" if kwargs.get("user_id") else "unknown"),
+        "arguments": {key: kwargs[key] for key in _LOGGED_ARGUMENTS if kwargs.get(key) is not None},
+        "cursor": bool(kwargs.get("cursor")),
+        "outcome": outcome,
+        "total_ms": round(seconds * 1_000, 3),
+    }
+    if collection is not None:
+        bodies = collection.collected["bodies"]
+        payload["threads"] = len(collection.scope.thread_ids)
+        payload["body_read_calls"] = len(bodies["reads"]) + sum(bodies["unavailable_reads"].values())
+    payload["stages"] = {name: {"wall_ms": round(value * 1_000, 3)} for name, value in phases.items()}
+    logger.info("lesson_report_call {}", json.dumps(payload, separators=(",", ":"), default=str))
+
+
 async def report_for_identity(*, cancellation_event: Event | None = None, **kwargs: Any) -> dict[str, Any]:
     """Run the read-only snapshot and immutable render phases on their owners."""
     workspace = kwargs["workspace"]
-    collection = await run_bulk(collect_for_identity, cancellation_event=cancellation_event, **kwargs)
-    resolved = await run_off_db(current_sources, workspace, collection.inputs)
-    collection = await run_bulk(collect_corrections, collection, resolved[0], cancellation_event)
-    result = await run_off_db(render_collection, collection, workspace, resolved)
-    return await run_bulk(attach_project_ids, result, collection.scope.user_id, cancellation_event)
+    started = time.perf_counter()
+    phases = PhaseTimes()
+    collection: ReportCollection | None = None
+    outcome = "error"
+    try:
+        with phases.phase("collect"):
+            collection = await run_bulk(collect_for_identity, cancellation_event=cancellation_event,
+                                        phases=phases, **kwargs)
+        with phases.phase("sources"):
+            resolved = await run_off_db(current_sources, workspace, collection.inputs)
+        with phases.phase("correction_join"):
+            collection = await run_bulk(collect_corrections, collection, resolved[0], cancellation_event)
+        with phases.phase("render"):
+            result = await run_off_db(render_collection, collection, workspace, resolved)
+        with phases.phase("project_ids"):
+            result = await run_bulk(attach_project_ids, result, collection.scope.user_id, cancellation_event)
+        outcome = "ok"
+        return result
+    except (LessonReportCollectionCancelled, asyncio.CancelledError):
+        outcome = "cancelled"
+        raise
+    except (ValueError, PermissionError):
+        outcome = "refused"
+        raise
+    finally:
+        _log_call(kwargs, phases, outcome, time.perf_counter() - started, collection)
