@@ -2,20 +2,25 @@
 
 This test deliberately uses no DNS-SD or socket seams: CI's macOS runtime must
 prove the operating system accepts the fallback listener and processes the
-native registration callback.
+native registration callback. It registers a unique instance name, because the
+product's default (the computer's name, with no automatic rename) conflicts
+with a CORSIA install already announcing on the same Mac.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import random
 import socket
 import subprocess
+import uuid
 
 import pytest
 
 from infra import devices_identity, devices_listener
+from infra.dns_sd import DNSServiceAnnouncement
 from infra.devices_listener import DevicesListener
 
 
@@ -96,6 +101,11 @@ async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(mo
     monkeypatch.setattr(devices_listener, "DEFAULT_PORT", primary)
     monkeypatch.setattr(devices_listener, "FALLBACK_PORTS", (fallback,))
     monkeypatch.setattr(devices_listener, "ensure_host_key", ensure_test_host_key)
+    test_name = f"corsia-test-{uuid.uuid4().hex[:12]}"
+    monkeypatch.setattr(
+        devices_listener, "DNSServiceAnnouncement",
+        functools.partial(DNSServiceAnnouncement, name=test_name),
+    )
     listener = DevicesListener(app=_empty_asgi_app)
     announcement = None
 
@@ -112,7 +122,7 @@ async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(mo
 
         if not _HOSTED_RUNNER:
             await _wait_for_registration(listener)
-            assert announcement.announced_name
+            assert announcement.announced_name == test_name
         assert announcement.error is None
     finally:
         if listener.task is not None:
