@@ -188,7 +188,9 @@ def _unowned_check_result(
         "event_route", RouteOutcome.PARKED.value,
         properties={"internal_event": internal_event, "external_id": external_id},
     )
-    dead_letter.park(internal_event, payload, "check_suite_noise_parked", external_id)
+    dead_letter.park(
+        internal_event, payload, "check_suite_noise_parked", external_id, expected=True,
+    )
     return RouteResult(
         RouteOutcome.PARKED, external_id=external_id,
         reason="check_suite_noise_suppressed",
