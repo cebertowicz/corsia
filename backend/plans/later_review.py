@@ -66,7 +66,7 @@ def _week_out(instant: str) -> str:
     like rather than parsing a row each sweep; a value that does not parse is a
     defect in the caller, not input.
     """
-    parsed = status_time.parse(instant) or status_time.parse(service._now())
+    parsed = status_time.parse(instant)
     if parsed is None:
         raise PlanError(f"not a timestamp: {instant!r}")
     return (parsed + timedelta(days=REVIEW_DAYS)).isoformat()

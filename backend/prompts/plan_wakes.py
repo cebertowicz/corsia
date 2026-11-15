@@ -47,7 +47,6 @@ REVISION_WORKER_STEP = (
 )
 #: A task in another thread's plan that one of yours depends on settled (#1552).
 WAKE_PREREQUISITE_SETTLED = "[CORSIA plan] {prerequisite} in {owner}'s plan {outcome}"
-#: Weekly Later review text lives in prompts.later_review.
 #: A conductor-added task reached a terminal outcome in the receiving agent's plan.
 WAKE_CONDUCTOR_TASK_SETTLED = (
     "[CORSIA plan] The task you added, {title}, in {receiver}'s plan {outcome}: {detail}."

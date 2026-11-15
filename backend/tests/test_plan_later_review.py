@@ -450,3 +450,12 @@ def test_later_is_listed_wherever_sections_are():
     assert "later" in withheld_projection._ENUM_VALUES["section"]
     assert "later" in plan_schemas.READ_PARAMS["section"]["enum"]
 
+
+
+def test_a_review_time_that_does_not_parse_is_refused_not_replaced():
+    try:
+        later_review._week_out("not a time")
+    except PlanError as exc:
+        assert "not a timestamp" in str(exc)
+    else:
+        raise AssertionError("a malformed instant must not fall back to the wall clock")

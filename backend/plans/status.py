@@ -214,9 +214,6 @@ def _minimal(row: dict) -> dict:
     } | {"truncated": True}
 
 
-# Later row rendering is in status_later.
-
-
 def _members(facts: dict, section: str) -> list[dict]:
     if section == "current":
         open_leaves = [n for n in facts["leaves"] if n["state"] not in _TERMINAL]
