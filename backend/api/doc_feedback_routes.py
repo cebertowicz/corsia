@@ -38,7 +38,7 @@ class DeliveryPreference(BaseModel):
 
 
 def _user_feedback_write(
-    assert_owns_artifact: Callable[[str, str, object], None],
+    assert_owns_artifact: Callable[[str, str, object], str],
     user_id: str,
     artifact_id: str,
     action: str,
@@ -48,7 +48,7 @@ def _user_feedback_write(
         raise ValueError("a retry names the lane it retries")
     db = get_db()
     try:
-        assert_owns_artifact(artifact_id, user_id, db)
+        artifact_id = assert_owns_artifact(artifact_id, user_id, db)
         with write_transaction(db, scope=f"user_doc_feedback_{action}") as connection:
             woken: list[str] = []
             state, lanes = "open", None if delivery_policy is None else (delivery_policy,)
@@ -123,7 +123,7 @@ def _send_thread_feedback(user_id: str, thread_id: str) -> dict:
         db.close()
 
 
-def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object], None]) -> None:
+def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object], str]) -> None:
     """Attach held-feedback routes to the comment API's ownership-scoped router."""
 
     async def user_feedback_action(user_id: str, body: FeedbackDocumentAction | FeedbackRetry, action: str) -> dict:
@@ -159,11 +159,11 @@ def add_feedback_routes(router, assert_owns_artifact: Callable[[str, str, object
         def touch() -> dict:
             db = get_db()
             try:
-                assert_owns_artifact(body.artifact_id, user["id"], db)
+                artifact_id = assert_owns_artifact(body.artifact_id, user["id"], db)
                 with write_transaction(db, scope="touch_user_doc_feedback") as connection:
                     changed = feedback_batches.touch_for_document(
                         connection,
-                        artifact_id=body.artifact_id,
+                        artifact_id=artifact_id,
                         delivery_policy=body.delivery_policy,
                     )
                 return {"touched": changed}

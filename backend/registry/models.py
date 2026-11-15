@@ -42,6 +42,7 @@ from registry.registration_writer import (  # noqa: F401 — compatibility re-ex
 )
 from registry.retirement_state import (  # noqa: F401 - re-exported for callers
     identity_state,
+    live_identity,
     retired_cause,
     successor_id,
 )
