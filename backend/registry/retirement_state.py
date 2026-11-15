@@ -51,3 +51,24 @@ def predecessors(artifact_id: str, *, db) -> list[str]:
         (artifact_id, artifact_id),
     ).fetchall()
     return [row["id"] for row in rows]
+
+
+def live_identity(artifact_id: str, *, db) -> str | None:
+    """The identity this document's comment state lives on now.
+
+    ``artifact_id`` itself unless a promote retired it with a successor; then the active identity
+    the successor chain ends at. None when the chain cannot be followed to one (a successor that is
+    gone or retired with no successor of its own, or a loop): the caller must refuse rather than
+    write to a retired row. The walk has no hop limit; an id it has already visited ends it, so a
+    document promoted any number of times still resolves. An identity retired with no successor
+    (its file deleted) answers itself, as it always did.
+    """
+    seen, current = {artifact_id}, artifact_id
+    while True:
+        successor = successor_id(current, db=db)
+        if successor is None:
+            return current if current == artifact_id or identity_state(current, db=db) == "active" else None
+        if successor in seen:
+            return None
+        seen.add(successor)
+        current = successor

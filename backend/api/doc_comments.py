@@ -46,6 +46,7 @@ from api.doc_comment_decisions import comment_action_status, decision_refusal, s
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from infra.db_async import run_in_db
+from plans.person_comment_task import MOVED
 from registry import models as registry_models
 
 router = APIRouter(prefix="/api", tags=["doc-comments"])
@@ -63,6 +64,32 @@ def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
     art = registry_models.get_artifact(artifact_id, db=db)
     if art is None or not may_access_artifact(art["parent_thread_id"], user_id, db=db):
         raise HTTPException(404, "Artifact not found")
+
+
+def _live_artifact_id(artifact_id: str, user_id: str, db) -> str:
+    """The artifact a person's comment write belongs to, for a pane that may still hold a retired id.
+
+    A promote retires the working file's identity and carries its comment state to the successor
+    (``doceditor.comment_transfer``), so a write keyed by the old id follows it there: ``artifact_id``
+    itself unless it was promoted, else the active identity its successor chain ends at. Refuses with
+    409 and the MOVED text when the chain ends nowhere the caller may write, so the browser keeps
+    the draft instead of the write landing on a row nobody reads.
+    """
+    live = registry_models.live_identity(artifact_id, db=db)
+    if live is not None and live != artifact_id:
+        try:
+            _assert_owns_artifact(live, user_id, db)
+        except HTTPException:
+            live = None
+    if live is None:
+        raise HTTPException(409, MOVED)
+    return live
+
+
+def _artifact_for_write(artifact_id: str, user_id: str, db) -> str:
+    """``_assert_owns_artifact`` for a write, returning the artifact to write to (see ``_live_artifact_id``)."""
+    _assert_owns_artifact(artifact_id, user_id, db)
+    return _live_artifact_id(artifact_id, user_id, db)
 
 
 @router.get("/artifacts/{artifact_id}/comments")
@@ -120,13 +147,13 @@ async def create_comment(
     def _access():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
-            return artifact["path"] if artifact else None
+            live_id = _artifact_for_write(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(live_id, db=db)
+            return live_id, artifact["path"] if artifact else None
         finally:
             db.close()
 
-    path = await run_in_db(_access)
+    artifact_id, path = await run_in_db(_access)
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
@@ -165,7 +192,7 @@ async def create_comment(
 
 from api.doc_feedback_routes import add_feedback_routes
 
-add_feedback_routes(router, _assert_owns_artifact)
+add_feedback_routes(router, _artifact_for_write)
 
 
 class PositionUpdates(BaseModel):
@@ -182,8 +209,8 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
     def _update():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
+            live_id = _artifact_for_write(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(live_id, db=db)
             from doceditor.live_tools import find_live
             if artifact and artifact.get("path") and find_live(Path(artifact["path"])) is not None:
                 raise HTTPException(409, "Live comment positions are saved by the server")
@@ -205,7 +232,7 @@ async def update_positions(artifact_id: str, token: str, body: PositionUpdates):
                     if context is not None:
                         prepared["anchor_prefix"], prepared["anchor_suffix"] = context
                 updates.append(prepared)
-            return store.update_positions(artifact_id, updates, db=db)
+            return store.update_positions(live_id, updates, db=db)
         finally:
             db.close()
 
@@ -247,6 +274,15 @@ async def accept_all_suggestions(artifact_id: str, token: str):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+
+    def _live():
+        db = get_db()
+        try:
+            return _live_artifact_id(artifact_id, user["id"], db)
+        finally:
+            db.close()
+
+    artifact_id = await run_in_db(_live)
     saved: dict = {}
     try:
         result = await accept_all_open(

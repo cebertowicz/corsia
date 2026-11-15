@@ -119,6 +119,12 @@ def _record_tags(connection, request: CommentInput, row: dict) -> None:
         comment_recipients.reset_action(connection, row, request.author_thread_id)
 
 
+def _refuse_retired_target(request: CommentInput, connection) -> None:
+    """A promote retired the document after the caller's check; its comments live on the successor."""
+    if request.artifact_id is not None and registry_models.successor_id(request.artifact_id, db=connection) is not None:
+        raise CommentAccessDenied('Artifact not found')
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -141,6 +147,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                                         insert_after=request.insert_after)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
+            _refuse_retired_target(request, connection)
             if request.registration is not None:
                 artifact_id = registry_service.register_write_strict(
                     request.author_thread_id, request.registration["path"], db=connection,
