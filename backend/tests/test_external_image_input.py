@@ -263,7 +263,7 @@ def test_the_route_pins_a_choice_and_refuses_an_unknown_model(isolated_db) -> No
 def test_unchecked_image_support_is_not_reported_as_text_only(isolated_db) -> None:
     _seed(isolated_db, "loaded", "unloaded")
 
-    assert eii.image_input_summary(_SID) == "Not determined: loaded, unloaded."
+    assert eii.image_input_summary(_SID) == "Images: not determined for loaded, unloaded."
     assert _row(isolated_db, "loaded")[1] == {}
     assert _row(isolated_db, "unloaded")[1] == {}
 
@@ -272,7 +272,7 @@ def test_a_rejected_model_does_not_make_unchecked_models_text_only(isolated_db) 
     _seed(isolated_db, "a", "b")
     asyncio.run(eii.set_image_input(_SID, "a", "no"))
 
-    assert eii.image_input_summary(_SID) == "Not determined: b."
+    assert eii.image_input_summary(_SID) == "Images: not determined for b."
     asyncio.run(eii.set_image_input(_SID, "b", "no"))
     assert eii.image_input_summary(_SID) == "Images: no model accepts them."
 

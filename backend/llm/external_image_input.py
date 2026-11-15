@@ -175,7 +175,8 @@ def image_input_summary(server_id: str) -> str:
     if not accepting and not unknown:
         parts.append("Images: no model accepts them.")
     if unknown:
-        parts.append(f"Not determined: {', '.join(unknown)}.")
+        label = "Not determined:" if accepting else "Images: not determined for"
+        parts.append(f"{label} {', '.join(unknown)}.")
     return " ".join(parts)
 
 
