@@ -8,8 +8,8 @@ dispatch path a real turn uses. The answer lands on the row's
 in ``metadata_json['image_input']``. A user's choice wins over detection and
 survives rediscovery; nothing is inferred from a model's name.
 
-Connection, Test connection and rediscovery never run image probes. The person
-can explicitly detect image support for one model with Detect now.
+Connection, Test connection and rediscovery never run image probes. The first
+successful reply triggers a check for that model; Detect now also checks it.
 """
 
 from __future__ import annotations
@@ -20,16 +20,18 @@ import json
 import logging
 import re
 import struct
+import uuid
 import zlib
 
 from infra.database import get_db, write_transaction
-from llm.external_provider import PREFIX, PROVIDER, _now, served_model_id
+from llm.external_provider import PREFIX, PROVIDER, _now, catalog_model_id, served_model_id
 
 log = logging.getLogger(__name__)
 
 YES, NO, UNKNOWN = "yes", "no", "unknown"
 DETECTED, USER = "detected", "user"
 _PROBE_TIMEOUT_S = 90
+_PENDING: set[asyncio.Task] = set()
 _PROBE_QUESTION = "What colour fills this image? Answer with one word."
 _PROBE_COLOUR = "green"
 # A provider refusing the image part says so in its error; any other failure
@@ -80,7 +82,7 @@ def classify_reply(content: str | None, failed: bool) -> tuple[str, str]:
     return NO, "Answered without seeing the test image."
 
 
-async def probe_image_input(server_id: str, pmid: str) -> tuple[str, str]:
+async def probe_image_input(server_id: str, pmid: str, *, automatic: bool = False) -> tuple[str, str]:
     """Send the test image to one External model and classify its answer."""
     from infra.db_async import run_in_db
     from llm.external_provider import build_external_params
@@ -101,8 +103,11 @@ async def probe_image_input(server_id: str, pmid: str) -> tuple[str, str]:
     except asyncio.TimeoutError:
         return UNKNOWN, f"The check timed out after {_PROBE_TIMEOUT_S}s."
     except Exception as exc:  # the answer is "unknown", never a crashed discovery
-        return classify_reply(str(exc), failed=True)
-    return classify_reply(response.content, failed=response.finish_reason == "error")
+        result, detail = classify_reply(str(exc), failed=True)
+        return (UNKNOWN if automatic else result), detail
+    failed = response.finish_reason == "error"
+    result, detail = classify_reply(response.content, failed=failed)
+    return (UNKNOWN if automatic and failed else result), detail
 
 
 def _rows(db, server_id: str) -> list:
@@ -176,22 +181,25 @@ def image_input_summary(server_id: str) -> str:
 
 def record_image_input(
     server_id: str, pmid: str, result: str, detail: str, source: str = DETECTED,
-    replace_user: bool = False,
+    replace_user: bool = False, claim: str | None = None,
 ) -> bool:
     """Store one model's image support.
 
     A detection never replaces a user choice unless the user asked for
     detection again (``replace_user``)."""
-    litellm_model = f"{PREFIX}{server_id}/{pmid}"
+    model_id = catalog_model_id(server_id, pmid)
     with write_transaction(None, scope="external_image_input") as db:
         row = db.execute(
-            "SELECT id, metadata_json FROM models WHERE provider = ? AND litellm_model = ?",
-            (PROVIDER, litellm_model),
+            "SELECT id, metadata_json FROM models WHERE provider = ? AND provider_model_id = ?",
+            (PROVIDER, model_id),
         ).fetchone()
         if row is None:
             return False
         meta = _meta(row)
-        user_set = (meta.get("image_input") or {}).get("source") == USER
+        state = meta.get("image_input") or {}
+        if claim is not None and state.get("automatic_claim") != claim:
+            return False
+        user_set = state.get("source") == USER
         if source == DETECTED and user_set and not replace_user:
             return False
         now = _now()
@@ -208,6 +216,46 @@ def record_image_input(
             (*params, now, row["id"]),
         )
     return True
+
+
+def _claim_first_use(server_id: str, pmid: str, claim: str) -> bool:
+    """Persist a single claim before any outbound request, even if it fails."""
+    with write_transaction(None, scope="external_image_first_use") as db:
+        row = db.execute(
+            "SELECT id, metadata_json FROM models WHERE provider = ? AND provider_model_id = ?",
+            (PROVIDER, catalog_model_id(server_id, pmid)),
+        ).fetchone()
+        if row is None:
+            return False
+        meta = _meta(row)
+        if meta.get("image_input"):
+            return False
+        meta["image_input"] = {
+            "source": DETECTED, "result": UNKNOWN,
+            "detail": "Checking image support.", "automatic_claim": claim,
+        }
+        db.execute("UPDATE models SET metadata_json = ? WHERE id = ?", (json.dumps(meta), row["id"]))
+    return True
+
+
+async def _detect_first_use(server_id: str, pmid: str) -> None:
+    from infra.db_async import run_in_db
+
+    claim = uuid.uuid4().hex
+    try:
+        if not await run_in_db(_claim_first_use, server_id, pmid, claim):
+            return
+        result, detail = await probe_image_input(server_id, pmid, automatic=True)
+        await run_in_db(record_image_input, server_id, pmid, result, detail, claim=claim)
+    except Exception:
+        log.exception("External first-use image check failed for %s/%s", server_id, pmid)
+
+
+def schedule_first_use_detection(server_id: str, pmid: str) -> None:
+    """Run independently of the successful response, retaining the task until done."""
+    task = asyncio.create_task(_detect_first_use(server_id, pmid))
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
 
 
 def mark_for_recheck(server_id: str) -> None:

@@ -109,6 +109,7 @@ def _start_provider_call(
         api_key=provider_params.get("api_key"),
         api_base=provider_params.get("api_base"),
         omlx_server_id=provider_params.get("omlx_server_id"),
+        external_model_identity=provider_params.get("external_model_identity"),
         on_reasoning_chunk=(
             callbacks.on_reasoning_chunk if use_streaming else None
         ),

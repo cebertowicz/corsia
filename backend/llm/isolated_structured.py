@@ -524,6 +524,7 @@ async def _invoke_native_structured(
         "max_tokens": request.max_output_tokens,
         "api_key": provider.get("api_key"),
         "api_base": provider.get("api_base"), "omlx_server_id": provider.get("omlx_server_id"),
+        "external_model_identity": provider.get("external_model_identity"),
         "on_reasoning_chunk": None,
         "on_content_chunk": None,
         "on_tool_call_chunk": None,
