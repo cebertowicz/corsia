@@ -40,56 +40,16 @@ from doceditor.comment_batch_actions import accept_all_open, decide_all_from_aut
 from doceditor.comments import CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
-from infra.auth import authenticate, may_access_artifact, require_user_header_only
+from infra.auth import authenticate, require_user_header_only
 from infra.database import get_db, write_transaction
+from api.doc_comment_access import _artifact_for_read, _artifact_for_write, _assert_owns_artifact, _live_artifact_id
 from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from infra.db_async import run_in_db
-from plans.person_comment_task import MOVED
 from registry import models as registry_models
 
 router = APIRouter(prefix="/api", tags=["doc-comments"])
-
-
-def _assert_owns_artifact(artifact_id: str, user_id: str, db) -> None:
-    """Raise 404 unless ``user_id`` may access ``artifact_id``'s comments.
-
-    The single ownership gate the comment routes share: artifact →
-    ``parent_thread_id`` → ``threads.user_id``. Allowed when the caller owns
-    the owning thread or the owner is a workspace/project sentinel (shared
-    substrate). A real OTHER user's thread, or an absent artifact, is a 404 —
-    foreign ids stay non-enumerable.
-    """
-    art = registry_models.get_artifact(artifact_id, db=db)
-    if art is None or not may_access_artifact(art["parent_thread_id"], user_id, db=db):
-        raise HTTPException(404, "Artifact not found")
-
-
-def _live_artifact_id(artifact_id: str, user_id: str, db) -> str:
-    """The artifact a person's comment write belongs to, for a pane that may still hold a retired id.
-
-    A promote retires the working file's identity and carries its comment state to the successor
-    (``doceditor.comment_transfer``), so a write keyed by the old id follows it there: ``artifact_id``
-    itself unless it was promoted, else the active identity its successor chain ends at. Refuses with
-    409 and the MOVED text when the chain ends nowhere the caller may write, so the browser keeps
-    the draft instead of the write landing on a row nobody reads.
-    """
-    live = registry_models.live_identity(artifact_id, db=db)
-    if live is not None and live != artifact_id:
-        try:
-            _assert_owns_artifact(live, user_id, db)
-        except HTTPException:
-            live = None
-    if live is None:
-        raise HTTPException(409, MOVED)
-    return live
-
-
-def _artifact_for_write(artifact_id: str, user_id: str, db) -> str:
-    """``_assert_owns_artifact`` for a write, returning the artifact to write to (see ``_live_artifact_id``)."""
-    _assert_owns_artifact(artifact_id, user_id, db)
-    return _live_artifact_id(artifact_id, user_id, db)
 
 
 @router.get("/artifacts/{artifact_id}/comments")
@@ -101,13 +61,13 @@ async def list_comments(artifact_id: str, token: str):
     def _list():
         db = get_db()
         try:
-            _assert_owns_artifact(artifact_id, user["id"], db)
-            artifact = registry_models.get_artifact(artifact_id, db=db)
+            artifact_id_read = _artifact_for_read(artifact_id, user["id"], db)
+            artifact = registry_models.get_artifact(artifact_id_read, db=db)
             path = artifact["path"] if artifact else None
-            comments, anchors_checked = anchored_threads(artifact_id, path, db)
+            comments, anchors_checked = anchored_threads(artifact_id_read, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
-            feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
-            feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
+            feedback_state.annotate_thread_attention(db, user["id"], artifact_id_read, comments)
+            feedback = feedback_batches.user_feedback_for_document(db, artifact_id_read)
             return comments, anchors_checked, feedback
         finally:
             db.close()

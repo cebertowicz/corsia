@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.doc_comments import _artifact_for_write
+from api.doc_comment_access import _artifact_for_write
 from doceditor import comment_thread_views
 from infra.auth import require_user_header_only
 from infra.database import get_db
