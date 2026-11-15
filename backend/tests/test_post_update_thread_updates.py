@@ -36,7 +36,7 @@ def _start_turn(db, turn_id: str) -> TurnIdentity:
 
 
 def _message_id(result: str) -> str:
-    return result.removeprefix("Update saved as message ").removesuffix(".")
+    return result.splitlines()[0].removeprefix("Update saved as message ").removesuffix(".")
 
 
 def _seed_assistant_message(db, turn_id: str, metadata: dict) -> None:
@@ -251,7 +251,8 @@ async def test_a_failed_record_rolls_back_the_message_and_sends_no_nudge(deleg_d
         _thread_id="sender-self", text="Lost", _host_access_turn_identity=TURN,
     )
 
-    assert result == "Error: update could not be saved (RuntimeError)"
+    assert result == ("Error: Nothing was saved. The update transaction failed (RuntimeError); "
+                      "retry with the same idempotency_key.")
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
     assert _updates(deleg_db) == []
     assert nudges == []

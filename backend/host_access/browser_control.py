@@ -25,6 +25,21 @@ PASSWORD_READ_REFUSED = (
     "Other commands still work."
 )
 PAGE_CHECK_FAILED = "This page couldn't be checked"
+# A failed plan write loses at most the person's task for the page, never the browser itself. What became of
+# the row is unknown (a failed read or emit leaves it in place), so the wording claims neither state.
+STEP_NOT_RECORDED = (
+    "Note: the sign-in task for this page may not have been recorded. If you need the person to sign in and "
+    "haven't told them, say so in chat."
+)
+DECLARATION_NOT_RECORDED = (
+    "The person step may not have been recorded, so the person may have no task for this page. "
+    "Tell them in chat what you need from the page and stop."
+)
+# A visible password field is the person's to fill in; with no task recorded for it, the command is refused.
+PASSWORD_PAGE_UNRECORDED = (
+    "This page is waiting for the person to sign in, and their sign-in task couldn't be recorded. "
+    "Ask them in chat to sign in in the shared browser, then try again."
+)
 PERSON_STEP = (
     "This browser step is the person's to complete. They already see a task in their attention list, and you "
     "get a turn once they finish or decline it; end your turn. If they decline, tell them in chat what you "
@@ -79,11 +94,16 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
 
 
 async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, args: tuple[str, ...], *,
-                              resolve: Resolve | None = None, session: str | None = None) -> None:
-    """Enforce page ownership, then the independent password-visit read guard."""
-    result = await _guarded_probe(thread_id, probe, session=session)
+                              resolve: Resolve | None = None, session: str | None = None) -> str | None:
+    """Enforce page ownership, then the independent password-visit read guard.
+
+    Returns STEP_NOT_RECORDED when no step is held and the page has no password field but its step couldn't
+    be written; the command still runs.
+    """
+    result, note = await _guarded_probe(thread_id, probe, session=session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:
         await _refuse_password_read(guarded, args, resolve)
+    return note
 
 
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
@@ -92,12 +112,20 @@ async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, i
     instruction = str(instruction).strip()
     if not instruction:
         raise BrowserSessionError("browser person step needs an instruction")
-    await _guarded_probe(thread_id, probe, session=session, instruction=instruction)
+    _, note = await _guarded_probe(thread_id, probe, session=session, instruction=instruction)
+    if note is not None:
+        raise BrowserSessionError(DECLARATION_NOT_RECORDED)
 
 
 async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, session: str | None = None,
-                         instruction: str | None = None) -> PasswordProbe:
-    """Share the agent probe and failure mapping between commands and declarations."""
+                         instruction: str | None = None) -> tuple[PasswordProbe, str | None]:
+    """Share the agent probe and failure mapping between commands and declarations.
+
+    A step that can't be written is logged and a live step is kept (the next call or re-probe recovers it);
+    the page's password guard still applies. A held step refuses every command, close included, as an
+    open step does (R7): its task exists, so its normal refusal is true. With no step held, a page showing a
+    password field refuses the command, and any other page runs it and the agent gets STEP_NOT_RECORDED.
+    """
     try:
         result = await probe(_known_nodes(thread_id))
     except Exception as exc:
@@ -109,12 +137,27 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         "declare" if instruction is not None else "probe", result,
         session=session, instruction=instruction or "",
     )
-    decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
+    try:
+        decision = await browser_step_lifecycle.step_event(thread_id, event, observer=partial(_observe_read_guard, thread_id))
+    except Exception:
+        log.warning("browser step for thread %s could not be recorded; a live step is kept for the next call",
+                    thread_id, exc_info=True)
+        _observe_read_guard(thread_id, result, False, False)
+        # A held step means its task exists (a failed row read, settle or emit leaves it), so the page is the
+        # person's and its normal refusal is true; the kind comes from in-memory state, not the store that failed.
+        if browser_step_lifecycle.has_step(thread_id):
+            if browser_step_lifecycle.password_page(thread_id):
+                raise BrowserSessionError(PASSWORD_PAGE + _ending(thread_id))
+            raise BrowserSessionError(PERSON_STEP)
+        # With no step held, the lifecycle's own visible-password test (R9) still marks the page as the person's.
+        if result.visible_nodes:
+            raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
+        return result, STEP_NOT_RECORDED
     messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,
                 "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
-    return result
+    return result, None
 
 
 def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_session: bool, guard_present: bool) -> None:

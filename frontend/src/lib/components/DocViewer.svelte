@@ -13,6 +13,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+	import { createPressReveal } from '$lib/docPressReveal.svelte';
 	import { createCommentOpeners } from '$lib/docViewerClickPoint';
 	import { createHeldUnread } from '$lib/docHeldUnread.svelte';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
@@ -26,20 +27,19 @@
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
 	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
-	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { closeCellUnderSheet, createCommentSurfaceState, focusDocumentEditor, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
-	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
+	import { leavePreviousTarget, loadSignal, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { DocViewerProps } from '$lib/docViewerProps';
-	import type { TabLoadSignal } from '$lib/artifactTabs';
+	import { createViewerHeader } from '$lib/docViewerHeader.svelte';
 	import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
@@ -79,7 +79,7 @@
 	let readonly = $state(false);
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
-	let freshness = $state<DocumentFreshness | null>(null); let ownership = $state<import('$lib/api/docOwnership').DocOwnership | null>(null);
+	const header = createViewerHeader(() => ({ target, artifactId: loadedArtifactId }));
 	const focusedComment = $derived($focusedDocComment);
 
 	let editText = $state('');
@@ -133,11 +133,10 @@
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', paneDrawer: isPaneDrawer, fits: columnFits, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad, quietList: () => commentUI.state?.kind === 'list' && commentUI.quiet, close: commentUI.closeAll });
 	const heldUnread = createHeldUnread(() => !!commentUI.state, () => listedComments);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
-	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
-	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	const openCards = createCommentOpeners(commentUI, scroll);
+	const { notePress, revealCard, revealDraft } = createPressReveal({ highlights: () => highlights, view: () => editorSurface?.editorView(), draftCovered: (from, opening) => editorSurface?.draftCovered(from, opening), scrollTo: (to) => { scroll.value = to; }, draft: () => draftController.draft, sheetUp: () => commentUI.sheetUp });
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { pickedComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click)); }
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent, fromText = false) { notePress(ids, click); pickedComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click, fromText)); }
 	function onDocEdit(changes: ChangeDesc, open: ReadonlySet<string>) { if (loadedArtifactId) remapComments(loadedArtifactId, changes, open); images.remap((p) => changes.mapPos(p)); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
@@ -197,7 +196,7 @@
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
 				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
-				freshness = value.freshness; ownership = value.ownership ?? null; docState = 'ready'; legacyAwaitingSave = awaiting;
+				header.loaded(d, value); docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
 	}
@@ -221,11 +220,7 @@
 			const d = target;
 			if (!d) return;
 			const seq = ++loadSeq;
-			// Every signal carries the tab instance that started this load, so a
-			// result that lands after the user switched tabs updates the tab that
-			// asked for it rather than whichever tab is active when it settles.
-			const signal = (s: Omit<TabLoadSignal, 'instanceId'>) =>
-				onSignal?.({ ...s, instanceId: d.instanceId });
+			const signal = loadSignal(onSignal, d);
 
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
@@ -238,7 +233,7 @@
 			readonly = opened.unsaved;
 			confirming = opened.confirming;
 			if (opened.text !== null) editText = opened.text;
-			freshness = null; ownership = null;
+			header.begin(d);
 			openRefusal = null; liveUnavailable = null;
 			docState = opened.text === null ? 'loading' : 'ready';
 			signal(opened.signal);
@@ -293,9 +288,9 @@
 		historyAvailable={history.available}
 		historyOpen={history.open}
 		onOpenHistory={history.toggle}
-		{freshness} {ownership} onOwnershipChanged={(value) => ownership = value}
+		freshness={header.freshness} ownership={header.ownership} headerStandIn={header.standIn} onOwnershipChanged={header.settling(target, loadedArtifactId).ownership}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
+		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, header.freshness, header.settling(target, loadedArtifactId).freshness)}
 		liveSession={liveSession ?? null}
 		{openRefusal} {liveUnavailable}
 		tabText={editText}
@@ -330,7 +325,7 @@
 		scrollTo={scroll.value}
 		onSave={flushNow}
 		onSelect={draftController.select}
-		onAnchorFocus={openCards.comment}
+		onAnchorFocus={(id, anchor, viaSuggestion, click) => { notePress([id], click); openCards.comment(id, anchor, viaSuggestion, click); }}
 		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
 		onTyping={closeTextCard}
 		cardMode={commentSurface?.cardMode()}
@@ -385,7 +380,7 @@
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetUp = open}
-		onRevealDraft={revealDraft}
+		onRevealDraft={revealDraft} onRevealCard={revealCard}
 		images={images.groups}
 		{covered}
 		{readStampSuppressed}

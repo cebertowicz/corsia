@@ -47,7 +47,7 @@ async def test_post_update_writes_trimmed_agent_message_and_broadcasts(deleg_db,
     assert row["role"] == "assistant"
     assert row["content"] == "The focused check passed."
     assert json.loads(row["metadata"]) == {"for_user": True, "turn_id": "turn-1", "node_id": node.id}
-    broadcast.assert_awaited_once_with("sender-self", (result.removeprefix("Update saved as message ").removesuffix("."),))
+    broadcast.assert_awaited_once_with("sender-self", (result.splitlines()[0].removeprefix("Update saved as message ").removesuffix("."),))
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_post_update_without_a_calling_turn_refuses_and_writes_nothing(del
 
     result = await PostUpdateTool().execute(_thread_id="sender-self", text="Orphan")
 
-    assert result.startswith("Error: the calling Turn could not be resolved")
+    assert result == "Error: Nothing was saved. The calling turn could not be resolved."
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
 
 
@@ -89,10 +89,10 @@ async def test_post_update_rejects_empty_and_too_long_text_without_writing(deleg
     tool = PostUpdateTool()
     assert tool.parameters["properties"]["text"]["minLength"] == 1
     assert await tool.execute(_thread_id="sender-self", text=" \n ") == (
-        "Error: text must be non-empty after trimming"
+        "Error: Nothing was saved. text must be non-empty after trimming."
     )
     assert await tool.execute(_thread_id="sender-self", text="x" * 2_001) == (
-        "Error: text must be at most 2,000 characters"
+        "Error: Nothing was saved. text must be at most 2,000 characters; put longer detail in a linked document."
     )
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
 
@@ -113,7 +113,7 @@ async def test_post_update_rejects_a_foreign_plan_node_without_writing(deleg_db)
     )
 
     assert result == (
-        "Error: node_id is not an open or settled node in your plan; omit it or pass a node from plan_read"
+        "Error: Nothing was saved. node_id is not a node in your plan; omit it or use a node from plan_read."
     )
     assert deleg_db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
 

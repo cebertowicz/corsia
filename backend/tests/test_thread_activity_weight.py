@@ -8,6 +8,8 @@ from pathlib import Path
 import sqlite3
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
+from infra.db_connection import register_message_sql_functions
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 from subagents.assistant_step_display import load_assistant_step_display
 
 
@@ -28,6 +30,7 @@ _FOCUS_SUMMARY_FIXTURE = json.loads(
 
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
+    register_message_sql_functions(conn)
     conn.row_factory = sqlite3.Row
     conn.execute(
         "CREATE TABLE messages ("
@@ -43,7 +46,7 @@ def _db() -> sqlite3.Connection:
     conn.execute(
         "CREATE TABLE active_turns (id TEXT, thread_id TEXT, status TEXT, started_at TEXT, ended_at TEXT, error TEXT)"
     )
-    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL + ";" + MESSAGE_UPDATE_SCHEMA_SQL)
     return conn
 
 

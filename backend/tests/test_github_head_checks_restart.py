@@ -131,12 +131,12 @@ async def test_pr_read_error_is_logged_not_raised(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_retryable_intake_refusal_retries_same_event_once(monkeypatch):
+async def test_unreachable_intake_retries_same_event_once(monkeypatch):
     class RetrySink(Sink):
         async def admit_event(self, **event):
             self.attempts.append(event)
             if len(self.attempts) == 1:
-                return SimpleNamespace(refusal=SimpleNamespace(code="intake_unreachable"))
+                raise OSError("intake down")
             return await super().admit_event(**event)
 
     sink = RetrySink()
@@ -180,7 +180,7 @@ async def test_exhausted_transient_failure_keeps_pending_head(monkeypatch, failu
     class RefusingSink(Sink):
         async def admit_event(self, **event):
             attempts.append(event["event_id"])
-            return SimpleNamespace(refusal=SimpleNamespace(code="intake_unreachable"))
+            raise OSError("intake down")
 
     if failure == "read":
         monkeypatch.setattr(poller, "gated_read", fail_read)

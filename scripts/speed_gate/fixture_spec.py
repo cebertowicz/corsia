@@ -58,6 +58,13 @@ GENERIC_SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * S
     "doc_comment_writer_line", "doc_comment_acks",
 )}
 
+#: Message update provenance postdates the census too. Synthetic stress shape, built by the generic pass on
+#: real assistant messages: one state row and one plan-node link per agent update the census counts
+#: (``thread_updates``); assumptions, not production counts.
+GENERIC_SYNTHETIC_ROWS.update({name: max(1, round(PRODUCTION_ROWS["thread_updates"] * SCALE)) for name in (
+    "message_update_state", "message_update_nodes",
+)})
+
 #: The one thread at the largest production parent, and its sibling relations.
 MAX_THREAD_MESSAGES = 100_639
 MAX_THREAD_USAGE = 36_834

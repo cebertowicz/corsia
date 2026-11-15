@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The comments pill, one for every review surface (RSR-4): the document's header and the image viewer's bar open the
 	// same drawer. It counts the comments shown by that surface's default list, never as a bare number: with their noun, or with
-	// the comment icon alone on a canvas up to 600px or in an image bar while Send shows (an unread count keeps its noun). It carries
+	// the comment icon and number on a canvas up to 600px, or in an image bar while Send shows; while a reply is unread, up to 600px, the icon and "N unread" alone. It carries
 	// a dot while the person's comments and edits wait for Send. The host gives it its own button look through `class`.
 	let { count, unread = 0, unsent = 0, loading = false, unknown = false, expanded = false, disabled = false, imageBadge = false, element = $bindable(), class: look = '', onOpen, ...data }: {
 		/** Comments (threads) in the default list. */
@@ -34,7 +34,7 @@
 	aria-label={loading ? 'Loading comments' : label}
 	title={loading ? 'Comments are loading' : unknown ? 'Comments unavailable until the document opens' : undefined} onclick={(event) => onOpen(event.currentTarget)}>
 	<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if imageBadge && !unknown}<span class="badge-count" aria-hidden="true">{loading ? '…' : count}</span>{/if}</span>
-	{#if !unknown}<span class="count">{loading ? '…' : count}</span>{#if !loading}{' '}<span class="count-unit" class:keep={unread > 0}>{noun}</span>{/if}{#if unread}{' '}<span class="unread">· {unreadPhrase}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}{/if}
+	{#if !unknown}<span class="count" class:unread-led={unread > 0}>{loading ? '…' : count}</span>{#if !loading}{' '}<span class="count-unit">{noun}</span>{/if}{#if unread}{' '}<span class="unread-sep">·</span>{' '}<span class="unread">{unreadPhrase}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}{/if}
 </button>
 
 <style>
@@ -42,18 +42,19 @@
 	.icon-anchor { position: relative; display: inline-flex; }
 	.count { font-variant-numeric: tabular-nums; }
 	.count-unit { color: var(--text-tertiary); }
-	.unread { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+	.unread-sep, .unread { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
 	.badge-count { display: none; }
 	@media (max-width: 48rem) {
 		.image-badge { position: relative; width: var(--touch-target); min-width: var(--touch-target); padding: 0; }
 		.image-badge .tool-icon { width: calc(var(--touch-target) / 2); height: calc(var(--touch-target) / 2); }
 		.image-badge .badge-count { display: block; position: absolute; top: calc(var(--touch-target) / 2 - var(--space-1)); right: calc(1px - var(--space-2)); padding: 1px calc(var(--space-1) - 1px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-size: var(--text-caption); line-height: 1; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
-		.image-badge .count, .image-badge .count-unit, .image-badge .unread { display: none; }
+		.image-badge .count, .image-badge .count-unit, .image-badge .unread-sep, .image-badge .unread { display: none; }
 		.image-badge .unsent-dot { position: absolute; top: calc(var(--space-1) + 1px); right: var(--space-1); }
 	}
 	@container doc-canvas (max-width: 600px) {
-		/* An unread count needs its noun: "3 · 3 unread" does not say what is counted. */
-		.count-unit:not(.keep) { display: none; }
+		/* Up to 600px the count is the icon and its number. While a reply is unread it is the icon and "N unread" alone: the total and its noun
+		   would not fit beside the other tools, and a wrapped row pushes the whole document down. The accessible name still says both. */
+		.count-unit, .unread-sep, .count.unread-led { display: none; }
 	}
 </style>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from core.tool_result_settlement import settle_turn_tool_lineage
 from infra.database import write_transaction
 from infra.plan_limit_continue import queue_terminal_continue
 from infra.completed_tool_results import (
@@ -55,7 +56,9 @@ def admit_input(
     db: sqlite3.Connection | None = None,
 ) -> InputAdmission:
     """Accept one FIFO input and atomically choose the idle Turn winner."""
-    with write_transaction(db, scope="admit_input") as connection:
+    from connections.fact_memo import fact_reads
+    # Shared account, catalog, policy and home facts stay unchanged; close before commit.
+    with write_transaction(db, scope="admit_input") as connection, fact_reads():
         from automation.self_restart import restart_holds_new_work
         from infra.passive_changes import materialize_pending_digest
         passive = materialize_pending_digest(connection, thread_id) if materialize_passive_digest else None
@@ -351,10 +354,9 @@ def _persist_before_terminal(
     """Persist terminal usage and settle account limits before successor admission."""
 
     _persist_completed_tool_results(connection, thread_id, turn_id, error)
+    settle_turn_tool_lineage(connection, thread_id, turn_id)
     usage.settle(connection, thread_id)
-    return settle_terminal_limits(
-        connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error,
-    )
+    return settle_terminal_limits(connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error)
 
 
 def _write_idle_marker(

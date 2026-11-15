@@ -81,6 +81,13 @@ def record_event(
         payload={"later": later, "reason": reason},
     )
 
+    if later:
+        # A plan reviews its pile one week after the first task crossed the cut;
+        # a crossing back above it moves nothing (``plans.later_review``).
+        from plans import later_review
+
+        later_review.arm_node(connection, node_id)
+
 
 def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | None) -> dict:
     """Apply an edit that names the cut, and free the slot when the cut moved onto it.

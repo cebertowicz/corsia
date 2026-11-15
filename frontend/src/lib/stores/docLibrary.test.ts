@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it } from 'vitest';
-import { docActivity, docLibrary, type DocEntry } from './docLibrary';
+import { docActivity, docLibrary, secondaryDocumentParts, type DocEntry } from './docLibrary';
 
 function entry(path: string, description: string, descState: DocEntry['descState'], updatedTs: number): DocEntry {
 	return {
@@ -23,5 +23,13 @@ describe('docActivity text', () => {
 			'described.md — Weekly notes',
 			'bare.md'
 		]);
+	});
+});
+
+describe('secondaryDocumentParts', () => {
+	it('keeps the owner apart from the description, so a row can cut the description and keep the owner whole', () => {
+		expect(secondaryDocumentParts({ descState: 'ai', description: 'Planning document', ownerName: 'Not set' })).toEqual({ lead: 'Planning document', owner: 'Owner: Not set' });
+		expect(secondaryDocumentParts({ descState: 'pending', description: '', ownerName: 'Release planning' })).toEqual({ lead: 'No description', owner: 'Owner: Release planning' });
+		expect(secondaryDocumentParts({ descState: 'ai', description: 'Notes', ownerName: null })).toEqual({ lead: 'Notes', owner: '' });
 	});
 });

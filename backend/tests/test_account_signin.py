@@ -165,6 +165,15 @@ def _script(path: Path, body: str) -> str:
     return str(path)
 
 
+def _as_pinned_copies(monkeypatch, scripts: dict[str, str]) -> None:
+    """Sign-in runs only CORSIA's pinned Claude Code and Codex copies; the scripted CLIs stand in for them."""
+    from tools import managed_runtime
+
+    real = managed_runtime.installed_runtime_path
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path",
+                        lambda kind, **kw: Path(scripts[kind]) if kind in scripts else real(kind, **kw))
+
+
 @pytest.fixture
 def scripted_vendor_clis(isolated_db, tmp_path, monkeypatch):
     from connections import account_controls
@@ -174,10 +183,11 @@ def scripted_vendor_clis(isolated_db, tmp_path, monkeypatch):
     log = tmp_path / "vendor.log"
     log.touch()
     monkeypatch.setenv("VENDOR_LOG", str(log))
-    upsert_connection(type="cli", provider="codex", status="available",
-                      config={"binary": _script(tmp_path / "codex", _CODEX), "harness_model_cache": {}})
-    upsert_connection(type="cli", provider="claude-code", status="available",
-                      config={"binary": _script(tmp_path / "claude", _CLAUDE), "harness_model_cache": {}})
+    scripts = {"codex": _script(tmp_path / "codex", _CODEX), "claude-code": _script(tmp_path / "claude", _CLAUDE)}
+    _as_pinned_copies(monkeypatch, scripts)
+    for provider, binary in scripts.items():
+        upsert_connection(type="cli", provider=provider, status="available",
+                          config={"binary": binary, "harness_model_cache": {}})
     default_codex, default_claude = tmp_path / "default-codex", tmp_path / "default-claude"
     default_codex.mkdir()
     default_claude.mkdir()
@@ -1464,8 +1474,10 @@ def test_routes_run_sign_in_to_sign_out_and_never_return_the_cleanup_as_identity
     default_claude.mkdir()
     monkeypatch.setenv("TEST_CLAUDE_DEFAULT", str(default_claude))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "default-codex"))
+    claude = _script(tmp_path / "claude", _CLAUDE)
+    _as_pinned_copies(monkeypatch, {"claude-code": claude})
     upsert_connection(type="cli", provider="claude-code", status="available",
-                      config={"binary": _script(tmp_path / "claude", _CLAUDE), "harness_model_cache": {}})
+                      config={"binary": claude, "harness_model_cache": {}})
     account_controls._SIGNINS.clear()
     app = FastAPI()
     app.include_router(router)

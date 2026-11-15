@@ -29,6 +29,7 @@ from infra.guidance_targets import HistoryTarget, guidance_target, history_targe
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
 from registry.durable_writes import write_text
+from registry.promoted_path import moved_save_message
 from registry.shared_write_errors import DurableWritePolicyError
 from registry.shared_document_events import report_plain_write
 from tools.file_write_completion import record_context_source_change
@@ -160,8 +161,12 @@ def _guided_write(
     return payloads[0]
 
 
-def _validate_document_write(body: DocumentSave, user_id: str) -> Path:
-    """Blocking. Every rejection comes before any write or Git side effect."""
+def _validate_document_write(body: DocumentSave, user_id: str, *, moved_notice: bool = False) -> Path:
+    """Blocking. Every rejection comes before any write or Git side effect.
+
+    ``moved_notice``: a person's save to a path a promote left is refused as "moved" with the
+    document's new path, not as a missing file.
+    """
     db = get_db()
     try:
         if body.thread_id and not owns_thread(body.thread_id, user_id, db=db):
@@ -174,7 +179,9 @@ def _validate_document_write(body: DocumentSave, user_id: str) -> Path:
         try:
             resolved = path.resolve(strict=not body.create)
         except OSError as exc:
-            raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
+            # Only inside this scope's roots, so a probe outside them learns nothing about promotes.
+            moved = moved_save_message(path, db=db) if moved_notice and path_write_allowed(path.resolve(strict=False), bases) else None
+            raise DocumentSaveError("moved" if moved else "no_such_file", moved or f"No such file: {exc}") from exc
         # Workspace context and System projection files are injected into every prompt.
         # They remain read-only through the document API so this endpoint
         # cannot become a system-prompt-injection vector.
@@ -335,7 +342,7 @@ async def save_document_text(
     ``by_agent`` saves as ``body.thread_id``, not as the user: guidance history is authored
     by that thread, and the scope-structure rules apply as they do to its file tools.
     """
-    resolved = await run_in_db(lambda: _validate_document_write(body, user_id))
+    resolved = await run_in_db(lambda: _validate_document_write(body, user_id, moved_notice=not by_agent))
     from doceditor.live_admission import falls_back_to_plain
     from doceditor.live_runtime import get_documents
     from doceditor.live_tools import find_live
