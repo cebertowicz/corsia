@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { onMount, tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { on } from '$lib/ws';
@@ -175,7 +176,7 @@
 	>
 		{#snippet actions()}
 			{#if noting}
-				<textarea class="rb-note" rows="1" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
+				<textarea use:keepTyped class="rb-note" rows="1" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
 				<div class="rb-actions">
 					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
