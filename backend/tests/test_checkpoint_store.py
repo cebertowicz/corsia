@@ -279,11 +279,11 @@ def test_normal_install_moves_150_artifact_pane_read_before_writer(
     original_finish = database._finish_write_hold
     original_pane = checkpoint_snapshots.capture_artifact_snapshot
 
-    def finish(scope, started_at):
+    def finish(scope, started_at, admission):
         if scope == "checkpoint_install":
             holder[phase]["started"] = started_at
             holder[phase]["finished"] = time.monotonic()
-        return original_finish(scope, started_at)
+        return original_finish(scope, started_at, admission)
 
     def capture_pane(connection, thread_id):
         pane[phase]["started"] = time.monotonic()
