@@ -39,8 +39,18 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			return () => { if (artifact) clearRefusals(artifact); };
 		});
 		// A refusal the server wrote for a person, or this side's own sentence, is shown as it is. Anything else (a crash, a dropped
-		// connection) is runtime text, so the card says what the review bar says.
-		const reason = (error: unknown, fallback: string) => (error instanceof SuggestionRefused || error instanceof SuggestionBlocked ? error.message : fallback);
+		// connection) is runtime text, so the card says what the review bar says, and the console keeps the error itself.
+		type DecisionContext = { id: string; decision: 'accept' | 'reject'; allFromAuthor?: boolean };
+		function reason(error: unknown, fallback: string, context: DecisionContext) {
+			if (error instanceof SuggestionRefused || error instanceof SuggestionBlocked) return error.message;
+			console.error('[suggestion decision] failed', context, error);
+			return fallback;
+		}
+		// Edits are re-read the way an applied-but-unrecorded decision is: the shown document with its comments, else the comments alone.
+		function recover(doc: DocViewerTarget | null, artifact: string | null) {
+			if (doc && inputs.target()?.instanceId === doc.instanceId) inputs.onDocumentChanged?.();
+			else if (artifact) void loadComments(artifact).catch(() => undefined);
+		}
 		async function submitSuggestionDecision(id: string, decision: 'accept' | 'reject', allFromAuthor = false) {
 			// The document this decision is for. The props may name another one by the time it settles.
 			const started = outcome, doc = inputs.target(), artifact = inputs.artifactId();
@@ -53,19 +63,26 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 					? await decideSuggestion(id, decision, true)
 					: await decideSuggestion(id, decision);
 				settle(started, (current) => { current.skipped = result.skipped ?? []; });
-				if (decision === 'accept' && result.text !== undefined && result.revision !== undefined && doc) {
-					// The accepted text goes on screen only while that document's tab is still the one shown; closing the surface does not change that.
-					const current = inputs.target(), shown = current?.instanceId === doc.instanceId ? current : null;
-					seedDraft(shown ?? doc, result.text, result.revision);
-					if (shown) inputs.onSuggestionAccepted?.(result.text);
+				// The server has applied the decision. A failure from here on is this side's follow-up, never "try again": the card
+				// would offer to repeat what is already done. It is logged and the document and comments are read again.
+				try {
+					if (decision === 'accept' && result.text !== undefined && result.revision !== undefined && doc) {
+						// The accepted text goes on screen only while that document's tab is still the one shown; closing the surface does not change that.
+						const current = inputs.target(), shown = current?.instanceId === doc.instanceId ? current : null;
+						seedDraft(shown ?? doc, result.text, result.revision);
+						if (shown) inputs.onSuggestionAccepted?.(result.text);
+					}
+					if (artifact) await loadComments(artifact);
+				} catch (followUpError) {
+					console.error('[suggestion decision] follow-up after the server applied it failed', { id, decision, allFromAuthor }, followUpError);
+					recover(doc, artifact);
 				}
-				if (artifact) await loadComments(artifact);
 			} catch (error) {
 				// Bound to the document, like the accepted text. A decision made elsewhere comes back with a comments load; an
 				// edit applied but not recorded is in the saved file, so the shown document is read again with its comments.
 				const kind = error instanceof SuggestionRefused ? error.kind : null;
-				if (kind === 'unrecorded' && doc && inputs.target()?.instanceId === doc.instanceId) inputs.onDocumentChanged?.();
-				else if ((kind === 'decided' || kind === 'unrecorded') && artifact) void loadComments(artifact).catch(() => undefined);
+				if (kind === 'unrecorded') recover(doc, artifact);
+				else if (kind === 'decided' && artifact) void loadComments(artifact).catch(() => undefined);
 				throw error;
 			} finally {
 				inputs.onSuggestionBusy?.(false);
@@ -80,9 +97,10 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			} catch (error) {
 				// The saved file no longer has the quote: the card stays orphaned with this reason until it is decided or the surface resets.
 				const stale = decision === 'accept' && error instanceof SuggestionRefused && error.kind === 'stale';
+				const text = reason(error, `Couldn’t ${decision} this suggestion. Try again.`, { id, decision });
 				settle(started, (current) => {
-					if (stale && artifact) recordRefusal(artifact, id, reason(error, `Couldn’t ${decision} this suggestion. Try again.`));
-					else current.errors = { ...current.errors, [id]: reason(error, `Couldn’t ${decision} this suggestion. Try again.`) };
+					if (stale && artifact) recordRefusal(artifact, id, text);
+					else current.errors = { ...current.errors, [id]: text };
 				});
 			}
 		}
@@ -101,7 +119,8 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 			try {
 				await submitSuggestionDecision(id, 'accept', true);
 			} catch (error) {
-				settle(started, (current) => { current.acceptAllError = reason(error, 'Couldn’t accept the suggestions. Try again.'); });
+				const text = reason(error, 'Couldn’t accept the suggestions. Try again.', { id, decision: 'accept', allFromAuthor: true });
+				settle(started, (current) => { current.acceptAllError = text; });
 			} finally {
 				acceptAllBusy = null;
 				settle(started, (current) => { current.acceptAllShownBusy = null; });

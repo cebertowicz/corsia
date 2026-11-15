@@ -2,7 +2,7 @@ import { tick, untrack } from 'svelte';
 import type { DocComment } from '$lib/stores/docComments';
 
 /**
- * Closes a phone thread sheet when the person's own Resolve or Agree takes its thread from open to resolved: nothing is left in it
+ * Closes a phone thread sheet when the person's own Resolve takes its thread from open to resolved (Agree never closes it): nothing is left in it
  * to act on, and the resolved list is one tap away. Someone else resolving the thread while it is read leaves the sheet up, and an
  * unsent reply keeps it up so its text is not lost. Call `resolving(id, answered)` from the person's own Resolve only, with the promise of its
  * answer: the mark lasts until that request is answered, so a refused Resolve, or one that settles with the thread still open, leaves
