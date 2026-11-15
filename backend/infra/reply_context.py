@@ -18,6 +18,7 @@ from typing import Any, TypeGuard
 
 from infra.chat_comment_ids import format_cid, parse_cid
 from infra.failure_reference import new_error_reference
+from infra.message_update_schema import not_replaced_sql
 
 logger = logging.getLogger(__name__)
 
@@ -182,8 +183,9 @@ def _comments(db: sqlite3.Connection, thread_id: str, raw: object, newest: int, 
             reason = "empty_quote"
         root_sender = item.get('root_user_message_id') if isinstance(item, dict) else None
         root_cid = item.get('root_cid') if isinstance(item, dict) else None
-        if not reason and root_sender is None and root_cid is None and db.execute(
-            "SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND role='assistant'", (thread_id, item['seq']),
+        if not reason and db.execute(
+            "SELECT 1 FROM messages WHERE thread_id=? AND seq=? AND role='assistant' "
+            f"AND {not_replaced_sql()}", (thread_id, item['seq']),
         ).fetchone() is None:
             # A comment lives in the thread of the agent message it marks; with none, it has no place to show.
             reason = 'not_agent_message'

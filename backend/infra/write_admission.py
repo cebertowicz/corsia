@@ -118,13 +118,19 @@ class WriteTicket:
             me.granted.wait(timeout)
         except BaseException:
             self._withdraw(me)
+            if self is MAIN_TICKET:
+                window.wait((me.acquired_at if me.acquired_at is not None else time.monotonic()) - me.requested_at)
             raise
         with self._lock:
             if self._holder is me:
+                if self is MAIN_TICKET:
+                    window.wait((me.acquired_at if me.acquired_at is not None else time.monotonic()) - me.requested_at)
                 _log_slow_wait(me)
                 return me
             self._waiters.remove(me)
             holder = self._holder
+        if self is MAIN_TICKET:
+            window.wait(time.monotonic() - me.requested_at)
         raise _synthetic_refusal(
             f"database is locked: write admission for {scope} waited {timeout:g}s "
             f"(queued behind {queued - 1}) and {_describe(holder)} still holds the write lock",
@@ -240,7 +246,5 @@ def _wait_bound() -> float:
 # diagnosis note in infra.database.
 def _log_slow_wait(admission: Admission) -> None:
     waited = (admission.acquired_at or admission.requested_at) - admission.requested_at
-    if admission.ticket is MAIN_TICKET:
-        window.wait(waited)
     if waited >= SLOW_WAIT_SECONDS:
         log.warning("SQLite write admission waited: scope=%s waited=%.3fs", admission.scope, waited)

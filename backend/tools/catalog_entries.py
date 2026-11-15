@@ -5,6 +5,7 @@ from __future__ import annotations
 from tools.catalog_automation_entries import AUTOMATION_CATALOG_ENTRIES
 from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
+from tools.post_update_text import REPLACE_RULE
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
 from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
 from tools.catalog_mailhost_entries import MAILHOST_CATALOG_ENTRIES
@@ -16,7 +17,6 @@ from tools.workspace_git import WORKSPACE_GIT_CATALOG_ENTRIES
 _Entry = ToolCatalogEntry
 
 POST_UPDATE_SUMMARY = "Leave the user a marked update they see in Focus mode"
-
 POST_UPDATE_WORTH_SENDING = (
     "Send a direct answer to the user's message, a material assumption, a "
     "discovery, a phase result, a blocker, a changed expectation (commitment, "
@@ -27,7 +27,7 @@ POST_UPDATE_WORTH_SENDING = (
 POST_UPDATE_ATTENTION_GUIDANCE = (
     "Working steps fold while replies and marked messages show. "
     + POST_UPDATE_WORTH_SENDING
-    + " Silence never answers; raise a plan decision for a choice."
+    + " Silence never answers; raise a plan decision for a choice. " + REPLACE_RULE
 )
 
 TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
