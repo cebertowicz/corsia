@@ -18,9 +18,10 @@ def _is_plain_file(path: Path) -> bool:
 def sandbox_literal(path: Path) -> str:
     """Escape ``path`` for a Safehouse profile rule exactly as given, no resolve.
 
-    Precondition: a root ``list_repo_worktrees`` returned in this request, or
-    ``<root>/.git`` after ``verified_worktree_marker`` proved it a non-symlink
-    regular file. Any other path must be resolved first (``_sandbox_path``).
+    Use for already-resolved paths and verified worktree markers. The fixed
+    ``<resolved repo>/.worktrees`` boundary is intentionally lexical: resolving
+    that child could turn a symlink into a grant outside the repository.
+    Other paths must be resolved first (``_sandbox_path``).
     """
     return str(path).replace("\\", "\\\\").replace('"', '\\"')
 

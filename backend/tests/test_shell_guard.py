@@ -11,6 +11,7 @@ if str(_BACKEND_DIR) not in sys.path:
 
 from tools import shell_guard  # noqa: E402
 from tools.workspace_git_paths import workspace_git_rules  # noqa: E402
+from tools.sandbox_git import sandbox_any_case  # noqa: E402
 from infra.project_repo_policy import RepoPolicy  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT
 
@@ -70,7 +71,8 @@ def _assert_verified_worktree_grant_keeps_controls_denied(
         deny = f'(deny file-write* (literal "{path}"))'
         assert profile.index(deny) > profile.index(git_allow)
     commondir_deny, hooks_deny = workspace_git_rules((repo / ".git" / "commondir", repo / ".git" / "hooks"))
-    marker_deny = f'(deny file-write* (literal "{worktree / ".git"}"))'
+    pattern = sandbox_any_case(repo / ".worktrees")
+    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
     assert profile.index(hooks_deny) > profile.index(git_allow)
     assert profile.index(commondir_deny) > profile.index(git_allow)
     assert profile.index(marker_deny) > profile.index(git_allow)
@@ -709,8 +711,10 @@ def test_base_checkout_chained_git_uses_verified_grant_and_keeps_teaching(
     assert (
         f'(allow file-read* file-write* '
         f'(subpath "{repo.resolve() / ".worktrees"}"))'
-        not in profile
+        in profile
     )
+    pattern = sandbox_any_case(repo.resolve() / ".worktrees")
+    assert f'(deny file-write* (regex #"^{pattern}/[^/]+$"))' in profile
 
     teaching = shell_guard.chained_base_git_denial_guidance(command, str(repo))
     assert teaching is not None

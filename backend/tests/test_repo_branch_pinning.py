@@ -15,6 +15,7 @@ from core.turn_core import TurnIdentity
 from tests.backend_git_helpers import git_subcommand
 from tests.project_ref_helpers import project_ref, select_workspace
 from tools.workspace_git_paths import workspace_git_rules
+from tools.sandbox_git import sandbox_any_case
 
 
 _RECOVERY_FETCH = "fetches the configured remote"
@@ -1590,7 +1591,7 @@ def test_pinned_repo_sandbox_profile_denies_base_and_allows_worktree(
     profile = shell_guard.pinned_repo_sandbox_profile("pytest", str(worktree))
     assert f'(deny file-write* (subpath "{repo.resolve()}"))' in profile
     assert (
-        f'(allow file-read* file-write* (subpath "{worktree.resolve()}"))'
+        f'(allow file-read* file-write* (subpath "{repo.resolve() / ".worktrees"}"))'
         in profile
     )
 
@@ -1691,21 +1692,26 @@ def test_recovery_commands_receive_only_narrow_write_exceptions(tmp_path, monkey
     assert git_allow not in upstream_fetch
     assert git_allow not in trailing_dot_fetch
     assert git_allow not in uppercase_lock_fetch
-    assert worktrees_allow not in fetch
-    assert worktrees_allow not in upstream_fetch
-    assert worktrees_allow not in trailing_dot_fetch
-    assert worktrees_allow not in uppercase_lock_fetch
+    # Folder writes are now constant; denied immediate entries still prevent
+    # these commands from acquiring the base worktree-management exception.
+    pattern = sandbox_any_case(repo / ".worktrees")
+    folder_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+$"))'
+    for profile in (fetch, upstream_fetch, trailing_dot_fetch, uppercase_lock_fetch):
+        assert worktrees_allow in profile
+        assert folder_deny in profile
     assert repo_literal_allow not in fetch
     assert repo_literal_allow not in upstream_fetch
     assert repo_literal_allow not in trailing_dot_fetch
     assert repo_literal_allow not in uppercase_lock_fetch
     assert all(git_allow not in profile for profile in rejected_fetches)
     assert git_allow not in worktree_add
-    assert worktrees_allow not in worktree_add
+    assert worktrees_allow in worktree_add
+    assert folder_deny in worktree_add
     assert repo_literal_allow not in worktree_add
     assert repo_allow not in worktree_add
     assert git_allow not in upstream_worktree_add
-    assert worktrees_allow not in upstream_worktree_add
+    assert worktrees_allow in upstream_worktree_add
+    assert folder_deny in upstream_worktree_add
     assert repo_literal_allow not in upstream_worktree_add
     assert repo_allow not in upstream_worktree_add
     assert shell_guard.check_worktree_targets("git fetch origin", str(repo)) is None
@@ -2186,7 +2192,8 @@ def test_worktree_git_access_does_not_reopen_base_git_identity(
         assert worktree_commit.index(deny) > worktree_commit.index(git_allow)
         assert deny in base_pull
     hooks_deny = workspace_git_rules((repo / ".git" / "hooks",))[0]
-    marker_deny = f'(deny file-write* (literal "{worktree / ".git"}"))'
+    pattern = sandbox_any_case(repo / ".worktrees")
+    marker_deny = f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
     assert worktree_commit.index(hooks_deny) > worktree_commit.index(git_allow)
     assert worktree_commit.index(marker_deny) > worktree_commit.index(git_allow)
     assert hooks_deny in base_pull

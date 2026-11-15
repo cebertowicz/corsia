@@ -260,9 +260,10 @@ def test_nonreciprocal_worktree_gets_no_ordinary_git_grant(
     )
 
     assert _git_allow(repo) not in profile
+    # Leftover folders are writable, but cannot mint the Git metadata grant.
     assert (
-        f'(allow file-read* file-write* (subpath "{worktree}"))'
-        not in profile
+        f'(allow file-read* file-write* (subpath "{repo / ".worktrees"}"))'
+        in profile
     )
 
 

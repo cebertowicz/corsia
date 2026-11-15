@@ -37,7 +37,7 @@ from tools.sandbox_config import (
     registered_repo_for_path,
     repo_worktree_root,
 )
-from tools.sandbox_git import sandbox_literal
+from tools.sandbox_git import sandbox_any_case, sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.workspace_git_paths import workspace_git_rules
@@ -711,10 +711,8 @@ def pinned_repo_sandbox_profile(
             or not policy.source_binding_valid
         ):
             rules.append(f'(deny file-write* (subpath "{_sandbox_path(repo)}"))')
-            for worktree in worktrees:  # resolved roots proved by this request's listing
-                rules.append(
-                    f'(allow file-read* file-write* (subpath "{sandbox_literal(worktree)}"))'
-                )
+            if policy.source_binding_valid and not policy.enforcement_error:
+                rules.append(f'(allow file-read* file-write* (subpath "{sandbox_literal(repo / ".worktrees")}"))')
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
     worktree_add_control_repo: Path | None = None
@@ -808,11 +806,13 @@ def pinned_repo_sandbox_profile(
         any_case = (repo / ".git" / "commondir", repo / ".git" / "hooks")
         rules.extend(workspace_git_rules(tuple(path.resolve(strict=False) for path in any_case)))
         if repo != worktree_control_repo:
-            rules.extend(
-                f'(deny file-write* '
-                f'(literal "{sandbox_literal(worktree / ".git")}"))'
-                for worktree in verified_worktrees_by_repo.get(repo, ())  # .git proved a plain file
-            )
+            # Pin immediate folders too, so a prepared .git cannot be renamed up.
+            pattern = sandbox_any_case(repo / ".worktrees")
+            rules.extend([
+                f'(deny file-write* (literal "{sandbox_literal(repo / ".worktrees")}"))',
+                f'(deny file-write* (regex #"^{pattern}/[^/]+$"))',
+                f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))',
+            ])
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
             f'(deny file-write* (subpath "{_sandbox_path(root)}"))'

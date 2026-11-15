@@ -583,7 +583,7 @@ def test_deleted_source_link_keeps_workspace_repo_write_quarantined(
     )
     assert f'(deny file-write* (subpath "{repo.resolve()}"))' in profile
     assert (
-        f'(allow file-read* file-write* (subpath "{worktree.resolve()}"))'
+        f'(allow file-read* file-write* (subpath "{repo.resolve() / ".worktrees"}"))'
         not in profile
     )
     assert (
@@ -803,10 +803,10 @@ def _linked_worktree(repo: Path, name: str) -> Path:
     return worktree.resolve()
 
 
-def test_profile_worktree_grants_match_legacy_add_dirs(
+def test_profile_folder_grant_covers_legacy_worktrees_and_keeps_invalid_repos_closed(
     tmp_path, monkeypatch, short_system_temp,
 ):
-    """Moving worktree grants off ``--add-dirs`` keeps the same RW set."""
+    """One folder grant covers worktrees and leftovers, with constant denies."""
     import re
 
     from tools import sandbox_config, shell_guard, unix_socket_policy
@@ -830,7 +830,7 @@ def test_profile_worktree_grants_match_legacy_add_dirs(
         _linked_worktree(repos["protected"], name)
         for name in ("a", "b", "c")
     ]
-    # Unverified directories under .worktrees are never granted.
+    # Leftover folders are included in the folder-wide shell grant.
     (repos["protected"] / ".worktrees" / "rogue").mkdir()
     quarantined = _linked_worktree(repos["quarantined"], "q")
     policies = [
@@ -858,25 +858,27 @@ def test_profile_worktree_grants_match_legacy_add_dirs(
         )
     }
 
-    assert profile_grants == set(granted)
+    trees = repos["protected"] / ".worktrees"
+    assert profile_grants == {trees}
+    assert all(tree.parent == trees for tree in granted)
     assert add_dirs.isdisjoint(profile_grants)
-    assert add_dirs | profile_grants == legacy_add_dirs | {
+    assert add_dirs | set(granted) == legacy_add_dirs | {
         unix_socket_policy.corsia_temp_root_for_bind("thread-one")
     }
     assert quarantined not in legacy_add_dirs | profile_grants
-    assert repos["protected"] / ".worktrees" / "rogue" not in profile_grants
+    assert repos["quarantined"] / ".worktrees" not in profile_grants
     lines = profile.splitlines()
     base_deny = lines.index(
         f'(deny file-write* (subpath "{repos["protected"]}"))'
     )
-    for worktree in granted:
-        grant = lines.index(
-            f'(allow file-read* file-write* (subpath "{worktree}"))'
-        )
-        marker_deny = lines.index(
-            f'(deny file-write* (literal "{worktree / ".git"}"))'
-        )
-        assert base_deny < grant < marker_deny
+    from tools.sandbox_git import sandbox_any_case
+
+    grant = lines.index(f'(allow file-read* file-write* (subpath "{trees}"))')
+    pattern = sandbox_any_case(trees)
+    marker_deny = lines.index(
+        f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))'
+    )
+    assert base_deny < grant < marker_deny
 
     safehouse = tmp_path / "bin" / "safehouse"
     safehouse.parent.mkdir()

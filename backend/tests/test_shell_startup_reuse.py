@@ -89,7 +89,7 @@ def test_listing_keeps_symlink_entry_and_parent_semantics(tmp_path):
     assert sandbox_config.list_repo_worktrees(redirected) == []
 
 
-def test_profile_worktree_rules_match_resolved_rendering(tmp_path):
+def test_profile_worktree_rules_pin_lexical_container_under_resolved_repo(tmp_path):
     plain = tmp_path / "plain"
     linked = [_link(plain, "a"), _link(plain, "b")]
     (plain / ".worktrees" / "alias").symlink_to(linked[0])
@@ -109,16 +109,15 @@ def test_profile_worktree_rules_match_resolved_rendering(tmp_path):
         "printf ok", str(tmp_path), policies=policies
     )
 
-    # The pre-change rendering resolved every worktree path and its .git marker.
-    for root in linked:
-        marker = root / ".git"
-        allow = shell_guard._sandbox_path(root)
-        deny = shell_guard._sandbox_path(marker)
-        assert f'(allow file-read* file-write* (subpath "{allow}"))' in profile
-        assert f'(deny file-write* (literal "{deny}"))' in profile
-        assert sandbox_git.sandbox_literal(root) == allow
-        assert sandbox_git.sandbox_literal(marker) == deny
-    assert profile.count("(allow file-read* file-write* (subpath") == len(
-        sandbox_config.list_repo_worktrees(plain)
-    )
+    # Resolve the registered repo alias, never a redirected container: that
+    # would grant unrelated folders merely because .worktrees is a symlink.
+    for repo in (plain.resolve(), redirected.resolve()):
+        trees = repo / ".worktrees"
+        assert f'(allow file-read* file-write* (subpath "{trees}"))' in profile
+        assert f'(deny file-write* (literal "{trees}"))' in profile
+        pattern = sandbox_git.sandbox_any_case(trees)
+        assert f'(deny file-write* (regex #"^{pattern}/[^/]+$"))' in profile
+        assert f'(deny file-write* (regex #"^{pattern}/[^/]+/[.][Gg][Ii][Tt]$"))' in profile
+    assert profile.count("(allow file-read* file-write* (subpath") == len(policies)
+    assert str(behind_link.resolve()) not in profile
     assert "hidden" not in profile
