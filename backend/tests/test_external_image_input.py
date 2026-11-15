@@ -1,7 +1,7 @@
 """External image support is detected per model, and a user's choice sticks.
 
 A generic model list reports no input types. Connection and discovery leave
-image support unchecked; explicit detection can send a test image. Rediscovery
+image support unchecked; first use or explicit detection can send a test image. Rediscovery
 keeps saved answers, and a user's choice outranks detection.
 """
 

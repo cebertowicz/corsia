@@ -136,7 +136,11 @@ replaces the observation; it is removed when the turn that recorded it ends
 (`backend/llm/memory_fit.py`). External server
 selectors carry both server identity and served model id; the External provider
 routes requests without managing the server's models
-(`backend/llm/external_provider.py`).
+(`backend/llm/external_provider.py`). Registration, testing and rediscovery
+perform metadata requests only. The response observer in `backend/llm/router.py`
+triggers image detection after a chosen External model's first successful reply;
+`backend/llm/external_image_input.py` owns the durable per-model claim and result.
+Failed checks remain unknown without automatic retry; a saved user choice wins.
 
 The oMLX public authentication, managed oMLX replacement, and model and account
 resolution sections were checked against the code at

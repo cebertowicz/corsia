@@ -365,7 +365,7 @@ async def _discover_and_notify(server_id: str) -> dict:
             return result
         if is_external:
             # Catalog discovery never grants permission to run a model.
-            # Image detection requires the person's per-model Detect now action.
+            # First successful use or per-model Detect now checks image support.
             return result
         try:
             from llm.network_endpoints import build_api_base
