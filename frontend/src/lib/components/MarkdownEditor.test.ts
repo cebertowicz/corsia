@@ -167,6 +167,21 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
+		it('opens a pressed suggestion even when two comments surround it, never a list that leaves it out', async () => {
+			const onAnchorFocus = vi.fn();
+			const onMarkerFocus = vi.fn();
+			const view = open({ highlights: [{ from: 0, to: 15, id: 'one', onMarkerFocus }, { from: 0, to: 15, id: 'two', onMarkerFocus }, suggestion('red')], onAnchorFocus });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			// A press on the struck text, in a popover: the innermost highlight under it is the suggestion.
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true, expect.any(MouseEvent));
+			expect(onMarkerFocus).not.toHaveBeenCalled();
+		});
+
 		it('reports a caret in a plain comment as before, with no suggestion flag and no click', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });
