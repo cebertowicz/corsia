@@ -21,7 +21,7 @@ from api.measurement_workflow_share import workflow_share_family
 from api.measurement_workflows import router as workflows_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_corrections import COVERAGE_METRICS, corrections_family, coverage_value
-from api.measurement_machinery import machinery_family, machinery_value
+from api.measurement_machinery import machinery_family, machinery_value, recorded_periods
 from core.machinery_cost import METRICS as MACHINERY_METRICS
 from api.measurement_breaks import (
     COMPARABILITY_UNRESTRICTED, comparability_start, derive_breaks, first_availability_period,
@@ -224,8 +224,9 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         sources = by_period if family != "tokens" else {}
         source_start = first_availability_period(breaks[metric])
         eligible_periods = metric_spine(metric, spine, first_limit_period, first_presence, source_start, page_grain)
-        eligible, first_row = set(eligible_periods), len(rows)
         drawn = [period for period in eligible_periods if period in page_grain.served]
+        eligible_periods = recorded_periods(family, eligible_periods, by_period)
+        eligible, first_row = set(eligible_periods), len(rows)
         # Sized hours run from the instrument's start, but the size rate divides them by presence
         # time, which exists only from the first recorded presence. Before that the rate is not
         # measured: no row or window may divide earlier work by later time.
@@ -239,7 +240,6 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
                                   lambda name, period: next_comparability_boundary(period, breaks[name]), rate_measured,
                                   data_start=rate_period))
         elif family == "tokens":
-            by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
             if metric == "fresh_tokens":
                 started = next((period for period in eligible_periods if (by_period.get(period) or {}).get("usage_rows")), None)

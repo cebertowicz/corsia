@@ -38,6 +38,17 @@ def machinery_value(metric, source):
     return (numerator / denominator if denominator else None), int(n)
 
 
+def recorded_periods(family, periods, rows):
+    """The periods a window or moving average may pool and name.
+
+    A machinery period has a row only once every one of its days is recorded
+    (``machinery_family``); one still short of days is drawn unmeasured but is
+    never pooled into, or named by, a window or an average. Other families keep
+    every period they are measured in.
+    """
+    return [period for period in periods if family != "machinery" or period in rows]
+
+
 def machinery_family(db, grain):
     """Return only periods whose every UTC-day marker exists, scoped to selected threads."""
     first = date.fromisoformat(grain.starts[0][:10]) - timedelta(days=2)

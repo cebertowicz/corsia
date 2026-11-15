@@ -253,3 +253,33 @@ async def test_retention_bound_and_period_before_first_marker(isolated_db, monke
     finally:
         db.close()
     assert (await periods())[WEEK] == (None, 1.0, 1)
+
+
+@pytest.mark.asyncio
+async def test_window_and_average_never_cover_an_incomplete_period(isolated_db, monkeypatch):
+    from api.measurement import measurement_series
+    db = get_db()
+    try:
+        _seed_thread(db, "root", agent=True)
+        # Enough actions in the week of Sep 21 that a window or average over it is not withheld for its n.
+        for index in range(21):
+            _tool(db, f"one{index}", "root", "plan_update", tool_result_byte_count=3)
+        # A later action in the week the nightly job has not finished: never pooled, never named.
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at) VALUES ('two','root','tool','abc',?,?)",
+                   (json.dumps({"name": "plan_update", "tool_result_byte_count": 3}), "2026-09-29T12:00:00+00:00"))
+        db.commit()
+    finally:
+        db.close()
+    # Markers run Sep 5 to Oct 2: the weeks of Aug 31 and Sep 28 are short of days.
+    assert run_daily(now=datetime(2026, 10, 3, 12, tzinfo=timezone.utc)) == 28
+    _freeze_clock(monkeypatch)
+    payload = await measurement_series("plan_action_pct", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
+    latest = payload["windows"]["plan_action_pct"]["latest"]
+    assert latest["n"] == 21
+    assert latest["from"] == "2026-09-07"
+    assert latest["to"] < "2026-09-28"
+    rows = {row["period"]: row for row in payload["rows"]}
+    assert rows["2026-09-28"]["raw_value"] is None
+    # Every moving-average span here reaches back into the short week of Aug 31 or ends in the
+    # short week of Sep 28, so none is served from the periods that happen to have rows.
+    assert all(row["average"] is None for row in rows.values())
