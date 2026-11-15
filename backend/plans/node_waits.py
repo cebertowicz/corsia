@@ -221,6 +221,17 @@ def watch_cause(row) -> dict:
     }
 
 
+def is_check_back(cause: dict) -> bool:
+    """Whether a cause is the agent's own check-back: a watch that is not a blocker armed as a wait.
+
+    The one rule every reader uses. A check-back is the agent's follow-up, so
+    it never stops a person's task asking them (``operator_display_state``),
+    never outranks a working child (``wait_causes.working_child``), and is not
+    waiting time on a person's task (``node_waiting``).
+    """
+    return cause.get("watch_id") is not None and not cause.get("blocked_wait")
+
+
 def named_watch_cause(row) -> dict:
     """A full-read watch's cause with what it waits on: why, and the watched artifact.
 
