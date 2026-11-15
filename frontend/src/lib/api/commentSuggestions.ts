@@ -46,9 +46,9 @@ async function decided(response: Response, fallback: string): Promise<Suggestion
 		try {
 			const body = await response.json();
 			if (typeof body.kind === 'string') kind = body.kind;
-			// A string `detail` is shown with or without a `kind`: a document-save refusal (stale text, a slow drain, a write policy) sends a
-			// bare `{detail}` written for the person. The fallback sentence is only for an answer that carries no string detail.
-			if (typeof body.detail === 'string') detail = body.detail;
+			// Only a refusal the server wrote for a person (it names its `kind`, or sends a `line`) is shown. Any other answer (a crash, a gateway
+			// page, a bare `detail`) is runtime text, so the card shows the same fallback sentence the review bar does.
+			if (kind && typeof body.detail === 'string') detail = body.detail;
 			else if (body.detail && typeof body.detail.line === 'string') detail = body.detail.line;
 		} catch { /* Preserve the useful local fallback for non-JSON errors. */ }
 		throw new SuggestionRefused(detail, response.status, kind);
