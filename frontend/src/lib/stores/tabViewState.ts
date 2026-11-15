@@ -4,12 +4,19 @@ import type { ImageViewportPlace } from '$lib/artifactTabTypes';
 import { remapOccurrence } from '$lib/docImageComments';
 import type { DocumentImageRequest } from '$lib/docViewerImages';
 import type { TextDocumentPlace } from '$lib/documentImagePlace';
+import type { DocumentFreshness } from '$lib/docFreshness';
+import type { DocOwnership } from '$lib/api/docOwnership';
+
+/** What a document's header row shows besides its title: who owns it and how fresh it is. */
+export type DocumentHeader = { freshness: DocumentFreshness | null; ownership: DocOwnership | null };
 
 /** An image of a document shown larger over its tab, and the camera the user left it at. */
 export type TabDocumentImage = DocumentImageRequest & { camera?: ImageViewportPlace; viewId: object };
 
 export type TabViewState = {
 	documentPlace?: TextDocumentPlace;
+	/** The header row as the last load answered it: only a first-frame stand-in for the next return; the load replaces it. */
+	documentHeader?: DocumentHeader;
 	imagePlace?: ImageViewportPlace;
 	/** The one record of which document image a tab shows: a tab switch keeps it, Back, collapse and close drop it. */
 	documentImage?: TabDocumentImage;
@@ -50,6 +57,10 @@ function setTabViewState(threadId: string, instanceId: string, change: (current:
 
 export function recordTabDocumentPlace(threadId: string, instanceId: string, place: TextDocumentPlace): void {
 	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentPlace: { ...place } }));
+}
+
+export function recordTabDocumentHeader(threadId: string, instanceId: string, header: DocumentHeader): void {
+	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentHeader: { ...header } }));
 }
 
 export function recordTabImagePlace(threadId: string, instanceId: string, place: ImageViewportPlace): void {

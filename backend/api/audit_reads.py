@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.audit_agent_hours import read_agent_hours
+from api import usage_rollup
 from infra.audit_reads import AuditReadError, read_audit_metric
 from infra.auth import require_user
 from infra.db_async import run_in_db
@@ -20,10 +22,13 @@ async def audit_metric(
     user: dict = Depends(require_user),
 ) -> dict:
     """Return one fixed metric within the authenticated user's project scope."""
+    if metric in ("agent_hours", "agent_day_levels"):
+        usage_rollup.schedule_refresh()
     try:
         return await run_in_db(
             lambda: read_audit_metric(
-                thread_id, user["id"], metric, since=since, until=until
+                thread_id, user["id"], metric, since=since, until=until,
+                agent_hours_reader=read_agent_hours,
             )
         )
     except AuditReadError as exc:

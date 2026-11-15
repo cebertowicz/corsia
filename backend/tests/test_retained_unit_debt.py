@@ -3,9 +3,10 @@
 Contract (Turn & Delivery ruling on bd9826d8): each retained unit in
 ``persist_completed_tool_results_in_transaction`` runs inside the existing
 ``settled_or_debt``. A refused unit is rolled back, logged once by name and
-omitted from the return; the terminal still applies and the call is closed by
-the read-time missing-result stub. No durable synthetic close is written. Only
-a lost savepoint still raises.
+omitted from the return; the terminal still applies and closes the call with
+one durable missing-result row (``turn_ended_without_result``), so a later cold
+checkpoint finds no debt. The refused bytes are never stored. Only a lost
+savepoint still raises.
 
 The first three cases held before each unit was settled on its own; in the
 rest, the bare retained write (``infra/thread_driver.py`` ->
@@ -17,7 +18,10 @@ import pytest
 from loguru import logger
 
 from core._tool_result_delivery_support import ToolResultBindingError
-from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
+from infra.delivery_states import (
+    PROVIDER_MISSING_RESULT_REASON,
+    TURN_ENDED_WITHOUT_RESULT_REASON,
+)
 from core.turn_core import BOOT_EPOCH, persist_turn_settlement, persist_turn_terminal
 from history.projection import render_portable_history
 from infra.completed_tool_results import persist_completed_tool_results
@@ -86,6 +90,14 @@ def _projected_tool_messages(lab):
     ]
 
 
+def _terminal_close(lab):
+    """The one row the terminal wrote for a call it left open; refused bytes absent."""
+    [(row_id, content, meta)] = lab.tool_rows()
+    assert meta["synthetic_reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
+    assert meta["synthetic_tool_result"] is True and REAL not in content
+    return row_id, meta
+
+
 def _duplicate_failure(lab):
     """One Step declaring ``dup-1`` twice, and both completed units retained."""
     step = _declare(lab, ("dup-1", SAME), ("dup-1", SAME))
@@ -97,30 +109,29 @@ def _duplicate_failure(lab):
 # --- controls -------------------------------------------------------------
 
 
-def test_terminal_writes_no_durable_close_and_projects_the_stub(lab):
-    """CONTROL: an unanswered declared call ends with no row and a read-time stub."""
+def test_terminal_writes_one_durable_close_and_projects_it(lab):
+    """CONTROL: an unanswered declared call ends with one durable close."""
     step = _declare(lab, ("unanswered-1", SAME))
 
     assert persist_turn_terminal(
         lab.identity.turn_id, "error", "provider failed", db=lab.db,
     ) is TerminalResult.APPLIED
-    assert lab.tool_rows() == []
-    [stub] = _projected_tool_messages(lab)
-    assert stub.message_id == f"{step}::unanswered-1::missing"
-    assert stub.synthetic_tool_result and stub.synthetic_reason == "tool_result_missing"
+    row_id, meta = _terminal_close(lab)
+    assert meta["assistant_step_id"] == step and meta["tool_call_id"] == "unanswered-1"
+    [projected] = _projected_tool_messages(lab)
+    assert projected.message_id == row_id
+    assert projected.synthetic_reason == TURN_ENDED_WITHOUT_RESULT_REASON
 
 
-def test_duplicate_declaration_projects_one_stub_for_the_repeated_id(lab):
-    """PIN, not a verdict: a Step declaring one id twice projects ONE stub.
-
-    ``history.messages._tool_calls`` drops the repeated id before
-    ``history.turns._complete_tool_results`` counts declared calls.
-    """
+def test_duplicate_declaration_gets_one_close_for_the_repeated_id(lab):
+    """A Step declaring one id twice gets ONE durable close, projected once."""
     step = _declare(lab, ("dup-1", SAME), ("dup-1", SAME))
     persist_turn_terminal(lab.identity.turn_id, "error", "provider failed", db=lab.db)
 
-    [stub] = _projected_tool_messages(lab)
-    assert stub.message_id == f"{step}::dup-1::missing"
+    row_id, meta = _terminal_close(lab)
+    assert meta["assistant_step_id"] == step and meta["tool_call_id"] == "dup-1"
+    [projected] = _projected_tool_messages(lab)
+    assert projected.message_id == row_id
 
 
 def test_terminal_lost_savepoint_raises_and_the_turn_stays_running(lab, monkeypatch):
@@ -149,7 +160,7 @@ def test_terminal_lost_savepoint_raises_and_the_turn_stays_running(lab, monkeypa
 
 
 def test_duplicate_id_refusals_are_named_debt_and_the_terminal_applies(lab, errors):
-    """(a) APPLIED, error, successor claimed, no row, one line per unit."""
+    """(a) APPLIED, error, successor claimed, one close, one line per unit."""
     step, failure = _duplicate_failure(lab)
     admit_input(
         "thread-1", role="user", content="next", intent="apply_now",
@@ -163,18 +174,18 @@ def test_duplicate_id_refusals_are_named_debt_and_the_terminal_applies(lab, erro
     status, error = _turn(lab)
     assert status == "error" and REAL not in (error or "")
     assert isinstance(settlement.successor, ClaimedBatch)
-    assert lab.tool_rows() == []
+    row_id, _meta = _terminal_close(lab)
     debt = _debt(errors)
     assert len(debt) == 2
     for line in debt:
         assert "dup-1" in line and lab.identity.turn_id in line and "thread-1" in line
         assert "ToolResultBindingError" in line and REAL not in line
-    [stub] = _projected_tool_messages(lab)
-    assert stub.message_id == f"{step}::dup-1::missing"
+    [projected] = _projected_tool_messages(lab)
+    assert projected.message_id == row_id
 
 
 def test_mixed_batch_keeps_the_persisted_unit_through_the_commit(lab, errors):
-    """(b) unit 1 refused, unit 2 persists and survives the terminal."""
+    """(b) unit 1 refused and closed by the terminal; unit 2 persists and survives."""
     step = _declare(lab, ("dup-1", SAME), ("dup-1", SAME), ("other-2", OTHER))
     failure = CompletedToolFailure((
         _unit(lab, step, "dup-1", SAME, REAL), _unit(lab, step, "other-2", OTHER, KEPT),
@@ -184,7 +195,11 @@ def test_mixed_batch_keeps_the_persisted_unit_through_the_commit(lab, errors):
         lab.identity.turn_id, "error", failure, db=lab.db,
     ) is TerminalResult.APPLIED
     lab.db.rollback()  # nothing uncommitted may be holding the row
-    [(_row_id, content, meta)] = lab.tool_rows()
+    rows = {meta["tool_call_id"]: (content, meta) for _row_id, content, meta in lab.tool_rows()}
+    assert sorted(rows) == ["dup-1", "other-2"]
+    assert rows["dup-1"][1]["synthetic_reason"] == TURN_ENDED_WITHOUT_RESULT_REASON
+    assert REAL not in rows["dup-1"][0]
+    content, meta = rows["other-2"]
     assert content == KEPT and meta["tool_call_id"] == "other-2"
     assert meta["tool_invocation_id"] == "other-2" and "synthetic_tool_result" not in meta
     [line] = _debt(errors)

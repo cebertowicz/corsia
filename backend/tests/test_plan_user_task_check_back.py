@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from plans import operator_projection
+from plans import node_cost, operator_projection
 from tests.plan_close_next_helpers import HUMAN, owner_plan, plan_update, revision, task
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
 
@@ -105,3 +105,32 @@ def test_paused_plan_keeps_the_look_but_defers_the_ask(db):
 
     assert node["display"]["label_key"] == "needs_you"
     assert node["requires_user_action"] is False
+
+
+def _waited(db, plan_id: str, node_id: str) -> float:
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    return node_cost.project_many([plan_id], db=db, now=later)[plan_id][node_id]["own"]["waiting"]["seconds"]
+
+
+def test_one_check_back_rule_the_task_reads_needs_you_and_counts_no_waiting(db):
+    """The pane and the waiting measure read the same watch the same way."""
+    plan = owner_plan(db)
+    node_id = _user_task(db, plan.id)
+    _watch(db, plan.id, node_id, "plain")
+
+    _envelope, node = _shown(db, node_id)
+
+    assert node["display"]["label_key"] == "needs_you"
+    assert _waited(db, plan.id, node_id) == 0
+
+
+def test_a_blocker_wait_on_the_persons_task_is_still_waiting_time(db):
+    plan = owner_plan(db)
+    node_id = _user_task(db, plan.id)
+    plan_update(db, plan.id, "block_node", {
+        "node_id": node_id, "expected_revision": revision(db, node_id),
+        "reason_key": "awaiting_vendor", "reason": "The vendor has to enable the account",
+        "owner_kind": "external", "owner_id": None,
+    })
+
+    assert _waited(db, plan.id, node_id) > 50 * 60

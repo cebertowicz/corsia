@@ -10,11 +10,14 @@ from collections.abc import Iterable
 from core.correction_attribution import FIRST_ARRIVAL_SQL
 from core.correction_learning import TRIAGE_EVENT
 from core.measurement_token_contract import priceable_usage_predicate
+from core.machinery_cost import DAY_EVENT as MACHINERY_DAY_EVENT, METRICS as MACHINERY_METRICS
 from core.size_rating import SIZE_EVENT
 
 
 def source_group(metric: str) -> str:
     """Return the metric group whose start and marks it shares."""
+    if metric in MACHINERY_METRICS:
+        return "machinery"
     if metric == "outcomes":
         return "outcomes"
     if metric == "first_try_acceptance":
@@ -61,6 +64,7 @@ _FIRST_ROW_SQL = {
     "classified_corrections": FIRST_ARRIVAL_SQL,
     # Triage had no structured fact before it was first recorded, so coverage has no period earlier.
     "first_correction_triage": f"SELECT MIN(ts) FROM outcome_events WHERE event_name='{TRIAGE_EVENT}'",
+    "first_machinery_day": f"SELECT MIN(ts) FROM outcome_events WHERE event_name='{MACHINERY_DAY_EVENT}'",
     "limit_hits": """
         SELECT MIN(started_at) FROM active_turns WHERE status > ''
     """,
@@ -87,6 +91,7 @@ _LIVE_SOURCE = {
     "presence": "presence",
     "estimated_human_hours_per_active_hour": "accepted_size_ratings",
     "limit_hits": "limit_hits",
+    "machinery": "first_machinery_day",
 }
 
 
