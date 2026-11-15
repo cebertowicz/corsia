@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { focusWhenPlaced, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
@@ -13,8 +13,12 @@
 	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null, focusComposer = true }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null;
 		/** False for a composer the layout redrew rather than one the reader opened: it leaves focus where it is. */
 		focusComposer?: boolean } = $props();
-	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
-	const takeFocus = (node: HTMLElement) => { if (focusComposer) queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
+	/** A composer opens ready to type, as its popover does, once its card is placed; the column brings it into view, so focusing it never scrolls. */
+	const takeFocus = (node: HTMLElement) => {
+		let stop = () => {}, gone = false;
+		if (focusComposer) queueMicrotask(() => { const field = node.querySelector<HTMLElement>('textarea, [contenteditable="true"]'); if (field && !gone) stop = focusWhenPlaced(field, () => true); });
+		return { destroy: () => { gone = true; stop(); } };
+	};
 	let stackEl = $state<HTMLElement>();
 	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});

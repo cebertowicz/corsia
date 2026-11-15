@@ -33,3 +33,18 @@ export function placeCards(items: MarginItem[], selected: string | null): Record
 	}
 	return out;
 }
+
+/**
+ * Focuses a field in a margin card once the card is placed: the one rule for every field the margin column focuses (a new
+ * composer, a reply handed off from another form). A card stays hidden until it has a place, which waits for its column to be
+ * drawn on the canvas, and a browser drops focus on a hidden field; the stack marks a placed card `placed`. `free` says, when the
+ * card is placed, that the reader has not moved on. The wait ends with the placement, or with the stop it returns.
+ */
+export function focusWhenPlaced(field: HTMLElement, free: () => boolean): () => void {
+	const card = field.closest<HTMLElement>('[data-margin-card]');
+	const focus = () => { if (free()) field.focus({ preventScroll: true }); };
+	if (!card || card.classList.contains('placed')) { focus(); return () => {}; }
+	const placed = new MutationObserver(() => { if (card.classList.contains('placed')) { placed.disconnect(); focus(); } });
+	placed.observe(card, { attributes: true, attributeFilter: ['class'] });
+	return () => placed.disconnect();
+}
