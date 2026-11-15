@@ -17,10 +17,8 @@
 		heading = null,
 		headingMeta = null,
 		contextLabel = null,
-		leading,
-		actions, compact = false,
-		doneLabel = 'Done', doneIcon = false,
-		onClose,
+		leading, actions, compact = false,
+		doneLabel = 'Done', doneIcon = false, onClose,
 		children,
 		above,
 		initialFocusSelector = '[data-drawer-autofocus]',
@@ -53,14 +51,11 @@
 		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
-		/** Word buttons for what the sheet shows, at the leading edge of the header row and apart from the dismiss control (a comment thread's Agree and Resolve). */
-		actions?: Snippet;
-		/** Draw the sheet with the design system's drawer radius (`--radius`) instead of the 28px glass sheet. The comment sheets use it. */
-		compact?: boolean;
+		/** Comment-sheet header options: `actions` are word buttons at the leading edge, apart from Close (a thread's Agree and Resolve); `compact` draws the design system's drawer radius, not the 28px glass sheet. */
+		actions?: Snippet; compact?: boolean;
 		/** Visible text of the dismiss control; it is also its accessible name. */
 		doneLabel?: string;
-		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */
-		doneIcon?: boolean;
+		/** Draw the dismiss control as the shared `CloseButton` X (its accessible name stays `doneLabel`), as a thread sheet and a chat comment sheet do. */ doneIcon?: boolean;
 		onClose: () => void;
 		children: Snippet;
 		/** A row above the chrome title, below the grabber. */
@@ -281,9 +276,7 @@
 		-webkit-backdrop-filter: var(--glass-blur);
 		box-shadow: 0 -18px 64px rgba(0, 0, 0, 0.32), var(--glass-rim);
 	}
-	.drawer-panel.dragging {
-		transition: none;
-	}
+	.drawer-panel.dragging { transition: none; }
 	.drawer-panel.compact { border-radius: var(--radius) var(--radius) 0 0; }
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
