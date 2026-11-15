@@ -79,17 +79,25 @@ function lowerBound(value: string, incomplete: boolean): string {
 	return incomplete ? `at least ${value}` : value;
 }
 
-/** Tokens are the stable subscription-backed usage fact shown on every detail row. */
+function tokensIncomplete(amount: OperatorCostAmount): boolean {
+	return amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0;
+}
+
+/**
+ * The token count worth showing, or null for an empty fact. The server reports
+ * a known 0 for work that never ran a Turn; with no recording gap that 0 says
+ * nothing, so it disappears like any other empty detail fact.
+ */
+function shownTokens(amount: OperatorCostAmount): number | null {
+	const known = amount.tokens.known;
+	return known !== null && (known > 0 || tokensIncomplete(amount)) ? known : null;
+}
+
+/** Tokens are the stable subscription-backed usage fact on every detail row that used any. */
 export function tokenLine(amount: OperatorCostAmount): string | null {
-	if (amount.tokens.known !== null) {
-		return lowerBound(
-			compactNumber.format(amount.tokens.known),
-			amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0,
-		);
-	}
-	return amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0
-		? 'not recorded'
-		: null;
+	const known = shownTokens(amount);
+	if (known !== null) return lowerBound(compactNumber.format(known), tokensIncomplete(amount));
+	return tokensIncomplete(amount) ? 'not recorded' : null;
 }
 
 /**
@@ -112,12 +120,8 @@ export function dollarLine(amount: OperatorCostAmount): string | null {
 /** Compact combined wording retained for revision/follow-up totals. */
 export function costLine(amount: OperatorCostAmount): string | null {
 	const parts = [dollarLine(amount)];
-	if (amount.tokens.known !== null) {
-		parts.push(lowerBound(
-			tokens(amount.tokens.known),
-			amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0,
-		));
-	}
+	const known = shownTokens(amount);
+	if (known !== null) parts.push(lowerBound(tokens(known), tokensIncomplete(amount)));
 	return parts.filter((part): part is string => part !== null).join(' · ') || null;
 }
 

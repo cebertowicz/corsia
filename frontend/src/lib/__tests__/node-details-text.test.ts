@@ -36,6 +36,8 @@ describe('node details wording', () => {
 		expect(costLine(amount(1.5, 0, 10, 4, 2))).toBe('at least $1.500 API-equivalent · at least 10 tokens');
 		expect(costLine(amount(0, 5, null))).toBeNull();
 		expect(costLine(amount(null, 5, null))).toBeNull();
+		expect(costLine(amount(0, 0, 0))).toBeNull();
+		expect(costLine(amount(null, 0, 0, 0, 1))).toBe('at least 0 tokens');
 	});
 
 	it('keeps working and waiting time out of the cost fact', () => {
