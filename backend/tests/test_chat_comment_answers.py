@@ -18,6 +18,12 @@ from infra.schema import SCHEMA_VERSION
 from infra.sidebar_preview import sidebar_update
 
 
+@pytest.fixture
+def focus_off(monkeypatch):
+    """Focus off: every assistant step reaches the person, so the stream holds an answer section."""
+    monkeypatch.setattr("infra.chat_comment_answers.focus_mode_on", lambda db=None: False)
+
+
 def _seed(db):
     seed_thread(db, "thread")
     db.execute("UPDATE threads SET user_id=?, next_message_seq=2 WHERE id='thread'", (OWNER_USER,))
@@ -80,7 +86,7 @@ def test_thread_list_preview_hides_answer_tags(isolated_db):
 
 
 @pytest.mark.parametrize(('text', 'before', 'visible'), TAG_CASES)
-def test_tag_cases_find_the_first_section(text, before, visible):
+def test_tag_cases_find_the_first_section(text, before, visible, focus_off):
     assert bool(parse_answers(text, 'answer')) == (before is not None)
     if before is not None:
         assert VisibleAnswerStream().feed(text) == before

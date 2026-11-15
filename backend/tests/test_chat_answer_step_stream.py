@@ -7,10 +7,10 @@ from core.turn_core import TurnIdentity
 from infra.database import get_db
 from infra.state import turn_buffers
 from ws.turn_helpers import _update_turn_buffer
-from test_chat_comment_answers import _seed
+from test_chat_comment_answers import _seed, focus_off  # noqa: F401  (fixture)
 
 
-def test_cc_new_turn_drops_stopped_turns_held_delta():
+def test_cc_new_turn_drops_stopped_turns_held_delta(focus_off):
     from subagents.cc_accept import _bind_turn
     from subagents.cc_event_context import CCEventContext
     from subagents.cc_event_simple import on_text_delta
@@ -32,7 +32,7 @@ def test_cc_new_turn_drops_stopped_turns_held_delta():
     asyncio.run(run())
 
 
-def test_codex_new_turn_drops_stopped_turns_held_delta(isolated_db):
+def test_codex_new_turn_drops_stopped_turns_held_delta(isolated_db, focus_off):
     from types import SimpleNamespace
     from subagents import codex_runtime
     from subagents.codex_runtime_events import _on_text_delta
@@ -99,7 +99,45 @@ def test_native_stream_reconnect_and_saved_projection(isolated_db):
         turn_buffers.clear('thread', identity)
 
 
-def test_cli_emitters_project_saved_step_and_clear_held_text(isolated_db, monkeypatch):
+def test_with_focus_on_a_tagged_step_streams_and_saves_the_same_text_and_places_nothing(isolated_db):
+    """A step that is not sent for the person is working text: its tag is neither held live nor placed."""
+    db = get_db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    identity = TurnIdentity('turn-on', 1)
+    events = []
+    turn_buffers.init('thread', identity)
+
+    async def broadcast(frame):
+        _update_turn_buffer('thread', identity, frame)
+        events.append(frame)
+
+    handler = StepHandler('thread', {'model': 'test'}, broadcast, 'turn-on')
+    handler.bind_turn_identity(identity)
+    text = 'Intro\n\n[c1.1] Yes, Friday is skipped.'
+
+    async def run():
+        for chunk in ['Intro\n', '\n[c1', '.1] Yes, Friday is skipped.']:
+            await handler.handle('text_delta', {'content': chunk})
+        assert turn_buffers.snapshot('thread', identity)['content'] == text
+        await handler.handle('text', {'content': text})
+        assert events[-1]['content'] == text
+        assert 'chat_visible_content' not in events[-1] and 'chat_answer_cids' not in events[-1]
+
+    try:
+        asyncio.run(run())
+    finally:
+        turn_buffers.clear('thread', identity)
+    db = get_db()
+    try:
+        assert db.execute('SELECT COUNT(*) FROM chat_comment_answers').fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_cli_emitters_project_saved_step_and_clear_held_text(isolated_db, monkeypatch, focus_off):
     from types import SimpleNamespace
     from subagents import cc_event_steps, codex_runtime_events
     from subagents.assistant_step_display import load_assistant_step_display

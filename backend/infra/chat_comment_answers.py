@@ -23,7 +23,11 @@ def _held_from(text: str) -> int:
 
 
 class VisibleAnswerStream:
-    """Stream a step's text until an answer section opens; the saved step settles the rest."""
+    """Stream a step's text until an answer section opens; the saved step settles the rest.
+
+    It holds an answer section only for a step that reaches the person, the test ``place_answers`` uses.
+    A streamed step is never a sent message, so that is Focus off; with Focus on its text passes through.
+    """
 
     def __init__(self) -> None:
         self.reset()
@@ -32,8 +36,13 @@ class VisibleAnswerStream:
         self.pending = ""
         self.started = False
         self.held = False
+        self.shown: bool | None = None  # Read once, at the step's first text.
 
     def feed(self, chunk: str) -> str:
+        if self.shown is None:
+            self.shown = reaches_the_person(None, None)
+        if not self.shown:
+            return chunk
         if self.held:
             return ""
         text = self.pending + chunk
@@ -154,15 +163,18 @@ def has_comment_cid(metadata: str | None, cid: str) -> bool:
         return False
 
 
-def focus_mode_on(db: sqlite3.Connection) -> bool:
+def focus_mode_on(db: sqlite3.Connection | None = None) -> bool:
     """As the settings API reads it: Focus is on unless saved off."""
     from infra.settings import get_setting
 
     return (get_setting("features", db=db) or {}).get("focus_mode", True) is not False
 
 
-def _reaches_the_person(db: sqlite3.Connection, metadata: dict | None) -> bool:
-    """Whether the person is shown this assistant message's words: sent for them, or Focus is off."""
+def reaches_the_person(db: sqlite3.Connection | None, metadata: dict | None) -> bool:
+    """Whether the person is shown this assistant message's words: sent for them, or Focus is off.
+
+    The one test behind both placing an answer (``place_answers``) and holding its text back while it streams.
+    """
     return bool(isinstance(metadata, dict) and metadata.get("for_user")) or not focus_mode_on(db)
 
 
@@ -179,7 +191,7 @@ def place_answers(
     A step that placed answers and has nothing left for chat is stamped ``false`` here, in the transaction
     that saves it.
     """
-    if role != "assistant" or "[c" not in content or not _reaches_the_person(db, metadata):
+    if role != "assistant" or "[c" not in content or not reaches_the_person(db, metadata):
         return
     placed = []
     for cid in parse_answers(content, message_id):

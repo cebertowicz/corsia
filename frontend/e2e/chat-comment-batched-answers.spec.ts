@@ -242,6 +242,35 @@ test('an answer written into the reply never streams into chat (Focus off)', asy
   await capture(page, 'after');
 });
 
+test('with Focus on, a tagged step streams whole into working text and answers in no chat row or thread', async ({ page, request }) => {
+  test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  const { thread, row, cids } = await queueComments(page, request, 'Streamed tagged step', 1);
+  const answer = 'Streamed answer, long enough that the reply pauses partway through it.';
+  const reply = `${lead}\n\n[${cids[0]}] ${answer}`;
+  // Focus on: the step is not sent for the person, so it is working text and nothing holds its tag back.
+  await seedMockResponses(request, [{ content: reply, content_gate: 'mid-stream' }]);
+  const chatRows = page.locator('.messages .message:not([data-work-block] *)');
+  await expect(async () => {
+    await expandWork(page);
+    await expect(page.locator('.messages [data-work-block]').getByText(lead)).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+  await expect(chatRows.filter({ hasText: 'Streamed answer' })).toHaveCount(0);
+  await expect(chatRows.filter({ hasText: `[${cids[0]}` })).toHaveCount(0);
+  expect((await request.post(`${BACKEND}/api/test/mock-gates/mid-stream/release`)).ok()).toBeTruthy();
+  // Saved, the step keeps the same whole text in working text; no answer is placed and chat shows none of it.
+  await expect.poll(async () => (await messages(request, thread)).some(m => m.role === 'assistant' && m.content === reply), { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+  const rows = await messages(request, thread);
+  expect(rows.find(m => m.role === 'assistant' && m.content === reply)?.chat_visible_content ?? null).toBeNull();
+  expect(rows.flatMap((m: any) => m.chat_comments ?? []).flatMap((c: any) => c.answers ?? []).filter((a: any) => a.author_kind === 'agent')).toHaveLength(0);
+  await expandWork(page);
+  await expect(page.locator('.messages [data-work-block]').getByText(answer)).toBeVisible();
+  await expect(chatRows.filter({ hasText: 'Streamed answer' })).toHaveCount(0);
+  const surface = await openCommentThread(row, page, quotes[0]);
+  await expect(surface.getByText(answer)).toHaveCount(0);
+  await capture(page, 'focus-on-streamed-tag');
+});
+
 for (const width of [1440, 900, 393]) test.describe(`answers-only turn at ${width}`, () => {
 test.use({ viewport: { width, height: width === 393 ? 852 : 1000 }, hasTouch: width === 393, isMobile: width === 393 });
 test(`a turn whose only sent words are answers adds nothing to chat, live and after a reload (${width})`, async ({ page, request }) => {
