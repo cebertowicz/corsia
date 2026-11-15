@@ -20,7 +20,7 @@ from infra.db_async import run_in_db_unless_owned
 
 #: A scheduled run's lost line: no agent tool starts a scheduled script, and a clock schedule or one at
 #: its last run has no next run, so the owner is told what still works whichever schedule it is.
-_RERUN_FIX = ("The script finished, and this line is not sent again. If the schedule runs again, that run "
+_SCHEDULED_RUN_FIX = ("The script finished, and this line is not sent again. If the schedule runs again, that run "
               "sends the lines it prints; running the script yourself does not send its lines. "
               "If what this event would have started cannot wait, start it yourself.")
 #: A run a rule started has no next run and its owner cannot start it with the same event. The script
@@ -106,7 +106,7 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
                 )
     if not refusals:
         return report
-    unreachable_fix = _RERUN_FIX if rule_decision_id is None else _RULE_RUN_FIX
+    unreachable_fix = _SCHEDULED_RUN_FIX if rule_decision_id is None else _RULE_RUN_FIX
     shown = [
         format_event_error(code, refusals[code], unreachable_fix if code == "intake_unreachable" else None)
         for code in sorted(refusals)[:2]

@@ -51,7 +51,7 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
     ))
 
     # A script can't resend a line by id (the runner builds it), so its outage says to run it again.
-    fix = script_event_lines._RERUN_FIX if code == "intake_unreachable" else None
+    fix = script_event_lines._SCHEDULED_RUN_FIX if code == "intake_unreachable" else None
     message = f"event line refused: {intake_errors.format_event_error(code, text, fix)}"
     assert "same event id" not in message
     assert report.status == "error" and report.error == message
@@ -131,7 +131,7 @@ def test_a_line_the_intake_could_not_take_is_sent_again_under_one_id_and_routed_
 
 
 @pytest.mark.parametrize(("rule_decision_id", "fix"), [
-    (None, script_event_lines._RERUN_FIX),
+    (None, script_event_lines._SCHEDULED_RUN_FIX),
     (7, script_event_lines._RULE_RUN_FIX),
 ])
 def test_an_intake_that_stays_down_ends_the_run_with_the_fix_its_owner_can_use(
