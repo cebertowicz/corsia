@@ -17,6 +17,7 @@ from typing import Any
 from core.lesson_report_boundaries import read_boundaries
 from core.lesson_report_inventory import build_inventory
 from core.lesson_report_offers import PAGE_SIZE, DeferredOffers, DetailRequest, snapshot_fingerprint
+from core.lesson_report_phases import PhaseTimes, timed
 from core.lesson_report_reads import read_bodies
 from core.lesson_report_receipts import offer_counts, read_offer_evidence
 from core.lesson_trial_receipts import read_trial_deliveries
@@ -174,38 +175,46 @@ def _list_inventory(inventory: list[dict[str, Any]], now: str,
 
 def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
                    detail: DetailRequest | None = None,
-                   cancellation_event: Event | None = None) -> dict[str, Any]:
+                   cancellation_event: Event | None = None,
+                   phases: PhaseTimes | None = None) -> dict[str, Any]:
     """Materialize scoped database evidence without Git or external work.
 
     Period offers stay in SQLite as ``DeferredOffers``: counts, the fingerprint text and, for
-    the ``detail`` lesson, the offers a page of it can show.
+    the ``detail`` lesson, the offers a page of it can show. ``phases``, when given, receives
+    the seconds each step took.
     """
-    history, missing_owners = _history(db, scope)
-    boundaries = read_boundaries(db, user_id=scope.user_id, thread_ids=scope.thread_ids)
-    offers = read_offer_evidence(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
-                                 from_ts=scope.from_ts, to_ts=scope.to_ts,
-                                 cancellation_event=cancellation_event)
+    with timed(phases, "history"):
+        history, missing_owners = _history(db, scope)
+    with timed(phases, "boundaries"):
+        boundaries = read_boundaries(db, user_id=scope.user_id, thread_ids=scope.thread_ids)
+    with timed(phases, "offer_evidence"):
+        offers = read_offer_evidence(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
+                                     from_ts=scope.from_ts, to_ts=scope.to_ts,
+                                     cancellation_event=cancellation_event)
     period = offers["period"]
-    deliveries = read_trial_deliveries(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
-                                      from_ts=scope.from_ts, to_ts=scope.to_ts)
+    with timed(phases, "deliveries"):
+        deliveries = read_trial_deliveries(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
+                                          from_ts=scope.from_ts, to_ts=scope.to_ts)
     if detail is not None:
-        # A row lists only reviews from this history, each node once, ahead of its offers.
-        period["offers"].prefetch(db, detail, reviews_at_most=len(history))
+        with timed(phases, "detail_offers"):
+            # A row lists only reviews from this history, each node once, ahead of its offers.
+            period["offers"].prefetch(db, detail, reviews_at_most=len(history))
     retained = offers["retained"] + boundaries
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
-                         facts=sources + retained)
+                         facts=sources + retained, phases=phases)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
     from core.lesson_gate import gate_counts
     from core.workflow_verdict_read import recorded_lesson_plans
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
-    return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
-            "retained": retained, "period": period, "bodies": bodies, "deliveries": deliveries,
-            "correction_facts": correction_facts(db, subjects),
-            "placement_checks": placement_check_counts(db, scope.thread_ids),
-            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts),
-            "trial_plans": recorded_lesson_plans(db, detail.lesson_id) if detail is not None else {}}
+    with timed(phases, "counts"):
+        return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
+                "retained": retained, "period": period, "bodies": bodies, "deliveries": deliveries,
+                "correction_facts": correction_facts(db, subjects),
+                "placement_checks": placement_check_counts(db, scope.thread_ids),
+                "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts),
+                "trial_plans": recorded_lesson_plans(db, detail.lesson_id) if detail is not None else {}}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
