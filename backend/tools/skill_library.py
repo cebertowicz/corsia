@@ -20,7 +20,7 @@ from tools.skill_library_common import (
     effective as _effective,
     index as _index,
     library_origin as _library_origin,
-    local_edits_token as _local_edits_token,
+    local_edits_digest as _local_edits_digest,
     persistent_owner as _persistent_owner,
     same_library_item as _same_library_item,
     write_result as _write_result,
@@ -58,7 +58,7 @@ class SkillLibraryTool(Tool):
         thread_id, thread = context
         return json.dumps(await run_off_db(
             _execute, action, thread_id, thread, kwargs.get("query"), kwargs.get("name"),
-            bool(kwargs.get("discard_local_edits", False)), kwargs.get("local_edits_token"),
+            bool(kwargs.get("discard_local_edits", False)), kwargs.get("local_edits_digest"),
         ), sort_keys=True)
 
 
@@ -69,7 +69,7 @@ def _execute(
     query: object,
     name: object,
     discard_local_edits: bool,
-    local_edits_token: object = None,
+    local_edits_digest: object = None,
 ) -> dict[str, Any]:
     """Run the complete operation off the event loop; writes use canonical owners."""
     from infra.database import get_db
@@ -99,9 +99,9 @@ def _execute(
                 elif action == "install":
                     result = _install(name, owner_id, project_id, db)
                 elif action == "update":
-                    result = _update(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
+                    result = _update(name, owner_id, project_id, db, discard_local_edits, local_edits_digest)
                 else:
-                    result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
+                    result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_digest)
         except _LibraryIndexError as error:
             result = _error(error.code, error.message)
         _emit_action(action, thread_id, result)
@@ -246,7 +246,7 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
 
 
 def _update(
-    name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_token: object,
+    name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_digest: object,
 ) -> dict[str, Any]:
     from infra.skill_install import origin_metadata, update_skill_bundle
     from library.installed import local_bundle, local_edits
@@ -272,13 +272,13 @@ def _update(
             "error": "local_edits",
             "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
             "changed_files": local_paths,
-            "local_edits_token": _local_edits_token(owner_id, name, folder),
+            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
         }
     confirmed_files = None
     if edited and discard:
-        confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_token)
+        confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_token)
+            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_digest)
     try:
         bundle = fetch_bundle(item)
     except LibraryMainChangedError as error:
@@ -305,7 +305,7 @@ def _update(
 
 
 def _remove(
-    name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_token: object,
+    name: str, owner_id: str, project_id: str | None, db, discard: bool, local_edits_digest: object,
 ) -> dict[str, Any]:
     from infra.skill_install import remove_skill_bundle
     from library.installed import local_edits
@@ -324,13 +324,13 @@ def _remove(
             "error": "local_edits",
             "message": f"your changed files: {', '.join(local_paths) or 'skill folder'}; review them before choosing whether to discard them",
             "changed_files": local_paths,
-            "local_edits_token": _local_edits_token(owner_id, name, folder),
+            "local_edits_digest": _local_edits_digest(owner_id, name, folder),
         }
     confirmed_files = None
     if edited and discard:
-        confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_token)
+        confirmed_files = _confirmed_bundle(owner_id, name, folder, local_edits_digest)
         if confirmed_files is None:
-            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_token)
+            return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_digest)
     result = remove_skill_bundle(
         _workspace(), name, author_thread_id=owner_id, thread_id=owner_id, project_id=project_id, db=db,
         reason="reviewed library skill removal", confirmed_files=confirmed_files,

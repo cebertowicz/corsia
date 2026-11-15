@@ -89,7 +89,7 @@ def bundle_token(owner_id: str, name: str, files: dict[str, bytes], problems: li
     return digest.hexdigest()
 
 
-def local_edits_token(owner_id: str, name: str, folder: Path) -> str | None:
+def local_edits_digest(owner_id: str, name: str, folder: Path) -> str | None:
     """Return the confirmation token for the current visible bundle."""
     from library.installed import local_bundle
 
@@ -111,14 +111,14 @@ def discard_confirmation(
     owner_id: str, name: str, folder: Path, paths: list[str], token: object,
 ) -> dict[str, Any]:
     """Return the actionable refusal when current bytes no longer match the token."""
-    current = local_edits_token(owner_id, name, folder)
+    current = local_edits_digest(owner_id, name, folder)
     if confirmed_bundle(owner_id, name, folder, token) is not None:
         return {}
     return {
         "error": "discard_confirmation_required",
-        "message": "review the changed files first; repeat with discard_local_edits: true and the local_edits_token from that response",
+        "message": "review the changed files first; repeat with discard_local_edits: true and the local_edits_digest from that response",
         "changed_files": paths,
-        "local_edits_token": current,
+        "local_edits_digest": current,
     }
 
 
