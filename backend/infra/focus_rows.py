@@ -16,6 +16,7 @@ import json
 
 from core.stop_causes import CONTEXT_OVERFLOW_REASON
 from infra.chat_comment_answers import chat_not_drawn_sql
+from infra.message_update_schema import not_replaced_sql
 
 # System rows that only record activity. Every other system row is a notice
 # (an error, interrupt, sandbox denial, or a type added later) and stays visible.
@@ -168,6 +169,7 @@ NEVER_DRAWN_FILTER = (
     "AND NOT (role = 'user' AND EXISTS (SELECT 1 FROM chat_visible_content cv "
     "WHERE cv.message_id = id AND cv.content = '')) "
     f"AND NOT (role = 'assistant' AND {chat_not_drawn_sql()}) "
+    f"AND {not_replaced_sql()} "
 )
 
 

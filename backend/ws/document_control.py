@@ -268,6 +268,7 @@ async def _operate(socket, user: dict, data: dict) -> None:
         before = live.snapshot[0]
         if not live.receive(message, sender=socket):
             raise StoreRefused("The server backlog is full; keep this update on the device and retry")
+        live.typist = subscription.actor
         section_turn.note_edit(socket, user, artifact_id, live, before)
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
                                     "store_id": live.store.store_id, "message_ids": [identifier],

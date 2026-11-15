@@ -29,6 +29,9 @@ import weakref
 from collections import deque
 from dataclasses import dataclass, field
 
+from infra.config import DB_PATH
+from infra.write_lock_window import window
+
 log = logging.getLogger(__name__)
 
 # How long an outermost write waits for its turn before it is refused. The
@@ -115,13 +118,19 @@ class WriteTicket:
             me.granted.wait(timeout)
         except BaseException:
             self._withdraw(me)
+            if self is MAIN_TICKET:
+                window.wait((me.acquired_at if me.acquired_at is not None else time.monotonic()) - me.requested_at)
             raise
         with self._lock:
             if self._holder is me:
+                if self is MAIN_TICKET:
+                    window.wait((me.acquired_at if me.acquired_at is not None else time.monotonic()) - me.requested_at)
                 _log_slow_wait(me)
                 return me
             self._waiters.remove(me)
             holder = self._holder
+        if self is MAIN_TICKET:
+            window.wait(time.monotonic() - me.requested_at)
         raise _synthetic_refusal(
             f"database is locked: write admission for {scope} waited {timeout:g}s "
             f"(queued behind {queued - 1}) and {_describe(holder)} still holds the write lock",
@@ -179,6 +188,10 @@ def ticket_for(path: str) -> WriteTicket | None:
 def _canonical(path: str) -> str:
     """One spelling per file; cached because ``realpath`` costs more than the rest of admission."""
     return os.path.realpath(path)
+
+
+# Keep the main ticket alive so callers can identify it with one comparison.
+MAIN_TICKET = ticket_for(str(DB_PATH))
 
 
 def ticket_of(connection: sqlite3.Connection) -> WriteTicket | None:

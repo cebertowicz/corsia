@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, TEST_TOKEN } from '../support/corsia';
@@ -5,7 +6,7 @@ import { isolatedDb } from '../support/heldComments';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { suggest } from '../support/liveConcurrency';
 import type { LiveDocument } from '../support/liveDocument';
-import { overlaps, ownerItem, rolePicker, seedOwnedDocument, supervisorItem } from '../support/documentOwnerSupervisor';
+import { LONG_NAME, overlaps, ownerItem, rolePicker, seedOwnedDocument, supervisorItem } from '../support/documentOwnerSupervisor';
 
 /**
  * The person sees who owns and who supervises a document and changes each one on the document, at wide and phone
@@ -259,5 +260,62 @@ for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852],
 		const parts = await rowParts(paused);
 		expect(parts.paused, `${label}: Paused ${JSON.stringify(parts)}`).toMatchObject({ text: 'Paused', cut: false, inside: true });
 		expectCutBetweenWords(parts, `${label} paused`);
+	});
+}
+
+for (const [label, width, height] of [['wide', 1440, 1000], ['phone', 393, 852], ['375', 375, 812]] as const) {
+	test(`@document-owner-supervisor the Documents list keeps the owner whole and lets the description give way, at ${label} width`, async ({ page, request }, info) => {
+		const touch = info.project.name.includes('mobile');
+		test.skip(touch !== (label !== 'wide'), 'wide runs on the desktop project, phone widths on the mobile one');
+		test.setTimeout(120_000);
+		await page.setViewportSize({ width, height });
+		const seeded = await seedOwnedDocument(page, request);
+		const dir = path.dirname(seeded.docPath);
+		const description = 'Plan for the community garden: the first planting day, the tool store and workshops for neighbours';
+		for (const [file, owner, text] of [['Project planning notes.md', seeded.owner, description], ['Project planning rota.md', seeded.agents[4], 'Volunteer rota']] as const) {
+			const made = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: path.join(dir, file), text: '# Notes\n', thread_id: owner, description: text, create: true } });
+			expect(made.ok(), await made.text()).toBeTruthy();
+		}
+		// A document two people share has no single owner: its row reads "Owner: Not set".
+		isolatedDb([
+			"connection.execute(\"INSERT OR IGNORE INTO users (id,password_hash,created_at,password_changed_at) VALUES ('second-person','x','2026-01-01','2026-01-01')\")",
+			"connection.execute(\"UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=?\", (sys.argv[2],))",
+		], seeded.artifact);
+		await seeded.open(page);
+		const browse = page.getByRole('button', { name: 'Browse documents…' });
+		if (!(await browse.isVisible())) await page.getByRole('button', { name: 'Toggle panel' }).click();
+		await browse.evaluate((button: HTMLElement) => button.click());
+		await page.getByPlaceholder('Search docs…').fill('Project planning');
+		// This test's own rows: earlier tests on the same server seed documents with the same names.
+		const rows = page.locator('.body .row').filter({ hasText: `${path.basename(dir)}/` });
+		for (const [file, owner] of [['Project planning.md', 'Owner: Not set'], ['Project planning notes.md', 'Owner: Release planning'], ['Project planning rota.md', `Owner: ${LONG_NAME}`]]) {
+			const row = rows.filter({ hasText: file });
+			await expect(row.locator('.row-desc-owner'), `${label}: ${file}`).toHaveText(owner, { timeout: 20_000 });
+			const fit = await row.locator('.row-desc').evaluate((line) => {
+				const ownerPart = line.querySelector<HTMLElement>('.row-desc-owner')!;
+				const [l, o] = [line.getBoundingClientRect(), ownerPart.getBoundingClientRect()];
+				return { cut: ownerPart.scrollWidth > ownerPart.clientWidth + 0.5, inside: o.left >= l.left - 0.5 && o.right <= l.right + 0.5 };
+			});
+			// The owner is drawn inside the line; it is cut only when the owner alone is wider than the line.
+			expect(fit.inside, `${label}: ${file} owner inside the line ${JSON.stringify(fit)}`).toBe(true);
+			if (!owner.includes(LONG_NAME)) expect(fit.cut, `${label}: ${file} owner whole ${JSON.stringify(fit)}`).toBe(false);
+		}
+		if (label !== 'phone') return;
+		// Narrower windows: wherever the separator shows, at least one letter of the description and its ellipsis show
+		// before it; otherwise the description and separator leave the line together.
+		for (let w = 270; w <= 400; w++) {
+			await page.setViewportSize({ width: w, height });
+			const bare = await rows.locator('.row-desc').evaluateAll((lines) => lines.flatMap((line) => {
+				const sep = line.querySelector<HTMLElement>('.row-desc-sep'), text = line.querySelector<HTMLElement>('.row-desc-text');
+				if (!sep || !text) return [];
+				const [l, s, t] = [line, sep, text].map((el) => el.getBoundingClientRect());
+				if (s.top >= l.bottom - 0.5 || s.left >= l.right - 0.5) return [];
+				const ctx = document.createElement('canvas').getContext('2d')!, cs = getComputedStyle(text);
+				ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+				const need = ctx.measureText(`${(text.textContent ?? '').slice(0, 1)}…`).width;
+				return t.width + 0.5 < need ? [{ text: t.width, need, line: l.width }] : [];
+			}));
+			expect(bare, `${w}: a separator with no description before it`).toEqual([]);
+		}
 	});
 }

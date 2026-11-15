@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from plans import admission, node_states, operator_stopped, service, user_steering, wait_causes
+from plans import admission, node_states, node_time, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
@@ -209,7 +209,7 @@ def project(
     memo: dict | None = None,
     lean: bool = False,
     detail_ids: frozenset[str] | None = None,
-    titles: Mapping[str, str] | None = None,
+    titles: Mapping[str, str] | None = None, stable: bool = False,
 ) -> dict[str, dict]:
     """Project every node from canonical owners without writing or client inference.
 
@@ -241,10 +241,10 @@ def project(
         titles = {node["id"]: node["title"] for node, _plan in node_plans}
     executions = admission.project_many(node_plans, db=db, memo=memo)
     stops = operator_stopped.nodes(node_plans, executor_by_node, executions, db=db)
-    commitment_costs, node_costs, initiatives = facts.project_costs(
+    commitment_costs, node_costs, initiatives = node_time.operator_costs(facts.project_costs(
         node_plans, db=db, now=now or datetime.now(timezone.utc), wanted=costs,
-        detail_ids=detail_ids,
-    )
+        detail_ids=detail_ids, stable=stable,
+    ), named=stable and costs)
     states: dict[str, dict] = {}
 
     for item in projected:
