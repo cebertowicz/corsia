@@ -55,8 +55,8 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         updated_at TEXT NOT NULL,
         archived_at TEXT{column_ddl(PLAN_AGGREGATE_COLUMNS)},
         -- When this plan's next weekly review of its Later pile is due (ISO
-        -- time), or null when none is armed. Slice 3 arms it; nothing reads it
-        -- yet, so it is declared here while the cut itself ships.
+        -- time), or null when none is armed. Written and read by
+        -- plans.later_review.
         later_review_at TEXT,
         UNIQUE(owner_kind, owner_id)
     );
