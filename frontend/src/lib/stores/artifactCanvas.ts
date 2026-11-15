@@ -20,3 +20,13 @@ export const artifactTabSheetOpen = writable(false);
  * look like with the panel out of the way reads this instead of looking for the panel's class in the DOM.
  */
 export const paneOverlay = writable(false);
+
+/**
+ * The main column's visible width once the shell settles (`settledShell`), published beside `paneOverlay` by the same
+ * pane; null while no pane protects an artifact leaf. What a layout decision reads when it must not follow a width the
+ * shell only passes through on a transition.
+ */
+export const shellCanvas = writable<number | null>(null);
+
+/** Context key: a getter for the artifact leaf's settled width (`settledLeafWidth`), set by `ChatArtifactSplit`. */
+export const SETTLED_LEAF_WIDTH = Symbol('settledLeafWidth');

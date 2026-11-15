@@ -133,7 +133,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		// focuses its card there.
 		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
-		// A pick is something the reader opened, even when the column at rest only selects its card.
+		// A pick is something the reader opened, even when the column at rest only selects its card: the column is theirs now.
+		quiet = false;
 		bump();
 		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
@@ -200,7 +201,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get quiet() { return quiet; }, get draftOverColumn() { return state?.kind === 'draft' && overColumn; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, closeAll, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus, returnFocusTo,
+		close, closeAll, release, engage() { quiet = false; }, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus, returnFocusTo,
 	};
 }
 

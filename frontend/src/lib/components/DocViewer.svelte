@@ -130,7 +130,7 @@
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	// The list over the text, as the sheet or (below the margin width) the popover: the selection's Comment button waits for it to close.
 	const listOverText = $derived(commentUI.sheetUp || (commentUI.state?.kind === 'list' && commentSurface?.cardMode() === 'popover'));
-	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', paneDrawer: isPaneDrawer, fits: columnFits, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad, /* a picked card is the reader's: only the column at rest is quiet */ quietList: () => commentUI.state?.kind === 'list' && commentUI.quiet && focusedComment === null, close: commentUI.closeAll });
+	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', paneDrawer: isPaneDrawer, fits: columnFits, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad, quietList: () => commentUI.state?.kind === 'list' && commentUI.quiet, close: commentUI.closeAll });
 	const heldUnread = createHeldUnread(() => !!commentUI.state, () => listedComments);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)).map(heldUnread.paint));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
@@ -156,7 +156,7 @@
 	});
 	export function jumpToUnread(id: string, beforeText?: () => void) { replyNavigation.goTo(id, beforeText); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
-	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
+	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,

@@ -205,6 +205,28 @@ describe('comment surface state', () => {
 		expect(surface.hovered).toBeNull();
 	});
 
+	describe('quiet: the column shown on load is the reader\'s once they engage with it', () => {
+		const shownOnLoad = () => {
+			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			surface.openOnLoad();
+			expect(surface.quiet).toBe(true);
+			return surface;
+		};
+
+		it('stops being quiet when the reader picks a thread in it', () => {
+			const surface = shownOnLoad();
+			surface.focusComment('c1', new DOMRect(), false, true);
+			expect(surface.quiet).toBe(false);
+		});
+
+		it('stops being quiet when the reader engages a card (a reply or its text)', () => {
+			const surface = shownOnLoad();
+			surface.engage();
+			expect(surface.quiet).toBe(false);
+			expect(surface.state).toEqual({ kind: 'list' });
+		});
+	});
+
 	describe('release: a picked margin card lets go', () => {
 		it('returns a card picked from rest to the column and clears the highlight, without pulling focus', () => {
 			const surface = createCommentSurfaceState(() => {}, undefined, () => true);

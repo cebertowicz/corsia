@@ -5,6 +5,7 @@ import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
 import imageSource from './documentImagePlace.ts?raw';
+import marginSource from './docMarginHold.svelte.ts?raw';
 
 let root: HTMLElement;
 // Editors `pane` made. A live editor's resize timer asks for a frame after the test, when jsdom has none left to give.
@@ -42,7 +43,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const frameEl = document.createElement('div');
 	frameEl.className = 'doc';
 	root.appendChild(frameEl);
-	const screen = { header, height, offset: 0 };
+	const screen = { header, height, offset: 0, width: 800 };
 	let scrolled = false;
 	let queued: FrameRequestCallback[] = [];
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => queued.push(callback));
@@ -65,6 +66,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	Object.defineProperties(scroller, {
 		scrollHeight: { configurable: true, get: () => view.contentHeight },
 		clientHeight: { configurable: true, get: () => screen.height - screen.header },
+		clientWidth: { configurable: true, get: () => screen.width },
 		scrollTop: {
 			configurable: true,
 			get: () => screen.offset,
@@ -89,7 +91,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	const follow = (text: string) => { reading = text; painted.length = 0; };
 	const painted: number[] = [];
 	let laidOut = '';
-	const size = () => [screen.header, screen.height, view.contentHeight].join();
+	const size = () => [screen.header, screen.height, screen.width, view.contentHeight].join();
 	laidOut = size();
 	/** Runs one frame; `layout` changes the page (a header growing) after the frame's callbacks, as a CSS transition does. */
 	const frame = async (layout?: () => void) => {
@@ -195,6 +197,36 @@ describe('keepPlaceWhenEditorMoves', () => {
 			});
 		}
 	}
+
+	// The text rewraps at the new width and CodeMirror scrolls to keep its own anchor, which is not the reader's line.
+	it('lays the place again over a scroll the editor makes while the width changes', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.scrollTop += 37;
+		await page.frame();
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	it('takes the place from the reader\'s own scroll at the new width', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		page.scroller.dispatchEvent(new Event('wheel'));
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
 
 	it('observes the scroller and its text through one resize observation', () => {
 		const page = pane();
@@ -471,6 +503,11 @@ describe('one place, one writer', () => {
 		expect(both.match(/\.scrollTop\s*[-+]?=(?!=)/g)).toHaveLength(1);
 		const applyPlace = /export function applyPlace[\s\S]*?\n}\n/.exec(code(readingSource))![0];
 		expect(applyPlace).toMatch(/\.scrollTop\s*=(?!=)/);
+	});
+
+	it('leaves the margin column\'s hold to the keeper: it sets the place and writes no offset of its own', () => {
+		expect(code(marginSource).match(/\.scrollTop\s*[-+]?=(?!=)/g)).toBeNull();
+		expect(code(marginSource)).toMatch(/holdPlace\(/);
 	});
 
 	it('has one place type and one way to read a place', () => {

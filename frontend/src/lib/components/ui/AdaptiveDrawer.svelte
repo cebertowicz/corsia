@@ -22,7 +22,6 @@
 		children,
 		above,
 		initialFocusSelector = '[data-drawer-autofocus]',
-		takeFocus = true,
 		fill = false,
 		flushBottom = false,
 		followKeyboard = false,
@@ -56,8 +55,6 @@
 		/** A row above the chrome title, below the grabber. */
 		above?: Snippet;
 		initialFocusSelector?: string;
-		/** False leaves focus where it is when the sheet appears, for a sheet the layout drew rather than one the reader opened. */
-		takeFocus?: boolean;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
 		/** Let a child-owned sticky footer reach the edge of the scroll region. The child owns its safe-area inset. */
@@ -132,9 +129,7 @@
 			return true;
 		});
 		let mounted = true;
-		// The reader opened this sheet: its field takes focus. A caller that says otherwise is showing a sheet the layout
-		// drew under them, and their focus stays where they left it.
-		if (takeFocus) void tick().then(() => {
+		void tick().then(() => {
 			if (!mounted || !panel?.isConnected) return;
 			(panel.querySelector<HTMLElement>(initialFocusSelector) ?? panel).focus();
 		});

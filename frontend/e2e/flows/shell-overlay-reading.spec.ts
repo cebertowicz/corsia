@@ -224,7 +224,8 @@ const surfaceUp = (page: Page, want: { of: string | null; composer: boolean }) =
 /**
  * A press on the panel toggle is not an outside press: whatever the reader is writing stays put through the trip, and
  * comes back with the same draft and caret at the same place in the comment. The card is expected to sit clear of the
- * panel while it is open, not under it.
+ * panel while it is open, not under it. A mouse press or the shortcut leaves focus in the field; a keyboard reader who
+ * moved to the toggle keeps focus on it, and the field keeps its draft and caret for when they go back to it.
  */
 async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1], form: keyof typeof writing, width: number, by: 'mouse' | 'keyboard' | 'shortcut') {
 	await page.setViewportSize({ width, height: 900 });
@@ -260,8 +261,22 @@ async function panelTrip(page: Page, request: Parameters<typeof seedDocument>[1]
 	const openState = await surfaceUp(page, before);
 	expect(openState.value, `the ${form} draft is unchanged while the panel is open (${JSON.stringify(openState)})`).toBe(before.value);
 	if (by === 'shortcut') await page.keyboard.press('ControlOrMeta+Backslash');
+	else if (by === 'keyboard') await page.keyboard.press('Enter');
 	else await toggle.click();
 	await page.waitForTimeout(600);
+	if (by === 'keyboard') {
+		const onToggle = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? null);
+		await expect.poll(onToggle, { timeout: 15_000, message: 'focus stays on the toggle the keyboard reader pressed' }).toBe('Toggle panel');
+		await page.waitForTimeout(1800);
+		expect(await onToggle(), 'nothing takes focus off the toggle as the shell settles').toBe('Toggle panel');
+		const field = before.composer ? page.locator('.composer textarea').last()
+			: page.locator(`[data-thread-id="${before.of}"] .ct-input, [data-comment-id="${before.of}"] .ct-input`).first();
+		await field.focus();
+		const back = await activeField(page);
+		expect(back.value, `the ${form} draft survived the panel trip (${JSON.stringify(back)})`).toBe(before.value);
+		expect(back.caret, `the ${form} caret survived the panel trip (${JSON.stringify(back)})`).toBe(before.caret);
+		return;
+	}
 	await expect.poll(() => activeField(page), { timeout: 15_000, message: `focus, and the same ${form} field with its draft, are back after the panel closes` })
 		.toMatchObject({ tag: 'TEXTAREA', of: before.of, composer: before.composer });
 	// The shell is still easing and the surface may still settle into another form under the writing: the place has to
@@ -442,7 +457,7 @@ test('keeps the quoted word in view with its composer beside it across the panel
 /**
  * A thread opened from the list, then the panel opened: the column comes beside the narrowed text and the line the thread
  * quotes stays in the view, not under the toolbar. The shell's move is slowed the way a busy computer slows it, which is
- * when the line used to be measured after it had already slid above the view. (Review 9 A, F2.)
+ * when the line used to be measured after it had already slid above the view.
  */
 test('keeps an open thread\'s line in view when the panel opens on a slow move', async ({ page, request, browserName }) => {
 	test.skip(browserName !== 'chromium', 'Slowing the move needs Chromium\'s animation controls.');
@@ -483,11 +498,11 @@ test('keeps an open thread\'s line in view when the panel opens on a slow move',
 });
 
 /**
- * The panel's move redraws a card that is already up in whichever form the narrower canvas has room for. That form takes
- * no focus: the reader asked for the panel, not for a new surface, so focus stays on the panel's own control while it is
- * open, and the writing place returns only when the panel closes. (Review 6 findings F1, F2, F3.)
+ * The panel's move redraws a card that is already up in whichever form the narrower canvas has room for. A mouse press on
+ * the panel's control takes no focus, so the reader's reply keeps it through the redraw: the new form takes it over once,
+ * into the same field, and nothing else in the surface takes focus.
  */
-test('takes no focus in a comment form the panel redrew, and keeps the card and its draft', async ({ page, request }) => {
+test('keeps focus in the reply through a comment form the panel redrew, with the card and its draft', async ({ page, request }) => {
 	test.setTimeout(180_000);
 	await page.setViewportSize({ width: 1360, height: 900 });
 	await seedDocument(page, request, true);
@@ -503,7 +518,8 @@ test('takes no focus in a comment form the panel redrew, and keeps the card and 
 	await toggle.click();
 	await page.waitForTimeout(1500);
 	const open = await activeField(page);
-	expect(open.tag, `the form the panel drew took focus while the panel was open (${JSON.stringify(open)})`).not.toBe('TEXTAREA');
+	expect(open.tag, `focus stays in the reply the panel redrew (${JSON.stringify(open)})`).toBe('TEXTAREA');
+	expect(open.of, `focus stays in the same reply while the panel is open (${JSON.stringify(open)})`).toBe(before.of);
 	const stayed = await surfaceUp(page, before);
 	expect(stayed.found, `the card is still up while the panel is open (${JSON.stringify(stayed)})`).toBe(true);
 	expect(stayed.up, `the card the panel redrew is still on screen (${JSON.stringify(stayed)})`).toBe(true);
@@ -514,4 +530,101 @@ test('takes no focus in a comment form the panel redrew, and keeps the card and 
 	expect(after.tag, `focus is back in the same reply after the panel closes (${JSON.stringify(after)})`).toBe('TEXTAREA');
 	expect(after.of, `the reply is the same comment after the panel closes (${JSON.stringify(after)})`).toBe(before.of);
 	expect(after.value, `the draft survived the trip (${JSON.stringify(after)})`).toBe(before.value);
+});
+
+/** A reply pinned at 1360 with the sidebar open, half-typed, its caret two characters back: the form crosses margin and popover with the panel. */
+async function pinnedReply(page: Page, request: Parameters<typeof seedDocument>[1]) {
+	await page.setViewportSize({ width: 1360, height: 900 });
+	await seedDocument(page, request, true);
+	const toggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
+	if (!await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed'))) await toggle.click();
+	await page.waitForTimeout(1500);
+	const input = await writing.pin.open(page);
+	await input.click();
+	await input.pressSequentially('Half-typed');
+	await page.keyboard.press('ArrowLeft');
+	await page.keyboard.press('ArrowLeft');
+	const before = await activeField(page);
+	expect(before.tag, `the reply holds focus before the panel moves (${JSON.stringify(before)})`).toBe('TEXTAREA');
+	return { toggle, before };
+}
+
+/**
+ * Counts, from now, the comment forms mounted and the focus moves in and out of comment fields, in page order. The
+ * observer and listeners go in once per page and each call restarts the count, so a second leg is not counted twice. A
+ * form is counted once per element: the popover's portal and the margin's move onto the canvas each insert the element
+ * a second time.
+ */
+const watchSurface = (page: Page) => page.evaluate(() => {
+	const w = window as unknown as { __surface: { mounts: number; focus: string[] }; __surfaceSeen: WeakSet<Element>; __surfaceWatching?: true };
+	w.__surface = { mounts: 0, focus: [] };
+	w.__surfaceSeen = new WeakSet();
+	if (w.__surfaceWatching) return;
+	w.__surfaceWatching = true;
+	const form = '.canvas-comment-drawer, [data-popover]';
+	new MutationObserver((records) => {
+		for (const record of records) for (const node of record.addedNodes) {
+			if (!(node instanceof Element)) continue;
+			for (const el of [...(node.matches(form) ? [node] : []), ...node.querySelectorAll(form)]) {
+				if (!w.__surfaceSeen.has(el)) { w.__surfaceSeen.add(el); w.__surface.mounts += 1; }
+			}
+		}
+	}).observe(document.body, { childList: true, subtree: true });
+	const field = (e: EventTarget | null) => e instanceof Element && e.matches('.ct-input, .composer textarea');
+	document.addEventListener('focusin', (e) => { if (field(e.target)) w.__surface.focus.push('in'); }, true);
+	document.addEventListener('focusout', (e) => { if (field(e.target)) w.__surface.focus.push((e as FocusEvent).relatedTarget ? 'out' : 'out-to-body'); }, true);
+});
+const surfaceSeen = (page: Page) => page.evaluate(() => (window as unknown as { __surface: { mounts: number; focus: string[] } }).__surface);
+
+test('redraws the comment form at most once and hands focus into the reply at most once per panel move', async ({ page, request }) => {
+	test.setTimeout(120_000);
+	const { toggle, before } = await pinnedReply(page, request);
+	for (const leg of ['open', 'close']) {
+		await watchSurface(page);
+		await toggle.click();
+		await page.waitForTimeout(1800);
+		const seen = await surfaceSeen(page);
+		expect(seen.mounts, `one form at most on the ${leg} (${JSON.stringify(seen)})`).toBeLessThanOrEqual(1);
+		expect(seen.focus.filter((f) => f === 'in').length, `one hand-off at most on the ${leg} (${JSON.stringify(seen)})`).toBeLessThanOrEqual(1);
+		expect(seen.focus.lastIndexOf('in') >= seen.focus.findLastIndex((f) => f !== 'in'), `nothing takes focus out of the reply after it is handed in on the ${leg} (${JSON.stringify(seen)})`).toBe(true);
+		const now = await activeField(page);
+		expect(now, `focus is in the same reply with its draft and caret after the ${leg}`).toMatchObject({ tag: 'TEXTAREA', of: before.of, value: before.value, caret: before.caret });
+	}
+});
+
+test('settles on one form with focus in the reply when the panel is toggled twice quickly', async ({ page, request }) => {
+	test.setTimeout(120_000);
+	const { toggle, before } = await pinnedReply(page, request);
+	await toggle.click();
+	await page.waitForTimeout(100);
+	await toggle.click();
+	await page.waitForTimeout(2200);
+	expect(await page.locator('.pane').evaluate((el) => el.classList.contains('collapsed')), 'the panel is closed again').toBe(true);
+	expect(await page.locator('.canvas-comment-drawer:not(.leaving), [data-popover]:not([inert])').count(), 'one form is up').toBe(1);
+	expect(await activeField(page)).toMatchObject({ tag: 'TEXTAREA', of: before.of, value: before.value, caret: before.caret });
+});
+
+test('keeps the reply and its focus when the window narrows while the panel is moving', async ({ page, request }) => {
+	test.setTimeout(120_000);
+	const { toggle, before } = await pinnedReply(page, request);
+	await toggle.click();
+	await page.waitForTimeout(100);
+	await page.setViewportSize({ width: 1200, height: 900 });
+	await page.waitForTimeout(2200);
+	await expect.poll(() => surfaceUp(page, before), { timeout: 15_000 }).toMatchObject({ found: true, up: true, clear: true, value: before.value });
+	expect(await activeField(page)).toMatchObject({ tag: 'TEXTAREA', of: before.of, value: before.value, caret: before.caret });
+	await toggle.click();
+	await page.waitForTimeout(2200);
+	expect(await activeField(page)).toMatchObject({ tag: 'TEXTAREA', of: before.of, value: before.value, caret: before.caret });
+});
+
+test('keeps a pinned card up and the reply focused when the sidebar is toggled', async ({ page, request }) => {
+	test.setTimeout(120_000);
+	const { before } = await pinnedReply(page, request);
+	for (const leg of ['collapse', 'expand']) {
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.waitForTimeout(1800);
+		await expect.poll(() => surfaceUp(page, before), { timeout: 15_000, message: `the card is up after the sidebar ${leg}` }).toMatchObject({ found: true, up: true, value: before.value });
+		expect(await activeField(page), `focus is in the reply after the sidebar ${leg}`).toMatchObject({ tag: 'TEXTAREA', of: before.of, value: before.value, caret: before.caret });
+	}
 });

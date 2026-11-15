@@ -32,14 +32,6 @@ export function documentRestorer(root: () => HTMLElement | undefined, restore = 
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-/** Editors a restore is laying a saved place in (a count, since a newer restore starts before the older one stops). */
-const restoring = new WeakMap<EditorView, number>();
-
-/** Whether a restore owns this editor's place now; any other holder of the reader's line steps aside until it ends. */
-export function restoringPlace(view: EditorView): boolean {
-	return (restoring.get(view) ?? 0) > 0;
-}
-
 /** Frames the pane width must hold before it counts as settled. */
 const STABLE_FRAMES = 3;
 /** The editor re-measures the text it left unrendered some time after the width returns, so the place is laid each frame for this long (about 0.75 s) after it last moved. */
@@ -79,17 +71,12 @@ export async function restoreDocumentPlace(
 	let width = root.getBoundingClientRect().width;
 	let steady = 0;
 	let held = 0;
-	restoring.set(view, (restoring.get(view) ?? 0) + 1);
-	try {
-		for (let frame = 0; frame < MAX_FRAMES && (held < HOLD_FRAMES || steady < STABLE_FRAMES); frame++) {
-			await nextFrame();
-			if (options.signal?.aborted || heldPlace(view) !== target || !view.dom.isConnected) return;
-			const now = root.getBoundingClientRect().width;
-			steady = now === width ? steady + 1 : 0;
-			width = now;
-			held = !applyPlace(view) && steady > 0 ? held + 1 : 0;
-		}
-	} finally {
-		restoring.set(view, (restoring.get(view) ?? 1) - 1);
+	for (let frame = 0; frame < MAX_FRAMES && (held < HOLD_FRAMES || steady < STABLE_FRAMES); frame++) {
+		await nextFrame();
+		if (options.signal?.aborted || heldPlace(view) !== target || !view.dom.isConnected) return;
+		const now = root.getBoundingClientRect().width;
+		steady = now === width ? steady + 1 : 0;
+		width = now;
+		held = !applyPlace(view) && steady > 0 ? held + 1 : 0;
 	}
 }
