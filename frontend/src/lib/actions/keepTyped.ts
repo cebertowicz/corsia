@@ -11,14 +11,17 @@
  * 3. its `inputType` is `insertText`, `insertReplacementText` or empty (never a delete, undo/redo, paste, drop, line
  *    break or transpose);
  * 4. the field held text and the selection did not cover all of it (select-all then type replaces on purpose);
- * 5. the text it removed reaches outside the word at the caret and the word just before it (autocorrect, QuickType and
- *    text replacement stay inside those);
+ * 5. the text it removed reaches outside the last two words up to the caret, counting the word the caret is in
+ *    (autocorrect, QuickType, text replacement and a contextual fix of the word before stay inside those);
  * 6. the incoming text looks like a contact suggestion: one line, at most 120 characters (so a dictated paragraph or
  *    a whole-field rewrite is left alone).
  *
  * `prose` (default true) also gives the field the chat input's typing hints, unless the field sets them itself: no
  * autocomplete, autocorrect on, sentence capitals, spellcheck. Name and title fields pass `{ prose: false }` for the
  * repair alone.
+ *
+ * The inserted text is cut to fit the field's `maxlength`, as the browser cuts an insertion, since a value written from
+ * script is not held to it.
  */
 type TextField = HTMLTextAreaElement | HTMLInputElement;
 type Snapshot = { value: string; start: number; end: number };
@@ -33,7 +36,7 @@ const blank = (char: string | undefined) => char !== undefined && /\s/.test(char
 export const eventOrigin = { trusted: (event: Event) => event.isTrusted };
 
 /** The value with the person's text kept and the incoming text at the caret, or null when the edit should stand. */
-export function keptValue(prior: Snapshot, next: string): { value: string; caret: number } | null {
+export function keptValue(prior: Snapshot, next: string, maxLength = -1): { value: string; caret: number } | null {
 	const old = prior.value;
 	if (!old.trim() || (prior.start <= 0 && prior.end >= old.length)) return null;
 	const limit = Math.min(old.length, next.length);
@@ -49,8 +52,10 @@ export function keptValue(prior: Snapshot, next: string): { value: string; caret
 	const removedEnd = old.length - tail;
 	if (removedEnd <= removedStart) return null;
 	let wordStart = prior.start;
-	while (blank(old[wordStart - 1])) wordStart--;
-	while (wordStart > 0 && !blank(old[wordStart - 1])) wordStart--;
+	for (let word = 0; word < 2; word++) {
+		while (blank(old[wordStart - 1])) wordStart--;
+		while (wordStart > 0 && !blank(old[wordStart - 1])) wordStart--;
+	}
 	let wordEnd = prior.end;
 	while (wordEnd < old.length && !blank(old[wordEnd])) wordEnd++;
 	if (removedStart >= wordStart && removedEnd <= wordEnd) return null;
@@ -60,8 +65,11 @@ export function keptValue(prior: Snapshot, next: string): { value: string; caret
 	const after = old.slice(prior.end);
 	const lead = before && !blank(before[before.length - 1]) ? ' ' : '';
 	const trail = after && !blank(after[0]) ? ' ' : '';
-	const value = `${before}${lead}${incoming}${trail}${after}`;
-	return { value, caret: before.length + lead.length + incoming.length };
+	const room = maxLength < 0 ? incoming.length : maxLength - before.length - lead.length - trail.length - after.length;
+	const inserted = incoming.slice(0, Math.max(0, room)).trimEnd();
+	if (!inserted) return { value: before + after, caret: before.length };
+	const value = `${before}${lead}${inserted}${trail}${after}`;
+	return { value, caret: before.length + lead.length + inserted.length };
 }
 
 export function keepTyped(node: TextField, options: { prose?: boolean } = {}) {
@@ -79,7 +87,7 @@ export function keepTyped(node: TextField, options: { prose?: boolean } = {}) {
 		if (!prior || !eventOrigin.trusted(event) || composing) return;
 		const input = event as InputEvent;
 		if (input.isComposing || !REPAIRED_TYPES.has(input.inputType ?? '')) return;
-		const kept = keptValue(prior, node.value);
+		const kept = keptValue(prior, node.value, node.maxLength);
 		if (!kept) return;
 		node.value = kept.value;
 		node.setSelectionRange(kept.caret, kept.caret);

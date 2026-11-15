@@ -59,9 +59,24 @@ describe('an AutoFill suggestion that replaces the whole value', () => {
 	});
 
 	it('brings back the whole suggestion when it shares a few letters with the typed text', () => {
-		typed('Hello you');
+		typed('Hello to you');
 		edit('insertReplacementText', 'Hey Sam');
-		expect(field.value).toBe('Hello you Hey Sam');
+		expect(field.value).toBe('Hello to you Hey Sam');
+	});
+
+	it("cuts the suggestion to fit the field's maxlength", () => {
+		field.maxLength = 25;
+		typed('Thanks, see you at');
+		edit('insertReplacementText', 'Sam Rivera');
+		expect(field.value).toBe('Thanks, see you at Sam Ri');
+	});
+
+	it('keeps the typed text alone when a full field has no room for the suggestion', () => {
+		field.maxLength = 18;
+		typed('Thanks, see you at');
+		edit('insertReplacementText', 'Sam Rivera');
+		expect(field.value).toBe('Thanks, see you at');
+		expect(field.selectionStart).toBe(18);
 	});
 
 	it('repairs before handlers registered earlier read the value', () => {
@@ -82,6 +97,18 @@ describe('edits that stand', () => {
 		typed('fix teh ');
 		edit('insertReplacementText', 'fix the ');
 		expect(field.value).toBe('fix the ');
+	});
+
+	it('a contextual fix of the word before the one the caret is in', () => {
+		typed('I think their is');
+		edit('insertReplacementText', 'I think there is');
+		expect(field.value).toBe('I think there is');
+	});
+
+	it('a contextual fix of the word before the last one, after a space', () => {
+		typed('I think their is ');
+		edit('insertReplacementText', 'I think there is ');
+		expect(field.value).toBe('I think there is ');
 	});
 
 	it('a QuickType completion of the word at the caret', () => {
@@ -178,8 +205,8 @@ describe('edits that stand', () => {
 		expect(field.value).toBe('Sam');
 	});
 
-	it('a one-word field, which looks the same as a QuickType suggestion', () => {
-		typed('Thanks');
+	it.each(['Thanks', 'Thanks Sam'])('a field of one or two words (%s), which looks the same as a word fix', (value) => {
+		typed(value);
 		edit('insertReplacementText', 'Sam');
 		expect(field.value).toBe('Sam');
 	});
