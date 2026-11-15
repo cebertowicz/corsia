@@ -60,7 +60,6 @@ def test_window_real_transactions_wait_and_reset(measurement, monkeypatch, caplo
             "short_held_seconds=0.20 max_held_seconds=1.20 waited_seconds=0.20 "
             "waited_writes=1 max_waited_seconds=0.20 top_scopes=[waiter 1/1.20s; holder 1/0.20s]"
         ]
-        print(lines[0])
         assert window.writes == 0 and window.waited == 0
         clock.now = 120.5
         assert sum("SQLite write lock window:" in r.message for r in caplog.records) == 1
