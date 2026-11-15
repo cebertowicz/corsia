@@ -431,10 +431,15 @@ def _commit_add_policy(
     protected: bool,
     connection,
 ) -> dict:
-    """Register one add's policy row inside the caller's compensation transaction."""
+    """Register one add's policy row inside the caller's compensation transaction.
+
+    The add just created ``source/<name>``, so a row already under that name has no
+    link: it is left from a link removed by hand, and this add replaces it.
+    """
     name = row["name"]
+    unlinked = get_project_repo_policies(project_id, db=connection).get(name)
     with write_transaction(connection, scope="repo_policy_add"):
-        _require_policy_snapshot(project_id, name, None, db=connection)
+        _require_policy_snapshot(project_id, name, unlinked, db=connection)
         _require_source_binding(ws_dir, name, repo_path)
         _require_owned_source(identity)
         policy = register_repo_policy(
