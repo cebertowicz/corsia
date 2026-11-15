@@ -10,6 +10,7 @@ import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
 from infra.db_connection import register_message_sql_functions
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 
 
 # Keep this unit test isolated from api.__init__ and its unrelated provider stack.
@@ -50,7 +51,7 @@ def _db() -> sqlite3.Connection:
         "CREATE TABLE active_turns (id TEXT, thread_id TEXT, status TEXT, started_at TEXT, ended_at TEXT, error TEXT)"
     )
     # A page never draws a comment-only input, which this table marks.
-    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL + ";" + MESSAGE_UPDATE_SCHEMA_SQL)
     return conn
 
 

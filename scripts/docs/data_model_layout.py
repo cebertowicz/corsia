@@ -5,7 +5,7 @@ from pathlib import Path
 # The shared schema.py contains several unrelated domains; its tables are
 # assigned separately below. All other modules have one explicit subsystem.
 MODULE_GROUPS = {
-    "Threads and messages": "message_schema thread_updates_schema held_replies_schema presence_schema presence_rollup_schema chat_comment_schema continuation_schema delivery_foundation_schema",
+    "Threads and messages": "message_schema message_update_schema thread_updates_schema held_replies_schema presence_schema presence_rollup_schema chat_comment_schema continuation_schema delivery_foundation_schema",
     "Plans": "plan_schema plan_aggregates_schema plan_events_schema plan_intent_schema plan_liveness_schema plan_markdown_import_schema plan_pane_views_schema plan_status_schema unattributed_dispatch_schema",
     "Events and webhooks": "bulletin_schema event_intake_schema event_rule_schema event_watch_schema webhook_delivery_schema",
     "Documents and artifacts": "artifact_identity_schema artifact_relocation_schema doc_comments_schema doc_feedback_schema doc_review_schema",

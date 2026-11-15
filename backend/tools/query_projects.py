@@ -43,7 +43,8 @@ def _history_line(row: Any, tool_output: str) -> str:
             )
         else:
             body = content
-    return f"#{row['seq']} [{str(row['created_at'])[:16]}] {row['role'].upper()}: {body}"
+    identity = f" (id: {row['update_id']})" if row.get("update_id") else ""
+    return f"#{row['seq']} [{str(row['created_at'])[:16]}] {row['role'].upper()}{identity}: {body}"
 
 
 class GetThreadHistoryTool(Tool):

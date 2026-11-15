@@ -33,6 +33,7 @@ from infra.continuity_staging import STAGING_SCHEMA_SQL
 from infra.held_replies_schema import HELD_REPLIES_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 
 NOW = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
 CFG = LifecycleConfig(
@@ -177,6 +178,7 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(CHAT_COMMENT_SCHEMA_SQL)
     conn.executescript(PRESENCE_SCHEMA_SQL)
     conn.executescript(THREAD_UPDATES_SCHEMA_SQL)
+    conn.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
     conn.executescript(HELD_REPLIES_SCHEMA_SQL)
     # Archive/purge now carries a plan-decision consequence too, so the
     # fixture loads those real schemas rather than a hand-copied subset.

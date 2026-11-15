@@ -16,6 +16,7 @@ const BODY = [
 	'Thanks,', 'Alex', '',
 ].join('\n');
 const QUOTE = 'Alex';
+const FIRST_QUOTE = 'Saturday work day';
 
 const WIDTHS = [
 	{ width: 1440, height: 900, mobile: false },
@@ -26,12 +27,13 @@ function skipOtherProject(mobile: boolean, projectName: string) {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1' || mobile !== projectName.endsWith('mobile'), 'Each device project checks its own width.');
 }
 
-/** The reader's comment on the document's last line, below the fold at every checked width. Returns its id. */
-async function commentOnLastLine(request: APIRequestContext, artifactId: string): Promise<string> {
-	const from = BODY.lastIndexOf(QUOTE);
+/** The reader's comment on the document's last line (below the fold at every checked width) or, with `anchor` 'first', on its first line. Returns its id. */
+async function commentOnLine(request: APIRequestContext, artifactId: string, anchor: 'last' | 'first' = 'last'): Promise<string> {
+	const quote = anchor === 'last' ? QUOTE : FIRST_QUOTE;
+	const from = anchor === 'last' ? BODY.lastIndexOf(QUOTE) : BODY.indexOf(FIRST_QUOTE);
 	const made = await request.post(`/api/artifacts/${artifactId}/comments`, {
 		params: { token: TEST_TOKEN },
-		data: { body: 'Can we confirm the gate code?', anchor_text: QUOTE, from_off: from, to_off: from + QUOTE.length, delivery_policy: 'immediate' },
+		data: { body: 'Can we confirm the gate code?', anchor_text: quote, from_off: from, to_off: from + quote.length, delivery_policy: 'immediate' },
 	});
 	expect(made.ok(), await made.text()).toBeTruthy();
 	return (await made.json()).comment.id as string;
@@ -50,7 +52,7 @@ async function reloadComments(page: Page, artifactId: string) {
 	await page.evaluate(async (id) => (await import('/src/lib/stores/docComments.ts')).loadComments(id), artifactId);
 }
 
-async function openDocument(page: Page, request: APIRequestContext, label: string, unread: boolean) {
+async function openDocument(page: Page, request: APIRequestContext, label: string, unread: boolean, anchor: 'last' | 'first' = 'last') {
 	const title = `Bottom notices ${label} ${Date.now().toString(36)}`;
 	const thread = await createSession(request, title);
 	await replacePreviousFixtureThread(request, thread);
@@ -63,7 +65,7 @@ async function openDocument(page: Page, request: APIRequestContext, label: strin
 	const saved = await request.put('/api/files/content', { params, data: { path: docPath, text: BODY, thread_id: thread, create: true } });
 	expect(saved.ok(), await saved.text()).toBeTruthy();
 	const artifactId = (await saved.json()).artifact.id as string;
-	const comment = await commentOnLastLine(request, artifactId);
+	const comment = await commentOnLine(request, artifactId, anchor);
 	if (unread) addAgentReply(artifactId, comment, thread);
 	await page.addInitScript(({ thread, artifactId, docPath, name }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'notices', artifactId, path: docPath, title: name, loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'notices', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
@@ -142,10 +144,12 @@ for (const { width, height, mobile } of WIDTHS) {
 		skipOtherProject(mobile, info.project.name);
 		test.setTimeout(90_000);
 		await page.setViewportSize({ width, height });
-		await openDocument(page, request, `end-${width}`, true);
-		await expect(jump(page), 'the jump control points at the unread reply below').toBeVisible();
+		// The unread reply is on the first line, so it is off screen once the view is at the end and the jump control stays (a reply on the
+		// last line is on screen there, and the control by design fades out as the view arrives).
+		await openDocument(page, request, `end-${width}`, true, 'first');
 		await scroller(page).evaluate((node) => { node.scrollTop = node.scrollHeight; });
 		await frames(page);
+		await expect(jump(page), 'the jump control points up at the unread reply on the first line').toBeVisible();
 		const lastLine = await page.locator('.cm-line').last().evaluate((line) => line.getBoundingClientRect().bottom);
 		const lastText = await page.locator('.cm-line', { hasText: QUOTE }).last().evaluate((line) => line.getBoundingClientRect().bottom);
 		const jumpTop = await jump(page).evaluate((el) => el.getBoundingClientRect().top);

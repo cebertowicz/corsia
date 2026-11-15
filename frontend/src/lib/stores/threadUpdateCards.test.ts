@@ -2,7 +2,9 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { token } from './auth';
-import { endVisit, loadUpdateCards, openAtDivider, threadUpdateCards, visitDividers } from './threadUpdateCards';
+import { endVisit, loadUpdateCards, openAtDivider, threadUpdateCards, visitDividers, watchUpdateCardNudges } from './threadUpdateCards';
+
+import { emit } from '$lib/ws/events';
 
 const divider = { since: '2026-09-29T09:00:00.000000', first_seq: 4 };
 
@@ -32,6 +34,21 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllGlobals();
 	token.set(null);
+});
+
+it('a replacement nudge refreshes even the first pending read and rejects its stale cards', async () => {
+	const resolves: Array<(response: object) => void> = [];
+	vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { resolves.push(resolve); })));
+	watchUpdateCardNudges();
+	const stale = loadUpdateCards('replacement-pending', 7);
+	emit('thread_updates_changed', { thread_ids: ['replacement-pending'] });
+	expect(resolves).toHaveLength(2);
+	resolves[1]({ ok: true, json: async () => ({ cards: [card(2)], divider: null }) });
+	await vi.waitFor(() => expect(get(threadUpdateCards)['replacement-pending']?.cards.map(item => item.id)).toEqual([2]));
+	resolves[0]({ ok: true, json: async () => ({ cards: [card(1)], divider: null }) });
+	await stale;
+	expect(get(threadUpdateCards)['replacement-pending'].cards.map(item => item.id)).toEqual([2]);
+	endVisit('replacement-pending');
 });
 
 describe('threadUpdateCards', () => {

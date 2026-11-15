@@ -17,6 +17,7 @@ import pytest
 
 from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
 from infra.db_connection import register_message_sql_functions
+from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
 _ID_TEST_SIZE = 400
 
 
@@ -56,7 +57,7 @@ class _Thread:
             "started_at TEXT)"
         )
         # A page never draws a comment-only input, which this table marks.
-        self.conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
+        self.conn.executescript(CHAT_VISIBLE_CONTENT_SQL + ";" + MESSAGE_UPDATE_SCHEMA_SQL)
         self._next = 0
 
     def add(self, mid, role, content="", *, metadata=None, seq=..., ts=None,
