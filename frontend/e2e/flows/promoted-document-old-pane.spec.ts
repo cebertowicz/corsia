@@ -8,6 +8,7 @@ import { expect } from '@playwright/test';
 import { createSession, openAppPastLanding, sidebarThread, TEST_TOKEN } from '../support/corsia';
 
 const repo = path.resolve(process.cwd(), '..');
+const PANE_BODY = 'Launch plan details for review.';
 const REPLY = 'Reply sent from the pane that was open before the promote';
 
 test('a reply sent from a pane open before a promote lands on the promoted document', async ({ page, request }, testInfo) => {
@@ -31,10 +32,15 @@ test('a reply sent from a pane open before a promote lands on the promoted docum
 	const name = 'Old pane plan.md';
 	const source = path.join(root, name);
 	const query = new URLSearchParams({ token: TEST_TOKEN });
-	const saved = await request.put(`/api/files/content?${query}`, { data: { path: source, text: 'Launch plan details for review.', thread_id: threadId, create: true } });
+	const saved = await request.put(`/api/files/content?${query}`, { data: { path: source, text: PANE_BODY, thread_id: threadId, create: true } });
 	expect(saved.ok(), await saved.text()).toBeTruthy();
 	const artifactId = (await saved.json()).artifact.id as string;
 	seed('feedback', artifactId, threadId);
+
+	const listOn = async (id: string) => {
+		const body = await (await request.get(`/api/artifacts/${id}/comments?${query}`)).json();
+		return body.comments as { body: string; anchor_text: string | null; from_off: number | null; to_off: number | null; replies?: { body: string }[] }[];
+	};
 
 	// The person opens the document and its comments: the pane now holds the working file's id.
 	await openAppPastLanding(page);
@@ -45,6 +51,7 @@ test('a reply sent from a pane open before a promote lands on the promoted docum
 	await page.getByRole('button', { name: /\d+ comments?, \d+ unread/ }).first().click();
 	const threads = page.getByRole('region', { name: /^Comment by / });
 	await expect(threads).toHaveCount(4);
+	const placedBefore = (await listOn(artifactId)).map((thread) => [thread.anchor_text, thread.from_off, thread.to_off]);
 
 	// Under the open pane, the file is edited outside CORSIA and then promoted: the promote cannot carry the working
 	// file's identity, so it retires it and carries its comments to the promoted document.
@@ -57,12 +64,19 @@ test('a reply sent from a pane open before a promote lands on the promoted docum
 	await field.fill(REPLY);
 	await field.press('Enter');
 
-	// It shows on the promoted document with the comments that moved there; the retired file holds nothing.
-	const textsOn = async (id: string) => {
-		const body = await (await request.get(`/api/artifacts/${id}/comments?${query}`)).json();
-		return (body.comments as { body: string; replies?: { body: string }[] }[]).flatMap((thread) => [thread.body, ...(thread.replies ?? []).map((reply) => reply.body)]);
-	};
+	// It shows on the promoted document with the comments that moved there (the retired id's own rows are checked
+	// by the backend tests); the list the open pane reads is that same list.
+	const textsOn = async (id: string) => (await listOn(id)).flatMap((thread) => [thread.body, ...(thread.replies ?? []).map((reply) => reply.body)]);
 	await expect.poll(async () => (await textsOn(promoted.shared)).includes(REPLY), { timeout: 20_000 }).toBe(true);
-	expect(await textsOn(artifactId)).toEqual([]);
+	expect(await textsOn(artifactId)).toEqual(await textsOn(promoted.shared));
+
+	// The same pane, without reopening: all four comments and the reply, each comment on its quoted text of the body
+	// the pane still shows (offsets read against that body, not shifted).
+	await expect(page.getByText(REPLY).first()).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByRole('region', { name: /^Comment by / })).toHaveCount(4);
+	const place = (thread: { anchor_text: string | null; from_off: number | null; to_off: number | null }) => [thread.anchor_text, thread.from_off, thread.to_off];
+	const after = (await listOn(artifactId)).map(place);
+	expect(after).toHaveLength(4);
+	expect(after).toEqual(placedBefore);
 	await page.screenshot({ path: testInfo.outputPath('reply-after-promote.png') });
 });

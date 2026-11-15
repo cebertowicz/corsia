@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from auth_fixtures import OTHER_USER, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from infra.database import get_db, write_transaction
-from plans.person_comment_task import MOVED
+from plans.public import PERSON_COMMENT_MOVED as MOVED
 from registry import models
 
 TOKEN = {"token": OWNER_TOKEN}
@@ -22,9 +22,12 @@ LANE = "immediate"
 
 
 @pytest.fixture
-def client(isolated_db):
+def client(isolated_db, monkeypatch):
+    from doceditor import live_runtime
     from main import app
 
+    # This client runs no lifespan, so a manager left by an integration test's app has no loop here.
+    monkeypatch.setattr(live_runtime, "_manager", None)
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -160,7 +163,7 @@ def test_a_promote_between_the_check_and_the_write_refuses_instead_of_writing_to
     client, isolated_db, monkeypatch,
 ):
     """The route's check can run before a promote commits; the insert re-reads the identity inside its own transaction."""
-    import api.doc_comments as routes
+    import api.doc_comment_access as routes
 
     db = get_db()
     try:
@@ -248,5 +251,37 @@ def test_live_identity_follows_one_hop_and_stops_at_a_loop(isolated_db):
                 (target, source),
             )
         assert models.live_identity(first, db=db) is None
+    finally:
+        db.close()
+
+
+def _listed(client, artifact):
+    response = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN)
+    assert response.status_code == 200, response.text
+    return [thread["body"] for thread in response.json()["comments"]]
+
+
+def test_the_list_a_pane_on_the_old_id_reads_shows_the_comments_on_the_live_document(client, isolated_db):
+    db = get_db()
+    try:
+        artifact, root = _document_with_thread(db)
+        before = _listed(client, artifact)
+        assert before and root["body"] in before
+        successor = _promote(db, artifact)
+        assert _listed(client, artifact) == _listed(client, successor) == before
+        assert _reply(client, artifact, root).status_code == 200
+        thread = client.get(f"/api/artifacts/{artifact}/comments", params=TOKEN).json()["comments"][0]
+        assert "from the open pane" in [reply["body"] for reply in thread["replies"]]
+    finally:
+        db.close()
+
+
+def test_the_list_on_the_old_id_reads_as_before_when_no_live_document_can_be_read(client, isolated_db):
+    db = get_db()
+    try:
+        artifact, _root = _document_with_thread(db)
+        successor = _promote(db, artifact)
+        models.retire(successor, tombstone=True, cause="file_gone", db=db)
+        assert _listed(client, artifact) == []
     finally:
         db.close()
