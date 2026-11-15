@@ -10,9 +10,11 @@
 	 * picked card does, and the cards around it make room. A `head` (the column's Accept all) is the column's first card, at its
 	 * top, so a change in its height moves the cards with a fresh placement, never under it. No card goes above it, a pick included.
 	 */
-	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null } = $props();
+	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null, focusComposer = true }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null;
+		/** False for a composer the layout redrew rather than one the reader opened: it leaves focus where it is. */
+		focusComposer?: boolean } = $props();
 	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
-	const takeFocus = (node: HTMLElement) => { queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
+	const takeFocus = (node: HTMLElement) => { if (focusComposer) queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
 	let stackEl = $state<HTMLElement>();
 	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});

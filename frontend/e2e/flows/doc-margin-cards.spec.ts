@@ -141,7 +141,16 @@ test('@flow:doc-margin-cards from the text, Escape then Tab reaches the cards in
 /** Selects a stretch of a line no comment is on, starts a comment on it (the composer opens in the column beside it), and cancels it. */
 async function cancelDraftOnLine(page: Page, doc: Awaited<ReturnType<typeof open>>) {
 	const target = 'Paragraph 6 of the plan';
-	await page.locator('.cm-line', { hasText: target }).first().click({ position: { x: 4, y: 4 } });
+	const line = page.locator('.cm-line', { hasText: target }).first();
+	// Widening the panes and raising the column both reflow the text; a click aimed while it still moves lands on another line.
+	let last = Number.NaN;
+	await expect.poll(async () => {
+		const top = (await line.boundingBox())?.y ?? Number.NaN;
+		const still = top === last;
+		last = top;
+		return still;
+	}, { message: 'the line has stopped moving', intervals: [150] }).toBe(true);
+	await line.click({ position: { x: 4, y: 4 } });
 	await page.keyboard.press('Home');
 	for (let i = 0; i < target.length; i++) await page.keyboard.press('Shift+ArrowRight');
 	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toBe(target);

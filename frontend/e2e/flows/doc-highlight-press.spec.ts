@@ -82,6 +82,18 @@ test.describe(`${TAG} desktop`, () => {
 		await saveEvidenceScreenshot(page, testInfo, 'press-1440-reverse');
 	});
 
+	// Repro for the Workspace panel layout fix: at 1200 wide the panel is laid over the collapsed canvas, so a highlight on the right of a line sits under the panel and the press lands on it.
+	test('a press on the word opens its comment at 1200 wide with the Workspace panel open', async ({ page, request }, testInfo) => {
+		test.setTimeout(90_000);
+		await page.setViewportSize({ width: 1200, height: 800 });
+		await open(page, request, 'open');
+		const { x, y } = await wordCentre(page);
+		await page.mouse.click(x, y);
+		await expect(card(page), 'the word comment opens').toBeVisible();
+		await logBuild(page, testInfo);
+		await saveEvidenceScreenshot(page, testInfo, 'press-1200-panel-open');
+	});
+
 	// At 900 an open Workspace panel is a drawer that slides the page left under a close scrim, so only its closed state is pressed there.
 	for (const [width, height, panel] of [[1440, 900, 'open'], [1440, 900, 'closed'], [1200, 800, 'closed'], [900, 800, 'closed']] as const) {
 		test(`a press on the word opens its comment at ${width} wide, panel ${panel}`, async ({ page, request }, testInfo) => {
