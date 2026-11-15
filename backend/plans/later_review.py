@@ -3,9 +3,12 @@
 ``plans.later_review_at`` is the one home of the review time, and only two
 writes touch it: ``arm``, made inside the transaction of the first write that
 puts a task below the cut, and ``settle``, which answers a review whose time
-has come. Nothing else moves it -- a second, tenth or hundredth task crossing
-the cut leaves it where the first put it -- so a plan keeps one review weekday
-however big its pile grows, and a late sweep cannot start a second review.
+has come. Nothing else moves it at run time -- a second, tenth or hundredth task
+crossing the cut leaves it where the first put it -- so a plan keeps one review
+weekday however big its pile grows, and a late sweep cannot start a second
+review. The one other writer is the one-time upgrade
+``infra.migration_195_to_196_later_review_arm``, which arms plans whose pile
+predates the review the way ``arm`` would.
 
 Nothing is scheduled for the review and nothing is derived from a timestamp:
 the continuation runner asks ``due`` on its own cadence, and ``settle`` answers
