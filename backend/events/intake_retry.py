@@ -2,23 +2,31 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from events.intake_errors import failure_code
 
+log = logging.getLogger(__name__)
+
 
 async def admit_with_retry(admit: Callable[..., Awaitable[Any]], *, pauses: Sequence[float],
                            sleep: Callable[[float], Awaitable[None]] = asyncio.sleep, **event: Any) -> Any:
     """Retry only an unreachable intake, always with the original event and id."""
-    for pause in (*pauses, None):
+    tries = len(pauses) + 1
+    for attempt, pause in enumerate((*pauses, None), start=1):
         try:
             result = await admit(**event)
         except Exception as exc:
             if pause is None or failure_code(exc) != "intake_unreachable":
                 raise
+            reason: object = exc
         else:
             if result.refusal is None or result.refusal.code != "intake_unreachable" or pause is None:
                 return result
+            reason = result.refusal.code
+        log.warning("intake unreachable for %s %s, try %s of %s: %s",
+                    event.get("event_type"), event.get("event_id"), attempt, tries, reason)
         await sleep(pause)
     raise AssertionError("unreachable")
