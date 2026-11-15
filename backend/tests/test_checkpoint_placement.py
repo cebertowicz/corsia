@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -424,16 +425,25 @@ def _answered() -> str:
 
 def test_a_rewrite_unmarks_the_entry(tmp_path, monkeypatch) -> None:
     from infra.continuity_store import replace_entry
-    from infra.placement_marks import selected_entries, set_mark
+    from infra.placement_marks import clear_mark, selected_entries, set_mark
 
     db = _db()
     _seed_thread(db)
     entry = _add(db, "decisions", {**_lesson("one"), "rationale": "r"})
     revision = _mark(db, entry)["revision"]
-    set_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
-             state="selected", revision=revision,
-             detail=_answered())
+    db.execute("UPDATE continuity_entries SET updated_at='2026-01-01T09:00:00' WHERE entry_id=?", (entry,))
+
+    def select() -> None:
+        set_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
+                 state="selected", revision=revision, detail=_answered())
+
+    select()
     assert [row["entry_id"] for row in selected_entries(db)] == [entry]
+    # The placement lookup is bounded by the revision's time, which a failed save that
+    # clears the mark and a later re-selection of the same revision both leave alone.
+    clear_mark(db, thread_id="thread-1", history_epoch=0, entry_id=entry)
+    select()
+    assert selected_entries(db)[0]["revised_at"] == "2026-01-01T09:00:00"
     replace_entry(db, thread_id="thread-1", history_epoch=0, entry_id=entry,
                   body={**_lesson("one, revised"), "rationale": "r"})
     assert selected_entries(db) == []
@@ -696,6 +706,54 @@ def test_placement_save_commits_its_path_after_recording_outside_edits(tmp_path)
         capture_output=True, text=True, check=True,
     ).stdout
     assert swept == "# Lessons\n- x\n- outside\n"
+
+
+def _unexpected(*_args, **_kwargs) -> None:
+    raise AssertionError("the save should have been found or written")
+
+
+def test_a_save_resumes_its_revision_commit_and_walks_no_further_back(tmp_path, monkeypatch) -> None:
+    """A save's lookup walks back to the entry's revision, never the whole history, reading its time as UTC."""
+    from core.placement_save import save_placement
+    from infra.guidance_git import digest
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    monkeypatch.setattr("core.context_source_paths.append_context_source_change", lambda *_a, **_k: None)
+    repo = _repo(tmp_path)
+    monkeypatch.setattr("infra.config.WORKSPACE", repo)
+    target = repo / "context" / "LESSONS.md"
+    target.parent.mkdir()
+    target.write_text("- x\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "placement: written\n\nPlacement: t/1@2\n"],
+        check=True, env={**os.environ, "GIT_COMMITTER_DATE": "2026-01-01T12:00:00+00:00"},
+    )
+    stopped = _log_sha(repo)
+
+    def save(revised_at: str) -> str | None:
+        entry = {"thread_id": "t", "entry_id": 1, "revision": 2, "revised_at": revised_at}
+        return save_placement(
+            entry, None, None, "context/LESSONS.md", target, {target: "- x\n- y\n"},
+            {target: digest("- x\n")}, [], settle=_unexpected, defer=_unexpected, refuse=_unexpected,
+            author=lambda _place: "Lane <t@a>",
+            message=lambda *_args: "placement: written\n\nPlacement: t/1@2\n", logger=None,
+        )
+
+    # The revision predates the commit, so the commit is this revision's, however late it is
+    # re-selected. Stamps are naive UTC; read as local time, 11:30 would bound at 18:30Z and miss.
+    assert save("2026-01-01T11:30:00") == stopped
+    assert target.read_text() == "- x\n"
+    # A revision written well after that commit cannot own it, so the save is made anew.
+    fresh = save("2026-01-01T14:00:00")
+    assert fresh not in (None, stopped)
+    assert target.read_text() == "- x\n- y\n"
+
+
+def _log_sha(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True,
+    ).stdout.strip()
 
 
 def test_placement_save_inside_an_enclosing_repository_writes_nothing(tmp_path) -> None:

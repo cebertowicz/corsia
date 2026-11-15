@@ -3,6 +3,7 @@
 	import { renderMarkdown } from '$lib/markdown';
 	import { localDayClock } from '$lib/time';
 	import { indentVar } from './planIndent';
+	import { liveStepClock } from './planStepTime';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
 	import {
 		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, personStepInstructionsDocument, tokenLine,
@@ -46,16 +47,16 @@
 	]);
 	const rolled = $derived(node.node_cost.rolled);
 	const own = $derived(node.node_cost.own);
-	const working = $derived(workingTime(rolled));
-	const waiting = $derived(waitingTime(rolled));
+	const working = $derived(workingTime(rolled, $liveStepClock));
+	const waiting = $derived(waitingTime(rolled, $liveStepClock));
 	const tokenUsage = $derived(tokenLine(rolled));
 	const cost = $derived(dollarLine(rolled));
-	const showOwn = $derived(ownDiffers(node));
-	const ownWorking = $derived(showOwn && workingTime(own) !== working ? workingTime(own) : null);
-	const ownWaiting = $derived(showOwn && waitingTime(own) !== waiting ? waitingTime(own) : null);
+	const showOwn = $derived(ownDiffers(node, $liveStepClock));
+	const ownWorking = $derived(showOwn && workingTime(own, $liveStepClock) !== working ? workingTime(own, $liveStepClock) : null);
+	const ownWaiting = $derived(showOwn && waitingTime(own, $liveStepClock) !== waiting ? waitingTime(own, $liveStepClock) : null);
 	const ownTokens = $derived(showOwn && tokenLine(own) !== tokenUsage ? tokenLine(own) : null);
 	const ownCost = $derived(showOwn && dollarLine(own) !== cost ? dollarLine(own) : null);
-	const initiative = $derived(initiativeLine(node));
+	const initiative = $derived(initiativeLine(node, $liveStepClock));
 	// One total on a lineage of two or more tasks: the older line gives way to it.
 	const followUps = $derived(initiative ? null : withFollowUps(node));
 	const instructionsDocument = $derived(personStepInstructionsDocument(node));
