@@ -249,15 +249,15 @@ def _run_search(fresh_db, **params) -> str:
             pass
 
     original_db, original_run = database.get_db, search_module.run_in_db
-    original_read = search_module.run_read
+    original_bulk = search_module.run_bulk
     database.get_db = lambda: _KeepOpen(fresh_db)
-    search_module.run_in_db = search_module.run_read = _inline
+    search_module.run_in_db = search_module.run_bulk = _inline
     try:
         return asyncio.run(SearchHistoryTool().execute(**params))
     finally:
         database.get_db = original_db
         search_module.run_in_db = original_run
-        search_module.run_read = original_read
+        search_module.run_bulk = original_bulk
 
 
 def test_search_tool_labels_only_older_epoch_as_historical(fresh_db):

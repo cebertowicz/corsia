@@ -96,6 +96,38 @@ async def test_status_group_preserves_order_error_and_event_loop_progress(isolat
 
 
 @pytest.mark.asyncio
+async def test_started_bulk_search_does_not_block_status_and_is_joined_on_cancel(isolated_db, monkeypatch):
+    from api.system_admin import system_update_status
+    from infra import db_async, update_status
+    from tools import query_search
+
+    monkeypatch.setattr(update_status, "update_status", lambda _: SimpleNamespace(to_dict=lambda: {"available": False}))
+    started, release = threading.Event(), threading.Event()
+    original = query_search.search_messages_fts
+    def search(*args, **kwargs):
+        started.set()
+        release.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(query_search, "search_messages_fts", search)
+    with ThreadPoolExecutor(max_workers=1, initializer=mark_thread_lane, initargs=("bulk",)) as pool:
+        monkeypatch.setattr(db_async, "_bulk_pool", pool)
+        task = asyncio.create_task(query_search.SearchHistoryTool().execute("missing"))
+        try:
+            await _started(started)
+            status = await asyncio.wait_for(system_update_status(user={}), 3)
+            assert status["available"] is False
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 3)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_cancelled_queued_message_search_is_withdrawn(isolated_db, monkeypatch):
     from infra import db_async
     from tools import query_search
@@ -106,12 +138,12 @@ async def test_cancelled_queued_message_search_is_withdrawn(isolated_db, monkeyp
         searched.set()
         return original(*args, **kwargs)
     monkeypatch.setattr(query_search, "search_messages_fts", search)
-    with ThreadPoolExecutor(max_workers=1, initializer=mark_thread_lane, initargs=("read",)) as pool:
-        monkeypatch.setattr(db_async, "_read_pool", pool)
+    with ThreadPoolExecutor(max_workers=1, initializer=mark_thread_lane, initargs=("bulk",)) as pool:
+        monkeypatch.setattr(db_async, "_bulk_pool", pool)
         def hold():
             started.set()
             release.wait(5)
-        holder = asyncio.create_task(db_async.run_read(hold))
+        holder = asyncio.create_task(db_async.run_bulk(hold))
         try:
             await _started(started)
             task = asyncio.create_task(query_search.SearchHistoryTool().execute("missing"))
@@ -121,7 +153,7 @@ async def test_cancelled_queued_message_search_is_withdrawn(isolated_db, monkeyp
                 await asyncio.wait_for(task, 3)
             release.set()
             await holder
-            await db_async.run_read(lambda: None)
+            await db_async.run_bulk(lambda: None)
             assert not searched.is_set()
         finally:
             release.set()

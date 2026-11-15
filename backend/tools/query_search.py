@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from infra.db_async import run_in_db, run_read
+from infra.db_async import run_bulk, run_in_db
 from tools.base import Tool
 from tools.query_helpers import (
     SENDER_CLASSES,
@@ -177,7 +177,7 @@ class SearchHistoryTool(Tool):
 
         # Checkpoint retrieval logs an outcome even if its caller is cancelled.
         # Keep that job on the lane that completes queued work after cancellation.
-        run_query = run_in_db if search_checkpoints_here else run_read
+        run_query = run_in_db if search_checkpoints_here else run_bulk
         rows, cp_rows, refusal, notice = await run_query(_query)
         if refusal is not None:
             return refusal
