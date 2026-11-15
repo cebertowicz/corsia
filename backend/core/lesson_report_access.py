@@ -1,6 +1,7 @@
 """Resolve existing caller visibility and sources for both lesson-report adapters."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 import json
@@ -144,7 +145,8 @@ def render_collection(collection: ReportCollection, workspace: Path,
     return result
 
 
-# The request arguments a call's log line names; never free text.
+# The request arguments a call's log line names. Some are caller-supplied strings, so the
+# line is one serialized payload (as ``context_preview_timing`` logs) and no value can forge a field.
 _LOGGED_ARGUMENTS = ("scope", "project", "agent", "range", "state", "preview", "lesson_id", "version", "evidence")
 
 
@@ -152,20 +154,22 @@ def _log_call(kwargs: dict[str, Any], phases: PhaseTimes, outcome: str, seconds:
               collection: ReportCollection | None) -> None:
     """One line per report call: who asked, with what, how it ended and where the time went.
 
-    The ``collect`` phase includes the wait for a bulk-lane worker; the phases inside it do not.
+    The ``collect`` stage includes the wait for a bulk-lane worker; the stages inside it do not.
     """
-    caller = kwargs.get("caller_thread_id") or ("http" if kwargs.get("user_id") else "unknown")
-    arguments = " ".join(f"{key}={kwargs[key]}" for key in _LOGGED_ARGUMENTS if kwargs.get(key) is not None)
-    sizes = ""
+    payload: dict[str, Any] = {
+        "event": "lesson_report_call",
+        "caller": kwargs.get("caller_thread_id") or ("http" if kwargs.get("user_id") else "unknown"),
+        "arguments": {key: kwargs[key] for key in _LOGGED_ARGUMENTS if kwargs.get(key) is not None},
+        "cursor": bool(kwargs.get("cursor")),
+        "outcome": outcome,
+        "total_ms": round(seconds * 1_000, 3),
+    }
     if collection is not None:
         bodies = collection.collected["bodies"]
-        sizes = (f" threads={len(collection.scope.thread_ids)}"
-                 f" body_read_calls={len(bodies['reads']) + sum(bodies['unavailable_reads'].values())}")
-    timings = ",".join(f"{name}:{value:.2f}" for name, value in phases.items())
-    logger.info(
-        f"lesson_report.call caller={caller} {arguments} cursor={'yes' if kwargs.get('cursor') else 'no'} "
-        f"outcome={outcome} seconds={seconds:.2f}{sizes} phases={timings}"
-    )
+        payload["threads"] = len(collection.scope.thread_ids)
+        payload["body_read_calls"] = len(bodies["reads"]) + sum(bodies["unavailable_reads"].values())
+    payload["stages"] = {name: {"wall_ms": round(value * 1_000, 3)} for name, value in phases.items()}
+    logger.info("lesson_report_call {}", json.dumps(payload, separators=(",", ":"), default=str))
 
 
 async def report_for_identity(*, cancellation_event: Event | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -189,7 +193,7 @@ async def report_for_identity(*, cancellation_event: Event | None = None, **kwar
             result = await run_bulk(attach_project_ids, result, collection.scope.user_id, cancellation_event)
         outcome = "ok"
         return result
-    except LessonReportCollectionCancelled:
+    except (LessonReportCollectionCancelled, asyncio.CancelledError):
         outcome = "cancelled"
         raise
     except (ValueError, PermissionError):
