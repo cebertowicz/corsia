@@ -18,8 +18,8 @@ from automation.script_readings import RunReport, Signal
 from infra.database import get_db
 from infra.db_async import run_in_db_unless_owned
 
-#: A scheduled run's lost line: no agent tool starts a scheduled script, and a clock schedule or one at
-#: its last run has no next run, so the owner is told what still works whichever schedule it is.
+#: A scheduled run's lost line: no agent tool starts a scheduled script, and a paused or cancelled
+#: schedule has no next run, so the owner is told what still works either way.
 _SCHEDULED_RUN_FIX = ("The script finished, and this line is not sent again. If the schedule runs again, that run "
                       "sends the lines it prints; running the script yourself does not send its lines. "
                       "If what this event would have started cannot wait, start it yourself.")
