@@ -296,7 +296,7 @@ def test_a_dirty_hour_planned_before_a_reset_is_not_written_after_it(isolated_db
 
 @pytest.mark.asyncio
 async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_other():
-    from api import usage_rollup
+    from api import rollup_lag, usage_rollup
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -307,6 +307,8 @@ async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_othe
         calls.append(("read", job.__name__))
         started.set()
         await release.wait()
+        if job.__name__ == "coverage_job":
+            return "", 0, "", ""
         return [functools.partial(lambda db: True)], False
 
     async def write(job, step):
@@ -314,15 +316,17 @@ async def test_refresh_is_single_flight_reads_on_one_lane_and_writes_on_the_othe
         finished.set()
         return True
 
+    rollup_lag._last_warning[0] = float("-inf")
     usage_rollup.schedule_refresh(read, write)
     usage_rollup.schedule_refresh(read, write)  # a second page load while the first refresh runs
     await asyncio.wait_for(started.wait(), 1)
     release.set()
     await asyncio.wait_for(finished.wait(), 1)
     await asyncio.wait_for(usage_rollup._refreshing[asyncio.get_running_loop()], 1)
-    # One flight plans the usage ledger, then the focus-attention rollup, each read before it is written.
+    # One flight plans the usage ledger, then the focus-attention rollup, each read before it is written,
+    # then reads how far each rollup covers.
     assert calls == [("read", "_plan_job"), ("write", "_write_job"),
-                     ("read", "_plan_presence_job"), ("write", "_write_job")]
+                     ("read", "_plan_presence_job"), ("write", "_write_job"), ("read", "coverage_job")]
 
 
 @pytest.mark.asyncio
