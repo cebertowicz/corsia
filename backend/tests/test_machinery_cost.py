@@ -16,7 +16,7 @@ def test_catalog_and_index_contract(isolated_db):
     from infra.measurement_starts import source_first_row_sql
     db = get_db()
     try:
-        assert CATEGORIES == {entry.category for entry in TOOL_CATALOG.values()}
+        assert {entry.category for entry in TOOL_CATALOG.values()} <= CATEGORIES
         plan = [r[3] for r in db.execute("EXPLAIN QUERY PLAN " + TOOL_ROWS_SQL, ("x", "2026-01-01", "2026-01-02"))]
         assert any("SEARCH" in line and "idx_messages_session" in line for line in plan)
         plan = [r[3] for r in db.execute("EXPLAIN QUERY PLAN " + source_first_row_sql("first_machinery_day"))]
@@ -38,6 +38,7 @@ async def test_daily_to_route_and_missing_day(isolated_db, monkeypatch):
     try:
         _seed_thread(db, "root", agent=True)
         _seed_thread(db, "second", agent=True)
+        _seed_thread(db, "chat", agent=True)
         _seed_outcomes(db, "root", count=20)
         _tool(db, "m1", "root", "tool_call", tool_name="plan_update", tool_result_byte_count=3)
         _tool(db, "m2", "root", "read_file", tool_result_byte_count=3)
@@ -46,6 +47,8 @@ async def test_daily_to_route_and_missing_day(isolated_db, monkeypatch):
         # guidance_loads shape written by core.guidance_loads.record_guidance_load.
         db.execute("INSERT INTO guidance_loads(id,thread_id,path,raw_sha256,git_blob_oid,delivered_sha256,byte_count,partial,created_at) VALUES ('g','root','SKILL.md','a','b','c',6,1,'2026-09-23T12:00:00+00:00')")
         db.execute("INSERT INTO llm_usage(id,thread_id,model,total_tokens,cache_read_tokens,created_at) VALUES ('u','root','m',100,20,'2026-09-23T12:00:00+00:00')")
+        # A reply with no tool call: its tokens belong in every token share's total.
+        db.execute("INSERT INTO llm_usage(id,thread_id,model,total_tokens,cache_read_tokens,created_at) VALUES ('v','chat','m',100,20,'2026-09-23T12:00:00+00:00')")
         db.commit()
     finally:
         db.close()
@@ -64,12 +67,12 @@ async def test_daily_to_route_and_missing_day(isolated_db, monkeypatch):
     assert all_rows["skill_read_action_pct"]["raw_value"] == pytest.approx(1 / 4)
     assert all_rows["machinery_returned_pct"]["raw_value"] == pytest.approx(3 / 12)
     assert all_rows["ungrouped_action_pct"]["raw_value"] == pytest.approx(1 / 4)
-    assert all_rows["plan_token_pct"]["raw_value"] == pytest.approx(1 / 3)
+    assert all_rows["plan_token_pct"]["raw_value"] == pytest.approx(1 / 6)
     assert all_rows["plan_tokens_per_outcome"]["n"] == 20
     assert (await rows("root"))["plan_action_pct"]["raw_value"] == pytest.approx(1 / 3)
     db = get_db()
     try:
-        assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name=?", (RECORD_EVENT,)).fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name=?", (RECORD_EVENT,)).fetchone()[0] == 3
         db.execute("DELETE FROM outcome_events WHERE dedupe_key=?", (f"{DAY_EVENT}:2026-09-24",))
         db.commit()
     finally:

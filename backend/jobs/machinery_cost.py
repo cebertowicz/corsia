@@ -90,13 +90,14 @@ def run_daily(*, now: datetime | None = None, config: LifecycleConfig | None = N
                         fallback.append(row["id"])
                     counts[f"c_{bucket}"] += 1
                     counts[f"b_{bucket}"] += size or 0
-                if not counts:
+                thread_tokens = tokens.get(thread["id"], 0)
+                if not counts and not thread_tokens:
                     continue
                 skills, skill_bytes, partial = guidance.get((start, thread["id"]), (0, 0, 0))
                 day_skill_reads += skills
                 day_partial_reads += partial
                 counts.update({"skill_count": skills, "skill_bytes": skill_bytes})
-                attrs = {**counts, "fresh_tokens": str(tokens.get(thread["id"], 0))}
+                attrs = {**counts, "fresh_tokens": str(thread_tokens)}
                 records.append((thread, attrs))
             marker = f"{DAY_EVENT}:{day}"
             stamp = datetime.combine(day, time(12), timezone.utc).isoformat()

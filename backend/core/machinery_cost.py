@@ -1,13 +1,11 @@
-"""Names and closed catalog categories for the machinery-cost facts."""
+"""Names and catalog categories for the machinery-cost facts."""
+from typing import get_args
+
+from tools.catalog_entry import ToolCategory
 
 DAY_EVENT = "measurement.machinery.day"
 RECORD_EVENT = "measurement.machinery.thread_day"
-CATEGORIES = frozenset({
-    "artifacts", "automations", "browser", "coordination", "delegation", "discovery",
-    "documents", "edit", "email", "filesystem", "google_workspace", "history", "host_access",
-    "memory", "messages", "microsoft", "microsoft_calendar", "microsoft_files", "microsoft_mail",
-    "plans", "processes", "projects", "shell", "web",
-})
+CATEGORIES = frozenset(get_args(ToolCategory))
 BUCKETS = CATEGORIES | {"connected_app", "ungrouped"}
 STEMS = ("plan", "memory", "agents", "skill_read", "machinery")
 SUFFIXES = ("token_pct", "tokens_per_outcome", "action_pct", "returned_pct")
