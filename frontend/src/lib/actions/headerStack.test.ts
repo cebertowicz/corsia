@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fitsOneRow, lineFloor, shouldStack } from './headerStack';
+import { get } from 'svelte/store';
+import { fitsOneRow, headerStack, lineFloor, shouldStack } from './headerStack';
 
 // What the review line needs in the first column: avatar, name at its floor, a 16-character ask, the chevron and the gaps between them.
 const floor = 19 + 8 + 56 + 8 + 122 + 8 + 13;
@@ -73,5 +74,47 @@ describe('fitsOneRow', () => {
 	it('counts the presence row with the tools', () => {
 		expect(fitsOneRow({ content: 700, others: 500, gaps: 8, floor })).toBe(false);
 		expect(fitsOneRow({ content: 700, others: 440, gaps: 8, floor })).toBe(true);
+	});
+});
+
+describe('one short-touch screen', () => {
+	// A matchMedia that answers the real query for a screen of the given height and pointer (1em = 16px).
+	const screen = (height: number, coarse: boolean) => {
+		vi.stubGlobal('matchMedia', (query: string) => {
+			const maxHeight = Number(/max-height: (\d+)em/.exec(query)?.[1]) * 16;
+			const needsCoarse = query.includes('any-pointer: coarse');
+			return { matches: height <= maxHeight && (!needsCoarse || coarse), addEventListener() {}, removeEventListener() {} };
+		});
+		vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+	};
+	// A header whose tools leave the notice less than its 300px floor: it stacks for room unless the screen is a short touch one.
+	const stacked = (): boolean => {
+		document.body.innerHTML = '<div id="h"><div class="rb-slot"></div><div class="document-tools"><span></span></div></div>';
+		const node = document.getElementById('h') as HTMLElement;
+		Object.defineProperty(node, 'clientWidth', { value: 636 });
+		vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+			const el = this as HTMLElement;
+			return { width: el.style.width === '16ch' ? 300 : el.parentElement?.matches('.document-tools') ? 440 : 0 } as DOMRect;
+		});
+		headerStack(node);
+		return node.classList.contains('rb-stack');
+	};
+	const sheet = async (): Promise<boolean> => {
+		vi.resetModules();
+		const { isShortTouch } = await import('$lib/stores/viewport');
+		return get(isShortTouch);
+	};
+	afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+	it('a 430px-tall touch screen gets the comments sheet and the short header', async () => {
+		screen(430, true);
+		expect(await sheet()).toBe(true);
+		expect(stacked()).toBe(false);
+	});
+
+	it('a 420px-tall mouse window gets neither', async () => {
+		screen(420, false);
+		expect(await sheet()).toBe(false);
+		expect(stacked()).toBe(true);
 	});
 });

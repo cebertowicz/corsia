@@ -1,10 +1,12 @@
+import { SHORT_TOUCH_QUERY } from '$lib/stores/viewport';
+
 /**
  * Whether the document header keeps the review line and the tool cluster on one row, or stacks them (tools first, the line
  * under them). The header's first column gets what the tools and the presence row leave; the line needs its own floor there:
  * its avatar, the name down to its floor, a 16-character request, the chevron and the gaps between them. Nothing about the
  * tools' width is assumed: it is read from the cluster as drawn, so a cluster with the delivery switch and a text History
  * button stacks the line at a wider header than one with only a count and Request review. A short viewport (a phone held
- * sideways) keeps the header as low as it was: it stacks only below 408px of header, never for room.
+ * sideways, the viewport.ts query that also opens comments in the sheet) keeps the header as low as it was: it stacks only below 408px of header, never for room.
  */
 export type HeaderRoom = {
 	/** The header's content width. */
@@ -21,9 +23,6 @@ export function fitsOneRow(room: HeaderRoom): boolean {
 	return room.content - room.others - room.gaps >= room.floor;
 }
 
-/** A viewport this short is a phone held sideways: every pixel of header height is taken from the document. */
-const SHORT_HEIGHT = 420;
-export const SHORT_VIEWPORT = `(max-height: ${SHORT_HEIGHT}px)`;
 /** The header width under which the line always takes its own row, however short the viewport. */
 const NARROW_HEADER = 408;
 
@@ -96,7 +95,7 @@ export function headerStack(node: HTMLElement, _key?: unknown) {
 	};
 	const schedule = () => { if (!frame) frame = requestAnimationFrame(apply); };
 	// Only the viewport's height changes with the orientation; the header's own width may not.
-	const short = window.matchMedia(SHORT_VIEWPORT);
+	const short = window.matchMedia(SHORT_TOUCH_QUERY);
 	short.addEventListener('change', schedule);
 	const observer = new ResizeObserver(schedule);
 	observer.observe(node);
