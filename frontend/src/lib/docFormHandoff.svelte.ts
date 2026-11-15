@@ -1,6 +1,7 @@
 import { getContext, tick, untrack } from 'svelte';
 import { SETTLED_LEAF_WIDTH, shellCanvas } from '$lib/stores/artifactCanvas';
 import { observeCanvasWidth, type WritingField } from '$lib/docCommentDrawer';
+import { focusWhenPlaced } from '$lib/docMarginPlacement';
 
 /**
  * The width a comment surface's form (margin, popover, sheet) follows: the width the canvas settles at, never one a shell
@@ -72,22 +73,9 @@ export function createFormHandoff(inputs: {
 			const into = drawer.querySelector<HTMLElement>(selector);
 			if (!into) return;
 			stopFocus();
-			stopFocus = focusWhenPlaced(into, () => { const now = document.activeElement; return !now || now === document.body || now === from || !now.isConnected; });
+			stopFocus = focusWhenPlaced(into, from);
 		});
 	});
 	return { note, get redrawn() { return redrawn; }, get handoff() { return handoff; } };
 }
 
-/**
- * Focuses a field in a margin card once the card is placed. DocMarginStack keeps a card hidden until it has a place, which
- * waits for its column to be drawn on the canvas, and a browser drops focus on a hidden field. `free` says, when the card is
- * placed, that the reader has not moved on. The wait ends with the card's placement, or with the stop it returns.
- */
-export function focusWhenPlaced(field: HTMLElement, free: () => boolean): () => void {
-	const card = field.closest<HTMLElement>('[data-margin-card]');
-	const focus = () => { if (free()) field.focus({ preventScroll: true }); };
-	if (!card || card.classList.contains('placed')) { focus(); return () => {}; }
-	const placed = new MutationObserver(() => { if (card.classList.contains('placed')) { placed.disconnect(); focus(); } });
-	placed.observe(card, { attributes: true, attributeFilter: ['class'] });
-	return () => placed.disconnect();
-}
