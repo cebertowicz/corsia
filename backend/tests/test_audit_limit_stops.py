@@ -87,3 +87,43 @@ def test_limit_stops_is_listed_by_the_tool():
     tool = AuditReadTool()
     assert "limit_stops" in tool.parameters["properties"]["metric"]["enum"]
     assert "limit_stops returns" in tool.description
+
+
+def _work_done(history_days: int) -> int:
+    """SQLite steps for one limit_stops call over a week, after `history_days` of older rows."""
+    from datetime import datetime, timedelta, timezone
+
+    from infra.audit_limit_stops import limit_stops
+    from infra.limit_history_schema import LIMIT_HISTORY_SCHEMA_SQL
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE vendor_accounts (id TEXT PRIMARY KEY, name TEXT)")
+    db.executescript(LIMIT_HISTORY_SCHEMA_SQL)
+    accounts = [f"acct-{i}" for i in range(4)]
+    db.executemany("INSERT INTO vendor_accounts VALUES (?,?)", [(a, a) for a in accounts])
+    end = datetime(2026, 11, 9, tzinfo=timezone.utc)
+    hours = range(-24 * (7 + history_days), 0)
+    db.executemany(
+        "INSERT INTO limit_observations "
+        "(account_id,window_key,window_kind,used_percent,resets_at,source,observed_at) "
+        "VALUES (?,?,'five_hour',?,?,'test',?)",
+        [(a, f"k:{w}", (h * 37) % 101, (end + timedelta(hours=h + 3)).isoformat(),
+          (end + timedelta(hours=h)).isoformat())
+         for a in accounts for w in range(3) for h in hours],
+    )
+    steps = [0]
+
+    def tick() -> int:
+        steps[0] += 1
+        return 0
+
+    db.set_progress_handler(tick, 100)
+    limit_stops(db, (end - timedelta(days=7)).isoformat(), end.isoformat())
+    return steps[0]
+
+
+def test_limit_stops_work_follows_the_week_not_the_history():
+    # Index seeks only: ninety more days of older rows add almost nothing.
+    week_only, with_history = _work_done(0), _work_done(90)
+    assert with_history < week_only * 1.1
