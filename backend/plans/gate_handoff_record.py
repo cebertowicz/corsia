@@ -1,9 +1,10 @@
 """What happened at an acceptance gate, read off events that already exist.
 
-The run phases and their step nodes, the person's ``hold_cleared`` verdicts,
-``correction_created`` and the offers ``plans.gate_handoff`` records as
-``gate_handoff_offered``; there is no table of counts. ``plans.gate_handoff``
-replays them into a gate's state.
+The run phases and their step nodes, the person's verdicts, settlement times,
+corrections and offers are read from existing records. Whether a run's document
+went ahead unchanged is read once after its settlement and kept on the run
+(``plans.gate_document_outcome``); triage classifies failed runs. There is no
+table of counts: ``plans.gate_handoff`` replays the records into gate state.
 
 Each read is a fixed number of statements whatever the gate's age: each one takes
 every run of the gate at once (``json_each`` over the ids), never one statement per run.
@@ -14,7 +15,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
+
 OFFER_EVENT = "gate_handoff_offered"
+_CHANGES_REQUESTED = "changes_requested"
 _ANSWERED_BY_PERSON = "user.ask_cleared"
 #: An offer's decision states that end it: answered, or withdrawn (the person's Won't do, a closed run, an archive).
 _SETTLED = ("answered", "invalidated")
@@ -31,6 +35,20 @@ class Run:
     answer: str | None = None
     answered_at: str | None = None
     corrections: list[str] = field(default_factory=list)
+    answers: list[dict] = field(default_factory=list)
+    title: str = ""
+    tiers: list[str] = field(default_factory=list)
+    settled_at: str | None = None
+    #: The state the gate step settled in: accepted (with or without a follow-up), failed or closed.
+    settled_state: str | None = None
+    #: When the person first asked for changes in this run, if they did.
+    rejected_at: str | None = None
+    artifact_id: str | None = None
+    first_round_at: str | None = None
+    answer_holds: set[str] = field(default_factory=set)
+    document_outcome: dict | None = None
+    #: The run asked on a document whose read is missing or failed: it counts neither way.
+    document_unread: bool = False
 
 
 def project_of(db, plan_id: str) -> str:
@@ -47,10 +65,10 @@ def _ids(values) -> str:
 
 
 def gate_runs(db, key: tuple[str, str, str]) -> list[Run]:
-    """Each run of the gate in start order, with its first answer and corrections."""
+    """Each run of the gate in start order, with answers, settlement and triage."""
     project, ref, step = key
     rows = db.execute(
-        "SELECT p.id AS phase, p.plan_id AS plan, p.workflow_version AS version, p.created_at AS created, s.id AS node"
+        "SELECT p.id AS phase, p.plan_id AS plan, p.workflow_version AS version, p.created_at AS created, p.title AS title, s.id AS node"
         " FROM plan_nodes p JOIN plans pl ON pl.id=p.plan_id AND pl.owner_kind='thread'"
         " LEFT JOIN threads t ON t.id=pl.owner_id"
         " JOIN plan_nodes s ON s.plan_id=p.plan_id AND s.parent_id=p.id AND s.workflow_step=?"
@@ -74,44 +92,159 @@ def gate_runs(db, key: tuple[str, str, str]) -> list[Run]:
                 continue
             run = runs[row["phase"]] = Run(
                 row["phase"], row["plan"], row["version"], row["created"], first.get("workflow_gate_mode", "person"), [],
+                title=row["title"],
             )
         run.nodes.append(row["node"])
     run_of = {node: run for run in runs.values() for node in run.nodes}
-    for node, verdict, stamp in _answers(db, list(run_of), "ASC"):
+    for node, verdict, stamp, detail, hold_id in _answers(db, list(run_of), "ASC"):
+        run_of[node].answers.append(detail)
+        if hold_id:
+            run_of[node].answer_holds.add(hold_id)
         if run_of[node].answer is None:
             run_of[node].answer, run_of[node].answered_at = verdict, stamp
+        if verdict == _CHANGES_REQUESTED and run_of[node].rejected_at is None:
+            run_of[node].rejected_at = stamp
+    for row in db.execute(
+        "SELECT node_id,created_at,new_state FROM plan_node_events WHERE event='state_transition'"
+        " AND new_state IN (SELECT value FROM json_each(?))"
+        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
+        (_ids(sorted(_TERMINAL_STATES)), _ids(run_of)),
+    ):
+        settled = run_of[row["node_id"]]
+        if settled.settled_at is None:
+            settled.settled_at, settled.settled_state = row["created_at"], row["new_state"]
+    first_shown: dict[tuple[str, str], str] = {}
+    for row in db.execute(
+        "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event='hold_placed'"
+        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid", (_ids(run_of),),
+    ):
+        run = run_of[row["node_id"]]
+        payload = json.loads(row["payload_json"] or "{}")
+        artifact = payload.get("owner_id")
+        if payload.get("owner_kind") == "user" and artifact:
+            first_shown.setdefault((row["node_id"], artifact), row["created_at"])
+        if run.first_round_at is None and payload.get("hold_id") in run.answer_holds:
+            run.first_round_at = first_shown.get((row["node_id"], artifact), row["created_at"])
+            run.artifact_id = artifact
     for phase, stamp in _corrections(db, [(run.plan, run.phase) for run in runs.values()]):
         runs[phase].corrections.append(stamp)
+    _triage(db, runs)
+    _documents(db, runs)
     return list(runs.values())
+
+
+def run_outcome(db, run: Run) -> str | None:
+    """Classify a person's entire review using batched answers read for this run."""
+    answers = run.answers
+    if not answers or run.settled_at is None or run.document_unread:
+        return None
+    if any(detail.get("verdict") == _CHANGES_REQUESTED for detail in answers):
+        return "failed"
+    if run.settled_state not in _ACCEPTED_STATES:
+        # Closed or failed without the person asking for changes: the work never went ahead, so
+        # there is nothing to judge the review by.
+        return None
+    go_ahead = next((detail for detail in reversed(answers) if detail.get("verdict") in ("approved", "approved_with_changes")), None)
+    if go_ahead is not None and run.document_outcome is not None:
+        return "clean" if run.document_outcome["went_ahead_unchanged"] else "failed"
+    counts = answers[0].get("feedback_counts") or {}
+    return "clean" if answers[0].get("verdict") == "approved" and all(
+        counts.get(key, 0) == 0 for key in ("comments", "edits", "suggestions", "rejected_suggestions")
+    ) else "failed"
+
+
+def document_ask(run: Run) -> tuple[str, str, str] | None:
+    """The document, first round and settlement time when the run's go-ahead is judged on a document.
+
+    That is a run asked on a document, answered and settled; any other run gives None.
+    """
+    if run.artifact_id and run.first_round_at and run.settled_at and run.answers and run.settled_state in _ACCEPTED_STATES:
+        return run.artifact_id, run.first_round_at, run.settled_at
+    return None
+
+
+def _documents(db, runs: dict[str, Run]) -> None:
+    """Attach each run's kept document read, in one statement and with no Git.
+
+    A read that found no recorded document leaves the outcome None, so the run is
+    judged by its feedback counts; a read that failed, or was never kept, counts
+    the run neither way rather than guess it clean.
+    """
+    from plans import gate_document_outcome
+
+    asked = {phase: run for phase, run in runs.items() if document_ask(run)}
+    if not asked:
+        return
+    kept = gate_document_outcome.kept(db, asked)
+    for phase, run in asked.items():
+        answer = kept.get(phase)
+        if answer is None or "fault" in answer:
+            run.document_unread = True
+        else:
+            run.document_outcome = answer.get("outcome")
+
+
+def _triage(db, runs: dict[str, Run]) -> None:
+    """Attach triage to runs through the canonical correction attribution in bounded reads."""
+    if not runs:
+        return
+    from core.correction_attribution import attributed_facts
+    from core.correction_learning import TRIAGE_EVENT
+    from core.corrections_recording import subject_key
+
+    members: dict[str, list[str]] = {}
+    for row in db.execute(
+        "WITH RECURSIVE below(id,plan,phase) AS ("
+        " SELECT json_extract(value,'$[1]'),json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(?)"
+        " UNION ALL SELECT n.id,below.plan,below.phase FROM below CROSS JOIN plan_nodes n"
+        " ON n.plan_id=below.plan AND n.parent_id=below.id) SELECT id,phase FROM below",
+        (json.dumps([[run.plan, run.phase] for run in runs.values()]),),
+    ):
+        members.setdefault(row["id"], []).append(row["phase"])
+    facts = attributed_facts(db, node_ids=members)
+    subjects: dict[str, list[str]] = {}
+    for fact in facts:
+        key = subject_key(fact.source_kind, fact.source_id)
+        subjects.setdefault(key, []).extend(members.get(fact.node_id or "", []))
+    for row in db.execute(
+        "SELECT subject_key,attributes FROM outcome_events WHERE event_name=? AND retracted_at IS NULL"
+        " AND subject_key IN (SELECT value FROM json_each(?))", (TRIAGE_EVENT, _ids(subjects)),
+    ):
+        tier = json.loads(row["attributes"]).get("tier")
+        if tier:
+            for phase in subjects[row["subject_key"]]:
+                runs[phase].tiers.append(tier)
 
 
 def first_answer(db, node_ids: list[str]) -> tuple[str | None, str | None]:
     """The person's first verdict across a step's nodes, rounds included, and when; later answers never count.
 
-    A run with no answer (not asked, or N/A) returns ``(None, None)``: it neither counts nor breaks a streak.
+    A run with no answer (not asked, or N/A) returns ``(None, None)``.
     """
-    for _node, verdict, stamp in _answers(db, node_ids, "ASC"):
+    for _node, verdict, stamp, _detail, _hold_id in _answers(db, node_ids, "ASC"):
         return verdict, stamp
     return None, None
 
 
 def latest_verdict(db, node_ids: list[str]) -> str | None:
     """The person's most recent verdict across a step's nodes, or None."""
-    for _node, verdict, _stamp in _answers(db, node_ids, "DESC"):
+    for _node, verdict, _stamp, _detail, _hold_id in _answers(db, node_ids, "DESC"):
         return verdict
     return None
 
 
 def _answers(db, node_ids: list[str], order: str):
-    """Each person's verdict on any of ``node_ids``, as (node, verdict, when), in one statement."""
+    """Each person's verdict and hold on the nodes, in one statement."""
     for row in db.execute(
         "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event='hold_cleared' AND provenance=?"
         f" AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at {order},rowid {order}",
         (_ANSWERED_BY_PERSON, _ids(node_ids)),
     ):
-        verdict = (json.loads(row["payload_json"] or "{}").get("detail") or {}).get("verdict")
+        payload = json.loads(row["payload_json"] or "{}")
+        detail = payload.get("detail") or {}
+        verdict = detail.get("verdict")
         if isinstance(verdict, str):
-            yield row["node_id"], verdict, row["created_at"]
+            yield row["node_id"], verdict, row["created_at"], detail, payload.get("hold_id")
 
 
 def _corrections(db, phases: list[tuple[str, str]]) -> list[tuple[str, str]]:

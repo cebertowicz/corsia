@@ -1,4 +1,4 @@
-"""An acceptance gate is handed off by its track record: 8 clean first answers, then the person's choice."""
+"""Acceptance gates are handed off by settled review outcomes and the person's choice."""
 
 from __future__ import annotations
 
@@ -65,12 +65,16 @@ def _state(workflow="gated", step="gate"):
         db.close()
 
 
-async def _go(run, verdict="approved", workflow="gated"):
+async def _go(run, verdict="approved", workflow="gated", *, settle=True):
     """One run of the gate: start it and give the gate step its answer (none when ``verdict`` is None)."""
     reply = await run.start(workflow)
     gate = reply["steps"][1]["id"]
     if verdict is not None:
         _answer(gate, verdict)
+        if settle and verdict != "changes_requested":
+            result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
+                                                     "evidence": "done", "verification_result": "passed"})
+            assert not isinstance(result, str), result
     return reply, gate
 
 
@@ -121,14 +125,14 @@ def _correct(work: str) -> None:
 
 
 async def _hand_off(run, option: str):
-    for _ in range(8):
+    for _ in range(13):
         await _go(run)
     _answer_offer(option)
 
 
-async def test_eight_clean_runs_raise_exactly_one_offer(isolated_db, tmp_path, monkeypatch):
+async def test_thirteen_clean_runs_raise_exactly_one_offer(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(7):
+    for _ in range(12):
         await _go(run)
     assert _offers() == []
     await _go(run)
@@ -147,26 +151,26 @@ async def test_eight_clean_runs_raise_exactly_one_offer(isolated_db, tmp_path, m
 
 
 @pytest.mark.parametrize("breaker", ["approved_with_changes", "changes_requested"])
-async def test_anything_but_approve_breaks_the_streak(isolated_db, tmp_path, monkeypatch, breaker):
+async def test_one_failed_run_is_allowed_in_the_window(isolated_db, tmp_path, monkeypatch, breaker):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(7):
+    for _ in range(12):
         await _go(run)
-    await _go(run, breaker)
-    assert _state().streak == 0
-    for _ in range(7):
-        await _go(run)
-    assert _offers() == []
-    await _go(run)
+    _, gate = await _go(run, breaker)
+    if breaker == "changes_requested":
+        _answer(gate, "approved")
+        await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
+                                       "evidence": "done", "verification_result": "passed"})
+    assert len(_state().window) == 13
     assert len(_offers()) == 1
 
 
-async def test_only_the_first_answer_counts(isolated_db, tmp_path, monkeypatch):
+async def test_first_answer_remains_available_before_settlement(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     for _ in range(3):
         await _go(run)
     _reply, gate = await _go(run, "changes_requested")
     _answer(gate, "approved")
-    assert _state().streak == 0
+    assert len(_state().window) == 3
     db = get_db()
     try:
         assert gate_handoff_record.first_answer(db, [gate])[0] == "changes_requested"
@@ -179,7 +183,7 @@ async def test_a_run_with_no_answer_neither_counts_nor_breaks(isolated_db, tmp_p
     await _go(run)
     await _go(run, None)
     await _go(run)
-    assert _state().streak == 2
+    assert len(_state().window) == 2
 
 
 async def test_alignment_gates_never_count_or_hand_off(isolated_db, tmp_path, monkeypatch):
@@ -192,24 +196,24 @@ async def test_alignment_gates_never_count_or_hand_off(isolated_db, tmp_path, mo
     ) == []
 
 
-async def test_a_new_version_starts_the_count_again(isolated_db, tmp_path, monkeypatch):
+async def test_a_new_version_keeps_the_window(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     for _ in range(5):
         await _go(run)
     _bump("v2")
     for _ in range(5):
         await _go(run)
-    assert _offers() == [] and _state().streak == 5
+    assert _offers() == [] and len(_state().window) == 10
     for _ in range(3):
         await _go(run)
     assert len(_offers()) == 1
 
 
-async def test_keep_restarts_the_count_and_offers_again_after_eight_more(isolated_db, tmp_path, monkeypatch):
+async def test_keep_restarts_the_count_and_offers_again_after_thirteen_more(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     await _hand_off(run, "D")
-    assert _state().kind == "person" and _state().streak == 0
-    for _ in range(7):
+    assert _state().kind == "person" and len(_state().window) == 0
+    for _ in range(12):
         await _go(run)
     assert len(_offers()) == 1
     await _go(run)
@@ -218,7 +222,7 @@ async def test_keep_restarts_the_count_and_offers_again_after_eight_more(isolate
 
 async def test_no_second_offer_while_one_is_open(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(12):
+    for _ in range(15):
         await _go(run)
     assert len(_offers()) == 1
 
@@ -276,7 +280,7 @@ async def test_a_spot_check_that_is_not_approved_hands_the_gate_back(isolated_db
     monkeypatch.setattr(gate_handoff, "drawn", lambda *_: True)
     await _go(run, "approved_with_changes")
     state = _state()
-    assert (state.kind, state.streak) == ("person", 0)
+    assert (state.kind, len(state.window)) == ("person", 0)
     reply, _gate = await _go(run)
     assert "gate_mode" not in reply["steps"][1]
 
@@ -292,6 +296,9 @@ async def test_a_failed_spot_check_answered_after_a_new_version_started_hands_th
     await _go(run, None)
     assert _state().kind == "spot"
     _answer(old_gate, "changes_requested")
+    _answer(old_gate, "approved")
+    await run.update("mark_done", {"node_id": old_gate, "expected_revision": run.revision(old_gate),
+                                   "evidence": "done", "verification_result": "passed"})
     assert _state().kind == "person"
 
 
@@ -308,16 +315,19 @@ async def test_a_correction_hands_the_gate_back(isolated_db, tmp_path, monkeypat
 
 async def test_a_correction_withdraws_an_open_offer(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(7):
+    for _ in range(12):
         await _go(run)
     reply, gate = await _go(run)
     decision_id = json.loads(_offers()[-1]["payload_json"])["decision_id"]
     work = reply["steps"][0]["id"]
     await run.update("mark_done", {"node_id": work, "expected_revision": run.revision(work), "evidence": "d", "verification_result": "passed"})
-    await run.update("add_correction", {
+    next_run = await run.start("gated")
+    affected = next_run["steps"][0]["id"]
+    correction = await run.update("add_correction", {
         "node_id": work, "expected_revision": run.revision(work), "title": "Fix", "acceptance_criteria": "Fixed",
-        "affected_nodes": [{"node_id": gate, "expected_revision": run.revision(gate)}],
+        "affected_nodes": [{"node_id": affected, "expected_revision": run.revision(affected)}],
     })
+    assert not isinstance(correction, str), correction
     db = get_db()
     try:
         assert decisions.read(decision_id, db=db)["state"] == "invalidated"
@@ -330,15 +340,15 @@ async def test_a_correction_withdraws_an_open_offer(isolated_db, tmp_path, monke
         "SELECT json_extract(payload_json,'$.reason') AS reason FROM plan_node_events WHERE event='decision_invalidated'"
     ) == [{"reason": "This work was corrected, so you keep reviewing it"}]
     state = _state()
-    assert (state.kind, state.streak, state.open_offer, state.voided_offer) == ("person", 0, None, None)
-    for _ in range(8):
+    assert (state.kind, len(state.window), state.open_offer, state.voided_offer) == ("person", 0, None, None)
+    for _ in range(13):
         await _go(run)
     assert len(_offers()) == 2
 
 
 async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(8):
+    for _ in range(13):
         reply, gate = await _go(run)
     (step,) = _run_db("SELECT title FROM plan_nodes WHERE id=?", gate)
     db = get_db()
@@ -349,9 +359,9 @@ async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_p
     assert decision["title"] == gate_handoff.OFFER_TITLE.format(step=step["title"], workflow=reply["node"]["title"])
 
 
-async def test_the_answer_that_earns_the_offer_commits_whatever_the_titles(isolated_db, tmp_path, monkeypatch):
+async def test_the_settlement_that_earns_the_offer_commits_whatever_the_titles(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(7):
+    for _ in range(gate_handoff.WINDOW[0] - 1):
         await _go(run)
     reply = await run.start("gated")
     gate, phase = reply["steps"][1]["id"], reply["node"]["id"]
@@ -363,6 +373,10 @@ async def test_the_answer_that_earns_the_offer_commits_whatever_the_titles(isola
         "SELECT json_extract(payload_json,'$.detail.verdict') AS v FROM plan_node_events WHERE node_id=? AND event='hold_cleared'",
         gate,
     ) == [{"v": "approved"}]
+    assert _offers() == []
+    result = await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate),
+                                            "evidence": "done", "verification_result": "passed"})
+    assert not isinstance(result, str), result
     db = get_db()
     try:
         decision = decisions.read(json.loads(_offers()[-1]["payload_json"])["decision_id"], db=db)
@@ -406,7 +420,7 @@ async def test_a_correction_on_a_run_of_an_older_version_hands_the_gate_back(iso
 
 async def test_an_other_answer_keeps_the_review_and_restarts_the_count(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    for _ in range(8):
+    for _ in range(13):
         await _go(run)
     payload = json.loads(_offers()[-1]["payload_json"])
     db = get_db()
@@ -419,17 +433,17 @@ async def test_an_other_answer_keeps_the_review_and_restarts_the_count(isolated_
         db.commit()
     finally:
         db.close()
-    assert _state().kind == "person" and _state().streak == 0
+    assert _state().kind == "person" and len(_state().window) == 0
     await _go(run)
     assert len(_offers()) == 1
 
 
 async def test_a_dismissed_offer_does_not_come_back_at_the_next_clean_run(isolated_db, tmp_path, monkeypatch):
-    """The person's Won't do on the offer withdraws it; it counts as Keep, so it returns only after eight more."""
+    """Withdrawing an offer resets the window before another offer."""
     from plans import decision_lifecycle
 
     run = _make(tmp_path, monkeypatch)
-    for _ in range(8):
+    for _ in range(13):
         await _go(run)
     payload = json.loads(_offers()[-1]["payload_json"])
     db = get_db()
@@ -443,8 +457,8 @@ async def test_a_dismissed_offer_does_not_come_back_at_the_next_clean_run(isolat
         assert decisions.read(payload["decision_id"], db=db)["state"] == "invalidated"
     finally:
         db.close()
-    assert _state().kind == "person" and _state().streak == 0 and _state().open_offer is None
-    for _ in range(7):
+    assert _state().kind == "person" and len(_state().window) == 0 and _state().open_offer is None
+    for _ in range(12):
         await _go(run)
     assert len(_offers()) == 1
     await _go(run)
@@ -473,7 +487,7 @@ async def test_drop_closes_the_gate_step_at_once_and_the_run_records_the_skip(is
 
 async def test_the_run_record_carries_each_gates_mode_and_first_answer(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
-    reply, gate = await _go(run, "approved_with_changes")
+    reply, gate = await _go(run, "approved_with_changes", settle=False)
     work = reply["steps"][0]["id"]
     await run.update("mark_done", {"node_id": work, "expected_revision": run.revision(work), "evidence": "d", "verification_result": "passed"})
     await run.update("mark_done", {"node_id": gate, "expected_revision": run.revision(gate), "evidence": "d", "verification_result": "passed"})
@@ -529,7 +543,7 @@ async def test_the_offer_renders_as_the_owners_decision_and_the_person_can_answe
     from registry import attention
 
     run = _make(tmp_path, monkeypatch)
-    for _ in range(8):
+    for _ in range(13):
         await _go(run)
     db = get_db()
     try:
