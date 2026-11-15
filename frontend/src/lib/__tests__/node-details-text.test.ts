@@ -106,5 +106,16 @@ describe('node details wording', () => {
 				model_cost_usd: { known: null, unknown_rows: 1 },
 			},
 		})).toBe('at least 100 tokens');
+		// A known zero is an empty fact here too, never a "0 tokens" follow-up line.
+		const idle = { ...base.node_cost.rolled, tokens: { known: 0, unknown_rows: 0 } };
+		const idleNode = { ...base, node_cost: { own: idle, rolled: idle } };
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: null, unknown_rows: 1 } },
+		})).toBeNull();
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: 0.5, unknown_rows: 0 } },
+		})).toBe('$0.5000 API-equivalent');
 	});
 });
