@@ -17,7 +17,7 @@ from llm import network_discovery as nd
 from llm import network_endpoints as ne
 from llm.endpoint_policy import registration_restriction, relocation_restriction
 from llm.external_declared_models import (
-    LIST_UNSUPPORTED, META_KEY, clean_model_ids, declared_model_ids, declared_model_refusal,
+    LIST_UNSUPPORTED, META_KEY, clean_model_ids, declared_model_ids,
 )
 from llm.providers.omlx_endpoints import health_url as omlx_health_url
 from llm.providers.omlx_public_auth import public_headers
@@ -158,10 +158,8 @@ async def _probe_external(
             f"Could not reach {probe_url} — {type(e).__name__}: {e}", action=action,
         )
     if declared and resp.status_code in LIST_UNSUPPORTED:
-        # No list call, or a mistyped path: only a declared model can tell them apart.
-        refused = await declared_model_refusal(base, dialect, headers, declared[0])
-        if refused:
-            raise _refuse_endpoint(dialect, "declared_model_refused", refused, action=action)
+        # A missing list API does not authorize running a declared model.
+        # The first requested use establishes whether that model can be served.
         return []
     if resp.status_code != 200:
         detail = f"{probe_url} returned HTTP {resp.status_code}"

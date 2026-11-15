@@ -33,7 +33,6 @@ def _register(host: str, base: str, *, status: str = "online") -> str:
 @pytest.fixture
 def listing(monkeypatch):
     """What the endpoint's ``/models`` lists; no request leaves the test."""
-    from llm import external_image_input
     from llm import external_provider as ep
 
     listed: dict = {"ids": ["qwen-flash", "glm-5.1"], "error": None}
@@ -44,11 +43,7 @@ def listing(monkeypatch):
             raise listed["error"]
         return dict.fromkeys(listed["ids"])
 
-    async def _no_image_probe(server_id):
-        return False
-
     monkeypatch.setattr(ep, "fetch_external_models", _fetch)
-    monkeypatch.setattr(external_image_input, "detect_image_input", _no_image_probe)
     return listed
 
 
