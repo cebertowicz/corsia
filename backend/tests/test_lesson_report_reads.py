@@ -212,7 +212,7 @@ def test_a_turn_whose_receipt_write_failed_still_counts_its_unlinked_read(db):
     assert projection["unavailable_reads"] == {"repeated or missing call/load linkage": 1}
 
 
-def _candidate_statement(db):
+def _candidate_statement(db, thread_ids=("owner",)):
     from collections import Counter
     from core.lesson_report_reads import _candidate_groups
 
@@ -223,17 +223,29 @@ def _candidate_statement(db):
             seen.append((sql, params))
             return db.execute(sql, params)
 
-    _candidate_groups(RecordingDB(), "user", ("owner",), Counter())
+    groups = _candidate_groups(RecordingDB(), "user", thread_ids, Counter())
     [statement] = seen
-    return statement
+    return statement, groups
 
 
 def test_candidate_scan_seeks_each_receipt_turn_on_the_turn_index(db):
     read_call(db)
     load(db)
-    sql, params = _candidate_statement(db)
+    (sql, params), _groups = _candidate_statement(db)
     details = [row["detail"] for row in db.execute("EXPLAIN QUERY PLAN " + sql, params)]
     assert "SEARCH m USING INDEX idx_messages_meta_turn_seq (thread_id=? AND <expr>=?)" in details, details
+
+
+def test_candidate_scan_reads_guidance_loads_once_for_any_number_of_threads(db):
+    # guidance_loads has no index led by thread_id, so batching threads would re-read it per batch.
+    read_call(db)
+    load(db)
+    thread_ids = (*(f"other-{index}" for index in range(1200)), "owner")
+    (sql, params), groups = _candidate_statement(db, thread_ids)
+    assert list(groups) == [("owner", "turn", PATH)]
+    details = [row["detail"] for row in db.execute("EXPLAIN QUERY PLAN " + sql, params)]
+    reads_of_g = [detail for detail in details if detail.startswith(("SCAN g", "SEARCH g"))]
+    assert reads_of_g == ["SEARCH g USING INDEX idx_guidance_loads_turn (turn_id>?)"], details
 
 
 def test_candidate_scan_cost_does_not_grow_with_reads_in_turns_without_a_receipt(db):
