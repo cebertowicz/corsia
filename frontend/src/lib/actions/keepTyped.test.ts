@@ -205,6 +205,25 @@ describe('edits that stand', () => {
 		expect(field.value).toBe('Hello @Alpha Agent ');
 	});
 
+	it('a beforeinput that got no input, then a clear on send, never brings the sent text back', async () => {
+		typed('sent comment to Sam', 0);
+		field.dispatchEvent(device(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true })));
+		await new Promise((resolve) => setTimeout(resolve));
+		field.value = '';
+		edit('insertReplacementText', 'Sam Rivera', { before: false });
+		expect(field.value).toBe('Sam Rivera');
+	});
+
+	it('an input that arrives in a later task than its beforeinput', async () => {
+		typed('Thanks, see you at');
+		const init = { inputType: 'insertReplacementText', bubbles: true, cancelable: true };
+		field.dispatchEvent(device(new InputEvent('beforeinput', init)));
+		await new Promise((resolve) => setTimeout(resolve));
+		field.value = 'Sam Rivera';
+		field.dispatchEvent(device(new InputEvent('input', init)));
+		expect(field.value).toBe('Sam Rivera');
+	});
+
 	it('an edit with no beforeinput', () => {
 		typed('Thanks, see you at');
 		edit('insertReplacementText', 'Sam', { before: false });

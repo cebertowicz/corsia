@@ -5,8 +5,9 @@
  * and the field's own `oninput` handlers only see the kept text.
  *
  * It repairs an edit only when all of these hold, so ordinary edits pass through untouched:
- * 1. a trusted `beforeinput` was seen for it (our own writes: the mention picker's synthetic `input`, a clear on send
- *    that fires no event at all, never qualify, and a stale snapshot can never resurrect cleared text);
+ * 1. a trusted `beforeinput` was seen for it in the same task (our own writes: the mention picker's synthetic `input`,
+ *    a clear on send that fires no event at all, never qualify; a `beforeinput` that got no `input`, such as Backspace
+ *    at the start, is dropped when its task ends, so a stale snapshot can never resurrect cleared text);
  * 2. no IME composition is open;
  * 3. its `inputType` is `insertText`, `insertReplacementText` or empty (never a delete, undo/redo, paste, drop, line
  *    break or transpose);
@@ -73,7 +74,10 @@ export function keepTyped(node: TextField, options: { prose?: boolean } = {}) {
 	let pending: Snapshot | null = null;
 	let composing = false;
 	const onBeforeInput = (event: Event) => {
-		pending = eventOrigin.trusted(event) ? { value: node.value, start: node.selectionStart ?? 0, end: node.selectionEnd ?? 0 } : null;
+		const snapshot = eventOrigin.trusted(event) ? { value: node.value, start: node.selectionStart ?? 0, end: node.selectionEnd ?? 0 } : null;
+		pending = snapshot;
+		// The browser sends an edit's `input` in the same task as its `beforeinput`; one that never came is not waited for.
+		if (snapshot) setTimeout(() => { if (pending === snapshot) pending = null; });
 	};
 	const onInput = (event: Event) => {
 		const prior = pending;
