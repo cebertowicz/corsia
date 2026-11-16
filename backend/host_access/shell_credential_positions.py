@@ -118,12 +118,15 @@ def curl_word_at(words: Sequence[str], index: int) -> bool:
     """Whether the simple command holding ``words[index]`` runs curl.
 
     Short ``-u`` carries a user and password only for curl; other
-    commands use it as a switch (``date -u``, ``sort -u``).
+    commands use it as a switch (``date -u``, ``sort -u``). A command
+    named by a variable (``$CURL``) may be curl, so it counts.
     """
+    first = ""
     for word in reversed(words[:index]):
         if str(word) in COMMAND_BOUNDARIES:
-            return False
+            break
         # A subshell's first word keeps its parenthesis: ``(curl``.
-        if Path(str(word).lstrip("(")).name.casefold() in _USERINFO_FLAG_COMMANDS:
+        first = str(word).lstrip("(")
+        if Path(first).name.casefold() in _USERINFO_FLAG_COMMANDS:
             return True
-    return False
+    return first.startswith("$")

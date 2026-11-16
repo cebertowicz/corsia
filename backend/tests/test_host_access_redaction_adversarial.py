@@ -264,6 +264,8 @@ _TOK = "Tok" + "en"
         "git ls-remote origin x; date -u +%H:%M",
         "sort -u a:b",
         "echo ready | date -u +%H:%M",
+        "ts=$(date -u +%H:%M)",
+        "echo \"$(date -u +%H:%M:%S)\"",
         "grep -n '" + _CRED + ":' notes.md",
         "python3 -c \"print(b'**" + _CRED + ":** any')\"",
         "python3 -c 'def f(" + _TOK.lower() + ": str): pass'",
@@ -286,9 +288,13 @@ def test_switches_and_code_text_are_not_literal_credentials(
         "curl -ualice:not-a-ref https://example.test",  # gitleaks:allow
         "sudo curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "$CURL -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "ffuf -u https://alice:not-a-ref@example.test/FUZZ",  # gitleaks:allow
         "ffuf -u 'https://example.test/?" + _TOK.lower() + "=abc123'",
         "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
+        "curl -H \"X-${P}-" + _TOK + ": abc123\" https://example.test",
+        "curl -H\"X-${P}-" + _TOK + ": abc123\" https://example.test",
+        "curl --header=\"X-${P}-" + _TOK + ": abc123\" https://example.test",
         "http example.test '" + _TOK + ":abc123'",
     ],
 )
@@ -302,9 +308,9 @@ def test_curl_user_and_header_literals_are_still_refused(
     assert check_command_safety(command) is not None
 
 
-def test_short_u_value_outside_curl_is_still_hidden_from_review() -> None:
-    from host_access.redaction import REDACTED, redact_shell_command
+def test_short_u_outside_curl_is_a_switch_shown_as_written() -> None:
+    from host_access.redaction import redact_shell_command
 
     rendered = redact_shell_command("sort -u a:b")
-    assert rendered.tokens == ("sort", "-u", "a:" + REDACTED)
+    assert rendered.tokens == ("sort", "-u", "a:b")
     assert rendered.literal_credentials == 0

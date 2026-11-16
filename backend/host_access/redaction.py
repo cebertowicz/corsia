@@ -123,7 +123,11 @@ def _userinfo_replacement(value: str) -> tuple[str, int, int]:
     return f"{identity}:{replacement}", redactions, literals
 
 
-def _redact_authorization_header(value: str) -> tuple[str, int, int]:
+def _redact_authorization_header(
+    value: str, *, explicit: bool = False
+) -> tuple[str, int, int]:
+    """Hide a credential header's value; ``explicit`` when the word is a
+    header by position (``-H``, ``--header``), not by its shape."""
     cookie = _COOKIE_HEADER_RE.fullmatch(value.strip())
     if cookie is not None:
         credential = cookie.group("credential").strip()
@@ -144,7 +148,8 @@ def _redact_authorization_header(value: str) -> tuple[str, int, int]:
         replacement, redactions, literals = _secret_replacement(
             assigned.strip()
         )
-        if _HEADER_NAME_RE.fullmatch(header.strip()) is None:
+        # Only a word that is a header by shape needs a header-shaped name.
+        if not explicit and _HEADER_NAME_RE.fullmatch(header.strip()) is None:
             literals = 0
         return f"{header}: {replacement}", redactions, literals
 
@@ -373,11 +378,13 @@ def _redact_userinfo_flag(
     """Hide a ``-u``, ``--user`` or ``--proxy-user`` value at ``index``.
 
     Returns the rendered words, redactions, literal count and words
-    consumed, or None when ``index`` holds no such value. A literal after
-    short ``-u`` is refused as userinfo only for curl; elsewhere (``date
-    -u``) it is hidden, and refused only as any other word would be.
+    consumed, or None when ``index`` holds no such value. Short ``-u``
+    carries userinfo only for curl; elsewhere (``date -u``) it is a switch,
+    and its next word is handled as any other word.
     """
     flag = str(words[index])
+    if flag.startswith("-u") and not curl_word_at(words, index):
+        return None
     if flag in {"-u", "--proxy-user", "--user"} and index + 1 < len(words):
         value, rendered_flag, consumed = str(words[index + 1]), [flag], 2
     elif flag.startswith("-u") and flag != "-u":
@@ -389,8 +396,6 @@ def _redact_userinfo_flag(
     rendered, count, literals = _userinfo_replacement(value)
     if consumed == 1:
         rendered = f"-u{rendered}"
-    if flag.startswith("-u") and not curl_word_at(words, index):
-        literals = _redact_intrinsic(value)[2]
     return [*rendered_flag, rendered], count, literals, consumed
 
 
@@ -454,7 +459,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
         if token in {"-H", "--header"} and index + 1 < len(tokens):
             candidate = str(tokens[index + 1])
             rendered, count, literals = _redact_authorization_header(
-                candidate
+                candidate, explicit=True
             )
             redacted.append(token)
             redacted.append(rendered)
@@ -484,7 +489,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
 
         if token.startswith("-H") and token != "-H":
             rendered, count, literals = _redact_authorization_header(
-                token[2:].strip()
+                token[2:].strip(), explicit=True
             )
             redacted.append(f"-H{rendered}")
             redactions += count
@@ -523,7 +528,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
                 continue
             if separator and option_key.casefold() == "header":
                 rendered, count, literals = _redact_authorization_header(
-                    value
+                    value, explicit=True
                 )
                 redacted.append(f"{option}={rendered}")
                 redactions += count
