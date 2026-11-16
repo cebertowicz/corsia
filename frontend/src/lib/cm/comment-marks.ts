@@ -1,11 +1,11 @@
 import { StateField, StateEffect, type EditorState } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { sheetOverlays, visibleRegion, type Box } from './visible-region';
+import { overlaySheet, sheetOverlays, visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
 import type { ImageRegion } from '$lib/api/docs';
 import { mapCommentRange } from './comment-range';
-import { keptWhole } from '$lib/sheetClearance';
+import { keptWhole, sheetRaised } from '$lib/sheetClearance';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -215,6 +215,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
 		if (!seenSize) { seenSize = true; return; }
 		if (done) return;
+		// A sheet the reader pulled up is their own move, as a scroll is: the keyboard that follows it moves nothing.
+		if (sheetRaised(overlaySheet(view))) { stop(); return; }
 		steady = 0;
 		check(settledPass);
 	}) : null;

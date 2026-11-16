@@ -83,7 +83,18 @@ async function openDocument(page: Page): Promise<Opened> {
 	await loginByUrl(page, { waitForComposer: false });
 	await page.getByRole('button', { name: /^Toggle sidebar/ }).tap();
 	await page.getByText(title, { exact: true }).first().tap();
-	await expect(cellMark(page)).toBeVisible({ timeout: 15_000 });
+	await expect(page.locator('.cm-content', { hasText: 'Trail survey' })).toBeVisible({ timeout: 15_000 });
+	// Both highlights sit below the first screen, where the editor has not drawn their lines yet: read down until it has.
+	await expect.poll(async () => {
+		if ((await cellMark(page).count()) && (await passageMark(page).count())) return true;
+		await page.locator('.cm-content').evaluate((content) => {
+			let scroller = content.parentElement;
+			while (scroller && !(/(auto|scroll)/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
+			scroller?.scrollBy(0, scroller.clientHeight / 2);
+		});
+		return false;
+	}, { intervals: [150], timeout: 20_000 }).toBe(true);
+	await expect(cellMark(page)).toBeVisible();
 	await expect(passageMark(page)).toBeVisible();
 	return { title, other, ids };
 }
@@ -358,7 +369,8 @@ test.describe(`${TAG} document`, () => {
 				const r = el.getBoundingClientRect();
 				return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && getComputedStyle(el).visibility !== 'hidden';
 			});
-			return { count: shown.length, misses: shown.filter((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !(hit === el || el.contains(hit)); }).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 30)) };
+			// A row's swipe actions sit behind the row itself, so the touch is the navigation's when it lands anywhere in it, never in the sheet.
+			return { count: shown.length, misses: shown.filter((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !aside.contains(hit) || !!hit.closest('[data-adaptive-drawer]'); }).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 30)) };
 		});
 		expect(rows.count, 'the navigation shows its rows').toBeGreaterThanOrEqual(3);
 		expect(rows.misses, 'every navigation row takes the touch over the sheet').toEqual([]);
