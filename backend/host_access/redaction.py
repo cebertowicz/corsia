@@ -123,11 +123,7 @@ def _userinfo_replacement(value: str) -> tuple[str, int, int]:
     return f"{identity}:{replacement}", redactions, literals
 
 
-def _redact_authorization_header(
-    value: str, *, explicit: bool = False
-) -> tuple[str, int, int]:
-    """Hide a credential header's value; ``explicit`` when the word is a
-    header by position (``-H``, ``--header``), not by its shape."""
+def _redact_authorization_header(value: str) -> tuple[str, int, int]:
     cookie = _COOKIE_HEADER_RE.fullmatch(value.strip())
     if cookie is not None:
         credential = cookie.group("credential").strip()
@@ -148,9 +144,6 @@ def _redact_authorization_header(
         replacement, redactions, literals = _secret_replacement(
             assigned.strip()
         )
-        # Only a word that is a header by shape needs a header-shaped name.
-        if not explicit and _HEADER_NAME_RE.fullmatch(header.strip()) is None:
-            literals = 0
         return f"{header}: {replacement}", redactions, literals
 
     credential = match.group("credential").strip()
@@ -298,8 +291,9 @@ def _redact_intrinsic(value: str) -> tuple[str, int, int]:
         return structured, count, literals
 
     authorization, count, literals = _redact_authorization_header(value)
-    if count:
-        return authorization, count, literals
+    if count:  # A header by shape only (not after -H) needs a header's name.
+        named = _HEADER_NAME_RE.fullmatch(value.partition(":")[0].strip())
+        return authorization, count, literals if named else 0
 
     key, separator, assigned = value.partition("=")
     if separator and _is_sensitive_key(key.lstrip("-")):
@@ -459,7 +453,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
         if token in {"-H", "--header"} and index + 1 < len(tokens):
             candidate = str(tokens[index + 1])
             rendered, count, literals = _redact_authorization_header(
-                candidate, explicit=True
+                candidate
             )
             redacted.append(token)
             redacted.append(rendered)
@@ -489,7 +483,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
 
         if token.startswith("-H") and token != "-H":
             rendered, count, literals = _redact_authorization_header(
-                token[2:].strip(), explicit=True
+                token[2:].strip()
             )
             redacted.append(f"-H{rendered}")
             redactions += count
@@ -528,7 +522,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
                 continue
             if separator and option_key.casefold() == "header":
                 rendered, count, literals = _redact_authorization_header(
-                    value, explicit=True
+                    value
                 )
                 redacted.append(f"{option}={rendered}")
                 redactions += count
