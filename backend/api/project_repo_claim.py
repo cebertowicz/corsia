@@ -53,8 +53,8 @@ def _overlaps(a: tuple[Path, ...], b: tuple[Path, ...]) -> bool:
     return any(contains(x, y) or contains(y, x) for x in a for y in b)
 
 
-def _everywhere(project_id: str, reason: str) -> None:
-    """Claim everywhere for ``reason``, logged where production log reads see it."""
+def _everywhere(project_id: str, reason: str) -> frozenset[str] | None:
+    """The claim ``None`` (everywhere) for ``reason``, logged where production log reads see it."""
     logger.info("repo registration claims everywhere project={} reason={}", project_id, reason)
     return None
 
@@ -94,7 +94,8 @@ def _other_roots(workspace: Path, project_id: str, db) -> list[tuple[Path, ...]]
     ):
         raw = row["repo_path"]
         if not isinstance(raw, str) or not Path(raw).is_absolute():
-            return _everywhere(project_id, f"unreadable repo path registered by project {row['project_id']}")
+            _everywhere(project_id, f"unreadable repo path registered by project {row['project_id']}")
+            return None
         roots.append(_forms(Path(os.path.normpath(raw))))
     return roots
 
