@@ -104,12 +104,14 @@ def inherited_args() -> list[str]:
 
 
 def stealth_args(ua: str | None, *, headless: bool) -> str:
-    """Inherited and stealth switches, separated by newlines for direct Chrome launch.
+    """Inherited switches plus the ones every managed launch adds, separated by newlines for direct Chrome launch.
 
+    Fake media devices keep a page's camera or microphone request from ever reaching the real
+    device, so no site can make the operating system ask the person for that permission.
     agent-browser also splits ``--args`` on whitespace; pass a spaced user agent separately.
     """
     inherited = inherited_args()
-    ours = ["--disable-blink-features=AutomationControlled"]
+    ours = ["--disable-blink-features=AutomationControlled", "--use-fake-device-for-media-stream"]
     if headless and ua:
         ours.append(f"--user-agent={ua}")
     return "\n".join([*inherited, *(arg for arg in ours if arg not in inherited)])

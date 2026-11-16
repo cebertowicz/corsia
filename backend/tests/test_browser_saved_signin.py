@@ -64,6 +64,8 @@ async def test_the_first_session_launches_on_the_shared_profile_and_stops_announ
     args = fake.chrome_calls[0]
     assert f"--user-data-dir={browser_launch.profile_dir('a')}" in args
     assert "--disable-blink-features=AutomationControlled" in args
+    # No page can reach the real camera or microphone, so none can raise an OS permission prompt.
+    assert "--use-fake-device-for-media-stream" in args
     ua = next(arg for arg in args if arg.startswith("--user-agent=")).removeprefix("--user-agent=")
     assert ua.endswith("Chrome/154.0.0.0 Safari/537.36") and "HeadlessChrome" not in ua
     assert Path(_value(first, "--init-script")).is_file()
@@ -80,6 +82,7 @@ async def test_a_visible_browser_keeps_chromes_own_user_agent(synthetic_browser,
     args = fake.chrome_calls[0]
     assert not any(arg.startswith("--user-agent=") for arg in args)
     assert "--disable-blink-features=AutomationControlled" in args
+    assert "--use-fake-device-for-media-stream" in args
     await fake.owner.shutdown()
 
 

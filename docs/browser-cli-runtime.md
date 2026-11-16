@@ -99,8 +99,11 @@ sign-in automatically; agents needing extraction without it can launch their
 own ephemeral agent-browser session in the protected shell. Headless launches drop the
 `AutomationControlled` blink feature, use a
 user agent derived from the installed Chrome without the `Headless` token, and
-run `browser_stealth_init.js` on every document. Launch flags apply only to a
-session's first command.
+run `browser_stealth_init.js` on every document. Every managed launch, headless
+or visible, uses Chrome's fake camera and microphone
+(`--use-fake-device-for-media-stream`), so no page reaches the real devices or
+makes the operating system ask the person for that permission. Launch flags apply
+only to a session's first command.
 
 Every managed navigation URL uses the pane's shared normalizer before native setup
 or daemon admission: HTTP, HTTPS and `about:blank` only. The pinned 0.31.2 navigation
