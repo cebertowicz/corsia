@@ -166,8 +166,8 @@ describe('a seed, which the transcript never draws', () => {
 });
 
 describe('the browser chip a stub carries', () => {
-	const github = { host: 'github.com' };
-	const other = { host: 'example.org' };
+	const github = { host: 'github.com', domain: 'github.com' };
+	const other = { host: 'example.org', domain: 'example.org' };
 	const blockChips = (entries: TranscriptEntry[]) => folds(entries).map((fold) => fold.browserChip ?? null);
 	const opened = (row: TranscriptMessage, chip: { host: string }) => ({ ...row, metadata: { ...row.metadata, browser_chip: chip } });
 

@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- The browser chip in chat and the browser's address bar now lead with the site's real domain, so a long web address cut short no longer hides which site the agent is on; before, the cut-off end was the part that named the site.
 - A browser step only you can finish, such as a password page, opens the shared browser in one press from its chat chip or its plan row, at any width; before, the press opened the task's details instead.
 - A chat comment card beside the message box now accepts clicks on its reply field and Send.
 - A chat comment thread shows an agent's answer once, even when the answer tags several of its comments; before, it showed once for each.
