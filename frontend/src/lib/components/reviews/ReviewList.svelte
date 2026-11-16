@@ -1,9 +1,28 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { reviewContinuationText, reviewStatus } from '$lib/reviewCopy';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import type { DocumentReviewState } from '$lib/docReviewState.svelte';
 	let { model }: { model: DocumentReviewState } = $props();
+	/**
+	 * Cancel keeps the focus through its request: while the request is pending the button refuses presses instead of
+	 * being disabled, and once the row goes the focus moves to the next Cancel, else the one before, else back into the
+	 * surface (its search field when there is one), so Escape still reaches the surface and never the page beneath it.
+	 */
+	async function cancel(event: MouseEvent, id: string) {
+		if (model.cancelPending.includes(id)) return;
+		const button = event.currentTarget as HTMLElement;
+		const surface = button.closest<HTMLElement>('[data-review-surface]');
+		const index = model.requests.findIndex((request) => request.id === id);
+		await model.cancel(id);
+		await tick();
+		const active = document.activeElement;
+		if (button.isConnected || !surface?.isConnected || (active && active !== document.body && active.isConnected)) return;
+		const cancels = [...surface.querySelectorAll<HTMLElement>('[data-review-request] .cancel')];
+		const next = cancels[index] ?? cancels[index - 1] ?? surface.querySelector<HTMLElement>('[data-review-autofocus]') ?? surface.closest<HTMLElement>('[data-popover]');
+		next?.focus({ preventScroll: true });
+	}
 </script>
 
 {#if model.requests.length}
@@ -17,7 +36,7 @@
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}
-					<button type="button" class="cancel" disabled={model.cancelPending.includes(request.id)} aria-label={`Cancel request to ${request.reviewer_name}`} onclick={() => model.cancel(request.id)}>
+					<button type="button" class="cancel" aria-disabled={model.cancelPending.includes(request.id)} aria-label={`Cancel request to ${request.reviewer_name}`} onclick={(event) => cancel(event, request.id)}>
 						{model.cancelPending.includes(request.id) ? 'Cancelling…' : model.cancelErrors[request.id] ? 'Retry' : 'Cancel'}
 					</button>
 				{/if}
@@ -34,8 +53,8 @@
 	.status { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.error { color: var(--red); font-size: var(--text-footnote); }
 	.cancel { flex: none; padding: 2px 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
-	.cancel:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
+	.cancel:hover:not([aria-disabled="true"]) { color: var(--text-primary); background: var(--bg-hover); }
 	.cancel:focus-visible { outline: 2px solid var(--accent); }
-	.cancel:disabled { cursor: default; opacity: 0.6; }
+	.cancel[aria-disabled="true"] { cursor: default; opacity: 0.6; }
 	@media (max-width: 768px) { li { min-height: 44px; } .cancel { min-height: 44px; padding: 0 10px; } }
 </style>

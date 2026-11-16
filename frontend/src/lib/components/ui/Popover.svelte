@@ -80,7 +80,7 @@
 		// While the person types in the card, a scroll counts as theirs only when a wheel or touch drove it; the document moving under them (an edit above, lines drawn) leaves the card in place.
 		const moved = (event?.type === 'resize' && !typing) || (event?.type === 'scroll' && (!typing || performance.now() - lastScrollInput < 500));
 		// Keep an active editor visible through viewport changes; a deliberate scroll can still hide it.
-		const engaged = !moved && surface.contains(active);
+		const engaged = !moved && active !== surface && surface.contains(active);
 		if (!rect) { if (live && !engaged) hidden = true; return; }
 		const area = region();
 		if (!engaged && (rect.bottom < area.top || rect.top > area.bottom || rect.right < area.left || rect.left > area.right)) {
@@ -242,6 +242,14 @@
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
 	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
 	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
+	/**
+	 * A press on the card's own text focuses the card, so the card's Escape answers it, never the page beneath. Focus that
+	 * was already on a field or control in the card stays there.
+	 */
+	function keepFocusInside(event: FocusEvent) {
+		const from = event.relatedTarget;
+		if (event.target === surface && from instanceof HTMLElement && from !== surface && surface.contains(from)) from.focus({ preventScroll: true });
+	}
 </script>
 
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} onwheelcapture={onScrollInput} ontouchmovecapture={onScrollInput} />
@@ -249,7 +257,7 @@
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
 	     Clipping keeps it measurable before it is placed without inherited visibility transitions delaying focus; covered, it is hidden outright. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} onfocus={keepFocusInside} tabindex="-1" bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
 {/if}
 
 <style>
@@ -257,4 +265,6 @@
 	/* Placement and clipping update immediately; menuPop owns the entrance and exit. */
 	.popover { transition-property: none; }
 	.popover.fill { display: flex; flex-direction: column; overflow: auto; }
+	/* The card takes focus only to keep it off the page beneath; the control inside it shows the focus. */
+	.popover:focus { outline: none; }
 </style>
