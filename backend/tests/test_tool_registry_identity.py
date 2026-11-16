@@ -456,8 +456,8 @@ async def test_registry_enters_host_gate_with_exact_identity_and_scopes_result(
             events.append(("permit-exit", value))
 
     @contextmanager
-    def repo_scope(reach, *, thread_id, tool_name):
-        assert (thread_id, tool_name) == ("gated-thread", "capture")
+    def repo_scope(reach, *, thread_id):
+        assert thread_id == "gated-thread"
         events.append(("repo-enter", None))
         try:
             yield

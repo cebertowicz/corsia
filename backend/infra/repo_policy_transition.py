@@ -53,7 +53,10 @@ EVERYWHERE = Reach()
 
 @dataclass(frozen=True, slots=True)
 class Holder:
-    """One in-flight effect or live owned process, with what the refusal names."""
+    """One in-flight effect or live owned process, with what the refusal names.
+
+    ``what`` is what its starter is running, as the refusal reads it ("an action").
+    """
 
     reach: Reach
     thread_id: str | None
@@ -90,10 +93,8 @@ def caller_reach(thread_id: str | None, *, db) -> Reach:
     return Reach(fenced)
 
 
-def _agent_label(thread_id: str | None) -> str:
+def _agent_label(thread_id: str) -> str:
     """The blocking agent by thread title, without naming a Local only project's thread."""
-    if not thread_id:
-        return "the person's own session"
     from infra.database import get_db
     from llm.locality import cloud_off_project_ids
 
@@ -115,12 +116,19 @@ def _agent_label(thread_id: str | None) -> str:
         return "an agent"
 
 
-def _busy(running: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
-    """The refusal a person or agent reads: what is still running, and what to do."""
-    if holder is not None:
-        running = f"{holder.what} from {_agent_label(holder.thread_id)}"
+def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
+    """The refusal a person or agent reads: who is still running what, and what to do.
+
+    No thread is the person's own session, so the refusal names them as "you".
+    """
+    if holder is None:
+        running = f"{fallback} is running"
+    elif holder.thread_id:
+        running = f"{_agent_label(holder.thread_id)} is running {holder.what}"
+    else:
+        running = f"you're running {holder.what}"
     return RepoPolicyTransitionBusy(
-        f"Repositories can't change while {running} is running. Try again once it finishes."
+        f"Repositories can't change while {running}. Try again once it finishes."
     )
 
 
@@ -215,7 +223,7 @@ class _RepoPolicyTransitionCoordinator:
             effects = [h for h in self._effects.values() if h.reach.meets(claim)]
             if effects:
                 blocker_holder: Holder | None = effects[0]
-                running = "an agent's tool"
+                running = "an agent's action"
             else:
                 busy, blocker_holder = self._process_blocker(
                     claim, active_process_count, owned_processes,
@@ -256,14 +264,9 @@ def admit_repo_effect(
     reach: Reach = EVERYWHERE,
     *,
     thread_id: str | None = None,
-    tool_name: str | None = None,
 ) -> Iterator[None]:
     """Admit one tool effect unless it conflicts with a repo transition."""
-    holder = Holder(
-        reach=reach,
-        thread_id=thread_id,
-        what=f"tool `{tool_name}`" if tool_name else "a tool call",
-    )
+    holder = Holder(reach=reach, thread_id=thread_id, what="an action")
     with _COORDINATOR.admit_effect(reach, holder):
         yield
 

@@ -11,7 +11,7 @@ def test_active_effect_blocks_repo_transition():
     )
 
     with admit_repo_effect():
-        with pytest.raises(RepoPolicyTransitionBusy, match="while a tool call .* is running"):
+        with pytest.raises(RepoPolicyTransitionBusy, match="while you're running an action"):
             with repo_policy_transition(
                 active_process_count=lambda: 0,
             ):

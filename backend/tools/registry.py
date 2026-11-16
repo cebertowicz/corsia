@@ -4,7 +4,7 @@ import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from host_access.credential_sanitizer import sanitize_credential_text
 from tools.result_sanitizer import sanitize_result
@@ -26,6 +26,10 @@ from tools.tool_surface import (
 
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
+
+if TYPE_CHECKING:
+    from infra.repo_policy_transition import Reach
+
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -144,7 +148,6 @@ class ToolRegistry(ToolStore):
             else admit_repo_effect(
                 await self._effect_reach(tool, thread_context["id"], authorization),
                 thread_id=thread_context["id"],
-                tool_name=name,
             )
         )
         with repo_effect, confined_reads.scope(thread_context):
@@ -154,7 +157,7 @@ class ToolRegistry(ToolStore):
                 )
 
     @staticmethod
-    async def _effect_reach(tool: Any, thread_id: str, authorization: Any) -> Any:
+    async def _effect_reach(tool: Any, thread_id: str, authorization: Any) -> "Reach":
         """What this call's effect could write, read once at admission.
 
         A call under a host-action permit, or to a connected app (whose local

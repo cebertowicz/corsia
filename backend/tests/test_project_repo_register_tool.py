@@ -390,10 +390,10 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
             held.__exit__(None, None, None)
 
     running = (
-        "a tool call from the person's own session" if blocker == "effect"
-        else "an agent's process"
+        "you're running an action" if blocker == "effect"
+        else "an agent's process is running"
     )
-    expected = f"Repositories can't change while {running} is running. Try again once it finishes."
+    expected = f"Repositories can't change while {running}. Try again once it finishes."
     assert expected in result, result
     assert registry_env["db"].execute(
         "SELECT COUNT(*) FROM project_repo_policies"

@@ -230,7 +230,7 @@ async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monke
         await _release(env, task)
     title = "Alpha worker" if blocker == "same project" else "Beta worker"
     assert (
-        f"Repositories can't change while tool `hold` from agent \"{title}\" is running. "
+        f"Repositories can't change while agent \"{title}\" is running an action. "
         "Try again once it finishes."
     ) in result, result
     assert _registered(env) == 0
@@ -269,7 +269,7 @@ async def test_live_connected_app_call_from_another_project_refuses(env, monkeyp
         result = await _register(env, target)
     finally:
         await _release(env, task)
-    assert f"while tool `{app.name}` from agent \"Beta worker\" is running." in result, result
+    assert "while agent \"Beta worker\" is running an action." in result, result
     assert _registered(env) == 0
 
 
@@ -278,9 +278,9 @@ async def test_person_session_effect_refuses(env):
     from infra.repo_policy_transition import admit_repo_effect, caller_reach
 
     target = _own_target(env)
-    with admit_repo_effect(caller_reach(None, db=env["db"]), tool_name="settings"):
+    with admit_repo_effect(caller_reach(None, db=env["db"])):
         result = await _register(env, target)
-    assert "while tool `settings` from the person's own session is running." in result, result
+    assert "while you're running an action." in result, result
     assert _registered(env) == 0
 
 
@@ -303,7 +303,7 @@ async def test_process_that_can_reach_the_project_refuses_and_is_named(env, bloc
             env["db"].execute("UPDATE threads SET project_id='pb' WHERE id='p-agent'")
             env["db"].commit()
     result = await _register(env, target)
-    assert f"while process \"sleeper\" from agent \"{owner_title}\" is running." in result, result
+    assert f"while agent \"{owner_title}\" is running process \"sleeper\"." in result, result
     assert _registered(env) == 0
 
 
@@ -320,7 +320,7 @@ async def test_targets_outside_own_folder_keep_the_instance_wide_fence(env, wher
         result = await _register(env, target)
     finally:
         await _release(env, task)
-    assert "Repositories can't change while tool `hold` from agent" in result, result
+    assert "Repositories can't change while agent \"Beta worker\" is running an action." in result, result
     assert _registered(env) == 0
     # Once nothing is in flight the same registration goes through, as today.
     assert "Registered repository 'app'" in await _register(env, target)
@@ -343,7 +343,10 @@ async def test_target_in_another_projects_folder_keeps_the_instance_wide_fence(e
     finally:
         await _release(env, task)
     assert raised.value.status_code == 409
-    assert "Repositories can't change while tool `hold`" in raised.value.detail
+    assert (
+        "Repositories can't change while agent \"Beta worker\" is running an action."
+        in raised.value.detail
+    )
     assert _registered(env) == 0
 
 
