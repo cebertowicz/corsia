@@ -132,8 +132,11 @@
 	const approveDescription = $derived(acceptFirst ? `Accepts the ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'}, then approves` : approveSends);
 	async function approve() {
 		if (round > 0 && blocked()) return;
+		// The count belongs to the receipt this approve produces, so every approve starts it at zero.
+		// The count belongs to the receipt this approve produces, so every approve starts it at zero.
+		acceptedCount = 0;
 		if (acceptFirst) {
-			bar.accepting = true; bar.failure = ''; acceptedCount = 0;
+			bar.accepting = true; bar.failure = '';
 			try { acceptedCount = (await onAcceptAll?.()) ?? 0; } catch { bar.failure = ACCEPT_FAILED; return; } finally { bar.accepting = false; }
 		}
 		void settle('approved');
