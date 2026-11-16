@@ -440,8 +440,8 @@ describe('BrowserLeaf keyboard relay', () => {
 		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Meta', code: 'MetaLeft', metaKey: true }));
 		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'a', code: 'KeyA', metaKey: true }));
 		expect(socket.sent.filter(message => message.type === 'input_keyboard')).toEqual([
-			{ type: 'input_keyboard', eventType: 'keyDown', key: 'Meta', code: 'MetaLeft', keyCode: 0, text: '', modifiers: 4 },
-			{ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', keyCode: 0, text: '', modifiers: 4 },
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'Meta', code: 'MetaLeft', keyCode: 0, text: '', modifiers: 4, id: expect.any(Number) },
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', keyCode: 0, text: '', modifiers: 4, id: expect.any(Number) },
 		]);
 	});
 });
@@ -473,8 +473,8 @@ describe('BrowserLeaf letterbox input', () => {
 		canvas.dispatchEvent(pointer('pointerup', 50, 110));
 		expect(socket.sent.filter(message => message.type === 'input_mouse')).toEqual([
 			{ type: 'input_mouse', eventType: 'mouseMoved', x: 50, y: 25, button: 'none', clickCount: 0 },
-			{ type: 'input_mouse', eventType: 'mousePressed', x: 50, y: 25, button: 'left', clickCount: 1 },
-			{ type: 'input_mouse', eventType: 'mouseReleased', x: 50, y: 50, button: 'left', clickCount: 1 },
+			{ type: 'input_mouse', eventType: 'mousePressed', x: 50, y: 25, button: 'left', clickCount: 1, id: expect.any(Number) },
+			{ type: 'input_mouse', eventType: 'mouseReleased', x: 50, y: 50, button: 'left', clickCount: 1, id: expect.any(Number) },
 		]);
 	});
 
@@ -482,13 +482,13 @@ describe('BrowserLeaf letterbox input', () => {
 		const { canvas, socket } = render();
 		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 3, deltaY: 90, deltaMode: 0 }));
-		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90 }));
+		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90, id: expect.any(Number) }));
 	});
 
 	it('converts a line wheel to pixels, as CDP expects', async () => {
 		const { canvas, socket } = render();
 		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 0, deltaY: 3, deltaMode: 1 }));
-		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 0, deltaY: 120 }));
+		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 0, deltaY: 120, id: expect.any(Number) }));
 	});
 });
