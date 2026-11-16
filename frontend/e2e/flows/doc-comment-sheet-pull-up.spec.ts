@@ -207,13 +207,16 @@ const unreachable = (page: Page) => sheet(page).last().evaluate((panel) => {
 	return { checked: targets.length, misses };
 });
 
-/** At 393 every field a reader types in reads at 16 px or more (no zoom on focus), and nothing is wider than the screen. */
+/**
+ * At 393 every field a reader types in reads at 16 px or more (no zoom on focus), and nothing is wider than the screen.
+ * The document editor's own size (.cm-editor and what it holds) is checked by phone-no-focus-zoom.spec.ts, not here.
+ */
 async function expectPhoneFit(page: Page, why: string) {
 	const found = await page.evaluate(() => {
 		const label = (el: Element) => `${el.tagName.toLowerCase()}${typeof el.className === 'string' && el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}`;
 		const shown = (el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
 		const fields = [...document.querySelectorAll('textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"], input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color])')]
-			.filter(shown).map((el) => ({ el: label(el), size: Number.parseFloat(getComputedStyle(el).fontSize) })).filter((field) => field.size < 16);
+			.filter((el) => shown(el) && !el.closest('.cm-editor')).map((el) => ({ el: label(el), size: Number.parseFloat(getComputedStyle(el).fontSize) })).filter((field) => field.size < 16);
 		const width = innerWidth, wide: string[] = [];
 		for (const el of document.querySelectorAll('body *')) {
 			const r = el.getBoundingClientRect();
