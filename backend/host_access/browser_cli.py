@@ -229,6 +229,15 @@ def render_model_result(result: CommandResult, *, redactions: dict[str, str]) ->
     return _bounded(rendered, redactions)
 
 
+def snapshot_text(result: CommandResult) -> str | None:
+    """`data.snapshot` of a finished command whose whole stdout is one JSON object; None for anything else."""
+    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
+        return None
+    data = json_object(result.stdout).get("data")
+    snapshot = data.get("snapshot") if isinstance(data, dict) else None
+    return snapshot if isinstance(snapshot, str) else None
+
+
 def rendered_field(rendered: str, key: str) -> str | None:
     """Read one value back from render_model_result's output: the `data` object, unwrapped."""
     if rendered.startswith("Error:"):

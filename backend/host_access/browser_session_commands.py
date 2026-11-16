@@ -207,9 +207,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
-    rendered = owner._model_result(result, runtime.record)
     if filled_field_showing and args[0] == "snapshot":
-        rendered = browser_control.hide_field_values(rendered)
+        hidden = hidden_snapshot(result)
+        if hidden is None:
+            return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
+        result = hidden
+    rendered = owner._model_result(result, runtime.record)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until
@@ -217,6 +220,18 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if opening_unlaunched_session and runtime.record.shared and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return _noted(rendered, note)
+
+
+def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandResult | None:
+    """A snapshot taken while a filled field shows: only `data.snapshot`, its values hidden; None for other output.
+
+    Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
+    """
+    snapshot = browser_cli.snapshot_text(result)
+    if snapshot is None:
+        return None
+    stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
+    return replace(result, stdout=stdout, stderr="")
 
 
 def _noted(text: str, note: str | None) -> str:

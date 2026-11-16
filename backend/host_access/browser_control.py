@@ -59,6 +59,10 @@ FILLED_FIELD_REFUSED = (
     "select, check, uncheck, scroll, scrollintoview, wait, tab, snapshot (field values hidden), "
     "get (but not get html), and is. The rest work again once the field is gone."
 )
+FILLED_FIELD_SNAPSHOT_WITHHELD = (
+    "Error: this snapshot was withheld. The page still shows the password field the person filled in, and "
+    "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
+)
 # While a password field the person finished still shows (R14), a field may display what they typed (a
 # show-password toggle, a text-type field), so only commands that never render a field's value run.
 _FILLED_FIELD_COMMANDS = frozenset({

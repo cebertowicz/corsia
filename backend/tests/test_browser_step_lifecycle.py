@@ -255,6 +255,27 @@ def test_hide_field_values_hides_every_value_and_the_text_beneath_it(snapshot, e
     assert browser_control.hide_field_values(snapshot) == expected
 
 
+_SNAPSHOT_JSON = '{"success": true, "data": {"snapshot": "- textbox [ref=e2]: Typed1\\n- button \\"Go\\" [ref=e3]"}}'
+
+
+def test_a_snapshot_with_a_filled_field_showing_keeps_only_hidden_values():
+    from host_access.browser_cli import CommandResult, render_model_result
+    from host_access.browser_session_commands import hidden_snapshot
+
+    hidden = hidden_snapshot(CommandResult(0, _SNAPSHOT_JSON, "warning on stderr: Typed1"))
+    assert render_model_result(hidden, redactions={}) == "- textbox [ref=e2]: [value hidden]\n- button \"Go\" [ref=e3]"
+    # Anything but one JSON object carrying data.snapshot could carry the value, so none of it is returned.
+    for result in (
+        CommandResult(0, f"warning: daemon restarted\n{_SNAPSHOT_JSON}", ""),
+        CommandResult(0, "- textbox [ref=e2]: Typed1", ""),
+        CommandResult(0, '{"success": true, "data": {"result": "Typed1"}}', ""),
+        CommandResult(1, _SNAPSHOT_JSON, "Typed1"),
+        CommandResult(0, _SNAPSHOT_JSON, "", timed_out=True),
+        CommandResult(0, _SNAPSHOT_JSON, "", completion="interrupted"),
+    ):
+        assert hidden_snapshot(result) is None
+
+
 @pytest.mark.asyncio
 async def test_a_new_field_after_done_asks_the_person_again(plan):
     page = Page()
