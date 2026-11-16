@@ -5,9 +5,10 @@ character of the deleted line as a character of a neighbouring line, or the comm
 """
 import pytest
 
+from doceditor import live_diff
 from doceditor.comment_anchoring import resolve_threads
 from doceditor.live_document import LiveDocument
-from doceditor.live_text import apply_text, clone, create, follow_spans, keep_standing
+from doceditor.live_text import apply_text, create, follow_spans
 
 HEAD = "# Plan\n\n- keep one\n"
 TAIL = "- keep two\n"
@@ -29,8 +30,7 @@ def _after_rewrite(old: str, new: str, quote: str) -> dict:
     text = doc["text"]
     before = str(text)
     moved: list[tuple[int, int]] = []
-    text.observe(lambda event: moved.append(keep_standing(
-        [span], follow_spans([span], before, event.delta, set())[0], before, str(text))[0]))
+    text.observe(lambda event: moved.append(follow_spans([span], before, event.delta, set())[0][0]))
     apply_text(doc, new)
     assert str(text) == new
     resolve_threads([comment], new, ranges={"c": moved[-1] if moved else span})
@@ -46,6 +46,15 @@ def test_the_next_line_starting_with_the_same_words_does_not_take_the_comment():
     old = HEAD + "- deploy queue merge\n- deploy docs test\n" + TAIL
     new = HEAD + "- deploy docs test\n" + TAIL
     _gone_where_it_was(_after_rewrite(old, new, "deploy queue merge"), len(HEAD))
+
+
+def test_a_word_the_next_line_shares_in_the_same_column_does_not_take_the_comment():
+    old = HEAD + "- deploy queue merge\n- deploy docs test\n" + TAIL
+    new = HEAD + "- deploy docs test\n" + TAIL
+    comment = _after_rewrite(old, new, "deploy")
+    next_word = new.index("deploy", len(HEAD))
+    assert (comment["from_off"], comment["to_off"]) != (next_word, next_word + len("deploy"))
+    _gone_where_it_was(comment, len(HEAD))
 
 
 def test_a_deleted_line_beside_an_edited_one_does_not_leave_its_letters_in_the_edited_line():
@@ -74,48 +83,83 @@ def _list(prefix: str, count: int, tag: str) -> str:
     return "".join(f"- {prefix} {number} {tag}\n" for number in range(count))
 
 
-def test_a_large_rewritten_block_is_replaced_whole_without_pairing_its_lines(monkeypatch):
-    """Pairing is one comparison per line pair, so a block past the bound must not be paired at all."""
-    from doceditor import live_diff
+def _dev_changes(old: str, new: str) -> list[tuple[int, int, str]]:
+    """What the diff was before line pairing: the character diff of each changed block of lines."""
+    prefix, old_end, new_end = live_diff._trim(old, new)
+    before = old[prefix:old_end].splitlines(keepends=True)
+    after = new[prefix:new_end].splitlines(keepends=True)
+    old_edges, new_edges = live_diff._edges(before), live_diff._edges(after)
+    result, cursor, byte_cursor = [], 0, 0
+    for tag, first, last, new_first, new_last in live_diff._line_opcodes(before, after):
+        if tag == "equal":
+            continue
+        start, end = prefix + old_edges[first], prefix + old_edges[last]
+        replacement = new[prefix + new_edges[new_first]:prefix + new_edges[new_last]]
+        for first, last, inserted in live_diff._character_changes(old[start:end], replacement, start):
+            byte_cursor += len(old[cursor:first].encode("utf-8"))
+            end_byte = byte_cursor + len(old[first:last].encode("utf-8"))
+            result.append((byte_cursor, end_byte, inserted))
+            cursor, byte_cursor = last, end_byte
+    return result
 
-    calls = []
+
+def _never_paired(monkeypatch) -> list[int]:
+    """Count the line comparisons pairing makes; a test that expects none asserts the list is empty."""
+    calls: list[int] = []
     real = live_diff._alike
-    monkeypatch.setattr(live_diff, "_alike", lambda left, right: calls.append(1) or real(left, right))
-    rows = 100  # 10,000 line pairs, but short lines: only the line-pair bound can replace it whole
+
+    def counted(left: str, right: str) -> float:
+        calls.append(1)
+        return real(left, right)
+    monkeypatch.setattr(live_diff, "_alike", counted)
+    return calls
+
+
+def test_a_large_rewritten_block_is_not_paired_and_is_diffed_as_it_was_before_pairing(monkeypatch):
+    """Pairing is one comparison per line pair, so a block past the bound must not be paired at all."""
+    calls = _never_paired(monkeypatch)
+    rows = 100  # 10,000 line pairs, but short lines: only the line-pair bound stops the pairing
     old = "".join(f"{number % 10}\n" for number in range(rows))
     new = "".join(f"{(number * 7 + 3) % 10}x\n" for number in range(rows))
     assert rows * rows > live_diff.MAX_LINE_PAIRS
     assert len(old) < live_diff.MAX_CHARACTER_BLOCK and len(new) < live_diff.MAX_CHARACTER_BLOCK
-    assert live_diff.text_changes(old, new) == [(0, len(old.encode()), new)]
+    assert live_diff.text_changes(old, new) == _dev_changes(old, new)
     assert calls == []
 
 
 def test_a_block_just_inside_the_bound_is_still_paired(monkeypatch):
-    from doceditor import live_diff
-
     side = int(live_diff.MAX_LINE_PAIRS ** .5)
     old, new = _list("audit", side, "a"), _list("audit", side, "b")
-    calls = []
-    real = live_diff._alike
-    monkeypatch.setattr(live_diff, "_alike", lambda left, right: calls.append(1) or real(left, right))
+    calls = _never_paired(monkeypatch)
     changes = live_diff.text_changes(old, new)
     assert calls and len(changes) == side  # one letter per line, not one replaced block
 
 
-def test_a_few_long_lines_are_replaced_whole_by_the_work_bound_without_pairing_them(monkeypatch):
-    """Three lines a side is nine line pairs and under the character cap: only the work bound replaces it."""
-    from doceditor import live_diff
-
-    calls = []
-    real = live_diff._alike
-    monkeypatch.setattr(live_diff, "_alike", lambda left, right: calls.append(1) or real(left, right))
+def test_a_few_long_lines_past_the_work_bound_are_not_paired_and_are_diffed_as_before_pairing(monkeypatch):
+    """Three lines a side is nine line pairs and under the character cap: only the work bound stops the pairing."""
+    calls = _never_paired(monkeypatch)
     old = "".join(f"{'ab ' * 130}{number}\n" for number in range(3))
     new = "".join(f"{'ba ' * 130}{number}\n" for number in range(3))
     assert len(old.splitlines()) ** 2 <= live_diff.MAX_LINE_PAIRS
     assert len(old) < live_diff.MAX_CHARACTER_BLOCK and len(new) < live_diff.MAX_CHARACTER_BLOCK
     assert live_diff._pair_work(old.splitlines(True), new.splitlines(True)) > live_diff.MAX_PAIR_WORK
-    assert live_diff.text_changes(old, new) == [(0, len(old.encode()), new)]
+    assert live_diff.text_changes(old, new) == _dev_changes(old, new)
     assert calls == []
+
+
+def test_a_long_edited_item_beside_many_inserted_lines_keeps_the_words_as_it_did_before_pairing(monkeypatch):
+    """One edited line next to more inserted lines than the bound allows still keeps its later words."""
+    calls = _never_paired(monkeypatch)
+    item = " ".join(f"word{number}" for number in range(35))
+    inserted = "".join(f"- inserted item {number} with some padding text here\n" for number in range(live_diff.MAX_LINE_PAIRS + 6))
+    old = HEAD + "- " + item + "\n" + TAIL
+    new = HEAD + "- " + item.replace("word2 ", "wordX ", 1) + "\n" + inserted + TAIL
+    assert len(inserted.splitlines()) > live_diff.MAX_LINE_PAIRS
+    assert live_diff.text_changes(old, new) == _dev_changes(old, new)
+    assert calls == []
+    comment = _after_rewrite(old, new, "word20 word21 word22")
+    assert comment["orphaned"] is False
+    assert new[comment["from_off"]:comment["to_off"]] == "word20 word21 word22"
 
 
 PARAGRAPH = " ".join(f"word{number} common" if number % 7 == 0 else f"word{number}" for number in range(90))
@@ -144,15 +188,6 @@ def test_a_long_line_split_in_two_keeps_a_comment_on_the_words_that_moved_to_the
     assert new[comment["from_off"]:comment["to_off"]] == quote
 
 
-def test_a_comment_in_a_block_past_the_bound_is_text_gone_not_moved():
-    side = 30  # 900 line pairs, past the bound
-    old = HEAD + _list("audit", side, "a") + TAIL
-    new = HEAD + _list("review", side, "b") + TAIL
-    comment = _after_rewrite(old, new, "audit 12 a")
-    assert comment["orphaned"] is True
-    assert comment["from_off"] == comment["to_off"]
-
-
 PARTIAL_OLD = HEAD + "- deploy queue merge soon\n- other thing here\n" + TAIL
 
 
@@ -165,59 +200,21 @@ def test_a_few_words_that_survive_in_a_line_rewritten_to_under_half_alike_are_te
     assert rest["orphaned"] is True  # reopened from disk the words are not at their old place either
 
 
-SAME_SPAN_NEW = HEAD + "- zzzzzz queue qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\n- different words entirely\n" + TAIL
-
-
-def _kept_on_its_words(comment: dict, new: str) -> None:
-    assert comment["orphaned"] is False
-    assert new[comment["from_off"]:comment["to_off"]] == "queue"
-
-
-def test_the_surviving_words_at_the_same_offset_stay_anchored_live():
-    _kept_on_its_words(_after_rewrite(PARTIAL_OLD, SAME_SPAN_NEW, "queue"), SAME_SPAN_NEW)
-
-
-def test_the_surviving_words_at_the_same_offset_stay_anchored_at_rest():
-    """A document read from disk keeps a quote still at its stored span, the same answer as live."""
-    comment = _comment(PARTIAL_OLD, "queue")
-    resolve_threads([comment], SAME_SPAN_NEW)
-    _kept_on_its_words(comment, SAME_SPAN_NEW)
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize("new, kept", [
-    (SAME_SPAN_NEW, True),
-    (HEAD + "the queue drains nightly\n- different words entirely\n" + TAIL, False),
-])
-async def test_a_real_live_document_places_the_comment_as_a_reload_would(tmp_path, new, kept):
+async def test_a_real_live_document_leaves_the_next_lines_word_alone(tmp_path):
+    old = HEAD + "- deploy queue merge\n- deploy docs test\n" + TAIL
+    new = HEAD + "- deploy docs test\n" + TAIL
     path = tmp_path / "doc.md"
-    path.write_text(PARTIAL_OLD)
+    path.write_text(old)
     live = await LiveDocument.open(path, tmp_path / "state")
     try:
-        comment = _comment(PARTIAL_OLD, "queue")
+        comment = _comment(old, "deploy")
         live.track_range("c", comment["from_off"], comment["to_off"])
         apply_text(live.doc, new)
         assert live.text == new
-        start, end = live.ranges["c"]
-        assert (new[start:end] == "queue") is kept and (start == end) is not kept
-        reloaded = _comment(PARTIAL_OLD, "queue")
-        resolve_threads([reloaded], new)
-        assert reloaded["orphaned"] is not kept
+        assert live.ranges["c"] == (len(HEAD), len(HEAD))
     finally:
         live.close()
-
-
-def test_the_candidate_that_reaches_disk_keeps_the_same_span_too():
-    from types import SimpleNamespace
-
-    from doceditor.live_comments import candidate_ranges
-
-    comment = _comment(PARTIAL_OLD, "queue")
-    span = (comment["from_off"], comment["to_off"])
-    live = SimpleNamespace(ranges={"c": span}, open_ends=set(), doc=create(PARTIAL_OLD))
-    fork = clone(live.doc.get_update())
-    apply_text(fork, SAME_SPAN_NEW)
-    assert candidate_ranges(live, fork) == {"c": span}
 
 
 def test_a_line_split_in_two_keeps_a_comment_on_the_words_that_moved_to_the_second_line():

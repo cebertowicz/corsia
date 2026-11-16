@@ -6,7 +6,6 @@ from collections.abc import Collection, Sequence
 import hashlib
 
 from doceditor.live_diff import text_changes, text_changes_async
-from doceditor.quote_anchor import reanchor
 
 from pycrdt import Doc, Text
 
@@ -205,25 +204,3 @@ def follow_spans(spans: Sequence[tuple[int, int]], before: str, delta: list[dict
             moved[index] = (first, last)
             opened.add(index)
     return moved, opened
-
-
-def keep_standing(spans: Sequence[tuple[int, int]], moved: list[tuple[int, int]], before: str,
-                  after: str) -> list[tuple[int, int]]:
-    """Put back a span an edit collapsed when its text still stands at the same place.
-
-    A rewrite that replaces text with the same text, at the same place, leaves a comment on it. This
-    asks ``reanchor``, the check a document read from disk uses, so a live document and a reloaded one
-    place the comment alike. A span whose text did not survive stays collapsed, text gone.
-    """
-    collapsed = [index for index, ((start, end), (first, last)) in enumerate(zip(spans, moved))
-                 if start < end and first == last]
-    if not collapsed:
-        return moved
-    units = before.encode("utf-16-le")
-    result = list(moved)
-    for index in collapsed:
-        start, end = spans[index]
-        quote = units[start * 2:end * 2].decode("utf-16-le", "replace")
-        if reanchor(after, quote, from16=start, to16=end, prefix=None, suffix=None) == (start, end):
-            result[index] = (start, end)
-    return result
