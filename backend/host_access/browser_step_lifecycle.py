@@ -59,6 +59,9 @@ class Decision:
     monitor: bool | None = None
     # The visit whose done fields clear: this event saw no visible password field there. Count and decline stay.
     forget_done: str | None = None
+    # The open password step's fields after this event: a field shown while the step is open (a confirm
+    # field, a page replacing its input) is one the person finishes with it, so a done answer holds it.
+    step_nodes: frozenset[int] | None = None
 
 
 def _kind(step: BrowserStep) -> Kind:
@@ -113,8 +116,12 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
                            guard_present=same_person_visit)
         if event.name == "declare" and isinstance(step, PersonStep) and result is not None and result.visit == step.visit:
             return Decision(("R12",))
+        grown = None
+        if (isinstance(step, PasswordStep) and result is not None and result.target == step.target
+                and not result.visible_nodes <= step.nodes):
+            grown = step.nodes | result.visible_nodes
         return Decision(("R13", "R7") if event.name == "declare" else ("R7",),
-                        refusal="password" if isinstance(step, PasswordStep) else "person")
+                        refusal="password" if isinstance(step, PasswordStep) else "person", step_nodes=grown)
     if result is None:
         return Decision()
     if result.visible_nodes:
@@ -186,6 +193,8 @@ async def step_event(thread_id: str, event: Event, *,
                                     session=event.session, occurrence=decision.occurrence)
             await _open_step(thread_id, opened)
         if (current := _steps.get(thread_id)) is not None:
+            if decision.step_nodes is not None and isinstance(current, PasswordStep):
+                current.nodes = decision.step_nodes
             if decision.monitor is False:
                 _stop_reprobe(current)
             elif decision.monitor is True and (current.reprobe is None or current.reprobe.done()):

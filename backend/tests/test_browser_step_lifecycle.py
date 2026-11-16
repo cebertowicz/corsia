@@ -231,6 +231,24 @@ async def test_a_new_field_after_done_asks_the_person_again(plan):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("while_open", [frozenset({42, 43}), frozenset({44})], ids=["confirm_field", "replaced_input"])
+async def test_a_field_shown_while_the_step_is_open_is_finished_with_it(plan, while_open):
+    page = Page()
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    # A confirm field appears, or the page swaps its input, while the person still has the step.
+    page.show("visit-one", while_open)
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [original] = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "mark_done", close_params(plan["db"], "mark_done", original["id"]),
+                actor=HUMAN)
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    assert len(_steps(plan["db"])) == 1 and THREAD not in lifecycle._steps
+
+
+@pytest.mark.asyncio
 async def test_a_field_hidden_then_shown_again_after_done_asks_the_person_again(plan):
     page = Page()
     await _done_with_field_showing(plan, page)
