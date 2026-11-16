@@ -181,6 +181,8 @@ async def test_a_password_field_in_a_cross_origin_frame_opens_the_step_and_stays
         with pytest.raises(BrowserSessionError, match="stay refused"):
             await browser_control.require_page_access(THREAD, probe, ("eval", "document.title"))
 
-        # The page's own text field still reads.
+        # The step ended on this visit, so no field's value reads here until the page changes, the page's own
+        # text field included: it could be showing what the person typed.
         resolve_search = _resolver(endpoint, await _element_box(endpoint, "q"))
-        assert await browser_control.require_page_access(THREAD, probe, ("get", "value", "@e1"), resolve=resolve_search) is None
+        with pytest.raises(BrowserSessionError, match="until you open another page or reload"):
+            await browser_control.require_page_access(THREAD, probe, ("get", "value", "@e1"), resolve=resolve_search)
