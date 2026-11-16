@@ -109,12 +109,24 @@ document.cookie = location.pathname.slice(1, -5) + '=1; path=/'; document.title 
 </script>"""
 COOKIES = """<!doctype html><title>Cookies</title><script>document.title = document.cookie || 'none';</script>"""
 
+# A form submitted on Enter, whose choice and typed text land in the title (a saved sign-in cannot read page text).
+CHOICE_FORM = """<!doctype html><title>Choice form</title>
+<form><select id=choice><option value=a>Ay</option><option value=b>Bee</option></select><input id=q value=x>
+<div id=hover>Over</div><div style="height:3000px"></div></form>
+<script>
+document.querySelector('form').addEventListener('submit', event => {
+  event.preventDefault(); document.title = 'sent:' + document.querySelector('#choice').value + ':' + document.querySelector('#q').value;
+});
+document.querySelector('#hover').addEventListener('mouseover', () => { window.hovered = true; });
+</script>"""
+
 
 @contextmanager
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
-             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/choice.html": CHOICE_FORM.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -247,6 +259,38 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
         browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
         import shutil
         shutil.rmtree(profile, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(monkeypatch):
+    """F1: on a session with a saved sign-in, select, scroll, hover and press act in the page; a key off the list is refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_launch, browser_session_launch
+    owner_key = f"verbs-e2e-{uuid4().hex}"
+    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    thread_id = f"verbs-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verbs-e2e", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"))).startswith("Error:")
+            assert owner._sessions[thread_id].record.profile
+            assert await owner.run(thread_id, ("select", "#choice", "b"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("hover", "#hover"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("scroll", "down", "300"), session="existing") == "Done."
+            assert await owner.run(thread_id, ("click", "#q"), session="existing") == "ok"
+            with pytest.raises(BrowserSessionError, match="Enter, Tab, Shift\\+Tab"):
+                await owner.run(thread_id, ("press", "Control+a"), session="existing")
+            assert await owner.run(thread_id, ("press", "Enter"), session="existing") == "Done."
+            assert "sent:b:x" in await owner.run(thread_id, ("get", "title"), session="existing")
+    finally:
+        await owner.shutdown()
+        profile = browser_launch.profile_dir(thread_id)
+        if profile is not None:
+            browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
+            import shutil
+            shutil.rmtree(profile, ignore_errors=True)
 
 
 def page_endpoint(rendered: str) -> str:

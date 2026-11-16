@@ -333,3 +333,8 @@ def has_step(thread_id: str) -> bool:
 
 def password_page(thread_id: str) -> bool:
     return isinstance(_steps.get(thread_id), PasswordStep)
+
+
+def held_pages(thread_id: str) -> bool:
+    """Whether this session has given the person a page (a step is open, or one was settled or declined)."""
+    return thread_id in _steps or bool(_answers.get(thread_id))

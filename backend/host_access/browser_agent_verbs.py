@@ -1,0 +1,57 @@
+"""Agent keys, dropdown choice, scrolling, hover and history on a browser session with a saved sign-in.
+
+Each verb is admitted as one fixed command shape (``admitted``), and its result carries no page content
+(``ACKNOWLEDGED``).
+"""
+from __future__ import annotations
+
+import re
+from typing import Sequence
+
+VERBS = frozenset({"press", "select", "scroll", "scrollintoview", "hover", "back", "forward"})
+# agent-browser's own names for the fixed key list; anything else, modifiers and text included, is refused.
+KEYS = ("Enter", "Tab", "Shift+Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+        "Home", "End", "PageUp", "PageDown", "Space", "Backspace", "Delete")
+DIRECTIONS = ("up", "down", "left", "right")
+MAX_SCROLL = 5000
+KEY_REFUSAL = ("press takes one of these keys only: Enter, Tab, Shift+Tab, Escape, ArrowUp, ArrowDown, "
+               "ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Space, Backspace, Delete. "
+               "Type text with browser_fill.")
+ACKNOWLEDGED = "Done."
+
+_REF = re.compile(r"(?:@|ref=)?e\d+")
+# Other selector engines: a prefix such as text=, xpath= or js=, an XPath, a chained locator, or a script URL.
+_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*=")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def plain_target(selector: str) -> bool:
+    """A snapshot ref or a plain CSS selector; never an engine prefix, XPath, chain or script."""
+    if _REF.fullmatch(selector):
+        return True
+    lowered = selector.lower()
+    return not (not selector or selector.startswith("-") or _ENGINE.match(selector) or
+                selector.startswith(("/", "(")) or ">>" in selector or _CONTROL.search(selector) or
+                "javascript:" in lowered or "eval(" in lowered)
+
+
+def admitted(args: Sequence[str]) -> bool:
+    """Whether the arguments are exactly one of the fixed shapes of these verbs."""
+    command, rest = args[0], args[1:]
+    if command == "press":
+        return len(rest) == 1 and rest[0] in KEYS
+    if command in {"back", "forward"}:
+        return not rest
+    if command in {"hover", "scrollintoview"}:
+        return len(rest) == 1 and plain_target(rest[0])
+    if command == "select":
+        return len(rest) == 2 and plain_target(rest[0]) and not rest[1].startswith("-")
+    if command == "scroll":
+        return (1 <= len(rest) <= 2 and rest[0] in DIRECTIONS and
+                (len(rest) == 1 or rest[1].isascii() and rest[1].isdigit() and 0 < int(rest[1]) <= MAX_SCROLL))
+    return False
+
+
+def refusal(args: Sequence[str]) -> str | None:
+    """The reason a press outside the key list is refused, so the agent learns the list."""
+    return KEY_REFUSAL if args[0] == "press" else None

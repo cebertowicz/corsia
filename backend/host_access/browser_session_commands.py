@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlsplit
 
 from host_access import browser_cdp, browser_cli, browser_control, browser_dom_write, browser_identity as identity
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_agent_verbs, browser_pane_state, browser_step_lifecycle
 from host_access.browser_session_state import BrowserSessionCleanupError, BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -124,7 +124,8 @@ def _saved_command(args: Sequence[str], *, pane: bool, single_dash_fill: bool = 
             command == "wait" and len(args) == 2 and not args[1].startswith("-") or
             command == "screenshot" and len(args) == 2 and not args[1].startswith("-") or
             tuple(args[:2]) == ("screenshot", "--full") and len(args) == 3 and not args[2].startswith("-") or
-            command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}))
+            command == "tab" and (len(args) == 1 or len(args) == 2 and args[1] not in {"new", "close"}) or
+            command in browser_agent_verbs.VERBS and browser_agent_verbs.admitted(args))
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
@@ -151,7 +152,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
                               not _javascript_url(navigation_url))
         if _script_config(config) or not (trusted_navigation and not pane or
                 _saved_command(args, pane=pane, single_dash_fill=owner._native.version == "0.31.2")):
-            raise BrowserSessionError(_SCRIPT_REFUSAL)
+            raise BrowserSessionError(browser_agent_verbs.refusal(args) or _SCRIPT_REFUSAL)
     # Pane and agent commands share this lock, but direct person interaction and
     # lifecycle cleanup do not. The lifecycle lock remains inside _run_admitted.
     owner._queued_actions += 1
@@ -207,6 +208,15 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
     rendered = owner._model_result(result, runtime.record)
+    saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+    if (saved_sign_in and not pane and args[0] in browser_agent_verbs.VERBS and not unfinished
+            and not rendered.startswith("Error:")):
+        if args[0] in {"back", "forward"}:
+            endpoint = await browser_cdp.page_endpoint(command)
+            await browser_control.reopen_held_page(
+                thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(browser_cdp.reopen_fresh, endpoint))
+        # A page that was held by a person or the password guard never reaches the agent through a verb's result.
+        rendered = browser_agent_verbs.ACKNOWLEDGED
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
     # Only the open that starts a session reveals the pane tab, so a tab the person closed stays shut until

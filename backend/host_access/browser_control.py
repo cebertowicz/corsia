@@ -106,6 +106,22 @@ async def require_page_access(thread_id: str, probe: browser_pane_state.Probe, a
     return note
 
 
+async def reopen_held_page(thread_id: str, probe: browser_pane_state.Probe, reopen: Callable[[], Awaitable[None]]) -> None:
+    """After back or forward, load the page again as a new navigation once the session has held a page.
+
+    A page that was in a person step or under the password read guard can come back from the back-forward
+    cache, or from its history entry, with its document and filled values. History doesn't say which entry
+    that was, so once a session has held any page, every back and forward loads fresh. A failed check
+    fails closed: the agent gets no page.
+    """
+    try:
+        result = await probe(_known_nodes(thread_id))
+    except Exception as exc:
+        raise BrowserSessionError(PAGE_CHECK_FAILED) from exc
+    if result.visible_nodes or _guarded_visits.get(thread_id) or browser_step_lifecycle.held_pages(thread_id):
+        await reopen()
+
+
 async def declare_person_step(thread_id: str, probe: browser_pane_state.Probe, instruction: str, *,
                               session: str | None = None) -> None:
     """Give the page to the person; an open declaration is a no-op, a decline is final for its visit."""

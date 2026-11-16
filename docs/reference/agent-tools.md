@@ -169,6 +169,7 @@ Pack: `browser`
 | `browser_close` | Close the browser session |
 | `browser_eval` | Run JavaScript in the page |
 | `browser_fill` | Fill a text input |
+| `browser_input` | Press a key, choose a dropdown option, scroll, hover, go back or forward |
 | `browser_open` | Open a URL in the browser |
 | `browser_person_step` | Let the person complete the current browser page |
 | `browser_run_steps` | Run setup steps from a System or installed skill |
