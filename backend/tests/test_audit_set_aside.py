@@ -133,3 +133,28 @@ async def test_restart_replay_poison_stores_a_code_and_keeps_the_text_on_the_del
         connection.close()
     assert dead["reason"] == restart_webhooks.DEAD_LETTER_REASON == "restart_replay_poison"
     assert delivery["error"] == "stored webhook payload is not an object"
+
+
+async def test_restart_replay_rows_read_under_one_github_name(isolated_db):
+    """GitHub's raw header (``push``, ``issue_comment``) is neither code-named nor agent-declared."""
+    from automation import restart_webhooks
+    from infra.audit_set_aside import RESTART_REPLAY_KIND, set_aside
+    from infra.database import get_db
+
+    with sqlite3.connect(isolated_db) as db:
+        for row_id, header in (("w1", "push"), ("w2", "issue_comment"), ("w3", "pull_request_review")):
+            db.execute(
+                "INSERT INTO webhook_deliveries (id,event_type,delivery_id,payload_hash,payload_json,"
+                "status,created_at) VALUES (?,?,?,'h','[]','held_restart','2026-11-10T00:00:00Z')",
+                (row_id, header, f"d-{row_id}"),
+            )
+    result = await restart_webhooks.replay_held_webhooks()
+    assert len(result["dead_lettered"]) == 3
+    connection = get_db()
+    try:
+        rows = set_aside(connection, "2000-01-01T00:00:00+00:00", "2999-01-01T00:00:00+00:00")
+    finally:
+        connection.close()
+    assert [(r["internal_event"], r["reason"], r["total"]) for r in rows] == [
+        (RESTART_REPLAY_KIND, "restart_replay_poison", 3),
+    ]

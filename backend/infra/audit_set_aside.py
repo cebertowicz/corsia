@@ -28,6 +28,10 @@ _PLATFORM_KINDS = frozenset({
     "system_bulletin.infrastructure", "script.owner_gone",
     "automation.watch_expired", "github.ingress_overdue",
 })
+#: The restart replay parks a held GitHub delivery as ``webhook.github.<header>``,
+#: where the header is GitHub's raw event name, not a code-named kind. All of them
+#: count under this one name, so none reads as agent-declared.
+RESTART_REPLAY_KIND = "webhook.github"
 
 
 @cache
@@ -45,6 +49,16 @@ def _code_named() -> frozenset[str]:
     return frozenset(
         manifest_kinds | set(GITHUB_ROUTED_EVENTS.values()) | _PLATFORM_KINDS | {REPORT_EVENT}
     )
+
+
+def _kind(internal_event: str, reason: str) -> str:
+    """The name a row is counted under: its own if code names it, else one fixed name."""
+    from automation.restart_webhooks import DEAD_LETTER_REASON
+
+    if reason == DEAD_LETTER_REASON and internal_event.startswith(f"{RESTART_REPLAY_KIND}."):
+        return RESTART_REPLAY_KIND
+    return internal_event if internal_event in _code_named() else DECLARED
+
 
 # Rows are written with more than one ISO form, so the text bounds only narrow
 # the index range (a day wide on each side) and julianday() decides. Each
@@ -78,7 +92,7 @@ def set_aside(db: sqlite3.Connection, since: str, until: str) -> list[dict]:
     groups: dict[tuple[str, str], dict] = {}
     for row in db.execute(_SET_ASIDE_SQL, params):
         reason = row["reason"]
-        kind = row["internal_event"] if row["internal_event"] in _code_named() else DECLARED
+        kind = _kind(row["internal_event"], reason)
         key = (kind, reason)
         group = groups.setdefault(key, {
             "internal_event": kind, "reason": reason, "total": 0, "days": {},
