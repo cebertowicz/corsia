@@ -90,14 +90,21 @@ def get_artifact_id_for_comment(comment_id: str, *, db=None) -> str | None:
             _db.close()
 
 
-def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
-    """All comment threads on an artifact, oldest-first within each level."""
+def list_for_artifact(artifact_id: str, *, db=None, adopt_replies: bool = False) -> list[dict]:
+    """All comment threads on an artifact, oldest-first within each level.
+
+    ``adopt_replies`` also takes replies keyed on another identity of the document whose parent thread is
+    on this artifact: a reply sent to a thread left on an earlier identity is saved on the live one."""
     _db = db or get_db()
     try:
+        adopted = (
+            " OR parent_id IN (SELECT id FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL)"
+            if adopt_replies else ""
+        )
         rows = [
             dict(r) for r in _db.execute(
-                "SELECT * FROM doc_comments WHERE artifact_id=? ORDER BY created_at",
-                (artifact_id,),
+                f"SELECT * FROM doc_comments WHERE artifact_id=?{adopted} ORDER BY created_at",
+                (artifact_id, artifact_id) if adopt_replies else (artifact_id,),
             ).fetchall()
         ]
         comment_recipients.tags_for_comments(_db, rows)

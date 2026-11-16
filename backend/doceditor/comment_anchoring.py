@@ -165,14 +165,15 @@ def prepare_positions(artifact_id: str, text: str, db: sqlite3.Connection, *, ra
 
 
 def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
-                     *, text: str | None = None, persist: bool = True) -> tuple[list[dict], bool]:
+                     *, text: str | None = None, persist: bool = True,
+                     adopt_replies: bool = False) -> tuple[list[dict], bool]:
     """Return threads anchored to current text, without making a read fragile.
 
     A failed text read leaves persisted offsets alone and reports that anchoring
     was skipped. A failed offset/context write also leaves the computed response
     valid; the next read retries persistence.
     """
-    threads = store.list_for_artifact(artifact_id, db=db)
+    threads = store.list_for_artifact(artifact_id, db=db, adopt_replies=adopt_replies)
     ranges = None
     if text is None and path:
         from pathlib import Path

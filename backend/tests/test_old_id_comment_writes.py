@@ -377,6 +377,22 @@ def test_every_pane_of_a_document_reads_the_same_lineage_including_comments_save
         db.close()
 
 
+def test_a_reply_sent_through_the_route_to_a_stray_thread_shows_under_it_in_every_pane(client, isolated_db):
+    db = get_db()
+    try:
+        artifact, _ = _document_with_thread(db)
+        successor = _promote(db, artifact)
+        stray, _ = add_comment(db, artifact, author_kind="user", author="Steve")
+        response = _reply(client, artifact, stray, "answer to the stray")
+        assert response.status_code == 200, response.text
+        for pane in (artifact, successor):
+            threads = client.get(f"/api/artifacts/{pane}/comments", params=TOKEN).json()["comments"]
+            by_id = {thread["id"]: thread for thread in threads}
+            assert [reply["body"] for reply in by_id[stray["id"]]["replies"]] == ["answer to the stray"], pane
+    finally:
+        db.close()
+
+
 def test_a_lineage_of_three_ids_reads_the_same_from_each_and_a_stray_thread_can_be_viewed(client, isolated_db):
     db = get_db()
     try:
