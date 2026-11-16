@@ -71,20 +71,27 @@ def capture_in_place_entry(
         try:
             target = entry.resolve(strict=True)
         except OSError as exc:
-            raise HTTPException(400, f"source/{entry.name} is a link that points nowhere") from exc
+            raise HTTPException(
+                400, f"source/{entry.name} is a link that points nowhere; fix or remove the link, then try again",
+            ) from exc
         if not target.is_dir():
-            raise HTTPException(400, f"source/{entry.name} is a link that does not point to a folder")
+            raise HTTPException(
+                400, f"source/{entry.name} is a link to something that isn't a folder; "
+                "point it at the repository's folder, then try again",
+            )
         try:
             require_under_home(target)
         except ValueError as exc:
             raise HTTPException(
-                400, f"source/{entry.name} links to a folder outside your home folder, which can't be registered",
+                400,
+                f"source/{entry.name} links to a folder outside your home folder; "
+                "move the repository under your home folder or link to one there, then try again",
             ) from exc
         kind = "linked"
     elif entry.is_dir():
         target, kind = entry.resolve(), "native"
     else:
-        raise HTTPException(400, f"source/{entry.name} is not a folder")
+        raise HTTPException(400, f"source/{entry.name} isn't a folder; register the repository's folder instead")
     return _repo_row(entry.name, target, kind, False), capture_source_entry(entry, kind)
 
 

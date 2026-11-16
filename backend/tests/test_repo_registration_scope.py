@@ -500,7 +500,9 @@ async def test_broken_link_entry_is_refused(env):
     with pytest.raises(HTTPException) as raised:
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
     assert raised.value.status_code == 400
-    assert "is a link that points nowhere" in raised.value.detail
+    assert raised.value.detail == (
+        "source/gone is a link that points nowhere; fix or remove the link, then try again"
+    )
     assert entry.is_symlink()
     assert _registered(env) == 0
 
@@ -536,7 +538,8 @@ async def test_link_entry_resolving_outside_home_is_refused(env, tmp_path_factor
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
     assert raised.value.status_code == 400
     assert raised.value.detail == (
-        "source/app links to a folder outside your home folder, which can't be registered"
+        "source/app links to a folder outside your home folder; "
+        "move the repository under your home folder or link to one there, then try again"
     )
     assert entry.is_symlink() and entry.readlink() == outside_home
     assert _registered(env) == 0
@@ -637,3 +640,28 @@ async def test_each_transition_logs_the_claim_it_ran_or_was_refused_under(env, c
         "repo policy transition refused claim=own-project blocker_thread=p-agent",
         "repo policy transition admitted claim=own-project",
     ], messages
+
+
+@pytest.mark.parametrize("kind", ["link to a file", "file"])
+@pytest.mark.asyncio
+async def test_entry_that_is_not_a_folder_is_refused_with_what_to_do(env, kind):
+    from fastapi import HTTPException
+
+    from api import project_repos
+
+    entry = env["alpha"] / "source" / "notes"
+    if kind == "file":
+        entry.write_text("x\n", encoding="utf-8")
+        expected = "source/notes isn't a folder; register the repository's folder instead"
+    else:
+        (env["tmp"] / "notes.txt").write_text("x\n", encoding="utf-8")
+        entry.symlink_to(env["tmp"] / "notes.txt")
+        expected = (
+            "source/notes is a link to something that isn't a folder; "
+            "point it at the repository's folder, then try again"
+        )
+    with pytest.raises(HTTPException) as raised:
+        project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
+    assert raised.value.status_code == 400
+    assert raised.value.detail == expected
+    assert _registered(env) == 0

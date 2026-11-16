@@ -29,7 +29,6 @@ from fastapi import HTTPException
 from infra.repo_policy_transition import (
     EVERYWHERE,
     Holder,
-    Reach,
     repo_policy_transition,
     transition_generation,
 )
@@ -179,7 +178,7 @@ def owned_process_holders() -> tuple[Holder, ...]:
 
     return tuple(
         Holder(
-            reach=record.reach if isinstance(record.reach, Reach) else EVERYWHERE,
+            reach=record.reach or EVERYWHERE,
             thread_id=record.thread_id,
             what=(
                 f'process "{record.description}"' if record.description
