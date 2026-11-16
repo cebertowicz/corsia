@@ -684,6 +684,18 @@ def test_controlled_branch_switch_failure_preserves_checkout(tmp_path, failure):
     assert current_repo_branch(repo) == "main"
 
 
+def test_pinning_the_current_branch_of_a_dirty_checkout_moves_nothing(tmp_path):
+    from infra.project_repo_policy import switch_repo_branch
+
+    repo = _git_repo_with_commit(tmp_path / "repo")
+    (repo / "agent-wrote.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    switched = switch_repo_branch(repo, "main")
+
+    assert (switched.previous_branch, switched.selected_branch, switched.created_local_branch) == ("main", "main", False)
+    assert (repo / "agent-wrote.txt").read_text(encoding="utf-8") == "uncommitted\n"
+
+
 def test_controlled_fast_forward_uses_one_upstream_and_exact_commit(
     tmp_path,
     monkeypatch,

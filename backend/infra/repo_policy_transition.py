@@ -41,7 +41,7 @@ _T = TypeVar("_T")
 #: How long a registration waits for what it meets: the longest foreground shell call.
 TRANSITION_WAIT_SECONDS = 600.0
 _FIRST_POLL_SECONDS = 0.25
-_MAX_POLL_SECONDS = 5.0
+_MAX_POLL_SECONDS = 2.0
 
 
 class RepoPolicyTransitionBusy(RuntimeError):

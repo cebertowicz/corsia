@@ -462,7 +462,7 @@ def _switch_existing_local(repo: Path, branch: str) -> None:
 
 
 def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
-    """Move a clean named checkout to a local or unique cached remote branch."""
+    """Move a clean checkout to a local or unique remote branch; its own branch moves nothing, dirty or not."""
     repo = repo_path.expanduser().resolve(strict=False)
     target = target_branch.strip()
     if not target:
@@ -473,12 +473,12 @@ def switch_repo_branch(repo_path: Path, target_branch: str) -> RepoBranchSwitch:
         operation="branch validation",
     )
     previous = current_repo_branch(repo)
+    if target == previous:
+        return RepoBranchSwitch(previous, target, False)
     if not _repo_is_clean(repo):
         raise ValueError("dirty checkout cannot change branches")
     local, remote_branches = _branch_inventory(repo)
     created = False
-    if target == previous:
-        return RepoBranchSwitch(previous, target, False)
     if target in local:
         mutation = ["switch", "--", target]
     else:
