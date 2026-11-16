@@ -158,7 +158,20 @@ def _pair_lines(before: list[str], after: list[str]) -> list[tuple[str | None, s
         row += rows
         column += columns
     pairs += [(line, None) for line in before[row:]] + [(None, line) for line in after[column:]]
-    return pairs
+    return _merge_unpaired(pairs)
+
+
+def _merge_unpaired(pairs: list[tuple[str | None, str | None]]) -> list[tuple[str | None, str | None]]:
+    """Join runs of whole deleted lines, or of whole inserted lines, into one change each, as a character diff gives."""
+    merged: list[tuple[str | None, str | None]] = []
+    for left, right in pairs:
+        if merged and (left is None) == (merged[-1][0] is None) and (right is None) == (merged[-1][1] is None) \
+                and (left is None or right is None):
+            before, after = merged[-1]
+            merged[-1] = (None if left is None else (before or "") + left, None if right is None else (after or "") + right)
+        else:
+            merged.append((left, right))
+    return merged
 
 
 def _pair_work(before: list[str], after: list[str]) -> int:

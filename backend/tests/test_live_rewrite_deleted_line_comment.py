@@ -239,3 +239,27 @@ def test_a_paragraph_reflowed_to_other_line_breaks_keeps_a_comment_on_a_word_in_
     comment = _after_rewrite(old, new, "five six")
     assert comment["orphaned"] is False
     assert new[comment["from_off"]:comment["to_off"]] == "five six"
+
+
+def _applied(old: str, changes: list[tuple[int, int, str]]) -> str:
+    units = old.encode()
+    for first, last, inserted in reversed(changes):
+        units = units[:first] + inserted.encode() + units[last:]
+    return units.decode()
+
+
+def test_lines_added_or_removed_whole_are_one_change_each_not_one_per_line():
+    """A pure insert or delete of N lines sends one operation, as the block diff did, whatever N is."""
+    lines = "".join(f"- item {number} with some padding text here\n" for number in range(5000))
+    for old, new in ((HEAD + TAIL, HEAD + lines + TAIL), (HEAD + lines + TAIL, HEAD + TAIL)):
+        changes = live_diff.text_changes(old, new)
+        assert len(changes) == 1 and len(_dev_changes(old, new)) == 1
+        assert _applied(old, changes) == new
+
+
+def test_a_run_of_unpaired_lines_beside_an_edited_one_is_one_change_per_run():
+    old = HEAD + "- audit build docs deploy\n" + TAIL
+    inserted = "".join(f"- zz{number} qq{number}\n" for number in range(5))
+    new = HEAD + "- audit build docs deploy now\n" + inserted + TAIL
+    changes = live_diff.text_changes(old, new)
+    assert len(changes) == 2 and changes[1][2] == inserted
