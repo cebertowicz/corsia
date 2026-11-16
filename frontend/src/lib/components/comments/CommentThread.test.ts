@@ -473,7 +473,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', orphaned: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text this suggestion replaces isn't in the document.");
+		expect(accept.title).toBe("Can’t accept: the text this suggestion replaces isn’t in the document.");
 		expect(host.textContent).toContain("The text this suggestion replaces isn't in the document.");
 	});
 
@@ -481,7 +481,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', textChanged: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text doesn't match this suggestion.");
+		expect(accept.title).toBe("Can’t accept: the text doesn’t match this suggestion.");
 		expect(host.querySelector('.ct-orphan')?.textContent).toBe("The text doesn't match this suggestion.");
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
 		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
@@ -536,8 +536,12 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text' }), false, { onDecision });
 		button(clicked).click(); flushSync();
 		expect(onDecision).toHaveBeenCalledWith('c1', decision);
-		expect(button(clicked).textContent).toBe(busyLabel);
-		expect(button(other).textContent).toBe(otherLabel);
+		expect(button(clicked).textContent?.trim()).toBe(busyLabel);
+		expect(button(clicked).getAttribute('aria-label')).toBe(`${busyLabel.replace('…', '')}: quote to new text`);
+		expect(button(other).textContent?.trim()).toBe(otherLabel);
+		expect(button(other).getAttribute('aria-label')).toBe(`${otherLabel}: quote to new text`);
+		expect(button(clicked).querySelector('.spinner')).not.toBeNull();
+		expect(button(clicked).getAttribute('aria-busy')).toBe('true');
 		expect(button(clicked).disabled).toBe(true);
 		expect(button(other).disabled).toBe(true);
 		button(other).click(); button(clicked).click();
@@ -546,6 +550,7 @@ describe('CommentThread', () => {
 		await vi.waitFor(() => expect(button(clicked).disabled).toBe(false));
 		expect(button(other).disabled).toBe(false);
 		expect(host.querySelector('.ct-suggestion-actions')?.textContent).not.toMatch(/Accepting|Rejecting/);
+		expect(host.querySelector('.ct-suggestion-actions .spinner')).toBeNull();
 	});
 
 	it('shows the refusal it is given, as an alert', () => {
@@ -690,5 +695,16 @@ describe('a decided suggestion that has replies', () => {
 		render(accepted({ resolved: true }));
 		expect(host.querySelector('.ct.resolved')).not.toBeNull();
 		expect(host.querySelector('.ct-decided')).toBeNull();
+	});
+});
+
+describe('CommentThread suggestion card in a short popover or sheet', () => {
+	it('keeps Accept and Reject in the pinned row below the reply field, so the field is never under them', () => {
+		render(thread({ replacement: 'new text' }));
+		const pin = host.querySelector('.ct-suggestion-pin[data-pin-bottom]');
+		const field = host.querySelector('.ct-compose');
+		expect(pin?.querySelector('.ct-suggestion-actions')).not.toBeNull();
+		expect(field).not.toBeNull();
+		expect(!!(field!.compareDocumentPosition(pin!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 	});
 });

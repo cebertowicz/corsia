@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import Popover from './Popover.svelte';
+import Popover, { ANCHOR_MOVED } from './Popover.svelte';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -342,6 +342,37 @@ describe('Popover', () => {
 		await vi.waitFor(() => expect(surface().style.top).toBe('100px'));
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));
+	});
+	it('keeps the card scrolled where it was when it re-measures, so a caret scrolled into view stays in view', async () => {
+		render();
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		await vi.waitFor(() => expect(surface.style.top).not.toBe('12px'));
+		// A browser clamps the scroll of a card measured at full height to 0; jsdom has no layout, so do it here.
+		let scrollTop = 0;
+		Object.defineProperty(surface, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } });
+		vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { if (this === surface && this.style.maxHeight === '') scrollTop = 0; return this.getBoundingClientRect().height; });
+		scrollTop = 120;
+		window.dispatchEvent(new Event(ANCHOR_MOVED));
+		expect(scrollTop).toBe(120);
+	});
+	it('watches content swapped in while it stays open, and re-places the card when that content grows', async () => {
+		const watching: Element[] = []; let resized: () => void = () => {};
+		vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resized = callback; } observe(el: Element) { watching.push(el); } unobserve(el: Element) { watching.splice(watching.indexOf(el), 1); } disconnect() {} });
+		const onPlace = vi.fn();
+		render({ onPlace });
+		const surface = document.body.querySelector<HTMLElement>('.popover')!;
+		const draft = document.createElement('div'); surface.append(draft);
+		await vi.waitFor(() => expect(watching).toContain(draft));
+		// The draft is replaced by the thread inside the same open card.
+		const thread = document.createElement('div'); draft.replaceWith(thread);
+		await vi.waitFor(() => expect(watching).toContain(thread));
+		expect(watching).not.toContain(draft);
+		await vi.waitFor(() => expect(onPlace).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 50)); // let the swap's own placement finish
+		const settled = onPlace.mock.calls.length;
+		resized();
+		await vi.waitFor(() => expect(onPlace.mock.calls.length).toBeGreaterThan(settled));
+		vi.unstubAllGlobals();
 	});
 	it('stays open out of sight and reach while covered, leaving the cover its clicks and Escape', async () => {
 		const { fromStore, writable } = await import('svelte/store');

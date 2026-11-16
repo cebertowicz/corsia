@@ -69,7 +69,7 @@ test('@flow:doc-margin-defects Send reply of a card near the bottom of the windo
 	await send.click();
 	await expect(wrap).toContainText('Is the intro the right place?');
 	// A suggestion with a reply stays an open conversation once decided: accept it, then Resolve it with the server refusing.
-	await wrap.getByRole('button', { name: 'Accept', exact: true }).click();
+	await wrap.getByRole('button', { name: /^Accept(:|$)/ }).click();
 	await expect(wrap.locator('.ct-decided')).toBeVisible();
 	let held = 0;
 	await page.route(new RegExp(`/api/comments/${doc.ids[SUGGESTION2]}(\\?|$)`), async (route) => {
