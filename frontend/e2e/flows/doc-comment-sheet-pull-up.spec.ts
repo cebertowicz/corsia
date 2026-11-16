@@ -365,12 +365,21 @@ test.describe(`${TAG} document`, () => {
 		await openNav();
 		await expect(page.locator('[data-adaptive-drawer]')).toHaveClass(/\bcovered\b/);
 		const rows = await sidebar(page).evaluate((aside) => {
+			// A control a clipping ancestor hides (a row's swipe actions at rest sit just past the row's edge) is not one the reader can see.
+			const clippedAway = (el: HTMLElement, x: number, y: number) => {
+				for (let up = el.parentElement; up && up !== aside.parentElement; up = up.parentElement) {
+					if (getComputedStyle(up).overflow === 'visible') continue;
+					const c = up.getBoundingClientRect();
+					if (x < c.left || x > c.right || y < c.top || y > c.bottom) return true;
+				}
+				return false;
+			};
 			const shown = [...aside.querySelectorAll<HTMLElement>('a, button')].filter((el) => {
 				const r = el.getBoundingClientRect();
-				return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && getComputedStyle(el).visibility !== 'hidden';
+				return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && getComputedStyle(el).visibility !== 'hidden'
+					&& !clippedAway(el, r.left + r.width / 2, r.top + r.height / 2);
 			});
-			// A row's swipe actions sit behind the row itself, so the touch is the navigation's when it lands anywhere in it, never in the sheet.
-			return { count: shown.length, misses: shown.filter((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !aside.contains(hit) || !!hit.closest('[data-adaptive-drawer]'); }).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 30)) };
+			return { count: shown.length, misses: shown.filter((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !(hit === el || el.contains(hit)); }).map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 30)) };
 		});
 		expect(rows.count, 'the navigation shows its rows').toBeGreaterThanOrEqual(3);
 		expect(rows.misses, 'every navigation row takes the touch over the sheet').toEqual([]);

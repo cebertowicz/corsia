@@ -22,13 +22,16 @@ describe('pageEscape', () => {
 		expect(close).not.toHaveBeenCalled();
 	});
 
-	it('closes the phone navigation before the pane it slides over', () => {
+	it('closes the phone navigation before the pane it slides over, and uses the press so nothing under the navigation closes too', () => {
 		paneOpen.set(true);
 		phoneNavOver.set(true);
 		const close = vi.fn();
-		expect(pageEscape(escape(), { open: true, close })).toBe(true);
+		const event = escape();
+		expect(pageEscape(event, { open: true, close })).toBe(true);
 		expect(close).toHaveBeenCalledTimes(1);
 		expect(get(paneOpen)).toBe(true);
+		// The document's own window listener runs after this one and closes its open sheet on an unused Escape.
+		expect(event.defaultPrevented).toBe(true);
 	});
 
 	it('closes the pane, then the sidebar, as before', () => {
