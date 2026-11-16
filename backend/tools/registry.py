@@ -4,7 +4,7 @@ import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from host_access.credential_sanitizer import sanitize_credential_text
 from tools.result_sanitizer import sanitize_result
@@ -26,6 +26,10 @@ from tools.tool_surface import (
 
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
+
+if TYPE_CHECKING:
+    from infra.repo_policy_transition import Reach
+
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -38,7 +42,8 @@ _RESERVED_EXECUTION_PREFIXES = (
 # ``infra.repo_policy_transition.repo_policy_transition``. They are excused
 # from the registry's ``admit_repo_effect()`` wrapper because that effect would
 # be the active effect their own transition refuses. Nothing else is exempt:
-# effects, transitions and owned processes stay mutually exclusive.
+# effects, transitions and owned processes stay mutually exclusive wherever an
+# effect's reach meets what the transition claims.
 _REPO_TRANSITION_OWNERS = frozenset({"project_create", "project_repo_register"})
 
 log = logging.getLogger(__name__)
@@ -134,18 +139,50 @@ class ToolRegistry(ToolStore):
         # the repository work they start, and they enter it themselves. The
         # transition already refuses while any effect is active, so admitting
         # this call's own effect would only make the tool collide with itself.
-        # Every other tool is still admitted as an effect, and the transition
-        # still excludes effects, other transitions and owned processes.
+        # Every other tool is still admitted as an effect carrying its caller's
+        # reach, and a transition excludes the effects and owned processes it
+        # meets (``infra.repo_policy_transition``).
         repo_effect = (
             nullcontext()
             if name in _REPO_TRANSITION_OWNERS
-            else admit_repo_effect()
+            else admit_repo_effect(
+                await self._effect_reach(tool, thread_context["id"], authorization),
+                thread_id=thread_context["id"],
+            )
         )
         with repo_effect, confined_reads.scope(thread_context):
             with host_action_permit_scope(authorization):
                 return await execute_recorded_call(
                     tool, name, execution_params, thread_context,
                 )
+
+    @staticmethod
+    async def _effect_reach(tool: Any, thread_id: str, authorization: Any) -> "Reach":
+        """What this call's effect could write, read once at admission.
+
+        A call under a host-action permit, or to a connected app (whose local
+        server is walled only from Local only projects), reaches everywhere.
+        """
+        from infra.repo_policy_transition import EVERYWHERE, caller_reach
+        from tools.mcp import MCPToolWrapper
+
+        if getattr(authorization, "_permit", None) is not None or isinstance(tool, MCPToolWrapper):
+            return EVERYWHERE
+        from infra.database import get_db
+        from infra.db_async import run_in_db
+
+        def _read():
+            db = get_db()
+            try:
+                return caller_reach(thread_id, db=db)
+            finally:
+                db.close()
+
+        try:
+            return await run_in_db(_read)
+        except Exception:
+            log.exception("repo effect reach read failed for thread=%s", thread_id)
+            return EVERYWHERE
 
     @staticmethod
     def _is_drain_allowed(name: str, params: dict[str, Any]) -> bool:

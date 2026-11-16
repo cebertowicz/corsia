@@ -389,11 +389,11 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
         if held is not None:
             held.__exit__(None, None, None)
 
-    expected = (
-        "Repository policy transition is blocked by an active tool effect."
-        if blocker == "effect"
-        else "Repository policy transition is blocked by an active owned process."
+    running = (
+        "you're running an action" if blocker == "effect"
+        else "an agent's process is running"
     )
+    expected = f"Repositories can't change while {running}. Try again once it finishes."
     assert expected in result, result
     assert registry_env["db"].execute(
         "SELECT COUNT(*) FROM project_repo_policies"
@@ -417,7 +417,7 @@ async def test_registry_runs_non_git_refusal_before_the_transition(registry_env,
 
     assert result.startswith("Error:")
     assert "not a Git repository" in result, result
-    assert "Repository policy transition" not in result
+    assert "Repositories can't change" not in result
 
 
 @pytest.mark.asyncio

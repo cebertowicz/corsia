@@ -1283,7 +1283,9 @@ async def test_repo_mutations_for_same_project_are_serialized(
     second_entered = threading.Event()
     call_guard = threading.Lock()
     call_count = 0
-    real_link = project_repos.link_repo_into_source
+    from api import project_repo_add_source
+
+    real_link = project_repo_add_source.link_repo_into_source
 
     def _controlled_link(*args, **kwargs):
         nonlocal call_count
@@ -1311,7 +1313,7 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "get_db", _connection)
     monkeypatch.setattr(project_repos, "sync_sources", lambda *_args: None)
 
-    monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
+    monkeypatch.setattr(project_repo_add_source, "link_repo_into_source", _controlled_link)
 
     first = asyncio.create_task(
         project_repos.add_repo(
@@ -1466,7 +1468,9 @@ async def test_add_replacement_before_ownership_capture_is_not_removed(
     _init_git_repo(registered)
     _init_git_repo(replacement)
     db = _policy_db()
-    real_link = project_repos.link_repo_into_source
+    from api import project_repo_add_source
+
+    real_link = project_repo_add_source.link_repo_into_source
 
     def _link_then_replace(*args, **kwargs):
         result = real_link(*args, **kwargs)
@@ -1478,7 +1482,7 @@ async def test_add_replacement_before_ownership_capture_is_not_removed(
 
     _configure_repo_api(monkeypatch, project_repos, workspace, db)
     monkeypatch.setattr(
-        project_repos,
+        project_repo_add_source,
         "link_repo_into_source",
         _link_then_replace,
     )
