@@ -49,7 +49,7 @@ def _event(name="probe", visible=False, **kwargs):
     (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, True)}), _event(visible=True),
      {"rules": ("R8",), "refusal": "password_declined"}),
-    (_state(answers={("password", "visit-one"): lifecycle.Answer(1)}), _event(visible=True),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({7}))}), _event(visible=True),
      {"rules": ("R9",), "open_kind": "password", "occurrence": 2, "refusal": "password"}),
     (_state(answers={("person", "visit-one"): lifecycle.Answer(1, True)}), _event("declare"),
      {"rules": ("R10",), "refusal": "person_declined"}),
@@ -57,7 +57,9 @@ def _event(name="probe", visible=False, **kwargs):
      {"rules": ("R11",), "open_kind": "person", "occurrence": 2}),
     (_state(_person()), _event("declare", visible=True), {"rules": ("R12",)}),
     (_state(_password()), _event("declare"), {"rules": ("R13", "R7"), "refusal": "password"}),
-], ids=[f"R{i}" for i in range(1, 14)])
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42}))}), _event(visible=True),
+     {"rules": ("R14",), "open_kind": None, "refusal": None}),
+], ids=[f"R{i}" for i in range(1, 15)])
 def test_decide_rule_table_is_pure(state, event, expected):
     before = repr(state)
     decision = lifecycle.decide(state, event)
@@ -169,6 +171,12 @@ async def test_answers_end_live_steps_and_only_done_allows_a_new_occurrence(plan
         assert len(_steps(db)) == 1
         assert THREAD not in lifecycle._steps
         assert plan["events"].count(f"{kind}_step_declined") == 1
+    elif kind == "password" and not hide_then_show:
+        # R14: the person marked the field they were asked about done, so it no longer holds the agent.
+        await ask()
+        assert len(_steps(db)) == 1
+        assert THREAD not in lifecycle._steps
+        assert not browser_control.password_page(THREAD)
     else:
         if kind == "password":
             with pytest.raises(BrowserSessionError, match="asks for a password"):
@@ -180,6 +188,74 @@ async def test_answers_end_live_steps_and_only_done_allows_a_new_occurrence(plan
         assert lifecycle._steps[THREAD].node_id == second["id"]
         assert lifecycle._steps[THREAD].occurrence == 2
         assert not any(event.endswith("_declined") for event in plan["events"])
+
+
+async def _done_with_field_showing(plan, page, nodes=frozenset({42})):
+    """Open a sign-in step on a visible field, then have the person mark it done with the field still showing."""
+    page.show("visit-one", nodes)
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [original] = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "mark_done", close_params(plan["db"], "mark_done", original["id"]),
+                actor=HUMAN)
+
+
+@pytest.mark.asyncio
+async def test_a_done_answer_releases_snapshot_and_click_while_the_field_still_shows(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    for command in (("snapshot",), ("tab", "list"), ("click", "@e3")):
+        assert await browser_control.require_page_access(THREAD, page.agent_probe, command) is None
+    assert len(_steps(plan["db"])) == 1 and THREAD not in lifecycle._steps
+
+
+@pytest.mark.asyncio
+async def test_a_new_field_after_done_asks_the_person_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    page.show("visit-one", frozenset({42, 43}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    first, second = _steps(plan["db"])
+    assert second["state"] == "pending" and lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_a_field_hidden_then_shown_again_after_done_asks_the_person_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    page.show("visit-one")
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_a_done_field_stays_read_guarded(plan):
+    """The agent runs on the page again, but scripts and value reads of the field the person filled in stay refused."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+
+    async def locate(node):
+        async def resolve(_target):
+            return node
+        return resolve
+
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",)) is None
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"))
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e1"),
+                                                  resolve=await locate(42))
+    with pytest.raises(BrowserSessionError, match="stay refused"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e1"),
+                                                  resolve=await locate(None))
+    # A field that is not the done one reads as before.
+    assert await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e2"),
+                                                     resolve=await locate(7)) is None
 
 
 def test_other_target_never_settles_and_declare_cannot_end_a_password_step():

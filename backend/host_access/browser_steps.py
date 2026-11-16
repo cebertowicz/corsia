@@ -76,6 +76,8 @@ class PasswordStep(BrowserStep):
     provenance = "browser.password_guard"
     event_prefix = "password_step"
     settlement_evidence = "Password field no longer on the page"
+    # The visible password fields the step was opened for; a done answer keeps them (browser_step_lifecycle R14).
+    nodes: frozenset[int] = field(default=frozenset(), kw_only=True)
 
     def title(self) -> str:
         return self._titled("Enter your password in the shared browser")
