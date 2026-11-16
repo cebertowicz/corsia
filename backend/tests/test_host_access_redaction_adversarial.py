@@ -285,6 +285,9 @@ def test_switches_and_code_text_are_not_literal_credentials(
         "curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "curl -ualice:not-a-ref https://example.test",  # gitleaks:allow
         "sudo curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "ffuf -u https://alice:not-a-ref@example.test/FUZZ",  # gitleaks:allow
+        "ffuf -u 'https://example.test/?" + _TOK.lower() + "=abc123'",
         "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
         "http example.test '" + _TOK + ":abc123'",
     ],

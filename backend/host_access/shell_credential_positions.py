@@ -123,6 +123,7 @@ def curl_word_at(words: Sequence[str], index: int) -> bool:
     for word in reversed(words[:index]):
         if str(word) in COMMAND_BOUNDARIES:
             return False
-        if Path(str(word)).name.casefold() in _USERINFO_FLAG_COMMANDS:
+        # A subshell's first word keeps its parenthesis: ``(curl``.
+        if Path(str(word).lstrip("(")).name.casefold() in _USERINFO_FLAG_COMMANDS:
             return True
     return False

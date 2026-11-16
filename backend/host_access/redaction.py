@@ -374,8 +374,8 @@ def _redact_userinfo_flag(
 
     Returns the rendered words, redactions, literal count and words
     consumed, or None when ``index`` holds no such value. A literal after
-    short ``-u`` is refused only for curl, where it carries a user and
-    password; elsewhere (``date -u``, ``sort -u``) it is only hidden.
+    short ``-u`` is refused as userinfo only for curl; elsewhere (``date
+    -u``) it is hidden, and refused only as any other word would be.
     """
     flag = str(words[index])
     if flag in {"-u", "--proxy-user", "--user"} and index + 1 < len(words):
@@ -390,7 +390,7 @@ def _redact_userinfo_flag(
     if consumed == 1:
         rendered = f"-u{rendered}"
     if flag.startswith("-u") and not curl_word_at(words, index):
-        literals = 0
+        literals = _redact_intrinsic(value)[2]
     return [*rendered_flag, rendered], count, literals, consumed
 
 
