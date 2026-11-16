@@ -106,7 +106,8 @@ for (const [width, height, project] of layouts) {
 			const settledBefore = settled.count();
 			expectStill(await typeAndSample(page, () => page.keyboard.type(' typed here', { delay: 40 })), 'typing in a paragraph');
 			await expect.poll(() => serverText(request, document), { message: 'the typed text was saved' }).toContain(`${INTRO} typed here`);
-			expect(settled.count(), 'the save after the typing reported its write settled').toBeGreaterThan(settledBefore);
+			// The settled frame is broadcast after the write lands, so the saved text can be read before it arrives.
+			await expect.poll(() => settled.count(), { message: 'the save after the typing reported its write settled' }).toBeGreaterThan(settledBefore);
 		});
 
 		test(`a write unsettled for less than the wait moves nothing, and one held past it shows the notice at ${width}`, async ({ page, request }) => {
