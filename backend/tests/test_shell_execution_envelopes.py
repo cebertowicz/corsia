@@ -1188,6 +1188,84 @@ def test_small_semantic_guard_does_not_recreate_a_cli_matrix(command) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "corsia restart",
+        "cd x && corsia dev up",
+        "FOO=1 corsia stop",
+        "env corsia reload",
+        "bash -c 'corsia restart'",
+        'sh -c "cd x; corsia service restart"',
+        "eval corsia restart",
+        "launchctl kickstart -k gui/501/ai.corsia.server",
+        "systemctl --user restart corsia",
+        "timeout 5 corsia restart",
+        "find . -exec corsia restart \\;",
+        "ssh host corsia restart",
+        "ssh -p 22 host 'cd x; corsia restart'",
+        "watch corsia restart",
+        "watch -n 5 'corsia restart'",
+        "alias r='corsia restart'",
+        "dash -c 'corsia restart'",
+        "su -c 'corsia restart' root",
+        "su root --command='corsia stop'",
+        "busybox sh -c 'corsia restart'",
+        "env -S 'corsia restart'",
+        "echo $(corsia restart)",
+        'echo "`corsia restart`"',
+        "(corsia restart)",
+        "case x in a) corsia restart;; esac",
+        "echo corsia restart | bash",
+        "python3 -c \"import os; os.system('corsia restart')\"",
+        "perl -e 'system(\"corsia restart\")'",
+        "osascript -e 'do shell script \"corsia restart\"'",
+        "tmux send-keys 'corsia restart' Enter",
+        "flock /tmp/l -c 'corsia restart'",
+        "xargs -I{} sh -c '{}' <<< 'corsia restart'",
+        "CMD='corsia restart'; bash -c \"$CMD\"",
+        "export CMD='corsia restart'; eval \"$CMD\"",
+        "bash -c \"$(printf 'corsia restart')\"",
+        "bash -c $(printf 'corsia restart')",
+        "alias r=\"$(printf 'corsia restart')\"",
+        "awk 'BEGIN{system(\"corsia restart\")}'",
+        "tcsh -c 'corsia restart'",
+        "trap 'corsia restart' EXIT",
+        "git -c alias.x='!corsia restart' x",
+        "echo corsia restart",
+        "echo 'unbalanced; corsia restart",
+    ],
+)
+def test_control_plane_guard_refuses_operation_words_anywhere(command) -> None:
+    from tools import shell_guard
+    from tools.shell_control_plane import runs_control_plane_operation
+
+    # su is refused first as privilege escalation; the check still sees it.
+    assert runs_control_plane_operation(command)
+    assert shell_guard.check_command_safety(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "corsia restart finished"',
+        "grep -rn 'corsia restart' docs/",
+        "git commit -m 'note: corsia stop is not needed'",
+        "git commit -m 'corsia restart fix'",
+        "make -C x 'corsia restart'",
+        "corsia status",
+        "corsia logs restart",
+        "launchctl list | grep corsia",
+        "systemctl --user status corsia",
+        "rg 'launchctl kickstart .*corsia' .",
+    ],
+)
+def test_control_plane_guard_allows_text_that_mentions_an_operation(command) -> None:
+    from tools import shell_guard
+
+    assert shell_guard.check_command_safety(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "curl -H 'Authorization: Bearer literal-token' https://example.test",
         "HF_TOKEN=hf_literal python script.py",
     ],

@@ -354,3 +354,58 @@ def test_short_u_is_a_switch_only_for_commands_known_to_use_it_so() -> None:
     hidden = redact_shell_command("fetch -u a:b")
     assert "a:b" not in hidden.tokens
     assert hidden.literal_credentials == 1
+
+
+_PW = "hunter" + "22"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python3 -c \"from urllib.parse import urlsplit; "
+        "print(urlsplit('https://example.com/a?b=c').query)\"",
+        "python3 -c \"print('docs live at https:// soon')\"",
+        "echo 'see https://example.com/a and http://[bad later'",
+        "gh api repos/o/r --jq '{s: .state}'",
+        "gh api repos/o/r --jq '{" + _TOK.lower() + ": .value}'",
+        "gh api repos/o/r --jq '{" + _TOK.lower() + ": $t}'",
+        "gh api repos/o/r --jq '.[] | {" + _TOK.lower() + ": (.a + .b)}'",
+        "jq '{\"" + _TOK.lower() + "\": .x}' f.json",
+    ],
+)
+def test_url_and_expression_text_inside_a_word_is_not_a_credential(
+    command: str,
+) -> None:
+    from host_access.redaction import (
+        redact_shell_command,
+        validate_shell_command_descriptor,
+    )
+    from tools.shell_guard import check_command_safety
+
+    rendered = redact_shell_command(command)
+    assert rendered.literal_credentials == 0
+    validate_shell_command_descriptor(rendered.descriptor())
+    assert check_command_safety(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -u alice:" + _PW + " https://x",  # gitleaks:allow
+        "curl -H 'Authorization: Bearer " + _PW + "' https://example.test",
+        "curl https://u:" + _PW + "@host/x",
+        "python3 -c \"u = 'https://u:" + _PW + "@host/x'\"",
+        "python3 -c \"u = 'see https://u:" + _PW + "@[bad/x'\"",
+        "gh api x --jq '{" + _TOK.lower() + ": \"" + _PW + "\"}'",
+        "gh api x --jq '{" + _TOK.lower() + ": " + _PW + "}'",
+        "echo 'https://u:" + _PW + "@[bad'",
+    ],
+)
+def test_url_and_key_literals_inside_a_word_are_still_refused(
+    command: str,
+) -> None:
+    from tools.shell_guard import check_command_safety
+
+    denial = check_command_safety(command)
+    assert denial is not None
+    assert _PW not in denial

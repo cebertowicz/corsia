@@ -9,8 +9,11 @@ import re
 from typing import Any, Mapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from host_access.credential_text import has_literal_key_value, redact_url_text
+from host_access.heredoc_redaction import redact_split_command, redacted_body
+from host_access.heredoc_redaction import verbatim_heredocs
 from host_access.shell_view import ShellCommandRedaction, descriptor_heredocs
-from host_access.shell_view import heredoc_view, shell_words
+from host_access.shell_view import shell_words
 from host_access.shell_credential_positions import (
     COMMAND_BOUNDARIES,
     LITERAL_OUTPUT_COMMANDS,
@@ -94,13 +97,6 @@ def _is_sensitive_key(value: str) -> bool:
     )
 
 
-def _contains_sensitive_key_text(value: str) -> bool:
-    return any(
-        _is_sensitive_key(match.group())
-        for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_-]*", value)
-    )
-
-
 def _is_indirect(value: str) -> bool:
     normalized = value.strip()
     if normalized in {"$(security", "$(/usr/bin/security"}:
@@ -159,6 +155,10 @@ def _redact_authorization_header(value: str) -> tuple[str, int, int]:
 
 
 def _redact_url(value: str) -> tuple[str, int, int]:
+    return redact_url_text(value, _redact_whole_url)
+
+
+def _redact_whole_url(value: str) -> tuple[str, int, int]:
     if "://" not in value:
         return value, 0, 0
     parseable_value = value.replace(REDACTED, _REDACTED_SENTINEL)
@@ -236,7 +236,7 @@ def _redact_structured_json(value: str) -> tuple[str, int, int]:
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
-        if _contains_sensitive_key_text(value):
+        if has_literal_key_value(value, _is_sensitive_key):
             raise CommandRedactionError(
                 "structured credential input is invalid"
             )
@@ -601,9 +601,20 @@ def redact_shell_command(command: str) -> ShellCommandRedaction:
         raise CommandRedactionError("command text is unsafe")
     try:
         command.encode("utf-8")
-        tokens = shell_words(command)
-    except (UnicodeError, ValueError) as exc:
+    except UnicodeError as exc:
         raise CommandRedactionError("command text is unparseable") from exc
+    try:
+        tokens = shell_words(command)
+    except ValueError as exc:
+        # A here-document body is data and need not tokenize as shell.
+        split = redact_split_command(command, _redact_shell_tokens, REDACTED)
+        if split is None:
+            raise CommandRedactionError("command text is unparseable") from exc
+        _validate_credential_expansions(
+            command,
+            has_credential_value=bool(split.redactions or split.literal_credentials),
+        )
+        return split
     if not tokens:
         raise CommandRedactionError("command text is empty")
     redacted = _redact_shell_tokens(
@@ -613,51 +624,8 @@ def redact_shell_command(command: str) -> ShellCommandRedaction:
         command,
         has_credential_value=bool(redacted.redactions),
     )
-    return _with_verbatim_heredocs(command, tokens, redacted)
-
-
-def _redacted_words(text: str) -> ShellCommandRedaction | None:
-    """Redact the shell words of ``text``, or ``None`` if it cannot be."""
-    try:
-        words = shell_words(text)
-        return _redact_shell_tokens(words, plain_word_indices(text, words))
-    except (CommandRedactionError, ValueError):
-        return None
-
-
-def _with_verbatim_heredocs(
-    command: str,
-    tokens: Sequence[str],
-    redacted: ShellCommandRedaction,
-) -> ShellCommandRedaction:
-    """Show here-document bodies as written instead of shell-tokenized.
-
-    ``redacted`` remains the only credential classifier. The verbatim view is
-    used only when every shown part re-tokenizes to a redaction fixed point
-    that retains no raw token the classifier replaced; otherwise the token
-    view stands.
-    """
-    view = heredoc_view(command, tokens, redacted.tokens, REDACTED)
-    if view is None:
-        return redacted
-    shell_text, heredocs, hidden = view
-    bodies = [item.body for item in heredocs]
-    shell = _redacted_words(shell_text)
-    shown = [_redacted_words(body) for body in bodies]
-    clean = [item for item in shown if item is not None and not item.redactions]
-    if shell is None or len(clean) != len(shown):
-        return redacted
-    words = [word for item in clean for word in item.tokens]
-    texts = [*shell.tokens, *words, *bodies]
-    if any(value in text for value in hidden for text in texts):
-        return redacted
-    return ShellCommandRedaction(
-        tokens=shell.tokens,
-        redactions=sum(
-            text.count(REDACTED) for text in [*shell.tokens, *bodies]
-        ),
-        literal_credentials=redacted.literal_credentials,
-        heredocs=heredocs,
+    return verbatim_heredocs(
+        command, tokens, redacted, _redact_shell_tokens, REDACTED
     )
 
 
@@ -700,7 +668,7 @@ def validate_shell_command_descriptor(value: object) -> None:
     if observed_markers != redactions:
         raise CommandRedactionError("command descriptor redactions are invalid")
     for body in bodies:
-        shown = _redacted_words(body)
+        shown = redacted_body(body, _redact_shell_tokens)
         if shown is None or shown.redactions:
             raise CommandRedactionError(
                 "command descriptor here-document is not redacted"

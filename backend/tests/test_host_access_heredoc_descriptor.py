@@ -270,15 +270,52 @@ def test_literal_credential_in_shell_text_is_still_classified() -> None:
     )
 
 
-def test_body_with_unbalanced_shell_quoting_still_fails_closed() -> None:
-    from host_access.redaction import CommandRedactionError, redact_shell_command
+@pytest.mark.parametrize(
+    ("command", "body"),
+    [
+        ("python3 - <<'PY'\n# don't\nprint(1)\nPY", "# don't\nprint(1)"),
+        (
+            "cat > f.md <<'EOF'\nit's \"x\" `y` `\nEOF",
+            "it's \"x\" `y` `",
+        ),
+    ],
+)
+def test_body_with_unbalanced_shell_quoting_is_data(command: str, body: str) -> None:
+    from host_access.redaction import redact_shell_command, validate_action_descriptor
     from tools.shell_guard import check_command_safety
 
-    command = "python3 - <<'PY'\n# don't\nprint(1)\nPY"
+    result = redact_shell_command(command)
+    descriptor = result.descriptor()
 
-    with pytest.raises(CommandRedactionError, match="unparseable"):
-        redact_shell_command(command)
-    assert check_command_safety(command) is not None
+    assert descriptor["heredocs"][0]["body"] == body
+    assert result.literal_credentials == 0
+    assert check_command_safety(command) is None
+    validate_action_descriptor("bash", _bash_descriptor(descriptor))
+
+
+@pytest.mark.parametrize(
+    ("line", "hidden"),
+    [
+        ("token=fake-hd-91", "fake-hd-91"),
+        ("curl -H 'Authorization: Bearer fake-hd-92' x", "fake-hd-92"),  # gitleaks:allow
+        ("git clone https://alice:fake-hd-93@example.test/r.git", "fake-hd-93"),
+        ("it's token=fake-hd-94", "fake-hd-94"),
+        ("password=abc123" + "def456", "abc123" + "def456"),
+    ],
+)
+def test_credential_in_a_body_that_does_not_tokenize_is_still_refused(
+    line: str, hidden: str
+) -> None:
+    from host_access.redaction import redact_shell_command
+    from host_access.refusal_messages import LITERAL_CREDENTIAL_REFUSAL
+    from tools.shell_guard import check_command_safety
+
+    command = f"cat > f.md <<'EOF'\nit's prose\n{line}\nEOF"
+    result = redact_shell_command(command)
+
+    assert result.literal_credentials >= 1
+    assert hidden not in json.dumps(result.descriptor())
+    assert check_command_safety(command) == f"Error: {LITERAL_CREDENTIAL_REFUSAL}"
 
 
 @pytest.mark.parametrize("delimiter", ["'EOF'", "EOF"])
@@ -341,8 +378,9 @@ def _heredoc_command(**heredoc: object) -> dict[str, object]:
             **_heredoc_command(body='curl -u "alice:[REDACTED]" x'),
             "redactions": 1,
         },
+        _heredoc_command(body="# don't"),
     ],
-    ids=["without-heredocs", "quoted", "unquoted", "redacted-body"],
+    ids=["without-heredocs", "quoted", "unquoted", "redacted-body", "unbalanced-quote-body"],
 )
 def test_validator_accepts_canonical_command_descriptors(command) -> None:
     from host_access.redaction import validate_action_descriptor
@@ -369,7 +407,6 @@ def test_validator_accepts_canonical_command_descriptors(command) -> None:
             body='curl -H "Authorization: Bearer fake-hd-40" https://example.test'
         ),
         _heredoc_command(body='curl -u "alice:[REDACTED]" x'),
-        _heredoc_command(body="# don't"),
     ],
     ids=[
         "empty-list",
@@ -386,7 +423,6 @@ def test_validator_accepts_canonical_command_descriptors(command) -> None:
         "body-holds-tab-terminator",
         "raw-credential-in-body",
         "uncounted-marker",
-        "unparseable-body",
     ],
 )
 def test_validator_rejects_invalid_heredocs(command) -> None:

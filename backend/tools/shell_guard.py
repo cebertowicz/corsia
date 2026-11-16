@@ -26,6 +26,7 @@ from tools.host_path_policy import current_protected_host_path_policy
 from tools.protected_path_rules import DENIED_EXECUTABLES
 from tools.repo_worktree_guidance import branch_pinned_worktree_guidance
 from tools.shell_argv import command_tokens, direct_argv
+from tools.shell_control_plane import runs_control_plane_operation
 from tools.sandbox_config import (
     get_allowed_dirs_ro,
     get_allowed_dirs_rw,
@@ -150,17 +151,6 @@ _PROTECTED_COMMAND_DENIES: tuple[tuple[str, re.Pattern[str]], ...] = (
             re.IGNORECASE,
         ),
     ),
-    (
-        "CORSIA control-plane operation",
-        re.compile(
-            r"\bcorsia\s+(?:dev\s+up\b|"
-            r"(?:(?:dev|service)\s+)?(?:reload|restart|stop)\b)"
-            r"|\b(?:launchctl|systemctl)\b[^\n;&|]*"
-            r"\b(?:bootout|kickstart|kill|restart|stop|unload)\b"
-            r"[^\n;&|]*\bcorsia\b",
-            re.IGNORECASE,
-        ),
-    ),
 )
 
 
@@ -168,13 +158,15 @@ def check_command_safety(command: str) -> str | None:
     """Apply protected-mode terminal guards before any permit is consumed."""
     if remote_error := check_remote_code_execution(command):
         return remote_error
-    for label, pattern in _PROTECTED_COMMAND_DENIES:
-        if pattern.search(command):
-            return (
-                "Error: Command blocked by protected-mode safety guard "
-                f"({label}). Request reviewed host access, then retry the "
-                "exact action."
-            )
+    labels = [label for label, pattern in _PROTECTED_COMMAND_DENIES if pattern.search(command)]
+    if runs_control_plane_operation(command):
+        labels.append("CORSIA control-plane operation")
+    if labels:
+        return (
+            "Error: Command blocked by protected-mode safety guard "
+            f"({labels[0]}). Request reviewed host access, then retry the "
+            "exact action."
+        )
     try:
         redacted = redact_shell_command(command)
     except CommandRedactionError as exc:
