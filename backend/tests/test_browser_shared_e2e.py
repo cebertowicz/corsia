@@ -465,9 +465,15 @@ async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site
     if not cross_site:
         return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
     # A cross-site frame's document is in another process: read it through the frame's own target.
-    (frame_endpoint,) = (await asyncio.to_thread(browser_cdp.frame_targets, await owner.page_endpoint(thread_id))).values()
-    async with browser_cdp.CdpClient(frame_endpoint) as cdp:
-        return (await cdp.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+    listed = await asyncio.to_thread(browser_cdp.frame_targets, await owner.page_endpoint(thread_id))
+    seen = []
+    for frame_endpoint in listed.values():
+        async with browser_cdp.CdpClient(frame_endpoint) as cdp:
+            href = (await cdp.call("Runtime.evaluate", expression="location.href", returnByValue=True))["result"].get("value")
+            seen.append(href)
+            if isinstance(href, str) and href.endswith("/frame-link.html"):
+                return (await cdp.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+    raise AssertionError(f"no frame target shows the fixture's frame: {seen}")
 
 
 @pytest.mark.integration
