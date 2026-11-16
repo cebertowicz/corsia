@@ -4,7 +4,7 @@ import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from host_access.credential_sanitizer import sanitize_credential_text
 from tools.result_sanitizer import sanitize_result
@@ -27,9 +27,6 @@ from tools.tool_surface import (
 from eval.otel import get_tracer, set_attrs, SPAN_TOOL_CALL
 from eval.tool_allowlist import record_only_result
 
-if TYPE_CHECKING:
-    from infra.repo_policy_transition import Reach
-
 _RESERVED_EXECUTION_PREFIXES = (
     "_thread_",
     "_host_access_",
@@ -41,9 +38,10 @@ _RESERVED_EXECUTION_PREFIXES = (
 # Tool names (resolved, post-dispatch) whose own execution enters
 # ``infra.repo_policy_transition.repo_policy_transition``. They are excused
 # from the registry's ``admit_repo_effect()`` wrapper because that effect would
-# be the active effect their own transition refuses. Nothing else is exempt:
-# effects, transitions and owned processes stay mutually exclusive wherever an
-# effect's reach meets what the transition claims.
+# be the active effect their own transition refuses. File tools that only read
+# are no effect either. Nothing else is exempt: effects, transitions and owned
+# processes stay mutually exclusive wherever an effect's reach meets what the
+# transition claims.
 _REPO_TRANSITION_OWNERS = frozenset({"project_create", "project_repo_register"})
 
 log = logging.getLogger(__name__)
@@ -110,7 +108,9 @@ class ToolRegistry(ToolStore):
             authorize_host_action,
             host_action_permit_scope,
             is_path_tool,
+            reads_only,
         )
+        from tools.repo_effect_reach import effect_reach
 
         if refusal := confined_reads.call_refusal(name, thread_context):
             return refusal
@@ -139,14 +139,17 @@ class ToolRegistry(ToolStore):
         # the repository work they start, and they enter it themselves. The
         # transition already refuses while any effect is active, so admitting
         # this call's own effect would only make the tool collide with itself.
-        # Every other tool is still admitted as an effect carrying its caller's
-        # reach, and a transition excludes the effects and owned processes it
-        # meets (``infra.repo_policy_transition``).
+        # A file tool that only reads writes nothing a transition changes. Every
+        # other tool is still admitted as an effect carrying what it can write, and
+        # a transition excludes the effects and owned processes it meets
+        # (``infra.repo_policy_transition``).
         repo_effect = (
             nullcontext()
-            if name in _REPO_TRANSITION_OWNERS
+            if name in _REPO_TRANSITION_OWNERS or reads_only(name)
             else admit_repo_effect(
-                await self._effect_reach(tool, thread_context["id"], authorization),
+                await effect_reach(
+                    tool, name, execution_params, thread_context["id"], authorization,
+                ),
                 thread_id=thread_context["id"],
             )
         )
@@ -155,34 +158,6 @@ class ToolRegistry(ToolStore):
                 return await execute_recorded_call(
                     tool, name, execution_params, thread_context,
                 )
-
-    @staticmethod
-    async def _effect_reach(tool: Any, thread_id: str, authorization: Any) -> "Reach":
-        """What this call's effect could write, read once at admission.
-
-        A call under a host-action permit, or to a connected app (whose local
-        server is walled only from Local only projects), reaches everywhere.
-        """
-        from infra.repo_policy_transition import EVERYWHERE, caller_reach
-        from tools.mcp import MCPToolWrapper
-
-        if getattr(authorization, "_permit", None) is not None or isinstance(tool, MCPToolWrapper):
-            return EVERYWHERE
-        from infra.database import get_db
-        from infra.db_async import run_in_db
-
-        def _read():
-            db = get_db()
-            try:
-                return caller_reach(thread_id, db=db)
-            finally:
-                db.close()
-
-        try:
-            return await run_in_db(_read)
-        except Exception:
-            log.exception("repo effect reach read failed for thread=%s", thread_id)
-            return EVERYWHERE
 
     @staticmethod
     def _is_drain_allowed(name: str, params: dict[str, Any]) -> bool:

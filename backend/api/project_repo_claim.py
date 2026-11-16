@@ -17,18 +17,23 @@ is gone, say) has no folder to overlap and is skipped, as the project fence
 skips it (``tools.project_fence._folder_roots``); its registered repositories
 still count.
 
+The claim also names the folders the registration changes (the target, written
+and resolved, and its ``source/`` binding), so a call that writes known paths
+conflicts only when it writes inside one of them (``infra.repo_policy_transition``).
+
 The claim is read before the transition admits; the add resolves its paths again
-inside it. A narrowed add checks what it resolved with the same predicate
-(:func:`confirmed_repo_path`) and refuses, to be retried, if a folder or link
-changed in between and the paths now leave the project's folder.
+inside it. The add checks what it resolved (:func:`confirmed_repo_path`): still
+inside the claimed folders and, when narrowed, with the same predicate; it refuses,
+to be retried, if a folder or link changed in between.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -42,6 +47,18 @@ from infra.repo_policy_transition import (
 from tools.host_path_resolution import canonical, containment_key, contains
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class AdmittedAdd:
+    """What one registration was admitted under.
+
+    ``claim``: its project, or ``None`` for everywhere. ``folders``: every form of the
+    folders it changes, or ``None`` when they could not be read.
+    """
+
+    claim: frozenset[str] | None
+    folders: tuple[Path, ...] | None
 
 
 def _forms(path: Path) -> tuple[Path, ...]:
@@ -150,25 +167,30 @@ _CHANGED = (
 
 
 def confirmed_repo_path(
-    claim: frozenset[str] | None, project_id: str, ws_dir: Path, row: dict,
+    admitted: AdmittedAdd, project_id: str, ws_dir: Path, row: dict,
     *, checked: Path | None = None,
 ) -> Path:
     """The add's one resolved repository folder, which every later step of the add uses.
 
     Called inside the transition, once. ``checked`` is the resolved folder a caller
     vetted before the transition (the agent tool's fence and Git-config checks); the
-    add registers only that folder. Under a narrowed claim, the folder and its
-    ``source/`` binding must still earn that claim; an add admitted everywhere
-    (``claim is None``) needs no claim check.
+    add registers only that folder. The folder must still be inside the folders the
+    transition claimed. Under a narrowed claim, the folder and its ``source/`` binding
+    must still earn that claim; an add admitted everywhere (``claim is None``) needs
+    no claim check.
 
     Raises:
-        HTTPException: 409, retryable, when the folder is not the one checked or no
-            longer earns the narrowed claim.
+        HTTPException: 409, retryable, when the folder is not the one checked, has
+            left the claimed folders, or no longer earns the narrowed claim.
     """
     repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
     # Exact, not case-folded: a link swapped after the caller's checks must not pass.
     if checked is not None and repo_path != checked:
         raise HTTPException(409, _CHANGED)
+    folders = admitted.folders
+    if folders is not None and not any(contains(folder, repo_path) for folder in folders):
+        raise HTTPException(409, _CHANGED)
+    claim = admitted.claim
     if claim is None:
         return repo_path
     binding = ws_dir / "source" / str(row["name"])
@@ -210,7 +232,7 @@ def owned_process_holders() -> tuple[Holder, ...]:
 
 def _add_claim(
     project_id: str, mode: str, path: str | None, name: str | None, ws_dir_for: Callable[[str], Path],
-) -> frozenset[str] | None:
+) -> AdmittedAdd:
     from infra import config
     from infra.database import get_db
 
@@ -218,17 +240,30 @@ def _add_claim(
         ws_dir = ws_dir_for(project_id)
     except HTTPException:
         # The add itself reports the missing project once the transition admits it.
-        return _everywhere(project_id, "project folder not found")
+        return AdmittedAdd(_everywhere(project_id, "project folder not found"), None)
+    paths = _registration_paths(ws_dir, mode, path, name)
+    try:
+        folders = (
+            None if paths is None
+            else tuple(dict.fromkeys(form for target in paths for form in _forms(target)))
+        )
+    except Exception:
+        log.exception("repo registration folders read failed for project=%s", project_id)
+        folders = None
     db = get_db()
     try:
-        return registration_claim(
-            project_id, ws_dir, mode=mode, path=path, name=name,
-            workspace=Path(config.WORKSPACE), db=db,
+        return AdmittedAdd(
+            registration_claim(
+                project_id, ws_dir, mode=mode, path=path, name=name,
+                workspace=Path(config.WORKSPACE), db=db,
+            ),
+            folders,
         )
     finally:
         db.close()
 
 
+@contextmanager
 def add_transition(
     project_id: str,
     mode: str,
@@ -237,15 +272,18 @@ def add_transition(
     *,
     ws_dir_for: Callable[[str], Path],
     active_process_count: Callable[[], int],
-) -> AbstractContextManager[frozenset[str] | None]:
+) -> Iterator[AdmittedAdd]:
     """The repo policy transition one registration runs under, claiming what it changes.
 
-    It yields the claim it was admitted under; pass that to :func:`confirmed_repo_path`.
+    It yields what it was admitted under; pass that to :func:`confirmed_repo_path`.
     """
     generation = transition_generation()
-    return repo_policy_transition(
+    read = _add_claim(project_id, mode, path, name, ws_dir_for)
+    with repo_policy_transition(
         active_process_count=active_process_count,
         owned_processes=owned_process_holders,
-        claim=_add_claim(project_id, mode, path, name, ws_dir_for),
+        claim=read.claim,
         claim_generation=generation,
-    )
+        folders=read.folders,
+    ) as claim:
+        yield AdmittedAdd(claim, read.folders)

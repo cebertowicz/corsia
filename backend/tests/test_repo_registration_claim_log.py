@@ -42,10 +42,10 @@ async def test_each_transition_logs_the_claim_it_ran_or_was_refused_under(env):
         finally:
             await _release(env, task)
         assert "Registered repository 'app'" in await _register(env, target)
-    assert lines == [
-        "repo policy transition refused claim=pa blocker_thread=p-agent blocker_walled_from=pb",
-        "repo policy transition admitted claim=pa",
-    ], lines
+    # The waiting registration logs each refused attempt, then the one that ran.
+    refused = "repo policy transition refused claim=pa blocker_thread=p-agent blocker_reach=walled_from:pb"
+    assert lines[-1] == "repo policy transition admitted claim=pa", lines
+    assert lines[:-1] and set(lines[:-1]) == {refused}, lines
 
 
 @pytest.mark.asyncio

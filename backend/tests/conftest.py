@@ -414,6 +414,15 @@ def _omlx_leftover_probe_never_runs_a_binary(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _short_repo_transition_wait(monkeypatch):
+    """A registration waits minutes for a conflicting write; tests that hold one refuse fast.
+
+    Tests of the wait itself set their own bound.
+    """
+    monkeypatch.setattr("infra.repo_policy_transition.TRANSITION_WAIT_SECONDS", 0.05)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_default_claude_root(monkeypatch, tmp_path_factory):
     """Each test's Default Claude root is its own, never the developer's ~/.claude."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("default-claude")))

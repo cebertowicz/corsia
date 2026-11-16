@@ -102,6 +102,8 @@ async def env(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("infra.db_async.run_in_db", _run_inline, raising=False)
     monkeypatch.setattr("tools.dispatch_ownership.run_in_db", _run_inline, raising=False)
     monkeypatch.setattr("tools.project_repo_register.run_in_db", _run_inline, raising=False)
+    # A conflict that outlasts this bound is refused; tests that wait release sooner.
+    monkeypatch.setattr("infra.repo_policy_transition.TRANSITION_WAIT_SECONDS", 0.6)
 
     leased: set[str] = set()
 
@@ -331,13 +333,14 @@ async def test_target_in_another_projects_folder_keeps_the_instance_wide_fence(e
     from fastapi import HTTPException
 
     from api import project_repos
+    from api.project_repo_add_wait import register_source_repo_waiting
 
     target = env["beta"] / "code" / "app"
     _git_repo(target)
     task = await _held_effect(env, "q-agent")
     try:
         with pytest.raises(HTTPException) as raised:
-            project_repos.register_source_repo(
+            await register_source_repo_waiting(
                 "pa", project_repos.RepoAdd(mode="link", path=str(target), name="app"),
             )
     finally:
@@ -609,9 +612,10 @@ async def test_entry_that_leaves_the_project_after_the_claim_is_refused_to_retry
     monkeypatch.setattr(project_repos, "resolve_add_source", swap_then_resolve)
     with pytest.raises(HTTPException) as raised:
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
-    # Only an add admitted under the narrowed claim checks, so this refusal shows it was.
+    # The resolved folder left the folders the transition claimed, so the add fails closed.
     assert raised.value.status_code == 409
-    assert "no longer inside this project's folder; try again" in raised.value.detail
+    assert "changed while it was being registered" in raised.value.detail
+    assert "try again" in raised.value.detail
     assert _registered(env) == 0
     assert entry.is_symlink() and entry.readlink() == outside
     # The retry claims everywhere and registers it, as any outside link.

@@ -1,9 +1,15 @@
 """Process-local admission fence for repository policy transitions.
 
-One coordinator, one lock. Every tool effect and every owned process carries a
-:class:`Reach`: the projects its caller was fenced from when the effect was
-admitted, or everywhere. A transition carries a claim: the projects whose write
-rules it changes, or everywhere. They conflict when the reach meets the claim.
+One coordinator, one lock. Every tool effect that can write and every owned
+process carries a :class:`Reach`: the exact paths a file-writing call writes, or
+else the projects its caller was fenced from when the effect was admitted, or
+everywhere. A transition carries a claim: the projects whose write rules it
+changes, or everywhere, and the folders it changes when it knows them. They
+conflict when the reach meets the claim. A call that only reads is no effect.
+
+A registration that meets an in-flight effect or process waits for it
+(:func:`wait_for_transition`), up to :data:`TRANSITION_WAIT_SECONDS`, then
+proceeds; it is refused only once that bound passes.
 
 Only a registration whose target sits inside the registering project's own
 folder claims less than everywhere (``api.project_repo_claim``): every caller not
@@ -15,35 +21,70 @@ every owned process, as before.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+import asyncio
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 import logging
+from pathlib import Path
 import threading
+import time
+from typing import TypeVar
 
 from loguru import logger
 
 log = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
+#: How long a registration waits for what it meets: the longest foreground shell call.
+TRANSITION_WAIT_SECONDS = 600.0
+_FIRST_POLL_SECONDS = 0.25
+_MAX_POLL_SECONDS = 5.0
+
 
 class RepoPolicyTransitionBusy(RuntimeError):
-    """A repository effect or policy transition cannot start safely."""
+    """A repository effect or policy transition cannot start safely.
+
+    ``retryable`` marks a conflict that ends when what is in flight finishes.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def _overlaps(paths: tuple[Path, ...], folders: tuple[Path, ...]) -> bool:
+    from tools.host_path_resolution import contains
+
+    return any(contains(a, b) or contains(b, a) for a in paths for b in folders)
 
 
 @dataclass(frozen=True, slots=True)
 class Reach:
-    """What one effect or owned process could write: everything outside ``fenced``.
+    """What one effect or owned process could write.
 
-    ``fenced`` is the set of projects the caller was walled from when its call was
-    admitted; ``None`` means everywhere. A project created after that read is in no
-    snapshot, so it counts as reachable, which fails closed.
+    ``paths``, when set, are the only paths the call writes (a file tool's target, as
+    written and resolved). Otherwise it could write everything outside ``fenced``, the
+    set of projects the caller was walled from when its call was admitted; ``None``
+    means everywhere. A project created after that read is in no snapshot, so it
+    counts as reachable, which fails closed.
     """
 
     fenced: frozenset[str] | None = None
+    paths: tuple[Path, ...] | None = None
 
-    def meets(self, claim: frozenset[str] | None) -> bool:
-        """Whether this reach can touch anything ``claim`` (``None``: everywhere) changes."""
+    def meets(
+        self, claim: frozenset[str] | None, folders: tuple[Path, ...] | None = None,
+    ) -> bool:
+        """Whether this reach can touch anything the claim changes.
+
+        ``claim`` is the projects (``None``: everywhere); ``folders`` the folders the
+        transition changes, when known (``None``: not known).
+        """
+        if self.paths is not None:
+            return folders is None or _overlaps(self.paths, folders)
         if self.fenced is None or claim is None:
             return True
         return any(project_id not in self.fenced for project_id in claim)
@@ -56,6 +97,14 @@ EVERYWHERE = Reach()
 def _scope(projects: frozenset[str] | None) -> str:
     """A claim or fenced set as one log token: ``everywhere`` or its sorted project ids."""
     return "everywhere" if projects is None else ",".join(sorted(projects)) or "none"
+
+
+def _reach_token(reach: Reach) -> str:
+    """A blocker's reach as one log token: the paths it writes, or the projects it is walled from."""
+    if reach.paths is not None:
+        return "writes:" + ",".join(str(path) for path in reach.paths)
+    # ``everywhere`` would misread here: a reach fenced from nothing reaches all.
+    return "walled_from:" + ("nothing" if reach.fenced is None else _scope(reach.fenced))
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +184,8 @@ def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
     else:
         running = f"you're running {holder.what}"
     return RepoPolicyTransitionBusy(
-        f"Repositories can't change while {running}. Try again once it finishes."
+        f"Repositories can't change while {running}. Try again once it finishes.",
+        retryable=True,
     )
 
 
@@ -149,6 +199,8 @@ class _RepoPolicyTransitionCoordinator:
         self._transition_active = False
         # ``None`` while the active transition claims everywhere.
         self._claim: frozenset[str] | None = None
+        # The folders the active transition changes; ``None`` when not known.
+        self._folders: tuple[Path, ...] | None = None
         # Bumped as each transition ends, so a claim read before one can be checked.
         self._generation = 0
 
@@ -160,7 +212,7 @@ class _RepoPolicyTransitionCoordinator:
     @contextmanager
     def admit_effect(self, reach: Reach, holder: Holder) -> Iterator[None]:
         with self._lock:
-            if self._transition_active and reach.meets(self._claim):
+            if self._transition_active and reach.meets(self._claim, self._folders):
                 raise RepoPolicyTransitionBusy(
                     "Repository tool effect is blocked by an active "
                     "policy transition."
@@ -179,6 +231,7 @@ class _RepoPolicyTransitionCoordinator:
     def _process_blocker(
         self,
         claim: frozenset[str] | None,
+        folders: tuple[Path, ...] | None,
         active_process_count: Callable[[], int],
         owned_processes: Callable[[], Iterable[Holder]] | None,
     ) -> tuple[bool, Holder | None]:
@@ -195,7 +248,7 @@ class _RepoPolicyTransitionCoordinator:
         if claim is not None:
             if holders is None:
                 raise unverified
-            meeting = [holder for holder in holders if holder.reach.meets(claim)]
+            meeting = [holder for holder in holders if holder.reach.meets(claim, folders)]
             return bool(meeting), (meeting[0] if meeting else None)
         try:
             process_count = active_process_count()
@@ -217,40 +270,40 @@ class _RepoPolicyTransitionCoordinator:
         owned_processes: Callable[[], Iterable[Holder]] | None = None,
         claim: frozenset[str] | None = None,
         claim_generation: int | None = None,
+        folders: tuple[Path, ...] | None = None,
     ) -> Iterator[frozenset[str] | None]:
         blocker: RepoPolicyTransitionBusy | None = None
         with self._lock:
             if self._transition_active:
                 raise RepoPolicyTransitionBusy(
-                    "Repository policy transition is already in progress."
+                    "Repository policy transition is already in progress.", retryable=True,
                 )
             if claim is not None and claim_generation != self._generation:
                 # Another transition ended after the claim was read: claim everywhere.
                 logger.info("repo policy transition claim {} widened to everywhere: "
                             "another transition ended after it was read", _scope(claim))
                 claim = None
-            effects = [h for h in self._effects.values() if h.reach.meets(claim)]
+            effects = [h for h in self._effects.values() if h.reach.meets(claim, folders)]
             if effects:
                 blocker_holder: Holder | None = effects[0]
                 running = "an agent's action"
             else:
                 busy, blocker_holder = self._process_blocker(
-                    claim, active_process_count, owned_processes,
+                    claim, folders, active_process_count, owned_processes,
                 )
                 running = "an agent's process" if busy else ""
             if not running:
                 self._transition_active = True
                 self._claim = claim
+                self._folders = folders
         # The claim each transition runs or is refused under, and the blocker's reach,
         # through loguru so production log reads see them (stdlib INFO is not captured).
         if running:
             logger.info(
-                "repo policy transition refused claim={} blocker_thread={} blocker_walled_from={}",
+                "repo policy transition refused claim={} blocker_thread={} blocker_reach={}",
                 _scope(claim),
                 blocker_holder.thread_id if blocker_holder else None,
-                # ``everywhere`` would misread here: a reach fenced from nothing reaches all.
-                ("nothing" if blocker_holder.reach.fenced is None else _scope(blocker_holder.reach.fenced))
-                if blocker_holder else None,
+                _reach_token(blocker_holder.reach) if blocker_holder else None,
             )
             # Named outside the lock: the label reads the database.
             blocker = _busy(running, blocker_holder)
@@ -262,6 +315,7 @@ class _RepoPolicyTransitionCoordinator:
             with self._lock:
                 self._transition_active = False
                 self._claim = None
+                self._folders = None
                 self._generation += 1
 
 
@@ -292,19 +346,55 @@ def repo_policy_transition(
     owned_processes: Callable[[], Iterable[Holder]] | None = None,
     claim: frozenset[str] | None = None,
     claim_generation: int | None = None,
+    folders: tuple[Path, ...] | None = None,
 ) -> Iterator[frozenset[str] | None]:
     """Quarantine durable repo policy changes from the effects and processes they meet.
 
     ``claim`` is ``None`` (everywhere) unless the caller read a narrower one, with the
     :func:`transition_generation` it read it at; a narrowed claim also needs
-    ``owned_processes`` so each live process is judged by its own reach. Yields the
-    claim the transition was admitted under (``None`` once widened to everywhere), so
-    the caller can check what it resolves inside the transition against it.
+    ``owned_processes`` so each live process is judged by its own reach. ``folders``
+    are the folders whose write rules change, when the caller knows them; a call that
+    writes known paths meets the transition only if they overlap one, and the caller
+    must confirm inside the transition that what it changes is still inside them.
+    Yields the claim the transition was admitted under (``None`` once widened to
+    everywhere), so the caller can check what it resolves inside the transition.
     """
     with _COORDINATOR.transition(
         active_process_count=active_process_count,
         owned_processes=owned_processes,
         claim=claim,
         claim_generation=claim_generation,
+        folders=folders,
     ) as admitted:
         yield admitted
+
+
+async def wait_for_transition(
+    attempt: Callable[[], Awaitable[_T]],
+    *,
+    wait_seconds: float | None = None,
+) -> _T:
+    """Run ``attempt`` until no in-flight effect or process it meets is left.
+
+    Each attempt enters its transition afresh, so it re-reads its claim. Between
+    attempts it sleeps on the event loop, holding no thread or lock. A conflict still
+    there after ``wait_seconds`` (default :data:`TRANSITION_WAIT_SECONDS`) is refused,
+    naming what is still running; any other refusal is raised at once.
+    """
+    limit = TRANSITION_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    deadline = time.monotonic() + limit
+    poll = _FIRST_POLL_SECONDS
+    while True:
+        try:
+            return await attempt()
+        except RepoPolicyTransitionBusy as exc:
+            remaining = deadline - time.monotonic()
+            if not exc.retryable:
+                raise
+            if remaining <= 0:
+                minutes = max(1, round(limit / 60))
+                raise RepoPolicyTransitionBusy(
+                    f"{exc} Waited {minutes} minute{'s' if minutes != 1 else ''} for it.",
+                ) from exc
+            await asyncio.sleep(min(poll, remaining))
+            poll = min(poll * 2, _MAX_POLL_SECONDS)
