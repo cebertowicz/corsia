@@ -64,6 +64,7 @@ def result_text(message_id, replaced, rows, thread_id):
         lines.append(f"Oldest updates show their first line, up to {FIRST_LINE_CHARS} characters. Read one in full with "
                      f'get_thread_history(thread_id="{thread_id}", from_seq=N, to_seq=N, tool_output="full").')
     lines.append(GUIDANCE)
+    lines.append("The person already has this text; don't repeat it in your closing text.")
     return "\n".join(lines)
 
 
