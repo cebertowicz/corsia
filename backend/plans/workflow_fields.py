@@ -117,6 +117,8 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             by = "reviewer"
         check = step.get("check") or f"Done: {title}"
         description = step.get("instruction")
+        if gate_mode == "agent":
+            description = "\n\n".join(filter(None, (gate_handoff.HANDED_OFF_STEP, description)))
         if by == "person":
             from plans.boundary_fields import PERSON_STEP_DESCRIPTION_LIMIT
             description = description or title
