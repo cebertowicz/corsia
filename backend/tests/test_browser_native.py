@@ -186,9 +186,9 @@ async def test_native_browser_success_failure_close_and_reopen(native_owner, tmp
 
 
 async def test_native_launch_gives_pages_fake_capture_devices(native_owner):
-    """The launched Chrome carries the switch and pages see its fake camera, with no permission asked.
+    """The launched Chrome carries the switch and pages see its fake camera and microphone, with no permission asked.
 
-    The hosted runner has no camera, so a video input a page can list is Chrome's fake one.
+    The hosted runner has no camera or microphone, so a video or audio input a page can list is Chrome's fake one.
     """
     async def serve(reader, writer):
         try:
@@ -222,7 +222,7 @@ async def test_native_launch_gives_pages_fake_capture_devices(native_owner):
               navigator.mediaDevices.enumerateDevices().then(devices => devices.map(device => device.kind),
                                                              error => 'error: ' + error.name)""")
         kinds = result['result']['value']
-        assert isinstance(kinds, list) and 'videoinput' in kinds, kinds
+        assert isinstance(kinds, list) and {'videoinput', 'audioinput'} <= set(kinds), kinds
     finally:
         await native_owner.close_thread(thread)
         server.close()
