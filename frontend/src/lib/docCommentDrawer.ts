@@ -33,6 +33,17 @@ export function observeCanvasWidth(bounds: HTMLElement | null, update: (width: n
 	return () => observer.disconnect();
 }
 
+/** A comment field the reader is writing in: `selector` finds the same field in another form of the surface. */
+export type WritingField = { selector: string; from: Element };
+
+/** The field `active` is, when it is one of these comments' reply fields or (`composing`) the new-comment composer; else null. */
+export function writingField(active: Element | null, comments: readonly { id: string }[], composing: boolean): WritingField | null {
+	if (!(active instanceof HTMLTextAreaElement)) return null;
+	if (composing && active.matches('.composer textarea')) return { selector: '.composer textarea', from: active };
+	const id = active.matches('.ct-input') ? active.closest('[data-thread-id]')?.getAttribute('data-thread-id') : null;
+	return id && comments.some((comment) => comment.id === id) ? { selector: `[data-thread-id="${CSS.escape(id)}"] .ct-input`, from: active } : null;
+}
+
 /** The card or image thumbnail a click in the drawer landed on, if any: what may open an image over the document. */
 export function clickedOpener(event: MouseEvent): Element | null {
 	return event.target instanceof Element ? event.target.closest('[data-comment-id], [data-region-thumb]') : null;

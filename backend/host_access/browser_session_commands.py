@@ -181,8 +181,9 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
+    note = None
     if guarded:
-        await browser_control.require_page_access(
+        note = await browser_control.require_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
     if not pane:
@@ -190,7 +191,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         browser_pane_state.agent_acted(thread_id)
     if shared_write:
         try:
-            return await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id))
+            return _noted(await browser_dom_write.shared_action(command, endpoint, args, partial(browser_pane_state.agent_acted, thread_id)), note)
         except browser_dom_write.DomWriteRefused as exc:
             await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
                                     properties={"command": args[0], "reason": exc.reason})
@@ -204,7 +205,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
-            return browser_cli.WAIT_TIMED_OUT
+            return _noted(browser_cli.WAIT_TIMED_OUT, note)
     rendered = owner._model_result(result, runtime.record)
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
         browser_pane_state.target_changed(thread_id)
@@ -212,7 +213,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     # the next session instead of coming back on every later open.
     if opening_unlaunched_session and runtime.record.shared and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
-    return rendered
+    return _noted(rendered, note)
+
+
+def _noted(text: str, note: str | None) -> str:
+    """The command's result, with the one line about a step that couldn't be recorded."""
+    return f"{text}\n{note}" if note else text
 
 
 async def page_endpoint(owner: Any, thread_id: str) -> str:

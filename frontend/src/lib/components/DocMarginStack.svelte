@@ -1,7 +1,7 @@
 <script lang="ts" generics="T extends { id: string }">
 	import { untrack, type Snippet } from 'svelte';
 	import { get } from 'svelte/store';
-	import { placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { focusWhenPlaced, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
 	/**
@@ -10,9 +10,16 @@
 	 * picked card does, and the cards around it make room. A `head` (the column's Accept all) is the column's first card, at its
 	 * top, so a change in its height moves the cards with a fresh placement, never under it. No card goes above it, a pick included.
 	 */
-	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null } = $props();
-	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
-	const takeFocus = (node: HTMLElement) => { queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
+	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, card, composer = null, head = null, focusComposer = true }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; card: Snippet<[T]>; composer?: MarginComposer | null; head?: Snippet | null;
+		/** False for a composer the layout redrew rather than one the reader opened: it leaves focus where it is. */
+		focusComposer?: boolean } = $props();
+	/** A composer opens ready to type, as its popover does, once its card is placed, unless the reader has moved on by then; the column brings it into view, so focusing it never scrolls. */
+	const takeFocus = (node: HTMLElement) => {
+		let stop = () => {}, gone = false;
+		const from = document.activeElement;
+		if (focusComposer) queueMicrotask(() => { const field = node.querySelector<HTMLElement>('textarea, [contenteditable="true"]'); if (field && !gone) stop = focusWhenPlaced(field, from); });
+		return { destroy: () => { gone = true; stop(); } };
+	};
 	let stackEl = $state<HTMLElement>();
 	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});

@@ -39,7 +39,7 @@ async def test_gemma_warm_probe_matches_live_wire(monkeypatch):
     async def complete(kwargs, **_):
         wire.append(kwargs["messages"])
         return router.LLMResponse(content="ok")
-    async def observed(_base, dispatch):
+    async def observed(_base, dispatch, _external_model_identity=None):
         return await dispatch
     async def mark(response, _server):
         return response

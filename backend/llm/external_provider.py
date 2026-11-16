@@ -92,6 +92,7 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
             raise ValueError(f"External server has no reachable endpoint: {server_id}")
         return {
             "model": f"anthropic/{provider_model_id}",
+            "external_model_identity": (server_id, provider_model_id),
             # A NON-EMPTY key is REQUIRED even for a keyless endpoint: with none, the
             # SDK falls back to the ANTHROPIC_API_KEY environment variable, which would
             # send CORSIA's own cloud credential to this user-supplied endpoint. The
@@ -106,6 +107,7 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
         raise ValueError(f"External server has no reachable endpoint: {server_id}")
     return {
         "model": f"openai/{provider_model_id}",
+        "external_model_identity": (server_id, provider_model_id),
         # A NON-EMPTY key is required: litellm's openai route falls back to the
         # OPENAI_API_KEY env var when api_key is None/empty, which would misroute
         # a keyless local endpoint to OpenAI's cloud (or throw AuthError). Use a

@@ -37,7 +37,7 @@ describe('ImageInputEditor', () => {
 
 	it('says a model not yet checked is not checked, and offers to detect now', () => {
 		open(null);
-		expect(status()).toContain('Not checked yet');
+		expect(status()).toBe('Not checked yet.');
 		expect(select().value).toBe('auto');
 		expect(button().textContent?.trim()).toBe('Detect now');
 	});

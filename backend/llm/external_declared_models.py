@@ -9,9 +9,9 @@ treat each declared id exactly like a listed one, and a list call the provider
 does not support (404/405) is not a failure once ids are declared: the host
 answered, it just keeps no catalog. Auth failures still mean offline.
 
-A mistyped base path answers the list call with 404 as well, so saving or
-testing such an endpoint asks one declared model for a reply before calling
-it reachable (:func:`declared_model_refusal`).
+A mistyped base path can also answer 404. Registration and Test connection
+only establish that the host answered; serving a declared model is checked
+by its first requested use, never by setup inference.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ MAX_DECLARED = 100
 # The list call is simply absent on these providers, not broken.
 LIST_UNSUPPORTED = frozenset({404, 405})
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$")
-_PROOF_TIMEOUT_S = 30.0
 
 
 def clean_model_ids(raw: list[str] | None) -> list[str] | None:
@@ -77,35 +76,3 @@ async def discoverable_models(
             raise
         listed = {}
     return merge_models(listed, declared)
-
-
-async def declared_model_refusal(
-    base: str, dialect: str, headers: dict, model_id: str,
-) -> str | None:
-    """Why ``base`` refused a request to a declared model, or None once it serves one.
-
-    Only the status is read: 401/403 is a refused key and 404 a wrong base path
-    or model id. Any other answer, even a rate limit, came from the path turns
-    use. The request is streamed and dropped at its status line, and carries
-    just the model and one message: no sampling parameters, except the output
-    cap the Anthropic Messages API refuses to run without.
-    """
-    from llm.network_endpoints import chat_request_url
-
-    url = chat_request_url(base, dialect=dialect)
-    body: dict = {"model": model_id, "stream": True,
-                  "messages": [{"role": "user", "content": "Reply with OK."}]}
-    if dialect == "anthropic":
-        body["max_tokens"] = 1
-    try:
-        async with httpx.AsyncClient(timeout=_PROOF_TIMEOUT_S) as client:
-            async with client.stream("POST", url, headers=headers, json=body) as resp:
-                status = resp.status_code
-    except httpx.HTTPError:
-        return None  # The list call reached this host; a slow model is not a wrong URL.
-    if status in (401, 403):
-        return f"{url} refused the API key for {model_id} (HTTP {status}). Check the key."
-    if status == 404:
-        return (f"{url} returned HTTP 404 for {model_id}. Check the base URL, including its "
-                f"version path, and the model ID.")
-    return None

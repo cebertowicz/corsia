@@ -3,11 +3,12 @@
 Every tool should return enough to decide the next read or action, not the
 whole plan. This is that read for Plans: an overview (plan identity, revision,
 state, progress, the current task or that there is none, the next step or the
-wait), then two independently capped sections -- **Current**, the open leaf
-work attention-first; **Recent**, the newest settled outcomes -- with truthful
-omission counts and cursors bound to one snapshot. Every listed row keeps its
-exact identity and a direct detail read; a cut row says so. Whole-plan output
-is an explicit opt-in elsewhere (``plan_read(mode='full')``).
+wait), then three independently capped sections -- **Current**, the open leaf
+work attention-first; **Recent**, the newest settled outcomes; **Later**, the
+pile below the cut in plan order -- with truthful omission counts and cursors
+bound to one snapshot. Every listed row keeps its exact identity and a direct
+detail read; a cut row says so. Whole-plan output is an explicit opt-in
+elsewhere (``plan_read(mode='full')``).
 
 The facts come from the one canonical projection the operator UI reads
 (``rollup`` + ``operator_node_state`` + ``operator_nodes``); this module only
@@ -30,7 +31,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from plans import node_history, operator_node_state, service, status_facts, wait_causes
+from plans import node_history, operator_node_state, service, status_facts, status_later, wait_causes
 from plans.close_next_bounds import bounded, json_bytes
 from plans.errors import PlanError
 from plans.status_facts import facts as _facts, full_facts as _full_facts
@@ -43,11 +44,15 @@ CURRENT_ROWS = 4
 RECENT_ROWS = 2
 CURRENT_BYTES = 3584
 RECENT_BYTES = 1536
+#: The pile below the cut gets its own page: a review, not a queue to work
+#: through, so it is capped to the same size as its weekly wake.
+LATER_ROWS = 8
+LATER_BYTES = 2048
 TITLE_MAX_BYTES = 96
 REASON_MAX_BYTES = 72
 PATH_MAX_BYTES = 72
 RECENT_DAYS = status_facts.RECENT_DAYS
-SECTIONS = ("current", "recent")
+SECTIONS = ("current", "recent", "later")
 
 _TERMINAL = service._TERMINAL_STATES
 #: Attention-first: what a person must act on, then what is blocked, then what
@@ -82,7 +87,7 @@ def read(
     dependencies(facts, recipient=actor.thread_id if actor.kind == "thread" else None,
                  plan_owner=plan_row["owner_id"] if plan_row["owner_kind"] == "thread" else None, db=db)
     if section is not None:
-        return _page(facts, section, position)
+        return _page(facts, section, position, db)
     return {
         **_overview(db, plan_row, facts),
         "current": _page(facts, "current", None),
@@ -214,6 +219,13 @@ def _members(facts: dict, section: str) -> list[dict]:
         open_leaves = [n for n in facts["leaves"] if n["state"] not in _TERMINAL]
         next_ids = set(facts["next_ids"])
         return sorted(open_leaves, key=lambda n: (_rank(n, next_ids), n["id"]))
+    if section == "later":
+        # Plan order, the order the wake lists and the pane groups: below the
+        # cut is a pile to re-cut, not work to rank for the next Turn.
+        return [
+            node for node in facts["nodes"]
+            if node["kind"] == "task" and node["state"] not in _TERMINAL and node["later"]
+        ]
     cutoff = (_clock_at(facts) - timedelta(days=RECENT_DAYS)).isoformat()
     settled = [
         n for n in facts["leaves"]
@@ -246,7 +258,16 @@ def cut_rows(
     return kept
 
 
-def _page(facts: dict, section: str, position: dict | None) -> dict[str, Any]:
+#: Each section's own caps: the pile below the cut is a review rather than a
+#: queue, so its page is sized like the weekly wake about the same pile.
+_CAPS = {
+    "current": (CURRENT_ROWS, CURRENT_BYTES),
+    "recent": (RECENT_ROWS, RECENT_BYTES),
+    "later": (LATER_ROWS, LATER_BYTES),
+}
+
+
+def _page(facts: dict, section: str, position: dict | None, db=None) -> dict[str, Any]:
     members = _members(facts, section)
     token = _token(facts["plan"]["id"], members)
     offset = 0
@@ -254,10 +275,16 @@ def _page(facts: dict, section: str, position: dict | None) -> dict[str, Any]:
         if position["t"] != token or position["o"] >= len(members):
             raise PlanError(STALE)
         offset = position["o"]
-    max_rows, max_bytes = (
-        (CURRENT_ROWS, CURRENT_BYTES) if section == "current" else (RECENT_ROWS, RECENT_BYTES)
+    max_rows, max_bytes = _CAPS[section]
+    later = section == "later"
+    # The window is cut before its rows are built, so a pile of a thousand rows
+    # costs one page of reads: a Later row's reason and date are keyed reads.
+    window = members[offset:offset + max_rows]
+    rows = cut_rows(
+        status_later.rows(db, window, title_bytes=TITLE_MAX_BYTES, reason_bytes=REASON_MAX_BYTES)
+        if later else [_row(node, facts) for node in window],
+        max_rows, max_bytes, minimal=status_later.minimal if later else _minimal,
     )
-    rows = cut_rows([_row(node, facts) for node in members[offset:]], max_rows, max_bytes)
     omitted = len(members) - offset - len(rows)
     page: dict[str, Any] = {
         "section": section, "rows": rows, "omitted_count": omitted,

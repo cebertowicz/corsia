@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
-import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -17,6 +16,11 @@ from infra.backend_git import git_argv
 from infra.config import WORKSPACE
 from infra.database import get_db
 from infra.git_state_cache import cached_current_branch, cached_layout_error
+from infra.project_repo_binding import (
+    persisted_repo_path as _persisted_repo_path,
+    source_binding_error,
+    valid_repo_name as _valid_repo_name,
+)
 from infra.project_repo_lock_recovery import recover_stale_git_index_lock
 from infra.project_repo_policy_writes import (
     clear_repo_policy as clear_repo_policy,
@@ -732,35 +736,6 @@ def fast_forward_repo(
     )
 
 
-def _persisted_repo_path(value: object) -> Path | None:
-    """Return a canonical absolute lexical identity without following it."""
-    if not isinstance(value, str):
-        return None
-    raw = value
-    path = Path(raw)
-    if (
-        not path.is_absolute()
-        or str(path) != raw
-        or os.path.normpath(raw) != raw
-    ):
-        return None
-    return path
-
-def _valid_repo_name(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    name = value
-    if (
-        not name
-        or name != name.strip()
-        or Path(name).name != name
-        or name in {".", ".."}
-        or name.startswith(".")
-    ):
-        return None
-    return name
-
-
 def _policy_from_row(project_id: str, row) -> RepoPolicy | None:
     repo_name = _valid_repo_name(row["repo_name"])
     repo_path = _persisted_repo_path(row["repo_path"])
@@ -1041,7 +1016,7 @@ def list_registered_repo_policies(
             except ValueError as exc:
                 binding_error = f"project planning root is invalid: {exc}"
             else:
-                binding_error = _source_binding_error(planning_root, policy)
+                binding_error = source_binding_error(planning_root, policy.repo_name, policy.path)
             if binding_error is not None:
                 policy = replace(
                     policy, enforcement_error=binding_error, source_binding_valid=False,
@@ -1054,23 +1029,3 @@ def list_registered_repo_policies(
     finally:
         if owns_connection:
             connection.close()
-
-
-def _source_binding_error(
-    planning_root: Path | None,
-    policy: RepoPolicy,
-) -> str | None:
-    """Return why a policy is not bound through its canonical planning root."""
-    if planning_root is None:
-        return "project planning root is unresolved"
-    entry = planning_root / "source" / policy.repo_name
-    try:
-        current_target = entry.resolve(strict=True)
-    except OSError:
-        return f"source binding '{policy.repo_name}' is missing"
-    if current_target.is_dir() and current_target == policy.path:
-        return None
-    return (
-        f"source binding '{policy.repo_name}' no longer targets "
-        "the registered checkout"
-    )

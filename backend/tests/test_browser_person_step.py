@@ -497,10 +497,12 @@ async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open
         raise PlanError("fixture row failure")
 
     monkeypatch.setattr(lifecycle, "_plan_write", fail)
-    with pytest.raises(PlanError, match="fixture row failure"):
-        if kind == "person":
+    # Contained: a declaration says it may not have been recorded; a password page refuses the command.
+    if kind == "person":
+        with pytest.raises(BrowserSessionError, match="may not have been recorded"):
             await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
-        else:
+    else:
+        with pytest.raises(BrowserSessionError, match="sign-in task couldn't be recorded"):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert THREAD not in lifecycle._steps
     assert _steps(plan["db"]) == []

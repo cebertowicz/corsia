@@ -155,7 +155,7 @@
 	});
 	export function jumpToUnread(id: string, beforeText?: () => void) { replyNavigation.goTo(id, beforeText); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
-	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
+	function focusFromCard(id: string, placement?: 'top') { commentUI.engage(); images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,

@@ -6,7 +6,7 @@ import { clearStartupProgress, refreshStartupProgress, startupProgress } from '.
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
 import { CREEP_STALE_MS, PHASE_SECONDS, remoteCeiling } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, NO_HISTORY_LONGER_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
-import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
+import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateFailureVerdict, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
 type ShellWindow = Window & {
@@ -351,6 +351,52 @@ describe('update screen store', () => {
 		vi.advanceTimersByTime(EXIT_HOLD_MS);
 		tickUpdateScreen(4_003);
 		expect(get(updateScreenView)).toBeNull();
+	});
+
+	/** A page that watched its update run, then slept while another device showed the outcome. */
+	async function wakeAfterOutcomeShownElsewhere(operationId: string, frontendHash: string): Promise<void> {
+		const hash = 'a'.repeat(40);
+		const versions = { frontend: { full_hash: frontendHash }, backend: { full_hash: hash, current_head: { full_hash: hash } } };
+		let row = status(inFlight(operationId));
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => (String(url).startsWith('/api/version') ? versions : row) })));
+		await loadUpdateStatus();
+		vi.advanceTimersByTime(60_000);
+		expect(get(updateScreenView)?.mode).not.toBe('done');
+		row = status({ ...inFlight(operationId), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' });
+		await loadUpdateStatus();
+	}
+
+	it('leaves when its update finished and another device already showed the outcome', async () => {
+		await wakeAfterOutcomeShownElsewhere('update-seen', 'a'.repeat(40));
+		await vi.advanceTimersByTimeAsync(10);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'done', percent: 100, toVersion: '2026.10.13' });
+		await vi.advanceTimersByTimeAsync(EXIT_HOLD_MS);
+		expect(get(updateScreenView)).toBeNull();
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(get(updateScreenView)).toBeNull();
+	});
+
+	it('fails rather than finishes when its own versions disagree after another device showed the outcome', async () => {
+		await wakeAfterOutcomeShownElsewhere('update-seen-mismatch', 'b'.repeat(40));
+		await vi.advanceTimersByTimeAsync(12_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
+	});
+
+	it('keeps its own version-mismatch failure when a later read finds the outcome seen', () => {
+		updateStatus.set(status(inFlight('update-mismatch')));
+		tickUpdateScreen(1_000);
+		updateStatus.set(status({ ...inFlight('update-mismatch'), status: 'complete', phase: undefined }));
+		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'Versions differ.' });
+		tickUpdateScreen(2_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
+
+		updateStatus.set(status({ ...inFlight('update-mismatch'), status: 'complete', phase: undefined, outcome_seen_at: '2026-10-13T00:00:05Z' }));
+		tickUpdateScreen(32_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
+		vi.advanceTimersByTime(EXIT_HOLD_MS);
+		tickUpdateScreen(34_000);
+		expect(get(updateScreenView)?.mode).toBe('failed');
 	});
 
 	it('dismisses its matching terminal screen and toast together', async () => {

@@ -198,8 +198,8 @@ READ_PARAMS = {
         ),
     },
     "section": {
-        "type": "string", "enum": ["current", "recent"],
-        "description": "The status section a cursor continues.",
+        "type": "string", "enum": ["current", "recent", "later"],
+        "description": "The status section a cursor continues; 'later' is the Later pile.",
     },
     "cursor": {
         "type": "string",

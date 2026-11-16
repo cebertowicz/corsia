@@ -117,7 +117,9 @@ test('@surface:attention decision drawer stays above an open artifact leaf', asy
 	expect(mobileHits.panel, 'drawer remains topmost at its centre').toBe(true);
 	expect(mobileHits.edges, 'mobile scrim covers both viewport edges').toEqual([true, true]);
 	await saveEvidenceScreenshot(page, testInfo, 'decision-over-artifact-and-phone', { fullPage: false });
-	await page.setViewportSize({ width: 1280, height: 800 });
+	// At 1280 the Workspace panel overlays the canvas, which leaves too little visible width for chat and the artifact
+	// side by side, so the canvas shows one surface (the chat, last pressed via the dock). Check the leaf where both fit.
+	await page.setViewportSize({ width: 2000, height: 1060 });
 	await drawer.getByRole('button', { name: 'Done' }).click();
 	await expect(page.locator('.leaf-col')).toBeVisible();
 });

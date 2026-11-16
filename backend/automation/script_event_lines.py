@@ -2,7 +2,8 @@
 
 The runner builds each line's event id from the run and the line's position, so a line
 sent twice is answered once. That is what lets a line the intake could not take be sent
-again here, and why a refused line's owner is told to run the script again, not to resend it.
+again here. Once those tries are used up the line is lost: no tool resends it, and a
+script run by hand sends no lines, so its owner is told to start what the event would have.
 """
 
 from __future__ import annotations
@@ -17,8 +18,11 @@ from automation.script_readings import RunReport, Signal
 from infra.database import get_db
 from infra.db_async import run_in_db_unless_owned
 
-#: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
-_RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
+#: A scheduled run's lost line: no agent tool starts a scheduled script, and a paused or cancelled
+#: schedule has no next run, so the owner is told what still works either way.
+_SCHEDULED_RUN_FIX = ("The script finished, and this line is not sent again. If the schedule runs again, that run "
+                      "sends the lines it prints; running the script yourself does not send its lines. "
+                      "If what this event would have started cannot wait, start it yourself.")
 #: A run a rule started has no next run and its owner cannot start it with the same event. The script
 #: itself finished: what is lost is the event its line would have sent, not the script's own work.
 #: Only a run the runner starts has its printed lines sent, so running the script by hand sends none.
@@ -44,24 +48,17 @@ async def _admit_line(schedule_id: str, index: int, tries: int, **event) -> tupl
     """
     from events.intake import admit_event
     from events.intake_errors import failure_code
+    from events.intake_retry import admit_with_retry
 
-    for attempt in range(1, tries + 1):
-        try:
-            result = await admit_event(**event)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
-            code = failure_code(exc)
-            if code == "intake_unreachable" and attempt < tries:
-                logger.warning("script schedule {} event line {} could not reach the intake, try {} of {}: {}",
-                               schedule_id, index, attempt, tries, exc)
-                await asyncio.sleep(_ADMIT_PAUSE_SECONDS[attempt - 1])
-                continue
-            logger.exception("script schedule {} event line {} failed inside the intake", schedule_id, index)
-            return code, ("the event intake failed unexpectedly" if code == "internal_error"
-                          else "event intake is unavailable")
-        return (result.refusal.code, result.refusal.text) if result.refusal is not None else None
-    return None  # unreachable: the last try returns
+    try:
+        result = await admit_with_retry(admit_event, pauses=_ADMIT_PAUSE_SECONDS[:tries - 1],
+                                        sleep=asyncio.sleep, **event)
+    except Exception as exc:  # noqa: BLE001 - the run settles as an error
+        code = failure_code(exc)
+        logger.exception("script schedule {} event line {} failed inside the intake", schedule_id, index)
+        return code, ("the event intake failed unexpectedly" if code == "internal_error"
+                      else "event intake is unavailable")
+    return (result.refusal.code, result.refusal.text) if result.refusal is not None else None
 
 
 async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, ...] = (),
@@ -109,7 +106,7 @@ async def admit_events(schedule: Schedule, report: RunReport, trace: tuple[str, 
                 )
     if not refusals:
         return report
-    unreachable_fix = _RERUN_FIX if rule_decision_id is None else _RULE_RUN_FIX
+    unreachable_fix = _SCHEDULED_RUN_FIX if rule_decision_id is None else _RULE_RUN_FIX
     shown = [
         format_event_error(code, refusals[code], unreachable_fix if code == "intake_unreachable" else None)
         for code in sorted(refusals)[:2]
