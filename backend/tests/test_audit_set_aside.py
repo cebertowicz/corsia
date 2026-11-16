@@ -61,11 +61,36 @@ def test_set_aside_names_kinds_from_code():
     from infra.failed_wake_surface import REPORT_EVENT
 
     named = _code_named()
-    for kind in (NOISE, "github.pr.merged", "measurement.measurement.movement_digest", "worker.result",
+    # Connector kinds by the name the platform parks them under: the manifest key.
+    for kind in (NOISE, "pr.merged", "head.checks_completed", "measurement.movement_digest", "result",
                  REPORT_EVENT, "script.owner_gone", "github.ingress_overdue"):
         assert kind in named
     for kind in AGENT_NAMED:
         assert kind not in named
+
+
+def test_a_connector_event_set_aside_by_the_platform_is_shown_by_name(isolated_db):
+    """Read back a dead letter written through the platform's own delivery path."""
+    from events.connectors import library
+    from events.platform import DEAD_LETTERED, deliver_platform_event_sync
+    from infra.audit_set_aside import set_aside
+    from infra.database import get_db
+
+    raw = {
+        "event_type": library.ITEM_CHANGED_EVENT, "external_id": "nobody/pdf", "name": "pdf",
+        "installed_version": "1.0.0", "library_version": "1.1.0", "item_manifest": "manifest-1",
+        "library_index_generation": 1, "installed_at": "2026-10-19T00:00:00+00:00",
+        "changed_files": ["SKILL.md"], "edited": False, "withdrawn_reason": None,
+    }
+    deliveries = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, raw)
+    assert [d.outcome for d in deliveries] == [DEAD_LETTERED]
+
+    db = get_db()
+    try:
+        rows = set_aside(db, "2000-01-01T00:00:00+00:00", "2100-01-01T00:00:00+00:00")
+    finally:
+        db.close()
+    assert [row["internal_event"] for row in rows] == [library.ITEM_CHANGED_EVENT]
 
 
 def test_set_aside_is_listed_by_the_tool():

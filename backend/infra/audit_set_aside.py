@@ -38,8 +38,10 @@ def _code_named() -> frozenset[str]:
         INFRASTRUCTURE_EVENT, OWNER_GONE_EVENT, WATCH_EXPIRED_EVENT,
         INGRESS_OVERDUE_EVENT, REPORT_EVENT,
     }
+    # The platform parks a connector event under its envelope type, the manifest's own
+    # key (events.envelope.normalize, events.intake), never prefixed by the connector.
     manifest_kinds = {
-        f"{connector}.{event_type}"
+        event_type
         for connector in registered_connectors()
         for event_type in get_manifest(connector).event_types
     }
