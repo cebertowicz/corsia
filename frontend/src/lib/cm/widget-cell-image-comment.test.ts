@@ -10,6 +10,7 @@ import { pendingCommentMark } from './pending-comment-mark';
 import { imageContext, type ImageContext } from './markdown-image';
 import { selectionIn } from './widget-selection';
 import { widgetComments, type WidgetSelection } from './widget-comments';
+import { paintTable } from './widget-paint';
 
 // A status column whose cells hold only a badge image, as a briefing's state column does.
 const CONTEXT: ImageContext = { docPath: '/ws/notes/brief.md', projectId: 'p1', token: 't' };
@@ -64,10 +65,11 @@ describe('a selection over a table cell holding only an image', () => {
 		expect(label(selection)).toBe('“Design” · Alpha, Status');
 	});
 
-	it('comments on just the image when the selection covers the image and none of the cell’s text', () => {
+	it('comments on the whole cell when the selection covers only the image of a cell that also has text', () => {
+		// Such a cell draws a mark on its text only, so a comment on just its image would be drawn on words it is not about.
 		const view = mount(), range = document.createRange(), mixed = cell(view, 2, 1);
 		range.selectNode(mixed.querySelector('.cm-md-cell-image')!);
-		expect(selectionIn(view, table(view), range)).toMatchObject({ from: at(OTHER), to: at(OTHER) + OTHER.length, text: OTHER });
+		expect(selectionIn(view, table(view), range)).toMatchObject({ from: at(`Done ${OTHER}`), to: at(OTHER) + OTHER.length, text: `Done ${OTHER}` });
 	});
 
 	it('takes the whole cell when its image cannot be read back to its markdown', () => {
@@ -92,6 +94,33 @@ describe('a selection over a table cell holding only an image', () => {
 		caret.setStart(text, 2);
 		caret.setEnd(text, 2);
 		expect(selectionIn(view, table(view), caret)).toBeNull();
+	});
+});
+
+describe('the comment a selection over a cell’s image makes', () => {
+	const paintFrom = (view: EditorView, selection: WidgetSelection | null) =>
+		paintTable(table(view), at(TABLE), TABLE, [{ id: 'a', kind: 'placed', from: selection!.from, to: selection!.to }]);
+
+	it('is drawn on the whole image-only cell it was made in', () => {
+		const view = mount(), range = document.createRange(), badge = cell(view, 1, 1);
+		range.selectNodeContents(badge);
+		paintFrom(view, selectionIn(view, table(view), range));
+		expect(badge.classList.contains('cm-comment-anchor')).toBe(true);
+		expect(badge.dataset.commentIds).toBe('a');
+		expect(badge.getAttribute('aria-label')).toMatch(/^Commented cell/);
+		expect(table(view).querySelector('.cm-comment-wrap')).toBeNull();
+	});
+
+	it('is drawn on the text of a cell that also has text, as a comment on that whole cell', () => {
+		const view = mount(), range = document.createRange(), mixed = cell(view, 2, 1);
+		range.selectNode(mixed.querySelector('.cm-md-cell-image')!);
+		const selection = selectionIn(view, table(view), range);
+		paintFrom(view, selection);
+		const drawn = [...mixed.querySelectorAll('.cm-comment-wrap[data-comment-ids="a"]')].map((wrap) => wrap.textContent?.trim());
+		expect(drawn).toEqual(['Done']);
+		// The words it is drawn on are words it is about, not just its image's alt text.
+		expect(selection?.text.replace(OTHER, '')).toContain(drawn[0]);
+		expect(mixed.textContent?.trim()).toBe('Done');
 	});
 });
 

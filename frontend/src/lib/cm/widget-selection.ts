@@ -85,9 +85,10 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 		const from = block.from + span.anchorFrom, to = block.from + span.anchorTo, text = src.slice(span.anchorFrom, span.anchorTo);
 		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
 	}
-	// Images and no text: the comment is on those images' markdown, or the whole cell when one cannot be read back.
+	// Images and no text: in a cell with no text the comment is on those images' markdown, drawn on the cell (`paintTable`). A cell
+	// that also has text draws a mark on its text only, so there, or when an image cannot be read back, it is on the whole cell.
 	if (!picked.trim()) {
-		const images = cellImagesIn(view, cell, part);
+		const images = cell.textContent?.trim() ? null : cellImagesIn(view, cell, part);
 		if (!images) return whole();
 		const { from, to } = images, text = state.sliceDoc(from, to);
 		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
