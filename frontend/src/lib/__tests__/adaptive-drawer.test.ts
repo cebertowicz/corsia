@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
 import { closesPhoneNav, phoneNavOver } from "$lib/stores/phoneNav.svelte";
 import { resetBackLayers } from "$lib/historyBackLayer";
+import { pageEscape } from "$lib/pageEscape";
+import { paletteOpen } from "$lib/stores/palette";
+import CommandPalette from "$lib/components/CommandPalette.svelte";
+import Modal from "$lib/components/ui/Modal.svelte";
 
 // The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
 const reduced = vi.hoisted(() => ({ current: false }));
@@ -234,19 +238,76 @@ describe("AdaptiveDrawer", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it("Escape closes the navigation before anything else hears it, and the sheet comes back as it was", async () => {
-      const onClose = vi.fn();
-      const { field, backdrop } = await draftUnderNav(onClose);
-      const laterListener = vi.fn();
-      window.addEventListener("keydown", laterListener);
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      window.removeEventListener("keydown", laterListener);
-      await settle();
-      expect(get(phoneNavOver)).toBe(false);
-      expect(laterListener).not.toHaveBeenCalled();
-      expect(onClose).not.toHaveBeenCalled();
-      expect(backdrop.classList.contains("covered")).toBe(false);
-      expect(field.value).toBe("Half a thought");
+    describe("Escape, topmost layer first", () => {
+      // The home page's window listener, registered before any layer it renders, as +page's <svelte:window> is.
+      const page = (event: KeyboardEvent) => pageEscape(event, { open: get(phoneNavOver), close: () => phoneNavOver.set(false) });
+      const escape = (target: EventTarget) => target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      let layer: Record<string, unknown> | null = null;
+      beforeEach(() => window.addEventListener("keydown", page));
+      afterEach(() => {
+        window.removeEventListener("keydown", page);
+        paletteOpen.set(false);
+        if (layer) unmount(layer);
+        layer = null;
+      });
+
+      it("with nothing above the navigation, closes the navigation and the hidden sheet comes back as it was", async () => {
+        const onClose = vi.fn();
+        const { field, backdrop } = await draftUnderNav(onClose);
+        escape(document.body);
+        await settle();
+        expect(get(phoneNavOver)).toBe(false);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(backdrop.classList.contains("covered")).toBe(false);
+        expect(field.value).toBe("Half a thought");
+        expect(document.activeElement).toBe(field);
+      });
+
+      it("the palette over the navigation over a hidden sheet: palette, then navigation, then sheet", async () => {
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+        const onClose = vi.fn();
+        const { field, backdrop } = await draftUnderNav(onClose);
+        layer = mount(CommandPalette, { target: document.body, props: { onPickProject: vi.fn(), onPickConversation: vi.fn(), onNewChat: vi.fn(), onGoWorkspace: vi.fn() } });
+        paletteOpen.set(true);
+        await settle();
+        const input = document.querySelector(".palette input") as HTMLInputElement;
+        expect(document.activeElement).toBe(input);
+
+        escape(input);
+        await settle();
+        expect(get(paletteOpen)).toBe(false);
+        expect(get(phoneNavOver)).toBe(true);
+        expect(backdrop.classList.contains("covered")).toBe(true);
+        expect(onClose).not.toHaveBeenCalled();
+
+        // The palette's input is gone, so the next Escape comes from the page itself.
+        escape(document.activeElement ?? document.body);
+        await settle();
+        expect(get(phoneNavOver)).toBe(false);
+        expect(backdrop.classList.contains("covered")).toBe(false);
+        expect(document.activeElement).toBe(field);
+        expect(field.value).toBe("Half a thought");
+        expect(onClose).not.toHaveBeenCalled();
+
+        escape(field);
+        await settle();
+        expect(onClose).toHaveBeenCalledTimes(1);
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      });
+
+      it("a dialog over the navigation closes alone; the navigation and the hidden sheet stay", async () => {
+        const onClose = vi.fn();
+        const { backdrop } = await draftUnderNav(onClose);
+        const closeDialog = vi.fn();
+        layer = mount(Modal, { target: document.body, props: { title: "Needs you", onClose: closeDialog, children: (() => {}) as never } });
+        await settle();
+        escape(document.querySelector(".modal") as HTMLElement);
+        await settle();
+        expect(closeDialog).toHaveBeenCalledTimes(1);
+        expect(get(phoneNavOver)).toBe(true);
+        expect(backdrop.classList.contains("covered")).toBe(true);
+        expect(onClose).not.toHaveBeenCalled();
+      });
     });
 
     it("gives focus back to the field it was on when the navigation goes", async () => {

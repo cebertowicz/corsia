@@ -44,7 +44,8 @@
 
 	function onKeydown(e: KeyboardEvent) {
 		if ($updateScreenVisible) return;
-		if (closeOnEscape && e.key === 'Escape') onClose();
+		// The dialog is the top layer: the page's own Escape (pane, navigation) skips a prevented one.
+		if (closeOnEscape && e.key === 'Escape') { e.preventDefault(); onClose(); }
 		if (e.key !== 'Tab') return;
 
 		const focusable = focusableElements();

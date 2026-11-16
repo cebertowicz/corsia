@@ -7,7 +7,7 @@ export const phoneNavOver = writable(false);
 
 let closeNav: (() => void) | null = null;
 
-/** HomeShell hands over how its navigation closes, so Back or Escape over a covered drawer closes the navigation. */
+/** HomeShell hands over how its navigation closes, so Back over a covered drawer closes the navigation. */
 export function closesPhoneNav(close: () => void): () => void {
 	closeNav = close;
 	return () => {
@@ -36,8 +36,9 @@ export function coverUnderNav(open: () => boolean, panel: () => HTMLElement | nu
 		if (isOpen && navUp && !untrack(() => openedWithNav) && !held && active instanceof HTMLElement && panel()?.contains(active)) held = active;
 	});
 	const covers = () => open() && over.current && !openedWithNav;
-	// Back and Escape never dismiss a drawer the reader can't see: while it is covered they close the navigation, and the
-	// drawer comes back as it was; the next Back or Escape closes it as before.
+	// Back never dismisses a drawer the reader can't see: while it is covered Back closes the navigation, and the drawer
+	// comes back as it was; the next Back closes it as before. Escape needs nothing here: the covered drawer is inert, so
+	// its focus trap never hears it, and the page closes the navigation once every layer above it has had its turn.
 	$effect(() => {
 		if (!covers()) {
 			const back = held;
@@ -45,21 +46,10 @@ export function coverUnderNav(open: () => boolean, panel: () => HTMLElement | nu
 			if (back?.isConnected && open()) back.focus({ preventScroll: true });
 			return;
 		}
-		const escape = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape') return;
-			event.preventDefault();
-			event.stopPropagation();
-			closeNav?.();
-		};
-		window.addEventListener('keydown', escape, true);
-		const removeBackLayer = pushBackLayer(() => {
+		return pushBackLayer(() => {
 			closeNav?.();
 			return true;
 		});
-		return () => {
-			window.removeEventListener('keydown', escape, true);
-			removeBackLayer();
-		};
 	});
 	return {
 		get covers() {
