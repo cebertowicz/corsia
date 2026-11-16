@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { onMount, tick } from 'svelte';
 	import './AccountsBlock.css';
 	import { Button, Field, Message } from '$lib/components/ui';
@@ -10,6 +11,7 @@
 	import OverageSwitch from './OverageSwitch.svelte';
 	import AccountUsageRow from './AccountUsageRow.svelte';
 	import AccountBillingRow from './AccountBillingRow.svelte';
+	import AccountAddField from './AccountAddField.svelte';
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import PolicySaveStatus from './PolicySaveStatus.svelte';
 	import { signinMessage } from './accountSigninMessage';
@@ -297,7 +299,7 @@
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => { if (!pending[account.id]) { editingId = null; editError = ''; } }}>Cancel</Button>
 							</div>
 						{/snippet}
-						<input aria-label={`Rename ${displayName(account)}`} placeholder={displayName(account)} readonly={!!pending[account.id]} bind:value={editName} onkeydown={(event) => {
+						<input use:keepTyped={{ prose: false }} aria-label={`Rename ${displayName(account)}`} placeholder={displayName(account)} readonly={!!pending[account.id]} bind:value={editName} onkeydown={(event) => {
 							if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
 							if (event.key === 'Enter' && !account.details_stale) void saveRename(account);
 							if (event.key === 'Escape' && !pending[account.id]) { editingId = null; editError = ''; }
@@ -367,19 +369,7 @@
 		</div>
 	{/if}
 	{#if adding}
-		<Field label="Account name" error={actionError}>
-			{#snippet trailing()}
-				<div class="inline-actions">
-					<Button size="sm" variant="primary" loading={addBusy} disabled={!addName.trim()} onclick={addAccount}>Add</Button>
-					<Button size="sm" disabled={addBusy} onclick={() => { if (!addBusy) { adding = false; addName = ''; } }}>Cancel</Button>
-				</div>
-			{/snippet}
-			<input aria-label={`Name for new ${provider.label} account`} readonly={addBusy} bind:value={addName} onkeydown={(event) => {
-				if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
-				if (event.key === 'Enter') void addAccount();
-				if (event.key === 'Escape' && !addBusy) { adding = false; addName = ''; }
-			}} />
-		</Field>
+		<AccountAddField providerLabel={provider.label} busy={addBusy} error={actionError} bind:name={addName} onAdd={() => void addAccount()} onCancel={() => { adding = false; addName = ''; }} />
 	{/if}
 </div>
 

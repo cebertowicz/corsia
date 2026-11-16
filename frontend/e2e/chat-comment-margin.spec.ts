@@ -268,7 +268,15 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 	const thread = await openCommentThread(row, page, QUOTE);
 	const input = thread.getByPlaceholder('Reply…');
 	const send = thread.getByRole('button', { name: 'Send reply' });
-	const check = async () => {
+	// A band beside the anchor that holds the whole composer clears the anchor; at 900x420 none does once the reply is engaged, so the
+	// popover pins to keep the caret, the field and Send in view and may cover the highlight: the quote in the card is what stays.
+	const check = async (engaged = false) => {
+		if (engaged && height === 420) {
+			await expectFieldAndSendUsable(thread, input);
+			// The pinned card is all composer; the quote above it is reached by scrolling the popover (asserted at the end).
+			await expect(thread.getByText(QUOTE).first()).toBeAttached();
+			return;
+		}
 		await expect.poll(async () => {
 			const a = (await anchor.boundingBox())!, p = (await page.locator('[data-popover]').boundingBox())!;
 			const header = (await page.locator('.shell-header').boundingBox())!;
@@ -279,14 +287,16 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 			if (p.y + p.height > composer.y) return `popover bottom ${Math.round(p.y + p.height)} below the composer top ${Math.round(composer.y)}`;
 			return true;
 		}).toBe(true);
-		await send.click({ trial: true });
+		// Send takes a click only once there is text to send.
+		if (engaged) await send.click({ trial: true });
 	};
-	for (let i = 0; i < 8; i++) { await input.pressSequentially(`typed reply ${i}`); await input.press('Shift+Enter'); }
 	await check();
+	for (let i = 0; i < 8; i++) { await input.pressSequentially(`typed reply ${i}`); await input.press('Shift+Enter'); }
+	await check(true);
 	await page.screenshot({ path: info.outputPath('typed-chat-popover.png'), animations: 'disabled' });
 
 	await page.keyboard.insertText(Array.from({ length: 40 }, (_, i) => `pasted reply ${i}`).join('\n'));
-	await check();
+	await check(true);
 	await page.screenshot({ path: info.outputPath('pasted-chat-popover.png'), animations: 'disabled' });
 
 	await send.click();
@@ -300,6 +310,7 @@ for (const height of [420, 900] as const) for (const theme of ['light', 'dark'] 
 	await expectFieldAndSendUsable(thread, input);
 	await expectDiscussionReachableByScroll(thread, 'A note on the phrase');
 	await expectDiscussionReachableByScroll(thread, 'typed reply 0');
+	await expectDiscussionReachableByScroll(thread, QUOTE);
 	await send.click();
 	await expect(input).toBeFocused();
 	await expect(thread).toContainText('second chat reply 0');

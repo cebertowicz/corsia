@@ -375,7 +375,7 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer bind:panel={sheet} keepsText fill ariaLabel={heading} {heading} doneLabel="Close" opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer bind:panel={sheet} keepsText fill ariaLabel={heading} {heading} doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { slide } from 'svelte/transition';
 	import PaneShell from './PaneShell.svelte';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
@@ -75,7 +76,7 @@
 				</div>
 				{#if editing}
 					<div transition:slide={{ duration: 130 }}>
-						<textarea class="dd-edit" rows="3" bind:value={draft} onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void saveEdit(); if (e.key === 'Escape') editing = false; }}></textarea>
+						<textarea use:keepTyped class="dd-edit" rows="3" bind:value={draft} onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void saveEdit(); if (e.key === 'Escape') editing = false; }}></textarea>
 						<div class="dd-edit-acts">
 							<button class="dd-ghost" onclick={() => (editing = false)}>Cancel</button>
 							<button class="dd-primary" disabled={saving} onclick={() => void saveEdit()}>{saving ? 'Saving…' : 'Save'}</button>

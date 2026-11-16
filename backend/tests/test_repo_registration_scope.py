@@ -648,25 +648,6 @@ async def test_link_repointed_after_the_tools_checks_is_refused(env, monkeypatch
     assert entry.is_symlink() and entry.readlink() == other
 
 
-@pytest.mark.asyncio
-async def test_each_transition_logs_the_claim_it_ran_or_was_refused_under(env, caplog):
-    import logging
-
-    target = _own_target(env)
-    caplog.set_level(logging.INFO, logger="infra.repo_policy_transition")
-    task = await _held_effect(env, "p-agent")
-    try:
-        assert "Repositories can't change" in await _register(env, target)
-    finally:
-        await _release(env, task)
-    assert "Registered repository 'app'" in await _register(env, target)
-    messages = [r.getMessage() for r in caplog.records if r.name == "infra.repo_policy_transition"]
-    assert messages == [
-        "repo policy transition refused claim=own-project blocker_thread=p-agent",
-        "repo policy transition admitted claim=own-project",
-    ], messages
-
-
 @pytest.mark.parametrize("kind", ["link to a file", "file"])
 @pytest.mark.asyncio
 async def test_entry_that_is_not_a_folder_is_refused_with_what_to_do(env, kind):

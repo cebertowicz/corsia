@@ -608,7 +608,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('shows a 409 reason and leaves the suggestion open', async () => {
 		mocks.flushDraft.mockResolvedValue(true);
-		mocks.decideSuggestion.mockRejectedValue(new Error('The text changed on the server'));
+		mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('The text changed on the server', 409, 'stale'));
 		const { onSuggestionAccepted } = render();
 		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!.click();
 		await vi.waitFor(() => expect(document.body.textContent).toContain('The text changed on the server'));
@@ -638,7 +638,8 @@ describe('DocCommentSurface suggestions', () => {
 		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
 		expect(mocks.loadComments).not.toHaveBeenCalled();
-		expect(accept().textContent).toBe('Accept');
+		expect(accept().textContent?.trim()).toBe('Accept');
+		expect(accept().getAttribute('aria-label')).toBe('Accept: old text to new text');
 		expect(accept().disabled).toBe(true);
 		expect(document.body.querySelector('.ct-orphan')?.textContent).toBe("The text this suggestion replaces isn't in the document.");
 		expect(onSuggestionAccepted).not.toHaveBeenCalled();
@@ -718,13 +719,13 @@ describe('DocCommentSurface suggestions', () => {
 		const live = fromStore(comments);
 		render({ get comments() { return live.current; } });
 		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
-		await vi.waitFor(() => expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Network down'));
+		await vi.waitFor(() => expect(document.body.querySelector('[role="alert"]')?.textContent).toBe("Couldn’t reject this suggestion. Try again."));
 		// Reject never saves the draft first, so a reload here would read positions for text the screen no longer has.
 		expect(mocks.flushDraft).not.toHaveBeenCalled();
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		// Comments refreshed from elsewhere: the card was never orphaned, so its refusal stays.
 		comments.set([{ ...suggestion }]); flushSync();
-		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Network down');
+		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe("Couldn’t reject this suggestion. Try again.");
 	});
 
 	it('drops a refusal once the surface closes', async () => {
@@ -788,7 +789,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(acceptAll().disabled).toBe(true);
 		expect(document.body.querySelector('[role="alert"]')).toBeNull();
 		fail(new Error('The document could not be saved'));
-		await vi.waitFor(() => expect(document.body.querySelector('.suggestion-error[role="alert"]')?.textContent).toBe('The document could not be saved'));
+		await vi.waitFor(() => expect(document.body.querySelector('.suggestion-error[role="alert"]')?.textContent).toBe('Couldn’t accept the suggestions. Try again.'));
 		expect(mocks.decideSuggestion).toHaveBeenCalledExactlyOnceWith('comment-1', 'accept', true);
 		expect(mocks.loadComments).not.toHaveBeenCalled();
 		expect(acceptAll().textContent).toBe('Accept all from agent-1');
@@ -977,13 +978,17 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
 		const onResolve = vi.fn(async () => false), onClose = vi.fn(), restoreFocus = vi.fn();
 		render({ comments: [decided], onResolve, onClose, restoreFocus, narrow });
-		const resolve = document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!;
+		// On a phone the one thread's Resolve is in the sheet's header row, beside Close; on the canvas it is on the card.
+		const resolveButton = () => document.body.querySelector<HTMLButtonElement>(narrow ? '[data-adaptive-drawer] button.sheet-act:not(.ack)' : '.ct-act.resolve')!;
+		const resolve = resolveButton();
+		expect(resolve).toBeTruthy();
+		if (narrow) expect(document.body.querySelector('.ct-act.resolve'), 'the card draws no second Resolve').toBeNull();
 		resolve.focus(); resolve.click();
 		await vi.waitFor(() => expect(onResolve).toHaveBeenCalledOnce());
 		await Promise.resolve(); await Promise.resolve();
 		expect(onClose).not.toHaveBeenCalled();
 		expect(restoreFocus).not.toHaveBeenCalled();
-		expect(document.body.querySelector('.ct-act.resolve')).toBe(resolve);
+		expect(resolveButton()).toBe(resolve);
 		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t resolve this. Try again.'));
 		// The sheet holds focus for its own card; a refusal must not hand it to the page.
 		expect(document.activeElement).not.toBe(document.body);
