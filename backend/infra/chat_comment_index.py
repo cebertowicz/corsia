@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
+from infra.chat_comment_ids import commentable_role_sql, is_commentable_role
 from infra.delivery_retry import DELIVERY_COLUMNS, newest_attempt_delivery
 
 
@@ -56,7 +57,8 @@ def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
         db.execute(
             "INSERT OR IGNORE INTO chat_comments "
             "(thread_id,target_message_id,user_message_id,cid,created_at,root_user_message_id,root_cid) "
-            "SELECT ?,id,?,?,?,?,? FROM messages WHERE thread_id=? AND seq=? AND role='assistant'",
+            "SELECT ?,id,?,?,?,?,? FROM messages "
+            f"WHERE thread_id=? AND seq=? AND {commentable_role_sql()}",
             (thread_id, user_message_id, comment['cid'], created_at,
              comment.get('root_user_message_id'), comment.get('root_cid'), thread_id, comment['seq']),
         )
@@ -91,9 +93,33 @@ def _merge_agent_answer(agent_answers: dict, thread: dict, key: tuple, sender: s
     answer['unread'] = answer['unread'] or bool(unread)
 
 
+def _agent_root_threads(db: sqlite3.Connection, thread_id: str, user_id: str, by_id: dict) -> dict:
+    """Threads rooted in a comment an agent left on its own message, keyed like the person's.
+
+    No offsets or anchors: the app places the root by its quote, and a reply names only the root's id and cid.
+    """
+    threads = {}
+    for target, root_id, cid, quote, note, created, updated, unread in db.execute(
+        "SELECT r.target_message_id,r.root_id,r.cid,r.quote,r.note,r.created_at,r.updated_at,"
+        "(v.user_id IS NULL OR v.seen_at < r.updated_at) "
+        "FROM chat_comment_agent_roots r "
+        "LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=r.root_id AND v.cid=r.cid "
+        "WHERE r.thread_id=? AND r.target_message_id IN (SELECT value FROM json_each(?)) "
+        "ORDER BY r.created_at,r.root_id",
+        (user_id, thread_id, json.dumps(list(by_id))),
+    ):
+        threads[(root_id, cid)] = {
+            'author_kind': 'agent', 'user_message_id': root_id, 'cid': cid, 'quote': quote, 'note': note,
+            'created_at': created, 'updated_at': updated, 'unread': bool(unread),
+            'delivery_state': 'delivered', 'answers': [],
+        }
+        by_id[target].setdefault('chat_comments', []).append(threads[(root_id, cid)])
+    return threads
+
+
 def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messages: list[dict]) -> None:
     """Attach comments and indexed answers for the targets in one loaded page."""
-    by_id = {message['id']: message for message in messages if message.get('role') == 'assistant'}
+    by_id = {message['id']: message for message in messages if is_commentable_role(message.get('role'))}
     if not by_id:
         return
     rows = db.execute(
@@ -111,7 +137,8 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
     for message_id, fields in saved_answer_fields(db, thread_id, list(by_id)).items():
         by_id[message_id].update(fields)
     sender_ids = list({row[1] for row in rows})
-    if not sender_ids:
+    threads = _agent_root_threads(db, thread_id, user_id, by_id)
+    if not sender_ids and not threads:
         return
     senders = db.execute(
         f"SELECT id,metadata,{','.join(DELIVERY_COLUMNS)} FROM messages "
@@ -129,7 +156,6 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
             delivery = newest_attempt_delivery(db, thread_id, sender_id, delivery)
         for comment in json.loads(metadata or '{}').get('reply_context', {}).get('comments', []):
             comments[(sender_id, comment['cid'])] = {**comment, **delivery}
-    threads = {}
     for target, sender, cid, created, _, _, _, root_sender, _, _ in rows:
         comment = comments.get((sender, cid))
         if root_sender is None and comment is not None and (sender, cid) not in threads:
@@ -158,4 +184,5 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         thread['answers'].sort(key=lambda answer: answer['created_at'])
     for message in by_id.values():
         if 'chat_comments' in message:
-            message['chat_comments'].sort(key=lambda comment: comment['from_off'])
+            # An agent root has no offsets: it follows the anchored comments, in the order it was left.
+            message['chat_comments'].sort(key=lambda comment: comment.get('from_off', float('inf')))

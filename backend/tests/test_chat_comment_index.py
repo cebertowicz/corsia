@@ -196,7 +196,13 @@ def test_page_and_scoped_attention_use_answer_indexes(isolated_db):
         chat_reply_items(captured, 'person', 'thread')
         sql, params = captured.statements[0]
         attention_plan = [row[3] for row in db.execute('EXPLAIN QUERY PLAN ' + sql, params)]
-        assert any('idx_chat_comment_answers_thread_time' in step and 'thread_id=?' in step for step in attention_plan), attention_plan
+        # Both unread kinds are searched by the displayed thread: the answers by their thread index, the agent
+        # roots by theirs. Neither is scanned whole. The union sorts only the rows that are unread.
+        assert any(step.startswith('SEARCH a ') and 'idx_chat_comment_answers' in step and 'thread_id=?' in step
+                   for step in attention_plan), attention_plan
+        assert any(step.startswith('SEARCH r ') and 'idx_chat_comment_agent_roots_target' in step
+                   and 'thread_id=?' in step for step in attention_plan), attention_plan
+        assert not any(step.startswith(('SCAN a ', 'SCAN r ', 'SCAN c ')) for step in attention_plan), attention_plan
     finally:
         db.close()
 

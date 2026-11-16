@@ -14,6 +14,33 @@ CREATE INDEX IF NOT EXISTS idx_chat_visible_content_thread
     ON chat_visible_content(thread_id);
 """
 
+# chat_comments.user_message_id names one of two kinds of root. A person's comment is a real
+# input message id, and its quote, anchors and note live in that message's metadata. An agent
+# root is a comment an agent left on its own message: its id is 'acr_<hex>', not a message id,
+# and its detail row is chat_comment_agent_roots.root_id. Joins that read `messages` on
+# user_message_id therefore skip agent roots by default; only the paths that name agent roots
+# (unread items, attach_comments, reply admission, view stamps, thread delete) read them.
+AGENT_ROOT_PREFIX = 'acr_'
+
+AGENT_ROOT_SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS chat_comment_agent_roots (
+    root_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    cid TEXT NOT NULL,
+    target_message_id TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    from_off INTEGER NOT NULL,
+    to_off INTEGER NOT NULL,
+    anchor_prefix TEXT NOT NULL,
+    anchor_suffix TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (thread_id, cid)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_comment_agent_roots_target
+    ON chat_comment_agent_roots(thread_id, target_message_id);
+"""
+
 CHAT_COMMENT_SCHEMA_SQL = CHAT_VISIBLE_CONTENT_SQL + """
 CREATE TABLE IF NOT EXISTS chat_comments (
     thread_id TEXT NOT NULL,
@@ -46,4 +73,4 @@ CREATE INDEX IF NOT EXISTS idx_chat_comment_answers_thread_time
     ON chat_comment_answers(thread_id, answered_at);
 CREATE INDEX IF NOT EXISTS idx_chat_comment_answers_comment
     ON chat_comment_answers(thread_id, user_message_id, cid);
-"""
+""" + AGENT_ROOT_SCHEMA_SQL

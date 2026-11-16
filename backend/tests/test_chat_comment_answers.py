@@ -131,7 +131,7 @@ def test_fresh_and_upgraded_schema():
     db.commit()
     migrate_to_current(db, SCHEMA_VERSION)
     assert {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'chat_comment_%'")} == {
-        "chat_comment_answers", "chat_comment_views", "chat_comments"
+        "chat_comment_agent_roots", "chat_comment_answers", "chat_comment_views", "chat_comments"
     }
     db.close()
 

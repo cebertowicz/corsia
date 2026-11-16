@@ -80,6 +80,27 @@ Source: `backend/infra/continuation_schema.py`.
 
 Indexes: `idx_automation_schedules_due` (state, next_run_at), `idx_automation_schedules_scope` (scope_id, next_run_at), `sqlite_autoindex_automation_schedules_1` (id, unique).
 
+### `chat_comment_agent_roots`
+
+Source: `backend/infra/chat_comment_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `root_id` | TEXT | Yes | No | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `cid` | TEXT | No | Yes | — | — |
+| `target_message_id` | TEXT | No | Yes | — | — |
+| `quote` | TEXT | No | Yes | — | — |
+| `from_off` | INTEGER | No | Yes | — | — |
+| `to_off` | INTEGER | No | Yes | — | — |
+| `anchor_prefix` | TEXT | No | Yes | — | — |
+| `anchor_suffix` | TEXT | No | Yes | — | — |
+| `note` | TEXT | No | Yes | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+| `updated_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_chat_comment_agent_roots_target` (thread_id, target_message_id), `sqlite_autoindex_chat_comment_agent_roots_1` (root_id, unique), `sqlite_autoindex_chat_comment_agent_roots_2` (thread_id, cid, unique).
+
 ### `chat_comment_answers`
 
 Source: `backend/infra/chat_comment_schema.py`.

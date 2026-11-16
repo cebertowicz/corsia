@@ -7,6 +7,7 @@ import re
 import sqlite3
 
 from infra.chat_comment_ids import CID_PATTERN, could_start_cid, parse_cid
+from infra.message_update_schema import not_replaced_sql
 
 _TAGGED = re.compile(rf"(?:\A|\r?\n[ \t]*\r?\n)([ \t]*(?:\[{CID_PATTERN}\][ \t]*)+)")
 _TAG = re.compile(rf"\[({CID_PATTERN})\]")
@@ -248,6 +249,11 @@ def delete_thread_chat_comment_index_rows(db: sqlite3.Connection, thread_id: str
         "DELETE FROM chat_comment_views WHERE user_message_id IN "
         "(SELECT id FROM messages WHERE thread_id=?)", (thread_id,),
     )
+    db.execute(
+        "DELETE FROM chat_comment_views WHERE user_message_id IN "
+        "(SELECT root_id FROM chat_comment_agent_roots WHERE thread_id=?)", (thread_id,),
+    )
+    db.execute("DELETE FROM chat_comment_agent_roots WHERE thread_id=?", (thread_id,))
     db.execute("DELETE FROM chat_comment_answers WHERE thread_id=?", (thread_id,))
     db.execute("DELETE FROM chat_comments WHERE thread_id=?", (thread_id,))
     db.execute("DELETE FROM chat_visible_content WHERE thread_id=?", (thread_id,))
@@ -260,10 +266,11 @@ SHOWN_ANSWERS_FROM = """FROM chat_comment_answers a
 JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id
 JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id
 JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id"""
-UNREAD_FROM = """FROM chat_comment_answers a
+# An answer on a replaced update is not unread: the person is shown the replacement, not that thread.
+UNREAD_FROM = f"""FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
 JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid
-JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id
+JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id AND {not_replaced_sql('target.id')}
 JOIN messages u ON u.id=a.user_message_id AND u.thread_id=a.thread_id
 JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=a.thread_id
 LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid"""
