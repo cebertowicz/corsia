@@ -24,6 +24,8 @@ from registry import artifact_record as AR
 ARMED = "armed"
 RESOLVED = "resolved"
 EXPIRED = "expired"
+#: The kind an expired watch is delivered, or set aside, under.
+WATCH_EXPIRED_EVENT = "automation.watch_expired"
 
 
 class WatchError(ValueError):
@@ -291,7 +293,7 @@ def _route_failure_wake(watch: Watch, target, db) -> bool:
     if row is None:
         from events import dead_letter
         dead_letter.park(
-            "automation.watch_expired",
+            WATCH_EXPIRED_EVENT,
             {"watch_id": watch.id, "artifact_ref": ref,
              "target": target.thread, "resolution": target.resolution},
             "artifact_identity_missing_at_expiry",
@@ -300,7 +302,7 @@ def _route_failure_wake(watch: Watch, target, db) -> bool:
     from registry import models
     models.record_artifact_change(
         artifact_id=row["id"],
-        internal_event="automation.watch_expired",
+        internal_event=WATCH_EXPIRED_EVENT,
         external_id=ref["external_id"],
         summary="expected event missing — watch expired",
         provenance={"resolution": target.resolution,

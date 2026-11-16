@@ -47,6 +47,8 @@ from infra.queries import get_thread, thread_gone_for_good, thread_unavailable_r
 #: Runs in flight at once. Set from the sandbox-startup probe on the owner's Mac.
 SCRIPT_RUN_CAP = 2
 WORKSPACE_SCOPE = "__workspace__"
+#: The kind a run whose owning agent is gone is reported and set aside under.
+OWNER_GONE_EVENT = "script.owner_gone"
 
 
 class _StoppedByShutdown(Exception):
@@ -155,7 +157,7 @@ def _report_owner_gone(connection, schedule: Schedule, row) -> None:
     if not is_health_sink(sink):
         try:
             enqueue_event_wake(
-                sink, "script.owner_gone", summary, details,
+                sink, OWNER_GONE_EVENT, summary, details,
                 message_id=str(uuid.uuid5(
                     uuid.NAMESPACE_URL, f"corsia-script-owner-gone:{schedule.id}",
                 )),
@@ -165,7 +167,7 @@ def _report_owner_gone(connection, schedule: Schedule, row) -> None:
         except ValueError:
             pass
     dead_letter.park(
-        "script.owner_gone", {**details, "summary": summary},
+        OWNER_GONE_EVENT, {**details, "summary": summary},
         "owner_inactive", schedule.id, db=connection,
     )
 

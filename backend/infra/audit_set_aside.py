@@ -20,18 +20,6 @@ from functools import cache
 
 #: The one row name every kind not named in code is counted under.
 DECLARED = "declared"
-#: Kinds the platform parks under a literal name of its own (bulletin_live,
-#: script_runner, watches, github_pr_quiet_watch; failed_wake_surface's
-#: REPORT_EVENT is added below). A name missing here is counted under
-#: DECLARED, never shown.
-_PLATFORM_KINDS = frozenset({
-    "system_bulletin.infrastructure", "script.owner_gone",
-    "automation.watch_expired", "github.ingress_overdue",
-})
-#: The restart replay parks a held GitHub delivery as ``webhook.github.<header>``,
-#: where the header is GitHub's raw event name, not a code-named kind. All of them
-#: count under this one name, so none reads as agent-declared.
-RESTART_REPLAY_KIND = "webhook.github"
 
 
 @cache
@@ -39,24 +27,37 @@ def _code_named() -> frozenset[str]:
     # Imported here so loading the audit reads does not load the event stack.
     from events.connectors import get_manifest, registered_connectors
     from events.connectors.github import GITHUB_ROUTED_EVENTS
+    from automation.script_runner import OWNER_GONE_EVENT
+    from automation.watches import WATCH_EXPIRED_EVENT
+    from events.connectors.github_pr_quiet_watch import INGRESS_OVERDUE_EVENT
+    from infra.bulletin_live import INFRASTRUCTURE_EVENT
     from infra.failed_wake_surface import REPORT_EVENT
 
+    # Kinds the platform parks under a name of its own, each read from its writer.
+    platform = {
+        INFRASTRUCTURE_EVENT, OWNER_GONE_EVENT, WATCH_EXPIRED_EVENT,
+        INGRESS_OVERDUE_EVENT, REPORT_EVENT,
+    }
     manifest_kinds = {
         f"{connector}.{event_type}"
         for connector in registered_connectors()
         for event_type in get_manifest(connector).event_types
     }
     return frozenset(
-        manifest_kinds | set(GITHUB_ROUTED_EVENTS.values()) | _PLATFORM_KINDS | {REPORT_EVENT}
+        manifest_kinds | set(GITHUB_ROUTED_EVENTS.values()) | platform
     )
 
 
 def _kind(internal_event: str, reason: str) -> str:
-    """The name a row is counted under: its own if code names it, else one fixed name."""
-    from automation.restart_webhooks import DEAD_LETTER_REASON
+    """The name a row is counted under: its own if code names it, else one fixed name.
 
-    if reason == DEAD_LETTER_REASON and internal_event.startswith(f"{RESTART_REPLAY_KIND}."):
-        return RESTART_REPLAY_KIND
+    The restart replay parks a held GitHub delivery under GitHub's raw event name,
+    which no code names, so all of them count under the replay's one kind.
+    """
+    from automation.restart_webhooks import DEAD_LETTER_KIND, DEAD_LETTER_REASON
+
+    if reason == DEAD_LETTER_REASON and internal_event.startswith(f"{DEAD_LETTER_KIND}."):
+        return DEAD_LETTER_KIND
     return internal_event if internal_event in _code_named() else DECLARED
 
 

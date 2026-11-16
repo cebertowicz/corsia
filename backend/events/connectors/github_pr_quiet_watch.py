@@ -41,6 +41,8 @@ JITTER_S = 10.0
 HEALTH_REPORT_INTERVAL = timedelta(hours=6)
 REPORT_SETTING = "pr_quiet_ingress_report"
 _ETAG_CACHE_MAX = 512
+#: The kind an overdue-ingress report is sent, or set aside, under.
+INGRESS_OVERDUE_EVENT = "github.ingress_overdue"
 
 _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
@@ -318,7 +320,7 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
     if not pending:
         return
     parked = dead_letter.park(
-        "github.ingress_overdue",
+        INGRESS_OVERDUE_EVENT,
         {"summary": "GitHub CI or reviewer events are overdue for registered PRs.",
          "pull_requests": pending},
         "ingress_overdue",

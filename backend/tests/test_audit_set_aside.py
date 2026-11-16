@@ -138,7 +138,7 @@ async def test_restart_replay_poison_stores_a_code_and_keeps_the_text_on_the_del
 async def test_restart_replay_rows_read_under_one_github_name(isolated_db):
     """GitHub's raw header (``push``, ``issue_comment``) is neither code-named nor agent-declared."""
     from automation import restart_webhooks
-    from infra.audit_set_aside import RESTART_REPLAY_KIND, set_aside
+    from infra.audit_set_aside import set_aside
     from infra.database import get_db
 
     with sqlite3.connect(isolated_db) as db:
@@ -156,5 +156,5 @@ async def test_restart_replay_rows_read_under_one_github_name(isolated_db):
     finally:
         connection.close()
     assert [(r["internal_event"], r["reason"], r["total"]) for r in rows] == [
-        (RESTART_REPLAY_KIND, "restart_replay_poison", 3),
+        (restart_webhooks.DEAD_LETTER_KIND, "restart_replay_poison", 3),
     ]

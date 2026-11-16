@@ -19,6 +19,8 @@ from infra.system_package import SYSTEM_VERSION
 
 _DAILY_SECONDS = 24 * 60 * 60
 _SYSTEM_RETRY_SECONDS = 60 * 60
+#: The kind an undeliverable infrastructure bulletin is set aside under.
+INFRASTRUCTURE_EVENT = "system_bulletin.infrastructure"
 
 
 def _record_failure(db, failure: FetchFailure) -> None:
@@ -30,11 +32,11 @@ def _record_failure(db, failure: FetchFailure) -> None:
     row = db.execute(
         "SELECT 1 FROM dead_letter_events WHERE internal_event=? AND reason=? "
         "AND external_id IS ? AND substr(created_at,1,10)=? LIMIT 1",
-        ("system_bulletin.infrastructure", reason, failure.item, today),
+        (INFRASTRUCTURE_EVENT, reason, failure.item, today),
     ).fetchone()
     if row is None:
         dead_letter.park(
-            "system_bulletin.infrastructure", {"reason": failure.reason, "item": failure.item},
+            INFRASTRUCTURE_EVENT, {"reason": failure.reason, "item": failure.item},
             reason, failure.item, db=db,
         )
 
