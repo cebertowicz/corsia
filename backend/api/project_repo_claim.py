@@ -76,17 +76,14 @@ def _registration_paths(ws_dir: Path, mode: str, path: str | None, name: str | N
 def _other_roots(workspace: Path, project_id: str, db) -> list[tuple[Path, ...]] | None:
     """Every other project's folder and registered repo, each as its forms; ``None`` on a bad repo row.
 
-    A project whose folder does not resolve has no folder root, as in the project
-    fence; its registered repositories are still read in the second loop.
+    A project whose folder does not resolve has no folder root, read by the same
+    function as the project fence; its registered repositories are still read below.
     """
-    from core.project_context import resolve_project_row_paths
+    from core.project_context import project_row_folder
 
     roots: list[tuple[Path, ...]] = []
     for row in db.execute("SELECT id, name, path FROM projects WHERE id != ?", (project_id,)):
-        try:
-            _name, root = resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])
-        except (ValueError, OSError):
-            root = None
+        root = project_row_folder(workspace, row)
         if root is not None:
             roots.append(_forms(root))
     for row in db.execute(
