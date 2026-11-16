@@ -251,14 +251,8 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
         shutil.rmtree(profile, ignore_errors=True)
 
 
-def page_endpoint(rendered: str) -> str:
-    value = json.loads(rendered).get("cdpUrl")
-    assert isinstance(value, str) and value.startswith("ws"), rendered
-    return browser_cdp._page_endpoint(value)
-
-
 async def cdp_value(owner: BrowserSessionOwner, thread_id: str, expression: str):
-    endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+    endpoint = await owner.page_endpoint(thread_id)
     async with browser_cdp.CdpClient(endpoint) as cdp:
         result = await cdp.call("Runtime.evaluate", expression=expression, returnByValue=True)
     return result["result"].get("value")
@@ -284,7 +278,7 @@ async def test_shared_agent_actions_preserve_person_focus_caret_and_pointer(fixt
             agent_ref, button_ref = f"@{textboxes[1]}", f"@{button.group(1)}"
             # The person's caret is in their own field and their pointer rests at a distinct coordinate.
             await cdp_value(owner, thread_id, "document.querySelector('#user').focus(); document.querySelector('#user').setSelectionRange(1, 4); null")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with browser_cdp.CdpClient(endpoint) as cdp:
                 await cdp.call("Input.dispatchMouseEvent", type="mouseMoved", x=17, y=23)
             before = await cdp_value(owner, thread_id, "({ active: document.activeElement.id, start: document.querySelector('#user').selectionStart, end: document.querySelector('#user').selectionEnd, pointer })")
@@ -312,7 +306,7 @@ async def test_cdp_mouse_dispatch_clicks_the_visible_page():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             point = await cdp_value(owner, thread_id, "(() => { const box = document.querySelector('#agent-button').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()")
             for event_type in ("mouseMoved", "mousePressed", "mouseReleased"):
                 await browser_cdp.dispatch_mouse_event(endpoint, {
@@ -336,7 +330,7 @@ async def test_cdp_keyboard_dispatch_preserves_meta_shortcuts():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/keyboard.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             await cdp_value(owner, thread_id, "document.querySelector('#field').focus(); null")
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 4})
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4})
@@ -356,7 +350,7 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/form.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             for event_type, button, click_count in (("mouseMoved", "none", 0), ("mousePressed", "left", 1), ("mouseReleased", "left", 1)):
                 await browser_cdp.dispatch_mouse_event(endpoint, {"eventType": event_type, "x": 20, "y": 20, "button": button, "clickCount": click_count})
             for event in (
@@ -541,7 +535,7 @@ async def test_shared_pane_input_to_frame_latency_reports_distribution():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with pane_screencast(endpoint) as (_cast, frames, next_frame):
                 # Starting a screencast sends the current picture without any page change.
                 await next_frame()
@@ -574,7 +568,7 @@ async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot
             # Headless, as the pane's browser opens by default: a visible window under an emulated
             # viewport can skip the frame for a one-glyph change, which says nothing about the stream.
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=False, session="new")).startswith("Error:")
-            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            endpoint = await owner.page_endpoint(thread_id)
             async with pane_screencast(endpoint) as (cast, frames, next_frame):
                 shown = (await next_frame())["deviceWidth"]
                 # Registered as the pane's cast, so the command path restarts it as it does in the app.
