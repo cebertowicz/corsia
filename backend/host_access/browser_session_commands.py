@@ -227,8 +227,11 @@ def hidden_snapshot(result: browser_cli.CommandResult) -> browser_cli.CommandRes
 
     Any other shape (a warning line before the JSON, an error, plain text) could carry a value, so it fails closed.
     """
-    snapshot = browser_cli.snapshot_text(result)
-    if snapshot is None:
+    if result.timed_out or result.completion == "interrupted" or result.returncode != 0:
+        return None
+    data = browser_cli.json_object(result.stdout).get("data")
+    snapshot = data.get("snapshot") if isinstance(data, dict) else None
+    if not isinstance(snapshot, str):
         return None
     stdout = json.dumps({"success": True, "data": {"snapshot": browser_control.hide_field_values(snapshot)}})
     return replace(result, stdout=stdout, stderr="")
