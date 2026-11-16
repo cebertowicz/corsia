@@ -107,17 +107,26 @@ class PaneScreencast:
         """Restart capture, which makes Chrome send the current picture at once."""
         if (cdp := self._cdp) is None:
             return  # run() has not started capturing yet, or has ended.
+        # Counted before the stop is sent: an earlier measurement answered while it is sent must not start a
+        # capture between this stop and this restart's own measurement.
+        self._expect_measurement()
         try:
             await cdp.send("Page.stopScreencast")
-            await self._start(cdp)
+            await self._measure(cdp)
         except websockets.ConnectionClosed:
             pass  # The pane is leaving; run() ends with the closed socket.
 
     async def _start(self, cdp: CdpClient) -> None:
-        # The reader starts the capture once this measurement answers, so no frame of it arrives unmeasured.
-        # Recorded before sending: the reader may take the answer before send returns.
+        self._expect_measurement()
+        await self._measure(cdp)
+
+    def _expect_measurement(self) -> None:
+        # The reader starts the capture once every expected measurement answers, so no frame of it arrives unmeasured.
         self._unmeasured += 1
         self._held = False  # The measurement now holds frames until it answers.
+
+    async def _measure(self, cdp: CdpClient) -> None:
+        # Recorded before sending: the reader may take the answer before send returns.
         self._measures.add(cdp.next_request())
         await cdp.send("Page.getLayoutMetrics")
 

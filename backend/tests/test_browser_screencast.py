@@ -262,6 +262,36 @@ async def test_restarts_before_their_measurements_answer_start_one_capture_after
 
 
 @pytest.mark.asyncio
+async def test_an_earlier_measurement_answered_while_a_restart_stops_starts_no_capture_before_the_restarts_own(monkeypatch):
+    # Chrome refuses a second start while one runs, so the restart's stop must be followed by one start only.
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    socket.measurements = []
+    sent = socket.send
+
+    async def send(text):
+        await sent(text)
+        if json.loads(text)["method"] == "Page.stopScreencast":
+            # The first measurement's answer arrives while the stop is being sent, and the reader takes it.
+            socket.incoming.put_nowait(socket.measurements.pop(0))
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+    socket.send = send
+    running = asyncio.create_task(cast.run())
+    await _sent(log, "Page.addScriptToEvaluateOnNewDocument")
+    await cast.restart()
+    assert not any(entry[1] == "Page.startScreencast" for entry in log)
+    socket.incoming.put_nowait(socket.measurements.pop(0))
+    await _started(log)
+    for _ in range(10):
+        await asyncio.sleep(0)
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    assert sum(entry[1] == "Page.startScreencast" for entry in log) == 1
+
+
+@pytest.mark.asyncio
 async def test_pane_screencast_restart_after_the_pane_left_does_not_fail_the_command(monkeypatch):
     log = []
     cast, socket, _connected = _screencast(monkeypatch, log)
