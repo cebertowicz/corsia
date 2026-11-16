@@ -26,7 +26,7 @@ def _world(history: int) -> sqlite3.Connection:
         (THREAD,),
     )
     # Earlier history: assistant steps, each with a tool result of its own.
-    rows = []
+    rows: list[tuple[str, str, str, str, str, str, int]] = []
     for n in range(history):
         role, meta = (
             ("assistant", {"turn_id": "t"}) if n % 2 == 0
@@ -34,9 +34,9 @@ def _world(history: int) -> sqlite3.Connection:
         )
         rows.append((f"old-{n}", THREAD, role, "earlier", json.dumps(meta), f"t{n:08d}", n + 1))
     rows.append((STEP, THREAD, "assistant", "done", json.dumps({"turn_id": "t"}), "u0", history + 1))
+    result_meta = json.dumps({"turn_id": "t", "assistant_step_id": STEP})
     for k in range(2):
-        meta = json.dumps({"turn_id": "t", "assistant_step_id": STEP})
-        rows.append((f"result-{k}", THREAD, "tool", "tool result", meta, f"u{k + 1}", history + 2 + k))
+        rows.append((f"result-{k}", THREAD, "tool", "tool result", result_meta, f"u{k + 1}", history + 2 + k))
     db.executemany(
         "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) VALUES (?,?,?,?,?,?,?)",
         rows,
@@ -47,7 +47,8 @@ def _world(history: int) -> sqlite3.Connection:
 
 class _Recorder:
     def __init__(self, db: sqlite3.Connection) -> None:
-        self.db, self.statements = db, []
+        self.db = db
+        self.statements: list[tuple[str, tuple]] = []
 
     def execute(self, sql, params=()):
         self.statements.append((sql, tuple(params)))
