@@ -31,7 +31,8 @@ STOP_TIMEOUT_SECONDS = 1.0
 MAX_SUMMARY_CHARS = 8_192
 SUMMARY_ENTRY_COUNT = 15
 THREAD_ENTRY_CHARS = 100
-STACK_ENTRY_CHARS = 320
+# Each stack is its own record; this keeps one under log_read's 1,500-character cap.
+STACK_ENTRY_CHARS = 1_400
 _BACKEND_PREFIX = f"{Path(__file__).resolve().parents[1]}{os.sep}"
 # Decorator plumbing between a reader and its caller: three frames per memoized call that
 # name no work, and would otherwise push the caller out of the six frames a signature keeps.
@@ -209,10 +210,6 @@ class CpuSampler:
             self._stack_cpu_seconds.items(), key=lambda item: item[1], reverse=True
         )[:SUMMARY_ENTRY_COUNT]
         top_stack_seconds = sum(seconds for _, seconds in top_stack_items)
-        top_stacks = "; ".join(
-            f"{seconds:.6f}s {_ellipsize(signature, STACK_ENTRY_CHARS)}"
-            for signature, seconds in top_stack_items
-        ) or "none"
         other_stack_seconds = max(0.0, self._process_cpu_seconds - top_stack_seconds)
         message = (
             "cpu sampler: "
@@ -221,13 +218,20 @@ class CpuSampler:
             f"sampler_cpu_seconds={self._sampler_cpu_seconds:.6f} "
             f"max_tick_lag_seconds={self._max_tick_lag_seconds:.6f} "
             f"top_threads=[{top_threads}] "
-            f"top_stacks=[{top_stacks}; other={other_stack_seconds:.6f}s]"
+            f"top_stacks={len(top_stack_items)} other={other_stack_seconds:.6f}s"
         )
         # WARNING, not INFO: the served process leaves the stdlib root logger at
         # WARNING (uvicorn configures only its own loggers), and both the stderr
         # fallback and the OTel capture handler accept WARNING and above, so an
         # INFO summary is dropped before it reaches any sink.
         self._logger.warning("%s", _ellipsize(message, MAX_SUMMARY_CHARS))
+        # One record per stack: log readers cap each record's message, so stacks
+        # packed into the summary line were cut after the first few.
+        for rank, (signature, seconds) in enumerate(top_stack_items, start=1):
+            self._logger.warning(
+                "cpu sampler stack: rank=%d seconds=%.6f %s",
+                rank, seconds, _ellipsize(signature, STACK_ENTRY_CHARS),
+            )
         self._thread_cpu_seconds = {}
         self._stack_cpu_seconds = {}
         self._process_cpu_seconds = 0.0

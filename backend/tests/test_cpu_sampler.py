@@ -105,15 +105,18 @@ def test_summary_reports_cpu_deltas_threads_stacks_sampler_and_tick_lag(caplog) 
 
     sampler.emit_summary(window_seconds=60)
 
-    message = caplog.records[-1].getMessage()
-    assert message == (
+    summary, stack = (record.getMessage() for record in caplog.records[-2:])
+    assert summary == (
         "cpu sampler: process_cpu_seconds=1.250000 window_seconds=60.000 "
         "sampler_cpu_seconds=0.050000 max_tick_lag_seconds=0.012000 "
         "top_threads=[1.200000s worker] "
-        "top_stacks=[1.200000s thread_group=worker sample=active "
-        "stack=backend/x.py:work:1; other=0.050000s]"
+        "top_stacks=1 other=0.050000s"
     )
-    assert len(message) <= cpu_sampler.MAX_SUMMARY_CHARS
+    assert stack == (
+        "cpu sampler stack: rank=1 seconds=1.200000 "
+        "thread_group=worker sample=active stack=backend/x.py:work:1"
+    )
+    assert len(summary) <= cpu_sampler.MAX_SUMMARY_CHARS
     assert not sampler._thread_cpu_seconds
     assert not sampler._stack_cpu_seconds
 
@@ -276,7 +279,14 @@ def test_summary_building_stays_cheap_with_sixty_thread_groups(caplog) -> None:
     sampler.emit_summary(window_seconds=60)
 
     assert time.process_time() - started < 0.1
-    assert len(caplog.records[-1].getMessage()) <= cpu_sampler.MAX_SUMMARY_CHARS
+    messages = [record.getMessage() for record in caplog.records]
+    stacks = [message for message in messages if message.startswith("cpu sampler stack:")]
+    assert len(stacks) == cpu_sampler.SUMMARY_ENTRY_COUNT
+    assert [message.split()[3] for message in stacks] == [
+        f"rank={rank}" for rank in range(1, cpu_sampler.SUMMARY_ENTRY_COUNT + 1)
+    ]
+    # Every record fits a log reader's per-record cap, so no stack is cut off.
+    assert all(len(message) <= 1_500 for message in messages)
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc format")
