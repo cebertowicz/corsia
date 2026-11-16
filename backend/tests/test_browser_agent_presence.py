@@ -20,6 +20,12 @@ def _no_presence_state():
         registry.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_frame_listing(monkeypatch):
+    # A refused write also looks for frames; the listing is a request to the browser, which these fakes lack.
+    monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {})
+
+
 def _owner(monkeypatch, password_page):
     owner = BrowserSessionOwner(namespace="corsia-presence-test")
     runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))

@@ -88,6 +88,20 @@ window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
+# A link inside a frame, 40px from the frame's left and 30px from its top; the page above it holds other
+# elements at the same distance from the page's corner, which is where a frame-relative box wrongly lands.
+FRAME_LINK = """<!doctype html><title>Frame inner</title><body style="margin:0">
+<a id=go href="#" style="position:absolute;left:40px;top:30px;display:block;width:100px;height:20px">Go</a>
+<script>
+window.clicks = 0;
+document.querySelector('#go').addEventListener('click', event => { event.preventDefault(); window.clicks++; });
+</script>"""
+# The same link under a white sheet that fills the frame.
+FRAME_COVERED = FRAME_LINK + '<div style="position:fixed;inset:0;background:white"></div>'
+FRAME_OUTER = """<!doctype html><title>Frame outer</title><body style="margin:8px">
+<div style="height:60px">top</div>
+<iframe src="__FRAME__" style="width:600px;height:240px;border:0"></iframe>"""
+
 # Password fields the probe must find without reading the whole DOM: in a same-origin frame, in open
 # and closed shadow roots, and named only by autocomplete, on a page whose DOM is over 1 MiB.
 PROBE = """<!doctype html><title>Probe fixture</title>
@@ -116,11 +130,18 @@ COOKIES = """<!doctype html><title>Cookies</title><script>document.title = docum
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
-             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode()}
+             "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
+             "/frame-link.html": FRAME_LINK.encode(), "/frame-covered.html": FRAME_COVERED.encode()}
+    frame_pages = {"/frame-same.html": "same", "/frame-cross.html": "cross", "/frame-covered-outer.html": "covered"}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
             body = pages.get(self.path)
+            if body is None and self.path in frame_pages:
+                # localhost is another site than 127.0.0.1, so Chrome runs that frame in its own process.
+                frame = {"same": "/frame-link.html", "covered": "/frame-covered.html",
+                         "cross": f"http://localhost:{self.server.server_port}/frame-link.html"}[frame_pages[self.path]]
+                body = FRAME_OUTER.replace("__FRAME__", frame).encode()
             if body is None:
                 self.send_error(404)
                 return
@@ -423,6 +444,68 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+async def frame_link_ref(owner: BrowserSessionOwner, thread_id: str) -> str:
+    """The agent's ref for the link inside the frame, once the frame has loaded."""
+    for _ in range(50):
+        snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+        found = re.search(r'link \\?"Go\\?" \[ref=(e\d+)\]', snapshot)
+        if found:
+            return f"@{found.group(1)}"
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"the frame's link never appeared in the snapshot: {snapshot}")
+
+
+async def frame_clicks(owner: BrowserSessionOwner, thread_id: str, *, cross_site: bool) -> int:
+    """How many times the page inside the frame saw its link clicked."""
+    if not cross_site:
+        return await cdp_value(owner, thread_id, "document.querySelector('iframe').contentWindow.clicks")
+    # A cross-site frame's document is in another process: read it through the frame's own target.
+    (frame_endpoint,) = (await asyncio.to_thread(browser_cdp.frame_targets, await owner.page_endpoint(thread_id))).values()
+    async with browser_cdp.CdpClient(frame_endpoint) as cdp:
+        return (await cdp.call("Runtime.evaluate", expression="window.clicks", returnByValue=True))["result"]["value"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("page", "cross_site"), [("frame-same.html", False), ("frame-cross.html", True)])
+async def test_a_click_on_a_link_inside_a_frame_applies_to_that_link(page, cross_site):
+    """A link in a same-origin frame and in a cross-site frame (its own process) is clicked, not refused as covered."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{page}"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            assert await owner.run(thread_id, ("click", ref), session="existing") == "ok"
+            assert await frame_clicks(owner, thread_id, cross_site=cross_site) == 1
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_covered_link_inside_a_frame_is_still_refused():
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-frame-covered-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-frame-covered", instance_key=uuid4().hex)
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/frame-covered-outer.html"), show_window=True, session="new")).startswith("Error:")
+            ref = await frame_link_ref(owner, thread_id)
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
+                await owner.run(thread_id, ("click", ref), session="existing")
+            assert await frame_clicks(owner, thread_id, cross_site=False) == 0
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

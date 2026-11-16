@@ -79,9 +79,11 @@ jobs:
             "backend/tests/test_browser_shared_e2e.py::test_installed_setup_steps_run_in_native_browser" \
             "backend/tests/test_browser_shared_e2e.py::test_scripted_steps_guard_a_mock_password_page" \
             "backend/tests/test_browser_shared_e2e.py::test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_cannot_prove" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_click_on_a_link_inside_a_frame_applies_to_that_link" \
+            "backend/tests/test_browser_shared_e2e.py::test_a_covered_link_inside_a_frame_is_still_refused" \
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
-          # A skip would pass silently; all three must actually run.
-          grep -q " 3 passed" "$RUNNER_TEMP/setup-steps.log"
+          # A skip would pass silently; all six must actually run (the frame click runs for a same-origin and a cross-site frame).
+          grep -q " 6 passed" "$RUNNER_TEMP/setup-steps.log"
       - name: Measure pane speed on real Chrome
         env:
           CORSIA_BROWSER_E2E: '1'
