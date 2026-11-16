@@ -43,7 +43,7 @@ def _mark(db, entry_id: int) -> tuple:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 197
+    assert SCHEMA_VERSION == 198
 
 
 def test_answerless_selections_become_unmarked_and_answered_ones_stay():

@@ -15,7 +15,7 @@ from infra.chat_comment_ids import commentable_role_sql, is_commentable_role
 from infra.chat_comment_index import attach_comments, place_comments
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_196_to_197_agent_comment_roots import migrate_196_to_197
+from infra.migration_197_to_198_agent_comment_roots import migrate_197_to_198
 from infra.reply_context import validate_reply_context
 from infra.schema import SCHEMA_VERSION
 
@@ -70,13 +70,13 @@ def test_migration_creates_the_table_and_index_and_is_idempotent():
     db = sqlite3.connect(':memory:')
     initialize_schema(db)
     db.execute('DROP TABLE chat_comment_agent_roots')
-    db.execute('PRAGMA user_version=196')
+    db.execute('PRAGMA user_version=197')
     db.commit()
-    assert MIGRATIONS[196] is migrate_196_to_197
-    assert migrate_to_current(db, SCHEMA_VERSION).from_version == 196
+    assert MIGRATIONS[197] is migrate_197_to_198
+    assert migrate_to_current(db, SCHEMA_VERSION).from_version == 197
     names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE name LIKE '%agent_roots%' AND name NOT LIKE 'sqlite_%'")}
     assert names == {'chat_comment_agent_roots', 'idx_chat_comment_agent_roots_target'}
-    migrate_196_to_197(db)
+    migrate_197_to_198(db)
     assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
     db.close()
 

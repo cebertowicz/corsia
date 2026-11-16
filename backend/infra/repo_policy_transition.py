@@ -22,6 +22,8 @@ from dataclasses import dataclass
 import logging
 import threading
 
+from loguru import logger
+
 log = logging.getLogger(__name__)
 
 
@@ -49,6 +51,11 @@ class Reach:
 
 #: The reach of a caller that is walled from nothing, or that could not be read.
 EVERYWHERE = Reach()
+
+
+def _scope(projects: frozenset[str] | None) -> str:
+    """A claim or fenced set as one log token: ``everywhere`` or its sorted project ids."""
+    return "everywhere" if projects is None else ",".join(sorted(projects)) or "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +226,8 @@ class _RepoPolicyTransitionCoordinator:
                 )
             if claim is not None and claim_generation != self._generation:
                 # Another transition ended after the claim was read: claim everywhere.
+                logger.info("repo policy transition claim {} widened to everywhere: "
+                            "another transition ended after it was read", _scope(claim))
                 claim = None
             effects = [h for h in self._effects.values() if h.reach.meets(claim)]
             if effects:
@@ -232,16 +241,21 @@ class _RepoPolicyTransitionCoordinator:
             if not running:
                 self._transition_active = True
                 self._claim = claim
-        # The claim each transition runs or is refused under, so how often a narrowed
-        # claim admits, and what still refuses one, can be read from the log.
-        scope = "everywhere" if claim is None else "own-project"
+        # The claim each transition runs or is refused under, and the blocker's reach,
+        # through loguru so production log reads see them (stdlib INFO is not captured).
         if running:
-            log.info("repo policy transition refused claim=%s blocker_thread=%s",
-                     scope, blocker_holder.thread_id if blocker_holder else None)
+            logger.info(
+                "repo policy transition refused claim={} blocker_thread={} blocker_walled_from={}",
+                _scope(claim),
+                blocker_holder.thread_id if blocker_holder else None,
+                # ``everywhere`` would misread here: a reach fenced from nothing reaches all.
+                ("nothing" if blocker_holder.reach.fenced is None else _scope(blocker_holder.reach.fenced))
+                if blocker_holder else None,
+            )
             # Named outside the lock: the label reads the database.
             blocker = _busy(running, blocker_holder)
             raise blocker
-        log.info("repo policy transition admitted claim=%s", scope)
+        logger.info("repo policy transition admitted claim={}", _scope(claim))
         try:
             yield claim
         finally:
