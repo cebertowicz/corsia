@@ -66,6 +66,14 @@ jobs:
             backend/tests/test_browser_native.py backend/tests/test_browser_native_recovery.py backend/tests/test_browser_real_socket.py \
             backend/tests/test_browser_restricted_ports.py \
             -m integration -vv --tb=short -o faulthandler_timeout=60
+      - name: Verify the password guard covers cross-origin frames on real Chrome
+        run: |
+          set -o pipefail
+          CORSIA_TEST_CHROME="$CORSIA_NATIVE_CHROME_BINARY" .venv/bin/python -m pytest -c backend/pytest.ini \
+            backend/tests/test_browser_frame_password_real.py \
+            -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/frame-guard.log"
+          # A skip would pass silently; both shapes must actually run.
+          grep -q " 2 passed" "$RUNNER_TEMP/frame-guard.log"
       - name: Verify setup steps run in the native browser
         env:
           CORSIA_BROWSER_E2E: '1'

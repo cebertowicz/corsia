@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Awaitable, Callable
 
-from host_access import browser_pane_state, browser_step_lifecycle
+from host_access import browser_cdp_frames, browser_pane_state, browser_step_lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_url import is_http_url as is_http_url, normalize_browser_url as normalize_browser_url
@@ -211,8 +211,9 @@ async def _refuse_password_read(guarded: PasswordReadGuard, args: tuple[str, ...
         except Exception as exc:
             log.info("password-visit read target for %s could not be located: %s", guarded.visit, exc)
             node = None
-        # A target that can't be located may be the hidden password input itself, so it fails closed.
-        if node is None or node in guarded.seen_nodes:
+        # A target that can't be located may be the hidden password input itself, so it fails closed. A ref
+        # inside a cross-origin frame locates the frame's element, which holds the frame's guarded fields.
+        if node is None or node in {browser_cdp_frames.frame_owner(seen) for seen in guarded.seen_nodes}:
             raise BrowserSessionError(PASSWORD_READ_REFUSED)
 
 
