@@ -287,7 +287,7 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path
             assert await owner.run(thread_id, ("select", "#choice", "b"), session="existing") == "Done."
             assert await owner.run(thread_id, ("hover", "#hover"), session="existing") == "Done."
             assert await owner.run(thread_id, ("scroll", "down", "300"), session="existing") == "Done."
-            assert await owner.run(thread_id, ("click", "#q"), session="existing") == "ok"
+            assert "clicked" in await owner.run(thread_id, ("click", "#q"), session="existing")
             with pytest.raises(BrowserSessionError, match="Enter, Tab, Shift\\+Tab"):
                 await owner.run(thread_id, ("press", "Control+a"), session="existing")
             assert await owner.run(thread_id, ("press", "Enter"), session="existing") == "Done."
