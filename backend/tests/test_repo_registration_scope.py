@@ -481,6 +481,28 @@ async def test_already_registered_entry_is_refused_and_left_alone(env):
 
 
 @pytest.mark.asyncio
+async def test_in_place_add_racing_a_same_name_row_is_refused_and_replaces_nothing(env, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import project_repos
+
+    entry = env["alpha"] / "source" / "app"
+    _git_repo(entry)
+    assert "Registered repository 'app'" in await _register(env, entry)
+    before = dict(env["db"].execute("SELECT * FROM project_repo_policies").fetchone())
+    # The add read the registered names before the same-name row landed.
+    monkeypatch.setattr("api.project_repo_add_source._registered_names", lambda _project_id: set())
+    with pytest.raises(HTTPException) as raised:
+        project_repos.register_source_repo(
+            "pa", project_repos.RepoAdd(mode="link", path=str(entry), protect_base_checkout=False),
+        )
+    assert raised.value.status_code == 409
+    assert dict(env["db"].execute("SELECT * FROM project_repo_policies").fetchone()) == before
+    assert entry.is_dir() and (entry / "tracked.txt").is_file()
+    assert _registered(env) == 1
+
+
+@pytest.mark.asyncio
 async def test_path_nested_in_a_source_entry_is_refused(env):
     entry = env["alpha"] / "source" / "app"
     nested = entry / "packages" / "lib"

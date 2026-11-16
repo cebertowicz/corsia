@@ -9,7 +9,6 @@ import threading
 from typing import Callable, TypeVar
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
 
 from core.project_context import resolve_project_paths
 from infra.auth import authenticate
@@ -40,6 +39,7 @@ from api.project_repo_checkout_guards import (
     require_supported_pin,
 )
 from api.project_repo_claim import add_transition, confirmed_repo_path
+from api.project_repo_controls import RepoAdd, RepoUpdate, add_controls, update_controls
 from api.project_repo_add_source import resolve_add_source
 from api.project_repo_sync import sync_sources
 from api.project_scaffolding import (
@@ -57,23 +57,6 @@ router = APIRouter(prefix="/api/projects", tags=["project-repos"])
 _T = TypeVar("_T")
 _PROJECT_REPO_LOCKS_GUARD = threading.Lock()
 _PROJECT_REPO_LOCKS: dict[str, threading.RLock] = {}
-
-
-class RepoAdd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mode: str  # "link" | "create"
-    path: str | None = None  # link mode: the existing directory to attach
-    name: str | None = None  # optional for link (defaults from basename); required for create
-    pinned_branch: str | None = None
-    protect_base_checkout: bool | None = None
-
-
-class RepoUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    pinned_branch: str | None = None
-    protect_base_checkout: bool | None = None
 
 
 def _workspace_dir_for(project_id: str) -> Path:
@@ -239,71 +222,6 @@ def _validated_repo_and_policy(
     return repo, policy
 
 
-def _add_controls(
-    body: RepoAdd,
-    *,
-    is_git: bool,
-    current_branch: str | None,
-) -> tuple[str | None, bool]:
-    fields = body.model_fields_set
-    if (
-        "protect_base_checkout" in fields
-        and body.protect_base_checkout is None
-    ):
-        raise HTTPException(400, "protect_base_checkout must be true or false")
-    if not is_git:
-        if (
-            ("pinned_branch" in fields and body.pinned_branch is not None)
-            or (
-                "protect_base_checkout" in fields
-                and body.protect_base_checkout
-            )
-        ):
-            raise HTTPException(
-                409,
-                "Branch pinning and checkout protection require a Git repository",
-            )
-        return None, False
-    pinned = (
-        body.pinned_branch
-        if "pinned_branch" in fields
-        else current_branch
-    )
-    protected = (
-        bool(body.protect_base_checkout)
-        if "protect_base_checkout" in fields
-        else True
-    )
-    return pinned, protected
-
-
-def _update_controls(
-    body: RepoUpdate,
-    *,
-    policy: RepoPolicy,
-) -> tuple[str | None, bool]:
-    fields = body.model_fields_set
-    if not fields:
-        raise HTTPException(400, "No repository settings to update")
-    if (
-        "protect_base_checkout" in fields
-        and body.protect_base_checkout is None
-    ):
-        raise HTTPException(400, "protect_base_checkout must be true or false")
-    return (
-        (
-            body.pinned_branch
-            if "pinned_branch" in fields
-            else policy.pinned_branch
-        ),
-        (
-            bool(body.protect_base_checkout)
-            if "protect_base_checkout" in fields
-            else policy.protect_base_checkout
-        ),
-    )
-
-
 def _active_owned_process_count() -> int:
     from host_access.processes import PROCESS_OWNER
 
@@ -397,14 +315,16 @@ def _commit_add_policy(
     pinned_branch: str | None,
     protected: bool,
     connection,
+    created: bool,
 ) -> dict:
     """Register one add's policy row inside the caller's compensation transaction.
 
-    The add just created ``source/<name>``, so a row already under that name has no
-    link: it is left from a link removed by hand, and this add replaces it.
+    When the add created ``source/<name>``, a row already under that name has no link:
+    it is left from a link removed by hand, and this add replaces it. An entry
+    registered where it is replaces nothing, so a same-name row is a conflict.
     """
     name = row["name"]
-    unlinked = get_project_repo_policies(project_id, db=connection).get(name)
+    unlinked = get_project_repo_policies(project_id, db=connection).get(name) if created else None
     with write_transaction(connection, scope="repo_policy_add"):
         _require_policy_snapshot(project_id, name, unlinked, db=connection)
         _require_source_binding(ws_dir, name, repo_path)
@@ -438,7 +358,7 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
         raise repo_git_timeout_response(exc) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    pinned_branch, protected = _add_controls(
+    pinned_branch, protected = add_controls(
         body,
         is_git=bool(row["git"]["is_repo"]),
         current_branch=current,
@@ -486,6 +406,7 @@ def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None
                 pinned_branch,
                 protected,
                 connection,
+                created,
             )
         except Exception as exc:
             concurrent_conflict = (
@@ -559,7 +480,7 @@ async def update_repo(token: str, project_id: str, name: str, body: RepoUpdate):
                 db=connection,
             )
             repo_path = Path(str(repo["path"])).expanduser().resolve(strict=False)
-            pinned_branch, protected = _update_controls(
+            pinned_branch, protected = update_controls(
                 body,
                 policy=existing,
             )
