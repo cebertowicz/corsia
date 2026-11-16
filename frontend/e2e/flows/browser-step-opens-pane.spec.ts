@@ -4,6 +4,7 @@ import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { colorAt } from '../support/browserCanvas';
 import { createSession, loginByUrl, sendChatMessage, sidebarThread, saveEvidenceScreenshot } from '../support/corsia';
+import { revealWorked } from '../support/documentOpen';
 import { seedMockResponses } from '../support/mock';
 import { startProbeServer } from '../support/probeServer';
 
@@ -97,7 +98,10 @@ test('marking the sign-in step done wakes the agent and leaves the page to it', 
 		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
 		await planRow.click({ button: 'right' });
 		await page.getByRole('menuitem', { name: 'Mark done' }).click();
-		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 45_000 });
+		// Focus folds the woken turn's plain reply into its own work group, after the first turn's.
+		await expect(page.getByRole('button', { name: /Expand Worked/ })).toHaveCount(2, { timeout: 45_000 });
+		await revealWorked(page);
+		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 30_000 });
 		await expect(chip(page)).toHaveCount(0);
 		await saveEvidenceScreenshot(page, info, '1440-done-woken', { fullPage: false });
 	} finally { await probe.close(); }
