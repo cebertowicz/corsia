@@ -29,8 +29,21 @@ const visibleTogether = (page: Page) => page.evaluate(() => {
 	const caret = !!fieldBox && fieldBox.bottom >= top - 1 && fieldBox.bottom <= bottom + 1;
 	// Only the outer surface scrolls: nothing inside it (the field included) scrolls vertically on its own.
 	const inner = scroller ? [...scroller.querySelectorAll<HTMLElement>('*')].filter((el) => /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1).map((el) => el.tagName.toLowerCase() + '.' + el.className) : [];
-	return { line: inside(line), field: inside(field), caret, send: inside(send), inner, scrollTop: scroller?.scrollTop ?? null, scrolls: !!scroller };
+	// What the scroller can show at once: the field alone, and the field with the line under it.
+	const room = bottom - top;
+	const fieldBox2 = field?.getBoundingClientRect(), lineBox = line?.getBoundingClientRect();
+	const fieldFits = !!fieldBox2 && fieldBox2.height <= room + 1;
+	const bothFit = fieldFits && !!lineBox && lineBox.bottom - fieldBox2!.top <= room + 1;
+	const fieldTop = !!fieldBox && fieldBox.top >= top - 1 && fieldBox.top < bottom;
+	return { line: inside(line), field: inside(field), caret, send: inside(send), fieldTop, fieldFits, bothFit, inner, scrollTop: scroller?.scrollTop ?? null, scrolls: !!scroller };
 });
+
+type Seen = Awaited<ReturnType<typeof visibleTogether>>;
+/**
+ * The rule for a reply field in a popover or sheet that scrolls: a field that fits the visible part of its scroller is in view whole
+ * (and the line under it too when both fit); a field that cannot fit keeps its bottom edge in view, so the caret, the line and Send show.
+ */
+const together = (seen: Seen) => seen.fieldFits ? seen.field && seen.send && (!seen.bothFit || seen.line) : seen.caret && seen.line && seen.send;
 
 for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { name: '393', width: 393, height: 852, phone: true }, { name: '852x393', width: 852, height: 393, phone: true }, { name: '393x440', width: 393, height: 440, phone: true }, { name: '320x340', width: 320, height: 340, phone: true }]) {
 	test.describe(`recipient line ${view.name}`, () => {
@@ -86,21 +99,30 @@ for (const view of [{ name: '1440', width: 1440, height: 900, phone: false }, { 
 				for (const count of [8, 12]) {
 					await reply.fill(lines(count));
 					await settled(page);
-					await expect.poll(async () => { const seen = await visibleTogether(page); return seen.line && seen.caret && seen.send; }, { message: `caret, line and Send in view together after a ${count}-line reply` }).toBe(true);
+					await expect.poll(async () => { return together(await visibleTogether(page)); }, { message: `the field, or its end with the line and Send, in view after a ${count}-line reply` }).toBe(true);
 					expect((await visibleTogether(page)).inner, `nothing inside the popover scrolls on its own after a ${count}-line reply`).toEqual([]);
 				}
 				// A four-line reply fits: the whole field, the line and Send are in view together.
 				await reply.fill('Yes, ring two waits for ring one.\nIt then runs the load tests.\nThe owner signs off after that.\nThen ring three starts.');
 				await settled(page);
-				await expect.poll(async () => { const seen = await visibleTogether(page); return seen.line && seen.caret && seen.send; }, { message: 'caret, line and Send in view together after a four-line reply' }).toBe(true);
-				// The whole field fits everywhere but the short 852x393 popover, where its top edge may sit a few pixels above the view (accepted: the popover keeps the caret, line and Send in view).
-				if (view.name !== '852x393') await expect.poll(async () => (await visibleTogether(page)).field, { message: 'the whole four-line field is in view' }).toBe(true);
+				await expect.poll(async () => { return together(await visibleTogether(page)); }, { message: 'the field, or its end with the line and Send, in view after a four-line reply' }).toBe(true);
+				// A field too tall for a short surface (320x340) cannot be shown whole: its top is reached by scrolling.
+				const shown = await visibleTogether(page);
+				if (!shown.fieldFits) {
+					await page.locator('.ct-compose textarea.ct-input').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+					await settled(page);
+					expect((await visibleTogether(page)).fieldTop, 'the top of the four-line field is reached by scrolling').toBe(true);
+					// Typing brings the end back: the caret, the line and Send.
+					await reply.pressSequentially(' ');
+					await settled(page);
+					await expect.poll(async () => together(await visibleTogether(page)), { message: 'the field\'s end, the line and Send are back in view after typing' }).toBe(true);
+				}
 				expect((await visibleTogether(page)).inner, 'nothing inside the popover scrolls on its own after a four-line reply').toEqual([]);
 				const before = await visibleTogether(page);
 				await reply.pressSequentially(' Ok.');
 				await settled(page);
 				const after = await visibleTogether(page);
-				expect(after.line && after.field && after.send, 'still together after typing on').toBe(true);
+				expect(together(after), 'still in view after typing on').toBe(true);
 				expect(Math.abs((after.scrollTop ?? 0) - (before.scrollTop ?? 0)), 'typing on a line that already fits does not scroll').toBeLessThanOrEqual(30);
 
 				// A new comment on other text: the box names the owner before anything is sent.

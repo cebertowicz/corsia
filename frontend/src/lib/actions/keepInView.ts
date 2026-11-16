@@ -45,6 +45,10 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * around that block; a block too tall for the scroller keeps the node-into-view
  * behaviour, and a node itself taller than the scroller shows its end.
  *
+ * `clearAfter` is how much a reveal leaves clear below the node (a line that belongs under a field). It is the node's own
+ * scroll margin, given up as far as the node needs the room: a node that fits the scroller on its own is shown whole, and
+ * only what is left over after it stays clear; a node taller than the room keeps the whole margin, so its end and what sits under it show.
+ *
  * A sticky row pinned to the scroller's bottom (`[data-pin-bottom]`) is room the field must not land under: while the node is revealed alone the
  * scroller carries that row's height as scroll padding, so the browser's own caret reveal after each typed character leaves it clear too, and
  * a reveal that still ends under the row (the browser does not always honour the padding for a field taller than the room above the row)
@@ -58,8 +62,8 @@ function pinnedBottom(owner: HTMLElement | null): number {
  * Typing at the end of a field brings its end back as growing does: the browser's own caret reveal stops at the caret
  * line, leaving the field's padding and the Send beside it past the scroller's end when the text did not wrap.
  */
-export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
-	let { enabled, whole } = options;
+export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement; clearAfter?: number }) {
+	let { enabled, whole, clearAfter } = options;
 	let frame = 0;
 	const owner = scroller(node);
 	/** Whether the node's end (the caret of a growing field, and its Send) was in view at the last scroll. */
@@ -86,6 +90,10 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			const own = (parseFloat(getComputedStyle(owner).scrollPaddingBottom) || 0) - held;
 			owner.style.scrollPaddingBottom = `${own + pinned}px`;
 			held = pinned;
+		}
+		if (clearAfter !== undefined) {
+			const spare = room - pinned - node.getBoundingClientRect().height;
+			node.style.scrollMarginBlockEnd = `${spare >= 0 ? Math.min(clearAfter, Math.floor(spare)) : clearAfter}px`;
 		}
 		// A node taller than the room shows its end, where the caret of a growing field and its Send are.
 		const block = !fits && node.getBoundingClientRect().height + scrollMargins(node) > room - pinned ? 'end' : 'nearest';
@@ -121,8 +129,8 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 	queueMicrotask(reveal);
 
 	return {
-		update(next: { enabled: boolean; whole?: HTMLElement }) {
-			({ enabled, whole } = next);
+		update(next: { enabled: boolean; whole?: HTMLElement; clearAfter?: number }) {
+			({ enabled, whole, clearAfter } = next);
 			reveal();
 		},
 		destroy() {

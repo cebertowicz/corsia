@@ -79,10 +79,10 @@ describe('comment loading presentation', () => {
 		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: null, goesTo: [] });
 	});
 
-	it('carries who a new comment goes to, by name, from the document and not from the owner label', async () => {
+	it('carries who a new comment goes to, by agent, from the document and not from the owner label', async () => {
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [], feedback: { owner_label: 'Documents', goes_to: [{ id: 'sup', name: 'Supervisor' }, { id: 'docs', name: 'Documents' }] } });
 		await loadComments('artifact');
-		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: ['Supervisor', 'Documents'] });
+		expect(get(commentLoads).artifact).toEqual({ state: 'ready', owner: 'Documents', goesTo: [{ id: 'sup', name: 'Supervisor' }, { id: 'docs', name: 'Documents' }] });
 	});
 
 	it('runs one more load for a burst of changes, after the one already running', async () => {

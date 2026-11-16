@@ -52,6 +52,24 @@ function sheet() {
 }
 
 describe('keepInView', () => {
+	it('gives up the room it leaves clear under a field only as far as the field itself needs it', () => {
+		const clearance = (room: number) => {
+			height = room;
+			const { field } = sheet();
+			const action = keepInView(field, { enabled: false, clearAfter: 70 });
+			action.update({ enabled: true, clearAfter: 70 });
+			const margin = parseFloat(field.style.scrollMarginBlockEnd);
+			action.destroy();
+			document.body.replaceChildren();
+			return margin;
+		};
+		// The field is 40px tall: with 100px of room it leaves 60px, not 70, so the whole field stays in view.
+		expect(clearance(100)).toBe(60);
+		expect(clearance(497)).toBe(70);
+		// A field taller than the room keeps the whole clearance, so its end and the line under it show.
+		expect(clearance(30)).toBe(70);
+	});
+
 	it('keeps a picked card in view while its sheet shrinks, though its own scroll is read only after a further shrink', () => {
 		const { owner, card, field, reveals, shrink } = sheet();
 		const action = keepInView(field, { enabled: false, whole: card });

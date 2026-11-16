@@ -248,6 +248,23 @@ describe('MarkdownEditor edits', () => {
 			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
 		});
 
+		it('a tap on two threads over the same text opens both as a list even when the text moves before the frame that reads the press', async () => {
+			const onAnchorFocus = vi.fn();
+			const onMarkerFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'one', onMarkerFocus }, { from: 6, to: 11, id: 'two', onMarkerFocus }], onAnchorFocus, cardMode: 'sheet' });
+			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
+			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
+			window.dispatchEvent(new MouseEvent('mouseup'));
+			// The list reloads and the text shifts: the point under the pointer is now outside both threads, and the list is still the two that were pressed.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(14);
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			expect(onMarkerFocus).toHaveBeenCalled();
+		});
+
 		it('a press held for over half a second on a comment opens it when the pointer goes up, as before', async () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, cardMode: 'sheet' });

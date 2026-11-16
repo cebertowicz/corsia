@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from doceditor import feedback_comments
+from doceditor.agent_name import agent_display_name
 
 
 def _joined_orders(db, root_ids: list[str]) -> dict[str, list[str]]:
@@ -39,7 +40,7 @@ def _names(db, ids: set[str]) -> dict[str, str]:
         return {}
     marks = ",".join("?" for _ in ids)
     rows = db.execute(f"SELECT id, title FROM threads WHERE id IN ({marks})", tuple(ids)).fetchall()
-    return {str(row["id"]): (row["title"] or "").strip() or str(row["id"]) for row in rows}
+    return {str(row["id"]): agent_display_name(row["title"], str(row["id"])) for row in rows}
 
 
 def annotate(db, artifact: dict[str, Any] | None, roots: list[dict[str, Any]]) -> list[dict[str, str]]:

@@ -7,6 +7,7 @@
 	import { createMentionSelection } from './mentionSelection';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 	import RecipientLine from './RecipientLine.svelte';
+	import { recipientNames, type Recipient } from './recipients';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
 	let { value = $bindable(''), selection = null, keepVisible = false, wholeCard, posting = false, onSend, onSelection, goesTo = undefined, selectedTags = createMentionSelection() }: {
@@ -20,20 +21,21 @@
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
 		/** The agents this reply wakes, from the server's reply rule; absent where the caller does not know (chat comments). */
-		goesTo?: string[];
+		goesTo?: Recipient[];
 		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
-	/** The height of the line under the field (its own top gap included), 0 when there is none. Revealing the field leaves this much clear below it, so the person never sees Send without seeing who gets the reply. */
+	/** The height of the line under the field (its own top gap included), 0 when there is none. Revealing the field leaves this much clear below it, so the person never sees Send without seeing who gets the reply, unless the field itself needs the room. */
 	let lineHeight = $state(0);
+	const gap = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1')) || 4;
 	/** Once the person taps the field or types, it stays in view in whatever scrolls the thread (a keyboard rising, the text
 	 * growing). Focus alone doesn't: a card focused by picking its tag is already being scrolled to smoothly. */
 	let typing = $state(false);
 	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
-	const tagNames = $derived(picker && goesTo ? picker.occurrences(value).map(item => value.slice(item.start, item.end).replace(/^@/, '')) : []);
+	const tagged = $derived(picker && goesTo ? picker.occurrences(value).map((item) => ({ id: item.agent_id, name: value.slice(item.start, item.end).replace(/^@/, '') })) : []);
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
 	export function focus(options?: FocusOptions) { input?.focus(options); }
@@ -78,14 +80,14 @@
 <div class="ct-compose open" data-reply-composer>
 	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
-		<textarea use:keepTyped id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard }} style:scroll-margin-block-end={lineHeight ? `calc(var(--space-1) + ${lineHeight}px)` : undefined} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
+		<textarea use:keepTyped id={inputId} class="ct-input" rows="1" placeholder="Reply…" readonly={posting} bind:this={input} use:keepInView={{ enabled: keepVisible || typing, whole: wholeCard, clearAfter: lineHeight ? lineHeight + gap() : undefined }} onpointerdown={() => (typing = true)} onblur={() => (typing = false)} bind:value use:autosize={value} oninput={() => { typing = true; saveSelection(); }} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}
 			<button class="ct-send" data-send-reply aria-disabled={posting ? 'true' : undefined} aria-busy={posting} onclick={sendClicked} aria-label="Send reply" title="Reply">
 				{#if posting}<Spinner size={14} />{:else}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>{/if}
 			</button>
 		{/if}
 	</Field>
-	{#if goesTo}<div class="ct-goes" bind:offsetHeight={lineHeight}><RecipientLine names={[...new Set([...goesTo, ...tagNames])]} none="No agent gets this reply." /></div>{/if}
+	{#if goesTo}<div class="ct-goes" bind:offsetHeight={lineHeight}><RecipientLine names={recipientNames(goesTo, tagged)} none="No agent gets this reply." /></div>{/if}
 </div>
 
 <style>

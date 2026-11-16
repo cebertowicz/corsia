@@ -6,6 +6,7 @@
 	import CommentQuote from './CommentQuote.svelte';
 	import MentionPicker from './MentionPicker.svelte';
 	import RecipientLine from './RecipientLine.svelte';
+	import { recipientNames, type Recipient } from './recipients';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
@@ -27,7 +28,7 @@
 		retainText?: boolean;
 		mentions?: boolean;
 		/** Who a new comment goes to, from the document's resolver; absent where the caller does not know (chat comments). */
-		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; names?: string[] };
+		goesTo?: { state: 'agent' | 'none' | 'loading' | 'error'; agents?: Recipient[] };
 		onRetry?: () => void;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
@@ -44,8 +45,8 @@
 	const saveSelection = () => { if (input) onSelection?.([input.selectionStart, input.selectionEnd]); };
 	const explanationId = $props.id();
 	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
-	const tagged = $derived(mentions && picker ? picker.occurrences(text).map(item => text.slice(item.start, item.end).replace(/^@/, '')) : []);
-	const names = $derived([...new Set([...(goesTo?.state === 'agent' ? goesTo.names ?? [] : []), ...tagged])]);
+	const tagged = $derived(mentions && picker ? picker.occurrences(text).map((item) => ({ id: item.agent_id, name: text.slice(item.start, item.end).replace(/^@/, '') })) : []);
+	const names = $derived(recipientNames(goesTo?.state === 'agent' ? goesTo.agents ?? [] : [], tagged));
 	let posting = $state(false);
 	$effect(() => {
 		text;
