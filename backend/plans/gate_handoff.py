@@ -42,6 +42,11 @@ OFFER_RECOMMENDATION = "A"
 DROP_REASON = "Dropped by you on {date}"
 GATE_REJECTED = "The person rejected this gate: ask for their review again, and close it only after a later answer."
 GATE_NOTICE = "Gate step {step} was handed off by the person, so {how}."
+#: The first line of a handed-off gate step's own description, so every read of the step says who checks it.
+HANDED_OFF_STEP = (
+    "The person handed this review to an agent. Don't ask the person: once the work is ready, hand this step "
+    "to a reviewer and accept or send back what it returns."
+)
 GATE_HOW = {
     "agent": "a reviewer checks it instead of them",
     "spot": "it is a spot check, so the person still reviews it",

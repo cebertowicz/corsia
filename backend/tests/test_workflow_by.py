@@ -171,6 +171,26 @@ def test_harvested_worker_return_can_be_accepted(db):
     assert result["node"]["state"] == "accepted"
 
 
+def test_a_reviewer_handed_a_step_already_up_for_review_returns_through_it(db):
+    """The owner put the step up for review, then handed it to a reviewer: the return still closes it."""
+    from plans import workflow_fields
+    parent = service.ensure_plan("thread", "parent", db=db)
+    phase = service.add_node(parent.id, kind="phase", title="Run", acceptance_criteria="Done", intent="Review work", db=db)
+    entry = workflow_fields.build_run(db, phase, [{"id": "review", "by": "reviewer", "difficulty": "routine"}], causing_executor="parent")[0]
+    step = entry["id"]
+    service.transition_node(step, "active", db=db)
+    submit_review_evidence(step, db=db, actor_id="parent")
+    child = service.ensure_plan("thread", "worker", db=db)
+    work = service.add_node(child.id, kind="task", title="Work", acceptance_criteria="Done", db=db)
+    mutations.attach_spawned_thread(step, "worker", db=db)
+    assert service._node_row(db, step)["state"] == "active"
+    service.transition_node(work.id, "active", actor_id="worker", db=db)
+    submit_review_evidence(work.id, db=db, actor_id="worker")
+    assert delegation.harvest_ready_children(db=db, drives=[], changed_plan_ids=[]) == [step]
+    result = boundary.mutate(parent.id, "accept", {"node_id": step, "expected_revision": service._node_row(db, step)["revision"], "verification_result": "passed", "evidence": "Reviewed worker return"}, actor=PlanActor("parent", "user-1", "project-1"), provenance="test", mutation_id=uuid.uuid4().hex, db=db).result
+    assert result["node"]["state"] == "accepted"
+
+
 @pytest.mark.asyncio
 async def test_person_step_after_earlier_steps_is_asked_when_they_finish(isolated_db, tmp_path, monkeypatch):
     steps = (
