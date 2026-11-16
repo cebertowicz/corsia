@@ -39,13 +39,13 @@ from api.project_repo_checkout_guards import (
     require_checkout_unchanged,
     require_supported_pin,
 )
+from api.project_repo_claim import add_transition, confirmed_repo_path
+from api.project_repo_add_source import resolve_add_source
 from api.project_repo_sync import sync_sources
 from api.project_scaffolding import (
     SourceEntryChangedError,
     SourceEntryIdentity,
     capture_source_entry,
-    create_repo_in_source,
-    link_repo_into_source,
     list_source_repos,
     remove_owned_source_entry,
     remove_linked_repo,
@@ -388,39 +388,6 @@ async def list_repos(token: str, project_id: str):
     return {"repos": await run_in_db(_list)}
 
 
-def _resolve_add_source(
-    ws_dir: Path,
-    body: RepoAdd,
-) -> tuple[dict, SourceEntryIdentity]:
-    """Resolve the source binding an add creates, before its transaction opens."""
-    if body.mode == "link":
-        if not body.path:
-            raise HTTPException(400, "link mode requires 'path'")
-        try:
-            row, identity = link_repo_into_source(
-                ws_dir,
-                Path(body.path),
-                name=body.name,
-                with_ownership=True,
-            )
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, f"Bad repository path: {exc}") from exc
-    else:
-        if not body.name:
-            raise HTTPException(400, "create mode requires 'name'")
-        try:
-            row, identity = create_repo_in_source(
-                ws_dir,
-                body.name,
-                with_ownership=True,
-            )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(500, str(exc)) from exc
-    return row, identity
-
-
 def _commit_add_policy(
     project_id: str,
     ws_dir: Path,
@@ -488,19 +455,22 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
     return pinned_branch, protected, switched
 
 
-def register_source_repo(project_id: str, body: RepoAdd) -> dict:
-    """Add-repo procedure shared by Project settings and project_repo_register."""
+def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None = None) -> dict:
+    """Add-repo procedure shared by Project settings and project_repo_register (``checked``)."""
 
-    def _add():
+    def _add(claim: frozenset[str] | None):
         ws_dir = _workspace_dir_for(project_id)
         connection = None
         identity: SourceEntryIdentity | None = None
+        created = False
         repo_path: Path | None = None
         switched = None
         try:
-            row, identity = _resolve_add_source(ws_dir, body)
+            row, identity, created = resolve_add_source(
+                project_id, ws_dir, mode=body.mode, path=body.path, name=body.name,
+            )
             _require_owned_source(identity)
-            repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
+            repo_path = confirmed_repo_path(claim, project_id, ws_dir, row, checked=checked)
             pinned_branch, protected, switched = _select_add_policy(
                 row,
                 body,
@@ -531,7 +501,7 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
                         lambda: restore_repo_branch_switch(repo_path, switched),
                     )
                 )
-            if identity is not None:
+            if identity is not None and created:
                 actions.append(
                     (
                         "source binding",
@@ -549,8 +519,11 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
 
     def _transitioned_add():
         try:
-            with repo_policy_transition(active_process_count=_active_owned_process_count):
-                return _add()
+            with add_transition(
+                project_id, body.mode, body.path, body.name,
+                ws_dir_for=_workspace_dir_for, active_process_count=_active_owned_process_count,
+            ) as claim:
+                return _add(claim)
         except RepoPolicyTransitionBusy as exc:
             raise HTTPException(409, str(exc)) from exc
 

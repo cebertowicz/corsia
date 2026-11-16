@@ -20,11 +20,11 @@
     "once you have looked at it and mean to accept it."
   ],
   "limits": {
-    "backend/api/project_repos.py": 784,
-    "backend/api/project_scaffolding.py": 447,
+    "backend/api/project_repos.py": 757,
+    "backend/api/project_scaffolding.py": 451,
     "backend/core/step_handler.py": 417,
     "backend/core/thread_lifecycle.py": 481,
-    "backend/host_access/processes.py": 1404,
+    "backend/host_access/processes.py": 1403,
     "backend/host_access/redaction.py": 968,
     "backend/host_access/supervisor.py": 1696,
     "backend/infra/host_access_leases.py": 1177,
@@ -57,7 +57,7 @@
     "backend/core/context_preview.py::build_next_turn_context_preview": 109,
     "backend/e2e_mock_catalog.py::seed_mock_catalog": 86,
     "backend/eval/endpoint.py::eval_turn": 81,
-    "backend/host_access/processes.py::ProcessOwner.spawn": 148,
+    "backend/host_access/processes.py::ProcessOwner.spawn": 147,
     "backend/host_access/redaction.py::_redact_shell_tokens": 221,
     "backend/host_access/redaction.py::redact_process_arguments": 103,
     "backend/host_access/supervisor.py::approve_and_activate": 165,
