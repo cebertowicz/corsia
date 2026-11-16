@@ -68,7 +68,7 @@ def _event(name="probe", visible=False, **kwargs):
      lifecycle.Event("probe", None, session="session-one"),
      {"rules": (), "forget_done": None}),
     (_state(_password(), row_state="accepted"), _event(),
-     {"rules": ("R3",), "end": "done", "forget_done": "visit-one"}),
+     {"rules": ("R3",), "end": "done", "forget_done": "visit-one", "answer": lifecycle.Answer(1, finished=True)}),
 ], ids=[f"R{i}" for i in range(1, 15)] + ["R14-declare-opens-person", "R14-declare-declined", "no-result-keeps-done", "forget-on-done-path"])
 def test_decide_rule_table_is_pure(state, event, expected):
     before = repr(state)
@@ -221,21 +221,40 @@ async def test_a_done_answer_releases_snapshot_and_click_while_the_field_still_s
 
 @pytest.mark.asyncio
 async def test_while_a_done_field_still_shows_only_commands_that_cannot_show_it_run(plan):
-    """A field may display what the person typed (text type, show-password toggle), so reads that render it stay
-    refused and a snapshot hides field values; once the field is gone everything runs again."""
+    """A field may display what the person typed (text type, show-password toggle), so reads that render it or run
+    a page script stay refused and a snapshot hides field values, for the rest of the visit."""
     page = Page()
     await _done_with_field_showing(plan, page)
-    for command in (("snapshot",), ("snapshot", "-i")):
-        access = await browser_control.check_page_access(THREAD, page.agent_probe, command)
-        assert access.filled_field_showing and access.note is None
-    for command in (("screenshot", "shot.png"), ("pdf", "page.pdf"), ("get", "html", "body"), ("read",),
-                    ("snapshot", "--json"), ("keyboard", "type", "x"), ("diff", "snapshot"), ("find", "role", "textbox")):
-        with pytest.raises(BrowserSessionError, match="still shows the password field") as refused:
-            await browser_control.check_page_access(THREAD, page.agent_probe, command)
-        assert "attention list" not in str(refused.value)
+    allowed = (("snapshot",), ("snapshot", "-i"), ("click", "@e3"), ("get", "text", "@e3"), ("get", "attr", "@e3", "href"),
+               ("wait", "2000"), ("wait", "#next", "--state", "hidden"), ("wait", "--load", "networkidle"),
+               ("wait", "--url", "**/home"), ("wait", "--text", "Welcome"))
+    refused = (("screenshot", "shot.png"), ("pdf", "page.pdf"), ("get", "html", "body"), ("read",),
+               ("snapshot", "--json"), ("keyboard", "type", "x"), ("diff", "snapshot"), ("find", "role", "textbox"),
+               ("eval", "1"), ("get", "value", "@e7"), ("get", "attr", "@e7", "value"), ("get", "attr", "@e7", " Value"),
+               ("get", "attr", "@e7"), ("wait", "--fn", "window.x"), ("wait", "-f", "window.x"),
+               ("wait", "--download", "f.zip"), ("wait", "--text", "--fn", "window.x"), ("wait", "--load"))
+
+    async def other_field(_target):
+        return 7
+
+    async def check_visit():
+        for command in allowed:
+            access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+            assert access.filled_field_visit and access.note is None, command
+        for command in refused:
+            with pytest.raises(BrowserSessionError) as refusal:
+                await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+            assert "attention list" not in str(refusal.value), command
+
+    await check_visit()
+    # A show-password control can swap the field for a new text input holding what was typed: the probe then sees
+    # no password field, so the visit itself stays restricted, and its new input's value with it.
     page.show("visit-one")
-    for command in (("snapshot",), ("screenshot", "shot.png")):
-        assert not (await browser_control.check_page_access(THREAD, page.agent_probe, command)).filled_field_showing
+    await check_visit()
+    page.show("visit-two")
+    for command in (("snapshot",), ("screenshot", "shot.png"), ("get", "value", "@e7"), ("wait", "--fn", "window.x")):
+        access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
+        assert not access.filled_field_visit
     assert len(_steps(plan["db"])) == 1
 
 
@@ -377,7 +396,12 @@ async def test_a_done_field_stays_read_guarded(plan):
     with pytest.raises(BrowserSessionError, match="stay refused"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e1"),
                                                   resolve=await locate(None))
-    # A field that is not the done one reads as before.
+    # Another field on the visit may be one a show-password control swapped in, so it doesn't read either; on
+    # the next visit it reads as before.
+    with pytest.raises(BrowserSessionError, match="filled in a password field"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e2"),
+                                                  resolve=await locate(7))
+    page.show("visit-two")
     assert await browser_control.require_page_access(THREAD, page.agent_probe, ("get", "value", "@e2"),
                                                      resolve=await locate(7)) is None
 

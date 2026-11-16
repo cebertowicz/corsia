@@ -181,12 +181,12 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     shared_write = browser_pane_state.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.
     endpoint = await browser_cdp.page_endpoint(command) if guarded or shared_write else ""
-    note, filled_field_showing = None, False
+    note, filled_field_visit = None, False
     if guarded:
         access = await browser_control.check_page_access(
             thread_id, partial(browser_cdp.page_password_probe, endpoint), tuple(args),
             resolve=partial(browser_dom_write.target_node, command, endpoint), session=runtime.record.session)
-        note, filled_field_showing = access.note, access.filled_field_showing
+        note, filled_field_visit = access.note, access.filled_field_visit
     if not pane:
         # Only a command the guard let through puts the agent in the page.
         browser_pane_state.agent_acted(thread_id)
@@ -207,7 +207,7 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
-    if filled_field_showing and args[0] == "snapshot":
+    if filled_field_visit and args[0] == "snapshot":
         hidden = hidden_snapshot(result)
         if hidden is None:
             return _noted(browser_control.FILLED_FIELD_SNAPSHOT_WITHHELD, note)
