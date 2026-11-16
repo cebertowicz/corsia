@@ -263,19 +263,27 @@ async def test_a_sign_in_outlives_its_browser_closing_and_a_copys_reaches_the_pr
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(monkeypatch):
+async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path, monkeypatch):
     """F1: on a session with a saved sign-in, select, scroll, hover and press act in the page; a key off the list is refused."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":
         pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
-    from host_access import browser_launch, browser_session_launch
-    owner_key = f"verbs-e2e-{uuid4().hex}"
-    monkeypatch.setattr(browser_launch, "_owner_key", lambda thread_id: owner_key)
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        # Linux refuses a saved profile at admission, so the job's browser would run without one. The record
+        # still carries it, and that is what puts a session behind the saved-sign-in command rules.
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
     thread_id = f"verbs-{uuid4().hex}"
     owner = BrowserSessionOwner(namespace="corsia-verbs-e2e", instance_key=uuid4().hex)
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/choice.html"))).startswith("Error:")
-            assert owner._sessions[thread_id].record.profile
+            record = owner._sessions[thread_id].record
+            assert record.profile or record.copy_of
+            with pytest.raises(BrowserSessionError):
+                await owner.run(thread_id, ("eval", "1"), session="existing")
             assert await owner.run(thread_id, ("select", "#choice", "b"), session="existing") == "Done."
             assert await owner.run(thread_id, ("hover", "#hover"), session="existing") == "Done."
             assert await owner.run(thread_id, ("scroll", "down", "300"), session="existing") == "Done."
@@ -286,11 +294,6 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(monkeypa
             assert "sent:b:x" in await owner.run(thread_id, ("get", "title"), session="existing")
     finally:
         await owner.shutdown()
-        profile = browser_launch.profile_dir(thread_id)
-        if profile is not None:
-            browser_session_launch.kept_signins_path(str(profile)).unlink(missing_ok=True)
-            import shutil
-            shutil.rmtree(profile, ignore_errors=True)
 
 
 def page_endpoint(rendered: str) -> str:
