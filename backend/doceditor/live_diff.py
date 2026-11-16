@@ -97,6 +97,13 @@ def _character_changes(old: str, new: str, start: int):
 
 
 LINE_ALIKE = .5
+GROUP = 4  # the most lines one side of a pair holds, for a line split, lines joined or a reflow
+# Pairing compares every group of old lines with every group of new ones, each comparison costing
+# about the product of the two texts' lengths. A block past either bound (line pairs, or the two
+# blocks' character counts multiplied) is replaced whole, like one past the character cap, so a
+# comment inside it is left with no text rather than moved.
+MAX_LINE_PAIRS = 64
+MAX_PAIR_CHARS = 30_000
 
 
 def _alike(left: str, right: str) -> float:
@@ -111,38 +118,52 @@ def _alike(left: str, right: str) -> float:
 def _pair_lines(before: list[str], after: list[str]) -> list[tuple[str | None, str | None]]:
     """Pair a changed block's lines in order, most alike first; an unpaired line is a whole delete or insert.
 
-    A character is kept only inside a line paired with its own line. A line that left no alike line
-    behind keeps no letter in another, so a comment on it is left with no text.
+    A pair is up to GROUP old lines with up to GROUP new lines (a line split, lines joined, a paragraph
+    reflowed), alike when more than half of their text is shared. A character is kept only inside a pair.
+    A line that left no alike text behind keeps no letter in another, so a comment on it is left with
+    no text.
     """
     if len(before) == len(after) == 1:
         return [(before[0], after[0])]
     best = [[0.0] * (len(after) + 1) for _ in range(len(before) + 1)]
-    alike = {}
+    pick: dict[tuple[int, int], tuple[int, int]] = {}
     for row in reversed(range(len(before))):
         for column in reversed(range(len(after))):
-            alike[row, column] = _alike(before[row], after[column])
-            paired = best[row + 1][column + 1] + alike[row, column] if alike[row, column] else 0.0
-            best[row][column] = max(best[row + 1][column], best[row][column + 1], paired)
+            steps = [(k, m) for k in range(1, min(GROUP, len(before) - row) + 1)
+                     for m in range(1, min(GROUP, len(after) - column) + 1)]
+            top, pick[row, column] = best[row + 1][column], (1, 0)
+            if best[row][column + 1] > top:
+                top, pick[row, column] = best[row][column + 1], (0, 1)
+            for rows, columns in steps:
+                left, right = "".join(before[row:row + rows]), "".join(after[column:column + columns])
+                ratio = _alike(left, right)
+                # Worth: shared characters less unshared ones, so a pair that takes in an unrelated line
+                # is worth less than the same pair without it.
+                worth = best[row + rows][column + columns] + (len(left) + len(right)) * (2 * ratio - 1)
+                if ratio and worth > top:
+                    top, pick[row, column] = worth, (rows, columns)
+            best[row][column] = top
     pairs: list[tuple[str | None, str | None]] = []
     row = column = 0
     while row < len(before) and column < len(after):
-        if alike[row, column] and best[row][column] == best[row + 1][column + 1] + alike[row, column]:
-            pairs.append((before[row], after[column]))
-            row += 1
-            column += 1
-        elif best[row][column] == best[row + 1][column]:
+        rows, columns = pick[row, column]
+        if rows and columns:
+            pairs.append(("".join(before[row:row + rows]), "".join(after[column:column + columns])))
+        elif rows:
             pairs.append((before[row], None))
-            row += 1
         else:
             pairs.append((None, after[column]))
-            column += 1
+        row += rows
+        column += columns
     pairs += [(line, None) for line in before[row:]] + [(None, line) for line in after[column:]]
     return pairs
 
 
 def _block_changes(before: list[str], after: list[str], start: int):
     """The character changes that turn one changed block of whole lines into another."""
-    if max(sum(map(len, before)), sum(map(len, after))) > MAX_CHARACTER_BLOCK and len(before) + len(after) > 2:
+    too_long = max(sum(map(len, before)), sum(map(len, after))) > MAX_CHARACTER_BLOCK and len(before) + len(after) > 2
+    chars = sum(map(len, before)) * sum(map(len, after))
+    if too_long or len(before) * len(after) > MAX_LINE_PAIRS or chars > MAX_PAIR_CHARS:
         return [(start, start + sum(map(len, before)), "".join(after))]
     changes, position = [], start
     for left, right in _pair_lines(before, after):
