@@ -37,7 +37,7 @@ import weakref
 from datetime import datetime, timedelta
 from typing import Any
 
-from api import presence_rollup
+from api import presence_rollup, rollup_lag
 from api.measurement_token_sql import FRESH_TOKEN_SQL, FRESH_TOKEN_UNKNOWN_SQL
 from core.measurement_pricing import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL
 from core.measurement_scope import query_params
@@ -314,17 +314,23 @@ _refreshing: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Task] 
 
 
 async def _refresh(read, write) -> None:
+    steps = {"usage": 0, "presence": 0}
+    ended = "completed"
     try:
-        for plan in (_plan_job, _plan_presence_job):  # the usage ledger, then the focus-attention spans
-            while True:
+        for name, plan in (("usage", _plan_job), ("presence", _plan_presence_job)):  # ledger, then focus spans
+            while ended == "completed":
                 writes, more = await read(plan)
+                steps[name] += 1
                 for job in writes:
                     if not await write(_write_job, job):
-                        return  # the state moved after planning; the next Measurement request restarts
+                        ended = f"stopped at {name}: state moved"  # the next Measurement request restarts
+                        break
                 if not more:
                     break
     except Exception:
+        ended = "failed"
         logger.exception("usage rollup refresh failed; Measurement reads stay raw past the rollup")
+    await rollup_lag.report_lag(read, ended, steps)
 
 
 def schedule_refresh(read=run_bulk, write=run_in_db) -> None:

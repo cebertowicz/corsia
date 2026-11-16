@@ -13,6 +13,9 @@ from external_harness_usage_helpers import persist_turn
 from llm.resolution import ExecutionTarget
 
 pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+# A hang guard, not a latency budget: the relaunch waits span real database work and
+# a default-executor hop, which take up to ~0.4s unloaded and longer on a busy runner.
+_HANG_GUARD_SECONDS = 20
 DISCOVERED_MODELS = {'claude-code': ('claude-code/test',), 'codex': ('codex/test',)}
 
 
@@ -1550,13 +1553,13 @@ async def test_cc_checkpoint_replacement_is_bound_before_start_yields(
         start_waiter = asyncio.create_task(start_entered.wait())
         done, _ = await asyncio.wait(
             (task, start_waiter),
-            timeout=0.5,
+            timeout=_HANG_GUARD_SECONDS,
             return_when=asyncio.FIRST_COMPLETED,
         )
         assert done
         if task in done:
             task.result()
-        await asyncio.wait_for(start_waiter, timeout=0.5)
+        await asyncio.wait_for(start_waiter, timeout=_HANG_GUARD_SECONDS)
         assert len(launched) == 1
         assert _LIVE.get(thread_id) is launched[0]
         assert launched[0].corsia_turn == identity
@@ -1564,7 +1567,7 @@ async def test_cc_checkpoint_replacement_is_bound_before_start_yields(
         assert launched[0].turn_active is True
         assert isinstance(launched[0].turn_terminal, asyncio.Event)
         release_start.set()
-        assert await asyncio.wait_for(task, timeout=0.5) is launched[0]
+        assert await asyncio.wait_for(task, timeout=_HANG_GUARD_SECONDS) is launched[0]
     finally:
         release_start.set()
         await asyncio.gather(task, return_exceptions=True)
@@ -1673,7 +1676,7 @@ async def test_cc_checkpoint_replacement_rejects_retired_predecessor_before_star
         ),
     ))
     try:
-        await asyncio.wait_for(launch_paused.wait(), timeout=0.5)
+        await asyncio.wait_for(launch_paused.wait(), timeout=_HANG_GUARD_SECONDS)
         assert _LIVE.pop(thread_id, None) is old
         old.turn_active = False
         old.corsia_turn = None
@@ -1686,8 +1689,8 @@ async def test_cc_checkpoint_replacement_rejects_retired_predecessor_before_star
 
         release_launch.set()
         with pytest.raises(RuntimeError, match="predecessor changed"):
-            await asyncio.wait_for(task, timeout=0.5)
-        assert await asyncio.wait_for(stop, timeout=0.5) is False
+            await asyncio.wait_for(task, timeout=_HANG_GUARD_SECONDS)
+        assert await asyncio.wait_for(stop, timeout=_HANG_GUARD_SECONDS) is False
         assert starts == []
         assert identity_installs == []
         assert _LIVE.get(thread_id) is None

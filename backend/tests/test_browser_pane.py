@@ -602,7 +602,8 @@ async def test_relay_shows_page_frames_and_stops_the_screencast_when_the_pane_le
     relay = asyncio.create_task(browser_stream._relay(pane, "thread-1", "user-1"))
     while not pane.text:
         await asyncio.sleep(0)
-    assert [json.loads(text) for text in pane.text] == [frame]
+    # Each sent frame is numbered, so the pane can report which one it last painted.
+    assert [json.loads(text) for text in pane.text] == [{**frame, "seq": 1}]
     assert cast.stopped == []
     left.set()
     with pytest.raises(WebSocketDisconnect):

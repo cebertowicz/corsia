@@ -26,7 +26,7 @@ def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:
     dependencies = node_waits.unmet_prerequisites(db, ids, compact=True)
     watches = node_waits.armed_watches(db, ids, compact=True)
     attempts = admission_attempts.open_attempts(ids, db=db, compact=True)
-    attention = artifact_links.raised_attention_nodes(ids, db=db)
+    attention = artifact_links.asking_attention_nodes(ids, db=db)
     for row in nodes:
         node_id = str(row["id"])
         placed = [dict(hold) | {"placed": True} for hold in holds.get(node_id, [])]
