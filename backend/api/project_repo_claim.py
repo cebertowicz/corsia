@@ -9,7 +9,13 @@ so the registration makes no path newly writable for anyone outside it.
 
 Anything else claims everywhere (``None``), the instance-wide fence: a target
 outside the workspace, inside the workspace but outside every project folder,
-touching another project, or any read that fails.
+touching another project, or any read that fails. Each such fallback is logged
+with its reason, so production can tell why a registration waited for everyone.
+
+Another project whose folder does not resolve (an archived project whose folder
+is gone, say) has no folder to overlap and is skipped, as the project fence
+skips it (``tools.project_fence._folder_roots``); its registered repositories
+still count.
 
 The claim is read before the transition admits; the add resolves its paths again
 inside it. A narrowed add checks what it resolved with the same predicate
@@ -26,6 +32,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 
 from fastapi import HTTPException
+from loguru import logger
 from infra.repo_policy_transition import (
     EVERYWHERE,
     Holder,
@@ -46,6 +53,12 @@ def _overlaps(a: tuple[Path, ...], b: tuple[Path, ...]) -> bool:
     return any(contains(x, y) or contains(y, x) for x in a for y in b)
 
 
+def _everywhere(project_id: str, reason: str) -> None:
+    """Claim everywhere for ``reason``, logged where production log reads see it."""
+    logger.info("repo registration claims everywhere project={} reason={}", project_id, reason)
+    return None
+
+
 def _registration_paths(ws_dir: Path, mode: str, path: str | None, name: str | None) -> list[Path] | None:
     source = ws_dir / "source"
     if mode == "link":
@@ -61,21 +74,27 @@ def _registration_paths(ws_dir: Path, mode: str, path: str | None, name: str | N
 
 
 def _other_roots(workspace: Path, project_id: str, db) -> list[tuple[Path, ...]] | None:
-    """Every other project's folder and registered repo, each as its forms; ``None`` on a bad row."""
+    """Every other project's folder and registered repo, each as its forms; ``None`` on a bad repo row.
+
+    A project whose folder does not resolve has no folder root, as in the project
+    fence; its registered repositories are still read in the second loop.
+    """
     from core.project_context import resolve_project_row_paths
 
     roots: list[tuple[Path, ...]] = []
     for row in db.execute("SELECT id, name, path FROM projects WHERE id != ?", (project_id,)):
-        _name, root = resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])
-        if root is None:
-            return None
-        roots.append(_forms(root))
+        try:
+            _name, root = resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])
+        except (ValueError, OSError):
+            root = None
+        if root is not None:
+            roots.append(_forms(root))
     for row in db.execute(
-        "SELECT repo_path FROM project_repo_policies WHERE project_id != ?", (project_id,)
+        "SELECT project_id, repo_path FROM project_repo_policies WHERE project_id != ?", (project_id,)
     ):
         raw = row["repo_path"]
         if not isinstance(raw, str) or not Path(raw).is_absolute():
-            return None
+            return _everywhere(project_id, f"unreadable repo path registered by project {row['project_id']}")
         roots.append(_forms(Path(os.path.normpath(raw))))
     return roots
 
@@ -92,16 +111,18 @@ def _paths_claim(
         own = canonical(ws_dir)
         # Only a direct child of ``projects/`` is a folder the project fence walls.
         if containment_key(own.parent) != containment_key(projects_root) or own == projects_root:
-            return None
+            return _everywhere(project_id, "project folder is not a direct child of projects/")
         own_forms = _forms(ws_dir)
         target_forms = [form for target in paths for form in _forms(target)]
         if not all(any(contains(root, form) for root in own_forms) for form in target_forms):
-            return None
+            return _everywhere(project_id, "a path leaves the project's folder")
         if not contains(own, canonical(paths[0])):
-            return None
+            return _everywhere(project_id, "the repository folder resolves outside the project's folder")
         others = _other_roots(Path(workspace), project_id, db)
-        if others is None or any(_overlaps(tuple(target_forms), other) for other in others):
+        if others is None:
             return None
+        if any(_overlaps(tuple(target_forms), other) for other in others):
+            return _everywhere(project_id, "a path overlaps another project's folder or repository")
         return frozenset({project_id})
     except Exception:
         log.exception("repo registration claim read failed for project=%s", project_id)
@@ -121,7 +142,7 @@ def registration_claim(
     """``{project_id}`` when the registration stays inside that project's folder, else ``None``."""
     paths = _registration_paths(ws_dir, mode, path, name)
     if paths is None:
-        return None
+        return _everywhere(project_id, f"no absolute target for mode {mode}")
     return _paths_claim(project_id, ws_dir, paths, workspace=workspace, db=db)
 
 
@@ -199,7 +220,7 @@ def _add_claim(
         ws_dir = ws_dir_for(project_id)
     except HTTPException:
         # The add itself reports the missing project once the transition admits it.
-        return None
+        return _everywhere(project_id, "project folder not found")
     db = get_db()
     try:
         return registration_claim(
