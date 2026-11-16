@@ -8,7 +8,7 @@ Call `github_agent_account` with `action: "status"` (or read `github_agent` in `
 
 | State | Meaning | What you do |
 |---|---|---|
-| `ready` | Verified; shells use its login, a noreply email and its own credential | Work normally |
+| `ready` | Verified; shells use its login, a noreply email and its own credential | Do the result's top-level `next` if set, then work normally |
 | `needs_auth` | Not signed in, rejected token (`token_rejected`), or `multiple_accounts` | `connect`; for `multiple_accounts`, ask the person to remove the extra account |
 | `unverified` | Being checked (`verifying`), GitHub unreachable (`verify_failed`), or `own_login_unknown` | Wait and `check`; for `own_login_unknown`, ask the person to sign in to GitHub on this computer with their own account so CORSIA can tell the two apart |
 | `wrong_account` | The signed-in account is the person's own | `sign_out`, then `connect` as the agents' account |
@@ -38,7 +38,7 @@ Done when `gh auth status` succeeds.
 
 1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`; or `signin.cause`, with `signin.next` when there is a recovery step (do it instead of waiting; a cause with no `next` has none, so tell the person in plain words what failed and stop); or, when no sign-in started, the account's status: do its top-level `next` if set, otherwise act on its row in the table above.
 2. Tell the person to open `signin.verification_uri` in a browser signed in **as the agents' GitHub account** (a private window, so it isn't their own), and give them `signin.user_code` to enter; never type it yourself.
-3. Call `action: "check"` every few seconds while `signin.status` is `waiting`: the person is still entering the code, so keep checking even though `account` reads `needs_auth` until they finish. Any other status means the sign-in is over. On `failed`, follow `signin.next` when it is there, including what it says to do if the cause repeats; a failure with no `next` has none, so tell the person in plain words what failed and stop. Otherwise (`completed`, `superseded`, or no `signin` at all) act on `account`'s row in the table above; `ready` means done. If the same cause returns after a second `connect`, tell the person in plain words what failed and stop.
+3. Call `action: "check"` every few seconds while `signin.status` is `waiting`: the person is still entering the code, so keep checking even though `account` reads `needs_auth` until they finish. Any other status means the sign-in is over. On `failed`, follow `signin.next` when it is there, including what it says to do if the cause repeats; a failure with no `next` has none, so tell the person in plain words what failed and stop. Otherwise (`completed`, `superseded`, or no `signin` at all) do the result's top-level `next` first if it is set, then act on `account`'s row in the table above; `ready` means done. If the same cause returns after a second `connect`, tell the person in plain words what failed and stop.
 
 For the agents' account, never run `gh auth login`, `gh auth logout`, `gh auth setup-git` or `git config` for credentials or identity in the shell, and never ask for a token, name or email. The account's home is read-only to shells and its identity comes from GitHub.
 
