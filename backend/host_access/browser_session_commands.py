@@ -197,24 +197,28 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
             await asyncio.to_thread(emit_product_event, "browser_pane", "agent_write_refused", thread_id=thread_id,
                                     properties={"command": args[0], "reason": exc.reason})
             raise
+    saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
+    history = saved_sign_in and not pane and args[0] in {"back", "forward"}
     browser_pane_state.page_command_starting(thread_id, tuple(args))
     try:
         result, unfinished = await owner._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+    except BaseException:
+        # A history move that timed out or failed may still have restored the page.
+        if history:
+            await _fresh_after_history(owner, runtime, thread_id, command)
+        raise
     finally:
         # A held pane shows nothing until this restart, so it runs however the command ends.
         await browser_pane_state.page_command_finished(thread_id, tuple(args))
+    if history:
+        await _fresh_after_history(owner, runtime, thread_id, command)
     if args[0] == "wait":
         error = browser_cli.json_object(result.stdout).get("error", "")
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
     rendered = owner._model_result(result, runtime.record)
-    saved_sign_in = bool(runtime.record.profile or runtime.record.copy_of)
     if (saved_sign_in and not pane and args[0] in browser_agent_verbs.VERBS and not unfinished
             and not rendered.startswith("Error:")):
-        if args[0] in {"back", "forward"}:
-            endpoint = await browser_cdp.page_endpoint(command)
-            await browser_control.reopen_held_page(
-                thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(browser_cdp.reopen_fresh, endpoint))
         # A page that was held by a person or the password guard never reaches the agent through a verb's result.
         rendered = browser_agent_verbs.ACKNOWLEDGED
     if args[0] == "tab" and len(args) == 2 and args[1] != "list" and not unfinished and not rendered.startswith("Error:"):
@@ -224,6 +228,25 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
     if opening_unlaunched_session and runtime.record.shared and not unfinished and not rendered.startswith("Error:"):
         browser_control.announce_browser_opened(thread_id)
     return _noted(rendered, note)
+
+
+async def _fresh_after_history(owner: Any, runtime: Any, thread_id: str, command: Any) -> None:
+    """Load a held page again after back or forward; if that can't be done, leave nothing readable.
+
+    A restored page keeps its document and filled values, so a failed check or reload blanks the page (and,
+    when even that fails, closes the session) before the error reaches the agent.
+    """
+    try:
+        endpoint = await browser_cdp.page_endpoint(command)
+        await browser_control.reopen_held_page(
+            thread_id, partial(browser_cdp.page_password_probe, endpoint), partial(browser_cdp.reopen_fresh, endpoint))
+    except BaseException:
+        try:
+            await command(("open", "about:blank"), 10)
+        except Exception:
+            logging.getLogger(__name__).warning("browser page could not be blanked after history", exc_info=True)
+            await owner._close_one(runtime)
+        raise
 
 
 def _noted(text: str, note: str | None) -> str:

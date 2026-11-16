@@ -29,6 +29,9 @@ REFUSED = [
     ["hover", "//a[@id='x']"], ["scrollintoview", "(//a)[1]"], ["hover", "js=document.title"],
     ["hover", "css=#a >> text=b"], ["scrollintoview", "#a >> nth=0"], ["hover", "a\nb"],
     ["select", "eval(1)", "v"],
+    # Playwright's internal engines carry a colon in the prefix
+    ["hover", "internal:text=Pay"], ["scrollintoview", "internal:control=enter-frame"],
+    ["select", "internal:role=button", "v"], ["hover", "internal:attr=[id=a]"],
     # shape: several values, extra arguments, bad directions and amounts
     ["select", "@e5", "a", "b"], ["select", "@e5"], ["hover", "@e1", "@e2"], ["scrollintoview"],
     ["scroll"], ["scroll", "sideways"], ["scroll", "down", "lots"], ["scroll", "down", "0"],
@@ -169,6 +172,88 @@ async def test_a_failed_check_after_history_fails_closed(saved, monkeypatch):
     monkeypatch.setattr(browser_cdp, "page_password_probe", probe)
     with pytest.raises(BrowserSessionError, match="couldn't be checked"):
         await saved.owner.run("a", ["back"])
+    await saved.owner.shutdown()
+
+
+async def _held_page(saved, monkeypatch, reopened):
+    """A session whose page the person held, with a reload that records the page it reloads."""
+    async def reopen_fresh(endpoint):
+        reopened.append(endpoint)
+
+    monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+    browser_step_lifecycle._answers["a"] = {("person", "earlier"): browser_step_lifecycle.Answer(1)}
+    monkeypatch.setattr(browser_control, "require_page_access", _allow)
+
+
+@pytest.mark.parametrize("outcome", ["error", "timeout", "raises"])
+@pytest.mark.parametrize("direction", ["back", "forward"])
+async def test_history_that_errors_or_times_out_still_loads_a_held_page_fresh(saved, monkeypatch, outcome, direction):
+    reopened = []
+    await _held_page(saved, monkeypatch, reopened)
+    if outcome == "error":
+        saved.result = type(saved.result)(1, "", "navigation failed")
+    elif outcome == "timeout":
+        saved.result = type(saved.result)(-1, "", "", timed_out=True, completion="interrupted")
+    else:
+        async def fail(*_args, **_kwargs):
+            raise BrowserSessionError("cancelled")
+
+        monkeypatch.setattr(saved.owner, "_run_admitted", fail)
+    try:
+        await saved.owner.run("a", [direction])
+    except BrowserSessionError:
+        pass
+    assert reopened == ["ws://synthetic.test/devtools/page/1"]
+    await saved.owner.shutdown()
+
+
+def _fail_after(name, module, calls, passes):
+    """Replace module.name so its first ``passes`` uses pass and every later one raises."""
+    original = getattr(module, name)
+
+    async def wrapper(*args, **kwargs):
+        calls.append(name)
+        if len(calls) > passes:
+            raise RuntimeError("target gone")
+        return await original(*args, **kwargs)
+
+    return wrapper
+
+
+@pytest.mark.parametrize("failing", ["page_endpoint", "page_password_probe", "reopen_fresh"])
+@pytest.mark.parametrize("blank_works", [True, False])
+async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, failing, blank_works):
+    """If the endpoint, the check or the reload fails, the restored page is blanked, or the session closed."""
+    reopened = []
+    await _held_page(saved, monkeypatch, reopened)
+    calls = []
+    if failing == "reopen_fresh":
+        async def reopen_fresh(_endpoint):
+            raise RuntimeError("target gone")
+
+        monkeypatch.setattr(browser_cdp, "reopen_fresh", reopen_fresh)
+    else:
+        # The guard resolves the page once before the verb (the probe is skipped by _allow); the history check is next.
+        monkeypatch.setattr(browser_cdp, failing, _fail_after(failing, browser_cdp, calls, 1 if failing == "page_endpoint" else 0))
+    if not blank_works:
+        real = saved.owner._run_admitted
+
+        async def run_admitted(runtime, args, **kwargs):
+            if tuple(args) == ("open", "about:blank"):
+                raise BrowserSessionError("browser is gone")
+            return await real(runtime, args, **kwargs)
+
+        monkeypatch.setattr(saved.owner, "_run_admitted", run_admitted)
+    with pytest.raises((BrowserSessionError, RuntimeError)):
+        await saved.owner.run("a", ["back"])
+    blanked = [call for call in saved.calls if call[-2:] == ("open", "about:blank")]
+    if blank_works:
+        assert len(blanked) == 1
+    else:
+        # Nothing could blank the page, so the session is gone and the next read has nothing to read.
+        assert "a" not in saved.owner._sessions
+        with pytest.raises(BrowserSessionError, match="no longer open"):
+            await saved.owner.run("a", ["snapshot"], session="existing")
     await saved.owner.shutdown()
 
 

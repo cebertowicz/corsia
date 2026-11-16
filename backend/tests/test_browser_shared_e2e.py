@@ -120,13 +120,18 @@ document.querySelector('form').addEventListener('submit', event => {
 document.querySelector('#hover').addEventListener('mouseover', () => { window.hovered = true; });
 </script>"""
 
+# A dropdown and a button under a white overlay, and an option label that must not reach an agent.
+COVERED = """<!doctype html><title>Covered fixture</title>
+<div style="position:relative"><select id=cs><option value=x>Secret option label</option></select>
+<button id=cb>Secret button text</button><div style="position:absolute;inset:0;background:white"></div></div>"""
+
 
 @contextmanager
 def fixture_server():
     pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
              "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode(),
              "/holder.html": SESSION_SIGN_IN.encode(), "/copy.html": SESSION_SIGN_IN.encode(), "/cookies.html": COOKIES.encode(),
-             "/choice.html": CHOICE_FORM.encode()}
+             "/choice.html": CHOICE_FORM.encode(), "/covered.html": COVERED.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -294,6 +299,35 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path
             assert "sent:b:x" in await owner.run(thread_id, ("get", "title"), session="existing")
     finally:
         await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_capture_verb_errors(tmp_path, monkeypatch):
+    """TEMPORARY: show what agent-browser says when hover, select and scrollintoview miss or are covered."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    from host_access import browser_session_launch
+
+    async def saved_profile(_thread_id):
+        return str(tmp_path / "profile"), None
+
+    monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
+    thread_id = f"capture-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-capture", instance_key=uuid4().hex)
+    captured = {}
+    try:
+        with fixture_server() as origin:
+            await owner.run(thread_id, ("open", f"{origin}/covered.html"))
+            for target in ("#nope", "#cs", "#cb"):
+                for args in (("hover", target), ("select", target, "Secret option label"), ("scrollintoview", target)):
+                    try:
+                        captured[" ".join(args)] = await owner.run(thread_id, args, session="existing")
+                    except Exception as exc:  # noqa: BLE001 - the capture wants every kind of failure
+                        captured[" ".join(args)] = f"RAISED {type(exc).__name__}: {exc}"
+    finally:
+        await owner.shutdown()
+    pytest.fail("CAPTURED " + json.dumps(captured, indent=1))
 
 
 def page_endpoint(rendered: str) -> str:

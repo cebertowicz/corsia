@@ -21,7 +21,7 @@ ACKNOWLEDGED = "Done."
 
 _REF = re.compile(r"(?:@|ref=)?e\d+")
 # Other selector engines: a prefix such as text=, xpath= or js=, an XPath, a chained locator, or a script URL.
-_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*=")
+_ENGINE = re.compile(r"[A-Za-z][A-Za-z0-9_:-]*=")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
