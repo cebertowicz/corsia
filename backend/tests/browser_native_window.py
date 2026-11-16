@@ -56,6 +56,7 @@ async def wait_for_headed_window(endpoint, socket_dir):
     executable = shutil.which('xwininfo')
     assert executable, 'headed fixture requires xwininfo'
     owned = None
+    cast = None
     try:
         async with asyncio.timeout(10):
             while True:
@@ -93,4 +94,7 @@ async def wait_for_headed_window(endpoint, socket_dir):
     except TimeoutError as exc:
         if owned is None:
             raise AssertionError('headed fixture has no owned X display') from exc
-        raise AssertionError('headed fixture window or frame did not become ready') from exc
+        # Which half timed out, and whether Chrome sent a frame the screencast then did not show.
+        detail = ('window never mapped' if cast is None else
+                  f'window mapped; Chrome sent {getattr(cast, "received", "?")} frames; page measured {getattr(cast, "_page", "?")}')
+        raise AssertionError(f'headed fixture window or frame did not become ready: {detail}') from exc

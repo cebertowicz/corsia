@@ -27,10 +27,10 @@ class PaneScreencast:
     beside it. Each start measures the page's layout viewport first, and frames report that size,
     so the pane draws and maps input to the page alone. While a metrics command runs, frames may be
     at a size that no longer holds, such as a screenshot's temporary capture size: they are
-    acknowledged but not shown. Until the following start's measurement answers, a frame's size
-    can't be judged yet, and Chrome need not answer before it sends the start's own frame, which on
-    a still page is the only one. The latest such frame is kept and shown once the measurement
-    answers if its size is the measured page's size; one at any other size is dropped.
+    acknowledged but not shown. The capture starts only once its measurement answers, so every
+    frame of a start arrives measured; a frame before that answer is the replaced capture's and is
+    not shown. A frame's size is never matched against the measurement: Chrome reports the whole
+    view, which includes a classic scrollbar the layout viewport leaves out.
     """
 
     QUALITY = 80
@@ -45,12 +45,12 @@ class PaneScreencast:
         self._compact = False
         self._page: tuple[int, int] | None = None
         self._scroll_max: tuple[float, float] | None = None
-        self._unmeasured = 0  # Measurements sent and not yet answered.
+        self._unmeasured = 0  # Measurements sent and not yet answered; the capture starts at zero.
         self._held = False
         self._cdp: CdpClient | None = None
         self._starts: set[int] = set()
         self._measures: set[int] = set()
-        self._unjudged: dict | None = None  # The latest frame received before its start's measurement.
+        self.received = 0  # Frames Chrome has sent, shown or not: tells a missing frame from a held one.
 
     async def run(self) -> None:
         """Relay frames until the pane leaves or Chrome closes the page target."""
@@ -74,6 +74,8 @@ class PaneScreencast:
                         if answered in self._measures:
                             self._measures.discard(answered)
                             self._measured(message.get("result"))
+                            if not self._unmeasured:
+                                await self._capture(cdp)
                         self._starts.discard(answered)
             finally:
                 self._cdp = None
@@ -86,7 +88,6 @@ class PaneScreencast:
     def hold(self) -> None:
         """Show no frame from now until the next start's measurement: the page's metrics are changing."""
         self._held = True
-        self._unjudged = None
 
     async def restart(self) -> None:
         """Restart capture, which makes Chrome send the current picture at once."""
@@ -99,12 +100,14 @@ class PaneScreencast:
             pass  # The pane is leaving; run() ends with the closed socket.
 
     async def _start(self, cdp: CdpClient) -> None:
-        # Measured before the start, though this start's first frame can still arrive before the answer.
+        # The reader starts the capture once this measurement answers, so no frame of it arrives unmeasured.
         # Recorded before sending: the reader may take the answer before send returns.
         self._unmeasured += 1
         self._held = False  # The measurement now holds frames until it answers.
         self._measures.add(cdp.next_request())
         await cdp.send("Page.getLayoutMetrics")
+
+    async def _capture(self, cdp: CdpClient) -> None:
         params: dict[str, object] = {"format": "jpeg", "quality": self._quality()}
         if self._size is not None:
             params.update(maxWidth=self._size[0], maxHeight=self._size[1])
@@ -129,11 +132,6 @@ class PaneScreencast:
         else:
             self._scroll_max = None
         self._unmeasured -= 1
-        if not self._unmeasured and (frame := self._unjudged) is not None:
-            self._unjudged = None
-            metadata = frame.get("metadata")
-            if isinstance(metadata, dict) and (metadata.get("deviceWidth"), metadata.get("deviceHeight")) == self._page:
-                self._show(frame)
 
     async def _relay_frame(self, cdp: CdpClient, params: object) -> None:
         session = params.get("sessionId") if isinstance(params, dict) else None
@@ -141,12 +139,9 @@ class PaneScreencast:
             # Without its session id the frame cannot be acknowledged, and Chrome would send no other.
             raise BrowserSessionError("This page couldn't be shown")
         await cdp.send("Page.screencastFrameAck", sessionId=session)
-        if self._held:
-            return
-        if self._unmeasured:
-            self._unjudged = params
-            return
-        self._show(params)
+        self.received += 1
+        if not self._held and not self._unmeasured:
+            self._show(params)
 
     def _show(self, params: dict) -> None:
         data, metadata = params.get("data"), params.get("metadata")
