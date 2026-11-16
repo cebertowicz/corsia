@@ -74,6 +74,8 @@ def _settle(
 
 
 _DEAD_LETTER_SEED = "corsia-webhook-dead-letter"
+# The dead letter stores a code; the exception's text stays on the delivery row.
+DEAD_LETTER_REASON = "restart_replay_poison"
 
 
 def _dead_letter(
@@ -103,7 +105,7 @@ def _dead_letter(
                 dead_id,
                 f"webhook.github.{row['event_type']}",
                 row["delivery_id"],
-                reason[:500],
+                DEAD_LETTER_REASON,
                 row["payload_json"] or "{}",
                 row["created_at"],
             ),

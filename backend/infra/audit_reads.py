@@ -16,10 +16,11 @@ from infra.queries import thread_available_sql
 from infra.sqlite_deadline import stop_at
 from infra.audit_plan_activity import plan_activity
 from infra.audit_limit_stops import limit_stops
+from infra.audit_set_aside import set_aside
 
 AUDIT_METRICS = (
     "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure",
-    "agent_hours", "agent_day_levels", "limit_stops"
+    "agent_hours", "agent_day_levels", "limit_stops", "set_aside"
 )
 MAX_WINDOW = timedelta(days=7)
 #: Metrics read by their own module from (db, caller user, since, until).
@@ -27,6 +28,8 @@ _WINDOWED_READERS = {
     "plan_activity": plan_activity,
     # Accounts belong to the install, not to a user or project.
     "limit_stops": lambda db, _user_id, since, until: limit_stops(db, since, until),
+    # Set-aside events carry no user or project; the read is counts only.
+    "set_aside": lambda db, _user_id, since, until: set_aside(db, since, until),
 }
 MAX_ROWS = 50
 TOP_PRESSURE_ROWS = 10
@@ -270,7 +273,7 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "install_accounts" if metric == "limit_stops" else (
+        "scope": "install_accounts" if metric == "limit_stops" else "install" if metric == "set_aside" else (
             "caller_user" if metric in {"seat_usage", "plan_activity", "agent_hours", "agent_day_levels"}
             else "caller_user_and_project"
         ),
