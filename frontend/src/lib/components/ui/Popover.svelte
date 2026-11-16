@@ -242,22 +242,15 @@
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
 	function onPointer(event: PointerEvent) { if (open && !covered && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
 	function onKey(event: KeyboardEvent) { if (open && !covered && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
-	/**
-	 * A press on the card's own text focuses the card, so the card's Escape answers it, never the page beneath. Focus that
-	 * was already on a field or control in the card stays there.
-	 */
-	function keepFocusInside(event: FocusEvent) {
-		const from = event.relatedTarget;
-		if (event.target === surface && from instanceof HTMLElement && from !== surface && surface.contains(from)) from.focus({ preventScroll: true });
-	}
 </script>
 
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} onwheelcapture={onScrollInput} ontouchmovecapture={onScrollInput} />
 
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
+	     Focusable (tabindex -1) so a press on its own text leaves the focus on the card, where its Escape answers the key, not the page beneath.
 	     Clipping keeps it measurable before it is placed without inherited visibility transitions delaying focus; covered, it is hidden outright. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} onfocus={keepFocusInside} tabindex="-1" bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} tabindex="-1" bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${style}${hidden ? ' clip-path: inset(100%);' : ''}${covered ? ' visibility: hidden;' : ''}`} role={surfaceRole ?? undefined} aria-label={ariaLabel} aria-hidden={hidden || covered || undefined} inert={hidden || covered}>{@render children()}</div>
 {/if}
 
 <style>

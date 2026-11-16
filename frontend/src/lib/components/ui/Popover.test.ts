@@ -148,20 +148,22 @@ describe('Popover', () => {
 			await vi.waitFor(() => expect(surface.style.clipPath).toBe(''));
 			return { surface, onClose };
 		};
-		it('keeps the focus in the card, so Escape closes the card and not the page beneath it', async () => {
+		it('puts the focus on the card, so Escape closes the card and not the page beneath it', async () => {
 			const { surface, onClose } = await open();
 			press(surface.querySelector('.card-text')!);
-			expect(surface.contains(document.activeElement)).toBe(true);
+			expect(document.activeElement).toBe(surface);
 			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 			expect(onClose).toHaveBeenCalledOnce();
 			expect(closeDocument).not.toHaveBeenCalled();
 		});
-		it('leaves the focus on a reply field already focused in the card', async () => {
-			const { surface } = await open();
-			const reply = surface.querySelector<HTMLTextAreaElement>('textarea')!;
-			reply.focus();
+		it('moves the focus from a reply field to the card, as a press on text blurs a field, and Escape still closes only the card', async () => {
+			const { surface, onClose } = await open();
+			surface.querySelector<HTMLTextAreaElement>('textarea')!.focus();
 			press(surface.querySelector('.card-text')!);
-			expect(document.activeElement).toBe(reply);
+			expect(document.activeElement).toBe(surface);
+			document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			expect(onClose).toHaveBeenCalledOnce();
+			expect(closeDocument).not.toHaveBeenCalled();
 		});
 		it('shows no focus ring on the card itself', () => {
 			const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Popover.svelte'), 'utf8');

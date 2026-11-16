@@ -259,6 +259,43 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			expect((await box(popover(page))).y).toBeCloseTo(placed.y, 0);
 		});
 
+		if (layout === '1440') test('@flow:document-comments a reader can drag-select a comment\'s words to copy them, and Escape then closes the card and leaves the document open at 1440', async ({ page, request }) => {
+			const body = `Plain note on the ${SECTION} note.`;
+			const phrase = `note on the ${SECTION}`;
+			await openSuggestionDocument(page, request, TEXT, [{ quote: `The ${SECTION} note is`, body }], options);
+			await expect(page.locator('.cm-scroller')).toBeVisible();
+			await placeTarget(page, 0.5);
+			await highlight(page, `The ${SECTION} note is`).click();
+			await expect(popover(page)).toBeVisible();
+			const words = popover(page).getByText(body, { exact: true });
+			await expect(words).toBeVisible();
+			// The phrase's drawn ends, found in the comment's own text node.
+			const ends = await words.evaluate((element, phrase) => {
+				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+				for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+					const at = node.textContent!.indexOf(phrase);
+					if (at < 0) continue;
+					const span = document.createRange();
+					span.setStart(node, at); span.setEnd(node, at + 1);
+					const first = span.getBoundingClientRect();
+					span.setStart(node, at + phrase.length - 1); span.setEnd(node, at + phrase.length);
+					const last = span.getBoundingClientRect();
+					return { from: { x: first.left + 1, y: first.top + first.height / 2 }, to: { x: last.right - 1, y: last.top + last.height / 2 } };
+				}
+				throw new Error('the phrase is not in one text node of the comment');
+			}, phrase);
+			await page.mouse.move(ends.from.x, ends.from.y);
+			await page.mouse.down();
+			await page.mouse.move(ends.to.x, ends.to.y, { steps: 8 });
+			await page.mouse.up();
+			expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(phrase);
+			// The press left the focus on the card, so its Escape closes the card and not the document beneath.
+			expect(await page.evaluate(() => !!document.activeElement?.closest('[data-popover]'))).toBe(true);
+			await page.keyboard.press('Escape');
+			await expect(popover(page)).toHaveCount(0);
+			await expect(page.locator('.cm-scroller')).toBeVisible();
+		});
+
 		test(`@flow:document-comments the new-comment card stays with the selection when the canvas scrolls at ${layout}`, async ({ page, request }, testInfo) => {
 			await openSuggestionDocument(page, request, TEXT, [], options);
 			await expect(page.locator('.cm-scroller')).toBeVisible();
