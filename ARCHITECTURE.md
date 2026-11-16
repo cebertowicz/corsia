@@ -540,9 +540,11 @@ projects, or everywhere) and, when known, the folders it changes. They conflict
 only where the reach meets the claim; a file tool that only reads is no effect.
 Only a registration inside the registering project's own folder claims less
 than everywhere (`api/project_repo_claim.py`). A registration that meets an
-in-flight effect or process waits for it (`wait_for_transition`, bounded by
-`TRANSITION_WAIT_SECONDS`, polling on the event loop with no thread or lock
-held), then proceeds; past the bound it is refused naming the holder. Tool
+in-flight effect or a bounded owned process waits for it
+(`infra/repo_policy_wait.py`, bounded by `TRANSITION_WAIT_SECONDS`, polling on
+the event loop with no thread or lock held), then proceeds; past the bound it is
+refused naming the holder. A long-running process has no bound a wait could
+outlast, so a registration that meets one is refused at once, naming it. Tool
 effects that meet an active transition refuse at once.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`

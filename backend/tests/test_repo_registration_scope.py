@@ -103,7 +103,7 @@ async def env(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr("tools.dispatch_ownership.run_in_db", _run_inline, raising=False)
     monkeypatch.setattr("tools.project_repo_register.run_in_db", _run_inline, raising=False)
     # A conflict that outlasts this bound is refused; tests that wait release sooner.
-    monkeypatch.setattr("infra.repo_policy_transition.TRANSITION_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr("infra.repo_policy_wait.TRANSITION_WAIT_SECONDS", 0.6)
 
     leased: set[str] = set()
 

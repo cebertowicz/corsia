@@ -172,7 +172,7 @@ async def test_only_a_process_with_a_bound_is_waited_on(env, long_running):
 
 
 def test_the_wait_bound_reads_as_a_person_says_it():
-    from infra.repo_policy_transition import _duration
+    from infra.repo_policy_wait import _duration
 
     assert [_duration(s) for s in (0.6, 1.4, 45, 60, 600)] == [
         "1 second", "1 second", "45 seconds", "1 minute", "10 minutes",
@@ -181,7 +181,8 @@ def test_the_wait_bound_reads_as_a_person_says_it():
 
 @pytest.mark.asyncio
 async def test_a_refusal_that_waiting_cannot_end_is_raised_at_once():
-    from infra.repo_policy_transition import RepoPolicyTransitionBusy, wait_for_transition
+    from infra.repo_policy_transition import RepoPolicyTransitionBusy
+    from infra.repo_policy_wait import wait_for_transition
 
     attempts = 0
 
@@ -197,7 +198,8 @@ async def test_a_refusal_that_waiting_cannot_end_is_raised_at_once():
 
 @pytest.mark.asyncio
 async def test_the_wait_retries_until_the_conflict_ends():
-    from infra.repo_policy_transition import RepoPolicyTransitionBusy, wait_for_transition
+    from infra.repo_policy_transition import RepoPolicyTransitionBusy
+    from infra.repo_policy_wait import wait_for_transition
 
     attempts = 0
 

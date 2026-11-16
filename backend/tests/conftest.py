@@ -419,7 +419,7 @@ def _short_repo_transition_wait(monkeypatch):
 
     Tests of the wait itself set their own bound.
     """
-    monkeypatch.setattr("infra.repo_policy_transition.TRANSITION_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr("infra.repo_policy_wait.TRANSITION_WAIT_SECONDS", 0.05)
 
 
 @pytest.fixture(autouse=True)

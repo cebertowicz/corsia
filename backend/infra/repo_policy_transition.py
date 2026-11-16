@@ -8,7 +8,7 @@ changes, or everywhere, and the folders it changes when it knows them. They
 conflict when the reach meets the claim. A call that only reads is no effect.
 
 A registration that meets an in-flight effect or a bounded owned process waits for
-it (:func:`wait_for_transition`), up to :data:`TRANSITION_WAIT_SECONDS`, then
+it (``infra.repo_policy_wait``), up to its bound, then
 proceeds; it is refused only once that bound passes. A long-running process has no
 bound a wait could outlast, so meeting one is refused at once, naming it.
 
@@ -22,28 +22,17 @@ every owned process, as before.
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 import logging
 from pathlib import Path
 import threading
-import time
-from typing import TypeVar
 
 from loguru import logger
 
 log = logging.getLogger(__name__)
-
-_T = TypeVar("_T")
-
-#: How long a registration waits for what it meets: the longest shell call, foreground
-#: or background (a long-running process is never waited on).
-TRANSITION_WAIT_SECONDS = 600.0
-_FIRST_POLL_SECONDS = 0.25
-_MAX_POLL_SECONDS = 2.0
 
 
 class RepoPolicyTransitionBusy(RuntimeError):
@@ -197,15 +186,6 @@ def _busy(fallback: str, holder: Holder | None, *, retryable: bool) -> RepoPolic
         retryable=retryable,
         running=running,
     )
-
-
-def _duration(seconds: float) -> str:
-    """A wait bound as a person says it: whole minutes, or seconds under a minute."""
-    if seconds < 60:
-        count, unit = max(1, round(seconds)), "second"
-    else:
-        count, unit = round(seconds / 60), "minute"
-    return f"{count} {unit}{'' if count == 1 else 's'}"
 
 
 class _RepoPolicyTransitionCoordinator:
@@ -397,35 +377,3 @@ def repo_policy_transition(
     ) as admitted:
         yield admitted
 
-
-async def wait_for_transition(
-    attempt: Callable[[], Awaitable[_T]],
-    *,
-    wait_seconds: float | None = None,
-) -> _T:
-    """Run ``attempt`` until no in-flight effect or process it meets is left.
-
-    Each attempt enters its transition afresh, so it re-reads its claim. Between
-    attempts it sleeps on the event loop, holding no thread or lock. A conflict still
-    there after ``wait_seconds`` (default :data:`TRANSITION_WAIT_SECONDS`) is refused,
-    naming what is still running; any other refusal is raised at once.
-    """
-    limit = TRANSITION_WAIT_SECONDS if wait_seconds is None else wait_seconds
-    deadline = time.monotonic() + limit
-    poll = _FIRST_POLL_SECONDS
-    while True:
-        try:
-            return await attempt()
-        except RepoPolicyTransitionBusy as exc:
-            remaining = deadline - time.monotonic()
-            if not exc.retryable:
-                raise
-            if remaining <= 0:
-                running = exc.running or "another repository change is in progress"
-                raise RepoPolicyTransitionBusy(
-                    f"Repositories can't change while {running}. It was still going after "
-                    f"{_duration(limit)}; try again once it finishes.",
-                    running=running,
-                ) from exc
-            await asyncio.sleep(min(poll, remaining))
-            poll = min(poll * 2, _MAX_POLL_SECONDS)

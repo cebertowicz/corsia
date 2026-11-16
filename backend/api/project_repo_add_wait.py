@@ -4,7 +4,7 @@ Project settings (``api.project_repos.add_repo``) and the ``project_repo_registe
 tool both register through :func:`register_source_repo_waiting`. Each attempt runs
 ``api.project_repos.register_source_repo`` on a DB thread, which enters the repo
 policy transition afresh; between attempts it waits on the event loop
-(``infra.repo_policy_transition.wait_for_transition``), holding no thread or lock.
+(``infra.repo_policy_wait.wait_for_transition``), holding no thread or lock.
 """
 
 from __future__ import annotations
@@ -15,7 +15,8 @@ from fastapi import HTTPException
 
 from api.project_repo_controls import RepoAdd
 from infra import db_async
-from infra.repo_policy_transition import RepoPolicyTransitionBusy, wait_for_transition
+from infra.repo_policy_transition import RepoPolicyTransitionBusy
+from infra.repo_policy_wait import wait_for_transition
 
 
 async def register_source_repo_waiting(
