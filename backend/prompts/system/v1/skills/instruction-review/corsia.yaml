@@ -12,7 +12,7 @@ workflow:
       title: Size counted and recorded
       instruction: "## Measure"
       required: true
-      check: the count for the set and for each file, each named with its unit, with text that shipped with the product counted apart, recorded beside the previous run's count, dated and marked a reading, not a limit, nothing to ask the person; the review horizon recorded where a later run reads it
+      check: the count for the set and for each file, each named with its unit, with text that shipped with the product counted apart, recorded only in this run's result, nowhere other agents read, dated and marked a reading, not a limit, nothing to ask the person; every earlier count, copied forward from the last run's result, how the count has moved across them and which signs showed, or that none did, written there too; the review horizon recorded where a later run reads it
       after: [scope]
       difficulty: {default: routine, hard_if: "no unit was recorded before"}
     - id: inventory
