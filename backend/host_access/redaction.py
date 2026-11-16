@@ -18,8 +18,8 @@ from host_access.shell_credential_positions import (
     SECURITY_PASSWORD_SUBCOMMANDS,
     SHELL_SEPARATORS,
     credential_stdin_source_indices,
-    curl_word_at,
     security_password_value_indices,
+    short_u_is_switch,
 )
 
 
@@ -372,12 +372,12 @@ def _redact_userinfo_flag(
     """Hide a ``-u``, ``--user`` or ``--proxy-user`` value at ``index``.
 
     Returns the rendered words, redactions, literal count and words
-    consumed, or None when ``index`` holds no such value. Short ``-u``
-    carries userinfo only for curl; elsewhere (``date -u``) it is a switch,
+    consumed, or None when ``index`` holds no such value. Short ``-u`` of
+    a command known to use it as a switch (``date -u``) carries no value,
     and its next word is handled as any other word.
     """
     flag = str(words[index])
-    if flag.startswith("-u") and not curl_word_at(words, index):
+    if flag.startswith("-u") and short_u_is_switch(words, index):
         return None
     if flag in {"-u", "--proxy-user", "--user"} and index + 1 < len(words):
         value, rendered_flag, consumed = str(words[index + 1]), [flag], 2

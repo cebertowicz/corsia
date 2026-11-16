@@ -265,6 +265,11 @@ _TOK = "Tok" + "en"
         "sort -u a:b",
         "echo ready | date -u +%H:%M",
         "ts=$(date -u +%H:%M)",
+        "ts=`date -u +%H:%M`",
+        "echo $(date -u +%H:%M)",
+        "(date -u +%H:%M)",
+        "TZ=UTC /bin/date -u +%H:%M",
+        "sort -r -u a:b",
         "echo \"$(date -u +%H:%M:%S)\"",
         "grep -n '" + _CRED + ":' notes.md",
         "python3 -c \"print(b'**" + _CRED + ":** any')\"",
@@ -289,6 +294,8 @@ def test_switches_and_code_text_are_not_literal_credentials(
         "sudo curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
         "$CURL -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "fetch -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "sudo sort -u alice:not-a-ref",  # gitleaks:allow
         "ffuf -u https://alice:not-a-ref@example.test/FUZZ",  # gitleaks:allow
         "ffuf -u 'https://example.test/?" + _TOK.lower() + "=abc123'",
         "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
@@ -308,9 +315,30 @@ def test_curl_user_and_header_literals_are_still_refused(
     assert check_command_safety(command) is not None
 
 
-def test_short_u_outside_curl_is_a_switch_shown_as_written() -> None:
+@pytest.mark.parametrize(
+    "command",
+    [
+        "out=$(curl -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "out=`curl -u alice:not-a-ref https://example.test`",  # gitleaks:allow
+        "out=$($CURL -u alice:not-a-ref https://example.test)",  # gitleaks:allow
+        "echo `fetch -u alice:not-a-ref`",  # gitleaks:allow
+    ],
+)
+def test_short_u_literal_inside_a_substitution_is_refused(command: str) -> None:
+    from host_access.redaction import CommandRedactionError, redact_shell_command
+    from tools.shell_guard import check_command_safety
+
+    with pytest.raises(CommandRedactionError):
+        redact_shell_command(command)
+    assert check_command_safety(command) is not None
+
+
+def test_short_u_is_a_switch_only_for_commands_known_to_use_it_so() -> None:
     from host_access.redaction import redact_shell_command
 
     rendered = redact_shell_command("sort -u a:b")
     assert rendered.tokens == ("sort", "-u", "a:b")
     assert rendered.literal_credentials == 0
+    hidden = redact_shell_command("fetch -u a:b")
+    assert "a:b" not in hidden.tokens
+    assert hidden.literal_credentials == 1

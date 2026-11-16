@@ -6,6 +6,7 @@ tell a credential value from an ordinary argument.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Sequence
 
@@ -27,7 +28,11 @@ SECURITY_PASSWORD_SUBCOMMANDS = frozenset(
 _SAFE_PRINTF_CREDENTIAL_FORMATS = frozenset(
     {"%b", "%b\\n", "%s", "%s\\n"}
 )
-_USERINFO_FLAG_COMMANDS = frozenset({"curl"})
+# Commands whose short -u is a switch that takes no value: ``date -u``
+# prints UTC, ``sort -u`` drops duplicate lines.
+_SWITCH_U_COMMANDS = frozenset({"date", "sort"})
+_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_PLAIN_COMMAND_RE = re.compile(r"[A-Za-z0-9._/+-]+")
 
 
 def credential_stdin_source_indices(
@@ -114,19 +119,32 @@ def security_password_value_indices(
     return frozenset(sensitive)
 
 
-def curl_word_at(words: Sequence[str], index: int) -> bool:
-    """Whether the simple command holding ``words[index]`` runs curl.
+def short_u_is_switch(words: Sequence[str], index: int) -> bool:
+    """Whether short ``-u`` at ``words[index]`` is a switch with no value.
 
-    Short ``-u`` carries a user and password only for curl; other
-    commands use it as a switch (``date -u``, ``sort -u``). A command
-    named by a variable (``$CURL``) may be curl, so it counts.
+    True only when the command it belongs to is named plainly and is one
+    of ``_SWITCH_U_COMMANDS``. Anywhere else -u may carry a user and
+    password (curl and tools that copy its flags), so a command this
+    cannot name (a variable, an alias, curl started inside ``$(...)``)
+    keeps the value treated as one.
     """
-    first = ""
-    for word in reversed(words[:index]):
-        if str(word) in COMMAND_BOUNDARIES:
+    segment: list[str] = []
+    for raw in reversed(words[:index]):
+        word = str(raw)
+        if word in COMMAND_BOUNDARIES:
             break
-        # A subshell's first word keeps its parenthesis: ``(curl``.
-        first = str(word).lstrip("(")
-        if Path(first).name.casefold() in _USERINFO_FLAG_COMMANDS:
-            return True
-    return first.startswith("$")
+        # A subshell or substitution starts its own command: (date,
+        # ts=$(date, or date after a backquote.
+        opener = max(word.rfind("("), word.rfind("`"))
+        if opener >= 0:
+            segment.insert(0, word[opener + 1:])
+            break
+        segment.insert(0, word)
+    command = next(
+        (word for word in segment if word and not _ASSIGNMENT_RE.match(word)),
+        "",
+    )
+    return (
+        _PLAIN_COMMAND_RE.fullmatch(command) is not None
+        and Path(command).name.casefold() in _SWITCH_U_COMMANDS
+    )
