@@ -11,15 +11,20 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from host_access.shell_view import ShellCommandRedaction, descriptor_heredocs
 from host_access.shell_view import heredoc_view, shell_words
+from host_access.shell_credential_positions import (
+    COMMAND_BOUNDARIES,
+    LITERAL_OUTPUT_COMMANDS,
+    NON_VALUE_CREDENTIAL_OPTIONS,
+    SECURITY_PASSWORD_SUBCOMMANDS,
+    SHELL_SEPARATORS,
+    credential_stdin_source_indices,
+    curl_word_at,
+    security_password_value_indices,
+)
 
 
 REDACTED = "[REDACTED]"
 _REDACTED_SENTINEL = "CORSIA_REDACTED_VALUE"
-_COMMAND_BOUNDARIES = frozenset({";", ";;", "&", "&&", "|", "||", "|&"})
-_REDIRECTION_OPERATORS = frozenset(
-    {"<", "<<", "<<<", ">", ">>", ">|", "<>", "<&", ">&", "&>"}
-)
-_SHELL_SEPARATORS = _COMMAND_BOUNDARIES | _REDIRECTION_OPERATORS
 _SENSITIVE_KEY_SUFFIXES = (
     "apikey",
     "authorization",
@@ -32,19 +37,7 @@ _SENSITIVE_KEY_SUFFIXES = (
     "secret",
     "token",
 )
-_NON_VALUE_CREDENTIAL_OPTIONS = frozenset({"password-stdin", "with-token"})
 _USERINFO_LONG_OPTIONS = frozenset({"proxy-user", "user", "userinfo"})
-_LITERAL_OUTPUT_COMMANDS = frozenset({"echo", "printf"})
-_SECURITY_PASSWORD_SUBCOMMANDS = frozenset(
-    {
-        "add-generic-password",
-        "add-internet-password",
-        "set-keychain-password",
-    }
-)
-_SAFE_PRINTF_CREDENTIAL_FORMATS = frozenset(
-    {"%b", "%b\\n", "%s", "%s\\n"}
-)
 _EXAMPLE_CREDENTIAL_VALUES = frozenset(
     {"dummy", "example", "placeholder", "sample"}
 )
@@ -61,6 +54,7 @@ _COOKIE_HEADER_RE = re.compile(
     r"^(?P<label>(?:cookie|set-cookie)\s*:\s*)(?P<credential>.*)$",
     re.IGNORECASE,
 )
+_HEADER_NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _AUTH_SCHEME_ARGUMENT_RE = re.compile(
     r"^(?:basic|bearer)(?:\s+|=|:|$)(.*)$",
     re.IGNORECASE,
@@ -144,12 +138,14 @@ def _redact_authorization_header(value: str) -> tuple[str, int, int]:
 
     match = _AUTHORIZATION_HEADER_RE.fullmatch(value.strip())
     if match is None:
-        header, separator, credential = value.partition(":")
-        if not separator or not _is_sensitive_key(header):
+        header, _separator, assigned = value.partition(":")
+        if not assigned.strip() or not _is_sensitive_key(header):
             return value, 0, 0
         replacement, redactions, literals = _secret_replacement(
-            credential.strip()
+            assigned.strip()
         )
+        if _HEADER_NAME_RE.fullmatch(header.strip()) is None:
+            literals = 0
         return f"{header}: {replacement}", redactions, literals
 
     credential = match.group("credential").strip()
@@ -371,88 +367,31 @@ def _validate_credential_expansions(
         )
 
 
-def _credential_stdin_source_indices(
-    tokens: Sequence[str],
-) -> frozenset[int]:
-    """Locate shell tokens that directly supply credential-only stdin."""
-    sensitive: set[int] = set()
-    hard_boundaries = frozenset({";", ";;", "&", "&&", "||"})
-    for consumer_index, raw in enumerate(tokens):
-        option, _separator, _value = str(raw).partition("=")
-        if option.removeprefix("--").casefold() not in (
-            _NON_VALUE_CREDENTIAL_OPTIONS
-        ):
-            continue
+def _redact_userinfo_flag(
+    words: Sequence[str], index: int
+) -> tuple[list[str], int, int, int] | None:
+    """Hide a ``-u``, ``--user`` or ``--proxy-user`` value at ``index``.
 
-        command_end = len(tokens)
-        for index in range(consumer_index + 1, len(tokens)):
-            if str(tokens[index]) in hard_boundaries:
-                command_end = index
-                break
-        for index in range(consumer_index + 1, command_end - 1):
-            if str(tokens[index]) == "<<<":
-                sensitive.add(index + 1)
-
-        pipe_index: int | None = None
-        for index in range(consumer_index - 1, -1, -1):
-            token = str(tokens[index])
-            if token in {"|", "|&"}:
-                pipe_index = index
-                break
-            if token in hard_boundaries:
-                break
-        if pipe_index is None:
-            continue
-
-        segment_start = 0
-        for index in range(pipe_index - 1, -1, -1):
-            if str(tokens[index]) in _COMMAND_BOUNDARIES:
-                segment_start = index + 1
-                break
-        if segment_start >= pipe_index:
-            continue
-        executable = Path(str(tokens[segment_start])).name.casefold()
-        if executable not in _LITERAL_OUTPUT_COMMANDS:
-            continue
-        argument_indices = [
-            index
-            for index in range(segment_start + 1, pipe_index)
-            if str(tokens[index]) not in _SHELL_SEPARATORS
-        ]
-        if (
-            executable == "printf"
-            and argument_indices
-            and str(tokens[argument_indices[0]])
-            in _SAFE_PRINTF_CREDENTIAL_FORMATS
-        ):
-            argument_indices = argument_indices[1:]
-        sensitive.update(argument_indices)
-    return frozenset(sensitive)
-
-
-def _security_password_value_indices(
-    tokens: Sequence[str],
-) -> frozenset[int]:
-    """Locate literal values supplied to security(1) password-write flags."""
-    sensitive: set[int] = set()
-    segment_start = 0
-    for index in range(len(tokens) + 1):
-        if (
-            index < len(tokens)
-            and str(tokens[index]) not in _COMMAND_BOUNDARIES
-        ):
-            continue
-        segment = [str(token) for token in tokens[segment_start:index]]
-        if (
-            len(segment) >= 2
-            and Path(segment[0]).name.casefold() == "security"
-            and segment[1].casefold() in _SECURITY_PASSWORD_SUBCOMMANDS
-        ):
-            for offset, token in enumerate(segment[:-1]):
-                if token == "-w":
-                    sensitive.add(segment_start + offset + 1)
-        segment_start = index + 1
-    return frozenset(sensitive)
+    Returns the rendered words, redactions, literal count and words
+    consumed, or None when ``index`` holds no such value. A literal after
+    short ``-u`` is refused only for curl, where it carries a user and
+    password; elsewhere (``date -u``, ``sort -u``) it is only hidden.
+    """
+    flag = str(words[index])
+    if flag in {"-u", "--proxy-user", "--user"} and index + 1 < len(words):
+        value, rendered_flag, consumed = str(words[index + 1]), [flag], 2
+    elif flag.startswith("-u") and flag != "-u":
+        value, rendered_flag, consumed = flag[2:], [], 1
+    else:
+        return None
+    if ":" not in value and not _is_indirect(value):
+        return ([flag, value], 0, 0, 2) if consumed == 2 else None
+    rendered, count, literals = _userinfo_replacement(value)
+    if consumed == 1:
+        rendered = f"-u{rendered}"
+    if flag.startswith("-u") and not curl_word_at(words, index):
+        literals = 0
+    return [*rendered_flag, rendered], count, literals, consumed
 
 
 def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
@@ -464,8 +403,8 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
     literal_output_command = False
     redirection_target = False
     credential_input_indices = (
-        _credential_stdin_source_indices(tokens)
-        | _security_password_value_indices(tokens)
+        credential_stdin_source_indices(tokens)
+        | security_password_value_indices(tokens)
     )
     index = 0
 
@@ -481,9 +420,9 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
 
     while index < len(tokens):
         token = str(tokens[index])
-        if token in _SHELL_SEPARATORS:
+        if token in SHELL_SEPARATORS:
             redacted.append(token)
-            if token in _COMMAND_BOUNDARIES:
+            if token in COMMAND_BOUNDARIES:
                 password_style_command = False
                 credential_context = False
                 literal_output_command = False
@@ -524,17 +463,13 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             index += 2
             continue
 
-        if (
-            token in {"-u", "--proxy-user", "--user"}
-            and index + 1 < len(tokens)
-        ):
-            candidate = str(tokens[index + 1])
-            redacted.append(token)
-            if ":" in candidate or _is_indirect(candidate):
-                append_sensitive(candidate, userinfo=True)
-            else:
-                redacted.append(candidate)
-            index += 2
+        userinfo = _redact_userinfo_flag(tokens, index)
+        if userinfo is not None:
+            words, count, literals, consumed = userinfo
+            redacted.extend(words)
+            redactions += count
+            literal_credentials += literals
+            index += consumed
             continue
 
         if (
@@ -558,18 +493,6 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             continue
 
         if (
-            token.startswith("-u")
-            and token != "-u"
-            and (":" in token[2:] or _is_indirect(token[2:]))
-        ):
-            rendered, count, literals = _userinfo_replacement(token[2:])
-            redacted.append(f"-u{rendered}")
-            redactions += count
-            literal_credentials += literals
-            index += 1
-            continue
-
-        if (
             token.startswith("-p")
             and token != "-p"
             and password_style_command
@@ -584,7 +507,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
         if token.startswith("--"):
             option, separator, value = token.partition("=")
             option_key = option[2:].casefold()
-            if not separator and option_key in _NON_VALUE_CREDENTIAL_OPTIONS:
+            if not separator and option_key in NON_VALUE_CREDENTIAL_OPTIONS:
                 redacted.append(token)
                 index += 1
                 continue
@@ -619,13 +542,13 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
                 continue
             if (
                 not separator
-                and option_key not in _NON_VALUE_CREDENTIAL_OPTIONS
+                and option_key not in NON_VALUE_CREDENTIAL_OPTIONS
                 and (
                     _is_sensitive_key(option_key)
                     or option_key.casefold() in _SENSITIVE_LONG_OPTIONS
                 )
                 and index + 1 < len(tokens)
-                and str(tokens[index + 1]) not in _SHELL_SEPARATORS
+                and str(tokens[index + 1]) not in SHELL_SEPARATORS
             ):
                 redacted.append(token)
                 append_sensitive(str(tokens[index + 1]))
@@ -636,7 +559,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             _is_sensitive_label(token)
             and "=" not in token
             and index + 1 < len(tokens)
-            and str(tokens[index + 1]) not in _SHELL_SEPARATORS
+            and str(tokens[index + 1]) not in SHELL_SEPARATORS
             and (
                 credential_context
                 or password_style_command
@@ -666,7 +589,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             password_style_command = True
         if (
             not is_redirection_target
-            and Path(token).name.casefold() in _LITERAL_OUTPUT_COMMANDS
+            and Path(token).name.casefold() in LITERAL_OUTPUT_COMMANDS
         ):
             literal_output_command = True
         index += 1
@@ -883,7 +806,7 @@ def redact_process_arguments(
         arguments
         and Path(str(arguments[0])).name.casefold() == "security"
         and any(
-            str(value).casefold() in _SECURITY_PASSWORD_SUBCOMMANDS
+            str(value).casefold() in SECURITY_PASSWORD_SUBCOMMANDS
             for value in arguments[1:3]
         )
     )

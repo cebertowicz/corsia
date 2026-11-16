@@ -249,3 +249,59 @@ def test_bash_descriptor_accepts_valid_bounded_values(
     descriptor["timeout_seconds"] = timeout_seconds
 
     validate_action_descriptor("bash", descriptor)
+
+
+# Credential-shaped words are assembled so tool layers that hide
+# credential text cannot rewrite these fixtures.
+_CRED = "Cred" + "ential"
+_TOK = "Tok" + "en"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "date -u +%H:%M:%S",
+        "git ls-remote origin x; date -u +%H:%M",
+        "sort -u a:b",
+        "echo ready | date -u +%H:%M",
+        "grep -n '" + _CRED + ":' notes.md",
+        "python3 -c \"print(b'**" + _CRED + ":** any')\"",
+        "python3 -c 'def f(" + _TOK.lower() + ": str): pass'",
+    ],
+)
+def test_switches_and_code_text_are_not_literal_credentials(
+    command: str,
+) -> None:
+    from host_access.redaction import redact_shell_command
+    from tools.shell_guard import check_command_safety
+
+    assert redact_shell_command(command).literal_credentials == 0
+    assert check_command_safety(command) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -ualice:not-a-ref https://example.test",  # gitleaks:allow
+        "sudo curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
+        "http example.test '" + _TOK + ":abc123'",
+    ],
+)
+def test_curl_user_and_header_literals_are_still_refused(
+    command: str,
+) -> None:
+    from host_access.redaction import redact_shell_command
+    from tools.shell_guard import check_command_safety
+
+    assert redact_shell_command(command).literal_credentials == 1
+    assert check_command_safety(command) is not None
+
+
+def test_short_u_value_outside_curl_is_still_hidden_from_review() -> None:
+    from host_access.redaction import REDACTED, redact_shell_command
+
+    rendered = redact_shell_command("sort -u a:b")
+    assert rendered.tokens == ("sort", "-u", "a:" + REDACTED)
+    assert rendered.literal_credentials == 0
