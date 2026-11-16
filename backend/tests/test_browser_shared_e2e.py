@@ -72,17 +72,19 @@ window.addEventListener('load', () => {
 </script>"""
 
 
-# Page-context writes: a dropdown, an SVG target, a rich-text editor, a covered button and one far
-# below the fold, beside the person's own field.
+# Page-context writes: a dropdown, an SVG target, a rich-text editor, a covered button, one far below
+# the fold and one a sticky header can sit over, beside the person's own field.
 WRITES = """<!doctype html><title>Writes fixture</title>
+<header style="position:sticky;top:0;height:80px;z-index:1;background:#eee">Header</header>
 <input id=user value=person>
 <select id=choice><option value=a>Ay</option><option value=b>Bee</option></select>
 <svg width=60 height=40><rect id=shape width=60 height=40 fill=teal></rect></svg>
 <div id=rich contenteditable>rich</div>
 <div style="position:relative"><button id=covered>Under</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="height:600px"></div><button id=sticky>Under the header</button>
 <div style="height:3000px"></div><button id=far>Far</button>
 <script>
-window.clicks = {shape: 0, far: 0, covered: 0};
+window.clicks = {shape: 0, far: 0, covered: 0, sticky: 0};
 for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
 </script>"""
 
@@ -408,9 +410,14 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
             assert await owner.run(thread_id, ("select", "#choice", "Bee"), session="existing") == "ok"
             assert await owner.run(thread_id, ("click", "#shape"), session="existing") == "ok"
             assert await owner.run(thread_id, ("click", "#far"), session="existing") == "ok"
+            # In view, but with its centre under the sticky header: the write scrolls it clear first.
+            await cdp_value(owner, thread_id, (
+                "(() => { const r = document.querySelector('#sticky').getBoundingClientRect();"
+                " window.scrollBy(0, r.top + r.height / 2 - 40); return null; })()"))
+            assert await owner.run(thread_id, ("click", "#sticky"), session="existing") == "ok"
             with pytest.raises(browser_dom_write.DomWriteRefused, match="rich-text editor"):
                 await owner.run(thread_id, ("fill", "#rich", "agent"), session="existing")
-            with pytest.raises(browser_dom_write.DomWriteRefused, match="another element covers it"):
+            with pytest.raises(browser_dom_write.DomWriteRefused, match=r"another element covers it \(a <div>\)"):
                 await owner.run(thread_id, ("click", "#covered"), session="existing")
             with pytest.raises(browser_dom_write.DomWriteRefused, match="no option"):
                 await owner.run(thread_id, ("select", "#choice", "Missing"), session="existing")
@@ -418,7 +425,7 @@ async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_ca
                 "({ choice: document.querySelector('#choice').value, clicks: window.clicks,"
                 " rich: document.querySelector('#rich').textContent, active: document.activeElement.id,"
                 " start: document.querySelector('#user').selectionStart, end: document.querySelector('#user').selectionEnd })"))
-            assert page == {"choice": "b", "clicks": {"shape": 1, "far": 1, "covered": 0}, "rich": "rich",
+            assert page == {"choice": "b", "clicks": {"shape": 1, "far": 1, "covered": 0, "sticky": 1}, "rich": "rich",
                             "active": "user", "start": 1, "end": 4}
             assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
                                 ("agent_write_refused", "no_option")]
