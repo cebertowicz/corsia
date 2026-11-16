@@ -52,9 +52,8 @@ describe('shouldLoadOlder', () => {
 });
 
 describe('adoptFirstPage', () => {
-	it('seeds cursor + hasMore from the first page and clears flags', () => {
+	it('seeds cursor + hasMore from the first page and clears the error', () => {
 		const s = createPager();
-		s.loading = true;
 		s.error = true;
 		adoptFirstPage(s, pageOf(['m20', 'm21', 'm22'], true));
 		expect(s.hasMore).toBe(true);
@@ -62,10 +61,34 @@ describe('adoptFirstPage', () => {
 		expect(s.loading).toBe(false);
 		expect(s.error).toBe(false);
 	});
+
+	it('leaves an older read in flight the only reader: no second read starts, and its cursor wins', async () => {
+		const el = makeScrollEl();
+		el._count = 10;
+		let land!: (page: MessagePage) => void;
+		const port: PagerPort = {
+			fetchPage: vi.fn(() => new Promise<MessagePage>((resolve) => { land = resolve; })),
+			prepend: vi.fn((older: unknown[]) => { el._count += older.length; }),
+			getScrollEl: () => el,
+			afterRender: async () => {},
+		};
+		const s = refreshPager(createPager({ hasMore: true, oldestId: 'm0' }));
+		const first = loadOlder(s, port, 1);
+		expect(port.fetchPage).toHaveBeenCalledWith('m0');
+		// The refetched first page lands while that read is out.
+		adoptFirstPage(s, pageOf(['m20', 'm21'], true));
+		expect(s.loading).toBe(true);
+		expect(await loadOlder(s, port, 1)).toBe(0);
+		expect(port.fetchPage).toHaveBeenCalledOnce();
+		land(pageOf(['o1', 'o2'], true));
+		expect(await first).toBe(2);
+		expect(s.oldestId).toBe('o1');
+		expect(s.loading).toBe(false);
+	});
 });
 
 describe('refreshPager', () => {
-	it('keeps that older history exists but starts no older read until the refetched first page lands', async () => {
+	it('keeps what the loaded window knows, so an older read pages from the rows on screen even if the refetch fails', async () => {
 		const el = makeScrollEl();
 		const port: PagerPort = {
 			fetchPage: vi.fn(async () => pageOf(['o1', 'o2'], false)),
@@ -74,12 +97,9 @@ describe('refreshPager', () => {
 			afterRender: async () => {},
 		};
 		const s = refreshPager(createPager({ hasMore: true, oldestId: 'm0' }));
-		expect(s.hasMore).toBe(true);
-		expect(await loadOlder(s, port, 1)).toBe(0);
-		expect(port.fetchPage).not.toHaveBeenCalled();
-		adoptFirstPage(s, pageOf(['m20', 'm21'], true));
+		expect(s).toMatchObject({ hasMore: true, oldestId: 'm0', loading: false, error: false });
 		expect(await loadOlder(s, port, 1)).toBe(2);
-		expect(port.fetchPage).toHaveBeenCalledWith('m20');
+		expect(port.fetchPage).toHaveBeenCalledWith('m0');
 	});
 });
 

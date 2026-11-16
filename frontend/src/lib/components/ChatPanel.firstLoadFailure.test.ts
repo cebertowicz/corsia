@@ -217,7 +217,7 @@ describe('ChatPanel first-page failure', () => {
 		expect(host.querySelector('.loading-older')).not.toBeNull();
 	});
 
-	it('starts no older read while a same-thread refresh reads its page', async () => {
+	it('pages older history from the rows on screen while a same-thread refresh reads its page, one read at a time', async () => {
 		let firstPages = 0;
 		let landRefresh: (() => void) | null = null;
 		const page = { messages: [{ id: 'm1', thread_id: 'thread-b', role: 'assistant', content: 'reading here', created_at: 't', seq: 51, metadata: { for_user: true } }], has_more: true, oldest_id: 'm1' };
@@ -232,24 +232,67 @@ describe('ChatPanel first-page failure', () => {
 			return { ok: true, status: 200, json: async () => ({}) };
 		});
 		globalThis.fetch = withEmptyAttentionQueue(fetchMock as unknown as typeof fetch);
-		const olderReads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('before=')).length;
+		const olderReads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('before=')).map(([input]) => String(input));
+		const wheelUp = () => host.querySelector('.messages')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
 		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
 		flushSync();
 		await (component as Record<string, any>).selectThread('thread-b');
 		flushSync();
 		await vi.waitFor(() => expect(host.querySelector('.loading-older')).not.toBeNull());
 		await tick();
-		const before = olderReads();
+		const before = olderReads().length;
 
-		// The reader wheels up at the top while the refreshed page is on its way: the window it would page from is being replaced.
+		// The reader wheels up at the top while the refreshed page is on its way: the read pages from the rows on screen.
 		const refreshing = (component as Record<string, any>).fetchThreadMessages('thread-b');
 		await vi.waitFor(() => expect(firstPages).toBe(2));
 		flushSync();
-		host.querySelector('.messages')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+		wheelUp();
 		await tick();
-		expect(olderReads()).toBe(before);
+		expect(olderReads().length).toBe(before + 1);
+		expect(olderReads().at(-1)).toContain('before=m1');
+
+		// The refreshed page lands while that read is out: it stays the only one.
 		landRefresh!();
 		await refreshing;
+		flushSync();
+		wheelUp();
+		await tick();
+		expect(olderReads().length).toBe(before + 1);
+	});
+
+	it('keeps a working older-history row when a same-thread refresh fails', async () => {
+		let firstPages = 0;
+		const page = { messages: [{ id: 'm1', thread_id: 'thread-b', role: 'assistant', content: 'reading here', created_at: 't', seq: 51, metadata: { for_user: true } }], has_more: true, oldest_id: 'm1' };
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/messages?') && url.includes('before=')) return new Promise(() => {});
+			if (url.includes('/messages?')) {
+				firstPages += 1;
+				return firstPages === 1
+					? { ok: true, status: 200, json: async () => page }
+					: { ok: false, status: 500, json: async () => ({}) };
+			}
+			return { ok: true, status: 200, json: async () => ({}) };
+		});
+		globalThis.fetch = withEmptyAttentionQueue(fetchMock as unknown as typeof fetch);
+		const olderReads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('before=')).map(([input]) => String(input));
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.loading-older')).not.toBeNull());
+		await tick();
+
+		await (component as Record<string, any>).fetchThreadMessages('thread-b');
+		flushSync();
+		expect(host.textContent).toContain('Couldn’t load this chat. Try again.');
+		const before = olderReads().length;
+		const button = host.querySelector<HTMLButtonElement>('button[aria-label="Load older messages"]');
+		expect(button).not.toBeNull();
+		button!.click();
+		await tick();
+		expect(olderReads().length).toBe(before + 1);
+		expect(olderReads().at(-1)).toContain('before=m1');
 	});
 
 	it('starts over from an empty window when the Focus setting changes', async () => {
