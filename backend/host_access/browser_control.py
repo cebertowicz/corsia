@@ -15,9 +15,9 @@ from infra import state
 log = logging.getLogger(__name__)
 
 PASSWORD_PAGE = (
-    "This page asks for a password, so it is the person's to complete. They already see a notice on the "
-    "page and a task in their attention list, and you get a turn once they finish or decline it; end your "
-    "turn. If they decline, tell them in chat what you needed the page for and stop."
+    "This page asks for a password, so it is the person's to complete. A task for it is in their Needs you "
+    "list, and you get a turn once they finish or decline it; end your turn. If they decline, tell them in "
+    "chat what you needed the page for and stop."
 )
 # A read guard outlives its step, so its refusal promises nothing about a notice, a task or a turn.
 PASSWORD_READ_REFUSED = (
@@ -41,10 +41,14 @@ PASSWORD_PAGE_UNRECORDED = (
     "Ask them in chat to sign in in the shared browser, then try again."
 )
 PERSON_STEP = (
-    "This browser step is the person's to complete. They already see a task in their attention list, and you "
-    "get a turn once they finish or decline it; end your turn. If they decline, tell them in chat what you "
-    "needed the page for and stop."
+    "This browser step is the person's to complete. A task for it is in their Needs you list, and you get a "
+    "turn once they finish or decline it; end your turn. If they decline, tell them in chat what you needed "
+    "the page for and stop."
 )
+# What the person can see right now: the page itself only in an open pane (where the password notice shows), else
+# only the task. A hand-off reply states which, so the agent never relies on a page the person can't see.
+PANE_OPEN = " The page is open in their browser pane."
+NO_PANE = " No browser pane is open, so they see the page only once they open that task."
 PASSWORD_DECLINED = (
     "The person declined to enter a password on this page. Tell them in chat what you needed the page for and stop."
 )
@@ -148,12 +152,12 @@ async def _guarded_probe(thread_id: str, probe: browser_pane_state.Probe, *, ses
         if browser_step_lifecycle.has_step(thread_id):
             if browser_step_lifecycle.password_page(thread_id):
                 raise BrowserSessionError(PASSWORD_PAGE + _ending(thread_id))
-            raise BrowserSessionError(PERSON_STEP)
+            raise BrowserSessionError(PERSON_STEP + seen_by_person(thread_id))
         # With no step held, the lifecycle's own visible-password test (R9) still marks the page as the person's.
         if result.visible_nodes:
             raise BrowserSessionError(PASSWORD_PAGE_UNRECORDED)
         return result, STEP_NOT_RECORDED
-    messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP,
+    messages = {"password": PASSWORD_PAGE + _ending(thread_id), "person": PERSON_STEP + seen_by_person(thread_id),
                 "password_declined": PASSWORD_DECLINED, "person_declined": PERSON_STEP_DECLINED}
     if decision.refusal is not None:
         raise BrowserSessionError(messages[decision.refusal])
@@ -168,10 +172,15 @@ def _observe_read_guard(thread_id: str, result: PasswordProbe | None, clear_sess
         _guard(thread_id, result, nodes=result.present_nodes | result.visible_nodes)
 
 
+def seen_by_person(thread_id: str) -> str:
+    """Whether the person can see the page now or only its task."""
+    return PANE_OPEN if browser_pane_state.has_pane(thread_id) else NO_PANE
+
+
 def _ending(thread_id: str) -> str:
     if browser_pane_state.has_pane(thread_id):
-        return " Post nothing in chat."
-    return " If you reply, use one short line; don't restate the task or say you made it."
+        return PANE_OPEN + " Post nothing in chat."
+    return NO_PANE + " If you reply, use one short line pointing them to it in Needs you; don't restate the task or say you made it."
 
 
 def _guard(thread_id: str, result: PasswordProbe, *, nodes: frozenset[int] | None = None) -> None:
