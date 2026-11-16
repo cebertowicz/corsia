@@ -124,7 +124,7 @@ async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypa
     """A node seen on the password page can still resolve to a box after the page navigates away."""
     class FakeCdp:
         def __init__(self, _endpoint):
-            pass
+            self.session_id, self.parents, self.attached = None, {}, []
 
         async def __aenter__(self):
             return self
@@ -139,6 +139,7 @@ async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypa
                 "DOM.performSearch": {"searchId": "search", "resultCount": 0},
                 "DOM.discardSearchResults": {},
                 "DOM.getBoxModel": {"model": {"border": [0, 0, 10, 0, 10, 10, 0, 10]}},
+                "Target.setAutoAttach": {},
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
@@ -161,7 +162,7 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
 
     class FakeCdp:
         def __init__(self, _endpoint):
-            self.parents: dict[int, int] = {}
+            self.session_id, self.parents, self.attached = None, {}, []
 
         async def __aenter__(self):
             return self
@@ -180,6 +181,7 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
                 "DOM.getSearchResults": {"nodeIds": [5, 6]},
                 "DOM.discardSearchResults": {},
                 "DOM.getBoxModel": {"model": {"border": [0, 0, 10, 0, 10, 10, 0, 10] if visible else [0] * 8}},
+                "Target.setAutoAttach": {},
             }[method]
 
     monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)

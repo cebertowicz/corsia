@@ -11,7 +11,7 @@ from urllib.request import urlopen
 
 import websockets
 
-from host_access import browser_cli
+from host_access import browser_cli, browser_cdp_frames
 from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 
@@ -45,31 +45,38 @@ class CdpClient:
         self.endpoint = endpoint
         self._max_size = max_size
         self._next_id = 0
+        self.session_id: str | None = None
         self.parents: dict[int, int] = {}
+        self._session_parents: dict[str, dict[int, int]] = {}
+        # Every Target.attachedToTarget seen, with the session it attached under (parentSessionId).
+        self.attached: list[dict] = []
+
+    def session_parents(self, session_id: str) -> dict[int, int]:
+        return self._session_parents.setdefault(session_id, {})
 
     def next_request(self) -> int:
         """The id of the next send, for a reader that must know its answer before send returns."""
         return self._next_id + 1
 
-    async def send(self, method: str, **params: object) -> int:
+    async def send(self, method: str, *, session_id: str | None = None, **params: object) -> int:
         """Send one command without reading its response; the caller's reader receives it."""
         self._next_id += 1
-        await self.socket.send(json.dumps({"id": self._next_id, "method": method, "params": params}))
+        message: dict[str, object] = {"id": self._next_id, "method": method, "params": params}
+        if session_id is not None:
+            message["sessionId"] = session_id
+        await self.socket.send(json.dumps(message))
         return self._next_id
 
     async def call(self, method: str, **params: object) -> dict:
-        request_id = await self.send(method, **params)
+        return await self.call_in(None, method, **params)
+
+    async def call_in(self, session_id: str | None, method: str, **params: object) -> dict:
+        """One command on the page's session (None) or a flattened child session on this connection."""
+        request_id = await self.send(method, session_id=session_id, **params)
         while True:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
-                if response.get("method") == "DOM.setChildNodes":
-                    event_params = response.get("params", {})
-                    parent = event_params.get("parentId")
-                    if isinstance(parent, int):
-                        for child in event_params.get("nodes", []):
-                            node_id = child.get("nodeId")
-                            if isinstance(node_id, int):
-                                self.parents[node_id] = parent
+                self._event(response)
                 continue
             if "error" in response:
                 error = response["error"]
@@ -82,6 +89,19 @@ class CdpClient:
             if not isinstance(result, dict):
                 raise BrowserSessionError("This page couldn't be checked")
             return result
+
+    def _event(self, event: dict) -> None:
+        params, origin = event.get("params", {}), event.get("sessionId")
+        if event.get("method") == "Target.attachedToTarget" and isinstance(params, dict):
+            self.attached.append({**params, "parentSessionId": origin})
+        elif event.get("method") == "DOM.setChildNodes" and isinstance(params, dict):
+            parents = self.parents if origin is None else self.session_parents(str(origin))
+            parent = params.get("parentId")
+            if isinstance(parent, int):
+                for child in params.get("nodes", []):
+                    node_id = child.get("nodeId")
+                    if isinstance(node_id, int):
+                        parents[node_id] = parent
 
     async def __aenter__(self) -> CdpClient:
         self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1)
@@ -96,8 +116,9 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
 
     ``known`` maps each guarded visit to its password nodes; only those of the page's own visit apply.
 
-    It covers the top document, in-process (same-origin) frames, and open and closed shadow roots,
-    and transfers only the matching nodes, never the whole DOM.
+    It covers the top document, in-process (same-origin) frames, open and closed shadow roots, and every
+    out-of-process (cross-origin) frame (browser_cdp_frames keys their nodes), and transfers only the matching
+    nodes, never the whole DOM. A field in a frame is visible only while each frame element above it is.
     """
     async with CdpClient(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
@@ -106,12 +127,12 @@ async def page_password_probe(endpoint: str, known: Mapping[str, frozenset[int]]
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
         known_here = known.get(loader, frozenset())
-        current = await _password_inputs(cdp)
-        visible = {node for node in current | known_here if await _visible(cdp, node)}
-        return PasswordProbe(loader, host, frozenset(visible), endpoint, present_nodes=frozenset(current))
+        current, documents = await browser_cdp_frames.search_page(cdp, _password_inputs, _visible)
+        visible = await browser_cdp_frames.shown_keys(documents, current | known_here, _visible)
+        return PasswordProbe(loader, host, visible, endpoint, present_nodes=frozenset(current))
 
 
-async def _password_inputs(cdp: CdpClient) -> set[int]:
+async def _password_inputs(cdp: browser_cdp_frames.Session) -> set[int]:
     # Search results are pushed against this session's document, so it is requested first, without children.
     await cdp.call("DOM.getDocument", depth=0)
     search = await cdp.call("DOM.performSearch", query=_PASSWORD_SEARCH, includeUserAgentShadowDOM=False)
@@ -137,7 +158,7 @@ def _sign_in_action(button: dict) -> bool:
             and label.strip().casefold() in {"sign in", "log in", "next", "continue", "verify", "submit", "confirm"})
 
 
-async def _display_secret(cdp: CdpClient, node: dict) -> bool:
+async def _display_secret(cdp: browser_cdp_frames.Session, node: dict) -> bool:
     """Recognize display secrets without reading field values; uncertain context stays guarded."""
     flat = node.get("attributes") or []
     names = {str(name).lower() for name in flat[::2]}
@@ -342,7 +363,7 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None, expec
     raise BrowserSessionError("This page couldn't be checked")
 
 
-async def border_rect(cdp: CdpClient, **node: object) -> Rect | None:
+async def border_rect(cdp: browser_cdp_frames.Session, **node: object) -> Rect | None:
     """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
         model = await cdp.call("DOM.getBoxModel", **node)
@@ -355,7 +376,7 @@ async def border_rect(cdp: CdpClient, **node: object) -> Rect | None:
     return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
 
 
-async def _visible(cdp: CdpClient, node: int) -> bool:
+async def _visible(cdp: browser_cdp_frames.Session, node: int) -> bool:
     rect = await border_rect(cdp, backendNodeId=node)
     return rect is not None and rect["width"] > 0 and rect["height"] > 0
 
