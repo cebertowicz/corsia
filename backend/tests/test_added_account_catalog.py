@@ -156,6 +156,63 @@ def test_discovery_written_without_a_revision_bump_is_listed_next_read(accounts)
     assert account_rows(db=db, provider='codex')['codex/added-later']['available'] is True
 
 
+def test_kept_projections_do_not_grow_with_account_churn(accounts):
+    """One kept entry per provider argument; an added or removed account replaces it."""
+    from connections.vendor_accounts import add_account, set_account_state
+    from llm import harness_catalog
+
+    db = accounts[0]
+    for index in range(12):
+        account = add_account('codex', f'Churn {index}')
+        for provider in (None, 'codex'):
+            harness_catalog.account_rows(db=db, provider=provider)
+        set_account_state(account['id'], 'removed', expected_revision=account['revision'])
+        for provider in (None, 'codex'):
+            harness_catalog.account_rows(db=db, provider=provider)
+            kept = harness_catalog._projected[provider][0]
+            assert account['id'] not in {row[0] for row in kept}
+    assert set(harness_catalog._projected) <= {None, 'claude-code', 'codex'}
+
+
+def test_concurrent_callers_each_get_their_own_rows(accounts):
+    """Threads on their own connections read at once; none sees another caller's change."""
+    import threading
+    from infra.database import get_db
+    from llm.harness_catalog import account_rows
+    from vendor_account_fixtures import _ready
+
+    db, _default, second, _third = accounts
+    _ready(db, second)
+    expected = _fresh_rows(db, 'codex')
+    answers, errors = [], []
+    start = threading.Barrier(8)
+
+    def call():
+        connection = get_db()
+        try:
+            start.wait()
+            for _ in range(25):
+                answer = account_rows(db=connection, provider='codex')
+                answers.append(answer)
+                if answer != expected:
+                    errors.append(answer)
+                answer['codex/test']['available'] = False
+                answer.pop('codex/test')
+        except BaseException as error:  # surfaced below, not swallowed
+            errors.append(error)
+        finally:
+            connection.close()
+
+    workers = [threading.Thread(target=call) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert errors == []
+    assert len({id(answer) for answer in answers}) == len(answers) == 200
+    assert account_rows(db=db, provider='codex') == expected
+
+
 def test_a_caller_changing_account_rows_cannot_change_a_later_read(accounts):
     from llm.harness_catalog import account_rows
     from vendor_account_fixtures import _ready
