@@ -294,3 +294,26 @@ async def test_pane_screencast_ends_visibly_when_chrome_refuses_a_frame_cannot_b
         await asyncio.wait_for(cast.run(), 1)
     assert not any(entry[0] == "pane" for entry in log)
     assert socket.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame_arrives", [False, True])
+async def test_a_start_that_brings_no_frame_asks_chrome_to_draw_once(monkeypatch, frame_arrives):
+    """A still page can draw nothing after a start; one screenshot makes Chrome draw, and the screencast sends that."""
+    monkeypatch.setattr(browser_screencast.PaneScreencast, "STALL_S", 0.05)
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    running = asyncio.create_task(cast.run())
+    await _started(log)
+    if frame_arrives:
+        socket.incoming.put_nowait(_frame(1, 400))
+    await asyncio.sleep(0.2)
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    shots = [entry for entry in log if entry[:2] == ("cdp", "Page.captureScreenshot")]
+    if frame_arrives:
+        assert shots == [] and cast.nudges == 0
+    else:
+        # Asked once only; the screenshot's own reply is never shown in the pane.
+        assert shots == [("cdp", "Page.captureScreenshot", {"format": "jpeg", "quality": 10})] and cast.nudges == 1
+        assert not any(entry[0] == "pane" for entry in log)

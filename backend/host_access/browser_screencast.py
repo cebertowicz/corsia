@@ -1,6 +1,7 @@
 """The browser pane's own screencast of the shared page."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Callable
 
@@ -31,12 +32,18 @@ class PaneScreencast:
     frame of a start arrives measured; a frame before that answer is the replaced capture's and is
     not shown. A frame's size is never matched against the measurement: Chrome reports the whole
     view, which includes a classic scrollbar the layout viewport leaves out.
+
+    Chrome sends a screencast frame only when it draws, and a still page can be visible, focused and
+    measured yet draw nothing after a start, which left the pane blank. So a start that brings no
+    frame within STALL_S asks Chrome for one screenshot, which makes it draw once; the screencast
+    sends that drawing as its frame. The screenshot's own reply is not shown.
     """
 
     QUALITY = 80
     # A compact pane (a phone, or a narrow desktop pane) gets smaller JPEGs. The quality stays fixed while input
     # moves: changing it needs a screencast restart, which delayed real frames when measured.
     COMPACT_QUALITY = 60
+    STALL_S = 1.0
 
     def __init__(self, endpoint: str, deliver: Callable[[str], object]) -> None:
         self.endpoint = endpoint
@@ -51,6 +58,8 @@ class PaneScreencast:
         self._starts: set[int] = set()
         self._measures: set[int] = set()
         self.received = 0  # Frames Chrome has sent, shown or not: tells a missing frame from a held one.
+        self.nudges = 0  # Screenshots asked for because a start brought no frame.
+        self._stall: asyncio.Task | None = None
 
     async def run(self) -> None:
         """Relay frames until the pane leaves or Chrome closes the page target."""
@@ -76,9 +85,13 @@ class PaneScreencast:
                             self._measured(message.get("result"))
                             if not self._unmeasured:
                                 await self._capture(cdp)
-                        self._starts.discard(answered)
+                        if answered in self._starts:
+                            self._starts.discard(answered)
+                            self._watch_for_stall(cdp)
             finally:
                 self._cdp = None
+                if self._stall is not None:
+                    self._stall.cancel()
 
     def capture_at(self, width: int, height: int, *, compact: bool = False) -> None:
         """Capture at most this many device pixels from the next start on."""
@@ -113,6 +126,20 @@ class PaneScreencast:
             params.update(maxWidth=self._size[0], maxHeight=self._size[1])
         self._starts.add(cdp.next_request())
         await cdp.send("Page.startScreencast", **params)
+
+    def _watch_for_stall(self, cdp: CdpClient) -> None:
+        if self._stall is not None:
+            self._stall.cancel()
+        self._stall = asyncio.create_task(self._nudge_if_silent(cdp, self.received))
+
+    async def _nudge_if_silent(self, cdp: CdpClient, before: int) -> None:
+        await asyncio.sleep(self.STALL_S)
+        if self.received == before and self._cdp is cdp:
+            self.nudges += 1
+            try:
+                await cdp.send("Page.captureScreenshot", format="jpeg", quality=10)
+            except websockets.ConnectionClosed:
+                pass  # The pane is leaving; run() ends with the closed socket.
 
     def _quality(self) -> int:
         return self.COMPACT_QUALITY if self._compact else self.QUALITY
