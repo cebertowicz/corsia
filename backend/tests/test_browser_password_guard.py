@@ -195,7 +195,9 @@ async def test_password_probe_reads_only_search_matches_and_keeps_only_password_
 
 @pytest.mark.asyncio
 async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector_names(monkeypatch):
-    """AR2: a read is refused when its @ref or CSS selector locates a seen password node, or can't be located."""
+    """AR2: a read is refused when its @ref or CSS selector locates a seen password node, or can't be located.
+
+    The step ended on this visit, so a value read of any other node is refused too (it may hold what was typed)."""
     responses = iter((PasswordProbe("visit", "example.test", frozenset({42}), present_nodes=frozenset({42})),))
     hidden = PasswordProbe("visit", "example.test", frozenset(), present_nodes=frozenset({42}))
 
@@ -227,7 +229,8 @@ async def test_a_hidden_password_read_is_refused_by_the_node_its_ref_or_selector
     for selector in ("@e3", "#password", "#gone", "@broken"):
         with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access("thread", probe, ("get", "value", selector), resolve=resolve)
-    await browser_control.require_page_access("thread", probe, ("get", "value", "@e4"), resolve=resolve)
+    with pytest.raises(BrowserSessionError, match="filled in a password field"):
+        await browser_control.require_page_access("thread", probe, ("get", "value", "@e4"), resolve=resolve)
     await browser_control.require_page_access("thread", probe, ("get", "attr", "@e4", "href"), resolve=resolve)
 
 

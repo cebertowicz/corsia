@@ -10,7 +10,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from host_access import browser_control, browser_steps, browser_step_lifecycle as lifecycle
+from host_access import browser_control, browser_session_commands, browser_steps, browser_step_lifecycle as lifecycle
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
@@ -439,8 +439,9 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
     page.show("visit-c", present=frozenset({42}))
     await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
     assert set(browser_control._guarded_visits[THREAD]) == {"visit-a"}
-    browser_control.browser_closed(THREAD)
+    await browser_session_commands.end_session(THREAD, "session-one")
     assert THREAD not in browser_control._guarded_visits
+    assert not lifecycle.finished_visit(THREAD, "visit-a")
     page.show("visit-a", present=frozenset({42}))
     await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
 

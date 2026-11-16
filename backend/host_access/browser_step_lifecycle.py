@@ -27,8 +27,9 @@ class Answer:
     declined: bool = False
     # The password fields the person finished (a done answer only); they stay theirs until seen hidden (R14).
     nodes: frozenset[int] = frozenset()
-    # The person marked a password field on this visit done. Kept for the visit even once the field is gone: a
-    # show-password control can swap it for a text input holding what they typed (browser_control, R14).
+    # A password step ended on this visit (done, declined, or its field hidden: R3, R4, R6), so what the person
+    # typed may still be on the page. Kept for the visit even once the field is gone: a show-password control can
+    # swap it for a text input holding what they typed (browser_control).
     finished: bool = False
 
 
@@ -110,7 +111,9 @@ def _decide_rules(state: StepState, event: Event) -> Decision:
         if end is not None:
             assert rule is not None
             done_nodes = step.nodes if end == "done" and isinstance(step, PasswordStep) else frozenset()
-            finished = (end == "done" and isinstance(step, PasswordStep)
+            # A password step that ends on its own visit (done, declined, or its field hidden) leaves what the
+            # person typed on that page; R5 means the visit changed, so it is gone with it.
+            finished = (isinstance(step, PasswordStep) and rule != "R5"
                         or state.answers.get((_kind(step), step.visit), Answer(0)).finished)
             answer = Answer(step.occurrence, end == "declined", done_nodes, finished)
             answers = dict(state.answers)
@@ -374,5 +377,5 @@ def password_page(thread_id: str) -> bool:
 
 
 def finished_visit(thread_id: str, visit: str) -> bool:
-    """Whether the person marked a password field on this visit done (Answer.finished)."""
+    """Whether a password step ended on this visit, so what the person typed may still be there (Answer.finished)."""
     return _answers.get(thread_id, {}).get(("password", visit), Answer(0)).finished

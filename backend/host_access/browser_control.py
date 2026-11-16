@@ -64,10 +64,10 @@ FILLED_FIELD_SNAPSHOT_WITHHELD = (
     "Error: this snapshot was withheld. The person filled in a password field on this page, and "
     "agent-browser's output wasn't a snapshot whose field values could be hidden. Run snapshot again."
 )
-# Once the person marks a password field done (R14), any field on that visit may display what they typed: a
-# text-type field, a show-password toggle, or one that swaps the field for a new text input the probe can't
-# tell from any other. So for the rest of the visit only commands that never render a field's value or run
-# a page script run, even after the field is gone.
+# Once a password step ends on its own visit (done, declined, or its field hidden), any field on that visit may
+# display what the person typed: a text-type field, a show-password toggle, or one that swaps the field for a
+# new text input the probe can't tell from any other. So for the rest of the visit only commands that never
+# render a field's value or run a page script run, even after the field is gone.
 _FILLED_FIELD_COMMANDS = frozenset({
     "open", "back", "forward", "reload", "click", "dblclick", "hover", "focus", "fill", "type", "press",
     "select", "check", "uncheck", "scroll", "scrollintoview", "tab", "is",
@@ -147,7 +147,8 @@ async def check_page_access(thread_id: str, probe: browser_pane_state.Probe, arg
     """require_page_access, also saying whether a snapshot's field values must be hidden (hide_field_values).
 
     A command passes with a password field visible only once the person marked it done (R14): every other
-    path with one showing refuses first. From then until the visit ends, only _filled_field_allows commands run.
+    path with one showing refuses first. Once a password step ended on the visit (finished_visit), only
+    _filled_field_allows commands run until the visit ends, with or without a visible field.
     """
     result, note = await _guarded_probe(thread_id, probe, session=session)
     if (guarded := _guarded_visits.get(thread_id, {}).get(result.visit)) is not None:

@@ -45,7 +45,7 @@ def _event(name="probe", visible=False, **kwargs):
      {"rules": ("R4",), "end": "declined", "answer": lifecycle.Answer(1, True)}),
     (_state(_person()), lifecycle.Event("probe", _probe("visit-two"), session="session-one"),
      {"rules": ("R5",), "end": "settle", "answer": lifecycle.Answer(1)}),
-    (_state(_password()), _event(), {"rules": ("R6",), "end": "settle", "answer": lifecycle.Answer(1)}),
+    (_state(_password()), _event(), {"rules": ("R6",), "end": "settle", "answer": lifecycle.Answer(1, finished=True)}),
     (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person", "forget_done": "visit-one"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, True)}), _event(visible=True),
      {"rules": ("R8",), "refusal": "password_declined"}),
@@ -69,7 +69,13 @@ def _event(name="probe", visible=False, **kwargs):
      {"rules": (), "forget_done": None}),
     (_state(_password(), row_state="accepted"), _event(),
      {"rules": ("R3",), "end": "done", "forget_done": "visit-one", "answer": lifecycle.Answer(1, finished=True)}),
-], ids=[f"R{i}" for i in range(1, 15)] + ["R14-declare-opens-person", "R14-declare-declined", "no-result-keeps-done", "forget-on-done-path"])
+    # A password step that ends on its own visit leaves the visit restricted; one whose visit changed doesn't.
+    (_state(_password(), row_state="closed"), _event(),
+     {"rules": ("R4",), "end": "declined", "answer": lifecycle.Answer(1, True, finished=True)}),
+    (_state(_password()), lifecycle.Event("probe", _probe("visit-two"), session="session-one"),
+     {"rules": ("R5",), "end": "settle", "answer": lifecycle.Answer(1)}),
+], ids=[f"R{i}" for i in range(1, 15)] + ["R14-declare-opens-person", "R14-declare-declined", "no-result-keeps-done",
+                                          "forget-on-done-path", "R4-password-finishes-visit", "R5-password-new-visit"])
 def test_decide_rule_table_is_pure(state, event, expected):
     before = repr(state)
     decision = lifecycle.decide(state, event)
@@ -256,6 +262,30 @@ async def test_while_a_done_field_still_shows_only_commands_that_cannot_show_it_
         access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=other_field)
         assert not access.filled_field_visit
     assert len(_steps(plan["db"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_step_settled_by_its_field_hiding_leaves_the_visit_restricted(plan):
+    """The person types, then presses the page's own show-password control (or the page hides the form) before
+    marking done: the step settles (R6), and a text input the page swapped in may hold what they typed."""
+    page = Page()
+    page.show("visit-one", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    page.show("visit-one")
+
+    async def swapped_input(_target):
+        return 77
+
+    access = await browser_control.check_page_access(THREAD, page.agent_probe, ("snapshot",), resolve=swapped_input)
+    assert access.filled_field_visit and THREAD not in lifecycle._steps
+    for command in (("get", "value", "@e9"), ("get", "attr", "@e9", "value"), ("screenshot", "shot.png"), ("eval", "1")):
+        with pytest.raises(BrowserSessionError):
+            await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=swapped_input)
+    page.show("visit-two")
+    for command in (("snapshot",), ("get", "value", "@e9"), ("screenshot", "shot.png")):
+        access = await browser_control.check_page_access(THREAD, page.agent_probe, command, resolve=swapped_input)
+        assert not access.filled_field_visit
 
 
 @pytest.mark.parametrize("snapshot, expected", [
