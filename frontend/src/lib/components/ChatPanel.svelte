@@ -42,6 +42,7 @@
 	import {
 		createPager,
 		refreshPager,
+		mergeTurnSummaries,
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
@@ -98,10 +99,7 @@
 	let focusRuns = $state<RunStub[]>([]), runLoads = $state<Record<string, RunLoad>>({});
 	const focusOn = () => $coreSettings?.features?.focus_mode === true;
 	const focusParam = () => (focusOn() ? '&view=focus' : '');
-	function mergeTurnSummaries(value: unknown): void {
-		if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-		turnSummaries = { ...turnSummaries, ...(value as Record<string, TurnSummary>) };
-	}
+	const adoptTurnSummaries = (value: unknown) => { turnSummaries = mergeTurnSummaries(turnSummaries, value); };
 
 	/** Drop the shown thread's pages, load state, summaries and run stubs: an open replaces them, and a new chat has none. */
 	function clearThreadTranscript(): void {
@@ -196,7 +194,7 @@
 				const page = await guardedPort.fetchPage(cursor);
 				if (page !== PAGER_ABORT && page) {
 					setChatReplyAttention(threadId, page.chat_reply_items ?? [], sequence);
-					mergeTurnSummaries((page as MessagePage).turn_summaries);
+					adoptTurnSummaries((page as MessagePage).turn_summaries);
 					focusRuns = adoptOlderPageRuns(focusRuns, page);
 				}
 				return page;
@@ -204,7 +202,7 @@
 		}, focusOn() ? 1 : undefined, needsMore); // a Focus page is one request, never a chain
 	}
 	const runLoader = {
-		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: mergeTurnSummaries,
+		pageSize: MSG_PAGE_SIZE, loads: () => runLoads, onSummaries: adoptTurnSummaries,
 		setLoad: (key: string, load: RunLoad) => { runLoads = { ...runLoads, [key]: load }; },
 	};
 	const loadRun = (stub: RunStub) => void loadRunRange(stub, runLoader);
@@ -263,7 +261,7 @@
 			firstLoadFailed = false;
 			setChatReplyAttention(threadId, data.chat_reply_items ?? [], sequence);
 			const hydrated = hydrateFetchedMessages(data.messages ?? []);
-			mergeTurnSummaries(data.turn_summaries);
+			adoptTurnSummaries(data.turn_summaries);
 			adoptThreadSnapshot(threadId, hydrated);
 			adoptFirstPage(pager, data);
 			focusRuns = adoptFirstPageRuns(focusRuns, data, hydrated);

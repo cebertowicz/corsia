@@ -6,6 +6,15 @@ export type TurnSummary = {
 	cause?: string | null;
 };
 
+/**
+ * Page summaries are keyed by durable Turn identity; a later page refreshes the prior value for that same Turn without
+ * disturbing other loaded Turns. Anything that is not a summary map leaves `current` as it is.
+ */
+export function mergeTurnSummaries(current: Record<string, TurnSummary>, value: unknown): Record<string, TurnSummary> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return current;
+	return { ...current, ...(value as Record<string, TurnSummary>) };
+}
+
 export interface MessagePage {
 	messages: any[];
 	has_more: boolean;

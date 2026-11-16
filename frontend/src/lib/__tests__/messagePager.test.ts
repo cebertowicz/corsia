@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
 	createPager,
 	adoptFirstPage,
+	mergeTurnSummaries,
 	shouldLoadOlder,
 	loadOlder,
 	LOAD_OLDER_TRIGGER_PX,
@@ -399,5 +400,21 @@ describe('loadOlder — guards', () => {
 		expect(s.error).toBe(false);
 		expect(s.hasMore).toBe(true);
 		expect(s.loading).toBe(false);
+	});
+});
+
+describe('mergeTurnSummaries', () => {
+	const summary = (status: string) => ({ started_at: null, ended_at: null, status, activity_count: 1 });
+
+	it('refreshes the same Turn and keeps other loaded Turns', () => {
+		const current = { a: summary('running'), b: summary('done') };
+		expect(mergeTurnSummaries(current, { a: summary('done') })).toEqual({ a: summary('done'), b: summary('done') });
+	});
+
+	it('leaves the current map as it is for anything that is not a summary map', () => {
+		const current = { a: summary('done') };
+		for (const value of [undefined, null, 'x', [summary('done')]]) {
+			expect(mergeTurnSummaries(current, value)).toBe(current);
+		}
 	});
 });
