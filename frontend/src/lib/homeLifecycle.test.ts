@@ -3,12 +3,53 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { onSheetMoved } from './docCommentDrawer';
 import { registerHomeLifecycle } from './homeLifecycle';
 
+const stubPointer = (coarse: boolean) => vi.stubGlobal('matchMedia', (q: string) => ({ matches: coarse && q.includes('coarse'), media: q }));
+
+describe('keyboard inset only where a soft keyboard can open', () => {
+	let teardown: () => void;
+	let input: HTMLTextAreaElement;
+	const style = () => document.documentElement.style;
+	const props = ['--kb-toolbar-inset', '--floater-bottom-pad', '--messages-pad-top'];
+	const setup = (coarse: boolean) => {
+		stubPointer(coarse);
+		input = document.createElement('textarea');
+		document.body.append(input);
+		teardown = registerHomeLifecycle({
+			token: () => null, activeThreadId: () => null, activeView: () => 'chat', threads: () => [],
+			loadThreads: vi.fn(), loadModels: vi.fn(), loadSettings: vi.fn(), loadUpdateStatus: vi.fn(),
+			pollSystem: vi.fn(), checkSecurityAlert: vi.fn(), selectThread: vi.fn(async () => {}),
+			setActiveView: vi.fn(), chatPanel: () => undefined, on: () => () => {}, connect: vi.fn(),
+		});
+	};
+	afterEach(() => {
+		teardown();
+		input.remove();
+		props.forEach((p) => style().removeProperty(p));
+		vi.unstubAllGlobals();
+	});
+
+	it('sets the inset on focus with a coarse pointer', () => {
+		setup(true);
+		input.focus();
+		expect(style().getPropertyValue('--kb-toolbar-inset')).toBe('60px');
+		expect(style().getPropertyValue('--floater-bottom-pad')).toBe('4px');
+		expect(style().getPropertyValue('--messages-pad-top')).not.toBe('');
+	});
+
+	it('leaves the inset and paddings untouched on focus with a fine pointer', () => {
+		setup(false);
+		input.focus();
+		props.forEach((p) => expect(style().getPropertyValue(p)).toBe(''));
+	});
+});
+
 describe('keyboard inset focus ordering', () => {
 	let teardown: () => void;
 	let input: HTMLTextAreaElement;
 	let button: HTMLButtonElement;
 
 	beforeEach(() => {
+		stubPointer(true);
 		vi.useFakeTimers();
 		input = document.createElement('textarea');
 		button = document.createElement('button');
@@ -28,6 +69,7 @@ describe('keyboard inset focus ordering', () => {
 		document.documentElement.style.removeProperty('--kb-toolbar-inset');
 		vi.clearAllTimers();
 		vi.useRealTimers();
+		vi.unstubAllGlobals();
 	});
 
 	const pointer = (target: HTMLElement, type: string) => {
@@ -117,6 +159,7 @@ describe('keyboard inset focus ordering', () => {
 
 describe('transcript offset around a focused editor', () => {
 	const setup = (commentSheet: boolean) => {
+		stubPointer(true);
 		vi.useFakeTimers();
 		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number);
 		const panel = { captureBottomOffset: vi.fn(), restoreBottomOffset: vi.fn() };
