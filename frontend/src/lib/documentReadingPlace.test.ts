@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeAnchorAt, releasePlace } from './documentReadingPlace';
 import { restoreDocumentPlace } from './documentImagePlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 import readingSource from './documentReadingPlace.ts?raw';
@@ -255,6 +255,82 @@ describe('keepPlaceWhenEditorMoves', () => {
 		await page.frame();
 		await page.frame();
 		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A frame follows a resize at once; CodeMirror measures the resize 50 ms after it, so its anchor scroll for the rewrap
+	// can come that late.
+	const pastEditorResizeMeasure = async (page: { frame: () => Promise<void> }) => {
+		await page.frame();
+		await new Promise<void>((resolve) => setTimeout(resolve, 60));
+	};
+
+	it('lays the place again over the editor\'s scroll that comes with its late resize measure', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		await pastEditorResizeMeasure(page);
+		await page.frame();
+		page.scroller.scrollTop += 37;
+		await page.frame();
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	it('keeps laying the place again while the width changes over several frames', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		for (let step = 0; step < 4; step++) {
+			await pastEditorResizeMeasure(page);
+			await page.frame(() => { page.screen.width -= 60; });
+		}
+		page.scroller.scrollTop += 37;
+		await page.frame();
+		await page.frame();
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// The browser's find bar or a screen reader moves the document with no input on the page.
+	it('takes a scroll with no input as the reader\'s place once the rewrap at the new width is laid', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 500; });
+		await pastEditorResizeMeasure(page);
+		await page.frame();
+		await page.frame();
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2300);
+		const line = page.view.state.doc.lineAt(page.view.lineBlockAtHeight(page.screen.header - page.view.documentTop).from).text;
+		const top = page.onScreen(line);
+		page.follow(line);
+		await page.frame(() => { page.screen.header += 20; });
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(2320);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	// A jump to a comment can start while a panel is still sliding: it lets go of the place, scrolls, and the place is taken
+	// from where it lands.
+	it('keeps where a jump lands while the width is still changing, and takes a later scroll with no input once it has settled', async () => {
+		const page = pane();
+		await page.readAt(2000);
+		await page.frame(() => { page.screen.width = 700; });
+		releasePlace(page.view);
+		page.scroller.scrollTop = 4000;
+		await page.frame();
+		await page.frame(() => { page.screen.width = 600; });
+		await page.frame(() => { page.screen.width = 500; });
+		expect(page.scroller.scrollTop).toBe(4000);
+		await pastEditorResizeMeasure(page);
+		await page.frame();
+		await page.frame();
+		page.scroller.scrollTop += 300;
+		await page.frame();
+		expect(page.scroller.scrollTop).toBe(4300);
 		page.stop();
 	});
 

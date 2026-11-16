@@ -213,6 +213,9 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
  */
 const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
+/** How long after a resize CodeMirror measures it (its resize observer's delay); its anchor scroll for the rewrap comes then. */
+const EDITOR_RESIZE_MEASURE_MS = 50;
+
 /**
  * Holds the reader's place in this editor until the returned stop is called: takes it at first open and from every
  * scroll of the reader's, and lays it again from the editor's one resize observation, which sees the editor's box move
@@ -222,8 +225,9 @@ const BY_HAND = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
  * edge, from inside its measure and its scroll handler. That block is the paragraph the place skips when it is cut off,
  * so its scroll is not the reader's: at a width other than the one the place was taken at, a scroll lays the place again
  * instead of taking it, unless the reader has scrolled by hand (wheel, touch, a press or a key on the scroller) since the
- * width last changed. A scroll with no input on the page at all (the browser's find bar, a screen reader's cursor) is
- * still laid back until the reader's next input there.
+ * width last changed. That lasts until the rewrap is laid: the first frame after CodeMirror's own resize measure in which
+ * the width is the one laid in the frame before and laying the place moves nothing. The place is then held at that width,
+ * so a scroll with no input on the page (the browser's find bar, a screen reader's cursor) is the reader's again.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	const scroller = view.scrollDOM;
@@ -233,6 +237,27 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	keeper.width = scroller.clientWidth;
 	let hand = false;
 	const byHand = () => { hand = true; };
+	// The width last laid while it changes, whether it has been resized since the last frame, when (in frame time) the
+	// loop first saw the change, whether a frame has begun since CodeMirror's resize measure was due (so that measure has
+	// run), and the frame asked to see whether the width has settled.
+	let laidWidth = scroller.clientWidth;
+	let resized = false;
+	let changedAt = 0;
+	let measured = false;
+	let settling = 0;
+	const settleWidth = () => {
+		settling = requestAnimationFrame((now) => {
+			settling = 0;
+			if (!view.dom.isConnected) return;
+			const width = scroller.clientWidth;
+			if (resized || width !== laidWidth) [laidWidth, resized, changedAt, measured] = [width, false, now, false];
+			else if (!applyPlace(view) && measured) {
+				keeper.width = width;
+				return;
+			} else measured = now - changedAt >= EDITOR_RESIZE_MEASURE_MS;
+			settleWidth();
+		});
+	};
 	const onScroll = () => {
 		// The editor grew back past the text below the view and the browser cut the offset to the new end: that scroll is
 		// the browser's, and the resize observation that follows lays the place again.
@@ -248,8 +273,12 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 		keeper.width = scroller.clientWidth;
 	};
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-		// The text rewrapping under an earlier press is the layout's move, not the reader's.
-		if (scroller.clientWidth !== keeper.width) hand = false;
+		if (scroller.clientWidth !== keeper.width) {
+			// The text rewrapping under an earlier press is the layout's move, not the reader's.
+			hand = false;
+			if (scroller.clientWidth !== laidWidth) resized = true;
+			if (!settling) settleWidth();
+		}
 		applyPlace(view);
 	}) : null;
 	observer?.observe(scroller);
@@ -258,6 +287,7 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	for (const kind of BY_HAND) scroller.addEventListener(kind, byHand, { capture: true, passive: true });
 	return () => {
 		observer?.disconnect();
+		if (settling) cancelAnimationFrame(settling);
 		scroller.removeEventListener('scroll', onScroll);
 		for (const kind of BY_HAND) scroller.removeEventListener(kind, byHand, { capture: true });
 		keepers.delete(view);
