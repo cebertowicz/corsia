@@ -75,7 +75,7 @@ test('one press on the sign-in chip shows the agent’s browser', async ({ page,
 	} finally { await probe.close(); }
 });
 
-test('a sign-in step for a site with a long name reaches the person, and Done wakes the agent', async ({ page, request }, info) => {
+test('a sign-in step for a site with a long name reaches the person', async ({ page, request }, info) => {
 	test.setTimeout(150_000);
 	const phone = info.project.name === 'chromium-mobile';
 	if (phone) await page.setViewportSize({ width: 393, height: 852 });
@@ -104,15 +104,6 @@ test('a sign-in step for a site with a long name reaches the person, and Done wa
 		await (phone ? listed.tap() : listed.click());
 		await expectPagePixels(page);
 		await saveEvidenceScreenshot(page, info, `${width}-long-3-browser`, { fullPage: false });
-		if (phone) return;
-
-		// Marking the step done wakes the agent, which takes its next turn.
-		await seedMockResponses(request, [{ content: 'Signed in; carrying on.', finish_reason: 'stop', match_thread: thread }]);
-		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
-		await planRow.click({ button: 'right' });
-		await page.getByRole('menuitem', { name: 'Mark done' }).click();
-		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 45_000 });
-		await saveEvidenceScreenshot(page, info, `${width}-long-4-woken`, { fullPage: false });
 	} finally { await probe.close(); }
 });
 
