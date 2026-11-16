@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
 	import { Button } from '$lib/components/ui';
 	import SettingsRow from './SettingsRow.svelte';
@@ -158,7 +159,7 @@
 				aria-label="New skill name"
 				onkeydown={(event) => { if (event.key === 'Enter') void create(); }}
 			/>
-			<input
+			<input use:keepTyped
 				bind:value={newDescription}
 				placeholder="Use when..."
 				aria-label="New skill description"

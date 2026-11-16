@@ -11,15 +11,17 @@ export function openSuggestionCount(comments: DocComment[]): number {
 
 /**
  * Accept every open suggestion on the shown document in one write, then put the accepted text on screen like a single accept does.
- * Throws when the document could not be saved first or the server refused, so the caller sends no verdict.
+ * Returns how many it accepted (the server's own list). Throws when the document could not be saved first or the server refused, so the caller sends no verdict.
  */
 export async function acceptAllOpen(
 	target: DocViewerTarget | null, artifactId: string,
 	hooks: { onText: (text: string) => void; onDocumentChanged: () => void },
-): Promise<void> {
+): Promise<number> {
 	if (!target || !await flushDraft(target)) throw new Error("Couldn't save the document before accepting the suggestions");
+	let accepted = 0;
 	try {
 		const result = await acceptAllSuggestions(artifactId);
+		accepted = result.accepted?.length ?? 0;
 		// Nothing to accept comes back with a null text and revision: the screen stays as it is.
 		if (typeof result.text === 'string' && typeof result.revision === 'string') {
 			seedDraft(target, result.text, result.revision);
@@ -31,4 +33,5 @@ export async function acceptAllOpen(
 		throw error;
 	}
 	await loadComments(artifactId);
+	return accepted;
 }

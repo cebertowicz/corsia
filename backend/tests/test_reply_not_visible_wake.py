@@ -15,7 +15,7 @@ import pytest
 
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
-from infra.reply_not_visible_wake import EVENT, nudge_text
+from infra.reply_not_visible_wake import EVENT, comment_nudge_text, nudge_text
 
 pytestmark = pytest.mark.focus_nudge
 
@@ -112,6 +112,20 @@ def test_the_text_is_the_approved_wording() -> None:
         "visible response, please use post_update now. If no reply to their last message was "
         "necessary or expected, DO NOT SEND AN UPDATE. Instead, answer with exactly NO_REPLY "
         "and nothing else."
+    )
+
+
+def test_the_comment_wake_names_the_comments_and_asks_for_a_tagged_update() -> None:
+    assert comment_nudge_text(["c4.1"]) == (
+        "Your answer to the comment [c4.1] is not in its thread. Send it with post_update, "
+        "starting with [c4.1] and then your answer."
+    )
+    assert comment_nudge_text(["c4.1", "c4.2"]) == (
+        "Your answers to the comments [c4.1] [c4.2] are not in their threads. Send them with "
+        "post_update, each starting with its own tag ([c4.1] first, then a blank line and [c4.2])."
+    )
+    assert comment_nudge_text(["c4.1", "c4.2", "c4.3"]).endswith(
+        "each starting with its own tag ([c4.1] first, then a blank line and [c4.2], and so on)."
     )
 
 
@@ -450,25 +464,31 @@ async def test_a_failure_in_the_nudge_never_loses_the_turn_end(db, monkeypatch) 
     assert effects is not None
 
 
-def _comment_on(db, typed: str) -> str:
-    """The person's message carries one chat comment on an earlier reply; returns its cid."""
+def _comments_on(db, typed: str, count: int) -> list[str]:
+    """The person's message carries ``count`` chat comments on an earlier reply; returns their cids."""
     target = _say(db, "Earlier agent message", turn="t0", for_user=True)
     _take_in(db)
     (order,) = db.execute("SELECT input_order FROM messages WHERE id='m1'").fetchone()
-    cid = f"c{order}.1"
+    cids = [f"c{order}.{n}" for n in range(1, count + 1)]
     db.execute("UPDATE messages SET content=?, metadata=json_set(metadata,'$.reply_context',json(?)) "
-               "WHERE id='m1'", (typed, json.dumps({"comments": [{"cid": cid}]})))
-    db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) "
-               "VALUES (?,?,?,?,?)", (_THREAD, target, "m1", cid, _AT))
+               "WHERE id='m1'", (typed, json.dumps({"comments": [{"cid": cid} for cid in cids]})))
+    for cid in cids:
+        db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) "
+                   "VALUES (?,?,?,?,?)", (_THREAD, target, "m1", cid, _AT))
     db.commit()
-    return cid
+    return cids
+
+
+def _comment_on(db, typed: str) -> str:
+    """The person's message carries one chat comment on an earlier reply; returns its cid."""
+    return _comments_on(db, typed, 1)[0]
 
 
 @pytest.mark.asyncio
-async def test_answers_shown_in_the_messages_comment_threads_are_a_visible_reply(db) -> None:
-    # A comments-only send answered in tags shows in its threads; nudging would show it twice.
+async def test_an_answer_sent_with_post_update_is_a_visible_reply(db) -> None:
+    # A comments-only send answered in a sent message shows in its threads; nudging would show it twice.
     cid = _comment_on(db, "")
-    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
     assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
 
     effects = await _end(db)
@@ -478,33 +498,226 @@ async def test_answers_shown_in_the_messages_comment_threads_are_a_visible_reply
 
 
 @pytest.mark.asyncio
-async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, monkeypatch) -> None:
-    # The renderer shows an answer in its thread only while the comment row joins; a deleted
-    # comment takes its answer with it, so chat shows nothing either.
+async def test_tagged_closing_text_places_no_answer_and_is_nudged_once(db, monkeypatch) -> None:
+    # Words the person was not sent answer no comment, so the Turn still owes a reply.
     import infra.reply_not_visible_wake as wake
 
     monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
     cid = _comment_on(db, "")
-    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
-    db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
-    db.commit()
-
-    await _end(db)
-
-    (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", None))
-
-
-@pytest.mark.asyncio
-async def test_words_left_outside_the_thread_answers_still_nudge_quoting_only_them(db, monkeypatch) -> None:
-    import infra.reply_not_visible_wake as wake
-
-    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
-    cid = _comment_on(db, "Also, can we skip Friday?")
-    _say(db, f"Yes, Friday is skipped.\n\n[{cid}] Moved. Tonight runs at 4 AM.")
+    closing = f"[{cid}] Moved. Tonight runs at 4 AM."
+    _say(db, closing)
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
 
     effects = await _end(db)
 
     (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", "Yes, Friday is skipped."))
+    assert nudge["content"].endswith(nudge_text("1:19", closing))
     assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_shows_tagged_closing_text_as_one_answer_never_a_bubble(db) -> None:
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    closing = _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert _for_user(db, closing)
+    assert [tuple(r) for r in db.execute(
+        "SELECT user_message_id,cid,assistant_message_id FROM chat_comment_answers",
+    )] == [("m1", cid, closing)]
+    stored = db.execute(
+        "SELECT v.content,json_extract(m.metadata,'$.chat_drawn') FROM messages m "
+        "JOIN chat_visible_content v ON v.message_id=m.id WHERE m.id=?", (closing,),
+    ).fetchone()
+    assert tuple(stored) == ("", 0)
+
+
+@pytest.mark.asyncio
+async def test_an_untagged_update_beside_tagged_closing_text_leaves_the_comment_nudged(db, monkeypatch) -> None:
+    # An update that answers no comment is not the comment's reply: the tagged closing text
+    # places nothing, so the Turn still owes an answer and is woken once for it.
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    _say(db, f"[{cid}] Yes, Friday is skipped.")
+
+    effects = await _end(db)
+
+    (nudge,) = _nudges(db)
+    # The person did get an update, so the wake does not say that no reply is visible.
+    assert nudge["content"].endswith(comment_nudge_text([cid]))
+    assert "No reply is visible" not in nudge["content"]
+    assert effects.drives.count(_THREAD) == 1
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_answering_with_an_untagged_update_has_replied(db) -> None:
+    # Turn 1's tagged closing text is still unanswered, but the wake fires once: any update the
+    # woken Turn sends settles it. Nothing is flipped and Turn 1's closing text is not re-shown.
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    first_closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    _say(db, "Yes, Friday is skipped.", turn="t2", for_user=True)
+    done = _say(db, "Done.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert not _for_user(db, done)
+    assert not _for_user(db, first_closing)
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+    assert len(_nudges(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_woken_turn_that_sent_an_untagged_update_shows_nothing_more(db) -> None:
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    first_closing = _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    _say(db, "Yes, Friday is skipped.", turn="t2", for_user=True)
+
+    await _stop(db, "t2")
+
+    assert not _for_user(db, first_closing)
+    assert db.execute("SELECT count(*) FROM chat_comment_answers").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_nudged_turn_answers_the_comment_with_a_tagged_update(db) -> None:
+    from infra.chat_comment_answers import place_flipped_answers
+
+    cid = _comment_on(db, "")
+    _say(db, "Moved the meeting.", for_user=True)
+    _say(db, f"[{cid}] Yes, Friday is skipped.")
+    await _end(db)
+    _take_nudge(db, "t2")
+    answer = _say(db, f"[{cid}] Yes, Friday is skipped.", turn="t2", for_user=True)
+    place_flipped_answers(db, _THREAD, answer)
+    db.commit()
+
+    await _end(db, turn="t2")
+
+    assert [tuple(r) for r in db.execute(
+        "SELECT user_message_id,cid,assistant_message_id FROM chat_comment_answers",
+    )] == [("m1", cid, answer)]
+    assert len(_nudges(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_untagged_update_alone_is_a_reply_to_a_comment_message(db) -> None:
+    # The agent answered the typed text, or left the comments unanswered as its grounding allows:
+    # nothing is tagged anywhere, so nothing is owed and the person is not told "no reply is visible".
+    _comment_on(db, "Also, can we skip Friday?")
+    _say(db, "Yes, Friday is skipped.", for_user=True)
+    _say(db, "Done.")
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_a_plain_message_answered_by_an_untagged_update_is_replied_to(db) -> None:
+    _take_in(db)
+    _say(db, "Hi there", for_user=True)
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_answer_repeated_in_closing_text_is_not_nudged(db) -> None:
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, monkeypatch) -> None:
+    # An answer shows in its thread only while its comment row joins; a deleted comment takes its
+    # answer with it, so the tagged closing text still owes one and the Turn is nudged.
+    import infra.reply_not_visible_wake as wake
+
+    cid = _comment_on(db, "")
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.", for_user=True)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
+    db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
+    db.commit()
+
+    effects = await _end(db)
+
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(comment_nudge_text([cid]))
+    assert effects.drives.count(_THREAD) == 1
+
+
+async def _owed_two_comments(db, monkeypatch) -> list[str]:
+    """Turn 1 sent an untagged update and tagged both comments only in closing text; woken once."""
+    import infra.reply_not_visible_wake as wake
+
+    monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
+    first, second = _comments_on(db, "", 2)
+    _say(db, "Moved the meeting.", for_user=True)
+    _say(db, f"[{first}] Yes, Friday is skipped.\n\n[{second}] Tonight runs at 4 AM.")
+    await _end(db)
+    (nudge,) = _nudges(db)
+    assert nudge["content"].endswith(comment_nudge_text([first, second]))
+    _take_nudge(db, "t2")
+    return [first, second]
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_owing_two_comments_places_both_answers_once(db, monkeypatch) -> None:
+    first, second = await _owed_two_comments(db, monkeypatch)
+    answer = _say(
+        db, f"[{first}] Yes, Friday is skipped.\n\n[{second}] Tonight runs at 4 AM.",
+        turn="t2", for_user=True,
+    )
+    done = _say(db, "Done.", turn="t2")
+
+    await _end(db, turn="t2")
+
+    assert sorted(tuple(r) for r in db.execute(
+        "SELECT cid,assistant_message_id FROM chat_comment_answers",
+    )) == sorted([(first, answer), (second, answer)])
+    assert not _for_user(db, done)
+    assert len(_nudges(db)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_woken_turn_answering_only_one_of_two_comments_has_replied_and_is_not_woken_again(
+    db, monkeypatch,
+) -> None:
+    # The wake fires once per person message, as on dev: any sent message after it settles the
+    # Turn, so the comment it left out is not asked for a second time and nothing else is shown.
+    first, second = await _owed_two_comments(db, monkeypatch)
+    answer = _say(db, f"[{first}] Yes, Friday is skipped.", turn="t2", for_user=True)
+    done = _say(db, "Done.", turn="t2")
+
+    effects = await _end(db, turn="t2")
+
+    assert [tuple(r) for r in db.execute(
+        "SELECT cid,assistant_message_id FROM chat_comment_answers",
+    )] == [(first, answer)]
+    assert not _for_user(db, done)
+    assert len(_nudges(db)) == 1
+    assert _THREAD not in effects.drives
