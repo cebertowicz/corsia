@@ -303,31 +303,32 @@ async def test_a_saved_sign_in_selects_an_option_and_submits_with_enter(tmp_path
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_capture_verb_errors(tmp_path, monkeypatch):
-    """TEMPORARY: show what agent-browser says when hover, select and scrollintoview miss or are covered."""
+async def test_a_saved_sign_in_shows_an_agent_no_page_text_in_a_target_verbs_error(tmp_path, monkeypatch):
+    """F1: agent-browser names the element covering a target; the agent gets a fixed text for it."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":
         pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
-    from host_access import browser_session_launch
+    from host_access import browser_agent_verbs as verbs, browser_session_launch
 
     async def saved_profile(_thread_id):
         return str(tmp_path / "profile"), None
 
     monkeypatch.setattr(browser_session_launch, "resolve_profile", saved_profile)
-    thread_id = f"capture-{uuid4().hex}"
-    owner = BrowserSessionOwner(namespace="corsia-capture", instance_key=uuid4().hex)
-    captured = {}
+    thread_id = f"verb-errors-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-verb-errors", instance_key=uuid4().hex)
     try:
         with fixture_server() as origin:
             await owner.run(thread_id, ("open", f"{origin}/covered.html"))
-            for target in ("#nope", "#cs", "#cb"):
-                for args in (("hover", target), ("select", target, "Secret option label"), ("scrollintoview", target)):
-                    try:
-                        captured[" ".join(args)] = await owner.run(thread_id, args, session="existing")
-                    except Exception as exc:  # noqa: BLE001 - the capture wants every kind of failure
-                        captured[" ".join(args)] = f"RAISED {type(exc).__name__}: {exc}"
+            for verb in ("hover", "select", "scrollintoview"):
+                tail = ("Secret option label",) if verb == "select" else ()
+                assert await owner.run(thread_id, (verb, "#nope", *tail), session="existing") == verbs.NOT_FOUND
+            for target in ("#cs", "#cb"):
+                assert await owner.run(thread_id, ("hover", target), session="existing") == verbs.COVERED
+            for verb, target in (("select", "#cs"), ("scrollintoview", "#cb")):
+                tail = ("Secret option label",) if verb == "select" else ()
+                result = await owner.run(thread_id, (verb, target, *tail), session="existing")
+                assert result == verbs.ACKNOWLEDGED and "Secret" not in result
     finally:
         await owner.shutdown()
-    pytest.fail("CAPTURED " + json.dumps(captured, indent=1))
 
 
 def page_endpoint(rendered: str) -> str:

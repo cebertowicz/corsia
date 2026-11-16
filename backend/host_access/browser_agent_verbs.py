@@ -18,6 +18,14 @@ KEY_REFUSAL = ("press takes one of these keys only: Enter, Tab, Shift+Tab, Escap
                "ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Space, Backspace, Delete. "
                "Type text with browser_fill.")
 ACKNOWLEDGED = "Done."
+# What agent-browser 0.31.2 says for a target that isn't there: it names nothing from the page.
+NOT_FOUND = ("Error: agent-browser command failed: Element not found. "
+             "Verify the selector is correct and the element exists in the DOM.")
+# Its cover message names the covering element (a tag), so a fixed text stands in for it.
+COVERED = ("Error: agent-browser command failed: that element is covered by another element at its click point. "
+           "Dismiss or interact with the covering element first (it is often a dialog, banner, or sticky header).")
+UNUSABLE = "Error: agent-browser command failed: that element couldn't be used."
+TARGETED = frozenset({"select", "hover", "scrollintoview"})
 
 _REF = re.compile(r"(?:@|ref=)?e\d+")
 # Other selector engines: a prefix such as text=, xpath= or js=, an XPath, a chained locator, or a script URL.
@@ -55,3 +63,10 @@ def admitted(args: Sequence[str]) -> bool:
 def refusal(args: Sequence[str]) -> str | None:
     """The reason a press outside the key list is refused, so the agent learns the list."""
     return KEY_REFUSAL if args[0] == "press" else None
+
+
+def model_error(args: Sequence[str], text: str) -> str:
+    """A target verb's error with nothing from the page in it; only the known not-found text passes through."""
+    if args[0] not in TARGETED or not text.startswith("Error:") or text == NOT_FOUND:
+        return text
+    return COVERED if " is covered by " in text else UNUSABLE

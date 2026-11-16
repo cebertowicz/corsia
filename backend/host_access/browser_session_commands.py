@@ -217,6 +217,8 @@ async def _run_action(owner: Any, runtime: Any, thread_id: str, args: Sequence[s
         if result.timed_out or isinstance(error, str) and "timed out" in error.lower():
             return _noted(browser_cli.WAIT_TIMED_OUT, note)
     rendered = owner._model_result(result, runtime.record)
+    if saved_sign_in and not pane:
+        rendered = browser_agent_verbs.model_error(args, rendered)
     if (saved_sign_in and not pane and args[0] in browser_agent_verbs.VERBS and not unfinished
             and not rendered.startswith("Error:")):
         # A page that was held by a person or the password guard never reaches the agent through a verb's result.

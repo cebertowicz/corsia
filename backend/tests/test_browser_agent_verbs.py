@@ -257,6 +257,30 @@ async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, 
     await saved.owner.shutdown()
 
 
+COVER_TEXT = ("Element '#pay' is covered by <div class=\"modal\" data-account=\"4417\">Account 4417</div> at its click "
+              "point, so the input would land on that element instead.")
+
+
+@pytest.mark.parametrize("args", [["hover", "#pay"], ["select", "#pay", "Large"], ["scrollintoview", "#pay"]])
+@pytest.mark.parametrize(("stderr", "expected"), [
+    (COVER_TEXT, verbs.COVERED),
+    ("no option labelled 'Large (L)' among: Small (S), Medium (M)", verbs.UNUSABLE),
+    ("Element not found. Verify the selector is correct and the element exists in the DOM.", verbs.NOT_FOUND),
+])
+async def test_a_target_verbs_error_carries_nothing_from_the_page(saved, args, stderr, expected):
+    saved.result = type(saved.result)(1, "", stderr)
+    result = await saved.owner.run("t1", args)
+    assert result == expected
+    assert "4417" not in result and "<div" not in result and "Small" not in result
+    await saved.owner.shutdown()
+
+
+async def test_the_error_of_another_command_is_left_as_it_was(saved):
+    saved.result = type(saved.result)(1, "", COVER_TEXT)
+    assert "Account 4417" in await saved.owner.run("t1", ["click", "#pay"])
+    await saved.owner.shutdown()
+
+
 async def test_a_session_without_a_saved_sign_in_is_unchanged(synthetic_browser, monkeypatch):
     monkeypatch.setattr(browser_launch, "_owner_key", lambda _: None)
     await synthetic_browser.owner.run("a", ["open", "about:blank"])
