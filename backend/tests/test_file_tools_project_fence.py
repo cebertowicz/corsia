@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# The gate binds sandbox_config.is_path_allowed by name on first import; import
+# it here so no test below makes it keep a patched copy for later files.
+import tools.host_access_gate  # noqa: F401
 from tools.filesystem_edit import EditFileTool, ListDirTool, MultiEditTool
 from tools.filesystem_rw import ReadFileTool, WriteFileTool
 from tools.glob import GlobTool
