@@ -185,6 +185,55 @@ async def test_native_browser_success_failure_close_and_reopen(native_owner, tmp
     await owner.shutdown()
 
 
+async def test_native_media_request_gets_a_fake_device_never_a_real_one(native_owner):
+    """A page's camera and microphone request reaches Chrome's fake devices, so the OS is never asked.
+
+    The hosted runner has no camera or microphone: without the launch switch this request fails.
+    """
+    from host_access import browser_session_commands
+
+    async def serve(reader, writer):
+        await reader.readuntil(b'\r\n\r\n')
+        writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nMedia test')
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    origin = f'http://127.0.0.1:{server.sockets[0].getsockname()[1]}'
+    thread = 'native-media'
+    try:
+        assert not (await native_owner.run(thread, ['open', f'{origin}/'])).startswith('Error:')
+        record = native_owner._sessions[thread].record
+        children = await asyncio.to_thread(psutil.Process(record.pid).children, recursive=True)
+        command_lines = []
+        for child in children:
+            try:
+                command_lines.append(child.cmdline())
+            except psutil.NoSuchProcess:
+                continue
+        assert any('--use-fake-device-for-media-stream' in line for line in command_lines), command_lines
+        # Stand in for the site permission a person would grant; the device answering is what is checked.
+        browser = await browser_session_commands.browser_endpoint(native_owner, thread)
+        async with browser_cdp.CdpClient(browser) as cdp:
+            await cdp.call('Browser.grantPermissions', origin=origin, permissions=['audioCapture', 'videoCapture'])
+        async with browser_cdp.CdpClient(await native_owner.page_endpoint(thread)) as cdp:
+            result = await cdp.call('Runtime.evaluate', awaitPromise=True, returnByValue=True, expression="""
+              navigator.mediaDevices.getUserMedia({audio: true, video: true}).then(stream => {
+                const tracks = stream.getTracks().map(track => [track.kind, track.label]);
+                stream.getTracks().forEach(track => track.stop());
+                return tracks;
+              }, error => 'error: ' + error.name)""")
+        tracks = result['result']['value']
+        assert isinstance(tracks, list), tracks
+        assert sorted(kind for kind, _ in tracks) == ['audio', 'video'], tracks
+        assert all('fake' in label.lower() for _, label in tracks), tracks
+    finally:
+        await native_owner.close_thread(thread)
+        server.close()
+        await server.wait_closed()
+
+
 async def test_native_pane_fits_both_shapes_on_each_tab(native_owner, monkeypatch):
     thread, connection = 'native-fit', 'pane'
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, 'browser_sessions', lambda: native_owner)
