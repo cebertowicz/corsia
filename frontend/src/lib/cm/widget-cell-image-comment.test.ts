@@ -11,6 +11,8 @@ import { imageContext, type ImageContext } from './markdown-image';
 import { selectionIn } from './widget-selection';
 import { widgetComments, type WidgetSelection } from './widget-comments';
 import { paintTable } from './widget-paint';
+import { emptyCellSelection } from './widget-cell-comment';
+import { build, cellEditor, cellEl, cleanup, clicked, typed } from './widget-cell-rig';
 
 // A status column whose cells hold only a badge image, as a briefing's state column does.
 const CONTEXT: ImageContext = { docPath: '/ws/notes/brief.md', projectId: 'p1', token: 't' };
@@ -122,6 +124,43 @@ describe('the comment a selection over a cell’s image makes', () => {
 		// The words it is drawn on are words it is about, not just its image's alt text.
 		expect(selection?.text.replace(OTHER, '')).toContain(drawn[0]);
 		expect(mixed.textContent?.trim()).toBe('Done');
+	});
+});
+
+describe('an image-only cell opened for editing, as a tap on a phone opens it', () => {
+	const openBadge = () => {
+		vi.useFakeTimers();
+		const r = build(DOC, [commentRanges, pendingCommentMark, imageContext.of(() => CONTEXT), widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() })]);
+		clicked(r, cellEl(r, 1, 1));
+		expect(cellEditor(r), 'setup: the cell editor opened').not.toBeNull();
+		vi.advanceTimersByTime(50);
+		return r;
+	};
+	afterEach(() => cleanup());
+
+	it('is offered Comment on its image’s markdown, labelled as a press beside the drawn image is', () => {
+		const r = openBadge();
+		// Wide enough that an empty cell's offer would sit inside it, at its far end.
+		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 200, 36));
+		const offer = emptyCellSelection(r.view);
+		expect(offer).toMatchObject({ from: at(BADGE), to: at(BADGE) + BADGE.length, text: BADGE, inWidget: true });
+		expect(label(offer)).toBe('“Design” · Alpha, Status');
+		// The badge is in the cell, so the offer goes beside or below the table, as for selected text, not over the cell's far end.
+		expect(offer, 'not placed inside the cell, over its image').not.toMatchObject({ end: true });
+		r.view.destroy();
+	});
+
+	it('is offered nothing once text is typed beside the image, and nothing for a cell that holds text and an image', () => {
+		const r = openBadge();
+		typed(r, 0, 'x');
+		expect(emptyCellSelection(r.view), 'the cell has text now').toBeNull();
+		r.view.destroy();
+		vi.useFakeTimers();
+		const mixed = build(DOC, [imageContext.of(() => CONTEXT)]);
+		clicked(mixed, cellEl(mixed, 2, 1));
+		expect(cellEditor(mixed), 'setup: the mixed cell opened').not.toBeNull();
+		expect(emptyCellSelection(mixed.view)).toBeNull();
+		mixed.view.destroy();
 	});
 });
 

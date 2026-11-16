@@ -1,13 +1,15 @@
 import { StateEffect, StateField, type EditorState, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
-import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
-import { tableCells } from './widget-cells';
+import { CELL_EDITOR, cellSource, openCellState, type OpenCell } from './widget-cell-state';
+import { tableCells, widgetCommentLabel } from './widget-cells';
+import { cellImageSlots } from './widget-cell-images';
+import { imageContext } from './markdown-image';
 import { heldText, heldToSource, sourceToHeld } from './widget-cell-row';
 import { cellTextRange, markClasses, suggestionInsert, type CellSuggestion, type Mark } from './widget-paint';
 import { colourStyle } from './suggestion-marks';
 import { OFFER_GAP, OFFER_ROOM, offerPlace } from './offer-place';
-import { selectionIn } from './widget-selection';
+import { rowsBox, selectionIn } from './widget-selection';
 import { acrossColumn } from './comment-anchor-geometry';
 import type { WidgetSelection } from './widget-selection-types';
 
@@ -69,13 +71,23 @@ export function paintOpenCell(view: EditorView, marks: Mark[]) {
 /**
  * An empty cell has no text to select, so while its editor is open and still empty the Comment offer is the whole cell's,
  * as it is for a tap on an empty cell of a document that can't be edited. The first character typed makes it a cell with
- * text, where a comment starts from selected text as anywhere else; emptying the cell again brings the offer back.
+ * text, where a comment starts from selected text as anywhere else; emptying the cell again brings the offer back. A cell holding
+ * only images (a status badge) has no text to select either: its offer is on those images' markdown, as a press beside them is.
  */
 
-/** The open cell while it holds no text, or null: no cell open, or the open one has text. */
+/** The markdown of the images an open cell holds when it holds nothing else, as document offsets; null otherwise. */
+function openCellImages(state: EditorState, cell: OpenCell): { from: number; to: number } | null {
+	const source = cellSource(state, cell), context = state.facet(imageContext)();
+	const slots = context ? cellImageSlots(source, context.docPath) : [];
+	if (!slots.length || slots.some((slot) => !slot)) return null;
+	const rest = slots.reduceRight((text, slot) => text.slice(0, slot!.from) + text.slice(slot!.to), source);
+	return rest.trim() ? null : { from: cell.from + slots[0]!.from, to: cell.from + slots[slots.length - 1]!.to };
+}
+
+/** The open cell while it holds no text (nothing, or only images), or null: no cell open, or the open one has text. */
 export function emptyOpenCell(state: EditorState) {
 	const cell = state.field(openCellState, false) ?? null;
-	return cell && cellSource(state, cell).trim() === '' ? cell : null;
+	return cell && (cellSource(state, cell).trim() === '' || openCellImages(state, cell)) ? cell : null;
 }
 
 /** Which empty cell is open, as a key that changes when another cell opens, so a move between empty cells raises the offer again. */
@@ -95,17 +107,27 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	const widget = cell && drawnTableAt(view, cell.tableFrom);
 	const td = widget && cellElement(widget, cell);
 	if (!widget || !td) return null;
-	// The same range a tap on an empty cell selects: the cell's contents, which for an empty cell is a caret at its start.
-	const range = document.createRange();
-	range.selectNodeContents(td);
-	if (!range.collapsed) range.collapse(true);
-	const raised = selectionIn(view, widget, range);
+	const images = openCellImages(view.state, cell), { state } = view;
+	let raised: WidgetSelection | null;
+	if (images) {
+		// The open cell's editor stands in for its drawn images, so they are read from its source: the same markdown a press
+		// beside the drawn images comments on (`selectionIn`), labelled by the one shared function.
+		const { from, to } = images, text = state.sliceDoc(from, to);
+		raised = { from, to, text, top: 0, left: 0, above: true, inWidget: true, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: () => rowsBox(widget, [td]) };
+	} else {
+		// The same range a tap on an empty cell selects: the cell's contents, which for an empty cell is a caret at its start.
+		const range = document.createRange();
+		range.selectNodeContents(td);
+		if (!range.collapsed) range.collapse(true);
+		raised = selectionIn(view, widget, range);
+	}
 	if (!raised) return null;
 	// That caret's own box has no size, so the offer is placed on the cell's box, the one its open editor is laid over. An empty
 	// cell holds no text for it to cover: it sits inside the cell, at its far end, away from the caret at the start.
-	// A cell too narrow to hold it (a phone's last column) puts it beside or below the table, as the offer for selected text goes.
+	// A cell too narrow to hold it (a phone's last column), or one whose images it would cover, puts it beside or below the table,
+	// as the offer for selected text goes.
 	const box = td.getBoundingClientRect();
-	if (box.width < OFFER_ROOM) return { ...raised, above: false, ...offerPlace(view, cell.tableFrom, box) };
+	if (images || box.width < OFFER_ROOM) return { ...raised, above: false, ...offerPlace(view, cell.tableFrom, box) };
 	return { ...raised, above: false, exact: true, end: true, top: (box.top + box.bottom) / 2, left: box.right - OFFER_GAP };
 }
 
