@@ -43,12 +43,16 @@ DROP_REASON = "Dropped by you on {date}"
 GATE_REJECTED = "The person rejected this gate: ask for their review again, and close it only after a later answer."
 GATE_NOTICE = "Gate step {step} was handed off by the person, so {how}."
 #: The first line of a handed-off gate step's own description, so every read of the step says who checks it.
+#: It names both readers: the run's owner, who starts the reviewer, and the reviewer the step is handed to.
 HANDED_OFF_STEP = (
-    "The person handed this review to an agent. Don't ask the person: once the work is ready, hand this step "
-    "to a reviewer (delegate_task with plan_node_id) and accept or send back what it returns."
+    "The person handed this review to an agent. If you started this workflow, don't ask the person: once the work "
+    "is ready, hand this step to a reviewer (delegate_task with plan_node_id) and accept or send back what it "
+    "returns. If you are that reviewer, check the work and return your verdict."
 )
 GATE_HOW = {
-    "agent": "a reviewer checks it instead of them",
+    "agent": (
+        "don't ask them: once the work is ready, hand it to a reviewer you start (delegate_task with plan_node_id)"
+    ),
     "spot": "it is a spot check, so the person still reviews it",
     "dropped": "it is already closed",
 }
