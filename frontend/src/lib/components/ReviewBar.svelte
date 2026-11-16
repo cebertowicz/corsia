@@ -133,7 +133,6 @@
 	async function approve() {
 		if (round > 0 && blocked()) return;
 		// The count belongs to the receipt this approve produces, so every approve starts it at zero.
-		// The count belongs to the receipt this approve produces, so every approve starts it at zero.
 		acceptedCount = 0;
 		if (acceptFirst) {
 			bar.accepting = true; bar.failure = '';
