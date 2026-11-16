@@ -100,6 +100,24 @@ describe('BrowserPaneStats', () => {
 		expect(delay[bucket(300)]).toBe(1);
 	});
 
+	it('ignores a decode that finishes after the connection was reset', () => {
+		const pane = stats();
+		pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });
+		const oldPainted = pane.arrived({ seq: 900, input: 1 });
+		pane.stop();
+		pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });
+		oldPainted(true);
+		pane.arrived({ seq: 1 })(false);
+		const report = pane.report();
+		expect(report).toMatchObject({ painted: 0, painted_seq: 0 });
+		expect(total(report.input_to_paint_ms)).toBe(0);
+		// The new connection's input 1 is still pending, and its own frame answers it.
+		pane.arrived({ seq: 2, input: 1 })(true);
+		const answered = pane.report();
+		expect(answered).toMatchObject({ painted: 1, painted_seq: 2 });
+		expect(total(answered.input_to_paint_ms)).toBe(1);
+	});
+
 	it('keeps at most 64 inputs that no frame has named', () => {
 		const pane = stats();
 		for (let count = 0; count < 100; count++) pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });

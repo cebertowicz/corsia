@@ -31,6 +31,8 @@ export class BrowserPaneStats {
 	private painted = 0;
 	private paintedSeq = 0;
 	private carried = 0;
+	// Counts connections: a decode that finishes after `stop()` belongs to the old connection and is ignored.
+	private connection = 0;
 	private bufferedMax = 0;
 	private decode = emptyBuckets();
 	private delay = emptyBuckets();
@@ -57,7 +59,9 @@ export class BrowserPaneStats {
 	arrived(frame: Frame): (drawn: boolean) => void {
 		const started = this.now();
 		const input = typeof frame.input === 'number' ? frame.input : 0;
+		const connection = this.connection;
 		return drawn => {
+			if (connection !== this.connection) return;
 			// A replaced frame still carries its input's name, which the next painted frame answers for.
 			if (!drawn) {
 				this.carried = Math.max(this.carried, input);
@@ -102,6 +106,7 @@ export class BrowserPaneStats {
 	stop(): void {
 		clearInterval(this.timer);
 		this.timer = undefined;
+		this.connection += 1;
 		this.nextId = 1;
 		this.sentAt.clear();
 		this.paintedSeq = 0;
