@@ -8,11 +8,13 @@ import time
 import pytest
 from loguru import logger
 
-from infra.otel_logs import lifecycle
+from infra import sqlite_deadline
+from infra.otel_logs import lifecycle, store as store_module
 from infra.otel_logs.capture import CapturedRecord
 from infra.otel_logs.store import (
     LogStore,
     ReadQuery,
+    ReadTimeout,
     StoreUnavailable,
     read_records,
 )
@@ -112,6 +114,16 @@ def test_read_filters_newest_first(store):
     assert [r["ts_ns"] for r in read_records(store.path, high)] == [2]
     window = ReadQuery(since_ns=2, until_ns=4, min_severity=0, limit=1)
     assert [r["ts_ns"] for r in read_records(store.path, window)] == [3, 2]  # limit + 1
+
+
+def test_read_past_its_deadline_is_interrupted(store, monkeypatch):
+    store.insert([_record(n) for n in range(1, 50)], time.time_ns())
+    monkeypatch.setattr(store_module, "READ_DEADLINE_SECONDS", 0)
+    # Check on every step so the progress handler stops the read, not the error mapping alone.
+    monkeypatch.setattr(sqlite_deadline, "DEADLINE_CHECK_STEPS", 1)
+    with pytest.raises(ReadTimeout) as timed_out:
+        _all(store.path)
+    assert "interrupted" in str(timed_out.value.__cause__).lower()
 
 
 def test_read_without_store_is_unavailable(tmp_path):

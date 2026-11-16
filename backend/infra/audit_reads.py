@@ -13,6 +13,7 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
+from infra.sqlite_deadline import stop_at
 from infra.audit_plan_activity import plan_activity
 from infra.audit_limit_stops import limit_stops
 
@@ -222,7 +223,7 @@ def _read_audit_metric(
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
-            db.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1000)
+            stop_at(db, deadline)
             db.create_function(
                 "safe_rejection_category", 1,
                 lambda value: safe_rejection(value)[0], deterministic=True,
