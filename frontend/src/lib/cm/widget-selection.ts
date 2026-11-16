@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { blockRange, cellElement, DIAGRAM } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { type WidgetSelection } from './widget-selection-types';
+import { CELL_IMAGE, cellImageRange } from './widget-open';
 
 /**
  * What the person selected inside a rendered table or diagram, as a range of the block's own source. The widgets replace
@@ -24,6 +25,17 @@ export function rowsBox(el: HTMLElement, cells: HTMLElement[]): DOMRect | null {
 	const bottom = Math.max(...trs.map((tr) => tr.getBoundingClientRect().bottom));
 	const wide = el.getBoundingClientRect();
 	return new DOMRect(wide.left, top, wide.width, bottom - top);
+}
+
+/**
+ * The markdown of the cell images `part` holds, read back as a click on one opens it (`cellImageRange`): what a selection with
+ * no text in a cell comments on, such as a status badge. Null when it holds none, or one that cannot be read back.
+ */
+function cellImagesIn(view: EditorView, cell: HTMLElement, part: Range): { from: number; to: number } | null {
+	const wraps = [...cell.querySelectorAll<HTMLElement>(CELL_IMAGE)].filter((wrap) => part.intersectsNode(wrap));
+	const ranges = wraps.flatMap((wrap) => cellImageRange(view, wrap) ?? []);
+	if (ranges.length === 0 || ranges.length < wraps.length) return null;
+	return { from: Math.min(...ranges.map((range) => range.from)), to: Math.max(...ranges.map((range) => range.to)) };
 }
 
 /** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
@@ -49,7 +61,9 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 			if (range.compareBoundaryPoints(Range.END_TO_END, inCell) > 0) part.setEnd(cell, cell.childNodes.length);
 			return { span, cell, part, picked: part.toString() };
 		})
-		.filter(({ span, picked }) => picked.trim() !== '' || (range.collapsed && span.from === span.to));
+		// An image has no text, so a cell is kept for the text selected in it, or for an image it holds that the selection covers.
+		.filter(({ span, cell, part, picked }) => picked.trim() !== '' || (range.collapsed && span.from === span.to)
+			|| (!range.collapsed && [...cell.querySelectorAll(CELL_IMAGE)].some((wrap) => part.intersectsNode(wrap))));
 	if (covered.length === 0) return null;
 	const rows = (items: Array<{ cell: HTMLTableCellElement }> = covered) => rowsBox(el, items.map(({ cell }) => cell));
 	const first = covered[0], last = covered[covered.length - 1];
@@ -69,6 +83,13 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	const { span, cell, part, picked } = first;
 	if (range.collapsed && span.from === span.to) {
 		const from = block.from + span.anchorFrom, to = block.from + span.anchorTo, text = src.slice(span.anchorFrom, span.anchorTo);
+		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
+	}
+	// Images and no text: the comment is on those images' markdown, or the whole cell when one cannot be read back.
+	if (!picked.trim()) {
+		const images = cellImagesIn(view, cell, part);
+		if (!images) return whole();
+		const { from, to } = images, text = state.sliceDoc(from, to);
 		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
 	}
 	const rendered = cell.textContent ?? '';

@@ -114,7 +114,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			// An image's cell has no text but is not empty: a press on the image is the first half of a click that opens it.
 			if (drawnCellImage(target)) return;
 			// Chromium gives an empty cell a collapsed DOM range but does not announce it through selectionchange.
-			// This is the existing press path for table selection, so read the range synchronously here.
+			// This is the existing press path for table selection, so read the range synchronously here. A cell holding only an
+			// image (a status badge) has no text either: a press beside the image selects it, which is what its comment is on.
 			if (emptyCell && !emptyCell.textContent?.trim()) {
 				event.preventDefault();
 				const range = document.createRange();
