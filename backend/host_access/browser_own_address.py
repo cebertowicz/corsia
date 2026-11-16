@@ -24,8 +24,6 @@ from urllib.parse import urlsplit
 
 import psutil
 
-from host_access import browser_ports
-
 logger = logging.getLogger(__name__)
 REFUSAL = "This address is the person's own CORSIA, and the agents' browser does not open it."
 _WELL_KNOWN = frozenset({80, 443})  # a wildcard here would close the whole web; match machine names instead
@@ -46,11 +44,14 @@ def _listening(process: psutil.Process) -> set[int]:
 
 
 def _backend_ports() -> set[int]:
-    """Every port this backend process answers on: its own, the devices listener and the measure receiver."""
-    ports = _listening(psutil.Process()) - set(browser_ports.RESERVED_PORTS)  # held for a session's own CDP and stream
-    if (configured := os.environ.get("BACKEND_PORT", "")).isdigit():
-        ports.add(int(configured))
-    return ports
+    """This backend's own port and its measure receiver's candidates, from the same sources that bind them.
+
+    Not every socket the process holds: a page server a test or tool starts in-process is someone else's site.
+    """
+    from infra.default_port import DEFAULT_BACKEND_PORT
+    from infra.otlp_listener import _ports as receiver_ports
+    configured = os.environ.get("BACKEND_PORT", "")
+    return {int(configured) if configured.isdigit() else DEFAULT_BACKEND_PORT, *receiver_ports()}
 
 
 def _frontend_ports(backend_ports: set[int]) -> frozenset[int]:
@@ -156,7 +157,11 @@ async def clear_serving_storage(endpoint: str) -> None:
     try:
         async with CdpClient(await _first_page(endpoint)) as cdp:
             for origin in await asyncio.to_thread(_serving_origins):
-                await asyncio.wait_for(cdp.call("Storage.clearDataForOrigin", origin=origin, storageTypes=_STORED_DATA),
-                                       _CLEAR_TIMEOUT)
+                try:
+                    await asyncio.wait_for(cdp.call("Storage.clearDataForOrigin", origin=origin,
+                                                    storageTypes=_STORED_DATA), _CLEAR_TIMEOUT)
+                except Exception:
+                    logger.warning("stored data of %s could not be cleared from the browser profile", origin,
+                                   exc_info=True)
     except Exception:
         logger.warning("stored data of the serving CORSIA could not be cleared from the browser profile", exc_info=True)

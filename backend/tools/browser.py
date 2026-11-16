@@ -9,7 +9,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-from infra.default_port import DEFAULT_BACKEND_PORT
 from tools.base import Tool
 from tools.browser_runtime import (
     BrowserCloseTool as BrowserCloseTool,
@@ -36,7 +35,7 @@ class BrowserOpenTool(Tool):
         "browser_person_step shares it automatically when you need their help.\n\n"
         "USE THIS to:\n"
         "- Open a web page for inspection or testing\n"
-        f"- Navigate to CORSIA UI (http://localhost:{DEFAULT_BACKEND_PORT}) for UX review\n\n"
+        "- Check a CORSIA test or dev instance you started; this CORSIA's own address is refused\n\n"
         "After opening, call browser_snapshot to see the page content."
     )
     parameters = {
@@ -44,7 +43,7 @@ class BrowserOpenTool(Tool):
         "properties": {
             "url": {
                 "type": "string",
-                "description": f"URL to navigate to (e.g. 'http://localhost:{DEFAULT_BACKEND_PORT}')",
+                "description": "URL to navigate to (e.g. 'https://example.com')",
             },
             "wait_for_load": {
                 "type": "boolean",

@@ -67,15 +67,23 @@ def test_resolver_rules_name_each_port_and_each_tailscale_name(serving):
     assert all(not rule.startswith(("MAP *:80 ", "MAP *:443 ")) for rule in rules)
 
 
-def test_this_backends_own_listeners_are_found(monkeypatch):
+def test_this_backends_own_ports_are_found_and_an_in_process_page_server_is_not(monkeypatch):
     held = socket.socket()
     held.bind(("127.0.0.1", 0))
     held.listen()
     monkeypatch.setenv("BACKEND_PORT", "4999")
+    monkeypatch.setenv("CORSIA_OTLP_PORT", "4998")
     try:
-        assert {held.getsockname()[1], 4999} <= own._backend_ports()
+        ports = own._backend_ports()
+        assert {4999, 4998} <= ports and held.getsockname()[1] not in ports
     finally:
         held.close()
+
+
+def test_without_a_configured_port_the_default_port_is_served(monkeypatch):
+    from infra.default_port import DEFAULT_BACKEND_PORT
+    monkeypatch.delenv("BACKEND_PORT", raising=False)
+    assert DEFAULT_BACKEND_PORT in own._backend_ports()
 
 
 def _frontend(backend: int) -> subprocess.Popen:
