@@ -18,6 +18,7 @@ from host_access.shell_credential_positions import (
     SECURITY_PASSWORD_SUBCOMMANDS,
     SHELL_SEPARATORS,
     credential_stdin_source_indices,
+    plain_word_indices,
     security_password_value_indices,
     short_u_is_switch,
 )
@@ -367,7 +368,7 @@ def _validate_credential_expansions(
 
 
 def _redact_userinfo_flag(
-    words: Sequence[str], index: int
+    words: Sequence[str], index: int, plain: frozenset[int] | None
 ) -> tuple[list[str], int, int, int] | None:
     """Hide a ``-u``, ``--user`` or ``--proxy-user`` value at ``index``.
 
@@ -377,7 +378,7 @@ def _redact_userinfo_flag(
     and its next word is handled as any other word.
     """
     flag = str(words[index])
-    if flag.startswith("-u") and short_u_is_switch(words, index):
+    if flag.startswith("-u") and short_u_is_switch(words, index, plain):
         return None
     if flag in {"-u", "--proxy-user", "--user"} and index + 1 < len(words):
         value, rendered_flag, consumed = str(words[index + 1]), [flag], 2
@@ -393,7 +394,9 @@ def _redact_userinfo_flag(
     return [*rendered_flag, rendered], count, literals, consumed
 
 
-def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
+def _redact_shell_tokens(
+    tokens: Sequence[str], plain: frozenset[int] | None
+) -> ShellCommandRedaction:
     redacted: list[str] = []
     redactions = 0
     literal_credentials = 0
@@ -462,7 +465,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             index += 2
             continue
 
-        userinfo = _redact_userinfo_flag(tokens, index)
+        userinfo = _redact_userinfo_flag(tokens, index, plain)
         if userinfo is not None:
             words, count, literals, consumed = userinfo
             redacted.extend(words)
@@ -491,11 +494,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             index += 1
             continue
 
-        if (
-            token.startswith("-p")
-            and token != "-p"
-            and password_style_command
-        ):
+        if token.startswith("-p") and token != "-p" and password_style_command:
             replacement, count, literals = _secret_replacement(token[2:])
             redacted.append(f"-p{replacement}")
             redactions += count
@@ -559,20 +558,14 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
             and "=" not in token
             and index + 1 < len(tokens)
             and str(tokens[index + 1]) not in SHELL_SEPARATORS
-            and (
-                credential_context
-                or password_style_command
-            )
+            and (credential_context or password_style_command)
         ):
             redacted.append(token)
             append_sensitive(str(tokens[index + 1]))
             index += 2
             continue
 
-        if (
-            literal_output_command
-            and _is_example_credential_assignment(token)
-        ):
+        if literal_output_command and _is_example_credential_assignment(token):
             rendered, count, literals = token, 0, 0
         else:
             rendered, count, literals = _redact_intrinsic(token)
@@ -581,10 +574,7 @@ def _redact_shell_tokens(tokens: Sequence[str]) -> ShellCommandRedaction:
         literal_credentials += literals
         if _CREDENTIAL_CONTEXT_RE.fullmatch(token.strip()):
             credential_context = True
-        if (
-            not is_redirection_target
-            and _password_style_executable(token)
-        ):
+        if not is_redirection_target and _password_style_executable(token):
             password_style_command = True
         if (
             not is_redirection_target
@@ -616,7 +606,9 @@ def redact_shell_command(command: str) -> ShellCommandRedaction:
         raise CommandRedactionError("command text is unparseable") from exc
     if not tokens:
         raise CommandRedactionError("command text is empty")
-    redacted = _redact_shell_tokens(tokens)
+    redacted = _redact_shell_tokens(
+        tokens, plain_word_indices(command, tokens)
+    )
     _validate_credential_expansions(
         command,
         has_credential_value=bool(redacted.redactions),
@@ -627,7 +619,8 @@ def redact_shell_command(command: str) -> ShellCommandRedaction:
 def _redacted_words(text: str) -> ShellCommandRedaction | None:
     """Redact the shell words of ``text``, or ``None`` if it cannot be."""
     try:
-        return _redact_shell_tokens(shell_words(text))
+        words = shell_words(text)
+        return _redact_shell_tokens(words, plain_word_indices(text, words))
     except (CommandRedactionError, ValueError):
         return None
 
@@ -712,7 +705,9 @@ def validate_shell_command_descriptor(value: object) -> None:
             raise CommandRedactionError(
                 "command descriptor here-document is not redacted"
             )
-    normalized = _redact_shell_tokens(tokens)
+    # Descriptor words have lost their quoting, so the quoting check in
+    # short_u_is_switch cannot run; redact_shell_command already ran it.
+    normalized = _redact_shell_tokens(tokens, None)
     if (
         normalized.tokens != tuple(tokens)
         or normalized.redactions != 0

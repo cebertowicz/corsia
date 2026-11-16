@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Sequence
 
+from host_access.shell_view import shell_words
+
 
 COMMAND_BOUNDARIES = frozenset({";", ";;", "&", "&&", "|", "||", "|&"})
 _REDIRECTION_OPERATORS = frozenset(
@@ -119,7 +121,30 @@ def security_password_value_indices(
     return frozenset(sensitive)
 
 
-def short_u_is_switch(words: Sequence[str], index: int) -> bool:
+def plain_word_indices(text: str, words: Sequence[str]) -> frozenset[int]:
+    """Indices of ``words`` (``shell_words(text)``) written plainly.
+
+    A plain word has no quotes or escapes. Empty when the as-written split
+    does not line up word for word, so every word counts as maybe quoted.
+    """
+    try:
+        written = shell_words(text, posix=False)
+    except ValueError:
+        return frozenset()
+    if len(written) != len(words):
+        return frozenset()
+    return frozenset(
+        index
+        for index, (word, raw) in enumerate(zip(words, written))
+        if word == raw and not any(mark in raw for mark in "\"'\\")
+    )
+
+
+def short_u_is_switch(
+    words: Sequence[str],
+    index: int,
+    plain: frozenset[int] | None,
+) -> bool:
     """Whether short ``-u`` at ``words[index]`` is a switch with no value.
 
     True only when the command it belongs to is named plainly and is one
@@ -127,19 +152,33 @@ def short_u_is_switch(words: Sequence[str], index: int) -> bool:
     password (curl and tools that copy its flags), so a command this
     cannot name (a variable, an alias, curl started inside ``$(...)``)
     keeps the value treated as one.
+
+    ``plain`` holds the indices of words written with no quotes or
+    escapes. The command boundary and any ``(`` or backquote that opens
+    the command must sit in such words, since a quoted one is only text
+    handed to an earlier command. ``None`` means the words are an already
+    redacted descriptor whose quoting is gone; only that check is skipped.
     """
     segment: list[str] = []
-    for raw in reversed(words[:index]):
-        word = str(raw)
+    for position in range(index - 1, -1, -1):
+        word = str(words[position])
         if word in COMMAND_BOUNDARIES:
+            if plain is not None and position not in plain:
+                return False
             break
         # A subshell or substitution starts its own command: (date,
         # ts=$(date, or date after a backquote.
         opener = max(word.rfind("("), word.rfind("`"))
         if opener >= 0:
+            if plain is not None and position not in plain:
+                return False
             segment.insert(0, word[opener + 1:])
             break
         segment.insert(0, word)
+    # A substitution that closes before -u, as in curl -d t=$(date +%s)
+    # -u, has already ended; the command is whatever started before it.
+    if any(")" in word or "`" in word for word in segment):
+        return False
     command = next(
         (word for word in segment if word and not _ASSIGNMENT_RE.match(word)),
         "",

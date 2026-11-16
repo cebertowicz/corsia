@@ -279,10 +279,15 @@ _TOK = "Tok" + "en"
 def test_switches_and_code_text_are_not_literal_credentials(
     command: str,
 ) -> None:
-    from host_access.redaction import redact_shell_command
+    from host_access.redaction import (
+        redact_shell_command,
+        validate_shell_command_descriptor,
+    )
     from tools.shell_guard import check_command_safety
 
-    assert redact_shell_command(command).literal_credentials == 0
+    rendered = redact_shell_command(command)
+    assert rendered.literal_credentials == 0
+    validate_shell_command_descriptor(rendered.descriptor())
     assert check_command_safety(command) is None
 
 
@@ -296,6 +301,9 @@ def test_switches_and_code_text_are_not_literal_credentials(
         "$CURL -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "fetch -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "sudo sort -u alice:not-a-ref",  # gitleaks:allow
+        "curl -d '(date' -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d \\(date -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl ';' date -u alice:not-a-ref https://example.test",  # gitleaks:allow
         "ffuf -u https://alice:not-a-ref@example.test/FUZZ",  # gitleaks:allow
         "ffuf -u 'https://example.test/?" + _TOK.lower() + "=abc123'",
         "curl -H 'X-Api-" + _TOK + ": abc123' https://example.test",
@@ -322,6 +330,10 @@ def test_curl_user_and_header_literals_are_still_refused(
         "out=`curl -u alice:not-a-ref https://example.test`",  # gitleaks:allow
         "out=$($CURL -u alice:not-a-ref https://example.test)",  # gitleaks:allow
         "echo `fetch -u alice:not-a-ref`",  # gitleaks:allow
+        "curl -d t=$(date +%s) -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "T=$(date +%s) curl -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d t=`date +%s` -u alice:not-a-ref https://example.test",  # gitleaks:allow
+        "curl -d '`date' -u alice:not-a-ref https://example.test",  # gitleaks:allow
     ],
 )
 def test_short_u_literal_inside_a_substitution_is_refused(command: str) -> None:
