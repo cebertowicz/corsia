@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickedOpener, onSheetMoved, openerFocus, presence, scrollListToCard } from './docCommentDrawer';
+import { clickedOpener, onSheetMoved, openerFocus, presence, scrollListToCard, writingField } from './docCommentDrawer';
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
@@ -107,5 +107,32 @@ describe('onSheetMoved', () => {
 		expect(() => onSheetMoved(document.createElement('div'))()).not.toThrow();
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		expect(reveal).not.toHaveBeenCalled();
+	});
+});
+
+describe('writingField', () => {
+	const surface = () => {
+		document.body.innerHTML = '<div data-thread-id="a"><textarea class="ct-input"></textarea><button>Resolve</button></div>'
+			+ '<div data-thread-id="gone"><textarea class="ct-input"></textarea></div><div class="composer"><textarea></textarea></div><textarea id="other"></textarea>';
+		return (selector: string) => document.querySelector(selector);
+	};
+
+	it('names a reply field by its thread, so the other form finds the same one', () => {
+		const at = surface();
+		expect(writingField(at('[data-thread-id="a"] textarea'), [{ id: 'a' }], false)?.selector).toBe('[data-thread-id="a"] .ct-input');
+	});
+
+	it('names the composer only while a draft is the surface', () => {
+		const at = surface();
+		expect(writingField(at('.composer textarea'), [], true)?.selector).toBe('.composer textarea');
+		expect(writingField(at('.composer textarea'), [], false)).toBeNull();
+	});
+
+	it('is null for anything that is not one of these comments\' fields', () => {
+		const at = surface();
+		expect(writingField(at('button'), [{ id: 'a' }], true)).toBeNull();
+		expect(writingField(at('#other'), [{ id: 'a' }], true)).toBeNull();
+		expect(writingField(at('[data-thread-id="gone"] textarea'), [{ id: 'a' }], true)).toBeNull();
+		expect(writingField(null, [{ id: 'a' }], true)).toBeNull();
 	});
 });

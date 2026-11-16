@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { Spinner, Toggle } from '$lib/components/ui';
-	import { saveUpdateSchedule, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
+	import { saveUpdateSchedule } from '$lib/update/schedule';
+	import { updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
 	import { failureCopy, failureFromOperation, failureFromVerdict, runningVersionOf } from '$lib/update/failureCopy';
 	import { changeList, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, isFailedOperation, releaseNotesFor, stepMessage } from '$lib/update/model';
 	import SettingsUpdateChanges from './SettingsUpdateChanges.svelte';

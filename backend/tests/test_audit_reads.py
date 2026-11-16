@@ -479,7 +479,7 @@ def test_audit_telemetry_records_only_metric_and_outcome(isolated_db, monkeypatc
 
 
 def test_audit_query_deadline_interrupts_large_read(isolated_db, monkeypatch):
-    from infra import audit_reads
+    from infra import audit_reads, sqlite_deadline
 
     _seed(isolated_db)
     with sqlite3.connect(isolated_db) as db:
@@ -490,9 +490,12 @@ def test_audit_query_deadline_interrupts_large_read(isolated_db, monkeypatch):
         )
     monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
     monkeypatch.setattr(audit_reads, "TIMEOUT_SECONDS", 0)
+    # Check on every step so the progress handler, not the after-query check, stops the read.
+    monkeypatch.setattr(sqlite_deadline, "DEADLINE_CHECK_STEPS", 1)
     with pytest.raises(audit_reads.AuditReadError) as timed_out:
         audit_reads.read_audit_metric("steve-p1", "steve", "stored_message_pressure")
     assert timed_out.value.category == "timeout"
+    assert "interrupted" in str(timed_out.value.__cause__).lower()
     assert "since and until" in timed_out.value.detail
     with pytest.raises(audit_reads.AuditReadError) as narrowed_timeout:
         audit_reads.read_audit_metric(

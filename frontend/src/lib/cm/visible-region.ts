@@ -33,6 +33,9 @@ function overlayTop(view: EditorView): number | null {
 	return null;
 }
 
+/** Whether a registered sheet overlays this editor now, so the reader's band is shorter than the pane. */
+export const sheetOverlays = (view: EditorView): boolean => overlayTop(view) !== null;
+
 /**
  * The one answer to which part of the editor the reader can see and which element scrolls it, for every vertical comment scroll.
  * `band` is the editor intersected with every clipping ancestor and the viewport, less the sheet that overlays it. `scroller` is the

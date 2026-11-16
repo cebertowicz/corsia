@@ -13,13 +13,21 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
+from infra.sqlite_deadline import stop_at
 from infra.audit_plan_activity import plan_activity
+from infra.audit_limit_stops import limit_stops
 
 AUDIT_METRICS = (
     "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure",
-    "agent_hours", "agent_day_levels"
+    "agent_hours", "agent_day_levels", "limit_stops"
 )
 MAX_WINDOW = timedelta(days=7)
+#: Metrics read by their own module from (db, caller user, since, until).
+_WINDOWED_READERS = {
+    "plan_activity": plan_activity,
+    # Accounts belong to the install, not to a user or project.
+    "limit_stops": lambda db, _user_id, since, until: limit_stops(db, since, until),
+}
 MAX_ROWS = 50
 TOP_PRESSURE_ROWS = 10
 MAX_BYTES = 16 * 1024
@@ -215,7 +223,7 @@ def _read_audit_metric(
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
-            db.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1000)
+            stop_at(db, deadline)
             db.create_function(
                 "safe_rejection_category", 1,
                 lambda value: safe_rejection(value)[0], deterministic=True,
@@ -248,9 +256,9 @@ def _read_audit_metric(
                 )
                 if len(rows) > MAX_ROWS:
                     raise AuditReadError("result_limit", "Audit result exceeds the fixed row limit; narrow the window.")
-            elif metric == "plan_activity":
+            elif metric in _WINDOWED_READERS:
                 assert start is not None and end is not None
-                rows = plan_activity(db, actor["user_id"], start, end)
+                rows = _WINDOWED_READERS[metric](db, actor["user_id"], start, end)
             else:
                 rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
             if time.monotonic() >= deadline:
@@ -262,7 +270,7 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": (
+        "scope": "install_accounts" if metric == "limit_stops" else (
             "caller_user" if metric in {"seat_usage", "plan_activity", "agent_hours", "agent_day_levels"}
             else "caller_user_and_project"
         ),

@@ -169,7 +169,7 @@ def _registered_paths(db) -> dict[str, list[Path]]:
     return by_project
 
 
-def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
+def _repo_roots(workspace: Path, db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
     """Fenced projects' registered repos, each as one whole root.
 
     A repo registered in two projects belongs to both: its worktrees' ``.git`` files
@@ -177,21 +177,21 @@ def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
     reaches holds a valid binding to stays open, unless a fenced Local only project also
     registers it and the caller reaches it only through projects that aren't: Local only
     content never reaches such a caller, so the whole repo is fenced, history included.
-    Only a valid binding opens a root; any registered path fences one.
+    Only a valid binding opens a root (a row whose ``source/`` link is gone opens
+    nothing); any registered path fences one.
     """
-    from infra.project_repo_policy import repo_policies_by_project
+    from infra.project_repo_binding import source_bound_paths
 
-    valid = repo_policies_by_project(db=db)
     registered = _registered_paths(db)
     fenced = [row for row in rows if fences(row["id"], row["id"] in cloud_off)]
     fenced_ids = {row["id"] for row in fenced}
+    reaching = [row for row in rows if row["id"] not in fenced_ids and row["id"] in registered]
     # Each root the caller reaches, and whether a Local only project it reaches holds it.
     reached: dict[Path, bool] = {}
-    for row in rows:
-        if row["id"] not in fenced_ids:
-            for policy in valid.get(row["id"], []):
-                key = canonical(policy.path)
-                reached[key] = reached.get(key, False) or row["id"] in cloud_off
+    for project_id, paths in source_bound_paths(workspace, db, reaching).items():
+        for path in paths:
+            key = canonical(path)
+            reached[key] = reached.get(key, False) or project_id in cloud_off
     roots = []
     for row in fenced:
         local_only = row["id"] in cloud_off
@@ -208,7 +208,7 @@ def _project_roots(workspace: Path, db, fences: _Fences) -> list[FencedRoot]:
 
     rows = db.execute("SELECT id, name, path, conductor_thread_id FROM projects").fetchall()
     cloud_off = cloud_off_project_ids(db=db)
-    return _folder_roots(workspace, db, fences, rows, cloud_off) + _repo_roots(db, rows, fences, cloud_off)
+    return _folder_roots(workspace, db, fences, rows, cloud_off) + _repo_roots(workspace, db, rows, fences, cloud_off)
 
 
 def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:

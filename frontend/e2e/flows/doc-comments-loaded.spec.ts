@@ -243,11 +243,16 @@ for (const { label, view } of CASES) {
 				const opener = card(page, doc.longThreads[0]);
 				await opener.scrollIntoViewIfNeeded();
 				const listTop = () => page.locator(`${DRAWER} .drawer-comments`).evaluate((el) => Math.round(el.scrollTop));
-				const listTopBefore = await listTop();
 				const row = opener.getByRole('button', { name: /16 replies/ });
 				if (!(await row.count())) fail('list: the long thread has no replies row to open it');
+				// The list's place is read with the row in view: the tap scrolls it there first, and that is where Back returns to.
+				await row.scrollIntoViewIfNeeded();
+				const listTopBefore = await listTop();
 				await press(row);
 				await settled(page);
+				// The check can only catch a Back that loses the list's place if the place is not the thread's own top.
+				const threadTop = await listTop();
+				if (listTopBefore < 3 || Math.abs(listTopBefore - threadTop) < 3) fail(`list: the place to return to (${listTopBefore}px) is not told apart from the thread's top (${threadTop}px), so Back could not be checked`);
 				await shot(page, info, label, '3-thread');
 				const back = page.locator(DRAWER).getByRole('button', { name: /^Back/ });
 				const drawerOpen = await page.locator(DRAWER).count();
@@ -399,11 +404,38 @@ for (const { label, view } of LONG_CASES) {
 				// The editor draws only the lines near its view: scroll the document down until the quote's line is drawn.
 				const scroller = page.locator('.cm-scroller').first();
 				await scroller.evaluate((el) => { el.scrollTop = 0; });
-				for (let step = 0; step < 40 && !(await anchor.count()); step++) {
-					await scroller.evaluate((el) => { el.scrollTop += el.clientHeight * 0.8; });
-					await page.waitForTimeout(50);
+				// The editor draws and measures only the lines near its view, and a short editor (83px at 852x393) covers little per step, so the scan walks the document, wraps back to the top and goes on until the quote is drawn, for at most 15s.
+				const scanUntil = Date.now() + 15_000;
+				while (!(await anchor.count()) && Date.now() < scanUntil) {
+					await scroller.evaluate((el) => { el.scrollTop = el.scrollTop + el.clientHeight >= el.scrollHeight - 1 ? 0 : el.scrollTop + Math.max(el.clientHeight * 0.8, 120); });
+					await page.waitForTimeout(100);
 				}
+				if (!(await anchor.count())) {
+					const diag = await scroller.evaluate((el) => {
+						const lines = [...el.querySelectorAll('.cm-line')].map((line) => (line.textContent ?? '').slice(0, 30));
+						return JSON.stringify({ top: el.scrollTop, h: el.clientHeight, sh: el.scrollHeight, drawn: lines.length, first: lines[0], last: lines[lines.length - 1], anchors: [...el.querySelectorAll('.cm-comment-anchor')].map((a) => (a.textContent ?? '').slice(0, 24)) });
+					});
+					throw new Error(`anchor "${quote}" never drawn in 15s: ${diag}`);
+				}
+				// A tap lands where the text is when the finger arrives. In a short editor (about 80 to 130px at 852x393) the editor re-measures the lines it draws, and
+				// that moves the scroll and the line under the finger by tens of pixels for a moment after a jump or a layout change. The press waits for the editor and the line to hold still.
+				const still = (target: Locator) => target.evaluate((el) => new Promise<void>((resolve) => {
+					const scroller = el.closest('.cm-scroller') as HTMLElement;
+					const deadline = performance.now() + 5_000;
+					let last = '', steady = 0;
+					const tick = () => {
+						const box = el.getBoundingClientRect();
+						const now = [scroller.scrollTop, scroller.clientHeight, Math.round(box.top), Math.round(box.left)].join();
+						steady = now === last ? steady + 1 : 0;
+						last = now;
+						if (steady >= 20 || performance.now() > deadline) resolve(); else requestAnimationFrame(tick);
+					};
+					tick();
+				}));
 				await anchor.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+				await still(anchor);
+				await anchor.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+				await still(anchor);
 				await press(anchor);
 				// One thread opens on its own in the sheet or the popover; in the margin it is that comment's card in the column.
 				const thread = page.locator(`.drawer-panel div.ct, [data-popover] div.ct, [data-comment-id="${id}"] div.ct`).first();

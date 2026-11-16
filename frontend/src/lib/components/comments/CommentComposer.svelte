@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { untrack } from 'svelte';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
@@ -8,7 +9,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -30,8 +31,13 @@
 		onCancel: () => void;
 		/** Escape, when it should close without discarding the text (as a click outside does); Cancel by default. */
 		onEscape?: () => void;
+		/** The caret the field takes when it mounts (the same draft drawn in another form), and each place it moves to. */
+		selection?: [number, number] | null;
+		onSelection?: (selection: [number, number]) => void;
 	} = $props();
 	let text = $state(untrack(() => body));
+	$effect(() => { const field = input; if (field) untrack(() => { if (selection) field.setSelectionRange(...selection); }); });
+	const saveSelection = () => { if (input) onSelection?.([input.selectionStart, input.selectionEnd]); };
 	const explanationId = $props.id();
 	let posting = $state(false);
 	$effect(() => {
@@ -59,7 +65,7 @@
 	<div class="input-wrap">
 		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
-			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+			<textarea use:keepTyped bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection}></textarea>
 		</Field>
 	</div>
 	<div class="actions">

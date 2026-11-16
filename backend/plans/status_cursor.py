@@ -49,7 +49,9 @@ def decode(value: str | None, *, plan_id: str, section: str | None) -> dict | No
     if value is None:
         return None
     if section is None:
-        raise PlanError("a status cursor continues one section: pass section='current' or 'recent'")
+        raise PlanError(
+            "a status cursor continues one section: pass section='current', 'recent' or 'later'"
+        )
     stale = FULL_STALE if section == FULL else STALE
     try:
         padded = value + "=" * (-len(value) % 4)

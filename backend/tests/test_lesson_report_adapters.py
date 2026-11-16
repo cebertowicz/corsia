@@ -526,7 +526,13 @@ def test_collection_cancellation_stops_after_first_count_chunk_and_closes_snapsh
     from core import lesson_report_access, lesson_report_offers
     from core.lesson_report_db import report_snapshot
 
-    _db, _app, _tool = report_target
+    db, _app, _tool = report_target
+    # A lesson-bearing call, so the period offers are counted at all.
+    db.execute("INSERT INTO context_manifests(id,harness,entries_json,entry_count,created_at) VALUES('manifest','native',?,1,'t')",
+               (json.dumps([{"source_id": "dynamic:skills-index", "lessons": [{"id": "lesson", "behavioral_sha256": "a" * 64}]}]),))
+    db.execute("INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+               "VALUES('call','owner','turn','m','manifest','2026-01-01T00:00:00')")
+    db.commit()
     cancellation = threading.Event()
     facts = {"count_chunks": 0, "text_chunks": 0, "snapshot_closed": False}
     original_snapshot = report_snapshot
@@ -544,8 +550,7 @@ def test_collection_cancellation_stops_after_first_count_chunk_and_closes_snapsh
 
     class CancelAfterFirstChunk:
         def __iter__(self):
-            yield {"id": "lesson", "version": "a" * 64, "n": 1, "calls": 1,
-                   "tasks": 0, "attempts": 0, "calls_without_task": 1}
+            yield {"manifest_id": "manifest", "task_id": None, "attempt_id": None, "n": 1}
             cancellation.set()
 
     def count_chunks(_db, sql, *_args, **_kwargs):
@@ -588,17 +593,21 @@ def test_collection_cancellation_stops_after_first_canonical_text_chunk(monkeypa
 
     def text_chunks(*_args, **_kwargs):
         chunks.append("first")
-        yield CancelAfterFirstText("[{\"id\":\"lesson\"}]")
+        yield CancelAfterFirstText("[{\"usage_id\":\"call\"}]")
         pytest.fail("a second canonical text chunk started after cancellation")
 
     monkeypatch.setattr(lesson_report_offers, "json_row_chunk_lists", count_chunks)
     monkeypatch.setattr(lesson_report_offers, "json_text_chunks", text_chunks)
-    offers = lesson_report_offers.DeferredOffers([], [], "user", "from", "to")
+    offers = lesson_report_offers.DeferredOffers([], [["manifest", 0, "lesson", "a" * 64]], "user", "from", "to")
+
+    class NoHarnesses:
+        def execute(self, *_args):
+            return iter(())
 
     with pytest.raises(lesson_report_offers.LessonReportCollectionCancelled):
-        offers.collect(object(), cancellation_event=cancellation)
+        offers.collect(NoHarnesses(), cancellation_event=cancellation)
 
-    assert chunks == ["first"] and len(offers._chunks) == 1
+    assert chunks == ["first"] and offers.text_chunks == 1
 
 
 def test_private_snapshot_interrupts_early_collection_and_closes_connection(report_target, monkeypatch, tmp_path):
@@ -625,7 +634,7 @@ def test_private_snapshot_interrupts_early_collection_and_closes_connection(repo
         snapshot.create_function("pause", 1, pause)
         snapshot.execute(
             "WITH RECURSIVE numbers(value) AS (VALUES(1) UNION ALL "
-            "SELECT value + 1 FROM numbers WHERE value < 100000) "
+            "SELECT value + 1 FROM numbers WHERE value < 10000000) "
             "SELECT sum(pause(value)) FROM numbers"
         ).fetchone()
         pytest.fail("early SQLite work finished after cancellation")

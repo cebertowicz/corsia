@@ -117,3 +117,40 @@ describe('ReviewBar capsule clearance', () => {
 		expect(clearance).toBe(-1);
 	});
 });
+
+describe('comment task bar on a comment sheet', () => {
+	const COMMENT_TASK: ReviewBarRead = {
+		...READ, ask_raised: false, hold_ids: [], ask_reason: null, asker: null,
+		person_step: {
+			node_id: 'n1', node_title: 'Review comments', node_revision: 1, plan_id: 'p1', owner_thread_id: 't1', owner_name: 'Docs agent',
+			comment_attention: { artifact_id: 'doc-1', comments: 2, suggestions: 0, system_task: true },
+		},
+	};
+
+	it('tucks the Dismiss all capsule away while a comment sheet is up, so it cannot float over the first card', async () => {
+		api.fetchReviewBar.mockResolvedValue(COMMENT_TASK);
+		suppressed = true;
+		const capsule = await render();
+		// The person-step variant passes `suppressed` through to the shell, the same as the agent review bar.
+		expect(capsule.classList.contains('suppressed')).toBe(true);
+		expect(container.querySelector('.review-bar.ask')!.classList.contains('suppressed')).toBe(true);
+		expect(capsule.textContent).toContain('Dismiss all');
+		expect(clearance).toBe(0);
+		// It is a class on the capsule and the bar, not a state of the sheet: the capsule returns with the sheet closed.
+		suppressed = false;
+		flushSync();
+		expect(capsule.classList.contains('suppressed')).toBe(false);
+		expect(container.querySelector('.review-bar.ask')!.classList.contains('suppressed')).toBe(false);
+	});
+
+	it('keeps the "N comments to review" line in the header row, never inside the floating capsule', async () => {
+		api.fetchReviewBar.mockResolvedValue(COMMENT_TASK);
+		suppressed = true;
+		const capsule = await render();
+		const line = [...container.querySelectorAll('.review-bar.ask .rb-head p')].find((p) => p.textContent === '2 comments to review');
+		expect(line).toBeTruthy();
+		expect(capsule.contains(line!)).toBe(false);
+		expect(capsule.textContent).not.toContain('comments to review');
+		expect([...container.querySelectorAll('*')].filter((el) => el.children.length === 0 && el.textContent?.includes('comments to review'))).toHaveLength(1);
+	});
+});

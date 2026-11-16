@@ -272,7 +272,9 @@ def activity_facts(plan_ids, *, db) -> list[dict]:
     Each plan chunk's eligible decision rows come back in one stepped read, and
     their metadata is parsed with the existing persisted reader. Work is linear
     in those bodies; no body/options/context escapes this owner and no full
-    renderer is invoked.
+    renderer is invoked. Activity reduces only open rows and counts only
+    answerable asks, so this reads open nodes alone, like ``wait_causes`` and
+    ``awaiting_count``: its cost is the open work, not every plan's history.
     """
     unique = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
     facts: list[dict] = []
@@ -280,7 +282,7 @@ def activity_facts(plan_ids, *, db) -> list[dict]:
         chunk = unique[start:start + hierarchy._ID_CHUNK]
         rows = fetch_all(
             db,
-            _rows_sql(",".join("?" for _ in chunk), compact=True),
+            _rows_sql(",".join("?" for _ in chunk), compact=True, open_nodes=True),
             (DECISION_TYPE, *chunk),
         )
         for row in rows:

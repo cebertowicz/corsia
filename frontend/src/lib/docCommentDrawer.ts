@@ -33,15 +33,15 @@ export function observeCanvasWidth(bounds: HTMLElement | null, update: (width: n
 	return () => observer.disconnect();
 }
 
-/** Report focus in a sheet's comment input, excluding its own review controls. */
-export function observeSheetTyping(panel: HTMLElement | null, update: (typing: boolean) => void) {
-	if (!panel) { update(false); return; }
-	const isField = (target: EventTarget | null) => target instanceof HTMLElement && panel.contains(target)
-		&& !target.closest('.rb-sheet-host') && target.matches('textarea, input, [contenteditable="true"]');
-	const onIn = (event: FocusEvent) => update(isField(event.target));
-	const onOut = (event: FocusEvent) => update(isField(event.relatedTarget));
-	panel.addEventListener('focusin', onIn); panel.addEventListener('focusout', onOut);
-	return () => { panel.removeEventListener('focusin', onIn); panel.removeEventListener('focusout', onOut); };
+/** A comment field the reader is writing in: `selector` finds the same field in another form of the surface. */
+export type WritingField = { selector: string; from: Element };
+
+/** The field `active` is, when it is one of these comments' reply fields or (`composing`) the new-comment composer; else null. */
+export function writingField(active: Element | null, comments: readonly { id: string }[], composing: boolean): WritingField | null {
+	if (!(active instanceof HTMLTextAreaElement)) return null;
+	if (composing && active.matches('.composer textarea')) return { selector: '.composer textarea', from: active };
+	const id = active.matches('.ct-input') ? active.closest('[data-thread-id]')?.getAttribute('data-thread-id') : null;
+	return id && comments.some((comment) => comment.id === id) ? { selector: `[data-thread-id="${CSS.escape(id)}"] .ct-input`, from: active } : null;
 }
 
 /** The card or image thumbnail a click in the drawer landed on, if any: what may open an image over the document. */

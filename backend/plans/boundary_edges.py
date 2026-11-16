@@ -35,10 +35,9 @@ def dispatch(
         if "node_ids" in params:
             # A bulk archive describes no single node, so it returns its own
             # per-node report rather than a node projection or a next task.
-            return after.archive_many(
-                plan_id, params["node_ids"], common, db,
-                executor=actor.thread_id if actor.kind == "thread" else None,
-            )
+            from plans import bulk_nodes
+
+            return bulk_nodes.dispatch(plan_id, operation, params, common, db, actor)
         archival.archive_node(
             params["node_id"], **fields.expected(params), **common,
         )
