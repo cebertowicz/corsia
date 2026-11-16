@@ -1045,8 +1045,7 @@ async def request_reviewed_lease(
                     and await run_in_db(get_host_access_auto_approve)
                 )
                 isolation_failed = False
-                # Closing model browsers guards only the person's approval prompt.
-                if review.allowed and not auto_approve:
+                if review.allowed and not auto_approve:  # isolation guards the person's prompt
                     try:
                         await _close_user_model_browsers(lease["user_id"])
                     except HostAccessBrowserIsolationError:
