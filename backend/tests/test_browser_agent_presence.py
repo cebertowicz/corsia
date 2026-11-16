@@ -117,7 +117,6 @@ class FakeCdp:
         self.scroll = scroll
         self.calls = []
         self.hit_tests = []
-        self.write_params = None
 
     async def __aenter__(self):
         return self
@@ -145,7 +144,6 @@ class FakeCdp:
         if method == "Runtime.callFunctionOn" and "labels" in params["functionDeclaration"]:
             return {"result": {"type": "object", "objectId": "label"} if self.labelled else {"type": "object", "subtype": "null"}}
         if method == "Runtime.callFunctionOn":
-            self.write_params = params
             return self.write
         if method == "Page.getLayoutMetrics":
             return {"cssVisualViewport": {"clientWidth": self.viewport[0], "clientHeight": self.viewport[1],
@@ -179,16 +177,6 @@ async def test_a_shared_click_marks_no_field(monkeypatch):
     assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2"),
                                            lambda field, label: marked.append((field, label))) == "ok"
     assert marked == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("args, gesture", [(("click", "@e2"), True), (("fill", "@e2", "agent value"), False)])
-async def test_only_a_shared_click_carries_user_activation(monkeypatch, args, gesture):
-    """A real click activates the page (a sign-in popup needs it); a fill is not a click."""
-    cdp = FakeCdp(labelled=False)
-    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
-    assert await browser_dom_write.shared_action(_run, "ws://page.test", args) == "ok"
-    assert cdp.write_params["userGesture"] is gesture
 
 
 @pytest.mark.asyncio
