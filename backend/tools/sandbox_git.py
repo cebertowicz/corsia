@@ -18,11 +18,36 @@ def _is_plain_file(path: Path) -> bool:
 def sandbox_literal(path: Path) -> str:
     """Escape ``path`` for a Safehouse profile rule exactly as given, no resolve.
 
-    Precondition: a root ``list_repo_worktrees`` returned in this request, or
-    ``<root>/.git`` after ``verified_worktree_marker`` proved it a non-symlink
-    regular file. Any other path must be resolved first (``_sandbox_path``).
+    Use for already-resolved paths, and for the fixed ``<resolved repo>/.worktrees``
+    boundary, which is intentionally lexical: resolving that child could turn a
+    symlink into a grant outside the repository. Other paths must be resolved
+    first (``_sandbox_path``).
     """
     return str(path).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def worktree_folder_rules(repo: Path, *, protected_base: bool) -> list[str]:
+    """Constant denies for ``<repo>/.worktrees``, whatever its worktree count.
+
+    Each pattern is the exact literal subtree intersected with an any-case,
+    depth-anchored regex. The literal pins the repository spelling (the regex
+    root uses ``sandbox_any_case`` wildcards, never escapes), and the regex pins
+    the depth, so neither a similarly named sibling nor a deeper ``.worktrees``
+    matches. Every immediate entry's ``.git`` (file, directory, any case) stays
+    unwritable. A protected base also pins the folder and its immediate
+    entries, so a ``.git`` prepared deeper cannot be renamed into place.
+    """
+    trees = repo / ".worktrees"
+    subtree = f'(subpath "{sandbox_literal(trees)}")'
+    pattern = sandbox_any_case(trees)
+
+    def deny(regex: str) -> str:
+        return f'(deny file-write* (require-all {subtree} (regex #"^{pattern}/{regex}")))'
+
+    rules = [deny("[^/]+/[.][Gg][Ii][Tt](/|$)")]
+    if protected_base:
+        rules[:0] = [f'(deny file-write* (literal "{sandbox_literal(trees)}"))', deny("[^/]+$")]
+    return rules
 
 
 def sandbox_any_case(path: Path) -> str:

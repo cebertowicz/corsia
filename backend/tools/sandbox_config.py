@@ -25,7 +25,7 @@ from infra.project_repo_policy import (
 from tools.repo_worktree_guidance import protected_checkout_worktree_guidance
 from tools.sandbox_ignored_files import is_ignored_untracked_file
 from tools.sandbox_git import verified_worktree_marker
-from tools.sandbox_worktree_cache import list_worktrees
+from tools.sandbox_worktree_cache import has_worktree, list_worktrees
 from tools.unix_socket_policy import thread_bind_roots
 
 
@@ -167,6 +167,11 @@ def repo_worktree_branch(
 def list_repo_worktrees(repo_root: Path) -> list[Path]:
     """List verified linked worktrees beneath the required local directory."""
     return list_worktrees(repo_root, _verified_worktree_root_and_gitdir, repo_worktree_root)
+
+
+def repo_has_verified_worktree(repo_root: Path) -> bool:
+    """Whether ``list_repo_worktrees`` is non-empty, without listing them all."""
+    return has_worktree(repo_root, _verified_worktree_root_and_gitdir, repo_worktree_root)
 
 
 
