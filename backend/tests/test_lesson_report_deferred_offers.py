@@ -267,6 +267,41 @@ def test_the_fingerprint_changes_with_every_fact_an_offer_carries(db, change):
     assert _offers_digest(db) != before
 
 
+def test_a_page_lists_offers_in_an_order_the_fingerprint_covers_past_one_owner_chunk(db):
+    """A cursor is accepted while the fingerprint holds, so the page order must follow from what it digests.
+
+    Adding an owner with no calls leaves every digested fact alone. If the order depended on an owner's
+    position in the owner list, that owner would shift later owners across a chunk boundary and reorder
+    the pages under an unchanged fingerprint, so a cursor would repeat or skip offers.
+    """
+    from core import lesson_report_offers as offers_module
+
+    _manifest(db, "one", [_lesson("subject")])
+    owners = [f"t{index:03d}" for index in range(1, offers_module.OWNER_CHUNK + 2)]
+    for thread_id in ["t000", *owners]:
+        db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES(?,'user','test/model','t','t')",
+                   (thread_id,))
+    # The owner at the last chunk-0 position calls after the first chunk-1 owner does.
+    for call_id, thread_id, created_at in (("late", owners[-2], "2026-09-23T00:00:00"),
+                                           ("early", owners[-1], "2026-09-22T00:00:00")):
+        db.execute("INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+                   "VALUES(?,?,'turn','m','one',?)", (call_id, thread_id, created_at))
+    identity = ("subject", "a" * 64)
+    ident = [["one", 0, *identity]]
+
+    def read(owner_list):
+        offers = offers_module.DeferredOffers(owner_list, ident, "user", SCOPE.from_ts, SCOPE.to_ts)
+        offers.collect(db)
+        offers.prefetch(db, offers_module.DetailRequest(*identity, offset=0), reviews_at_most=0)
+        digest = hashlib.sha256()
+        offers.feed(digest)
+        return digest.hexdigest(), [offer["usage_id"] for offer in offers.page(identity, 0, 2)]
+
+    fingerprint, order = read(owners)
+    assert read(["t000", *owners]) == (fingerprint, order)
+    assert order == ["early", "late"]
+
+
 def test_offer_collection_cost_does_not_grow_with_lessons_per_manifest(db):
     """Counts and fingerprint read calls, not offers: SQLite work stays flat as a manifest's lessons grow.
 

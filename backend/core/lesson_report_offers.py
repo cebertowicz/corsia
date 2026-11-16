@@ -44,14 +44,14 @@ _CALL_COLUMNS = (
 # One row per (call of a lesson-bearing manifest, distinct lesson of that manifest). The first
 # parameter carries the manifests' distinct identities, which Python derived once per manifest.
 _COLUMNS = ("SELECT i.lid AS id,i.ver AS version," + _CALL_COLUMNS +
-            ",m.harness AS harness,i.ord AS ord,o.chunk AS chunk ")
+            ",m.harness AS harness,i.ord AS ord ")
 _IDENTITIES = (
     "(SELECT json_extract(value,'$[0]') AS mid,json_extract(value,'$[1]') AS ord,"
     "json_extract(value,'$[2]') AS lid,json_extract(value,'$[3]') AS ver FROM json_each(?)) i"
 )
 # LIMIT stops SQLite flattening this into the join as a bare json_each, which it would then rescan
 # for every candidate row; unflattened, it is materialized once and probed through an automatic index.
-_OWNERS = "(SELECT value AS tid,key/" + str(OWNER_CHUNK) + " AS chunk FROM json_each(?) LIMIT -1) o"
+_OWNERS = "(SELECT value AS tid FROM json_each(?) LIMIT -1) o"
 _LEFT_JOIN_MANIFEST = "LEFT JOIN context_manifests m ON m.id=u.context_manifest_id "
 
 #: Offers of the calls inside a time window. CROSS JOIN pins the plan: identities drive, llm_usage
@@ -73,7 +73,9 @@ CALLS_SQL = (
     "JOIN " + _OWNERS + " ON o.tid=t.id " + _LEFT_JOIN_MANIFEST +
     "WHERE t.user_id=?"
 )
-ORDER = "chunk,created_at,usage_id,ord"
+#: Offers are listed by call, then by the lesson's place in the manifest: only facts the fingerprint
+#: digests, so an unchanged fingerprint means an unchanged page order and a cursor stays valid.
+ORDER = "created_at,usage_id,ord"
 
 #: Every period call of the owners, owners first. Calls whose manifest offers no lesson are
 #: included: filtering them costs more than reading them, and they carry no offer.
