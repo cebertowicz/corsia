@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from infra.otel_logs.capture import CapturedRecord
+from infra.sqlite_deadline import stop_at
 
 SCHEMA_VERSION = "1"
 PAGE_SIZE = 4096
@@ -346,7 +347,7 @@ def read_records(path: Path, query: ReadQuery) -> list[dict]:
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
-            db.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1000)
+            stop_at(db, deadline)
             return [dict(row) for row in db.execute(sql, params).fetchall()]
     except sqlite3.OperationalError as exc:
         if "interrupted" in str(exc).lower() or time.monotonic() >= deadline:
