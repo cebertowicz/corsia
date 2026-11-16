@@ -124,12 +124,6 @@ class _Relay:
         return next((offset for _at, _size, offset in reversed(self.sent) if offset is not None), None)
 
 
-def _page_endpoint(rendered: str) -> str:
-    value = json.loads(rendered).get("cdpUrl")
-    assert isinstance(value, str) and value.startswith("ws"), rendered
-    return browser_cdp._page_endpoint(value)
-
-
 def _percentile(values: list[float], fraction: float) -> float | None:
     if not values:
         return None
@@ -153,8 +147,8 @@ async def _pane_on(fixture: str):
     tasks: list[asyncio.Task] = []
     try:
         with _pages() as origin:
-            assert not (await owner.run(thread_id, ("open", f"{origin}/{fixture}"), show_window=True, session="new")).startswith("Error:")
-            endpoint = _page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            assert not (await owner.run(thread_id, ("open", f"{origin}/{fixture}"), show_window=False, session="new")).startswith("Error:")
+            endpoint = await owner.page_endpoint(thread_id)  # The pane's own resolver.
             screencast = PaneScreencast(endpoint, relay.offer)
             tasks = [asyncio.create_task(screencast.run()), asyncio.create_task(relay.frames.send(relay.send_text))]
             assert await relay.frame_after(0, lambda _offset: True) is not None, "the pane never received a first frame"
