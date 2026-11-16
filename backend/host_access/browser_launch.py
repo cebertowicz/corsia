@@ -103,7 +103,7 @@ def inherited_args() -> list[str]:
     return inherited
 
 
-def stealth_args(ua: str | None, *, headless: bool) -> str:
+def managed_launch_args(ua: str | None, *, headless: bool) -> str:
     """Inherited switches plus the ones every managed launch adds, separated by newlines for direct Chrome launch.
 
     Fake media devices keep a page's camera or microphone request from ever reaching the real
