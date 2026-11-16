@@ -58,7 +58,7 @@ Source: `backend/infra/artifact_identity_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `updated_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_artifact_identities_decision_source` (expression), `idx_artifact_identities_upload_path` (path), `idx_measurement_decisions_answered` (expression), `idx_measurement_decisions_raised` (expression), `idx_measurement_decisions_thread` (expression), `sqlite_autoindex_artifact_identities_1` (id, unique), `sqlite_autoindex_artifact_identities_2` (integration, type, external_id, unique).
+Indexes: `idx_artifact_identities_decision_source` (expression), `idx_artifact_identities_successor` (expression), `idx_artifact_identities_upload_path` (path), `idx_measurement_decisions_answered` (expression), `idx_measurement_decisions_raised` (expression), `idx_measurement_decisions_thread` (expression), `sqlite_autoindex_artifact_identities_1` (id, unique), `sqlite_autoindex_artifact_identities_2` (integration, type, external_id, unique).
 
 ### `artifact_reconcile_receipts`
 
