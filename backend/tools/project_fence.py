@@ -180,20 +180,18 @@ def _repo_roots(workspace: Path, db, rows, fences: _Fences, cloud_off) -> list[F
     Only a valid binding opens a root (a row whose ``source/`` link is gone opens
     nothing); any registered path fences one.
     """
-    from infra.project_repo_policy import list_registered_repo_policies
+    from infra.project_repo_binding import source_bound_paths
 
     registered = _registered_paths(db)
     fenced = [row for row in rows if fences(row["id"], row["id"] in cloud_off)]
     fenced_ids = {row["id"] for row in fenced}
+    reaching = [row for row in rows if row["id"] not in fenced_ids and row["id"] in registered]
     # Each root the caller reaches, and whether a Local only project it reaches holds it.
     reached: dict[Path, bool] = {}
-    for row in rows:
-        if row["id"] not in fenced_ids and row["id"] in registered:
-            for policy in list_registered_repo_policies(workspace=workspace, db=db, project_id=row["id"]):
-                if not policy.source_binding_valid:
-                    continue
-                key = canonical(policy.path)
-                reached[key] = reached.get(key, False) or row["id"] in cloud_off
+    for project_id, paths in source_bound_paths(workspace, db, reaching).items():
+        for path in paths:
+            key = canonical(path)
+            reached[key] = reached.get(key, False) or project_id in cloud_off
     roots = []
     for row in fenced:
         local_only = row["id"] in cloud_off

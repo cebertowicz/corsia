@@ -576,6 +576,23 @@ def test_a_registration_whose_source_link_is_gone_opens_nothing(world):
     assert fence_for_thread(BETA_AGENT).refusal(repo / "README") is None
 
 
+def test_the_fence_checks_bindings_without_loading_each_projects_policies(world, monkeypatch):
+    """The fence runs on every file-tool call: no per-project policy load or git branch read."""
+    from infra import project_repo_policy
+    from tools.project_fence import fence_for_thread
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("the fence loaded repo policies")
+
+    monkeypatch.setattr(project_repo_policy, "list_registered_repo_policies", refuse)
+    monkeypatch.setattr(project_repo_policy, "current_repo_branch", refuse)
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-beta", repo, link=True)
+    _register(world, "id-alpha", repo, link=True)
+    assert fence_for_thread(ALPHA_AGENT).refusal(repo / "README") is None
+
+
 def test_a_fence_refusal_is_counted(world, monkeypatch):
     from tools import project_fence
 
