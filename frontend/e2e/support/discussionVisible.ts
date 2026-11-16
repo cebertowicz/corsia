@@ -120,7 +120,10 @@ export async function expectFieldAndSendUsable(card: Locator, field: Locator) {
 		for (let parent = el.parentElement; parent; parent = parent.parentElement) {
 			if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowY)) continue;
 			const box = parent.getBoundingClientRect();
-			if (caret.top < box.top - 1 || caret.bottom > box.bottom + 1) return `caret line ${Math.round(caret.top)}-${Math.round(caret.bottom)} clipped by ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
+			// What a sticky Accept and Reject row covers at the box's bottom is not room: the caret line must clear it.
+			// It is measured where the row is drawn: a sticky row sticks inside the box's padding and border.
+			const pinned = [...parent.querySelectorAll<HTMLElement>('[data-pin-bottom]')].filter((row) => getComputedStyle(row).position === 'sticky').reduce((most, row) => Math.max(most, box.bottom - row.getBoundingClientRect().top), 0);
+			if (caret.top < box.top - 1 || caret.bottom > box.bottom - pinned + 1) return `caret line ${Math.round(caret.top)}-${Math.round(caret.bottom)} clipped by ${parent.className || parent.tagName} ${Math.round(box.top)}-${Math.round(box.bottom)}`;
 		}
 		return true;
 	})).toBe(true);

@@ -24,7 +24,7 @@
 	<ChatCommentThreads {messageId} {threadId} {comments} {listed} opened={!listed} onReply={listed ? undefined : onReply} keepReplyVisible={!listed && keep} />
 {/snippet}
 {#if narrow}
-	<AdaptiveDrawer bind:panel keepsText ariaLabel={name} heading={name} leading={fromList ? backButton : undefined} doneLabel="Close" opaque followKeyboard open={!closing} {onClose} {onClosed}>
+	<AdaptiveDrawer bind:panel keepsText ariaLabel={name} heading={name} leading={fromList ? backButton : undefined} doneLabel="Close" doneIcon compact opaque followKeyboard open={!closing} {onClose} {onClosed}>
 		{@render body(true)}
 	</AdaptiveDrawer>
 {:else}

@@ -36,7 +36,7 @@ describe('acceptAllOpen', () => {
 	it('saves the document, accepts, puts the accepted text on screen and reloads the comments', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: ['c1'], skipped: [], text: 'new text', revision: 'r2' });
 		const h = hooks();
-		await acceptAllOpen(target, 'art-1', h);
+		await expect(acceptAllOpen(target, 'art-1', h)).resolves.toBe(1);
 		expect(mocks.flushDraft).toHaveBeenCalledWith(target);
 		expect(mocks.acceptAllSuggestions).toHaveBeenCalledWith('art-1');
 		expect(mocks.seedDraft).toHaveBeenCalledWith(target, 'new text', 'r2');
@@ -47,7 +47,7 @@ describe('acceptAllOpen', () => {
 	it('changes nothing on screen when there was nothing to accept', async () => {
 		mocks.acceptAllSuggestions.mockResolvedValue({ accepted: [], skipped: [], text: null, revision: null });
 		const h = hooks();
-		await acceptAllOpen(target, 'art-1', h);
+		await expect(acceptAllOpen(target, 'art-1', h)).resolves.toBe(0);
 		expect(h.onText).not.toHaveBeenCalled();
 	});
 

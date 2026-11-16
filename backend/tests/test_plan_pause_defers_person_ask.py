@@ -300,6 +300,39 @@ def test_pause_node_defers_a_document_ask_and_resume_restores_it(db):
     assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
 
 
+def test_a_paused_document_ask_keeps_its_needs_you_look(db):
+    """Pausing silences a document ask's badges, never its look in the plan list."""
+    from plans import artifact_links
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Approve the design", db=db)
+    artifact_id = document_ask(db, "owner")
+    db.commit()
+    boundary.mutate(
+        plan.id, "block_node",
+        {"node_id": node.id, "owner_kind": "user", "ask_artifact_id": artifact_id,
+         "reason": "Approve the design", "reason_key": "design_approval",
+         "expected_revision": node.revision},
+        actor=_thread_actor("owner"), provenance="test", mutation_id=_mid(), db=db,
+    )
+    db.commit()
+    needs_you = {"label_key": "needs_you", "tone_key": "human-review"}
+    assert _pane_row(db, node.id)["display"] == needs_you
+
+    _node_lifecycle(db, plan.id, node.id, "pause_node")
+    row = _pane_row(db, node.id)
+    assert row["display"] == needs_you
+    assert row["status_reason"] == user_steering.USER_PAUSE_REASON
+    assert not row["requires_user_action"]
+    assert artifact_links.asking_attention_nodes([node.id], db=db) == {node.id}
+    assert attention._summarize_raised(None, "user-1", db=db) == []
+    assert _activity_awaiting(db) == 0
+
+    _lifecycle(db, plan.id, "pause")
+    assert _pane_row(db, node.id)["display"] == needs_you
+
+
 def test_pause_node_defers_a_raised_artifact_ask_and_resume_restores_it(db):
     from plans import artifact_links, operator_chat_state
     from registry import attention as registry_attention, models

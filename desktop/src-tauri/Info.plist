@@ -8,5 +8,11 @@
   <array>
     <string>_corsia._tcp</string>
   </array>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>CORSIA uses the microphone when you talk with your agents, or when you ask an agent to make a call or record a meeting.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>CORSIA uses this to hear the other people on a call or in a meeting when you ask an agent to record it.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>CORSIA uses this when you ask an agent to work in another app, such as sending a text from Messages.</string>
 </dict>
 </plist>
