@@ -2,17 +2,44 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { pickedComments } from '$lib/stores/docComments';
 import { createCommentSurfaceState } from './docCommentSurfaceState.svelte';
 
-afterEach(() => focusedDocComment.set(null));
+afterEach(() => { focusedDocComment.set(null); pickedComments.set(new Set()); });
 
 describe('comment surface state', () => {
+	it('reads a thread only when its highlight is pressed, never when the caret moves into it', () => {
+		const surface = createCommentSurfaceState(() => {});
+		surface.focusComment('c1', new DOMRect());
+		expect(get(pickedComments).size).toBe(0);
+		surface.focusComment('c2', new DOMRect(), false, false, true);
+		expect([...get(pickedComments)]).toEqual(['c2']);
+	});
+
+	it('reads every thread a margin marker opens', () => {
+		const surface = createCommentSurfaceState(() => {});
+		surface.focusMarker(['a', 'b'], document.createElement('button'));
+		expect([...get(pickedComments)]).toEqual(['a', 'b']);
+	});
+
 	it('opens a comment when the caret lands in its text', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.focusComment('c1', new DOMRect());
 		// Picked in the text: its card leaves the focus there.
 		expect(surface.state).toEqual({ kind: 'thread', id: 'c1', fromText: true });
 		expect(get(focusedDocComment)).toBe('c1');
+	});
+
+	it('opens several threads on pressed text without taking the focus from the text', () => {
+		const restoreEditor = vi.fn();
+		const surface = createCommentSurfaceState(restoreEditor);
+		surface.focusMarker(['a', 'b'], document.createElement('span'), undefined, true, true);
+		// Picked in the text, as one thread's card is: it leaves the focus there, and what restores focus is the editor.
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b'], fromText: true });
+		surface.restoreFocus();
+		expect(restoreEditor).toHaveBeenCalled();
+		surface.focusMarker(['a', 'b'], document.createElement('button'));
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b'] });
 	});
 
 	it('keeps the comments drawer open when the caret lands in commented text', () => {
@@ -188,6 +215,28 @@ describe('comment surface state', () => {
 		expect(surface.state).toBeNull();
 		surface.hover(null);
 		expect(surface.hovered).toBeNull();
+	});
+
+	describe('quiet: the column shown on load is the reader\'s once they engage with it', () => {
+		const shownOnLoad = () => {
+			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			surface.openOnLoad();
+			expect(surface.quiet).toBe(true);
+			return surface;
+		};
+
+		it('stops being quiet when the reader picks a thread in it', () => {
+			const surface = shownOnLoad();
+			surface.focusComment('c1', new DOMRect(), false, true);
+			expect(surface.quiet).toBe(false);
+		});
+
+		it('stops being quiet when the reader engages a card (a reply or its text)', () => {
+			const surface = shownOnLoad();
+			surface.engage();
+			expect(surface.quiet).toBe(false);
+			expect(surface.state).toEqual({ kind: 'list' });
+		});
 	});
 
 	describe('release: a picked margin card lets go', () => {

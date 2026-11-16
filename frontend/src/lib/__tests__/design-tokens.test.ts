@@ -22,8 +22,6 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
-	// chatCommentViewport writes it on the transcript while a phone comment sheet is open: the sheet's height.
-	'--comment-sheet-space',
 	// BrowserLeaf assigns the shared session owner's colour with Svelte `style:--presence-color`.
 	'--presence-color',
 	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
@@ -67,7 +65,7 @@ const RUNTIME_PROVIDED = new Set([
  */
 const KNOWN_UNRESOLVED_BASELINE_COUNT = 5;
 const KNOWN_UNRESOLVED = new Set([
-	'lib/components/ThreadAgentPanel.svelte:359 → var(--text-quaternary)',
+	'lib/components/ThreadAgentPanel.svelte:360 → var(--text-quaternary)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:138 → var(--surface-2)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:144 → var(--link)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:151 → var(--err)',

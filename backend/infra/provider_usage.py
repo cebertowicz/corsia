@@ -159,12 +159,15 @@ def from_anthropic(usage: Mapping[str, Any] | None) -> TokenUsage | None:
     input_uncached = _count(usage.get("input_tokens"))
     if input_uncached is None:
         return None
+    counts = {
+        "cache_read": _count(usage.get("cache_read_input_tokens")),
+        "cache_write": _count(usage.get("cache_creation_input_tokens")),
+        "output": _count(usage.get("output_tokens")),
+    }
     return TokenUsage(
         input_uncached=input_uncached,
-        cache_read=_count(usage.get("cache_read_input_tokens")) or 0,
-        cache_write=_count(usage.get("cache_creation_input_tokens")) or 0,
-        output=_count(usage.get("output_tokens")) or 0,
-        unreported=frozenset({"output"}) if _count(usage.get("output_tokens")) is None else frozenset(),
+        **{field: count or 0 for field, count in counts.items()},
+        unreported=_absent(counts),
     )
 
 
@@ -179,16 +182,14 @@ def from_codex(usage: Mapping[str, Any] | None) -> TokenUsage | None:
     input_tokens = _count(usage.get("inputTokens"))
     if input_tokens is None:
         return None
-    output = _count(usage.get("outputTokens"))
     # ``cache_write`` stays a measured zero: the Codex app-server has no
     # cache-creation concept at all, so zero is the true count rather than an
-    # absent measurement. ``outputTokens`` is different -- some payloads omit
-    # it, and calling that zero output would assert a measurement nobody made.
+    # absent measurement. ``cachedInputTokens`` and ``outputTokens`` are
+    # different -- a payload that omits one has not measured it.
     return _subset_convention(
         input_tokens,
-        _count(usage.get("cachedInputTokens")) or 0,
-        output or 0,
-        unreported=frozenset() if output is not None else frozenset({"output"}),
+        _count(usage.get("cachedInputTokens")),
+        _count(usage.get("outputTokens")),
     )
 
 
@@ -208,19 +209,25 @@ def unmeasured_ledger_row() -> dict[str, None]:
     }
 
 
+def _absent(counts: Mapping[str, int | None]) -> frozenset[str]:
+    """The buckets among ``counts`` that the payload did not report."""
+    return frozenset(field for field, count in counts.items() if count is None)
+
+
 def _subset_convention(
-    prompt_tokens: int,
-    cache_read: int,
-    output: int,
-    *,
-    unreported: frozenset[str] = frozenset(),
+    prompt_tokens: int, cache_read: int | None, output: int | None,
 ) -> TokenUsage:
-    """Build usage where ``cache_read`` is already inside ``prompt_tokens``."""
+    """Build usage where ``cache_read`` is already inside ``prompt_tokens``.
+
+    An unreported cache count leaves the whole prompt uncached: the context
+    the prompt occupies is still known, only its cached share is not.
+    """
+    read = cache_read or 0
     return TokenUsage(
-        input_uncached=max(0, prompt_tokens - cache_read),
-        cache_read=min(cache_read, prompt_tokens),
-        output=output,
-        unreported=unreported,
+        input_uncached=max(0, prompt_tokens - read),
+        cache_read=min(read, prompt_tokens),
+        output=output or 0,
+        unreported=_absent({"cache_read": cache_read, "output": output}),
     )
 
 
@@ -286,18 +293,13 @@ def from_litellm(
     prompt_tokens = _count(getattr(usage, "prompt_tokens", None))
     if prompt_tokens is None:
         return None
-    reported_output = _count(getattr(usage, "completion_tokens", None))
-    output = reported_output or 0
-    unreported = frozenset({"output"}) if reported_output is None else frozenset()
-
+    output = _count(getattr(usage, "completion_tokens", None))
     details = getattr(usage, "prompt_tokens_details", None)
-    cached = _count(getattr(details, "cached_tokens", None)) or 0
-    disjoint_read = _count(getattr(usage, "cache_read_input_tokens", None)) or 0
-    disjoint_write = (
-        _count(getattr(usage, "cache_creation_input_tokens", None)) or 0
-    )
+    cached = _count(getattr(details, "cached_tokens", None))
+    disjoint_read = _count(getattr(usage, "cache_read_input_tokens", None))
+    disjoint_write = _count(getattr(usage, "cache_creation_input_tokens", None))
 
-    if prompt_tokens == 0 and cached == 0 and disjoint_read == 0 and disjoint_write == 0:
+    if prompt_tokens == 0 and not cached and not disjoint_read and not disjoint_write:
         # Nothing was reported on the input side. litellm defaults
         # ``prompt_tokens`` to 0 rather than leaving it unset, so this is how an
         # absent measurement arrives -- and no real completion has a zero-token
@@ -305,15 +307,14 @@ def from_litellm(
         return None
 
     if reports_cache_outside_prompt(model, api_base=api_base):
-        return TokenUsage(
-            input_uncached=prompt_tokens,
-            cache_read=disjoint_read or cached,
-            cache_write=disjoint_write,
-            output=output,
-            unreported=unreported,
-        )
+        # litellm mirrors the native read count into ``cached_tokens``, so
+        # either field reports it; only both absent leaves it unknown.
+        read = disjoint_read or cached
+        if read is None:
+            read = disjoint_read  # a reported native zero beside no mirror
+        return _disjoint(prompt_tokens, read, disjoint_write, output)
 
-    if cached > prompt_tokens:
+    if cached is not None and cached > prompt_tokens:
         # A subset cannot exceed its superset. Whatever the vendor is, this
         # payload is reporting disjoint counts, so honour the arithmetic over
         # the vendor guess rather than clamping real tokens away.
@@ -322,15 +323,21 @@ def from_litellm(
         # payload arriving with api_base set, i.e. Claude through a gateway --
         # and that vendor does report cache creation, so carry it. Omitting it
         # silently dropped those tokens from the bill.
-        return TokenUsage(
-            input_uncached=prompt_tokens,
-            cache_read=cached,
-            cache_write=disjoint_write,
-            output=output,
-            unreported=unreported,
-        )
+        return _disjoint(prompt_tokens, cached, disjoint_write, output)
 
-    return _subset_convention(prompt_tokens, cached, output, unreported=unreported)
+    return _subset_convention(prompt_tokens, cached, output)
+
+
+def _disjoint(
+    prompt_tokens: int, cache_read: int | None, cache_write: int | None, output: int | None,
+) -> TokenUsage:
+    """Build usage whose cache counts sit outside ``prompt_tokens``."""
+    counts = {"cache_read": cache_read, "cache_write": cache_write, "output": output}
+    return TokenUsage(
+        input_uncached=prompt_tokens,
+        **{field: count or 0 for field, count in counts.items()},
+        unreported=_absent(counts),
+    )
 
 
 def from_openai(usage: Mapping[str, Any] | None) -> TokenUsage | None:
@@ -346,13 +353,8 @@ def from_openai(usage: Mapping[str, Any] | None) -> TokenUsage | None:
     if prompt_tokens is None:
         return None
     details = usage.get("prompt_tokens_details")
-    cache_read = 0
-    if isinstance(details, Mapping):
-        cache_read = _count(details.get("cached_tokens")) or 0
-    return _subset_convention(
-        prompt_tokens, cache_read, _count(usage.get("completion_tokens")) or 0,
-        unreported=frozenset({"output"}) if _count(usage.get("completion_tokens")) is None else frozenset(),
-    )
+    cache_read = _count(details.get("cached_tokens")) if isinstance(details, Mapping) else None
+    return _subset_convention(prompt_tokens, cache_read, _count(usage.get("completion_tokens")))
 
 
 def checkpoint_call_receipts(usage: dict[str, object]) -> dict[str, object]:

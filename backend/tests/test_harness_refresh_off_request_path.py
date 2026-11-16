@@ -8,6 +8,7 @@ import pytest
 
 import connections.harness_models as harness_models
 import connections.harness_refresh as harness_refresh
+from vendor_account_fixtures import accounts  # noqa: F401
 
 
 @pytest.fixture
@@ -197,3 +198,63 @@ async def test_an_unchanged_binary_is_probed_once_and_a_replaced_one_again(
 
     # A forced refresh (startup) always re-asks.
     assert await _version_now(forced=True) == "1.0.3"
+
+
+@pytest.mark.asyncio
+async def test_a_stale_check_during_the_startup_re_ask_asks_each_account_once(accounts, monkeypatch):
+    """The startup re-ask is the provider's running check: a stale check asked for meanwhile joins it."""
+    from collections import Counter
+    from datetime import datetime, timedelta, timezone
+
+    import connections.account_discovery_refresh as refresh_module
+    from connections.account_discovery_types import StagedDiscovery
+    from infra.database import write_transaction
+
+    _db, default, second, third = accounts
+    monkeypatch.setattr(harness_models, "_CHECK_TASKS", {})
+    monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
+    monkeypatch.setattr(harness_refresh, "_PENDING", {})
+    monkeypatch.setattr(harness_refresh, "_PROBED", {})
+    monkeypatch.setattr(harness_refresh, "_notify_models_changed", lambda: None)
+
+    async def discover(_binary, context=None):
+        await asyncio.sleep(0.05)
+        return StagedDiscovery({"rows": ["test"]})
+
+    def normalize(payload, *, harness_version, timestamp):
+        return [{"selector_id": name, "available": True, "context_window": 200000} for name in payload["rows"]]
+
+    async def version(_binary, env=None):
+        return "1.0"
+
+    monkeypatch.setattr(harness_models, "_ADAPTERS", {"codex": (discover, normalize, "synthetic")})
+    monkeypatch.setattr(harness_models, "binary_version", version)
+    monkeypatch.setattr(harness_refresh, "_fingerprint", lambda binary: ("/bin/test", 1, 1, 1))
+    await harness_refresh.refresh_harness_catalogs(reason="startup")
+    # The backend restarts more than an hour after the last ask, so the catalog reads as stale.
+    with write_transaction(None, scope="test_age") as connection:
+        envelope = harness_models.read_discovery_envelope("codex", db=connection)
+        envelope["refreshed_at"] = envelope["attempted_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        harness_models._save_discovery_envelope("codex", envelope, db=connection)
+    harness_refresh._PROBED.clear()
+
+    commits: Counter[str] = Counter()
+    original = refresh_module.commit_discovery_bundle
+    loop = asyncio.get_running_loop()
+
+    def counted(provider, staged, rows, *, context, **kwargs):
+        result = original(provider, staged, rows, context=context, **kwargs)
+        commits[context.account_id] += 1
+        if sum(commits.values()) == 1:
+            # The first commit tells the open picker to reload (from the commit's worker thread,
+            # through the loop), and its read asks for a stale check.
+            loop.call_soon_threadsafe(harness_refresh.schedule_stale_refresh)
+        return result
+
+    monkeypatch.setattr(refresh_module, "commit_discovery_bundle", counted)
+    await harness_refresh.refresh_harness_catalogs(reason="startup")
+    await asyncio.gather(*harness_models._CHECK_TASKS.values())
+
+    assert commits == {default["id"]: 1, second["id"]: 1, third["id"]: 1}
+    assert harness_models._CHECK_TASKS == {}

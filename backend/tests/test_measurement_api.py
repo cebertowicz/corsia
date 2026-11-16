@@ -734,6 +734,18 @@ async def test_validation_rejects_unknown_ids_and_grains(isolated_db):
     assert unknown.value.status_code == invalid_grain.value.status_code == 400
 
 
+def test_a_refused_series_id_is_named_with_where_to_find_the_ids():
+    from api.measurement_series_selection import requested_series
+
+    with pytest.raises(HTTPException) as refused:
+        requested_series("outcomes,not_a_series,dollar_trend")
+    assert refused.value.status_code == 400
+    assert refused.value.detail == ("unknown or unavailable series id: not_a_series, dollar_trend; "
+                                    "GET /api/measurement/series/index lists the available ids")
+    with pytest.raises(HTTPException) as empty:
+        requested_series(",")
+    assert empty.value.detail.startswith("unknown or unavailable series id: none given; ")
+
 @pytest.mark.asyncio
 async def test_fresh_asks_series_starts_at_first_outcome_without_recording_user_hold(isolated_db):
     """A live read starts the ratio at its first accepted outcome and creates no hold boundary."""

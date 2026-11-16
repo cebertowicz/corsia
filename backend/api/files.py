@@ -149,6 +149,7 @@ DOCUMENT_SAVE_HTTP_STATUS = {
     "outside_scope": 400,
     "too_large": 413,
     "already_exists": 409,
+    "moved": 409,
     "not_a_file": 400,
     "invalid_skill": 422,
     "stale": 409,

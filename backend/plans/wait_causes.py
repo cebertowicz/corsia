@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+from plans import node_waits
+
 
 @contextmanager
 def account_read_snapshot(db):
@@ -135,14 +137,12 @@ def working_child(projection: dict) -> dict | None:
     One predicate for every reader: the operator display and the status read
     show such a step in progress, and its plan counts as moving. A hold, a
     dependency or a decision on the step is named first and wins, so a paused
-    step never reads as progress just because its child is busy. A watch does
-    not: it is the parent's check-in on the child, not a stop (#2373), unless
-    it is a blocker armed as a wait (``plans.blocked_wait``), which wins like
-    the hold it replaced. A child between Turns with steps still to take up
-    holds the step (it waits) but is not progress (``child_active``).
+    step never reads as progress just because its child is busy; a check-back
+    (``node_waits.is_check_back``) is only the parent's check-in (#2373). A
+    child between Turns with steps to take up waits but is not progress.
     """
     for cause in projection["causes"]:
-        if cause.get("watch_id") is not None and not cause.get("blocked_wait"):
+        if node_waits.is_check_back(cause):
             continue
         if cause["reason_key"] == DELEGATED_CHILD and cause.get("child_active", True):
             return cause
@@ -276,7 +276,7 @@ def delegation_facts(node_plans, *, db) -> dict[str, dict]:
     A reused worker belongs only to its newest attachment, the same ownership
     rule the full tree uses when nesting the child summary.
     """
-    from plans import delegation, delegation_needs, hierarchy, node_waits, projections
+    from plans import delegation, delegation_needs, hierarchy, projections
     node_ids = [str(node["id"]) for node, _plan in node_plans]
     if not node_ids:
         return {}

@@ -15,6 +15,8 @@ together or not at all.
 
 from __future__ import annotations
 
+from loguru import logger
+
 from doceditor import comments, feedback_batch_core, review_requests, writer_line_move
 from registry.shared_write_errors import SuccessorHoldsComments
 
@@ -55,6 +57,9 @@ def refuse_if_occupied(db, *, from_artifact_id: str, to_artifact_id: str) -> Non
         "SELECT path FROM artifact_identities WHERE id=?", (to_artifact_id,)
     ).fetchone()
     where = f" at {target[0]}" if target and target[0] else ""
+    # The signal that tells whether this refusal needs a merge rule: how often this line appears
+    # in the backend log against how many promotes ran.
+    logger.warning("Promote refused: both documents hold comments ({} and {})", from_artifact_id, to_artifact_id)
     raise SuccessorHoldsComments(
         f"Couldn’t promote: this file and the document already registered{where} both have "
         "comments, and comment threads from two documents can’t be merged. Nothing was moved and "

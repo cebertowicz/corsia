@@ -97,6 +97,16 @@ def _authorized_identity(db, artifact_id: str, actor_thread_id: str) -> dict:
     return identity
 
 
+def checked_source_path(artifact_id: str, target_path: str, *, actor_thread_id: str, db) -> Path:
+    """The file a relocation would move, after every check that can refuse it; nothing is written.
+
+    A caller that must hold that path before the move runs this first, so a refused call never
+    touches anyone's open document. ``relocate_artifact`` runs the same checks again under the hold.
+    """
+    identity = _authorized_identity(db, artifact_id, actor_thread_id)
+    return Path(_validated_move(db, identity, target_path, actor_thread_id)["source_path"])
+
+
 def _validated_move(
     db, identity: dict, target_path: str, actor_thread_id: str,
 ) -> dict:
@@ -160,13 +170,14 @@ def _validated_move(
 
 def relocate_artifact(
     artifact_id: str, target_path: str, *, actor_thread_id: str, db=None,
+    held_path: Path | None = None,
 ) -> dict:
     """Move one artifact's backing file, preserving its identity.
 
     Workspace artifacts and same-filesystem targets only; a non-workspace
     integration or a cross-device target is rejected loud. Its owner or scope
     conductor may relocate it. A supplied connection must be clean: no outer
-    transaction may span the filesystem move.
+    transaction may span the filesystem move. ``held_path``: refuse if moved off it.
     """
     _db = db if db is not None else get_db()
     if _db.in_transaction:
@@ -175,6 +186,8 @@ def relocate_artifact(
         )
     try:
         identity = _authorized_identity(_db, artifact_id, actor_thread_id)
+        if held_path is not None and Path(identity["path"] or "") != held_path:
+            raise RelocationError("This document was moved by another request first, so it wasn’t moved again. Try again from its new place.")
         move = _validated_move(_db, identity, target_path, actor_thread_id)
 
         now = _now()
@@ -204,6 +217,23 @@ def relocate_artifact(
     return artifact
 
 
+def _move_identity_path(db, artifact_id: str, source_path: str, target: dict, now: str) -> None:
+    """The one write that moves an identity to a new path, for every identity-preserving move.
+
+    ``target`` carries ``target_path``, ``target_external_id``, ``target_type`` and ``target_title``.
+    They move together, and the document's saved calls are pointed at the new path in the same
+    transaction: a wake asks an agent to repeat a saved call, and it must name the file where it now is.
+    """
+    from doceditor.writer_line_move import repoint_lines
+
+    db.execute(
+        "UPDATE artifact_identities SET path=?,external_id=?,type=?,title=?,updated_at=? WHERE id=?",
+        (target["target_path"], target["target_external_id"], target["target_type"],
+         target["target_title"], now, artifact_id),
+    )
+    repoint_lines(db, artifact_id=artifact_id, old_path=source_path, new_path=target["target_path"])
+
+
 def write_existing_move(
     identity: dict,
     move: dict,
@@ -216,14 +246,7 @@ def write_existing_move(
     owner = _owner_thread(db, artifact_id)
     now = _now()
     with write_transaction(db, scope="adopt_moved_file_identity") as transaction:
-        transaction.execute(
-            "UPDATE artifact_identities SET path=?,external_id=?,type=?,title=?,"
-            "updated_at=? WHERE id=?",
-            (
-                move["target_path"], move["target_external_id"],
-                move["target_type"], move["target_title"], now, artifact_id,
-            ),
-        )
+        _move_identity_path(transaction, artifact_id, str(identity["path"]), move, now)
         _append_relocation_event(
             transaction,
             artifact_id=artifact_id,
@@ -295,13 +318,9 @@ def _perform_relocation(db, intent_id: str) -> None:
         # Path, external key, type and title move together: a partial update
         # here is exactly what forks one artifact into two identities.
         with write_transaction(db, scope="relocation_identity") as connection:
-            connection.execute(
-                "UPDATE artifact_identities "
-                "SET path=?, external_id=?, type=?, title=?, updated_at=? WHERE id=?",
-                (
-                    intent["target_path"], intent["target_external_id"],
-                    target_type, target_title, _now(), intent["artifact_id"],
-                ),
+            _move_identity_path(
+                connection, intent["artifact_id"], intent["source_path"],
+                {**intent, "target_type": target_type, "target_title": target_title}, _now(),
             )
             connection.execute(
                 "UPDATE artifact_relocation_intents SET phase='identity_updated', "

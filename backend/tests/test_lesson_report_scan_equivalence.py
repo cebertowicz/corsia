@@ -1,7 +1,6 @@
 """Lesson-report scans return fewer SQLite rows but exactly the rows the row-by-row scans did."""
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter
 
@@ -95,20 +94,33 @@ def test_candidate_prefilter_keeps_every_row_python_resolves_to_read_file_and_dr
     assert "not json" not in kept
 
 
-def test_candidate_groups_equal_the_unfiltered_scan_in_the_same_order(db):
+NON_CANONICAL = {"non-canonical NaN", "non-canonical Infinity"}
+
+
+def test_candidate_groups_equal_the_unfiltered_scan_of_receipt_turns_in_the_same_order(db):
+    """Equal to the row-by-row scan over the Turns with a receipt, for rows the Turn index holds.
+
+    The Turn index keeps only canonical JSON metadata, so a NaN or Infinity row is not examined;
+    the report's coverage line names that.
+    """
     for label, metadata in {**READS, **NOT_READS, **SPELLED, **UNREADABLE}.items():
         _tool_row(db, label, metadata)
+    _tool_row(db, "no receipt", {**_call("read_file", path=PATH), "turn_id": "quiet"})
+    db.execute("INSERT INTO guidance_loads(id,thread_id,turn_id,path,raw_sha256,git_blob_oid,delivered_sha256,"
+               "byte_count,partial,created_at) VALUES('load','owner','turn',?,?,?,?,1,0,'t')",
+               (PATH, "a" * 64, "b" * 40, "c" * 64))
     old: dict = {}
-    old_unavailable: Counter = Counter()
     for row in _all_rows(db):
         arguments, metadata = _read_call(row)
         if arguments is None or metadata is None:
             continue
         old.setdefault(("owner", metadata["turn_id"], arguments["path"]), []).append(row["id"])
+    assert ("owner", "quiet", PATH) in old and NON_CANONICAL <= set(old[("owner", "turn", PATH)])
+    expected = {("owner", "turn", PATH): [ident for ident in old[("owner", "turn", PATH)] if ident not in NON_CANONICAL]}
     new_unavailable: Counter = Counter()
     new = _candidate_groups(db, "user", ("owner",), new_unavailable)
-    assert {key: [row["id"] for row, _ in value] for key, value in new.items()} == old
-    assert new_unavailable == old_unavailable
+    assert {key: [row["id"] for row, _ in value] for key, value in new.items()} == expected
+    assert new_unavailable == Counter()
 
 
 def test_chunked_rows_keep_order_across_chunk_boundaries(db):
@@ -209,18 +221,6 @@ def _ordered(result):
     return json.dumps(result, sort_keys=True, default=str), list(result["period"]["unavailable_calls"].items())
 
 
-def _text(offers):
-    """The canonical document text of a list of offers, as the fingerprint hashes it."""
-    return ",".join(json.dumps(offer, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-                    for offer in offers).encode()
-
-
-def _fed(deferred):
-    digest = hashlib.sha256()
-    deferred.feed(digest)
-    return digest.hexdigest()
-
-
 def assert_materialized_equals_the_scan(new, old):
     """The materialized period offers carry exactly what the row-by-row list did."""
     deferred, scanned = new["period"].pop("offers"), old["period"].pop("offers")
@@ -229,8 +229,8 @@ def assert_materialized_equals_the_scan(new, old):
 
 
 def assert_offers_equal(deferred, scanned):
-    """A DeferredOffers hashes to the document text of ``scanned`` and counts what it lists."""
-    assert _fed(deferred) == hashlib.sha256(_text(scanned)).hexdigest()
+    """A DeferredOffers counts what ``scanned`` lists. Its fingerprint is tested on its own:
+    it digests what determines the offers, not the offers' text."""
     expected: dict = {}
     for offer in scanned:
         row = expected.setdefault((offer["id"], offer["version"]), {

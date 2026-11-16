@@ -267,7 +267,7 @@ async def test_a_password_field_seen_during_a_person_step_keeps_the_visit_read_g
     [step] = _steps(db)
     plan_update(db, plan["plan"].id, "mark_done", close_params(db, "mark_done", step["id"]), actor=HUMAN)
     for command in (("eval", "document.body.innerText"), ("get", "value", "#password")):
-        with pytest.raises(BrowserSessionError, match="asks for a password"):
+        with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access(THREAD, page.agent_probe, command)
     await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
 
@@ -382,7 +382,7 @@ async def test_a_password_hidden_between_probes_is_guarded_before_the_person_ste
     async def resolve(_selector):
         return 42
 
-    with pytest.raises(BrowserSessionError, match="asks for a password"):
+    with pytest.raises(BrowserSessionError, match="has shown a password field"):
         await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
     await asyncio.gather(loop, return_exceptions=True)
     assert THREAD not in lifecycle._steps
@@ -433,7 +433,7 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
         return 42
 
     for command in (("eval", "document.title"), ("get", "value", "#password")):
-        with pytest.raises(BrowserSessionError, match="asks for a password"):
+        with pytest.raises(BrowserSessionError, match="has shown a password field"):
             await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
     # A document the guard never covered is not over-refused.
     page.show("visit-c", present=frozenset({42}))
@@ -443,6 +443,28 @@ async def test_a_password_guard_outlives_leaving_its_tab_and_clears_when_the_bro
     assert THREAD not in browser_control._guarded_visits
     page.show("visit-a", present=frozenset({42}))
     await browser_control.require_page_access(THREAD, page.agent_probe, ("eval", "document.title"), resolve=resolve)
+
+
+@pytest.mark.asyncio
+async def test_a_read_refused_after_the_step_ended_promises_no_notice_task_or_turn(plan):
+    """The guard outlives its step; its refusal names the guard, not a step that is over."""
+    page, db = Page(), plan["db"]
+    page.show("visit-a", frozenset({42}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    [step] = _steps(db)
+    page.show("visit-a", present=frozenset({42}))
+    await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+    assert row(db, step["id"])["state"] == "accepted" and not browser_control.password_page(THREAD)
+
+    async def resolve(_selector):
+        return 42
+
+    for command in (("eval", "document.title"), ("get", "value", "#password")):
+        with pytest.raises(BrowserSessionError) as refused:
+            await browser_control.require_page_access(THREAD, page.agent_probe, command, resolve=resolve)
+        assert str(refused.value) == browser_control.PASSWORD_READ_REFUSED
+        assert "already see" not in str(refused.value) and "task" not in str(refused.value)
 
 
 @pytest.mark.parametrize("instruction", ["Choose your account.", "Your phone needs approval", "Sign in"])
@@ -475,10 +497,12 @@ async def test_failed_row_open_never_publishes_an_active_step_and_retry_can_open
         raise PlanError("fixture row failure")
 
     monkeypatch.setattr(lifecycle, "_plan_write", fail)
-    with pytest.raises(PlanError, match="fixture row failure"):
-        if kind == "person":
+    # Contained: a declaration says it may not have been recorded; a password page refuses the command.
+    if kind == "person":
+        with pytest.raises(BrowserSessionError, match="may not have been recorded"):
             await browser_control.declare_person_step(THREAD, page.agent_probe, "Choose your account")
-        else:
+    else:
+        with pytest.raises(BrowserSessionError, match="sign-in task couldn't be recorded"):
             await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert THREAD not in lifecycle._steps
     assert _steps(plan["db"]) == []

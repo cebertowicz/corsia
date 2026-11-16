@@ -5,6 +5,7 @@ import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 import { apiFetch } from '$lib/api/request';
+import { keepReadAnswers } from '$lib/chatCommentTypes';
 
 /** Show the server's comment threads on the loaded rows they name; a row not loaded here has nothing to show them on. */
 export function adoptCommentThreads(threadId: string, fresh: Message[]): void {
@@ -12,7 +13,7 @@ export function adoptCommentThreads(threadId: string, fresh: Message[]): void {
 	const byId = new Map(fresh.map(row => [row.id, row]));
 	messages.update(currentRows => currentRows.map(row => {
 		const next = row.thread_id === threadId ? byId.get(row.id) : undefined;
-		return next ? { ...row, chat_comments: next.chat_comments ?? [], chat_visible_content: next.chat_visible_content, chat_answer_cids: next.chat_answer_cids } : row;
+		return next ? { ...row, chat_comments: keepReadAnswers(row.chat_comments, next.chat_comments ?? []) ?? [], chat_visible_content: next.chat_visible_content, chat_answer_cids: next.chat_answer_cids } : row;
 	}));
 }
 
@@ -73,7 +74,8 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		} catch (error) { console.error('Could not refresh chat comment threads', error); }
 	}
 	// A comment or reply posted, retried or delivered names the rows it is on; the server keeps it on their threads.
-	const stops = [on('turn_complete', frame => refresh(frame)), on('chat_comments_changed', frame => {
+	const stops = [on('messages_replaced', frame => refresh({ ...frame, step_ids: [frame.message.id] })),
+		on('turn_complete', frame => refresh(frame)), on('chat_comments_changed', frame => {
 		if (Array.isArray(frame?.target_seqs) && frame.target_seqs.length) void refresh(frame, frame.target_seqs.map((seq: number) => ({ seq })));
 	}), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;

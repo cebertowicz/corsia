@@ -227,7 +227,7 @@ def _stamp(user_id: str, thread_id: str, message_id: str, cid: str, assistant_me
             ).fetchone()
             if row is None or not has_comment_cid(row[0], cid):
                 return False
-            # Only the answer whose element completed its dwell can advance the stamp.
+            # Only the answer the person opened can advance the stamp.
             db.execute(
                 "INSERT INTO chat_comment_views "
                 "SELECT ?, ?, ?, answered_at FROM chat_comment_answers "

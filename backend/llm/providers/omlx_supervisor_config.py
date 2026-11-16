@@ -72,14 +72,27 @@ def listen_host(resolved: str) -> str:
     return LOCAL_BIND if bind == LOCAL_BIND else resolved
 
 
-def _ssd_cache_enabled(settings_path: Path) -> bool:
-    """Whether oMLX's own settings leave its SSD cache on (its default when unread)."""
+def _ssd_cache_folder(settings_path: Path, default: Path) -> str | None:
+    """The SSD cache folder oMLX's own settings name, ``default`` when they name none, None when off.
+
+    A folder the person chose is kept. Only the default one oMLX saved for an earlier
+    base folder (``<base_path>/cache``) follows the current base, so a moved state
+    root never leaves the server writing into the old one.
+    """
     try:
         raw = json.loads(settings_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return True
-    cache = raw.get("cache") if isinstance(raw, dict) else None
-    return not (isinstance(cache, dict) and cache.get("enabled") is False)
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    cache = raw.get("cache") if isinstance(raw.get("cache"), dict) else {}
+    if cache.get("enabled") is False:
+        return None
+    chosen, saved_base = cache.get("ssd_cache_dir"), raw.get("base_path")
+    if not isinstance(chosen, str) or not chosen.strip():
+        return str(default)
+    if isinstance(saved_base, str) and saved_base and Path(chosen) == Path(saved_base) / "cache":
+        return str(default)
+    return chosen
 
 
 def managed_global_settings() -> dict:
@@ -101,21 +114,22 @@ def managed_global_settings() -> dict:
 
 
 def managed_launch_settings(settings: dict) -> dict:
-    """Return CORSIA's managed server's launch settings, every folder from the current state root.
+    """Return CORSIA's managed server's launch settings, its own folders from the current state root.
 
-    oMLX's command-line folders beat the ones its own settings.json stores, so a
-    state root that moved never leaves the server reading or writing an older
-    folder, whatever that file or the server row still names. A cache that
-    oMLX's settings turn off stays off: passing the cache folder would turn it on.
+    oMLX's command-line folders beat the ones its own settings.json stores, and oMLX
+    saves them back into that file, so a state root that moved never leaves the server
+    reading or writing an older folder. The SSD cache folder is the person's when they
+    chose one in oMLX, and the launch passes it back unchanged. A cache that oMLX's
+    settings turn off stays off: passing the cache folder would turn it on.
     """
     from llm.managed_omlx_binary import managed_omlx_paths
 
     paths = managed_omlx_paths()
-    cache_on = not settings.get("no_cache") and _ssd_cache_enabled(paths.settings_path)
+    cache = _ssd_cache_folder(paths.settings_path, paths.base_path / "cache")
     folders = {
         "base_path": str(paths.base_path),
         "model_dir": str(paths.model_dir),
-        "paged_ssd_cache_dir": str(paths.base_path / "cache") if cache_on else None,
+        "paged_ssd_cache_dir": None if settings.get("no_cache") else cache,
     }
     # oMLX's CLI flags override its settings file, so pass its saved values back.
     return {**settings, **managed_global_settings(), **folders}

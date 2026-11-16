@@ -127,17 +127,17 @@ def _lineage_shape(connection, plan_id: str, ids: list[str]) -> dict | None:
     return {"ids": ids, "members": members, "expanded": expanded, "needs": node_cost_initiative.node_ids(expanded)}
 
 
-def _roll(shape: dict, own: dict, spans: dict) -> dict[str, dict]:
+def _roll(shape: dict, own: dict, spans: dict, *, clock: datetime | None = None) -> dict[str, dict]:
     """Each asked node's rolled cost, settled, from its loaded shape and the read own facts."""
     totals: dict[str, dict] = {}
     plan_spans: dict[str, node_time.Span] = {}
     if shape["carried"]:
         _, totals, plan_spans = node_cost._roll_plans_with_totals(
-            shape["tree"], shape["child_nodes"], own, shape["child_attached"], spans,
+            shape["tree"], shape["child_nodes"], own, shape["child_attached"], spans, clock=clock,
         )
     rolled = node_cost._rollup_one_plan(
         own, shape["carried"], {child: totals[child] for child in set(shape["carried"].values())},
-        node_span_roll.shape_spans(shape, spans, plan_spans),
+        node_span_roll.shape_spans(shape, spans, plan_spans), clock=clock,
     )
     return {node_id: node_cost._settled(rolled[node_id]) for node_id in shape["ids"]}
 
@@ -166,6 +166,7 @@ def working_seconds(wanted, *, db, now: datetime | None = None) -> dict[str, int
 
 def project(
     listed, wanted, commitment_ids: Collection[str], *, db, now: datetime | None = None,
+    stable: bool = False,
 ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict | None], usage_cost.Ledger]:
     """The cost figures of one scoped read, with one priced ledger read for all of them.
 
@@ -186,10 +187,10 @@ def project(
         ]
         needed = sorted({*listed, *(node_id for shape in [*rolls, *lineages] for node_id in shape["needs"])})
         dollars, ledger = usage_cost.priced_with_pending(connection, needed, commitment_ids)
-        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, dollars=dollars)
+        own, spans = node_cost.own_many_timed(needed, db=connection, now=clock, dollars=dollars, stable=stable)
     rolled: dict[str, dict] = {}
     for shape in rolls:
-        rolled.update(_roll(shape, own, spans))
+        rolled.update(_roll(shape, own, spans, clock=clock if stable else None))
     initiatives: dict[str, dict | None] = {str(value): None for value in wanted}
     for shape in lineages:
         totals = node_cost_initiative.totals(shape["expanded"], own)

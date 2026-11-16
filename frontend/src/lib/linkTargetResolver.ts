@@ -1,7 +1,9 @@
 import { get } from 'svelte/store';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { fetchRoots, fetchRevision, type DocRevision, type ScopeRoot } from '$lib/api/docs';
-import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { fetchRoots, fetchRevision } from '$lib/api/docs';
+import { linkedFile, targetPath, type LinkedFileReads } from '$lib/linkedFile';
+import { markTabStatus, openLinkLoadingTab, settleLinkLoadingTab } from '$lib/stores/artifactWorkspace';
+import type { ArtifactLink } from '$lib/artifactTabTypes';
 import { defaultTabTitle } from '$lib/artifactTabTitle';
 import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
@@ -14,52 +16,20 @@ import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from 
 export interface LinkResolverDeps {
 	activeThreadId: () => string | null;
 	projectId: () => string | null;
-	fetchRoots: (projectId: string | null) => Promise<ScopeRoot[]>;
-	fetchRevision: (path: string, projectId: string | null) => Promise<DocRevision>;
-	openArtifact: (threadId: string, input: { artifactId: string | null; path: string; title: string }) => void;
+	fetchRoots: LinkedFileReads['fetchRoots'];
+	fetchRevision: LinkedFileReads['fetchRevision'];
+	/** Shows the pressed link's tab loading at once; null when the same link is already loading (its tab is selected). */
+	openLoading: (threadId: string, link: ArtifactLink, title: string) => string | null;
+	/** The loading tab becomes the resolved document's tab. */
+	openArtifact: (threadId: string, input: { artifactId: string | null; path: string; title: string }, loadingTab: string) => void;
+	/** The loading tab shows the unavailable or error state. */
+	failLoading: (threadId: string, loadingTab: string, status: 'unavailable' | 'error') => void;
 	showError: (message: string) => void;
 	openExternal: (href: string) => Promise<void>;
 	isTauri: () => boolean;
 	origin: () => string;
 	openSettings: (section: SettingsSection, anchor: string | null) => void;
 	openThread: (threadId: string) => void;
-}
-
-function targetPath(href: string): string | null {
-	const withoutQuery = href.split(/[?#]/, 1)[0];
-	if (!withoutQuery) return null;
-	try {
-		return withoutLineSuffix(decodeURIComponent(withoutQuery));
-	} catch {
-		return null;
-	}
-}
-
-function normalizePath(root: string, target: string): string | null {
-	const rootParts = root.split('/').filter(Boolean);
-	const parts = target.startsWith('/') ? [] : [...rootParts];
-	for (const part of target.split('/')) {
-		if (!part || part === '.') continue;
-		if (part === '..') {
-			if (parts.length <= rootParts.length) return null;
-			parts.pop();
-			continue;
-		}
-		parts.push(part);
-	}
-	const resolved = `/${parts.join('/')}`;
-	return resolved === root || resolved.startsWith(`${root}/`) ? resolved : null;
-}
-
-function workspacePath(href: string, roots: ScopeRoot[]): string | null {
-	const target = targetPath(href);
-	if (!target) return null;
-	const workspaces = roots.filter((root) => root.kind === 'workspace');
-	if (target.startsWith('/')) {
-		const root = workspaces.find((candidate) => target === candidate.path || target.startsWith(`${candidate.path}/`));
-		return root ? normalizePath(root.path, target) : null;
-	}
-	return workspaces[0] ? normalizePath(workspaces[0].path, target) : null;
 }
 
 function externalHref(href: string): string | null {
@@ -124,6 +94,8 @@ interface LinkRouted {
 	result: 'external' | 'document' | 'settings' | 'thread' | 'error';
 	target: LinkOpenTarget;
 	reason?: LinkOpenFailure;
+	/** This press joined an open already in flight; that open reports the outcome. */
+	joined?: true;
 }
 
 function failed(target: LinkOpenTarget, reason: LinkOpenFailure): LinkRouted {
@@ -161,37 +133,51 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 		deps.showError('Open a chat before opening a linked document');
 		return failed('workspace_document', 'no_active_thread');
 	}
+	const link = { href, projectId: deps.projectId() };
+	// The press shows its tab loading before any request: the roots and revision reads can wait on the database.
+	const loadingTab = deps.openLoading(threadId, link, defaultTabTitle(targetPath(href) ?? href));
+	if (loadingTab === null) return { result: 'document', target: 'workspace_document', joined: true };
+	return openLinkedDocument(link, threadId, loadingTab, deps);
+}
+
+// A failure lands in the pressed link's own tab, which states the reason; a toast would repeat it, and on a phone cover it.
+async function openLinkedDocument(link: ArtifactLink, threadId: string, loadingTab: string, deps: LinkResolverDeps): Promise<LinkRouted> {
 	try {
-		const projectId = deps.projectId();
-		const path = workspacePath(href, await deps.fetchRoots(projectId));
-		if (!path) {
-			deps.showError("Couldn't find the linked workspace document");
+		const linked = await linkedFile(link.href, deps, link.projectId);
+		if (!linked) {
+			deps.failLoading(threadId, loadingTab, 'unavailable');
 			return failed('workspace_document', 'not_found');
 		}
-		const revision = await deps.fetchRevision(path, projectId);
-		if (!revision.exists) {
-			deps.showError("Couldn't find the linked workspace document");
-			return failed('workspace_document', 'not_found');
-		}
+		const { path, revision } = linked;
 		deps.openArtifact(threadId, {
 			artifactId: revision.artifact_id,
 			path: revision.path ?? path,
 			title: defaultTabTitle(revision.path ?? path),
-		});
+		}, loadingTab);
 		return { result: 'document', target: 'workspace_document' };
 	} catch {
-		deps.showError("Couldn't open the linked workspace document");
+		deps.failLoading(threadId, loadingTab, 'error');
 		return failed('workspace_document', 'open_failed');
 	}
 }
 
+/** Retry on a link tab that failed to open: the same tab loads again and resolves the same link. */
+export async function retryLinkTab(threadId: string, loadingTab: string, link: ArtifactLink): Promise<void> {
+	const deps = defaultDeps();
+	markTabStatus(threadId, loadingTab, 'loading');
+	const { target, reason } = await openLinkedDocument(link, threadId, loadingTab, deps);
+	emitProductEvent('link', 'open', reason ? { target, outcome: 'failed', reason } : { target, outcome: 'succeeded' });
+}
+
 /**
  * Routes one rendered-markdown target to an external browser or the artifact leaf.
- * Reports one `link.open` event per call: target class, outcome and a bounded
- * failure reason only; never the href, a path, a title or error text.
+ * Reports one `link.open` event per open: target class, outcome and a bounded
+ * failure reason only; never the href, a path, a title or error text. A press on
+ * a link still loading starts no open and reports nothing.
  */
 export async function resolveLinkTarget(href: string, deps: LinkResolverDeps): Promise<'external' | 'document' | 'settings' | 'thread' | 'error'> {
-	const { result, target, reason } = await routeLinkTarget(href, deps);
+	const { result, target, reason, joined } = await routeLinkTarget(href, deps);
+	if (joined) return result;
 	emitProductEvent('link', 'open', reason
 		? { target, outcome: 'failed', reason }
 		: { target, outcome: 'succeeded' });
@@ -204,7 +190,9 @@ function defaultDeps(): LinkResolverDeps {
 		projectId: () => get(uiScope)?.id ?? null,
 		fetchRoots,
 		fetchRevision: (path, projectId) => fetchRevision(path, projectId),
-		openArtifact: openArtifactTab,
+		openLoading: openLinkLoadingTab,
+		openArtifact: (threadId, input, loadingTab) => settleLinkLoadingTab(threadId, loadingTab, input),
+		failLoading: markTabStatus,
 		showError: (message) => toasts.show(message, 'error'),
 		openExternal: openExternalUrl,
 		isTauri: () => document.documentElement.dataset.shell === 'tauri',

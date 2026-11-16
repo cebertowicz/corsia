@@ -5,14 +5,14 @@ const mocks = vi.hoisted(() => ({ fetchRevision: vi.fn() }));
 
 vi.mock('$lib/api/docs', () => ({ fetchRevision: mocks.fetchRevision }));
 
-import { startArtifactRevisionWatch } from './artifactRevisionWatch';
+import { checkThreadRevisions, startArtifactRevisionWatch } from './artifactRevisionWatch';
 import { emit } from '$lib/ws/events';
 import { token } from '$lib/stores/auth';
 import { threads } from '$lib/stores/threads';
 import { uiScope } from '$lib/stores/uiScope';
 import { subagentMeta } from '$lib/stores/subagents';
 import {
-	applyTabLoadSignal, markTabSaved, openArtifactTab, threadWorkspaces,
+	applyTabLoadSignal, markTabSaved, openArtifactTab, openLinkLoadingTab, threadWorkspaces,
 } from '$lib/stores/artifactWorkspace';
 
 function deferred<T>() {
@@ -99,6 +99,24 @@ describe('artifact revision watch', () => {
 			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalledTimes(2));
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			expect(mocks.fetchRevision).toHaveBeenCalledTimes(2);
+		} finally {
+			stop();
+		}
+	});
+
+	it('never probes a link tab still resolving, on focus or on a chat switch', async () => {
+		openLoaded('thread-a', 'art-1', '/a.md');
+		const linkTab = openLinkLoadingTab('thread-a', { href: 'shared/x.md', projectId: 'project-1' }, 'x.md');
+		mocks.fetchRevision.mockResolvedValue(revision('r0'));
+		const stop = startArtifactRevisionWatch();
+		try {
+			window.dispatchEvent(new Event('focus'));
+			checkThreadRevisions('thread-a');
+			await vi.waitFor(() => expect(mocks.fetchRevision).toHaveBeenCalled());
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(mocks.fetchRevision.mock.calls.map(([path]) => path)).not.toContain('');
+			const tab = get(threadWorkspaces)['thread-a'].tabs.find((entry) => entry.instanceId === linkTab);
+			expect(tab?.status).toBe('loading');
 		} finally {
 			stop();
 		}

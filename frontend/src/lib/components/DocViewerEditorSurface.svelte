@@ -12,7 +12,7 @@
 	import { coarsePointer, selectionButtonPlace } from '$lib/selectionButtonPlace';
 	import type { SelectionOffer } from '$lib/cm/widget-selection-types';
 	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
+	import DocLoadState from './DocLoadState.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
@@ -138,7 +138,8 @@
 	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.widgetLabel(from, to, quote); }
 	export function widgetLabelStamp() { return editor?.widgetLabelStamp(); }
-	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
+	export function coveredBySheet(from: number, opening: boolean) { return editor?.coveredBySheet(from, opening); }
+	export function editorView() { return editor?.editorView(); }
 
 	// The button follows the selection's end but never leaves the visible document column, and sits above or below the rows the
 	// selection is drawn on, as chat's does, so it never covers selected text.
@@ -172,14 +173,8 @@
 {/snippet}
 
 <div class="doc-main" class:email-mode={email} bind:this={column}>
-	{#if docState === 'loading'}
-		<div class="loadbar"><span></span></div>
-		<div class="md-skel">{#each Array(6) as _, i (i)}<span class="ms-line" style="width:{[90, 70, 80, 55, 75, 45][i]}%"></span>{/each}</div>
-	{:else if docState === 'error'}
-		<div class="load-error" role="alert">
-			<p>Couldn't open {documentName}.</p>
-			<Button size="sm" variant="ghost" onclick={onRetry}>Retry</Button>
-		</div>
+	{#if docState === 'loading' || docState === 'error'}
+		<DocLoadState state={docState} name={documentName} {onRetry} />
 	{:else}
 		<div class="doc-body" class:email-scroll={email}>
 			{#if email}<EmailNotes lines={loudLines} />{/if}

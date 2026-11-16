@@ -258,6 +258,14 @@ def _creation_values(
     )
 
 
+def _mark_born_later(connection: sqlite3.Connection, plan_id: str, node_id: str) -> None:
+    """Mark the new task Later and arm its plan's first review."""
+    from plans import later_review
+
+    service.touch_node(connection, node_id, later=1)
+    later_review.arm(connection, plan_id)
+
+
 def create_node(
     connection: sqlite3.Connection,
     plan_id: str,
@@ -312,13 +320,16 @@ def create_node(
     _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
                      intent, intent_node_id)
     if later:
-        # Born below the cut. The flag goes through the one revision writer rather
-        # than joining the creation insert's three migration-shaped column lists;
-        # it is ranking, so no aggregate is re-derived for it.
-        service.touch_node(connection, node_id, later=1)
+        _mark_born_later(connection, plan_id, node_id)
+    from plans.conductor_add import ADD_PROVENANCE, coordinator_kind
+
     service._event(
         connection, node_id, "node_created", actor_id=actor_id, provenance=provenance,
         payload={
+            # The boundary authorized this add with the same rule, so the kind is set.
+            **({"conductor_kind": coordinator_kind(connection, connection.execute(
+                "SELECT owner_kind, owner_id FROM plans WHERE id=?", (plan_id,)).fetchone(), actor_id)}
+               if provenance == ADD_PROVENANCE else {}),
             "checkpoint_exception": checkpoint_exception, "workflow_ref": workflow_ref,
             "workflow_version": workflow_version, "workflow_step": workflow_step,
             "difficulty": difficulty, "size": size, "follow_up_of": follow_up_of,

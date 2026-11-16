@@ -10,7 +10,7 @@ import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, t
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 import { clearStartupProgress, refreshStartupProgress } from './startupProgress';
-import type { UpdateSchedule, UpdateStatus } from './types';
+import type { UpdateStatus } from './types';
 import { apiFetch } from '$lib/api/request';
 
 const POLL_MS = 1_000;
@@ -41,6 +41,9 @@ let noticeToastId: string | null = null;
 let latestNoticeStatus: UpdateStatus | null = null;
 // What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
 const shownOutcomes = new Set<string>();
+// Updates this page watched while they ran. It checks their version itself: another device having shown the outcome
+// says nothing about whether this page reaches the new version.
+const followedOperations = new Set<string>();
 const noticedVersions = new Set<string>();
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
@@ -138,7 +141,9 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
 			updateConfirmed.set({ operationId: operation.operation_id, version: operation.target_version ?? get(updateStatus)?.target_version ?? null });
-			showTerminal(operation);
+			// A success greets one device; a page that only follows it confirms its own screen quietly.
+			if (operation.outcome_seen_at) shownOutcomes.add(operation.operation_id);
+			else showTerminal(operation);
 			void loadUpdateStatus();
 			return;
 		}
@@ -159,6 +164,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 function reconcileOperation(status: UpdateStatus): void {
 	const operation = status.operation ?? null;
 	if (isInFlight(operation)) {
+		followedOperations.add(operation.operation_id);
 		updateFailureVerdict.set(null);
 		pollStatusWhileRunning();
 		return;
@@ -167,9 +173,10 @@ function reconcileOperation(status: UpdateStatus): void {
 	stopVersionPolling();
 	dropProgressToast();
 	updateProgressMinimized.set(false);
-	if (!operation || operation.outcome_seen_at || isResolvedFailure(operation)) return;
-	if (operation.status === 'complete') void verifyComplete(operation);
-	else if (isFailedOperation(operation)) showTerminal(operation);
+	if (!operation || isResolvedFailure(operation)) return;
+	const unseen = !operation.outcome_seen_at;
+	if (operation.status === 'complete' && (unseen || followedOperations.has(operation.operation_id))) void verifyComplete(operation);
+	else if (unseen && isFailedOperation(operation)) showTerminal(operation);
 }
 
 /** Read the durable operation projection and start polling only while it is active. */
@@ -217,33 +224,6 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	}
 }
 
-function showScheduleSaveError(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): void {
-	toasts.showAction("Couldn't save the schedule", {
-		label: 'Retry', run: () => { void saveUpdateSchedule(patch); },
-	});
-}
-
-export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): Promise<boolean> {
-	const authToken = get(token);
-	if (!authToken) {
-		showScheduleSaveError(patch);
-		return false;
-	}
-	try {
-		const response = await apiFetch('/api/system/update-schedule', {
-			method: 'PUT', headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(patch), cache: 'no-store',
-		});
-		if (!response.ok) throw new Error(`Schedule save returned ${response.status}`);
-		const schedule = await response.json() as UpdateSchedule;
-		updateStatus.update((current) => current ? { ...current, schedule } : current);
-		return true;
-	} catch {
-		showScheduleSaveError(patch);
-		return false;
-	}
-}
-
 /** Open Settings > System at the Updates card; Settings keeps the thread it opened over, so Back returns to it. */
 export function openUpdates(): void {
 	dismissNotice();
@@ -287,6 +267,7 @@ export function resetUpdateStoreForTests(): void {
 	versionMismatchStartedAt = null;
 	noticeToastId = null;
 	shownOutcomes.clear();
+	followedOperations.clear();
 	noticedVersions.clear();
 	updateStatus.set(null);
 	updateProgressMinimized.set(false);

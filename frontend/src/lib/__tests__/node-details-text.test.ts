@@ -26,16 +26,18 @@ describe('node details wording', () => {
 			tokens: { known: knownTokens, unknown_rows: tokenUnknownRows },
 			usage_recording_failures: failures,
 			execution: {
-				seconds: 0, unknown_turns: 0,
+				settled_seconds: 0, open_starts: [], unknown_turns: 0,
 				turns: { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 },
 			},
-			waiting: { seconds: 0 },
+			waiting: { settled_seconds: 0, open_starts: [] },
 		});
 		expect(costLine(amount(null, 3, 10))).toBe('10 tokens');
 		expect(costLine(amount(0.25, 1, 10))).toBe('at least $0.2500 API-equivalent · 10 tokens');
 		expect(costLine(amount(1.5, 0, 10, 4, 2))).toBe('at least $1.500 API-equivalent · at least 10 tokens');
 		expect(costLine(amount(0, 5, null))).toBeNull();
 		expect(costLine(amount(null, 5, null))).toBeNull();
+		expect(costLine(amount(0, 0, 0))).toBeNull();
+		expect(costLine(amount(null, 0, 0, 0, 1))).toBe('at least 0 tokens');
 	});
 
 	it('keeps working and waiting time out of the cost fact', () => {
@@ -44,13 +46,32 @@ describe('node details wording', () => {
 			model_cost_usd: { known: 1.5, unknown_rows: 0 },
 			tokens: { known: 10, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			execution: { seconds: 7_800, unknown_turns: 0, turns },
-			waiting: { seconds: waiting },
+			execution: { settled_seconds: 7_800, open_starts: [], unknown_turns: 0, turns },
+			waiting: { settled_seconds: waiting, open_starts: [] },
 		});
 		expect(costLine(amount(18_180))).toBe('$1.500 API-equivalent · 10 tokens');
 		expect(workingTime(amount(18_180))).toBe('2h 10m');
 		expect(waitingTime(amount(18_180))).toBe('5h 3m');
 		expect(waitingTime(amount(0))).toBeNull();
+	});
+
+	it('advances each open duration and leaves closed durations fixed', () => {
+		const amount = node({ id: 'live' }).node_cost.own;
+		const start = '2026-01-01T00:00:00Z';
+		const now = Date.parse('2026-01-01T00:00:10Z');
+		const live = { ...amount,
+			execution: { ...amount.execution, settled_seconds: 3, open_starts: [start, start],
+				turns: { ...amount.execution.turns, running: 2 } },
+			waiting: { settled_seconds: 5, open_starts: [start] },
+		};
+		expect(workingTime(live, now)).toBe('23s');
+		expect(waitingTime(live, now)).toBe('15s');
+		expect(workingTime(live, now + 2_000)).toBe('27s');
+		expect(waitingTime(live, now + 2_000)).toBe('17s');
+		const closed = { ...live, execution: { ...live.execution, open_starts: [] }, waiting: { settled_seconds: 5, open_starts: [] } };
+		expect(workingTime(closed, now + 2_000)).toBe('3s');
+		expect(waitingTime(closed, now + 2_000)).toBe('5s');
+		expect(waitingTime({ ...closed, waiting: { settled_seconds: 0, open_starts: ['2026-01-01T00:00:20Z'] } }, now)).toBeNull();
 	});
 
 	it('names the next mover only when it is not an agent', () => {
@@ -68,7 +89,7 @@ describe('node details wording', () => {
 			tokens: { known: tokens, unknown_rows: 0 },
 			model_cost_usd: { known: null, unknown_rows: 0 },
 			usage_recording_failures: 0,
-			elapsed_seconds: { known: 0, status: 'in_progress' as const },
+			elapsed_seconds: { settled_seconds: 0, status: 'in_progress' as const, open_starts: [] },
 			user_effort: { known_plan_actions: 0, status: 'partial' as const },
 		});
 		const base = node({ id: 'n' });
@@ -85,5 +106,16 @@ describe('node details wording', () => {
 				model_cost_usd: { known: null, unknown_rows: 1 },
 			},
 		})).toBe('at least 100 tokens');
+		// A known zero is an empty fact here too, never a "0 tokens" follow-up line.
+		const idle = { ...base.node_cost.rolled, tokens: { known: 0, unknown_rows: 0 } };
+		const idleNode = { ...base, node_cost: { own: idle, rolled: idle } };
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: null, unknown_rows: 1 } },
+		})).toBeNull();
+		expect(withFollowUps({
+			...idleNode,
+			commitment_cost: { ...commitment(0, 3), model_cost_usd: { known: 0.5, unknown_rows: 0 } },
+		})).toBe('$0.5000 API-equivalent');
 	});
 });

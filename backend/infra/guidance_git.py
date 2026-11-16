@@ -27,6 +27,7 @@ from infra.guidance_history_paths import digest, file_version, find_commit, is_e
 from infra.guidance_index_sync import CORSIA_COMMITTER, consume_records, index_lock_fault, record_failure, seed_legacy_records
 from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, commit_message, is_person_author, recorded_reason,
+    unforgeable,
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
 from infra.guidance_save_after import after_save
@@ -276,8 +277,10 @@ def save_with_history(
     write: Callable[[Path, bytes], object] = _write_bytes,
     lesson_gate: bool = True,
     lesson_observation_thread_id: str | None = None,
+    accepted_suggestions: tuple[str, ...] = (),
 ) -> SaveResult:
-    """Save writes and compare-and-swap deletes in one history commit.
+    """Save writes and compare-and-swap deletes in one history commit; ``accepted_suggestions`` marks
+    a version that applies those accepted suggestions, and nothing else can.
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
@@ -304,7 +307,7 @@ def save_with_history(
     timing: dict[str, float] = {}
     done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
     subject = f"{target.kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
-    commit = message or commit_message(subject, target.scope, reason, evidence)
+    commit = unforgeable(message) if message else commit_message(subject, target.scope, reason, evidence, accepted_suggestions)
     result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing)
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,

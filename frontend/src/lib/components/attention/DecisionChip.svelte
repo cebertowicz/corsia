@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	/**
 	 * The canonical decision chip — one renderer for one persisted decision
 	 * identity, wherever the dock is mounted.
@@ -236,7 +237,7 @@
 				{#if decision.other_enabled}
 					<label class="other-option">
 						<span class="sr-only">Note</span>
-						<textarea
+						<textarea use:keepTyped
 							bind:this={otherEl}
 							bind:value={other}
 							class="text-field"
@@ -283,7 +284,7 @@
 					     keyboard traversal passes through this input on every pass,
 					     and discarding the chosen option there silently unpresses
 					     the option and disables Answer with nothing announced. -->
-					<textarea
+					<textarea use:keepTyped
 						bind:this={otherEl}
 						bind:value={other}
 						class="text-field"

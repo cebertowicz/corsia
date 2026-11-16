@@ -136,7 +136,11 @@ replaces the observation; it is removed when the turn that recorded it ends
 (`backend/llm/memory_fit.py`). External server
 selectors carry both server identity and served model id; the External provider
 routes requests without managing the server's models
-(`backend/llm/external_provider.py`).
+(`backend/llm/external_provider.py`). Registration, testing and rediscovery
+perform metadata requests only. The response observer in `backend/llm/router.py`
+triggers image detection after a chosen External model's first successful reply;
+`backend/llm/external_image_input.py` owns the durable per-model claim and result.
+Failed checks remain unknown without automatic retry; a saved user choice wins.
 
 The oMLX public authentication, managed oMLX replacement, and model and account
 resolution sections were checked against the code at
@@ -690,9 +694,18 @@ paths or switch branches from a running process.
 ## Scoped audit reads and host-access refusals
 
 `backend/infra/audit_reads.py` owns the fixed state-database audit metrics and
-their scope: the caller's user and project for every metric except
-`seat_usage`, which is scoped to the caller's user alone because subscription
-accounts are shared across projects. The authenticated HTTP route and agent tool
+their scope. `checkpoint_health`, `lease_reviews` and `stored_message_pressure`
+are scoped to the caller's user and project. `seat_usage`, `plan_activity`,
+`agent_hours` and `agent_day_levels` are scoped to the caller's user alone and
+count archived threads: subscription accounts are shared across projects, and
+`agent_day_levels` reports each row's place as the caller's project, another
+project or no project (`agent_hours` rows are grouped by account and provider
+only). The readers for `agent_hours` and `agent_day_levels` live in
+`backend/api/audit_agent_hours.py`, because they read Measurement's hourly usage
+rollup (`api/usage_rollup.py`); the HTTP route and the agent tool pass them in.
+Their token sums cover every call, where `seat_usage` sums only calls
+Measurement can price, and they name an unattributed call's model prefix
+`provider` where `seat_usage` names it `harness`. The authenticated HTTP route and agent tool
 call that same service; the agent tool gets its current thread from the tool
 registry, never from model arguments. The service opens a dedicated SQLite
 `mode=ro`, `query_only` connection, binds actor and rows to one read snapshot,
@@ -704,9 +717,8 @@ Measurement's priceable-token contract (`core/measurement_token_contract.py`),
 reports the rows that contract drops as `excluded_calls`, and splits
 unattributed Claude Code and Codex rows by harness. Every metric except an
 unwindowed pressure ranking needs a window of at most seven days. The caller
-and every metric except `seat_usage` use the canonical `thread_available_sql`
-predicate; `seat_usage` scopes by user only and counts archived threads,
-since a subscription account is shared across projects. Rows with an installed checkpoint take their
+and the three project-scoped metrics use the canonical `thread_available_sql`
+predicate. Rows with an installed checkpoint take their
 current-epoch boundary from `checkpoint_queries.current_installed_through_seq`,
 which shares the exact selection rule with `current_installed`; rows without one
 are labeled `no_checkpoint` and count full stored history. These numeric sizes

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
+from core.tool_result_settlement import settle_turn_tool_lineage
 from infra.database import write_transaction
 from infra.plan_limit_continue import queue_terminal_continue
 from infra.completed_tool_results import (
@@ -55,7 +56,9 @@ def admit_input(
     db: sqlite3.Connection | None = None,
 ) -> InputAdmission:
     """Accept one FIFO input and atomically choose the idle Turn winner."""
-    with write_transaction(db, scope="admit_input") as connection:
+    from connections.fact_memo import fact_reads
+    # Shared account, catalog, policy and home facts stay unchanged; close before commit.
+    with write_transaction(db, scope="admit_input") as connection, fact_reads():
         from automation.self_restart import restart_holds_new_work
         from infra.passive_changes import materialize_pending_digest
         passive = materialize_pending_digest(connection, thread_id) if materialize_passive_digest else None
@@ -112,13 +115,12 @@ def _parent_completion(
 
     if has_open_structured_attachment(child_id, db=db):
         return None
-    existing = db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND json_valid(metadata) "
-        "AND json_extract(metadata,'$.completion')=1 "
-        "AND json_extract(metadata,'$.child_turn_id')=? LIMIT 1",
-        (str(parent), turn_id),
-    ).fetchone()
-    if existing is not None:
+    message_id = f"parent-completion:{turn_id}"
+    # Both completion writers (this one and delegate_send's completion intent)
+    # key the row by this id. Look it up by key: this runs inside the Turn's
+    # write transaction, and reading the parent's history here held every
+    # other writer for as long as that history took to read.
+    if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone() is not None:
         return None
     from infra.thread_confinement import ChildOutput
 
@@ -137,7 +139,7 @@ def _parent_completion(
         role="user",
         content=content,
         intent="apply_now",
-        message_id=f"parent-completion:{turn_id}",
+        message_id=message_id,
         metadata={
             "sender_kind": "agent",
             "from_thread": child_id,
@@ -351,10 +353,9 @@ def _persist_before_terminal(
     """Persist terminal usage and settle account limits before successor admission."""
 
     _persist_completed_tool_results(connection, thread_id, turn_id, error)
+    settle_turn_tool_lineage(connection, thread_id, turn_id)
     usage.settle(connection, thread_id)
-    return settle_terminal_limits(
-        connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error,
-    )
+    return settle_terminal_limits(connection, thread_id, turn_id, outcome=outcome, ended_at=ended_at, error=error)
 
 
 def _write_idle_marker(

@@ -20,7 +20,7 @@
 	let errMsg = $state<string | null>(null);
 
 	const status = $derived.by(() => {
-		if (!imageInput) return 'Not checked yet. CORSIA checks when the model is discovered or the endpoint is tested.';
+		if (!imageInput) return 'Not checked yet.';
 		const answer = imageInput.result === 'yes' ? 'Accepts images.'
 			: imageInput.result === 'no' ? 'Text only.'
 			: 'Could not be determined.';
@@ -49,7 +49,7 @@
 			onchange={(e) => (draft = (e.currentTarget as HTMLSelectElement).value as Mode)}
 			aria-label="Image support"
 		>
-			<option value="auto">Detect automatically</option>
+			<option value="auto">Detect</option>
 			<option value="yes">Accepts images</option>
 			<option value="no">Text only</option>
 		</select>

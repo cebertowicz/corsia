@@ -15,6 +15,9 @@ Merging is linear in the intervals carried; it adds no query.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from math import inf, nextafter
+
 from plans.node_waiting import Interval, subtract, union
 
 Span = dict[str, list[Interval]]
@@ -38,6 +41,59 @@ def seconds(span: Span) -> tuple[int, int]:
     working = sum(int(end - start) for start, end in span["working"])
     waited = subtract(span["waiting"], span["working"])
     return working, int(sum(end - start for start, end in waited))
+
+
+def stable_amount(intervals: list[Interval], now: datetime, *, floor_each: bool = False) -> dict:
+    """The settled union and the start of its open final segment."""
+    merged = union(intervals)
+    opened = merged[-1][1] == nextafter(now.timestamp(), inf) if merged else False
+    closed = merged[:-1] if opened else merged
+    lengths = [end - start for start, end in closed]
+    total = sum(int(length) for length in lengths) if floor_each else int(sum(lengths))
+    starts = [datetime.fromtimestamp(merged[-1][0], timezone.utc).isoformat()] if opened else []
+    return {"seconds": total, "open_starts": starts}
+
+
+def _settled_part(part: dict) -> dict:
+    rest = {key: value for key, value in part.items() if key not in ("seconds", "open_starts")}
+    return {"settled_seconds": part["seconds"], "open_starts": part.get("open_starts", []), **rest}
+
+
+def operator_amount(amount: dict | None) -> dict | None:
+    """A stable amount under the operator payload's names.
+
+    Its ``execution`` and ``waiting`` hold only time that has ended, so they read
+    ``settled_seconds``, never ``seconds`` (the agent path's total up to now): a
+    reader adds ``now - start`` for each ``open_starts`` entry.
+    """
+    if amount is None:
+        return None
+    return {**amount, "execution": _settled_part(amount["execution"]), "waiting": _settled_part(amount["waiting"])}
+
+
+def operator_costs(found: tuple[dict, dict, dict], *, named: bool) -> tuple[dict, dict, dict]:
+    """``operator_node_facts.project_costs``'s figures, under the operator payload's names when ``named``.
+
+    A stable read leaves running time out so the payload holds still between
+    reads; ``named`` says so in the field names (``operator_amount``).
+    """
+    commitment_costs, node_costs, initiatives = found
+    if not named:
+        return found
+    named_nodes = {
+        plan_id: {
+            node_id: None if cost is None else {
+                "own": operator_amount(cost["own"]), "rolled": operator_amount(cost["rolled"]),
+            }
+            for node_id, cost in nodes.items()
+        }
+        for plan_id, nodes in node_costs.items()
+    }
+    named_initiatives = {
+        node_id: None if value is None else {**value, "cost": operator_amount(value["cost"])}
+        for node_id, value in initiatives.items()
+    }
+    return commitment_costs, named_nodes, named_initiatives
 
 
 def interval_count(span: Span) -> int:

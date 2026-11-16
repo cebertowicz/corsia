@@ -8,6 +8,8 @@ is open and at least one of these holds:
   deadline-owned: a blocker only the user clears stays a hold, never a watch,
   ``plans.blocked_wait``), except a task its agent set aside
   (``plans.scheduled_wait``): that is the agent's own choice, not a wait;
+  nor does an agent's check-back (``node_waits.is_check_back``) count on a
+  person's task: the person owes that step;
 - an unmet dependency: an edge of its own present while its prerequisite is
   not accepted. An edge an open ancestor hands down (``plans.node_waits``)
   is that ancestor's wait, counted on it once; its roll-up spans the steps;
@@ -33,10 +35,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from math import inf, nextafter
 from typing import Callable
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from plans import decision_projection
+from plans import decision_projection, node_waits
 from plans.node_states import _ACCEPTED_STATES, _TERMINAL_STATES
 from plans.status_time import parse
 
@@ -132,7 +135,7 @@ def _edge_intervals(events: list, live: list, now: float) -> dict[str, list[Inte
 def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     """Every fact the intervals need, one chunked query per kind."""
     facts: dict[str, dict] = defaultdict(lambda: defaultdict(list))
-    for row in rows_in(connection, "SELECT id,plan_id,created_at,state FROM plan_nodes "
+    for row in rows_in(connection, "SELECT id,plan_id,created_at,state,assignee FROM plan_nodes "
                        "WHERE id IN ({marks})", ids):
         facts[str(row["id"])]["node"] = dict(row)
     for row in rows_in(
@@ -151,13 +154,14 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     queries = (
         ("live", "SELECT node_id,depends_on_node_id,created_at FROM plan_node_dependencies "
                  "WHERE node_id IN ({marks})"),
-        ("watches", "SELECT w.plan_node_id AS node_id,w.status,w.armed_at,"
+        ("watches", "SELECT w.plan_node_id AS node_id,w.id,w.condition_type,w.condition_value,w.status,w.armed_at,"
                     "COALESCE(w.resolved_at,w.expired_at,CASE WHEN w.status<>'armed' THEN w.updated_at END)"
-                    " AS ended_at FROM expected_event_watches w WHERE w.plan_node_id IN ({marks})"
-                    # A set-aside task (operator_scheduled.is_set_aside) is not waiting.
-                    " AND NOT EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=w.plan_node_id"
+                    " AS ended_at,json_extract(e.payload_json,'$.blocked.owner_kind') AS blocked_owner_kind"
+                    " FROM expected_event_watches w LEFT JOIN plan_node_events e ON e.node_id=w.plan_node_id"
                     " AND e.event='watch_armed' AND json_extract(e.payload_json,'$.watch_id')=w.id"
-                    " AND json_extract(e.payload_json,'$.scheduled.reason') IS NOT NULL)"),
+                    " WHERE w.plan_node_id IN ({marks})"
+                    # A set-aside task (operator_scheduled.is_set_aside) is not waiting.
+                    " AND json_extract(e.payload_json,'$.scheduled.reason') IS NULL"),
         ("holds", "SELECT node_id,created_at,cleared_at FROM plan_node_holds "
                   "WHERE owner_kind='user' AND node_id IN ({marks})"),
     )
@@ -259,14 +263,16 @@ def own_waiting(connection, node_ids: list[str], now: datetime, rows_in: Callabl
 
 
 def own_waiting_intervals(
-    connection, node_ids: list[str], now: datetime, rows_in: Callable,
+    connection, node_ids: list[str], now: datetime, rows_in: Callable, *, stable: bool = False,
 ) -> dict[str, list[Interval]]:
     """Each node's own merged waiting intervals (epoch seconds); the one builder.
 
     ``own_waiting`` is their summed length; a roll-up carries the intervals
     themselves so time that several steps waited through together counts once.
     """
-    clock = now.timestamp()
+    # Mark open endpoints one float beyond the read clock. A closed interval can
+    # end exactly at now; comparing its endpoint with now would misclassify it.
+    clock = nextafter(now.timestamp(), inf) if stable else now.timestamp()
     facts = _read(connection, node_ids, rows_in)
     paused = _plan_paused(
         connection,
@@ -286,9 +292,13 @@ def own_waiting_intervals(
         if "node" not in fact:
             continue
         spans = _state_spans(fact["node"], fact["transitions"], clock)
+        # On a person's task the agent's check-back is its follow-up, not a
+        # wait: the person owes the step (operator_display_state reads Needs you).
+        persons = fact["node"]["assignee"] == "user"
         causes = [
             (start, clock if row["status"] == "armed" else (_at(row["ended_at"]) or start))
             for row in fact["watches"] if (start := _at(row["armed_at"])) is not None
+            and not (persons and node_waits.is_check_back(node_waits.watch_cause(row)))
         ]
         for prerequisite, present in _edge_intervals(fact["edges"], fact["live"], clock).items():
             causes += intersect(present, unmet.get(prerequisite, []))

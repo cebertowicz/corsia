@@ -27,6 +27,8 @@ def _create_threads(db):
 
     definition = SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS threads (", 1)[1].split(");", 1)[0]
     db.execute("CREATE TABLE threads (" + definition + ")")
+    from infra.message_update_schema import MESSAGE_UPDATE_SCHEMA_SQL
+    db.executescript(MESSAGE_UPDATE_SCHEMA_SQL)
 
 
 class _HistoryDb:
@@ -34,12 +36,12 @@ class _HistoryDb:
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         _create_threads(self.db)
-        self.db.execute("CREATE TABLE messages (seq INTEGER, thread_id TEXT, role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT)")
+        self.db.execute("CREATE TABLE messages (id TEXT, seq INTEGER, thread_id TEXT, role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT)")
         if title is not None:
             self.db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u',?,'t','t')", (title,))
         self.db.executemany(
-            "INSERT INTO messages VALUES (?, 'thread-1', ?, ?, ?, ?, 'delivered')",
-            [(r['seq'], r['role'], r['content'], r['metadata'], r['created_at']) for r in rows],
+            "INSERT INTO messages VALUES ('m' || ?, ?, 'thread-1', ?, ?, ?, ?, 'delivered')",
+            [(r['seq'], r['seq'], r['role'], r['content'], r['metadata'], r['created_at']) for r in rows],
         )
 
     def execute(self, sql: str, params):

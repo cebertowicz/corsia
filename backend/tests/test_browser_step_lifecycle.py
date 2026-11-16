@@ -120,7 +120,12 @@ async def test_session_end_never_settles_and_agent_close_is_refused(plan, monkey
         assert THREAD not in owner._sessions
         page.show("visit-two")
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",), session="session-two")
-    assert row(db, original["id"])["state"] == "pending"
+    # Never done: the row closes unfinished, with why, so the agent waiting on it hears it.
+    assert row(db, original["id"])["state"] == "closed"
+    reason = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND new_state='closed'", (original["id"],),
+    ).fetchone()["payload_json"]
+    assert lifecycle.SESSION_ENDED_REASON in reason
     assert THREAD not in lifecycle._steps
     assert not any(event.endswith("_settled") for event in plan["events"])
     assert not browser_control.password_page(THREAD)
@@ -205,7 +210,8 @@ async def test_row_read_failure_preserves_the_live_step_and_retry_recovers(plan,
         raise PlanError("fixture row read failure")
 
     monkeypatch.setattr(lifecycle, "_step_row_state", fail)
-    with pytest.raises(PlanError, match="fixture row read failure"):
+    # A held step means its task exists, so its normal refusal holds even though the row can't be read.
+    with pytest.raises(BrowserSessionError, match="asks for a password" if kind == "password" else "person's to complete"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert lifecycle._steps[THREAD] is step
     assert row(plan["db"], step.node_id)["state"] == "pending"

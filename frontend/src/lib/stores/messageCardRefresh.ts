@@ -78,6 +78,13 @@ function schedule(): void {
 	}, DEBOUNCE_MS);
 }
 
+/** The pending re-read outlives the view that armed it, so a test cancels it before the next test's reads. */
+export function _cancelPendingMessageCardRefreshForTests(): void {
+	if (pending) clearTimeout(pending);
+	pending = null;
+	turnEnded = false;
+}
+
 let watching = false;
 
 /** Subscribes once per page. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickAnchor } from './docViewerClickPoint';
+import { clickAnchor, createCommentOpeners } from './docViewerClickPoint';
 
 const ownRects = Range.prototype.getClientRects;
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); Range.prototype.getClientRects = ownRects; });
@@ -32,6 +32,16 @@ describe('clickAnchor', () => {
 		const rect = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 230 }), () => null)!()!;
 		expect([rect.x, rect.top, rect.height]).toEqual([90, 222, 24]);
 	});
+	it('sits against the whole of a highlight up to three lines tall, and against the pressed line of a taller one', () => {
+		const line = document.body.appendChild(document.createElement('div'));
+		line.textContent = 'alpha beta gamma';
+		line.style.lineHeight = '24px';
+		Range.prototype.getClientRects = () => [new DOMRect(0, 200, 300, 20), new DOMRect(0, 224, 300, 20)] as unknown as DOMRectList;
+		const short = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 205 }), () => new DOMRect(0, 200, 300, 44))!()!;
+		expect([short.top, short.bottom]).toEqual([198, 244]);
+		const tall = clickAnchor(press(line, { detail: 1, clientX: 90, clientY: 205 }), () => new DOMRect(0, 200, 300, 200))!()!;
+		expect([tall.top, tall.height]).toEqual([198, 24]);
+	});
 	it('follows its comment’s text as it moves, and hides when the text’s box does', () => {
 		const marker = document.body.appendChild(document.createElement('button'));
 		marker.className = 'cm-comment-marker';
@@ -43,5 +53,23 @@ describe('clickAnchor', () => {
 		expect([moved.x, moved.top, moved.height]).toEqual([12, 60, 18]);
 		text = null;
 		expect(anchor()).toBeNull();
+	});
+});
+
+describe('createCommentOpeners', () => {
+	const openers = () => {
+		const ui = { focusComment: vi.fn(() => false), focusMarker: vi.fn() };
+		const scroll = { stay: vi.fn(), toComment: vi.fn() };
+		return { ui, open: createCommentOpeners(ui as never, scroll as never) };
+	};
+	it('reads the thread for a click or tap on its highlight, and not for a caret moved in by keys', () => {
+		const { ui, open } = openers();
+		open.comment('c', () => null);
+		expect(ui.focusComment).toHaveBeenLastCalledWith('c', expect.anything(), undefined, false, false);
+		Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+		const span = document.body.appendChild(document.createElement('span'));
+		// A phone tap has no point to open at, and still reads.
+		open.comment('c', () => null, undefined, press(span, { detail: 1 }));
+		expect(ui.focusComment).toHaveBeenLastCalledWith('c', expect.anything(), undefined, expect.any(Boolean), true);
 	});
 });

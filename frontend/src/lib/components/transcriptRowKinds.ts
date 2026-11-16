@@ -18,7 +18,7 @@ const ACTIVITY_SYSTEM_TYPES = new Set([
 const NEVER_DRAWN_SYSTEM_TYPES = new Set(['seed']);
 // Events the transcript never draws: the continue input that re-runs a Turn its
 // provider refused for size is the agent's, and the checkpoint row already shows it.
-const NEVER_DRAWN_EVENT_TYPES = new Set(['context_overflow.continue']);
+const NEVER_DRAWN_EVENT_TYPES = new Set(['context_overflow.continue', 'vendor_usage_limit_refusal']);
 
 // Rows that end a turn with an error. One stays a notice until the agent's next turn
 // starts with nothing to read in between; that start writes `recovered: true` on it.
@@ -72,8 +72,14 @@ export function systemType(message: TranscriptMessage): string {
  */
 export function isNeverDrawn(message: TranscriptMessage): boolean {
 	if (message.role === 'assistant') return message.metadata?.chat_drawn === false;
-	return message.role === 'system' && (NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message))
+	return message.role === 'system' && (message.metadata?.chat_drawn === false || isUsageLimitNotice(message)
+		|| NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message))
 		|| NEVER_DRAWN_EVENT_TYPES.has(String(message.metadata?.event_type ?? '')));
+}
+
+function isUsageLimitNotice(message: TranscriptMessage): boolean {
+	return (['llm_error', 'cc_error'].includes(systemType(message)) || isResultNotice(message))
+		&& message.metadata?.cause_kind === 'usage_limit';
 }
 
 /** Whether an error row carries the stamp that moves it inside its block. */
@@ -83,7 +89,7 @@ export function isRecoveredError(message: TranscriptMessage): boolean {
 }
 
 export function isSystemNotice(message: TranscriptMessage): boolean {
-	if (message.role !== 'system') return false;
+	if (message.role !== 'system' || isNeverDrawn(message)) return false;
 	const type = systemType(message);
 	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;

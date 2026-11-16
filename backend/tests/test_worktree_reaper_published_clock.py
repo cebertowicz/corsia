@@ -42,6 +42,9 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         worktree_reaper_store, "_store_path", lambda: state / "reaper" / "pr.json",
     )
     monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: set())
+    # Every owner a test names is a live thread unless the test says otherwise.
+    monkeypatch.setattr(worktree_reaper_checks, "_load_thread_lifecycles",
+                        lambda: {"0123abcd-1111-2222-3333-444455556666": None})
     monkeypatch.setattr(worktree_reaper_checks, "open_pr_branches", lambda repo: set())
 
 
@@ -80,7 +83,7 @@ def _run(repo: Path):
 
 
 def test_threshold_constants_are_literal():
-    assert worktree_reaper.PUBLISHED_IDLE_THRESHOLD_SECONDS == 24 * HOUR
+    assert worktree_reaper.SHORT_IDLE_THRESHOLD_SECONDS == 24 * HOUR
     assert worktree_reaper.IDLE_THRESHOLD_SECONDS == 7 * 24 * HOUR
 
 

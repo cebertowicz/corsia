@@ -11,7 +11,7 @@ import pytest
 from infra.database import get_db
 from plans import decision_fields, decisions, gate_handoff, gate_handoff_record, holds, service
 from plans.boundary import PlanActor
-from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, SPOT_DENOMINATORS
+from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, HANDED_OFF_STEP, SPOT_DENOMINATORS
 from tests.test_workflow_runs import Run, SHIP_BODY
 import tools.workflow_task_fields as workflow_task_fields
 
@@ -233,6 +233,8 @@ async def test_none_builds_a_reviewer_step_and_never_a_spot_check(isolated_db, t
         assert _run_db("SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_created'", gate)[0][
             "payload_json"
         ].count('"workflow_gate_mode": "agent"') == 1
+        # Every read of the step, not only the run's start reply, says the person is not asked.
+        assert _run_db("SELECT description FROM plan_nodes WHERE id=?", gate)[0]["description"].startswith(HANDED_OFF_STEP)
     assert GATE_NOTICE.format(step="gate", how=GATE_HOW["agent"]) in reply["notice"]
 
 
@@ -347,6 +349,37 @@ async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_p
     finally:
         db.close()
     assert decision["title"] == gate_handoff.OFFER_TITLE.format(step=step["title"], workflow=reply["node"]["title"])
+
+
+async def test_the_answer_that_earns_the_offer_commits_whatever_the_titles(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(7):
+        await _go(run)
+    reply = await run.start("gated")
+    gate, phase = reply["steps"][1]["id"], reply["node"]["id"]
+    step_title, workflow_title = "S" * 30 + " step title of sixty characters long", "W" * 25 + " workflow title of sixty characters"
+    for node, title in ((gate, step_title[:60]), (phase, workflow_title[:60])):
+        await run.update("edit", {"node_id": node, "expected_revision": run.revision(node), "title": title})
+    _answer(gate, "approved")
+    assert _run_db(
+        "SELECT json_extract(payload_json,'$.detail.verdict') AS v FROM plan_node_events WHERE node_id=? AND event='hold_cleared'",
+        gate,
+    ) == [{"v": "approved"}]
+    db = get_db()
+    try:
+        decision = decisions.read(json.loads(_offers()[-1]["payload_json"])["decision_id"], db=db)
+    finally:
+        db.close()
+    assert len(decision["title"]) <= service.MAX_NODE_TITLE
+    assert decision["title"].startswith("Hand the SSSS") and "in WWWW" in decision["title"]
+    assert step_title[:60] in decision["context"] and workflow_title[:60] in decision["context"]
+
+
+async def test_a_short_title_is_never_cut():
+    assert gate_handoff.offer_title("Accept note", "Support digest") == "Hand the Accept note review in Support digest to an agent?"
+    assert gate_handoff.offer_title("Person accepts the note", "Weekly digest") == (
+        "Hand the Person accept… review in Weekly digest to an agent?"
+    )
 
 
 async def test_a_gate_value_must_be_acceptance_or_alignment():

@@ -53,10 +53,33 @@ _BINARY_CANDIDATES = {
 }
 
 
+# Agents run CORSIA's own checked copy of these CLIs (tools.managed_runtime pins), never
+# the person's: a person's copy can update itself to an untested version mid-work.
+PINNED_HARNESSES = ("claude-code", "codex")
+
+
+def stored_binary(provider: str, binary: str | None) -> str:
+    """The ``binary`` a connection row keeps; for a pinned CLI, where its copy is or will be.
+
+    A missing pinned copy stores where it will be installed, so no launch reader falls
+    back to the person's copy on PATH. Only a machine with no pin for its architecture
+    keeps the bare name.
+    """
+    if binary:
+        return binary
+    if provider in PINNED_HARNESSES:
+        from tools.managed_runtime import pinned_executable_path
+
+        if expected := pinned_executable_path(provider):
+            return str(expected)
+    return _BINARY_CANDIDATES[provider][0]
+
+
 def resolve_builtin_binary(provider: str, *, db=None) -> tuple[dict, str | None]:
     """A built-in CLI's stored config and its executable, or None if missing.
 
-    A configured binary wins; otherwise PATH, then the known install locations.
+    Claude Code and Codex: only CORSIA's verified pinned copy. GitHub: a configured
+    binary wins; otherwise PATH, then the known install locations.
     """
     from connections.models import get_connection
 
@@ -68,10 +91,16 @@ def binary_from_config(provider: str, cfg: dict, *, candidate_roots: tuple[Path,
     """Resolve a CLI; tests may supply search roots without changing this machine's installs.
 
     The injected roots are a Python-only seam, never a persisted setting or environment override.
+    For a pinned CLI the first root stands in for the runtime cache.
     """
     import os
     import shutil
 
+    if provider in PINNED_HARNESSES:
+        from tools.managed_runtime import installed_runtime_path
+
+        pinned = installed_runtime_path(provider, root=candidate_roots[0] if candidate_roots else None)
+        return str(pinned) if pinned else None
     name, candidates = _BINARY_CANDIDATES[provider]
     manual = cfg.get("binary")
     if manual and os.path.isfile(manual) and os.access(manual, os.X_OK):
@@ -107,19 +136,19 @@ def seed_builtin_connections(*, db=None) -> int:
     """
     from connections.models import SOURCE_CHECK_KEY, ConnectionStatus, ConnectionType, upsert_connection
 
-    def seed(provider: str, binary_name: str, extra: dict) -> None:
+    def seed(provider: str, extra: dict) -> None:
         cfg, binary = resolve_builtin_binary(provider, db=db)
         cfg = {k: v for k, v in cfg.items() if k != SOURCE_CHECK_KEY}
         upsert_connection(
             type=ConnectionType.CLI, provider=provider,
-            config={**extra, **cfg, "binary": binary or binary_name},
+            config={**extra, **cfg, "binary": stored_binary(provider, binary)},
             status=ConnectionStatus.AVAILABLE if binary else ConnectionStatus.NOT_INSTALLED,
             db=db,
         )
 
-    seed("claude-code", "claude", {"permission_mode": "bypassPermissions"})
+    seed("claude-code", {"permission_mode": "bypassPermissions"})
     refresh_github_connection(db=db)
-    seed("codex", "codex", {})
+    seed("codex", {})
 
     log.info("Seeded built-in connections: claude-code, github, codex")
     return 3
@@ -129,9 +158,10 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
     """Probe the resolved ``gh`` and store GitHub's row; False if the probe failed.
 
     Startup stores a failed probe as needs_auth. The model-source recheck keeps
-    the last stored row instead and reports itself incomplete.
+    the last stored row instead and reports itself incomplete. Only an answered
+    check that found no GitHub login at all marks the row ``NO_OWN_LOGIN``.
     """
-    from connections.github_signin import UPDATE_GH_REASON, GhUpdateRequired
+    from connections.github_signin import NO_OWN_LOGIN, UPDATE_GH_REASON, GhUpdateRequired
     from connections.models import (
         SOURCE_CHECK_KEY,
         ConnectionStatus,
@@ -142,7 +172,7 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
     from connections.source_state import UNVERIFIED, resolve_check
 
     gh_cfg, gh_bin = resolve_builtin_binary("github", db=db)
-    gh_cfg = {k: v for k, v in gh_cfg.items() if k != SOURCE_CHECK_KEY}
+    gh_cfg = {k: v for k, v in gh_cfg.items() if k not in (SOURCE_CHECK_KEY, NO_OWN_LOGIN)}
     update_needed = False
     try:
         authed, login = _gh_status(gh_bin) if gh_bin else (False, None)
@@ -162,11 +192,14 @@ def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False
         gh_status = ConnectionStatus.AVAILABLE
     else:
         gh_status = ConnectionStatus.NEEDS_AUTH
+    # Not installed, or answered with no login listed: the person has no GitHub sign-in here.
+    no_login = not update_needed and (not gh_bin or (authed is False and not login))
     upsert_connection(
         type=ConnectionType.CLI,
         provider="github",
         # Only a definite login replaces the stored one: the agents' account compares against it.
-        config={**gh_cfg, "binary": gh_bin or "gh", **({"login": login} if authed and login else {})},
+        config={**gh_cfg, "binary": gh_bin or "gh", **({"login": login} if authed and login else {}),
+                **({NO_OWN_LOGIN: True} if no_login else {})},
         status=gh_status,
         db=db,
     )

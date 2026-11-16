@@ -30,19 +30,40 @@ class AuditReadTool(Tool):
             "claude-code/ and codex/ usage; it covers this user's usage across "
             "all projects. Its token sums cover only calls Measurement can price; "
             "excluded_calls counts the rest. "
+            "agent_hours returns, per vendor account (per provider, the model name up "
+            "to its first '/', when a call has no account) and for all together, "
+            "agent-hours, agents, calls and token sums. Unlike seat_usage, it covers "
+            "every model and its token sums include calls Measurement cannot price, "
+            "so the two can differ for one window. "
+            "An agent-hour is one agent in one clock hour with at least one "
+            "model call, so one call counts the whole hour. agent_day_levels groups "
+            "agent-days by kind of agent, by this project, another project or none, "
+            "and by hours active that day. Both cover this user's agents in and "
+            "outside projects. "
+            "plan_activity counts this user's plan activity across projects: agent-days, "
+            "tasks created, conductor adds, stale open tasks, owed verdicts and plan_update calls; its "
+            "row carries the definition of each field. "
+            "limit_stops returns, per subscription account on this install, each usage "
+            "window (window_key and window_kind, such as five_hour or seven_day) with any "
+            "reading recorded before the UTC window's end: stops (times it "
+            "reached 100%), hours_at_limit (hours at 100%, until the next reading or its "
+            "reset) and observations (readings inside the window; 0 means no new reading). "
+            "Accounts and windows with no recorded readings are absent. "
             "stored_message_pressure returns the top "
             "ten stored-message sizes as a proxy for unfolded backlog. Its "
             "rank_limit field is 10; matching threads beyond it are omitted. "
             "Each pressure row labels whether a current installed checkpoint "
             "exists. It does not "
             "estimate the exact rendered provider tail. The backend includes "
-            "only this thread's user and project (seat_usage: user), with no raw messages, error "
-            "text, or SQL. checkpoint_health, lease_reviews and seat_usage require since "
-            "and until as UTC ISO 8601 timestamps no more than seven days apart. "
+            "only this thread's user and project (seat_usage, plan_activity, agent_hours and agent_day_levels: user; limit_stops: the install's accounts), with no raw messages, error "
+            "text, or SQL. Every metric except stored_message_pressure requires since "
+            "and until as UTC ISO 8601 timestamps no more than seven days apart; "
+            "agent_hours takes whole hours and agent_day_levels takes 00:00:00Z. "
             "For stored_message_pressure, omit both for the full current scope "
             "or supply both to rank threads whose updated_at is in that window. "
-            "On a pressure timeout, supply or narrow its activity window; "
-            "for other metrics, narrow the required window once. "
+            "On a timeout: for stored_message_pressure, supply or narrow its activity "
+            "window; for agent_hours and agent_day_levels, narrow the window or call "
+            "again in a few minutes; for other metrics, narrow the window once. "
             "A scope denial is final for this identity."
         )
 
@@ -72,6 +93,13 @@ class AuditReadTool(Tool):
         thread_id = kwargs.pop("_thread_id", None)
         kwargs.pop("_thread_project_id", None)
         kwargs.pop("_host_access_turn_identity", None)
+        # Imported here, as other tools import the api layer, so loading the tool does not load it.
+        from api import usage_rollup
+        from api.audit_agent_hours import read_agent_hours
+
+        if kwargs.get("metric") in ("agent_hours", "agent_day_levels"):
+            usage_rollup.schedule_refresh()
+
         try:
             result = await run_in_db(
                 lambda: read_audit_metric(
@@ -80,6 +108,7 @@ class AuditReadTool(Tool):
                     kwargs["metric"],
                     since=kwargs.get("since"),
                     until=kwargs.get("until"),
+                    agent_hours_reader=read_agent_hours,
                 )
             )
         except AuditReadError as exc:

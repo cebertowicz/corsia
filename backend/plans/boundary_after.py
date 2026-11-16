@@ -53,7 +53,7 @@ def after_transition(
 
 def after_close(
     node_id: str, reason: str, params: dict[str, Any], common: dict,
-    *, executor: str | None = None,
+    *, executor: str | None = None, bulk: bool = False,
 ) -> dict:
     """Release a closed task, start the named next task, reconcile, and report next.
 
@@ -68,6 +68,10 @@ def after_close(
     # A required step can't be skipped, so one that closed (the person's Won't do) fails its run like a failure.
     ended_not_done = reason in ("failed", service.CLOSED)
     run_closed, run_open = run_end.fail_run(node_id, common) if ended_not_done else ([], [])
+    if bulk:
+        for sibling in run_closed:
+            admission.release(sibling, "closed", db=db)
+        return _run_summary(db, node_id, run_open)
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)
@@ -98,12 +102,24 @@ def after_close(
         )
     result = admission.result(node_id, db=db)
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
-    if (ended := run_end.summary(db, node_id)) is not None:
-        result["run_summary"] = ended
-    elif run_open:
-        titles = ", ".join(service._node_row(db, open_id)["title"] for open_id in run_open)
-        result["run_summary"] = run_end.RUN_LEFT_OPEN.format(titles=titles)
+    result.update(_run_summary(db, node_id, run_open))
+    if executor is not None and reason == "accepted":
+        from plans import workflow_fields
+
+        if ready := workflow_fields.person_gates_ready(db, node_id):
+            result["person_gate"] = " ".join(ready)
     return result
+
+
+def _run_summary(db, node_id: str, run_open: list[str]) -> dict:
+    from plans import run_end
+
+    if (ended := run_end.summary(db, node_id)) is not None:
+        return {"run_summary": ended}
+    if run_open:
+        titles = ", ".join(service._node_row(db, open_id)["title"] for open_id in run_open)
+        return {"run_summary": run_end.RUN_LEFT_OPEN.format(titles=titles)}
+    return {}
 
 
 def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, common: dict):
@@ -208,63 +224,3 @@ def after_park(plan_id: str, operation: str, params: dict[str, Any], actor, comm
             title=str(parked["title"]), step=str(parked["id"]),
         )
     return result
-
-
-def _release_archived(
-    plan_id: str, archived: list[dict], common: dict, *, executor: str | None,
-) -> None:
-    """Take the executor off every task this archive retired, then reselect.
-
-    One reconciliation covers the whole list: it reads the plan's current slots,
-    so calling it per node would only repeat the same read.
-    """
-    from plans import admission
-
-    db = common["db"]
-    freed = [
-        entry["node_id"] for entry in archived
-        if admission.release(entry["node_id"], "archived", db=db)
-    ]
-    if not freed:
-        return
-    admission.reconcile_plan(
-        plan_id, actor_id=common["actor_id"], provenance=common["provenance"],
-        causing_executor=executor, db=db,
-    )
-
-
-def archive_many(
-    plan_id: str, node_ids: list[str], common: dict, db, *, executor: str | None,
-) -> dict:
-    """Retire many nodes, reporting every refusal in the caller's order.
-
-    A lane-owned node is refused here, per node, rather than aborting the call
-    at authorization the way a single archive is: the lane rule is the
-    boundary's, so it is judged here, and ``plans.archival`` judges the rest.
-
-    Archiving a selected task takes its executor off that task, in bulk exactly
-    as singly: an attempt left open on an archived node holds the slot against
-    every later selection, and nothing would reopen it.
-    """
-    import plans.archival as archival
-    from plans import node_settlement
-
-    lanes = {
-        node_id: node_settlement.lane_refusing(db, node_id, "archive_node")
-        for node_id in node_ids
-    }
-    report = archival.archive_nodes(
-        [node_id for node_id in node_ids if lanes[node_id] is None], **common,
-    )
-    _release_archived(plan_id, report["archived"], common, executor=executor)
-    reasons = {entry["node_id"]: entry["reason"] for entry in report["refused"]}
-    for node_id, lane in lanes.items():
-        if lane is not None:
-            reasons[node_id] = node_settlement.refusal_message(lane, "archive_node")
-    return {
-        "archived": report["archived"],
-        "refused": [
-            {"node_id": node_id, "reason": reasons[node_id]}
-            for node_id in dict.fromkeys(node_ids) if node_id in reasons
-        ],
-    }

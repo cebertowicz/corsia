@@ -229,6 +229,29 @@ describe('docSaveQueue', () => {
 		clearDraft(doc);
 	});
 
+	it('keeps the unsaved text and the moved-document message across a retried save', async () => {
+		const moved = "Couldn't save: this document is at projects/alpha/shared/planning/plan.md. Your changes are still in this tab. Copy them into the document there.";
+		const doc = target({ path: '/project/old-path.md', artifactId: 'moved' });
+		mocks.writeContent.mockRejectedValue(new Error(`409 ${JSON.stringify({ detail: moved })}`));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		seedDraft(doc, 'server text');
+
+		setDraftText(doc, 'first edit');
+		expect(await flushDraft(doc)).toBe(false);
+		setDraftText(doc, 'first edit, then more');
+		expect(await flushDraft(doc)).toBe(false);
+
+		expect(mocks.writeContent.mock.calls.map((call) => call[1])).toEqual(['first edit', 'first edit, then more']);
+		expect(existingDraft(doc)).toMatchObject({
+			editText: 'first edit, then more',
+			savedText: 'server text',
+			status: 'error',
+			error: moved,
+		});
+		expect(mocks.toastShow).toHaveBeenLastCalledWith(moved, 'error');
+		clearDraft(doc);
+	});
+
 	it('frees the saved text a returning tab paints from once the tab closes', async () => {
 		const doc = target({ path: '/project/closing.md', artifactId: 'closing' });
 		seedDraft(doc, 'saved text');

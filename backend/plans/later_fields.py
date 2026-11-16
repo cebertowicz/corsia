@@ -21,11 +21,10 @@ from plans import service
 EVENT = "node_later"
 
 #: Shown when the cut is asked for on a branch. It names the alternative rather
-#: than only refusing, because putting a whole branch below the cut is a real act
-#: (its open tasks are flipped together).
+#: than only refusing: the caller can pass the branch's open task ids in one call.
 LATER_ON_BRANCH = (
-    "Later applies to tasks. To put this branch in Later, "
-    "edit each of its open tasks with later: true."
+    "Later applies to tasks. To put this branch in Later, pass its open task ids"
+    " in node_ids."
 )
 #: A reason explains a Later row; on its own it explains nothing.
 REASON_WITHOUT_LATER = "reason goes with later: it is why this task is in Later"
@@ -81,6 +80,13 @@ def record_event(
         connection, node_id, EVENT, actor_id=actor_id, provenance=provenance,
         payload={"later": later, "reason": reason},
     )
+
+    if later:
+        # A plan reviews its pile one week after the first task crossed the cut;
+        # a crossing back above it moves nothing (``plans.later_review``).
+        from plans import later_review
+
+        later_review.arm_node(connection, node_id)
 
 
 def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | None) -> dict:

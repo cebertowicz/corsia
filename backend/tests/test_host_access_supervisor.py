@@ -330,11 +330,12 @@ async def test_auto_approval_activates_without_claiming_a_user_decision(
 
     _configure_review_fakes(monkeypatch, supervisor)
     monkeypatch.setattr(supervisor, "_invoke_application_review", review)
-    monkeypatch.setattr(
-        supervisor,
-        "_close_user_model_browsers",
-        lambda _user_id: asyncio.sleep(0),
-    )
+    closed: list[str] = []
+
+    async def close_user_browsers(user_id: str) -> None:
+        closed.append(user_id)
+
+    monkeypatch.setattr(supervisor, "_close_user_model_browsers", close_user_browsers)
     wake_calls = []
 
     async def wake(lease):
@@ -351,6 +352,8 @@ async def test_auto_approval_activates_without_claiming_a_user_decision(
     )
 
     assert captured["auto_approve"] is True
+    # No approval prompt is shown, so other agents' browsers stay open.
+    assert closed == []
     assert lease["state"] == "active"
     assert lease["user_decision"] is None
     assert lease["application_review_result"]["approval_mode"] == "automatic"
@@ -386,11 +389,12 @@ async def test_disabling_auto_approval_during_review_falls_back_to_user_decision
 
     _configure_review_fakes(monkeypatch, supervisor)
     monkeypatch.setattr(supervisor, "_invoke_application_review", review)
-    monkeypatch.setattr(
-        supervisor,
-        "_close_user_model_browsers",
-        lambda _user_id: asyncio.sleep(0),
-    )
+    closed: list[str] = []
+
+    async def close_user_browsers(user_id: str) -> None:
+        closed.append(user_id)
+
+    monkeypatch.setattr(supervisor, "_close_user_model_browsers", close_user_browsers)
 
     lease = await supervisor.request_reviewed_lease(
         "root",
@@ -400,6 +404,8 @@ async def test_disabling_auto_approval_during_review_falls_back_to_user_decision
     )
 
     assert captured["auto_approve"] is True
+    # The person is prompted after all, so the browsers close first.
+    assert closed == ["steve"]
     assert lease["state"] == "awaiting_user"
     assert lease["application_review_result"]["approval_mode"] == "manual"
     assert lease["user_decision"] is None
@@ -1329,7 +1335,7 @@ async def test_application_allow_closes_user_model_browsers_before_prompt(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("auto_approve", [False, True])
-async def test_browser_isolation_failure_after_allow_records_review_and_stage(
+async def test_browser_isolation_failure_after_allow_blocks_only_a_prompted_lease(
     isolated_db,
     monkeypatch,
     auto_approve,
@@ -1351,6 +1357,11 @@ async def test_browser_isolation_failure_after_allow_records_review_and_stage(
         "_notify_changed",
         lambda lease: changed.append(lease["state"]),
     )
+    monkeypatch.setattr(
+        supervisor,
+        "_deliver_activation_wake",
+        lambda _lease: asyncio.sleep(0, result=True),
+    )
 
     lease = await supervisor.request_reviewed_lease(
         "root",
@@ -1359,9 +1370,13 @@ async def test_browser_isolation_failure_after_allow_records_review_and_stage(
         duration_seconds=60,
     )
 
+    assert lease["application_review_result"]["verdict"] == "allow"
+    if auto_approve:
+        # No prompt, so no close is attempted and the lease activates.
+        assert lease["state"] == "active"
+        return
     assert lease["state"] == "blocked"
     assert lease["terminal_reason"] == "browser_isolation_failed"
-    assert lease["application_review_result"]["verdict"] == "allow"
     assert changed == ["blocked"]
 
 

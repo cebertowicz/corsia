@@ -209,27 +209,6 @@ describe('CommentThread', () => {
 		});
 	}
 
-	it('stamps an unread reply only after it is observed in the viewport', async () => {
-		visibleObserver();
-		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
-		vi.unstubAllGlobals();
-	});
-
-	it('retries a failed visible stamp only on the next visibility change', async () => {
-		visibleObserver();
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
-		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
-		flushSync(); await Promise.resolve(); flushSync();
-		expect(onViewed).toHaveBeenCalledTimes(1);
-		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
-		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2), { timeout: 3000 });
-		warn.mockRestore(); vi.unstubAllGlobals();
-	});
-
 	it('shows only new and latest replies in a long thread until earlier replies are expanded', () => {
 		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
 		render(thread({ replies, newReplyIds: ['r4', 'r5'] }));
@@ -509,7 +488,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', orphaned: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text this suggestion replaces isn't in the document.");
+		expect(accept.title).toBe("Can’t accept: the text this suggestion replaces isn’t in the document.");
 		expect(host.textContent).toContain("The text this suggestion replaces isn't in the document.");
 	});
 
@@ -517,7 +496,7 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', textChanged: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe("Can't accept: the text doesn't match this suggestion.");
+		expect(accept.title).toBe("Can’t accept: the text doesn’t match this suggestion.");
 		expect(host.querySelector('.ct-orphan')?.textContent).toBe("The text doesn't match this suggestion.");
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
 		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
@@ -572,8 +551,12 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text' }), false, { onDecision });
 		button(clicked).click(); flushSync();
 		expect(onDecision).toHaveBeenCalledWith('c1', decision);
-		expect(button(clicked).textContent).toBe(busyLabel);
-		expect(button(other).textContent).toBe(otherLabel);
+		expect(button(clicked).textContent?.trim()).toBe(busyLabel);
+		expect(button(clicked).getAttribute('aria-label')).toBe(`${busyLabel.replace('…', '')}: quote to new text`);
+		expect(button(other).textContent?.trim()).toBe(otherLabel);
+		expect(button(other).getAttribute('aria-label')).toBe(`${otherLabel}: quote to new text`);
+		expect(button(clicked).querySelector('.spinner')).not.toBeNull();
+		expect(button(clicked).getAttribute('aria-busy')).toBe('true');
 		expect(button(clicked).disabled).toBe(true);
 		expect(button(other).disabled).toBe(true);
 		button(other).click(); button(clicked).click();
@@ -582,6 +565,7 @@ describe('CommentThread', () => {
 		await vi.waitFor(() => expect(button(clicked).disabled).toBe(false));
 		expect(button(other).disabled).toBe(false);
 		expect(host.querySelector('.ct-suggestion-actions')?.textContent).not.toMatch(/Accepting|Rejecting/);
+		expect(host.querySelector('.ct-suggestion-actions .spinner')).toBeNull();
 	});
 
 	it('shows the refusal it is given, as an alert', () => {
@@ -726,5 +710,16 @@ describe('a decided suggestion that has replies', () => {
 		render(accepted({ resolved: true }));
 		expect(host.querySelector('.ct.resolved')).not.toBeNull();
 		expect(host.querySelector('.ct-decided')).toBeNull();
+	});
+});
+
+describe('CommentThread suggestion card in a short popover or sheet', () => {
+	it('keeps Accept and Reject in the pinned row below the reply field, so the field is never under them', () => {
+		render(thread({ replacement: 'new text' }));
+		const pin = host.querySelector('.ct-suggestion-pin[data-pin-bottom]');
+		const field = host.querySelector('.ct-compose');
+		expect(pin?.querySelector('.ct-suggestion-actions')).not.toBeNull();
+		expect(field).not.toBeNull();
+		expect(!!(field!.compareDocumentPosition(pin!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 	});
 });

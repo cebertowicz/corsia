@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { untrack } from 'svelte';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
@@ -9,7 +10,7 @@
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', pending = false, error = '', retryable = true, retainText = false, onBody, onSubmit, onCancel, mentions = true, goesTo = undefined, onRetry, selectedTags = createMentionSelection(), onEscape, selection = null, onSelection }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -34,8 +35,13 @@
 		onCancel: () => void;
 		/** Escape, when it should close without discarding the text (as a click outside does); Cancel by default. */
 		onEscape?: () => void;
+		/** The caret the field takes when it mounts (the same draft drawn in another form), and each place it moves to. */
+		selection?: [number, number] | null;
+		onSelection?: (selection: [number, number]) => void;
 	} = $props();
 	let text = $state(untrack(() => body));
+	$effect(() => { const field = input; if (field) untrack(() => { if (selection) field.setSelectionRange(...selection); }); });
+	const saveSelection = () => { if (input) onSelection?.([input.selectionStart, input.selectionEnd]); };
 	const explanationId = $props.id();
 	// The agents the person tags in the text also get it: the line adds each one as they are picked or typed.
 	const tagged = $derived(mentions && picker ? picker.occurrences(text).map(item => text.slice(item.start, item.end).replace(/^@/, '')) : []);
@@ -66,7 +72,7 @@
 	{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 	<div class="input-wrap">
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
-			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+			<textarea use:keepTyped bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection}></textarea>
 		</Field>
 	</div>
 	{#if goesTo}<RecipientLine {names} none="No agent gets this comment." notice={goesTo.state === 'loading' || goesTo.state === 'error' ? goesTo.state : null} {onRetry} />{/if}

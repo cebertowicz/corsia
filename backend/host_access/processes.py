@@ -32,6 +32,7 @@ from host_access.managed_lifecycle import (
     ManagedLifecycleMixin,
 )
 from host_access.managed_runtime import read_log_tail
+from infra.repo_policy_transition import Reach, current_effect_reach
 from host_access.process_launch import (
     bind_process_launch,
     close_fd,
@@ -113,6 +114,7 @@ class ProcessRecord:
     stall_after_seconds: float | None = None
     max_lifetime_seconds: float | None = None
     log_truncated: bool = False
+    reach: Reach | None = field(default=None, repr=False)  # launching call's effect reach; None is everywhere
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +127,7 @@ class ForegroundProcessResult:
     returncode: int
     timed_out: bool = False
     undeclared_background_stopped: bool = False
+    stop_reason: str | None = None  # the owner's reason, when it moved to stop the group
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,10 +459,7 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
 
     def active_process_count(self) -> int:
         """Return owned process groups that still require lifecycle cleanup."""
-        return sum(
-            runtime.record.terminal_state in _OUTSTANDING_STATES
-            for runtime in self._runtimes.values()
-        )
+        return len(self.outstanding_records())
 
     @staticmethod
     def _lifecycle_cleanup_pending(runtime: _RuntimeProcess) -> bool:
@@ -486,12 +486,13 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
             else 0
         )
 
+    def outstanding_records(self) -> tuple[ProcessRecord, ...]:
+        """The records of owned process groups that still require lifecycle cleanup."""
+        runtimes = self._runtimes.values()
+        return tuple(r.record for r in runtimes if r.record.terminal_state in _OUTSTANDING_STATES)
+
     def running_records(self) -> tuple[ProcessRecord, ...]:
-        return tuple(
-            runtime.record
-            for runtime in self._runtimes.values()
-            if runtime.record.terminal_state == "running"
-        )
+        return tuple(r.record for r in self._runtimes.values() if r.record.terminal_state == "running")
 
     def record(self, handle: str) -> ProcessRecord:
         runtime = self._runtimes.get(handle)
@@ -713,9 +714,8 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
                 description=(description or "").strip() or None,
                 started_at=self._clock(),
                 stall_after_seconds=stall_after_seconds if long_running else None,
-                max_lifetime_seconds=(
-                    max_lifetime_seconds if long_running else None
-                ),
+                max_lifetime_seconds=max_lifetime_seconds if long_running else None,
+                reach=None if lease_id or permit_id else current_effect_reach(),
             )
             runtime = _RuntimeProcess(
                 record=record,
@@ -791,12 +791,11 @@ class ProcessOwner(BrowserProcessMixin, ManagedLifecycleMixin):
         if not timed_out:
             undeclared = await self._finish_normal_foreground(runtime)
         return ForegroundProcessResult(
-            record=runtime.record,
-            stdout=stdout,
-            stderr=stderr,
+            record=runtime.record, stdout=stdout, stderr=stderr,
             returncode=int(runtime.process.returncode or 0),
             timed_out=timed_out,
             undeclared_background_stopped=undeclared,
+            stop_reason=runtime.pending_reason,
         )
 
     async def _finish_normal_foreground(

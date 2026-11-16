@@ -13,11 +13,21 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.config import DB_PATH
 from infra.product_events import emit_product_event
 from infra.queries import thread_available_sql
+from infra.sqlite_deadline import stop_at
+from infra.audit_plan_activity import plan_activity
+from infra.audit_limit_stops import limit_stops
 
 AUDIT_METRICS = (
-    "checkpoint_health", "lease_reviews", "seat_usage", "stored_message_pressure"
+    "checkpoint_health", "lease_reviews", "plan_activity", "seat_usage", "stored_message_pressure",
+    "agent_hours", "agent_day_levels", "limit_stops"
 )
 MAX_WINDOW = timedelta(days=7)
+#: Metrics read by their own module from (db, caller user, since, until).
+_WINDOWED_READERS = {
+    "plan_activity": plan_activity,
+    # Accounts belong to the install, not to a user or project.
+    "limit_stops": lambda db, _user_id, since, until: limit_stops(db, since, until),
+}
 MAX_ROWS = 50
 TOP_PRESSURE_ROWS = 10
 MAX_BYTES = 16 * 1024
@@ -51,6 +61,10 @@ def _window(metric: str, since: str | None, until: str | None) -> tuple[str | No
     start, end = _utc(since), _utc(until)
     if start >= end or end - start > MAX_WINDOW:
         raise AuditReadError("invalid_window", "Use a positive window of no more than seven days.")
+    if metric == "agent_day_levels" and any(d.hour or d.minute or d.second or d.microsecond for d in (start, end)):
+        raise AuditReadError("invalid_window", "Use UTC midnight for both bounds, for example 2026-01-01T00:00:00Z.")
+    if metric == "agent_hours" and any(d.minute or d.second or d.microsecond for d in (start, end)):
+        raise AuditReadError("invalid_window", "Use whole UTC hours, for example 2026-01-01T00:00:00Z.")
     return start.isoformat(), end.isoformat()
 
 
@@ -60,6 +74,9 @@ def _timeout_error(metric: str, since: str | None) -> AuditReadError:
             "Audit read timed out; supply since and until to rank recently updated threads."
             if since is None else "Audit read timed out; narrow the activity window."
         )
+    elif metric in ("agent_hours", "agent_day_levels"):
+        detail = ("Audit read timed out; narrow the window, or retry in a few minutes: "
+                  "this read uses the hourly usage summary, which may still be catching up.")
     else:
         detail = "Audit read timed out; narrow the window."
     return AuditReadError("timeout", detail)
@@ -192,10 +209,11 @@ def _read_audit_metric(
     *,
     since: str | None = None,
     until: str | None = None,
+    agent_hours_reader=None,
 ) -> dict:
     """Read one fixed metric after binding the actor to its owned project."""
     if metric not in AUDIT_METRICS:
-        raise AuditReadError("invalid_metric", "Choose checkpoint_health, lease_reviews, seat_usage, or stored_message_pressure.")
+        raise AuditReadError("invalid_metric", "Choose one of: " + ", ".join(AUDIT_METRICS) + ".")
     start, end = _window(metric, since, until)
     if not actor_thread_id:
         raise AuditReadError("scope_denied", "An authenticated caller thread is required.")
@@ -205,7 +223,7 @@ def _read_audit_metric(
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA busy_timeout=250")
-            db.set_progress_handler(lambda: 1 if time.monotonic() >= deadline else 0, 1000)
+            stop_at(db, deadline)
             db.create_function(
                 "safe_rejection_category", 1,
                 lambda value: safe_rejection(value)[0], deterministic=True,
@@ -225,7 +243,24 @@ def _read_audit_metric(
                 raise AuditReadError(
                     "scope_denied", "Audit reads require a caller-owned thread in a project."
                 )
-            rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
+            if metric in ("agent_hours", "agent_day_levels"):
+                assert start is not None and end is not None
+                if agent_hours_reader is None:
+                    raise AuditReadError(
+                        "unavailable",
+                        "This metric's reader was not supplied by the caller; report it as a defect. "
+                        "A host lease will not fix it.",
+                    )
+                rows = agent_hours_reader(
+                    db, metric, actor["user_id"], actor["project_id"], start, end, MAX_ROWS + 1,
+                )
+                if len(rows) > MAX_ROWS:
+                    raise AuditReadError("result_limit", "Audit result exceeds the fixed row limit; narrow the window.")
+            elif metric in _WINDOWED_READERS:
+                assert start is not None and end is not None
+                rows = _WINDOWED_READERS[metric](db, actor["user_id"], start, end)
+            else:
+                rows = _query(db, metric, actor["user_id"], actor["project_id"], start, end, deadline)
             if time.monotonic() >= deadline:
                 raise _timeout_error(metric, since)
             db.execute("RELEASE scoped_audit_read")
@@ -235,7 +270,10 @@ def _read_audit_metric(
         raise AuditReadError("unavailable", "Audit store is unavailable; use a reviewed lease if authorized.") from exc
     result: dict[str, object] = {
         "metric": metric,
-        "scope": "caller_user" if metric == "seat_usage" else "caller_user_and_project",
+        "scope": "install_accounts" if metric == "limit_stops" else (
+            "caller_user" if metric in {"seat_usage", "plan_activity", "agent_hours", "agent_day_levels"}
+            else "caller_user_and_project"
+        ),
         "window": [start, end] if start is not None else None,
         "rows": rows,
     }
@@ -253,12 +291,14 @@ def read_audit_metric(
     *,
     since: str | None = None,
     until: str | None = None,
+    agent_hours_reader=None,
 ) -> dict:
     """Read a fixed metric and count success or denial without private contents."""
     metric_name = metric if metric in AUDIT_METRICS else "invalid"
     try:
         result = _read_audit_metric(
-            actor_thread_id, user_id, metric, since=since, until=until
+            actor_thread_id, user_id, metric, since=since, until=until,
+            agent_hours_reader=agent_hours_reader,
         )
     except AuditReadError as exc:
         emit_product_event(

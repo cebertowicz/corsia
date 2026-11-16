@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "The comment box now names who a new comment goes to, so GET /artifacts/{id}/comments resolves the document's recipients even when it has no comments: 3 more statements (13 to 16) on the gate's comment-free fixture; with comments the added work is a fixed 10 statements, not growing with comment count.",
+  "reason": "The lesson report reads candidate read_file rows only from Turns with a guidance receipt, seeking each Turn on its index; its coverage line names that scope (a few more bytes). The comment box now names who a new comment goes to, so GET /artifacts/{id}/comments resolves the document's recipients even when it has no comments: 3 more statements (13 to 16) on the gate's comment-free fixture; with comments the added work is a fixed 10 statements, not growing with comment count.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -157,9 +157,9 @@
       "steps": 1257513
     },
     "/api/measurement/lessons": {
-      "bytes": 104075,
+      "bytes": 104241,
       "statements": 850,
-      "steps": 5459206
+      "steps": 4016667
     },
     "/api/measurement/limits": {
       "bytes": 509,

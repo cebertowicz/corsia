@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from core import tool_result_binding
+from core.guidance_manifest import STATUS_WRITE_FAILED
 from core.tool_result_report import canonical_result_reasons
 from core.lesson_report_boundaries import identity_for_raw
 from core.lesson_report_files import recorded_source
+from core.lesson_report_phases import PhaseTimes, timed
 from core.lesson_report_sql import json_row_chunks, read_file_metadata_predicate
 from core.tool_result_projection import tool_result_reference
 from tools.catalog import normalize_tool_name
@@ -105,29 +107,48 @@ def identify_recorded_reads(reads: list[dict[str, Any]], blob_reader,
     return result
 
 
+# The scoped Turns whose read_file calls can join a body receipt. A receipt is written only for a
+# ``SKILL.md`` read, so a Turn with neither a receipt nor a failed receipt write has no read to
+# join, and its tool rows are never read. The thread set is one JSON parameter, so
+# ``guidance_loads`` (no index leads with ``thread_id``) is read once per call, never once per
+# batch of threads.
+_RECEIPT_TURNS_SQL = (
+    "SELECT g.thread_id AS thread_id,g.turn_id AS turn_id FROM guidance_loads g "
+    "WHERE g.turn_id IS NOT NULL AND g.thread_id IN (SELECT value FROM json_each(?)) "
+    "UNION SELECT a.thread_id,a.id FROM active_turns a "
+    "WHERE a.guidance_load_status=? AND a.thread_id IN (SELECT value FROM json_each(?))"
+)
+
+
 def _candidate_groups(db, user_id: str, thread_ids: tuple[str, ...], unavailable: Counter[str]):
     candidates: dict[tuple[str, str, str], list[tuple[Any, dict[str, Any]]]] = defaultdict(list)
-    unique_threads = tuple(dict.fromkeys(thread_ids))
-    for offset in range(0, len(unique_threads), 499):
-        chunk = unique_threads[offset:offset + 499]
-        placeholders = ",".join("?" for _ in chunk)
-        rows = json_row_chunks(
-            db,
-            "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.seq AS seq "
-            "FROM threads t JOIN messages m ON m.thread_id=t.id "
-            "WHERE t.user_id=? AND t.id IN (" + placeholders + ") AND m.role='tool' "
-            "AND " + read_file_metadata_predicate("m.metadata"),
-            (user_id, *chunk), ("id", "thread_id", "metadata"), "thread_id,seq,id",
-        ) if chunk else ()
-        for row in rows:
-            arguments, metadata = _read_call(row)
-            if arguments is None or metadata is None:
-                continue
-            path, turn = arguments.get("path"), metadata.get("turn_id")
-            if not isinstance(path, str) or not Path(path).is_absolute() or not isinstance(turn, str) or not turn:
-                unavailable["absolute path or Turn lineage unavailable"] += 1
-                continue
-            candidates[(str(row["thread_id"]), turn, path)].append((row, metadata))
+    if not thread_ids:
+        return candidates
+    threads = json.dumps(list(dict.fromkeys(thread_ids)))
+    # CROSS JOIN keeps the receipt Turns outermost, and INDEXED BY makes each Turn's tool rows a
+    # seek on idx_messages_meta_turn_seq (key and partial predicate repeated below); without it the
+    # planner can walk every tool row of the thread on idx_messages_tool_lineage. The unary +
+    # strips w.turn_id's TEXT affinity, which would otherwise be applied to the indexed expression
+    # and leave the seek on thread_id alone. Only rows that index holds are examined, so a tool row
+    # whose metadata json_valid rejects (NaN, Infinity) is not a candidate; coverage says so.
+    for row in json_row_chunks(
+        db,
+        "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.seq AS seq "
+        "FROM (" + _RECEIPT_TURNS_SQL + ") w "
+        "CROSS JOIN threads t ON t.id=w.thread_id "
+        "CROSS JOIN messages m INDEXED BY idx_messages_meta_turn_seq ON m.thread_id=w.thread_id "
+        "AND json_extract(m.metadata,'$.turn_id')=+w.turn_id AND json_valid(m.metadata) "
+        "WHERE t.user_id=? AND m.role='tool' AND " + read_file_metadata_predicate("m.metadata"),
+        (threads, STATUS_WRITE_FAILED, threads, user_id), ("id", "thread_id", "metadata"), "thread_id,seq,id",
+    ):
+        arguments, metadata = _read_call(row)
+        if arguments is None or metadata is None:
+            continue
+        path, turn = arguments.get("path"), metadata.get("turn_id")
+        if not isinstance(path, str) or not Path(path).is_absolute() or not isinstance(turn, str) or not turn:
+            unavailable["absolute path or Turn lineage unavailable"] += 1
+            continue
+        candidates[(str(row["thread_id"]), turn, path)].append((row, metadata))
     return candidates
 
 
@@ -154,11 +175,14 @@ def _loads_by_group(db, candidates):
 
 def read_bodies(
     db, *, user_id: str, thread_ids: tuple[str, ...], facts: list[dict[str, Any]],
+    phases: PhaseTimes | None = None,
 ) -> dict[str, Any]:
     """Batch scoped potential reads before loading bodies or binding predecessors."""
     unavailable: Counter[str] = Counter()
-    candidates = _candidate_groups(db, user_id, thread_ids, unavailable)
-    loads_by_group = _loads_by_group(db, candidates)
+    with timed(phases, "read_bodies.candidates"):
+        candidates = _candidate_groups(db, user_id, thread_ids, unavailable)
+    with timed(phases, "read_bodies.loads"):
+        loads_by_group = _loads_by_group(db, candidates)
 
     surviving: list[tuple[Any, dict[str, Any], Any]] = []
     for key, calls in candidates.items():
@@ -172,36 +196,41 @@ def read_bodies(
     bodies: dict[str, Any] = {}
     wanted = json.dumps([list(pair) for pair in dict.fromkeys(
         (str(row["thread_id"]), str(row["id"])) for row, _metadata, _load in surviving)])
-    for row in json_row_chunks(
-        db, "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.content AS content "
-        "FROM messages m JOIN (SELECT json_extract(value,'$[0]') AS thread_id,json_extract(value,'$[1]') AS id "
-        "FROM json_each(?)) w ON m.thread_id=w.thread_id AND m.id=w.id WHERE m.role='tool'",
-        (wanted,), ("id", "thread_id", "metadata", ("content", "hex(content)")), "id",
-    ) if surviving else ():
-        # Content travels as hex so embedded NUL bytes survive SQLite's JSON text functions.
-        row["content"] = bytes.fromhex(row["content"]).decode() if row["content"] else None
-        bodies[str(row["id"])] = row
+    with timed(phases, "read_bodies.bodies"):
+        for row in json_row_chunks(
+            db, "SELECT m.id AS id,m.thread_id AS thread_id,m.metadata AS metadata,m.content AS content "
+            "FROM messages m JOIN (SELECT json_extract(value,'$[0]') AS thread_id,json_extract(value,'$[1]') AS id "
+            "FROM json_each(?)) w ON m.thread_id=w.thread_id AND m.id=w.id WHERE m.role='tool'",
+            (wanted,), ("id", "thread_id", "metadata", ("content", "hex(content)")), "id",
+        ) if surviving else ():
+            # Content travels as hex so embedded NUL bytes survive SQLite's JSON text functions.
+            row["content"] = bytes.fromhex(row["content"]).decode() if row["content"] else None
+            bodies[str(row["id"])] = row
 
     rows = [bodies[str(row["id"])] for row, _metadata, _load in surviving if str(row["id"]) in bodies]
-    canonical = canonical_result_reasons(db, rows)
+    with timed(phases, "read_bodies.canonical"):
+        canonical = canonical_result_reasons(db, rows)
     reads: list[dict[str, Any]] = []
-    for row, metadata, load in surviving:
-        body = bodies.get(str(row["id"]))
-        if body is None:
-            unavailable["canonical invocation lineage unavailable"] += 1
-            continue
-        reason = canonical[str(body["id"])]
-        if reason is not None:
-            unavailable[reason] += 1
-            continue
-        record, reason = _joined_read(db, body, metadata, load, facts)
-        if record is not None:
-            reads.append(record)
-        else:
-            unavailable[str(reason)] += 1
+    with timed(phases, "read_bodies.join"):
+        for row, metadata, load in surviving:
+            body = bodies.get(str(row["id"]))
+            if body is None:
+                unavailable["canonical invocation lineage unavailable"] += 1
+                continue
+            reason = canonical[str(body["id"])]
+            if reason is not None:
+                unavailable[reason] += 1
+                continue
+            record, reason = _joined_read(db, body, metadata, load, facts)
+            if record is not None:
+                reads.append(record)
+            else:
+                unavailable[str(reason)] += 1
     return {"reads": reads, "unavailable_reads": dict(unavailable),
             "coverage": (
-                "canonical read_file only; shell reads and unrecorded lineage unavailable; "
+                "canonical read_file only; reads examined only in Turns that recorded a guidance "
+                "load or a failed receipt write, and only results whose stored metadata is canonical "
+                "JSON (not NaN or Infinity); shell reads and unrecorded lineage unavailable; "
                 "native results before the native-writer fix lack invocation lineage and are "
                 "counted as unavailable rather than reads; predecessor Turn lineage refuses "
                 "provider-call-id reuse across Turns"

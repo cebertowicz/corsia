@@ -8,7 +8,7 @@ import { expectDiscussionReachableByScroll, expectFieldAndSendUsable } from '../
 const quote = 'target line for a reply';
 const text = Array.from({ length: 45 }, (_, i) => i === 25 ? quote : `document line ${i}`).join('\n\n');
 
-/** One rule, two ends of it: where the card's room holds the thread, the original and the latest reply show beside the field; where it cannot, field and Send stay pinned and clickable, the highlight stays clear, and the thread is reachable by scrolling inside the card. */
+/** One rule: a long reply never makes anything inside the card scroll. The field grows to its text, the card (or sheet) is the one box that scrolls, the field's bottom edge and Send stay in view as lines are typed, the highlight stays clear, and the whole thread is reachable by scrolling that box. */
 for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps the field usable and the thread reachable on a ${state}`, async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop');
 	await page.setViewportSize({ width: 900, height: 420 });
@@ -55,7 +55,12 @@ for (const state of ['resolved', 'suggestion'] as const) test(`long reply keeps 
 		input = resolved.getByPlaceholder('Reply…');
 		card = resolved;
 	}
-	await input.fill(Array.from({ length: 40 }, (_, i) => `second reply ${i}`).join('\n'));
+	const second = Array.from({ length: 40 }, (_, i) => `second reply ${i}`);
+	// A suggestion's reply scrolls with its card, so it grows in steps from one line to forty: after each step the field is inside the popover's visible box and shows its last line, and Accept and Reject still take a tap.
+	if (state === 'suggestion') for (const line of [1, 2, 4, 8, 16, 24, 32, 40]) {
+		await input.fill(second.slice(0, line).join('\n'));
+		await expectFieldAndSendUsable(card, input);
+	} else await input.fill(second.join('\n'));
 	await expectFieldAndSendUsable(card, input);
 	if (state === 'resolved') {
 		await expectDiscussionReachableByScroll(card, 'Existing thread');

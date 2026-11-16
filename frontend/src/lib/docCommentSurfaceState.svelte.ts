@@ -5,9 +5,7 @@ import { tick, untrack } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { arrivedDocComments } from '$lib/stores/docComments';
-import { paneOverlay } from '$lib/stores/artifactCanvas';
-import { PANE_DRAWER_WIDTH } from '$lib/artifactSplitLayout';
+import { pickedComments } from '$lib/stores/docComments';
 import { CELL_EDITOR, cellAtPosition, closeCell, openCellAt, openCellState } from '$lib/cm/widget-cell-state';
 
 /** What a card is anchored to; the popover owns the union. */
@@ -66,11 +64,8 @@ export function closeCellUnderSheet(commentUI: Pick<ReturnType<typeof createComm
 /** The canvas width (px) at which the text keeps at least 45 characters beside the 308 px margin column. */
 export const MARGIN_MIN = 660;
 
-/**
- * Whether a canvas this wide (px) leaves room for the margin column beside its text; below it, the popover or the sheet.
- * A Workspace panel the shell shows over the canvas (`paneOverlay`) covers its inline end (`--pane-overlay-inset`), so that part is no room.
- */
-export const hasRoomForMargin = (canvasWidth: number, overlaid = get(paneOverlay)) => canvasWidth - (overlaid ? PANE_DRAWER_WIDTH : 0) >= MARGIN_MIN;
+/** Whether the visible canvas leaves room for the margin beside its text; below it, the popover or the sheet. */
+export const hasRoomForMargin = (canvasWidth: number) => canvasWidth >= MARGIN_MIN;
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
 export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string, marginUp?: () => boolean) {
@@ -121,12 +116,12 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		state = { kind: 'draft' };
 		bump();
 	}
-	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. The highlight is how a thread is opened now that no marker stands by it: its card, once shown, stamps the replies viewed. */
-	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
+	/** A highlight picked in the text selects its card; with the margin column up it does so as a suggestion's insert does. A click or tap on it (`pressed`) reads the thread: the card showing it stamps the replies viewed. A caret passing into it by keys reads nothing. */
+	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false, pressed = false) {
 		const margin = marginUp?.();
 		// A document canvas with no room for the column shows its list as a popover (a phone's as a sheet): a highlight picked there opens that one thread in its place.
 		const changed = pickComment(id, rect, viaSuggestion || !!margin, clicked, margin === false);
-		if (changed) arrivedDocComments.set(new Set([id]));
+		if (pressed) pickedComments.set(new Set([id]));
 		return changed;
 	}
 	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean, replacesList = false) {
@@ -138,7 +133,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		// focuses its card there.
 		if (state?.kind === 'list' && !viaSuggestion && !replacesList) return false;
 		const changed = get(focusedDocComment) !== id;
-		// A pick is something the reader opened, even when the column at rest only selects its card.
+		// A pick is something the reader opened, even when the column at rest only selects its card: the column is theirs now.
+		quiet = false;
 		bump();
 		if (state?.kind === 'list' && !replacesList) { focusedDocComment.set(id); return changed; }
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
@@ -149,14 +145,15 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		restoreFocus = restoreEditor;
 		return changed;
 	}
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false) {
-		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
+	/** `fromText`: several threads on text the person pressed (`stacked`): the list leaves the focus in the text, as one thread's card does. */
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false, fromText = false) {
+		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids, ...(fromText ? { fromText: true as const } : {}) };
 		bump();
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		atClick = clicked;
-		restoreFocus = () => opener.focus();
-		arrivedDocComments.set(new Set(ids));
+		restoreFocus = fromText && ids.length > 1 ? restoreEditor : () => opener.focus();
+		pickedComments.set(new Set(ids));
 	}
 	function selectMarkerThread(id: string) {
 		if (state?.kind === 'thread' && state.ids?.includes(id)) state = { ...state, id };
@@ -205,7 +202,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get quiet() { return quiet; }, get draftOverColumn() { return state?.kind === 'draft' && overColumn; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, closeAll, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus, returnFocusTo,
+		close, closeAll, release, engage() { quiet = false; }, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus, returnFocusTo,
 	};
 }
 
