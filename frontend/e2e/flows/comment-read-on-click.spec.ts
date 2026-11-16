@@ -56,7 +56,11 @@ async function chatWithHeldAnswer(page: Page, request: APIRequestContext, width:
 	const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
 	// A cid names the input's admission order, the same on every fresh instance; the read after posting proves it.
 	const gate = `read-on-click-${width}`;
-	await seedMockResponses(request, [{ content: '[c2.1] The answer to read.', response_gate: gate }]);
+	// The answer is sent with post_update, the only place a comment answer comes from (#2685).
+	await seedMockResponses(request, [
+		{ content: '', response_gate: gate, tool_calls: [{ id: 'update-1', name: 'post_update', arguments: JSON.stringify({ text: '[c2.1] The answer to read.' }) }], finish_reason: 'tool_calls' },
+		{ content: 'Done.' },
+	]);
 	await openAppPastLanding(page);
 	await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
 	await openChat(page, title);

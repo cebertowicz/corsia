@@ -6,9 +6,9 @@ import { openLiveDocument, seedLiveDocument, serverText, type LiveDocument } fro
 import { layouts } from '../support/liveConcurrency';
 
 /**
- * Typing in a document never moves it. Each stretch of typing is saved a moment after it stops, and while that write
- * is unsettled the live session reports it; the "still settling" notice shows only once a write has stayed unsettled
- * for 2 s, so ordinary saves never mount it.
+ * Typing in a document never moves it. Each stretch of typing is saved a moment after it stops, and the live session
+ * reports the write settled once it lands; a routine save never reports it unsettled. The "still settling" notice shows
+ * only once a write has stayed unsettled for 2 s, so ordinary saves never mount it.
  * The proof is the position of the first paragraph, the table and the header, sampled in the page every 50 ms
  * through the typing, the save after it and the settling, and again across a write held for less than the wait.
  * A write that is truly stuck still shows the notice, and the text moves once.
@@ -57,11 +57,11 @@ function expectStill(samples: Sample[], what: string, minSamples = 30) {
 	}
 }
 
-/** Counts the frames the server sends while a write is unsettled, so a run proves the typing reached that state. Install before the page opens. */
-function watchUnsettled(page: Page): { count(): number } {
+/** Counts the frames the server sends once a write has settled, so a run proves the typing's save landed and reported it. Install before the page opens. */
+function watchSettled(page: Page): { count(): number } {
 	let count = 0;
 	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
-		try { if (JSON.parse(String(frame.payload)).type === 'doc_pending' && JSON.parse(String(frame.payload)).pending === true) count += 1; } catch { /* not a JSON frame */ }
+		try { if (JSON.parse(String(frame.payload)).type === 'doc_pending' && JSON.parse(String(frame.payload)).pending === false) count += 1; } catch { /* not a JSON frame */ }
 	}));
 	return { count: () => count };
 }
@@ -99,13 +99,14 @@ for (const [width, height, project] of layouts) {
 		test(`typing in a paragraph moves neither the paragraph nor the table at ${width}`, async ({ page, request }) => {
 			test.setTimeout(120_000);
 			await page.setViewportSize({ width, height });
-			const unsettled = watchUnsettled(page);
+			const settled = watchSettled(page);
 			const document = await open(page, request, width);
 			await page.locator('.cm-line', { hasText: INTRO }).click({ position: { x: 8, y: 6 } });
 			await page.keyboard.press('End');
+			const settledBefore = settled.count();
 			expectStill(await typeAndSample(page, () => page.keyboard.type(' typed here', { delay: 40 })), 'typing in a paragraph');
 			await expect.poll(() => serverText(request, document), { message: 'the typed text was saved' }).toContain(`${INTRO} typed here`);
-			expect(unsettled.count(), 'the save reported an unsettled write while the document was sampled').toBeGreaterThan(0);
+			expect(settled.count(), 'the save after the typing reported its write settled').toBeGreaterThan(settledBefore);
 		});
 
 		test(`a write unsettled for less than the wait moves nothing, and one held past it shows the notice at ${width}`, async ({ page, request }) => {
