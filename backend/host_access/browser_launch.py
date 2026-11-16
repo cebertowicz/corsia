@@ -97,7 +97,7 @@ def inherited_args() -> list[str]:
         ).strip())]
     for arg in inherited:
         switch = re.split(r"[=\s]", arg.lstrip("-"), maxsplit=1)[0].lower()
-        if switch in {"explicitly-allowed-ports", "remote-allow-origins", "remote-debugging-port",
+        if switch in {"explicitly-allowed-ports", "host-resolver-rules", "remote-allow-origins", "remote-debugging-port",
                       "remote-debugging-address", "user-data-dir"}:
             raise BrowserIdentityError(f"managed browser refuses --{switch}; remove it from AGENT_BROWSER_ARGS")
     return inherited
