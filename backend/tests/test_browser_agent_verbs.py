@@ -1,4 +1,6 @@
 """Keys, dropdown choice, scrolling, hover and history on a saved sign-in: each verb is one fixed shape."""
+import asyncio
+
 import pytest
 
 from host_access import browser_agent_verbs as verbs
@@ -221,8 +223,8 @@ def _fail_after(name, module, calls, passes):
 
 
 @pytest.mark.parametrize("failing", ["page_endpoint", "page_password_probe", "reopen_fresh"])
-@pytest.mark.parametrize("blank_works", [True, False])
-async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, failing, blank_works):
+@pytest.mark.parametrize("blank", ["works", "fails", "cancelled"])
+async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, failing, blank):
     """If the endpoint, the check or the reload fails, the restored page is blanked, or the session closed."""
     reopened = []
     await _held_page(saved, monkeypatch, reopened)
@@ -235,19 +237,20 @@ async def test_a_history_failure_leaves_the_page_unreadable(saved, monkeypatch, 
     else:
         # The guard resolves the page once before the verb (the probe is skipped by _allow); the history check is next.
         monkeypatch.setattr(browser_cdp, failing, _fail_after(failing, browser_cdp, calls, 1 if failing == "page_endpoint" else 0))
-    if not blank_works:
+    if blank != "works":
         real = saved.owner._run_admitted
 
         async def run_admitted(runtime, args, **kwargs):
             if tuple(args) == ("open", "about:blank"):
-                raise BrowserSessionError("browser is gone")
+                raise asyncio.CancelledError() if blank == "cancelled" else BrowserSessionError("browser is gone")
             return await real(runtime, args, **kwargs)
 
         monkeypatch.setattr(saved.owner, "_run_admitted", run_admitted)
-    with pytest.raises((BrowserSessionError, RuntimeError)):
+    expected = asyncio.CancelledError if blank == "cancelled" else (BrowserSessionError, RuntimeError)
+    with pytest.raises(expected):
         await saved.owner.run("a", ["back"])
     blanked = [call for call in saved.calls if call[-2:] == ("open", "about:blank")]
-    if blank_works:
+    if blank == "works":
         assert len(blanked) == 1
     else:
         # Nothing could blank the page, so the session is gone and the next read has nothing to read.
