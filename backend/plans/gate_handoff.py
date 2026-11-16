@@ -45,7 +45,7 @@ GATE_NOTICE = "Gate step {step} was handed off by the person, so {how}."
 #: The first line of a handed-off gate step's own description, so every read of the step says who checks it.
 HANDED_OFF_STEP = (
     "The person handed this review to an agent. Don't ask the person: once the work is ready, hand this step "
-    "to a reviewer and accept or send back what it returns."
+    "to a reviewer (delegate_task with plan_node_id) and accept or send back what it returns."
 )
 GATE_HOW = {
     "agent": "a reviewer checks it instead of them",
