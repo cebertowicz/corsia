@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_store import BrowserMessage, LiveStore
-from doceditor.live_text import clone, create, follow_spans, map_spans, state_clocks, text_digest, utf16_length
+from doceditor.live_text import clone, create, follow_spans, keep_standing, map_spans, state_clocks, text_digest, utf16_length
 from doceditor.section_log import SectionLog
 
 if TYPE_CHECKING:
@@ -131,14 +131,15 @@ class LiveDocument:
 
     def _changed(self, event) -> None:
         ids = list(self.ranges)
-        spans, opened = follow_spans(list(self.ranges.values()), self._before, event.delta,
+        prior, after = list(self.ranges.values()), self.text
+        spans, opened = follow_spans(prior, self._before, event.delta,
                                      {index for index, identifier in enumerate(ids) if identifier in self.open_ends})
-        self.ranges.update(zip(ids, spans))
+        self.ranges.update(zip(ids, keep_standing(prior, spans, self._before, after)))
         self.open_ends = {ids[index] for index in opened}
         held = list(self._reservations.values())
         for reservation, span in zip(held, map_spans([item.span for item in held], self._before, event.delta)):
             reservation.span = span
-        self._before = self.text
+        self._before = after
         self.snapshot = (self._before, dict(self.ranges))
         self.text_changed()
 

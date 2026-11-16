@@ -99,11 +99,12 @@ def _character_changes(old: str, new: str, start: int):
 LINE_ALIKE = .5
 GROUP = 4  # the most lines one side of a pair holds, for a line split, lines joined or a reflow
 # Pairing compares every group of old lines with every group of new ones, each comparison costing
-# about the product of the two texts' lengths. A block past either bound (line pairs, or the two
-# blocks' character counts multiplied) is replaced whole, like one past the character cap, so a
-# comment inside it is left with no text rather than moved.
+# about the product of the two texts' lengths. A block of several lines past either bound (line
+# pairs, or the characters all those comparisons cover, see ``_pair_work``) is replaced whole, like
+# one past the character cap, so a comment inside it is left with no text rather than moved. One
+# line replaced by one line is never compared in groups, so it has no bound but the character cap.
 MAX_LINE_PAIRS = 64
-MAX_PAIR_CHARS = 30_000
+MAX_PAIR_WORK = 1_000_000
 
 
 def _alike(left: str, right: str) -> float:
@@ -159,11 +160,23 @@ def _pair_lines(before: list[str], after: list[str]) -> list[tuple[str | None, s
     return pairs
 
 
+def _pair_work(before: list[str], after: list[str]) -> int:
+    """The characters ``_pair_lines`` compares at most: every old group against every new group.
+
+    The sum over all group pairs of (old group characters x new group characters) is the product of
+    the two sides' sums, so it is cheap to know before any comparison is made.
+    """
+    def covered(lines: list[str]) -> int:
+        return sum(sum(map(len, lines[row:row + size])) for row in range(len(lines))
+                   for size in range(1, min(GROUP, len(lines) - row) + 1))
+    return covered(before) * covered(after)
+
+
 def _block_changes(before: list[str], after: list[str], start: int):
     """The character changes that turn one changed block of whole lines into another."""
     too_long = max(sum(map(len, before)), sum(map(len, after))) > MAX_CHARACTER_BLOCK and len(before) + len(after) > 2
-    chars = sum(map(len, before)) * sum(map(len, after))
-    if too_long or len(before) * len(after) > MAX_LINE_PAIRS or chars > MAX_PAIR_CHARS:
+    several = len(before) > 1 or len(after) > 1
+    if too_long or several and (len(before) * len(after) > MAX_LINE_PAIRS or _pair_work(before, after) > MAX_PAIR_WORK):
         return [(start, start + sum(map(len, before)), "".join(after))]
     changes, position = [], start
     for left, right in _pair_lines(before, after):
