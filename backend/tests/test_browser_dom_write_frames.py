@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_dom_write
+from host_access import browser_cdp, browser_dom_frames, browser_dom_hit, browser_dom_write
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserSessionError
 
@@ -100,7 +100,7 @@ async def _run(args, _timeout):
 @pytest.fixture(autouse=True)
 def _no_frame_targets(monkeypatch):
     monkeypatch.setattr(browser_cdp, "frame_targets", lambda _endpoint: {})
-    monkeypatch.setattr(browser_dom_write, "_SETTLE_INTERVAL", 0)
+    monkeypatch.setattr(browser_dom_hit, "SETTLE_INTERVAL", 0)
 
 
 def _connect(monkeypatch, **targets):
@@ -110,7 +110,9 @@ def _connect(monkeypatch, **targets):
         opened.append(endpoint)
         return targets[endpoint]
 
+    # The page is opened by the write path; a cross-site frame's own target by the frame search.
     monkeypatch.setattr(browser_dom_write, "CdpClient", client)
+    monkeypatch.setattr(browser_dom_frames, "CdpClient", client)
     return opened
 
 

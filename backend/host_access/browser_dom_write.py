@@ -5,11 +5,16 @@ import asyncio
 import json
 import re
 from contextlib import AsyncExitStack
-from dataclasses import dataclass
 from typing import Callable, Sequence
 
-from host_access import browser_cdp, browser_cli
+from host_access import browser_dom_hit
 from host_access.browser_cdp import CdpClient, Rect, RunCommand, border_rect, protocol_int
+from host_access.browser_dom_frames import locate_in_frames, shifted
+from host_access.browser_dom_hit import (
+    Located, box_matches as _box_matches, cover_tag as _cover, in_viewport as _in_viewport,
+    is_empty as _is_empty, isolated_context as _isolated_context, node_for_box as _node_for_box,
+    remote_object_id as _object_id, page_viewport as _viewport, read_box as _box,
+)
 from host_access.browser_session_state import BrowserSessionError
 
 # Where an agent wrote: the field's border box and its first label's, in page CSS pixels.
@@ -29,39 +34,8 @@ _WRITE_REFUSALS = {
     "rejected_value": "the field didn't keep the value",
     "no_option": "the dropdown has no option with that value or label",
 }
-# A page that is still moving (a smooth scroll that scrollintoview started and did not wait for)
-# is re-read at this interval, for at most this many reads, until a hit test holds. Each read also
-# runs a box command and a hit test, so the wait is longer than reads times interval.
-_SETTLE_INTERVAL = 0.05
-_SETTLE_READS = 40
-
-
-@dataclass(frozen=True)
-class Located:
-    """The node a write acts on, and where to reach it.
-
-    ``cdp`` is the target the node lives in: the page, or a cross-site frame's own target. ``frame_id`` names
-    the in-page frame whose world the write runs in (None for the target's main frame). ``shift`` is the
-    frame origin to add to a rect measured by ``cdp`` for it to be in the page's pixels.
-    """
-
-    node: int
-    cdp: CdpClient
-    frame_id: str | None = None
-    shift: tuple[float, float] = (0, 0)
-
-
-@dataclass(frozen=True)
-class ChildFrame:
-    """A frame below the page: its id, its owner element in the page, where its viewport shows on the page.
-
-    ``endpoint`` is the frame's own target when Chrome runs it in another process (a cross-site frame).
-    """
-
-    id: str
-    owner: int
-    viewport: Rect
-    endpoint: str | None = None
+_SETTLE_INTERVAL = browser_dom_hit.SETTLE_INTERVAL
+_SETTLE_READS = browser_dom_hit.SETTLE_READS
 
 
 class DomWriteRefused(BrowserSessionError):
@@ -137,7 +111,7 @@ async def _locate(run: RunCommand, page: CdpClient, endpoint: str, selector: str
     node, reason, box = await _locate_in_page(run, page, selector)
     if node is not None:
         return Located(node, page), reason, None
-    found, framed_cover, framed = await _locate_in_frames(run, page, endpoint, selector, box, frame_clients)
+    found, framed_cover, framed = await locate_in_frames(run, page, endpoint, selector, box, frame_clients)
     if found is not None:
         return found, "covered", None
     if reason != "covered":
@@ -165,115 +139,6 @@ async def _locate_in_page(run: RunCommand, cdp: CdpClient, selector: str, *,
         await run(("scrollintoview", selector), 10)
         node, reason, box = await _settled_hit(run, cdp, selector, await _box(run, selector))
     return node, reason, box
-
-
-async def _locate_in_frames(run: RunCommand, page: CdpClient, endpoint: str, selector: str, box: dict | None,
-                            frame_clients: AsyncExitStack) -> tuple[Located | None, str | None, bool]:
-    """Find a target inside a child frame: the node, else the tag of what covers it, and whether a frame was tried.
-
-    agent-browser measures an element inside a frame from that frame's own corner, so each frame's content-box
-    origin moves the box onto the page. A frame counts only when the moved centre is inside both the page's
-    viewport and the frame's own, and the page must hold still between the box and the hit test, as on the page.
-
-    The search stops one level down: a frame nested inside a cross-site frame has its owner in that frame's
-    process, not in this page, so it is never listed here and its elements are still refused.
-    """
-    cover: str | None = None
-    for read in range(_SETTLE_READS):
-        # The first box is the page path's last read; later ones are fresh, after the page moved.
-        box = box if read == 0 else await _box(run, selector)
-        if box is None or _is_empty(box):
-            return None, None, False
-        view = await _viewport(page)
-        shown = [(frame, _on_page(box, frame)) for frame in await _child_frames(page, endpoint)]
-        shown = [(frame, placed) for frame, placed in shown if _in_viewport(view, placed) and _inside(frame.viewport, placed)]
-        if not shown:
-            return None, None, False
-        found, cover = None, None
-        for frame, placed in shown:
-            found, cover = await _hit_in_frame(page, frame, box, placed, frame_clients)
-            if found is not None:
-                break
-        # The frame may have moved while it was hit, so the answer holds only if its place and the box did not.
-        if await _box(run, selector) == box and [frame.viewport for frame, _ in shown] == [
-                await _owner_viewport(page, frame.owner) for frame, _ in shown]:
-            return found, cover, True
-        await asyncio.sleep(_SETTLE_INTERVAL)
-    return None, None, False
-
-
-async def _hit_in_frame(page: CdpClient, frame: ChildFrame, box: dict, placed: dict,
-                        frame_clients: AsyncExitStack) -> tuple[Located | None, str | None]:
-    """The node a box inside a frame names, or the tag of what covers it."""
-    if frame.endpoint is None:
-        # A frame in the page's own process is hit-tested through the page, at the box moved onto the page.
-        node = await _node_for_box(page, placed)
-        if node:
-            return Located(node, page, frame.id), None
-        return None, await _cover(page, placed)
-    # A cross-site frame shows on the page as its owner element; what is inside it is known only to its own target.
-    if await _node_at_centre(page, placed) != frame.owner:
-        return None, await _cover(page, placed)
-    target = await frame_clients.enter_async_context(CdpClient(frame.endpoint))
-    node = await _node_for_box(target, box)
-    if node:
-        return Located(node, target, None, (frame.viewport["x"], frame.viewport["y"])), None
-    return None, await _cover(target, box)
-
-
-async def _child_frames(page: CdpClient, endpoint: str) -> list[ChildFrame]:
-    """Every frame whose owner element is in this page and shows a box, nearest the page first."""
-    tree = await page.call("Page.getFrameTree")
-    listed = [(frame_id, None) for frame_id in _descendants(tree.get("frameTree", {}))]
-    # A cross-site frame is in no frame tree; it is a target of its own whose id is the frame's.
-    listed += list((await asyncio.to_thread(browser_cdp.frame_targets, endpoint)).items())
-    frames = []
-    for frame_id, frame_endpoint in listed:
-        try:
-            owner = protocol_int((await page.call("DOM.getFrameOwner", frameId=frame_id)).get("backendNodeId"))
-            viewport = await _owner_viewport(page, owner)
-        except BrowserSessionError:
-            # A frame of another tab, or one with no element in this page.
-            continue
-        if viewport is not None:
-            frames.append(ChildFrame(frame_id, owner, viewport, frame_endpoint))
-    return frames
-
-
-async def _owner_viewport(page: CdpClient, owner: int) -> Rect | None:
-    """Where a frame's own viewport shows on the page: its owner element's content box."""
-    try:
-        content = (await page.call("DOM.getBoxModel", backendNodeId=owner)).get("model", {}).get("content")
-    except BrowserSessionError:
-        return None
-    if not isinstance(content, list) or len(content) < 8:
-        return None
-    viewport = {"x": content[0], "y": content[1], "width": content[2] - content[0], "height": content[5] - content[1]}
-    return viewport if viewport["width"] > 0 and viewport["height"] > 0 else None
-
-
-def _descendants(node: dict) -> list[str]:
-    found = []
-    for child in node.get("childFrames", []) or []:
-        frame_id = child.get("frame", {}).get("id")
-        if isinstance(frame_id, str):
-            found.append(frame_id)
-        found.extend(_descendants(child))
-    return found
-
-
-def _on_page(box: dict, frame: ChildFrame) -> dict:
-    """A box measured from the frame's corner, moved to where it shows on the page."""
-    return {**box, "x": box["x"] + frame.viewport["x"], "y": box["y"] + frame.viewport["y"]}
-
-
-def _inside(viewport: Rect, box: dict) -> bool:
-    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-    return viewport["x"] <= x < viewport["x"] + viewport["width"] and viewport["y"] <= y < viewport["y"] + viewport["height"]
-
-
-def _shifted(rect: Rect, shift: tuple[float, float]) -> Rect:
-    return {**rect, "x": rect["x"] + shift[0], "y": rect["y"] + shift[1]}
 
 
 async def _settled_hit(run: RunCommand, cdp: CdpClient, selector: str,
@@ -341,25 +206,8 @@ async def _css_target(cdp: CdpClient, selector: str, box: dict) -> tuple[bool, i
     return True, node
 
 
-async def _viewport(cdp: CdpClient) -> dict:
-    return (await cdp.call("Page.getLayoutMetrics")).get("cssVisualViewport", {})
-
-
 def _is_ref(selector: str) -> bool:
     return re.fullmatch(r"(?:@|ref=)?e\d+", selector) is not None
-
-
-def _is_empty(box: dict) -> bool:
-    """The all-zero box agent-browser gives for an element with no layout; one zero side is a real element."""
-    return not any(box[key] for key in ("x", "y", "width", "height"))
-
-
-def _in_viewport(viewport: dict, box: dict) -> bool:
-    width, height = viewport.get("clientWidth"), viewport.get("clientHeight")
-    if not isinstance(width, (int, float)) or not isinstance(height, (int, float)):
-        return False
-    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-    return 0 <= x < width and 0 <= y < height
 
 
 async def _report_field(cdp: CdpClient, node: int, object_id: str, on_field: FieldTarget,
@@ -373,96 +221,7 @@ async def _report_field(cdp: CdpClient, node: int, object_id: str, on_field: Fie
     label_id = label.get("result", {}).get("objectId")
     label_box = await border_rect(cdp, objectId=label_id) if isinstance(label_id, str) else None
     # A cross-site frame's own target measures from the frame's corner, so its rects move to the page's.
-    on_field(_shifted(field, shift), _shifted(label_box, shift) if label_box is not None else None)
-
-
-async def _box(run: RunCommand, selector: str) -> dict | None:
-    result = await run(("get", "box", selector), 10)
-    payload = browser_cli.json_object(result.stdout)
-    data = payload.get("data")
-    # agent-browser 0.31 exposes box geometry directly in data (older verified builds used data.result).
-    box = data.get("result", data) if isinstance(data, dict) else None
-    if not isinstance(box, dict) or not all(isinstance(box.get(key), (int, float)) for key in ("x", "y", "width", "height")):
-        return None
-    return box
-
-
-async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
-    node = await _node_at_centre(cdp, box)
-    return await _matching_ancestor(cdp, node, box) if node else None
-
-
-async def _node_at_centre(cdp: CdpClient, box: dict) -> int | None:
-    # The box is in viewport pixels, but the hit test takes document pixels: add the scroll offset.
-    viewport = await _viewport(cdp)
-    scroll_x, scroll_y = viewport.get("pageX"), viewport.get("pageY")
-    if not isinstance(scroll_x, (int, float)) or not isinstance(scroll_y, (int, float)):
-        return None
-    try:
-        location = await cdp.call("DOM.getNodeForLocation", x=round(scroll_x + box["x"] + box["width"] / 2),
-                                  y=round(scroll_y + box["y"] + box["height"] / 2), includeUserAgentShadowDOM=False,
-                                  ignorePointerEventsNone=True)
-    except BrowserSessionError:
-        # Chrome reports no node at a point nothing hit-tests at.
-        return None
-    return protocol_int(location.get("backendNodeId"))
-
-
-async def _cover(cdp: CdpClient, box: dict | None) -> str | None:
-    """The tag of the element at the target's centre, so the agent can dismiss or scroll past it."""
-    node = await _node_at_centre(cdp, box) if box is not None and not _is_empty(box) else None
-    if not node:
-        return None
-    try:
-        name = (await cdp.call("DOM.describeNode", backendNodeId=node)).get("node", {}).get("nodeName")
-    except BrowserSessionError:
-        return None
-    # Only a tag name: page text, ids and classes stay out of the agent's error.
-    return name.lower() if isinstance(name, str) and re.fullmatch(r"[A-Za-z][\w-]*", name) else None
-
-
-async def _matching_ancestor(cdp: CdpClient, node: int, expected: dict) -> int | None:
-    """Walk from the hit to a matching ancestor, including shadow hosts.
-
-    Refs expose geometry but not identity; a same-sized overlay can still match.
-    """
-    context = None
-    while node:
-        if await _box_matches(cdp, node, expected):
-            return node
-        try:
-            if context is None:
-                context = await _isolated_context(cdp)
-            resolved = await cdp.call("DOM.resolveNode", backendNodeId=node, executionContextId=context)
-            parent = await cdp.call(
-                "Runtime.callFunctionOn", objectId=_object_id(resolved), returnByValue=False, silent=True,
-                functionDeclaration="function() { return this.parentElement || this.getRootNode().host || null; }",
-            )
-            object_id = parent.get("result", {}).get("objectId")
-            if not isinstance(object_id, str):
-                return None
-            description = await cdp.call("DOM.describeNode", objectId=object_id)
-            node = protocol_int(description.get("node", {}).get("backendNodeId"))
-        except BrowserSessionError:
-            # An inaccessible frame kept the old refusal when its hit box did not match.
-            return None
-    return None
-
-
-async def _box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
-    rect = await border_rect(cdp, backendNodeId=node)
-    return rect is not None and all(abs(rect[key] - expected[key]) <= 1 for key in ("x", "y", "width", "height"))
-
-
-async def _isolated_context(cdp: CdpClient, frame_id: str | None = None) -> int:
-    """A world of ours in a frame: the target's main frame, or the in-page frame named."""
-    if frame_id is None:
-        tree = await cdp.call("Page.getFrameTree")
-        frame = tree.get("frameTree", {}).get("frame", {}).get("id")
-    else:
-        frame = frame_id
-    world = await cdp.call("Page.createIsolatedWorld", frameId=frame, worldName="corsia-shared-browser", grantUniveralAccess=False)
-    return protocol_int(world.get("executionContextId"))
+    on_field(shifted(field, shift), shifted(label_box, shift) if label_box is not None else None)
 
 
 # The fixed page-context write (Governance R4): it takes only a command, values and an append flag,
@@ -502,10 +261,3 @@ _WRITE = """function(command, values, append) {
 def _write_arguments(args: Sequence[str]) -> list[dict]:
     values = list(args[2:]) if args[0] == "select" else [args[2] if len(args) > 2 else ""]
     return [{"value": args[0]}, {"value": values}, {"value": args[0] == "type"}]
-
-
-def _object_id(result: dict) -> str:
-    value = result.get("object")
-    if not isinstance(value, dict) or not isinstance(value.get("objectId"), str):
-        raise BrowserSessionError("This page couldn't be checked")
-    return value["objectId"]
