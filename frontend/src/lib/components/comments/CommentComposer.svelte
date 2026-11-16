@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { untrack } from 'svelte';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
@@ -64,7 +65,7 @@
 	<div class="input-wrap">
 		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
-			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection}></textarea>
+			<textarea use:keepTyped bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} readonly={pending} bind:value={text} use:autosize={text} onkeydown={onKey} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection}></textarea>
 		</Field>
 	</div>
 	<div class="actions">
