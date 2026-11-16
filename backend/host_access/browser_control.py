@@ -178,9 +178,10 @@ def seen_by_person(thread_id: str) -> str:
 
 
 def _ending(thread_id: str) -> str:
-    if browser_pane_state.has_pane(thread_id):
-        return PANE_OPEN + " Post nothing in chat."
-    return NO_PANE + " If you reply, use one short line pointing them to it in Needs you; don't restate the task or say you made it."
+    seen = seen_by_person(thread_id)
+    if seen == PANE_OPEN:
+        return seen + " Post nothing in chat."
+    return seen + " If you reply, use one short line pointing them to it in Needs you; don't restate the task or say you made it."
 
 
 def _guard(thread_id: str, result: PasswordProbe, *, nodes: frozenset[int] | None = None) -> None:
