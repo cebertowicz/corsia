@@ -101,8 +101,10 @@ describe('chat thread read stamps', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2', '2026-10-16T18:01:00Z')], newReplyIds: ['r1', 'r2'] };
 		shown.hideReply = true;
 		render(vi.fn().mockResolvedValue(undefined), { inMargin: true });
-		expect(newMarks()).toBe(2);
+		// At rest the preview carries one New mark for its unread answers.
+		expect(newMarks()).toBe(1);
 		shown.hideReply = false; shown.opened = true; flushSync();
+		expect(newMarks()).toBe(2);
 		// The stamp lands: the server names no new answers, and the open card still shows which ones were new.
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(2);
