@@ -173,6 +173,7 @@ describe('MarkdownEditor edits', () => {
 			const view = open({ highlights: [{ from: 0, to: 15, id: 'one', onMarkerFocus }, { from: 0, to: 15, id: 'two', onMarkerFocus }, suggestion('red')], onAnchorFocus });
 			vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 10, right: 18, top: 20, bottom: 36 });
 			// A press on the struck text, in a popover: the innermost highlight under it is the suggestion.
+			vi.mocked(EditorView.prototype.posAtCoords).mockReturnValue(8);
 			view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1, clientX: 14, clientY: 25 }));
 			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select.pointer' });
 			window.dispatchEvent(new MouseEvent('mouseup'));
