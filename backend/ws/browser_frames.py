@@ -56,6 +56,6 @@ class PaneFrames:
                     message = self._stats.stamp(message)
                     started = time.perf_counter()
                     await send_text(message)
-                    self._stats.frame_sent((time.perf_counter() - started) * 1000)
+                    self._stats.frame_sent((time.perf_counter() - started) * 1000, len(message))
             else:
                 self._ready.clear()

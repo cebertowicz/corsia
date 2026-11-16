@@ -70,6 +70,36 @@ describe('BrowserPaneStats', () => {
 		expect(total(pane.report().input_to_paint_ms)).toBe(1);
 	});
 
+	it('times the oldest input a paint answers, so later input cannot hide how long the first waited', () => {
+		const pane = stats();
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 50;
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 90;
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 100;
+		const painted = pane.arrived({ seq: 1, input: 3 });
+		clock = 130;
+		painted(true);
+		const delay = pane.report().input_to_paint_ms as number[];
+		expect(total(delay)).toBe(1);
+		expect(delay[bucket(130)]).toBe(1);
+	});
+
+	it('keeps an input waiting until a painted frame names it or a later input', () => {
+		const pane = stats();
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 60;
+		pane.arrived({ seq: 1 })(true);
+		expect(total(pane.report().input_to_paint_ms)).toBe(0);
+		clock = 200;
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 300;
+		pane.arrived({ seq: 2, input: 2 })(true);
+		const delay = pane.report().input_to_paint_ms as number[];
+		expect(delay[bucket(300)]).toBe(1);
+	});
+
 	it('keeps at most 64 inputs that no frame has named', () => {
 		const pane = stats();
 		for (let count = 0; count < 100; count++) pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });

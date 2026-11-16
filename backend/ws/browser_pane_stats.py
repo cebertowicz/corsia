@@ -102,9 +102,9 @@ class PaneStats:
 
     def _reset_window(self) -> None:
         self._started = time.monotonic()
-        self._offered = self._replaced = self._sent = 0
+        self._offered = self._replaced = self._sent = self._sent_bytes = 0
         self._frame_kib, self._send_ms, self._cpu_ms, self._lag_ms = (Histogram() for _ in range(4))
-        self._dispatch = {"move": Histogram(), "click": Histogram(), "key": Histogram()}
+        self._dispatch = {kind: Histogram() for kind in ("move", "click", "key", "wheel")}
         self._inputs = {"move": 0, "click": 0, "key": 0, "wheel": 0}
         self._coalesced = self._backlog_max = 0
         self._reports = self._bad_reports = self._painted = self._buffered_max = 0
@@ -133,8 +133,9 @@ class PaneStats:
                 fields += f',"input":{input_id}'
         return message[:-1] + fields + "}" if message.endswith("}") else message
 
-    def frame_sent(self, send_ms: float) -> None:
+    def frame_sent(self, send_ms: float, size: int) -> None:
         self._sent += 1
+        self._sent_bytes += size
         self._send_ms.add(send_ms)
 
     def input_handled(self, data: dict, dispatch_seconds: float) -> None:
@@ -142,8 +143,7 @@ class PaneStats:
         if kind is None:
             return
         self._inputs[kind] += 1 if kind != "click" or data.get("eventType") == "mousePressed" else 0
-        if kind != "wheel":
-            self._dispatch[kind].add(dispatch_seconds * 1000)
+        self._dispatch[kind].add(dispatch_seconds * 1000)
         input_id = data.get("id")
         if kind in _STAMPED_KINDS and _count(input_id, _MAX_SEQUENCE) and input_id:
             self._handled = (input_id, time.monotonic())
@@ -192,6 +192,7 @@ class PaneStats:
             f"thread={self.thread}", f"window={seconds:.0f}s", f"viewer={self.viewer}", f"size={self._size}",
             f"frames_in={self._offered}", f"replaced={self._replaced}", f"sent={self._sent}",
             f"sent_fps={self._sent / seconds:.1f}",
+            f"sent_kib={self._sent_bytes / 1024:.0f}",
             f"frame_kib_p50={p(self._frame_kib, .5)}", f"frame_kib_p95={p(self._frame_kib, .95)}",
             f"send_ms_p50={p(self._send_ms, .5)}", f"send_ms_p95={p(self._send_ms, .95)}",
             f"frame_cpu_ms_p50={p(self._cpu_ms, .5)}", f"frame_cpu_ms_p95={p(self._cpu_ms, .95)}",
@@ -200,7 +201,8 @@ class PaneStats:
             f"keys={self._inputs['key']}", f"wheels={self._inputs['wheel']}",
             f"dispatch_ms_move_p95={p(self._dispatch['move'], .95)}",
             f"dispatch_ms_click_p95={p(self._dispatch['click'], .95)}",
-            f"dispatch_ms_key_p95={p(self._dispatch['key'], .95)}", f"backlog_max={self._backlog_max}",
+            f"dispatch_ms_key_p95={p(self._dispatch['key'], .95)}",
+            f"dispatch_ms_wheel_p95={p(self._dispatch['wheel'], .95)}", f"backlog_max={self._backlog_max}",
             f"reports={self._reports}",
         ]
         if self._reports:

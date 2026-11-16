@@ -20,8 +20,9 @@ const emptyBuckets = () => STATS_BUCKET_UPPERS.map(() => 0);
 
 /**
  * What this pane measures about its own stream, reported to the server every few seconds: frames
- * painted, the newest frame number painted, how long each took from receipt to paint, how long an
- * input took to show in a painted frame, and how much input was still queued in the socket. Only
+ * painted, the newest frame number painted, how long each took from receipt to paint, how long the
+ * oldest input still waiting took to show in the first painted frame that answers it, and how much
+ * input was still queued in the socket. Only
  * counts and times; never page content, a position or a key.
  */
 export class BrowserPaneStats {
@@ -67,9 +68,14 @@ export class BrowserPaneStats {
 			this.decode[bucketIndex(this.now() - started)] += 1;
 			const named = Math.max(input, this.carried);
 			this.carried = 0;
-			const sent = this.sentAt.get(named);
-			if (sent !== undefined) this.delay[bucketIndex(this.now() - sent)] += 1;
-			for (const id of this.sentAt.keys()) if (id <= named) this.sentAt.delete(id);
+			// The oldest input this paint answers sets the delay: under rapid input a later one must not hide how long the first waited.
+			let oldest: number | undefined;
+			for (const [id, sent] of this.sentAt) {
+				if (id > named) break;
+				oldest ??= sent;
+				this.sentAt.delete(id);
+			}
+			if (oldest !== undefined) this.delay[bucketIndex(this.now() - oldest)] += 1;
 		};
 	}
 

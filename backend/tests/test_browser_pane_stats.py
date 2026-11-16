@@ -119,12 +119,13 @@ def test_the_window_line_has_the_agreed_figures_and_no_content(lines):
     stats.frame_offered(300 * 1024, 0.4, replaced=False)
     stats.frame_offered(300 * 1024, 0.4, replaced=True)
     stats.stamp(FRAME)
-    stats.frame_sent(12.0)
+    stats.frame_sent(12.0, 3 * 1024)
+    stats.frame_sent(12.0, 1024)
     stats.input_handled({"type": "input_mouse", "eventType": "mouseMoved", "x": 123, "y": 456, "id": 1}, 0.01)
     stats.input_handled({"type": "input_mouse", "eventType": "mousePressed", "x": 123, "y": 456, "id": 2}, 0.02)
     stats.input_handled({"type": "input_mouse", "eventType": "mouseReleased", "x": 123, "y": 456, "id": 3}, 0.02)
     stats.input_handled({"type": "input_keyboard", "eventType": "keyDown", "key": "s3cret", "text": "s3cret"}, 0.03)
-    stats.input_handled({"type": "input_mouse", "eventType": "mouseWheel", "deltaY": 99}, 0.0)
+    stats.input_handled({"type": "input_mouse", "eventType": "mouseWheel", "deltaY": 99}, 0.02)
     stats.input_coalesced()
     stats.backlog(4)
     stats.loop_lag(2.0)
@@ -136,7 +137,7 @@ def test_the_window_line_has_the_agreed_figures_and_no_content(lines):
     (line,) = lines
     assert line.startswith("browser pane stats thread=01234567 ")
     for name, value in {
-        "viewer": "remote", "size": "1440x900@2", "frames_in": "2", "replaced": "1", "sent": "1",
+        "viewer": "remote", "size": "1440x900@2", "frames_in": "2", "replaced": "1", "sent": "2", "sent_kib": "4",
         "moves": "1", "clicks": "1", "keys": "1", "wheels": "1", "coalesced": "1", "backlog_max": "4",
         "reports": "1", "painted": "40", "in_flight_max": "0", "up_buffered_max": "2048",
         "input_to_paint_n": "3", "visible": "false",
@@ -144,6 +145,7 @@ def test_the_window_line_has_the_agreed_figures_and_no_content(lines):
         assert token(line, name) == value, name
     assert 16 < float(token(line, "input_to_paint_ms_p50")) <= 32
     assert 256 < float(token(line, "frame_kib_p50")) <= 512
+    assert 16 < float(token(line, "dispatch_ms_wheel_p95")) <= 32
     names = {part.split("=", 1)[0] for part in line.split() if "=" in part}
     assert not names & {"x", "y", "key", "text", "url", "delta_y"} and "s3cret" not in line
     assert "final" not in line
