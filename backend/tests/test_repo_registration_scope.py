@@ -229,8 +229,10 @@ async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monke
     finally:
         await _release(env, task)
     title = "Alpha worker" if blocker == "same project" else "Beta worker"
-    assert "Repository policy transition is blocked by an active tool effect." in result, result
-    assert f'Blocked by tool `hold` from agent "{title}".' in result, result
+    assert (
+        f"Repositories can't change while tool `hold` from agent \"{title}\" is running. "
+        "Try again once it finishes."
+    ) in result, result
     assert _registered(env) == 0
 
 
@@ -267,8 +269,7 @@ async def test_live_connected_app_call_from_another_project_refuses(env, monkeyp
         result = await _register(env, target)
     finally:
         await _release(env, task)
-    assert "Repository policy transition is blocked by an active tool effect." in result, result
-    assert f'Blocked by tool `{app.name}` from agent "Beta worker".' in result, result
+    assert f"while tool `{app.name}` from agent \"Beta worker\" is running." in result, result
     assert _registered(env) == 0
 
 
@@ -279,8 +280,7 @@ async def test_person_session_effect_refuses(env):
     target = _own_target(env)
     with admit_repo_effect(caller_reach(None, db=env["db"]), tool_name="settings"):
         result = await _register(env, target)
-    assert "blocked by an active tool effect." in result, result
-    assert "from the person's own session" in result, result
+    assert "while tool `settings` from the person's own session is running." in result, result
     assert _registered(env) == 0
 
 
@@ -303,8 +303,7 @@ async def test_process_that_can_reach_the_project_refuses_and_is_named(env, bloc
             env["db"].execute("UPDATE threads SET project_id='pb' WHERE id='p-agent'")
             env["db"].commit()
     result = await _register(env, target)
-    assert "Repository policy transition is blocked by an active owned process." in result, result
-    assert f'Blocked by process "sleeper" from agent "{owner_title}".' in result, result
+    assert f"while process \"sleeper\" from agent \"{owner_title}\" is running." in result, result
     assert _registered(env) == 0
 
 
@@ -321,7 +320,7 @@ async def test_targets_outside_own_folder_keep_the_instance_wide_fence(env, wher
         result = await _register(env, target)
     finally:
         await _release(env, task)
-    assert "Repository policy transition is blocked by an active tool effect." in result, result
+    assert "Repositories can't change while tool `hold` from agent" in result, result
     assert _registered(env) == 0
     # Once nothing is in flight the same registration goes through, as today.
     assert "Registered repository 'app'" in await _register(env, target)
@@ -344,7 +343,7 @@ async def test_target_in_another_projects_folder_keeps_the_instance_wide_fence(e
     finally:
         await _release(env, task)
     assert raised.value.status_code == 409
-    assert "blocked by an active tool effect" in raised.value.detail
+    assert "Repositories can't change while tool `hold`" in raised.value.detail
     assert _registered(env) == 0
 
 
@@ -536,7 +535,9 @@ async def test_link_entry_resolving_outside_home_is_refused(env, tmp_path_factor
     with pytest.raises(HTTPException) as raised:
         project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
     assert raised.value.status_code == 400
-    assert raised.value.detail == "Bad repository path: Repo path must be under your home directory"
+    assert raised.value.detail == (
+        "source/app links to a folder outside your home folder, which can't be registered"
+    )
     assert entry.is_symlink() and entry.readlink() == outside_home
     assert _registered(env) == 0
 
@@ -590,3 +591,49 @@ async def test_entry_that_leaves_the_project_after_the_claim_is_refused_to_retry
     result = project_repos.register_source_repo("pa", project_repos.RepoAdd(mode="link", path=str(entry)))
     assert Path(result["path"]) == outside.resolve()
     assert _registered(env) == 1
+
+
+@pytest.mark.asyncio
+async def test_link_repointed_after_the_tools_checks_is_refused(env, monkeypatch):
+    """The tool registers only the folder its fence and Git-config checks saw."""
+    from api import project_repos
+
+    checked = _own_target(env)
+    other = env["alpha"] / "code" / "other"
+    _git_repo(other)
+    entry = env["alpha"] / "source" / "app"
+    entry.symlink_to(checked, target_is_directory=True)
+    real = project_repos.resolve_add_source
+
+    def repoint_then_resolve(project_id, ws_dir, **kwargs):
+        entry.unlink()
+        entry.symlink_to(other, target_is_directory=True)
+        return real(project_id, ws_dir, **kwargs)
+
+    monkeypatch.setattr(project_repos, "resolve_add_source", repoint_then_resolve)
+    result = await _register(env, entry)
+    assert result.startswith(
+        "Error: The repository's folder changed while it was being registered; "
+        "check the path and try again."
+    ), result
+    assert _registered(env) == 0
+    assert entry.is_symlink() and entry.readlink() == other
+
+
+@pytest.mark.asyncio
+async def test_each_transition_logs_the_claim_it_ran_or_was_refused_under(env, caplog):
+    import logging
+
+    target = _own_target(env)
+    caplog.set_level(logging.INFO, logger="infra.repo_policy_transition")
+    task = await _held_effect(env, "p-agent")
+    try:
+        assert "Repositories can't change" in await _register(env, target)
+    finally:
+        await _release(env, task)
+    assert "Registered repository 'app'" in await _register(env, target)
+    messages = [r.getMessage() for r in caplog.records if r.name == "infra.repo_policy_transition"]
+    assert messages == [
+        "repo policy transition refused claim=own-project blocker_thread=p-agent",
+        "repo policy transition admitted claim=own-project",
+    ], messages

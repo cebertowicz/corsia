@@ -77,7 +77,9 @@ def capture_in_place_entry(
         try:
             require_under_home(target)
         except ValueError as exc:
-            raise HTTPException(400, f"Bad repository path: {exc}") from exc
+            raise HTTPException(
+                400, f"source/{entry.name} links to a folder outside your home folder, which can't be registered",
+            ) from exc
         kind = "linked"
     elif entry.is_dir():
         target, kind = entry.resolve(), "native"
@@ -118,7 +120,7 @@ def resolve_add_source(
                 row, identity = link_repo_into_source(ws_dir, Path(path), name=name, with_ownership=True)
                 return row, identity, True
         except (ValueError, OSError) as exc:
-            raise HTTPException(400, f"Bad repository path: {exc}") from exc
+            raise HTTPException(400, f"Can't register this folder: {exc}") from exc
         registered = _registered_names(project_id)
         return *capture_in_place_entry(ws_dir, entry, name=name, registered=registered), False
     if not name:

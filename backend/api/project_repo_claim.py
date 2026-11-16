@@ -126,19 +126,31 @@ def registration_claim(
     return _paths_claim(project_id, ws_dir, paths, workspace=workspace, db=db)
 
 
+_CHANGED = (
+    "The repository's folder changed while it was being registered; check the path and try again."
+)
+
+
 def confirmed_repo_path(
     claim: frozenset[str] | None, project_id: str, ws_dir: Path, row: dict,
+    *, checked: Path | None = None,
 ) -> Path:
     """The add's one resolved repository folder, which every later step of the add uses.
 
-    Called inside the transition, once. Under a narrowed claim, the folder and its
+    Called inside the transition, once. ``checked`` is the resolved folder a caller
+    vetted before the transition (the agent tool's fence and Git-config checks); the
+    add registers only that folder. Under a narrowed claim, the folder and its
     ``source/`` binding must still earn that claim; an add admitted everywhere
-    (``claim is None``) needs no check.
+    (``claim is None``) needs no claim check.
 
     Raises:
-        HTTPException: 409, retryable, when the paths no longer earn the narrowed claim.
+        HTTPException: 409, retryable, when the folder is not the one checked or no
+            longer earns the narrowed claim.
     """
     repo_path = Path(str(row["path"])).expanduser().resolve(strict=False)
+    # Exact, not case-folded: a link swapped after the caller's checks must not pass.
+    if checked is not None and repo_path != checked:
+        raise HTTPException(409, _CHANGED)
     if claim is None:
         return repo_path
     binding = ws_dir / "source" / str(row["name"])

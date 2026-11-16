@@ -450,8 +450,8 @@ def _select_add_policy(row: dict, body: RepoAdd, repo_path: Path):
     return pinned_branch, protected, switched
 
 
-def register_source_repo(project_id: str, body: RepoAdd) -> dict:
-    """Add-repo procedure shared by Project settings and project_repo_register."""
+def register_source_repo(project_id: str, body: RepoAdd, *, checked: Path | None = None) -> dict:
+    """Add-repo procedure shared by Project settings and project_repo_register (``checked``)."""
 
     def _add(claim: frozenset[str] | None):
         ws_dir = _workspace_dir_for(project_id)
@@ -465,7 +465,7 @@ def register_source_repo(project_id: str, body: RepoAdd) -> dict:
                 project_id, ws_dir, mode=body.mode, path=body.path, name=body.name,
             )
             _require_owned_source(identity)
-            repo_path = confirmed_repo_path(claim, project_id, ws_dir, row)
+            repo_path = confirmed_repo_path(claim, project_id, ws_dir, row, checked=checked)
             pinned_branch, protected, switched = _select_add_policy(
                 row,
                 body,

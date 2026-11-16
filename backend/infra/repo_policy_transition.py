@@ -115,11 +115,12 @@ def _agent_label(thread_id: str | None) -> str:
         return "an agent"
 
 
-def _busy(prefix: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
-    if holder is None:
-        return RepoPolicyTransitionBusy(prefix)
+def _busy(running: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
+    """The refusal a person or agent reads: what is still running, and what to do."""
+    if holder is not None:
+        running = f"{holder.what} from {_agent_label(holder.thread_id)}"
     return RepoPolicyTransitionBusy(
-        f"{prefix} Blocked by {holder.what} from {_agent_label(holder.thread_id)}."
+        f"Repositories can't change while {running} is running. Try again once it finishes."
     )
 
 
@@ -214,22 +215,25 @@ class _RepoPolicyTransitionCoordinator:
             effects = [h for h in self._effects.values() if h.reach.meets(claim)]
             if effects:
                 blocker_holder: Holder | None = effects[0]
-                prefix = "Repository policy transition is blocked by an active tool effect."
+                running = "an agent's tool"
             else:
                 busy, blocker_holder = self._process_blocker(
                     claim, active_process_count, owned_processes,
                 )
-                prefix = (
-                    "Repository policy transition is blocked by an active owned process."
-                    if busy else ""
-                )
-            if not prefix:
+                running = "an agent's process" if busy else ""
+            if not running:
                 self._transition_active = True
                 self._claim = claim
-        if prefix:
+        # The claim each transition runs or is refused under, so how often a narrowed
+        # claim admits, and what still refuses one, can be read from the log.
+        scope = "everywhere" if claim is None else "own-project"
+        if running:
+            log.info("repo policy transition refused claim=%s blocker_thread=%s",
+                     scope, blocker_holder.thread_id if blocker_holder else None)
             # Named outside the lock: the label reads the database.
-            blocker = _busy(prefix, blocker_holder)
+            blocker = _busy(running, blocker_holder)
             raise blocker
+        log.info("repo policy transition admitted claim=%s", scope)
         try:
             yield claim
         finally:

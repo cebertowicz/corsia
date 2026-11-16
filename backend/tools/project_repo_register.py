@@ -114,12 +114,13 @@ class ProjectRepoRegisterTool(Tool):
             return f"Error: {refusal}"
 
         # The path as written, made absolute, so a link entry already in the project's
-        # source/ is recognised as that entry; the procedure resolves it again itself.
+        # source/ is recognised as that entry. The procedure resolves it again and
+        # registers it only if it is still the folder checked above.
         written = os.path.normpath(Path(raw_path).expanduser().absolute())
         body = RepoAdd(mode="link", path=written, name=name)
         try:
             repo = await run_in_db(
-                lambda: register_source_repo(project_id, body)
+                lambda: register_source_repo(project_id, body, checked=target)
             )
         except HTTPException as exc:
             return f"Error: {exc.detail}"
