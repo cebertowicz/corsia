@@ -193,7 +193,11 @@ async def test_native_media_request_gets_a_fake_device_never_a_real_one(native_o
     from host_access import browser_session_commands
 
     async def serve(reader, writer):
-        await reader.readuntil(b'\r\n\r\n')
+        try:
+            await reader.readuntil(b'\r\n\r\n')
+        except asyncio.IncompleteReadError:
+            writer.close()  # Chrome's speculative preconnect closes without sending a request.
+            return
         writer.write(b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nMedia test')
         await writer.drain()
         writer.close()
@@ -214,18 +218,26 @@ async def test_native_media_request_gets_a_fake_device_never_a_real_one(native_o
                 continue
         assert any('--use-fake-device-for-media-stream' in line for line in command_lines), command_lines
         # Stand in for the site permission a person would grant; the device answering is what is checked.
+        # Grant on the page's own browser context, which need not be the browser's default one.
+        page = await native_owner.page_endpoint(thread)
+        async with browser_cdp.CdpClient(page) as cdp:
+            context = (await cdp.call('Target.getTargetInfo'))['targetInfo'].get('browserContextId')
+        grant = {'origin': origin, 'permissions': ['audioCapture', 'videoCapture']}
+        if context:
+            grant['browserContextId'] = context
         browser = await browser_session_commands.browser_endpoint(native_owner, thread)
         async with browser_cdp.CdpClient(browser) as cdp:
-            await cdp.call('Browser.grantPermissions', origin=origin, permissions=['audioCapture', 'videoCapture'])
-        async with browser_cdp.CdpClient(await native_owner.page_endpoint(thread)) as cdp:
+            await cdp.call('Browser.grantPermissions', **grant)
+        async with browser_cdp.CdpClient(page) as cdp:
             result = await cdp.call('Runtime.evaluate', awaitPromise=True, returnByValue=True, expression="""
               navigator.mediaDevices.getUserMedia({audio: true, video: true}).then(stream => {
                 const tracks = stream.getTracks().map(track => [track.kind, track.label]);
                 stream.getTracks().forEach(track => track.stop());
                 return tracks;
-              }, error => 'error: ' + error.name)""")
+              }, async error => 'error: ' + error.name + '; permissions: ' + JSON.stringify(await Promise.all(
+                ['camera', 'microphone'].map(name => navigator.permissions.query({name}).then(s => s.state)))))""")
         tracks = result['result']['value']
-        assert isinstance(tracks, list), tracks
+        assert isinstance(tracks, list), f'{tracks}; context={context!r}'
         assert sorted(kind for kind, _ in tracks) == ['audio', 'video'], tracks
         assert all('fake' in label.lower() for _, label in tracks), tracks
     finally:
