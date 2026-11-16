@@ -57,6 +57,8 @@ class Decision:
     refusal: str | None = None
     guard_present: bool = False
     monitor: bool | None = None
+    # The visit whose done fields clear: this event saw no visible password field there. Count and decline stay.
+    forget_done: str | None = None
 
 
 def _kind(step: BrowserStep) -> Kind:
@@ -71,14 +73,23 @@ def _session_changed(state: StepState, event: Event) -> bool:
 
 
 def decide(state: StepState, event: Event) -> Decision:
-    """R1–R14 in precedence order. No writes, clock, task scheduling or plan reads."""
+    """R1-R14 in precedence order, plus one rule on every path: an event whose result shows no visible
+    password field names that visit in `forget_done`, so a field that shows again is asked about again.
+    No writes, clock, task scheduling or plan reads."""
+    decision = _decide_rules(state, event)
+    if (result := event.result) is not None and not result.visible_nodes:
+        decision = replace(decision, forget_done=result.visit)
+    return decision
+
+
+def _decide_rules(state: StepState, event: Event) -> Decision:
     step, result = state.open, event.result
     if event.name == "session_ended":  # R1: no page observation can prove completion across sessions.
         return Decision(("R1",), end="unsettled" if step else None, clear_answers=True)
     if event.name in {"pane_probe_available", "pane_probe_gone"}:
         return Decision(monitor=event.name == "pane_probe_available")
     if _session_changed(state, event):  # R2 also clears answers when the prior session had no open step.
-        following = decide(StepState(session=event.session), event)
+        following = _decide_rules(StepState(session=event.session), event)
         return replace(following, rules=("R2",) + following.rules,
                        end="unsettled" if step else None, clear_answers=True)
     end, rule = None, None
@@ -96,7 +107,7 @@ def decide(state: StepState, event: Event) -> Decision:
             answer = Answer(step.occurrence, end == "declined", done_nodes)
             answers = dict(state.answers)
             answers[(_kind(step), step.visit)] = answer
-            following = decide(StepState(answers=answers, session=state.session), event)
+            following = _decide_rules(StepState(answers=answers, session=state.session), event)
             same_person_visit = isinstance(step, PersonStep) and result is not None and result.visit == step.visit
             return replace(following, rules=(rule,) + following.rules, end=end, answer=answer,
                            guard_present=same_person_visit)
@@ -110,9 +121,12 @@ def decide(state: StepState, event: Event) -> Decision:
         answer = state.answers.get(("password", result.visit), Answer(0))
         if answer.declined:
             return Decision(("R8",), refusal="password_declined")
-        if result.visible_nodes <= answer.nodes:  # R14: the person finished these fields, so the page is the agent's again.
+        if not result.visible_nodes <= answer.nodes:
+            return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
+        # R14: the person finished these fields, so the page is the agent's again. A declare asks for
+        # a different step (e-signature, MFA), so it goes on to R10/R11.
+        if event.name != "declare":
             return Decision(("R14",))
-        return Decision(("R9",), open_kind="password", occurrence=answer.count + 1, refusal="password")
     if event.name == "declare":
         answer = state.answers.get(("person", result.visit), Answer(0))
         if answer.declined:
@@ -157,8 +171,10 @@ async def step_event(thread_id: str, event: Event, *,
                 _answers.setdefault(thread_id, {})[(_kind(step), step.visit)] = decision.answer
             if decision.end == "declined":
                 await _emit(f"{step.event_prefix}_declined", thread_id)
-        if result is not None and not result.visible_nodes:
-            _forget_done_nodes(thread_id, result.visit)
+        if decision.forget_done is not None:
+            answers = _answers.get(thread_id, {})
+            if (done := answers.get(("password", decision.forget_done))) is not None and done.nodes:
+                answers[("password", decision.forget_done)] = replace(done, nodes=frozenset())
         if decision.open_kind is not None:
             assert result is not None
             if decision.open_kind == "password":
@@ -179,14 +195,6 @@ async def step_event(thread_id: str, event: Event, *,
         if event.name == "session_ended":
             _sessions.pop(thread_id, None)
         return decision
-
-
-def _forget_done_nodes(thread_id: str, visit: str) -> None:
-    """A probe that sees no visible password field on a visit ends the person's done for those fields, so
-    one that shows again is asked about again. The answer's count and a decline stay."""
-    answers = _answers.get(thread_id, {})
-    if (answer := answers.get(("password", visit))) is not None and answer.nodes:
-        answers[("password", visit)] = replace(answer, nodes=frozenset())
 
 
 def discard_session(thread_id: str) -> None:

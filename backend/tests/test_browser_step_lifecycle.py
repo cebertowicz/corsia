@@ -40,17 +40,17 @@ def _event(name="probe", visible=False, **kwargs):
     (_state(_person()), lifecycle.Event("probe", _probe("visit-two"), session="session-two"),
      {"rules": ("R2",), "end": "unsettled", "clear_answers": True}),
     (_state(_person(), row_state="accepted"), _event(),
-     {"rules": ("R3",), "end": "done", "answer": lifecycle.Answer(1)}),
+     {"rules": ("R3",), "end": "done", "answer": lifecycle.Answer(1), "forget_done": "visit-one"}),
     (_state(_person(), row_state="closed"), _event(),
      {"rules": ("R4",), "end": "declined", "answer": lifecycle.Answer(1, True)}),
     (_state(_person()), lifecycle.Event("probe", _probe("visit-two"), session="session-one"),
      {"rules": ("R5",), "end": "settle", "answer": lifecycle.Answer(1)}),
     (_state(_password()), _event(), {"rules": ("R6",), "end": "settle", "answer": lifecycle.Answer(1)}),
-    (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person"}),
+    (_state(_person()), _event(), {"rules": ("R7",), "refusal": "person", "forget_done": "visit-one"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, True)}), _event(visible=True),
      {"rules": ("R8",), "refusal": "password_declined"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({7}))}), _event(visible=True),
-     {"rules": ("R9",), "open_kind": "password", "occurrence": 2, "refusal": "password"}),
+     {"rules": ("R9",), "open_kind": "password", "occurrence": 2, "refusal": "password", "forget_done": None}),
     (_state(answers={("person", "visit-one"): lifecycle.Answer(1, True)}), _event("declare"),
      {"rules": ("R10",), "refusal": "person_declined"}),
     (_state(answers={("person", "visit-one"): lifecycle.Answer(1)}), _event("declare"),
@@ -58,8 +58,18 @@ def _event(name="probe", visible=False, **kwargs):
     (_state(_person()), _event("declare", visible=True), {"rules": ("R12",)}),
     (_state(_password()), _event("declare"), {"rules": ("R13", "R7"), "refusal": "password"}),
     (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42}))}), _event(visible=True),
-     {"rules": ("R14",), "open_kind": None, "refusal": None}),
-], ids=[f"R{i}" for i in range(1, 15)])
+     {"rules": ("R14",), "open_kind": None, "refusal": None, "forget_done": None}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42}))}), _event("declare", visible=True),
+     {"rules": ("R11",), "open_kind": "person", "occurrence": 1, "refusal": None}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42})),
+                     ("person", "visit-one"): lifecycle.Answer(1, True)}), _event("declare", visible=True),
+     {"rules": ("R10",), "open_kind": None, "refusal": "person_declined"}),
+    (_state(answers={("password", "visit-one"): lifecycle.Answer(1, nodes=frozenset({42, 43}))}),
+     lifecycle.Event("probe", None, session="session-one"),
+     {"rules": (), "forget_done": None}),
+    (_state(_password(), row_state="accepted"), _event(),
+     {"rules": ("R3",), "end": "done", "forget_done": "visit-one"}),
+], ids=[f"R{i}" for i in range(1, 15)] + ["R14-declare-opens-person", "R14-declare-declined", "no-result-keeps-done", "forget-on-done-path"])
 def test_decide_rule_table_is_pure(state, event, expected):
     before = repr(state)
     decision = lifecycle.decide(state, event)
@@ -231,6 +241,45 @@ async def test_a_field_hidden_then_shown_again_after_done_asks_the_person_again(
     with pytest.raises(BrowserSessionError, match="asks for a password"):
         await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
     assert lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_with_the_same_fields_showing_opens_a_person_step(plan):
+    """The password part is finished; an e-signature or MFA step the agent declares still reaches the person."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    first, second = _steps(plan["db"])
+    assert first["state"] != "pending" and second["state"] == "pending"
+    assert isinstance(lifecycle._steps[THREAD], PersonStep)
+    assert lifecycle._steps[THREAD].node_id == second["id"]
+    with pytest.raises(BrowserSessionError, match="person"):
+        await browser_control.require_page_access(THREAD, page.agent_probe, ("snapshot",))
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_when_a_new_field_shows_asks_the_password_again(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    page.show("visit-one", frozenset({42, 43}))
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    first, second = _steps(plan["db"])
+    assert second["state"] == "pending" and isinstance(lifecycle._steps[THREAD], PasswordStep)
+    assert lifecycle._steps[THREAD].occurrence == 2
+
+
+@pytest.mark.asyncio
+async def test_declare_after_done_and_a_declined_person_step_stays_declined(plan):
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    _, person = _steps(plan["db"])
+    plan_update(plan["db"], plan["plan"].id, "close_node",
+                {**close_params(plan["db"], "close_node", person["id"]), "reason": "Not now"}, actor=HUMAN)
+    with pytest.raises(BrowserSessionError, match="declined"):
+        await browser_control.declare_person_step(THREAD, page.agent_probe, "Draw your signature")
+    assert len(_steps(plan["db"])) == 2 and THREAD not in lifecycle._steps
 
 
 @pytest.mark.asyncio
