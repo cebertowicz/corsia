@@ -7,7 +7,7 @@ import shutil
 
 import psutil
 
-from host_access import browser_screencast
+from host_access import browser_cdp, browser_screencast
 
 
 async def x_command(executable, *args, environment=None):
@@ -96,5 +96,19 @@ async def wait_for_headed_window(endpoint, socket_dir):
             raise AssertionError('headed fixture has no owned X display') from exc
         # Which half timed out, and whether Chrome sent a frame the screencast then did not show.
         detail = ('window never mapped' if cast is None else
-                  f'window mapped; Chrome sent {getattr(cast, "received", "?")} frames; page measured {getattr(cast, "_page", "?")}')
+                  f'window mapped; Chrome sent {getattr(cast, "received", "?")} frames; page measured {getattr(cast, "_page", "?")}; '
+                  f'{await _page_state(endpoint)}')
         raise AssertionError(f'headed fixture window or frame did not become ready: {detail}') from exc
+
+
+async def _page_state(endpoint):
+    """Whether Chrome thinks the page is shown and can draw it: tells a hidden page from a stalled capture."""
+    try:
+        async with asyncio.timeout(5):
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                state = await cdp.call('Runtime.evaluate', returnByValue=True,
+                                       expression='[document.visibilityState, document.hasFocus(), innerWidth, innerHeight]')
+                shot = await cdp.call('Page.captureScreenshot', format='jpeg', quality=10)
+        return f'page {state["result"].get("value")}; screenshot {len(shot.get("data", ""))} chars'
+    except Exception as error:  # noqa: BLE001 - a diagnostic must not hide the timeout it explains
+        return f'page state unreadable: {error!r}'
