@@ -107,7 +107,8 @@ describe('the comment a selection over a cell’s image makes', () => {
 		paintFrom(view, selectionIn(view, table(view), range));
 		expect(badge.classList.contains('cm-comment-anchor')).toBe(true);
 		expect(badge.dataset.commentIds).toBe('a');
-		expect(badge.getAttribute('aria-label')).toMatch(/^Commented cell/);
+		// The label replaces the name the cell's content gives it, so it carries the badge's alt text.
+		expect(badge.getAttribute('aria-label')).toBe('Commented cell: Design');
 		expect(table(view).querySelector('.cm-comment-wrap')).toBeNull();
 	});
 
