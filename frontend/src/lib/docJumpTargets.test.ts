@@ -161,6 +161,28 @@ describe('docJumpTargets', () => {
 		expect(docJumpTargets(root, [unread('toolbar')])).toMatchObject({ direction: 'above', target: { id: 'toolbar', distance: 10 } });
 	});
 
+	it('judges an email draft against the body that scrolls, not the editor that grows to the whole text (#2483)', () => {
+		// The email layout lets the CodeMirror scroller grow to the full text (overflow visible) and scrolls `.doc-body` around it.
+		const root = document.createElement('div');
+		root.innerHTML = '<div class="doc-body"><div class="cm-scroller"><div class="cm-content"></div></div></div>';
+		const body = root.querySelector<HTMLElement>('.doc-body')!;
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		body.style.overflowY = 'auto';
+		scroller.style.overflow = 'visible';
+		paint(root, 0, 700);
+		paint(body, VIEW.top, VIEW.bottom);
+		paint(scroller, -400, 2000);
+		document.body.appendChild(root);
+		roots.push(root);
+		mark(root, 'shown', 200, 240);
+		mark(root, 'above', 20, 60);
+		mark(root, 'below', 1200, 1240);
+
+		expect(docJumpTargets(root, [thread('shown')])).toEqual({ count: 1, target: null, direction: null });
+		expect(docJumpTargets(root, [thread('above')])).toMatchObject({ direction: 'above', target: { id: 'above', distance: 40 } });
+		expect(docJumpTargets(root, [thread('below')])).toMatchObject({ direction: 'below', target: { id: 'below', distance: 700 } });
+	});
+
 	it('gives the thread the tap goes to out of the same list', () => {
 		const threads = [thread('a'), thread('b')];
 		const canvasEl = canvas();
