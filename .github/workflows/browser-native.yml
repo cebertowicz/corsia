@@ -81,3 +81,13 @@ jobs:
             -m integration -vv --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/setup-steps.log"
           # A skip would pass silently; both must actually run.
           grep -q " 2 passed" "$RUNNER_TEMP/setup-steps.log"
+      - name: Measure pane speed on real Chrome
+        env:
+          CORSIA_BROWSER_E2E: '1'
+        run: |
+          # Figures go to the job summary; the tests fail only if the pane stops following the page.
+          set -o pipefail
+          PATH="$RUNNER_TEMP/browser-bin:$PATH" env -u CI .venv/bin/python -m pytest -c backend/pytest.ini \
+            backend/tests/test_browser_pane_speed.py \
+            -m integration -vv -s --tb=short -o faulthandler_timeout=60 | tee "$RUNNER_TEMP/pane-speed.log"
+          grep -q " 2 passed" "$RUNNER_TEMP/pane-speed.log"
