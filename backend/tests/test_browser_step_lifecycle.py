@@ -220,6 +220,42 @@ async def test_a_done_answer_releases_snapshot_and_click_while_the_field_still_s
 
 
 @pytest.mark.asyncio
+async def test_while_a_done_field_still_shows_only_commands_that_cannot_show_it_run(plan):
+    """A field may display what the person typed (text type, show-password toggle), so reads that render it stay
+    refused and a snapshot hides field values; once the field is gone everything runs again."""
+    page = Page()
+    await _done_with_field_showing(plan, page)
+    for command in (("snapshot",), ("snapshot", "-i")):
+        access = await browser_control.check_page_access(THREAD, page.agent_probe, command)
+        assert access.filled_field_showing and access.note is None
+    for command in (("screenshot", "shot.png"), ("pdf", "page.pdf"), ("get", "html", "body"), ("read",),
+                    ("snapshot", "--json"), ("keyboard", "type", "x"), ("diff", "snapshot"), ("find", "role", "textbox")):
+        with pytest.raises(BrowserSessionError, match="still shows the password field") as refused:
+            await browser_control.check_page_access(THREAD, page.agent_probe, command)
+        assert "attention list" not in str(refused.value)
+    page.show("visit-one")
+    for command in (("snapshot",), ("screenshot", "shot.png")):
+        assert not (await browser_control.check_page_access(THREAD, page.agent_probe, command)).filled_field_showing
+    assert len(_steps(plan["db"])) == 1
+
+
+@pytest.mark.parametrize("snapshot, expected", [
+    # Real agent-browser 0.31.2 lines: a text-type field and a toggled field show the value, a password field bullets.
+    ("- textbox [ref=e1]: plain one\n- textbox [ref=e2]: Typed1", "- textbox [ref=e1]: [value hidden]\n- textbox [ref=e2]: [value hidden]"),
+    ("- textbox [ref=e2]: Typed1\n  - StaticText \"Typed1\"\n- button \"Show\" [ref=e3]",
+     "- textbox [ref=e2]: [value hidden]\n- button \"Show\" [ref=e3]"),
+    ("- Iframe [ref=e2]\n  - textbox [ref=e3]: Typed1\n    - StaticText \"Typed1\"\n  - button \"Go\" [ref=e4]",
+     "- Iframe [ref=e2]\n  - textbox [ref=e3]: [value hidden]\n  - button \"Go\" [ref=e4]"),
+    ("- textbox \"Email\" [ref=e1] [required]: me]: x [ref=e9]", "- textbox \"Email\" [ref=e1] [required]: [value hidden]"),
+    ("- textbox \"Email\" [ref=e1]\n- searchbox [ref=e2]", "- textbox \"Email\" [ref=e1]\n- searchbox [ref=e2]"),
+    ("- combobox: Typed1", "- combobox [value hidden]"),
+    ("- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\"", "- heading \"Sign in\" [level=1]\n- StaticText \"Welcome\""),
+])
+def test_hide_field_values_hides_every_value_and_the_text_beneath_it(snapshot, expected):
+    assert browser_control.hide_field_values(snapshot) == expected
+
+
+@pytest.mark.asyncio
 async def test_a_new_field_after_done_asks_the_person_again(plan):
     page = Page()
     await _done_with_field_showing(plan, page)

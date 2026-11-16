@@ -75,6 +75,34 @@ test('one press on the sign-in chip shows the agent’s browser', async ({ page,
 	} finally { await probe.close(); }
 });
 
+test('marking the sign-in step done wakes the agent and leaves the page to it', async ({ page, request }, info) => {
+	test.skip(info.project.name === 'chromium-mobile', 'desktop proof');
+	test.setTimeout(150_000);
+	const probe = await startProbeServer();
+	try {
+		const title = `sign-in-done-${Date.now()}`;
+		const thread = await createSession(request, title);
+		await loginByUrl(page);
+		await sidebarThread(page, title).click();
+		await reachPasswordPage(page, request, thread, probe.origin);
+		await chip(page).click();
+		await expectPagePixels(page);
+
+		// The person marks the step done with the password field still on the page; the agent wakes, reads the page
+		// and is not asked to hand it back.
+		await seedMockResponses(request, [
+			{ tool_calls: [{ id: 'read-after-done', name: 'browser_snapshot', arguments: JSON.stringify({}) }], finish_reason: 'tool_calls', match_thread: thread },
+			{ content: 'Signed in; carrying on.', finish_reason: 'stop', match_thread: thread },
+		]);
+		const planRow = page.locator('.tree-row').filter({ hasText: 'Enter your password' }).first();
+		await planRow.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Mark done' }).click();
+		await expect(page.getByText('Signed in; carrying on.')).toBeVisible({ timeout: 45_000 });
+		await expect(chip(page)).toHaveCount(0);
+		await saveEvidenceScreenshot(page, info, '1440-done-woken', { fullPage: false });
+	} finally { await probe.close(); }
+});
+
 test('a subagent’s sign-in step opens the subagent’s browser from the parent’s plan', async ({ page, request }, info) => {
 	test.skip(info.project.name === 'chromium-mobile', 'desktop proof');
 	test.setTimeout(150_000);
