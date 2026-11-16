@@ -100,3 +100,69 @@ describe('keepInView', () => {
 		action.destroy();
 	});
 });
+
+/** A scroller holding a field and, below it, a sticky row pinned to the scroller's bottom. */
+function pinnedScroller(pinnedHeight: number | null) {
+	const owner = document.createElement('div');
+	owner.style.overflowY = 'auto';
+	const field = document.createElement('textarea');
+	owner.append(field);
+	if (pinnedHeight !== null) {
+		const pin = document.createElement('div');
+		pin.setAttribute('data-pin-bottom', '');
+		pin.style.position = 'sticky';
+		Object.defineProperty(pin, 'offsetHeight', { value: pinnedHeight });
+		owner.append(pin);
+	}
+	document.body.append(owner);
+	return { owner, field };
+}
+
+
+describe('keepInView with a pinned bottom row', () => {
+	it('leaves the height of a sticky [data-pin-bottom] row clear at the scroller\'s bottom, for the browser\'s caret reveal too', () => {
+		const { owner, field } = pinnedScroller(52);
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('52px');
+		action.destroy();
+		expect(owner.style.scrollPaddingBottom).toBe('');
+	});
+
+	it('adds no scroll padding when nothing is pinned', () => {
+		const { owner, field } = pinnedScroller(null);
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('');
+		action.destroy();
+	});
+	it('scrolls the scroller by what is left when a reveal still ends the field under the pinned row', () => {
+		const { owner, field } = pinnedScroller(52);
+		let top = 0;
+		Object.defineProperty(owner, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+		owner.getBoundingClientRect = () => ({ top: 0, bottom: 420, height: 420 }) as DOMRect;
+		// scrollIntoView left the field's end at 400, 32 px under the row that covers 368 to 420.
+		field.getBoundingClientRect = () => ({ top: 100, bottom: 400 - top, height: 300 }) as DOMRect;
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(top).toBe(32);
+		action.destroy();
+	});
+	it('counts the scroller\'s bottom padding and border, since a sticky row sticks inside them', () => {
+		const { owner, field } = pinnedScroller(52);
+		owner.style.paddingBottom = '12px';
+		owner.style.borderBottom = '1px solid';
+		let top = 0;
+		Object.defineProperty(owner, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+		owner.getBoundingClientRect = () => ({ top: 0, bottom: 420, height: 420 }) as DOMRect;
+		// The row covers 355 to 407 (12 px padding and a 1 px border under it): a field ending at 390 is under it.
+		field.getBoundingClientRect = () => ({ top: 100, bottom: 390 - top, height: 290 }) as DOMRect;
+		field.scrollIntoView = vi.fn();
+		const action = keepInView(field, { enabled: true });
+		action.update({ enabled: true });
+		expect(owner.style.scrollPaddingBottom).toBe('64px');
+		expect(top).toBe(35);
+		action.destroy();
+	});
+});

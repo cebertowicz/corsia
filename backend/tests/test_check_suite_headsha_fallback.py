@@ -540,7 +540,7 @@ class TestNoOwnerMainFailureRouting:
         monkeypatch.setattr(
             router.dead_letter,
             "park",
-            lambda internal_event, payload, reason, external_id: parked.append(
+            lambda internal_event, payload, reason, external_id, **_kw: parked.append(
                 reason
             )
             or "dl-1",

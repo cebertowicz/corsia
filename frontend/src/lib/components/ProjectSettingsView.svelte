@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { uiScope, exitScope } from '$lib/stores/uiScope';
@@ -246,7 +247,7 @@
 		<SettingsGroup label="Identity">
 			<label class="fld">
 				<span>Name</span>
-				<input
+				<input use:keepTyped={{ prose: false }}
 					type="text"
 					bind:value={name}
 					onblur={saveName}
@@ -255,7 +256,7 @@
 			</label>
 			<label class="fld">
 				<span>Description</span>
-				<textarea rows="2" bind:value={description} onblur={saveDescription} placeholder="Short description, shown in the projects list"></textarea>
+				<textarea use:keepTyped rows="2" bind:value={description} onblur={saveDescription} placeholder="Short description, shown in the projects list"></textarea>
 			</label>
 			<div class="fld">
 				<span>Accent</span>

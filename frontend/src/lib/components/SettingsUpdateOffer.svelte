@@ -3,7 +3,8 @@
 	import { drainStatus } from '$lib/stores/connection';
 	import { toasts } from '$lib/stores/toast';
 	import { changeList, costLine, currentOperation, formatScheduleTime, releaseNotesFor } from '$lib/update/model';
-	import { saveUpdateSchedule, startUpdate, updateOperation, updateStarting, updateStatus } from '$lib/update/store';
+	import { saveUpdateSchedule } from '$lib/update/schedule';
+	import { startUpdate, updateOperation, updateStarting, updateStatus } from '$lib/update/store';
 	import SettingsUpdateChanges from './SettingsUpdateChanges.svelte';
 
 	/** The update on offer: what changed, what it costs, and when to take it. */

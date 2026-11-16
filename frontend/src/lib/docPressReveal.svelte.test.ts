@@ -27,7 +27,7 @@ function setup() {
 	let reveal!: ReturnType<typeof createPressReveal>;
 	stop = $effect.root(() => {
 		reveal = createPressReveal({
-			highlights: () => [{ id: 'c1', from: 10, to: 30 }], view: () => view, draftCovered: () => true, scrollTo: vi.fn(), draft: () => null, sheetUp: () => state.sheetUp,
+			highlights: () => [{ id: 'c1', from: 10, to: 30 }], view: () => view, coveredBySheet: () => true, scrollTo: vi.fn(), draft: () => null, sheetUp: () => state.sheetUp,
 		});
 	});
 	flushSync();

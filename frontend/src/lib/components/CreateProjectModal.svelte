@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { keepTyped } from '$lib/actions/keepTyped';
 	import Modal from './ui/Modal.svelte';
 	import Button from './ui/Button.svelte';
 	import AccentPicker from './ui/AccentPicker.svelte';
@@ -54,7 +55,7 @@
 			<label class="fld">
 				<span>Name</span>
 				<!-- svelte-ignore a11y_autofocus -->
-				<input
+				<input use:keepTyped={{ prose: false }}
 					type="text"
 					bind:value={name}
 					placeholder="e.g. Acme Redesign"
@@ -65,7 +66,7 @@
 
 			<label class="fld">
 				<span>Description <em>optional</em></span>
-				<textarea
+				<textarea use:keepTyped
 					rows="2"
 					bind:value={description}
 					placeholder="Short description, shown in the projects list"

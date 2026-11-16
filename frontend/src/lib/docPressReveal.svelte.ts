@@ -16,7 +16,7 @@ type Scroll = { from: number; to: number; origin: 'comment-save' };
 export function createPressReveal(deps: {
 	highlights: () => (Span & { id: string })[];
 	view: () => EditorView | undefined;
-	draftCovered: (from: number, opening: boolean) => boolean | undefined;
+	coveredBySheet: (from: number, opening: boolean) => boolean | undefined;
 	scrollTo: (to: Scroll) => void;
 	draft: () => Span | null | undefined;
 	sheetUp: () => boolean;
@@ -49,7 +49,7 @@ export function createPressReveal(deps: {
 		/** The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it. */
 		revealDraft(opening: boolean) {
 			const draft = deps.draft();
-			if (draft && (deps.draftCovered(draft.from, opening) ?? opening)) deps.scrollTo({ from: draft.from, to: draft.to, origin: 'comment-save' });
+			if (draft && (deps.coveredBySheet(draft.from, opening) ?? opening)) deps.scrollTo({ from: draft.from, to: draft.to, origin: 'comment-save' });
 		},
 	};
 }

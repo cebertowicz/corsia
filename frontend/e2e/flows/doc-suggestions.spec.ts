@@ -275,7 +275,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 		if (outgoing.url().includes(`/api/comments/${fine}/decision`)) fineDecisionRequests += 1;
 	});
 	const delayedAccept = await delayDecision(page, loose);
-	const accepting = row(loose).getByRole('button', { name: /^(Accept|Accepting…)$/ });
+	const accepting = row(loose).getByRole('button', { name: /^(Accept|Accepting)(:|$)/ });
 	await accept(loose).dblclick();
 	await delayedAccept.arrived;
 	await expect(accepting).toHaveText('Accepting…');
@@ -288,7 +288,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 	await inResolved(drawer, () => expect(resolvedList(page).locator(`[data-comment-id="${loose}"]`).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 	expect(looseDecisionRequests).toBe(1);
 	const delayedReject = await delayDecision(page, fine);
-	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting…)$/ });
+	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting)(:|$)/ });
 	// Closing Resolved resizes the sheet; wait for the card and its hit target to settle.
 	await expect.poll(() => row(fine).evaluate(async (card) => {
 		const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
