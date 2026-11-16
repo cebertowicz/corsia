@@ -233,7 +233,7 @@ async def test_effect_that_can_reach_the_project_refuses_and_is_named(env, monke
     title = "Alpha worker" if blocker == "same project" else "Beta worker"
     assert (
         f"Repositories can't change while agent \"{title}\" is running an action. "
-        "Try again once it finishes."
+        "It was still going after 1 second; try again once it finishes."
     ) in result, result
     assert _registered(env) == 0
 

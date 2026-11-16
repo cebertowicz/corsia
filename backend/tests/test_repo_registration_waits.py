@@ -136,9 +136,47 @@ async def test_a_write_that_outlasts_the_wait_is_refused_and_named(env):
         result = await _register(env, target)
     finally:
         await _finish(tool, task)
-    assert "while agent \"Alpha worker\" is running an action." in result, result
-    assert "Waited 1 minute for it." in result, result
+    assert (
+        "Repositories can't change while agent \"Alpha worker\" is running an action. "
+        "It was still going after 1 second; try again once it finishes."
+    ) in result, result
     assert _registered(env) == 0
+
+
+@pytest.mark.parametrize("long_running", [True, False])
+@pytest.mark.asyncio
+async def test_only_a_process_with_a_bound_is_waited_on(env, long_running):
+    """A long-running process can outlast any wait, so meeting one is refused at once."""
+    import os
+    import sys
+    import time
+
+    target = _own_target(env)
+    await env["owner"].spawn(
+        [sys.executable, "-c", "import time;time.sleep(60)"],
+        thread_id="p-agent", turn_id="turn-1", cwd=Path.cwd(), env=os.environ,
+        timeout_seconds=60.0, background=True, description="watcher",
+        long_running=long_running,
+    )
+    started = time.monotonic()
+    result = await _register(env, target)
+    elapsed = time.monotonic() - started
+    assert "while agent \"Alpha worker\" is running process \"watcher\"." in result, result
+    assert _registered(env) == 0
+    if long_running:
+        assert elapsed < 0.4, elapsed
+        assert "It was still going after" not in result, result
+    else:
+        assert elapsed >= 0.6, elapsed
+        assert "It was still going after 1 second" in result, result
+
+
+def test_the_wait_bound_reads_as_a_person_says_it():
+    from infra.repo_policy_transition import _duration
+
+    assert [_duration(s) for s in (0.6, 1.4, 45, 60, 600)] == [
+        "1 second", "1 second", "45 seconds", "1 minute", "10 minutes",
+    ]
 
 
 @pytest.mark.asyncio

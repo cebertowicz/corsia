@@ -7,9 +7,10 @@ everywhere. A transition carries a claim: the projects whose write rules it
 changes, or everywhere, and the folders it changes when it knows them. They
 conflict when the reach meets the claim. A call that only reads is no effect.
 
-A registration that meets an in-flight effect or process waits for it
-(:func:`wait_for_transition`), up to :data:`TRANSITION_WAIT_SECONDS`, then
-proceeds; it is refused only once that bound passes.
+A registration that meets an in-flight effect or a bounded owned process waits for
+it (:func:`wait_for_transition`), up to :data:`TRANSITION_WAIT_SECONDS`, then
+proceeds; it is refused only once that bound passes. A long-running process has no
+bound a wait could outlast, so meeting one is refused at once, naming it.
 
 Only a registration whose target sits inside the registering project's own
 folder claims less than everywhere (``api.project_repo_claim``): every caller not
@@ -38,7 +39,8 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
-#: How long a registration waits for what it meets: the longest foreground shell call.
+#: How long a registration waits for what it meets: the longest shell call, foreground
+#: or background (a long-running process is never waited on).
 TRANSITION_WAIT_SECONDS = 600.0
 _FIRST_POLL_SECONDS = 0.25
 _MAX_POLL_SECONDS = 2.0
@@ -47,12 +49,16 @@ _MAX_POLL_SECONDS = 2.0
 class RepoPolicyTransitionBusy(RuntimeError):
     """A repository effect or policy transition cannot start safely.
 
-    ``retryable`` marks a conflict that ends when what is in flight finishes.
+    ``retryable`` marks a conflict that ends when what is in flight finishes;
+    ``running`` is what is still running, as a clause ("agent "X" is running an action").
     """
 
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self, message: str, *, retryable: bool = False, running: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.running = running
 
 
 def _overlaps(paths: tuple[Path, ...], folders: tuple[Path, ...]) -> bool:
@@ -112,11 +118,14 @@ class Holder:
     """One in-flight effect or live owned process, with what the refusal names.
 
     ``what`` is what its starter is running, as the refusal reads it ("an action").
+    ``waitable`` is false for a holder with no bound a wait could outlast (a
+    long-running process).
     """
 
     reach: Reach
     thread_id: str | None
     what: str
+    waitable: bool = True
 
 
 # The reach of the tool effect running in this task, so an owned process spawned by
@@ -172,7 +181,7 @@ def _agent_label(thread_id: str) -> str:
         return "an agent"
 
 
-def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
+def _busy(fallback: str, holder: Holder | None, *, retryable: bool) -> RepoPolicyTransitionBusy:
     """The refusal a person or agent reads: who is still running what, and what to do.
 
     No thread is the person's own session, so the refusal names them as "you".
@@ -185,8 +194,18 @@ def _busy(fallback: str, holder: Holder | None) -> RepoPolicyTransitionBusy:
         running = f"you're running {holder.what}"
     return RepoPolicyTransitionBusy(
         f"Repositories can't change while {running}. Try again once it finishes.",
-        retryable=True,
+        retryable=retryable,
+        running=running,
     )
+
+
+def _duration(seconds: float) -> str:
+    """A wait bound as a person says it: whole minutes, or seconds under a minute."""
+    if seconds < 60:
+        count, unit = max(1, round(seconds)), "second"
+    else:
+        count, unit = round(seconds / 60), "minute"
+    return f"{count} {unit}{'' if count == 1 else 's'}"
 
 
 class _RepoPolicyTransitionCoordinator:
@@ -234,8 +253,9 @@ class _RepoPolicyTransitionCoordinator:
         folders: tuple[Path, ...] | None,
         active_process_count: Callable[[], int],
         owned_processes: Callable[[], Iterable[Holder]] | None,
-    ) -> tuple[bool, Holder | None]:
-        """Whether a live owned process meets the claim, and which one to name."""
+    ) -> tuple[bool, Holder | None, bool]:
+        """Whether a live owned process meets the claim, which one to name, and
+        whether every one that meets it can be waited out."""
         unverified = RepoPolicyTransitionBusy("Owned process activity could not be verified.")
         holders: tuple[Holder, ...] | None = None
         if owned_processes is not None:
@@ -249,7 +269,8 @@ class _RepoPolicyTransitionCoordinator:
             if holders is None:
                 raise unverified
             meeting = [holder for holder in holders if holder.reach.meets(claim, folders)]
-            return bool(meeting), (meeting[0] if meeting else None)
+            stuck = [holder for holder in meeting if not holder.waitable]
+            return bool(meeting), next(iter(stuck or meeting), None), not stuck
         try:
             process_count = active_process_count()
         except Exception as exc:
@@ -260,7 +281,12 @@ class _RepoPolicyTransitionCoordinator:
             or process_count < 0
         ):
             raise unverified
-        return bool(process_count), (holders[0] if holders else None)
+        if not process_count:
+            return False, None, True
+        # Unless every counted process has its holder, none is known to end within the wait.
+        stuck = [holder for holder in holders or () if not holder.waitable]
+        waitable = holders is not None and len(holders) >= process_count and not stuck
+        return True, next(iter(stuck or holders or ()), None), waitable
 
     @contextmanager
     def transition(
@@ -277,6 +303,7 @@ class _RepoPolicyTransitionCoordinator:
             if self._transition_active:
                 raise RepoPolicyTransitionBusy(
                     "Repository policy transition is already in progress.", retryable=True,
+                    running="another repository change is in progress",
                 )
             if claim is not None and claim_generation != self._generation:
                 # Another transition ended after the claim was read: claim everywhere.
@@ -284,11 +311,13 @@ class _RepoPolicyTransitionCoordinator:
                             "another transition ended after it was read", _scope(claim))
                 claim = None
             effects = [h for h in self._effects.values() if h.reach.meets(claim, folders)]
+            # An in-flight tool call always ends within its own time limit.
+            waitable = True
             if effects:
                 blocker_holder: Holder | None = effects[0]
                 running = "an agent's action"
             else:
-                busy, blocker_holder = self._process_blocker(
+                busy, blocker_holder, waitable = self._process_blocker(
                     claim, folders, active_process_count, owned_processes,
                 )
                 running = "an agent's process" if busy else ""
@@ -306,7 +335,7 @@ class _RepoPolicyTransitionCoordinator:
                 _reach_token(blocker_holder.reach) if blocker_holder else None,
             )
             # Named outside the lock: the label reads the database.
-            blocker = _busy(running, blocker_holder)
+            blocker = _busy(running, blocker_holder, retryable=waitable)
             raise blocker
         logger.info("repo policy transition admitted claim={}", _scope(claim))
         try:
@@ -392,9 +421,11 @@ async def wait_for_transition(
             if not exc.retryable:
                 raise
             if remaining <= 0:
-                minutes = max(1, round(limit / 60))
+                running = exc.running or "another repository change is in progress"
                 raise RepoPolicyTransitionBusy(
-                    f"{exc} Waited {minutes} minute{'s' if minutes != 1 else ''} for it.",
+                    f"Repositories can't change while {running}. It was still going after "
+                    f"{_duration(limit)}; try again once it finishes.",
+                    running=running,
                 ) from exc
             await asyncio.sleep(min(poll, remaining))
             poll = min(poll * 2, _MAX_POLL_SECONDS)

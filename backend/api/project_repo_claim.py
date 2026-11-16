@@ -225,6 +225,8 @@ def owned_process_holders() -> tuple[Holder, ...]:
                 f'process "{record.description}"' if record.description
                 else f"a {record.mode} process"
             ),
+            # A long-running process has no time limit, so no wait outlasts it.
+            waitable=not record.long_running,
         )
         for record in PROCESS_OWNER.outstanding_records()
     )

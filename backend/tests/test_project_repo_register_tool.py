@@ -389,11 +389,15 @@ async def test_registry_still_refuses_register_while_repo_access_is_active(
         if held is not None:
             held.__exit__(None, None, None)
 
-    running = (
-        "you're running an action" if blocker == "effect"
-        else "an agent's process is running"
+    # An action ends within its own time limit, so it is waited out first; a process
+    # the count reports but no holder accounts for is refused at once.
+    expected = (
+        "Repositories can't change while you're running an action. "
+        "It was still going after 1 second; try again once it finishes."
+        if blocker == "effect"
+        else "Repositories can't change while an agent's process is running. "
+        "Try again once it finishes."
     )
-    expected = f"Repositories can't change while {running}. Try again once it finishes."
     assert expected in result, result
     assert registry_env["db"].execute(
         "SELECT COUNT(*) FROM project_repo_policies"
