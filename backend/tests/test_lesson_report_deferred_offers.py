@@ -117,12 +117,17 @@ def test_a_review_less_report_equals_origin_dev_byte_for_byte(db, monkeypatch):
     assert all(row["delivered"] == 0 for row in new_report["rows"])
     assert new_report["snapshot"] == _report(db, lesson_id="subject", **options)["snapshot"]
 
-    # Reconstruct the historical fingerprint, including the snapshot embedded in cursors;
-    # the new fingerprint's delivery sensitivity is tested with real receipts separately.
-    fingerprint = module.snapshot_fingerprint
+    # Reconstruct the historical fingerprint, including the snapshot embedded in cursors: no
+    # deliveries, and the offers' own canonical text, listed by the row-by-row reference scan.
+    # The current fingerprint's sensitivity to deliveries and to offers is tested separately.
+    from tests.test_lesson_report_scan_equivalence import old_read_offer_evidence
+
+    eager = old_read_offer_evidence(db, user_id=SCOPE.user_id, thread_ids=SCOPE.thread_ids,
+                                    from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)["period"]["offers"]
     def historical_fingerprint(snapshot, canonical):
         assert snapshot["deliveries"] == []
-        return fingerprint({key: value for key, value in snapshot.items() if key != "deliveries"}, canonical)
+        old = {key: value for key, value in snapshot.items() if key != "deliveries"}
+        return hashlib.sha256(canonical({**old, "period": {**old["period"], "offers": eager}})).hexdigest()
     monkeypatch.setattr(module, "snapshot_fingerprint", historical_fingerprint)
 
     def historical(page):
@@ -205,7 +210,7 @@ def test_no_usage_yields_empty_offers_and_the_same_fingerprint(db):
     _expect("no-usage-detail", _shape(_report(db, lesson_id="subject", version="a" * 64)))
 
 
-def test_sqlite_canonical_text_equals_python_canonical_json(db):
+def test_grouped_counts_equal_the_row_by_row_scan_with_awkward_values(db):
     from tests.test_lesson_report_scan_equivalence import assert_materialized_equals_the_scan, old_read_offer_evidence
     from core.lesson_report_receipts import read_offer_evidence
 
@@ -213,23 +218,89 @@ def test_sqlite_canonical_text_equals_python_canonical_json(db):
     kwargs = dict(user_id="user", thread_ids=("owner",), from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
     old = old_read_offer_evidence(db, **kwargs)
     assert any("sep  " in json.dumps(offer, ensure_ascii=False) for offer in old["period"]["offers"]), \
-        "awkward values reached the compared text"
+        "awkward values reached the compared offers"
     assert_materialized_equals_the_scan(read_offer_evidence(db, **kwargs), old)
 
 
-def test_chunk_boundaries_do_not_change_the_text(db, monkeypatch):
+def _offers_digest(db):
+    from core.lesson_report import collect_report
+
+    digest = hashlib.sha256()
+    collect_report(db, scope=SCOPE, sources=[])["period"]["offers"].feed(digest)
+    return digest.hexdigest()
+
+
+def test_chunk_boundaries_do_not_change_the_fingerprint(db, monkeypatch):
     from core import lesson_report_offers as offers_module
     from core.lesson_report import collect_report
 
     _seed(db, calls=40)
-    whole = collect_report(db, scope=SCOPE, sources=[])["period"]["offers"]
+    whole = _offers_digest(db)
     monkeypatch.setattr(offers_module, "CHUNK_ROWS", 3)
-    split = collect_report(db, scope=SCOPE, sources=[])["period"]["offers"]
-    first, second = hashlib.sha256(), hashlib.sha256()
-    whole.feed(first)
-    split.feed(second)
-    assert first.hexdigest() == second.hexdigest()
-    assert len(split._chunks) > 1
+    assert _offers_digest(db) == whole
+    assert collect_report(db, scope=SCOPE, sources=[])["period"]["offers"].text_chunks > 1
+
+
+@pytest.mark.parametrize("change", [
+    "UPDATE llm_usage SET plan_node_id='moved' WHERE id='call-001'",
+    "UPDATE llm_usage SET plan_id=NULL,plan_node_id=NULL,plan_attempt_id=NULL,plan_commitment_id=NULL,"
+    "plan_usage_role=NULL WHERE id='call-001'",
+    "UPDATE llm_usage SET plan_attempt_id='moved' WHERE id='call-003'",
+    "UPDATE llm_usage SET plan_commitment_id='moved' WHERE id='call-003'",
+    "UPDATE llm_usage SET turn_id='moved' WHERE id='call-004'",
+    "UPDATE llm_usage SET model='moved' WHERE id='call-004'",
+    "UPDATE llm_usage SET created_at='2026-09-26T23:59:59' WHERE id='call-004'",
+    "UPDATE llm_usage SET context_manifest_id='one' WHERE id='call-004'",
+    "UPDATE context_manifests SET harness='moved' WHERE id='one'",
+    "UPDATE context_manifests SET entries_json=json_array(json_object('source_id','dynamic:skills-index',"
+    "'lessons',json_array(json_object('id','subject','behavioral_sha256','c')))) WHERE id='one'",
+    "DELETE FROM llm_usage WHERE id='call-005'",
+    "INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at) "
+    "VALUES('added','owner','turn','m','one','2026-09-23T00:00:00')",
+])
+def test_the_fingerprint_changes_with_every_fact_an_offer_carries(db, change):
+    """The fingerprint digests calls and identities, not offers, so it must still move with each offer field."""
+    _seed(db, calls=40)
+    before = _offers_digest(db)
+    assert _offers_digest(db) == before
+    db.execute(change)
+    assert _offers_digest(db) != before
+
+
+def test_offer_collection_cost_does_not_grow_with_lessons_per_manifest(db):
+    """Counts and fingerprint read calls, not offers: SQLite work stays flat as a manifest's lessons grow.
+
+    The offer-row read did work in proportion to calls times lessons; at production scale
+    (about 1.9 million calls of manifests carrying about 15 lessons) that took over 20 minutes.
+    """
+    from core.lesson_report_receipts import read_offer_evidence
+
+    def steps(lessons):
+        db.execute("DELETE FROM llm_usage")
+        db.execute("DELETE FROM context_manifests")
+        _manifest(db, "wide", [_lesson(f"lesson-{index}") for index in range(lessons)])
+        for index in range(400):
+            db.execute("INSERT INTO llm_usage(id,thread_id,turn_id,model,context_manifest_id,created_at,plan_id,"
+                       "plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) "
+                       "VALUES(?,'owner','turn','m','wide',?,'plan',?,?,'c','execution')",
+                       (f"call-{index:03d}", f"2026-09-{22 + index % 5:02d}T00:00:00",
+                        f"task-{index % 7}", f"attempt-{index % 11}"))
+        ticks = [0]
+        def tick():
+            ticks[0] += 1
+            return 0
+        db.set_progress_handler(tick, 100)
+        try:
+            result = read_offer_evidence(db, user_id="user", thread_ids=("owner",),
+                                         from_ts=SCOPE.from_ts, to_ts=SCOPE.to_ts)
+        finally:
+            db.set_progress_handler(None, 0)
+        counts = result["period"]["offers"].counts
+        assert len(counts) == lessons and all(row["n"] == 400 and row["tasks"] == 7 for row in counts.values())
+        return ticks[0]
+
+    narrow, wide = steps(1), steps(40)
+    assert wide < 2 * narrow, (narrow, wide)
 
 
 def test_the_owner_list_is_probed_by_an_index_not_rescanned_per_candidate_row(db):
