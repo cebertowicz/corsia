@@ -162,13 +162,19 @@ def test_a_pane_with_no_report_logs_no_painted_figures_and_an_idle_window_logs_n
 
 
 def test_the_viewer_is_local_or_remote_and_the_address_is_not_kept():
-    class Pane:
-        def __init__(self, host):
-            self.client = type("Client", (), {"host": host})() if host else None
+    from starlette.websockets import WebSocket
 
-    assert viewer_kind(Pane("127.0.0.1")) == "local" and viewer_kind(Pane("::1")) == "local"
-    assert viewer_kind(Pane("203.0.113.9")) == "remote"
-    assert viewer_kind(Pane(None)) == "unknown" and viewer_kind(object()) == "unknown"
+    def pane(host, headers=()):
+        scope = {"type": "websocket", "headers": [(k.encode(), v.encode()) for k, v in headers],
+                 "client": (host, 1) if host else None}
+        return WebSocket(scope, None, None)
+
+    assert viewer_kind(pane("127.0.0.1")) == "local" and viewer_kind(pane("::1")) == "local"
+    assert viewer_kind(pane("203.0.113.9")) == "remote"
+    # A viewer relayed through a forwarder on this computer arrives from loopback with a forwarding header.
+    for header in ("x-forwarded-for", "forwarded", "x-real-ip", "tailscale-user-login"):
+        assert viewer_kind(pane("127.0.0.1", [(header, "x")])) == "remote"
+    assert viewer_kind(pane(None)) == "unknown" and viewer_kind(object()) == "unknown"
 
 
 @pytest.mark.asyncio
@@ -269,6 +275,7 @@ async def test_a_relayed_pane_logs_its_inputs_and_report_when_it_leaves(monkeypa
         {"type": "pane_stats", "painted": "bad"},
     )])
     pane.client = type("Client", (), {"host": "203.0.113.9"})()
+    pane.scope, pane.headers = {}, {}
     with pytest.raises(WebSocketDisconnect):
         await asyncio.wait_for(browser_stream._relay(pane, "thread-1", "user-1"), 1)
     assert [data["id"] for data in handled] == [1, 2]

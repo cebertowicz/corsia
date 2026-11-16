@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from infra.local_connection import is_direct_loopback
 from infra.request_timing import _BUCKET_UPPERS, bucket_percentile
 
 if TYPE_CHECKING:
@@ -24,7 +25,6 @@ WINDOW_SECONDS = 60.0
 TICK_SECONDS = 0.1
 #: A frame this long after Chrome handled an input is no longer that input's effect, so it carries no stamp.
 STAMP_MAX_AGE_SECONDS = 2.0
-_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _MAX_COUNT = 100_000
 _MAX_SEQUENCE = 2**31
 _MAX_IN_FLIGHT_SAMPLES = 64
@@ -224,11 +224,10 @@ _ticker: asyncio.Task | None = None
 
 
 def viewer_kind(pane: object) -> str:
-    """Whether the pane connects from this computer; the address itself is never kept."""
-    host = getattr(getattr(pane, "client", None), "host", None)
-    if host is None:
+    """Whether the pane connects directly from this computer, not through a forwarder on it; no address is kept."""
+    if getattr(getattr(pane, "client", None), "host", None) is None:
         return "unknown"
-    return "local" if host in _LOCAL_HOSTS else "remote"
+    return "local" if is_direct_loopback(pane) else "remote"  # type: ignore[arg-type]
 
 
 def start(stats: PaneStats) -> None:
