@@ -128,9 +128,11 @@ class _CdpRefusals(logging.Handler):
 async def _title(cdp):
     """Poll until the document settles, counting a CDP refusal as not loaded yet.
 
-    A just-opened popup is still replacing its initial about:blank; CI once saw Chrome refuse
-    the first evaluate on a refused popup. A refusal that persists still fails, and any
-    refusal is reported as a warning so its cause stays visible.
+    Temporary diagnosis: CI once saw Chrome refuse the first evaluate on a just-opened popup, and
+    its cause is not known. One guess is the popup still replacing its initial about:blank, but
+    180 local popups never reproduced it. A refusal that persists still fails, and any refusal is
+    reported as a warning with its CDP code and message. Once a run's warning shows that code,
+    narrow the catch to it; if no run shows one, remove the catch.
     """
     refusals = _CdpRefusals()
     cdp_log = logging.getLogger(browser_cdp.__name__)
