@@ -33,6 +33,10 @@ describe('BrowserPaneStats', () => {
 		expect(pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' })).toMatchObject({ id: 3 });
 		expect(pane.stamp({ type: 'navigate', url: 'https://example.test' })).not.toHaveProperty('id');
 		expect(pane.stamp({ type: 'clipboard_undo' })).not.toHaveProperty('id');
+		// A release usually changes nothing on screen, so nobody waits on it.
+		expect(pane.stamp({ type: 'input_keyboard', eventType: 'keyUp' })).not.toHaveProperty('id');
+		expect(pane.stamp({ type: 'input_mouse', eventType: 'mouseReleased' })).not.toHaveProperty('id');
+		expect(pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' })).toMatchObject({ id: 4 });
 	});
 
 	it('times an input from its send to the painted frame that names it', () => {
@@ -81,7 +85,7 @@ describe('BrowserPaneStats', () => {
 	it('forgets earlier inputs once a later one is answered, and times each only once', () => {
 		const pane = stats();
 		pane.stamp({ type: 'input_mouse', eventType: 'mousePressed' });
-		pane.stamp({ type: 'input_mouse', eventType: 'mouseReleased' });
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
 		pane.arrived({ seq: 1, input: 2 })(true);
 		pane.arrived({ seq: 2, input: 1 })(true);
 		pane.arrived({ seq: 3, input: 2 })(true);
@@ -116,6 +120,19 @@ describe('BrowserPaneStats', () => {
 		pane.arrived({ seq: 2, input: 2 })(true);
 		const delay = pane.report().input_to_paint_ms as number[];
 		expect(delay[bucket(300)]).toBe(1);
+	});
+
+	it('does not time an input no frame showed against a later input\'s paint', () => {
+		const pane = stats();
+		// A click on an empty spot draws nothing; the person reads for 30 s, then scrolls.
+		pane.stamp({ type: 'input_mouse', eventType: 'mousePressed' });
+		clock = 30_000;
+		pane.stamp({ type: 'input_mouse', eventType: 'mouseWheel', deltaY: 1 });
+		clock = 30_100;
+		pane.arrived({ seq: 1, input: 2 })(true);
+		const delay = pane.report().input_to_paint_ms as number[];
+		expect(total(delay)).toBe(1);
+		expect(delay[bucket(100)]).toBe(1);
 	});
 
 	it('ignores a decode that finishes after the connection was reset', () => {

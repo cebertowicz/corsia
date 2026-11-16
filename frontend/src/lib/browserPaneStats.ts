@@ -8,6 +8,11 @@ export const STATS_BUCKET_UPPERS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
 const REPORT_MS = 10_000;
 // An input is forgotten if no frame ever names it; this bounds what a stalled page can pile up.
 const MAX_PENDING_INPUT = 64;
+// The inputs a person waits to see: a key press, a pointer press and a wheel. A release usually changes nothing on screen.
+const AWAITED = new Set(['keyDown', 'mousePressed', 'mouseWheel']);
+// An input sent this long before the one a frame names was never shown, such as a click on an empty spot, so it is
+// not timed. The server likewise names an input only in a frame sent within this time (STAMP_MAX_AGE_SECONDS).
+const UNSHOWN_AFTER_MS = 2_000;
 
 type Frame = { seq?: unknown; input?: unknown };
 
@@ -45,11 +50,11 @@ export class BrowserPaneStats {
 		private readonly visible: () => boolean = () => document.visibilityState === 'visible'
 	) {}
 
-	/** Gives an input that can change the picture a number, so a later frame can name it. A pointer move is not numbered. */
+	/** Gives an input a person waits to see a number, so a later frame can name it. A pointer move or a release is not numbered. */
 	stamp<T extends object>(message: T): T {
 		this.bufferedMax = Math.max(this.bufferedMax, this.buffered());
 		const { type, eventType } = message as { type?: unknown; eventType?: unknown };
-		if (type !== 'input_keyboard' && !(type === 'input_mouse' && eventType !== 'mouseMoved')) return message;
+		if ((type !== 'input_keyboard' && type !== 'input_mouse') || !AWAITED.has(eventType as string)) return message;
 		const id = this.nextId++;
 		this.sentAt.set(id, this.now());
 		if (this.sentAt.size > MAX_PENDING_INPUT) this.sentAt.delete(this.sentAt.keys().next().value as number);
@@ -85,11 +90,13 @@ export class BrowserPaneStats {
 
 	/** Every pending input up to `named` was shown at `at`; the oldest of them sets the delay, so under rapid input a later one must not hide how long the first waited. */
 	private answer(named: number, at: number): void {
+		const reference = this.sentAt.get(named);
 		let oldest: number | undefined;
 		for (const [id, sent] of this.sentAt) {
 			if (id > named) break;
-			oldest ??= sent;
 			this.sentAt.delete(id);
+			if (reference !== undefined && reference - sent > UNSHOWN_AFTER_MS) continue;
+			oldest ??= sent;
 		}
 		if (oldest !== undefined) this.delay[bucketIndex(at - oldest)] += 1;
 	}
