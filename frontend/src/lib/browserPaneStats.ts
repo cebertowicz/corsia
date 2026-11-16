@@ -30,6 +30,7 @@ export class BrowserPaneStats {
 	private sentAt = new Map<number, number>();
 	private painted = 0;
 	private paintedSeq = 0;
+	private paintedAt = 0;
 	private carried = 0;
 	// Counts connections: a decode that finishes after `stop()` belongs to the old connection and is ignored.
 	private connection = 0;
@@ -62,25 +63,35 @@ export class BrowserPaneStats {
 		const connection = this.connection;
 		return drawn => {
 			if (connection !== this.connection) return;
-			// A replaced frame still carries its input's name, which the next painted frame answers for.
 			if (!drawn) {
-				this.carried = Math.max(this.carried, input);
+				// Decodes finish out of order. A replaced frame older than one already painted had its input
+				// shown by that paint; a newer one carries its input's name to the next painted frame.
+				if (typeof frame.seq === 'number' && frame.seq <= this.paintedSeq) this.answer(input, this.paintedAt);
+				else this.carried = Math.max(this.carried, input);
 				return;
 			}
 			this.painted += 1;
-			if (typeof frame.seq === 'number') this.paintedSeq = Math.max(this.paintedSeq, frame.seq);
-			this.decode[bucketIndex(this.now() - started)] += 1;
+			const at = this.now();
+			if (typeof frame.seq === 'number' && frame.seq >= this.paintedSeq) {
+				this.paintedSeq = frame.seq;
+				this.paintedAt = at;
+			}
+			this.decode[bucketIndex(at - started)] += 1;
 			const named = Math.max(input, this.carried);
 			this.carried = 0;
-			// The oldest input this paint answers sets the delay: under rapid input a later one must not hide how long the first waited.
-			let oldest: number | undefined;
-			for (const [id, sent] of this.sentAt) {
-				if (id > named) break;
-				oldest ??= sent;
-				this.sentAt.delete(id);
-			}
-			if (oldest !== undefined) this.delay[bucketIndex(this.now() - oldest)] += 1;
+			this.answer(named, at);
 		};
+	}
+
+	/** Every pending input up to `named` was shown at `at`; the oldest of them sets the delay, so under rapid input a later one must not hide how long the first waited. */
+	private answer(named: number, at: number): void {
+		let oldest: number | undefined;
+		for (const [id, sent] of this.sentAt) {
+			if (id > named) break;
+			oldest ??= sent;
+			this.sentAt.delete(id);
+		}
+		if (oldest !== undefined) this.delay[bucketIndex(at - oldest)] += 1;
 	}
 
 	/** The figures since the last report; the counters start again, the newest painted number does not. */
@@ -110,6 +121,7 @@ export class BrowserPaneStats {
 		this.nextId = 1;
 		this.sentAt.clear();
 		this.paintedSeq = 0;
+		this.paintedAt = 0;
 		this.carried = 0;
 		this.report();
 	}

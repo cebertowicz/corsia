@@ -48,6 +48,24 @@ describe('BrowserPaneStats', () => {
 		expect((report.decode_ms as number[])[bucket(30)]).toBe(1);
 	});
 
+	it('answers an older replaced frame\'s input at the newer paint that already showed it', () => {
+		const pane = stats();
+		pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });
+		clock = 10;
+		const older = pane.arrived({ seq: 1, input: 1 });
+		const newer = pane.arrived({ seq: 2 });
+		clock = 50;
+		newer(true);
+		clock = 70;
+		older(false);
+		clock = 5000;
+		pane.arrived({ seq: 3 })(true);
+		const report = pane.report();
+		expect(report).toMatchObject({ painted: 2, painted_seq: 3 });
+		expect(total(report.input_to_paint_ms)).toBe(1);
+		expect((report.input_to_paint_ms as number[])[bucket(50)]).toBe(1);
+	});
+
 	it('lets a replaced frame pass its input name to the next painted frame', () => {
 		const pane = stats();
 		pane.stamp({ type: 'input_keyboard', eventType: 'keyDown' });
