@@ -162,23 +162,25 @@ async function tapOpen(page: Page, mark: Locator) {
 }
 
 /**
- * Drags the open sheet's grabber with the primary button, `steps` being the travel from the press after each move (negative up),
- * reading `each` after every step; `hold` waits before letting go, so a short pull is not a quick tap.
+ * Drags the open sheet's grabber with a finger, as a phone reader does, `steps` being the travel from the touch after each move
+ * (negative up), reading `each` after every step; `hold` waits before lifting, so a short pull is not a quick tap. A mouse press
+ * would move focus to the sheet itself (it takes focus, the grabber does not), which a finger's drag does not do.
  */
 async function pull<T>(page: Page, steps: number[], each: () => Promise<T>, hold = 0): Promise<T[]> {
 	const grabber = await sheet(page).last().locator('.drawer-drag-region').boundingBox();
 	expect(grabber, 'the sheet has a grabber').not.toBeNull();
 	const x = grabber!.x + grabber!.width / 2, y = grabber!.y + grabber!.height / 2;
+	const touch = await page.context().newCDPSession(page);
 	const seen: T[] = [];
-	await page.mouse.move(x, y);
-	await page.mouse.down();
+	await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
 	for (const dy of steps) {
-		await page.mouse.move(x, y + dy);
+		await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + dy, id: 1 }] });
 		await painted(page);
 		seen.push(await each());
 	}
 	if (hold) await page.waitForTimeout(hold);
-	await page.mouse.up();
+	await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	await touch.detach();
 	await sheetSettled(page);
 	return seen;
 }
@@ -308,6 +310,31 @@ test.describe(`${TAG} document`, () => {
 		await frame(page, 'raised-keyboard-up');
 		const reach = await unreachable(page);
 		expect(reach.misses, 'everything in the raised sheet takes the touch').toEqual([]);
+		await page.setViewportSize(PHONE);
+	});
+
+	test('a tap on the grabber grows a capped sheet and the reply box keeps focus, so the keyboard stays up', async ({ page }) => {
+		await openDocument(page);
+		await bringLowest(page, passageMark(page));
+		await tapOpen(page, passageMark(page));
+		const field = sheet(page).last().locator('textarea').first();
+		await field.tap();
+		await page.setViewportSize(KEYBOARD_UP);
+		await sheetSettled(page);
+		await expect(field).toBeFocused();
+		const rest = await sheetNow(page), at = await place(passageMark(page));
+		expect(rest.cap, 'with the keyboard up, the sheet is held to its cap').not.toBe('');
+		expect(rest.hidden, 'and its thread runs on past what it shows').toBeGreaterThan(1);
+		const grabber = await sheet(page).last().locator('.drawer-drag-region').boundingBox();
+		await page.touchscreen.tap(grabber!.x + grabber!.width / 2, grabber!.y + grabber!.height / 2);
+		await sheetSettled(page);
+		await expect(sheet(page), 'the tap leaves the sheet open').toHaveCount(1);
+		const grown = await sheetNow(page);
+		expect(grown.cap, 'a quick tap on the grabber drops the cap').toBe('');
+		expect(grown.height, 'and the sheet grows').toBeGreaterThan(rest.height + 20);
+		await expect(field, 'the reply box keeps focus through the tap').toBeFocused();
+		expect((await place(passageMark(page))).scrollTop, 'and no text under the reader moves').toBe(at.scrollTop);
+		await frame(page, 'grabber-tap-keyboard-up');
 		await page.setViewportSize(PHONE);
 	});
 
@@ -461,6 +488,7 @@ test.describe(`${TAG} chat`, () => {
 		expect(raised.cap, 'let go past 40 px, the sheet drops its cap').toBe('');
 		expect(raised.height, 'and grows').toBeGreaterThan(rest.height + 20);
 		expect((await place(mark)).scrollTop, 'the transcript has not scrolled').toBe(at.scrollTop);
+		await expect(sheet(page).last().locator('textarea').first(), 'the reply box keeps focus through the pull, so the keyboard stays up').toBeFocused();
 		await frame(page, 'chat-raised-keyboard-up');
 		await page.setViewportSize(PHONE);
 		await sheetSettled(page);

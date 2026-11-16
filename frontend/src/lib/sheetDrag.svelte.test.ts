@@ -4,7 +4,7 @@ import { sheetHeld } from './sheetClearance';
 
 function pointer(type: string, clientY: number, { pointerId = 7, button = 0 } = {}) {
 	const handle = document.createElement('div');
-	return { type, clientY, pointerId, button, currentTarget: handle } as unknown as PointerEvent;
+	return { type, clientY, pointerId, button, currentTarget: handle, preventDefault: vi.fn() } as unknown as PointerEvent;
 }
 
 function drag(expandable = false) {
@@ -19,6 +19,18 @@ function drag(expandable = false) {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('createSheetDrag', () => {
+	it('takes a primary press for the drag, so the press does not move focus out of the reply box; other buttons are left alone', () => {
+		const { sheet } = drag(true);
+		const secondary = pointer('pointerdown', 100, { button: 2 });
+		sheet.start(secondary);
+		expect(secondary.preventDefault).not.toHaveBeenCalled();
+		expect(sheet.dragging).toBe(false);
+		const primary = pointer('pointerdown', 100);
+		sheet.start(primary);
+		expect(primary.preventDefault).toHaveBeenCalledOnce();
+		expect(sheet.dragging).toBe(true);
+	});
+
 	it('follows the pointer down, never up, and snaps a short drag back', () => {
 		const { sheet, onDismiss } = drag();
 		sheet.start(pointer('pointerdown', 100));

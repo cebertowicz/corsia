@@ -52,6 +52,9 @@ export function createSheetDrag(props: {
 		canGrow = props.expandable();
 		hold(props.panel());
 		dragging = true;
+		// The press is the drag's, not a focus change: the sheet takes focus and the grabber does not, so the press would otherwise
+		// move focus from the reply box to the sheet, and on a phone take the keyboard down with it.
+		event.preventDefault();
 		handle.setPointerCapture?.(event.pointerId);
 	}
 

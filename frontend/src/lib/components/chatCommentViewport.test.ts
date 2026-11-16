@@ -117,7 +117,7 @@ describe('keepAboveSheet', () => {
 		};
 		const drag = createSheetDrag({ expandable: () => true, panel: () => panel, onExpand: () => liftSheetCap(panel), onDismiss: vi.fn() });
 		const handle = document.createElement('div');
-		const at = (type: string, clientY: number) => ({ type, clientY, pointerId: 4, button: 0, currentTarget: handle }) as unknown as PointerEvent;
+		const at = (type: string, clientY: number) => ({ type, clientY, pointerId: 4, button: 0, currentTarget: handle, preventDefault: () => {} }) as unknown as PointerEvent;
 		drag.start(at('pointerdown', 600));
 		// Each 10 px step grows the sheet before any lift; by the third its top (852 - 480) is over the text's bottom (440).
 		for (let step = 1; step <= 3; step++) {
