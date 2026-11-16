@@ -41,6 +41,7 @@
 	import { createPlanDestinations } from './chatPlanDestinations';
 	import {
 		createPager,
+		refreshPager,
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
@@ -166,9 +167,10 @@
 	export async function fetchThreadMessages(threadId: string) {
 		// Another chat replaces the whole transcript, whichever path changed it. A
 		// same-thread refresh replaces only the first page: older rows, their
-		// summaries and run stubs stay until that page is actually unloaded.
+		// summaries and run stubs stay until that page is actually unloaded, and so does what the window knows of older
+		// history, so nothing above the reader comes or goes while the page is read.
 		if (lastFirstPageThreadId !== null && lastFirstPageThreadId !== threadId) clearThreadTranscript();
-		else { pagerGeneration++; pager = createPager(); }
+		else { pagerGeneration++; pager = refreshPager(pager); }
 		const myGen = pagerGeneration;
 		try {
 			await loadFirstPage(threadId, myGen);
@@ -298,7 +300,7 @@
 			const sid = get(activeThreadId);
 			if (!sid) return;
 			pagerGeneration++;
-			pager = createPager();
+			pager = lastFirstPageThreadId === sid ? refreshPager(pager) : createPager();
 			const myGen = pagerGeneration;
 			await refreshVisibleThread(sid, loadFirstPage(sid, myGen));
 		};

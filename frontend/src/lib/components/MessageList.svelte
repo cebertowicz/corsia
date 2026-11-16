@@ -275,8 +275,10 @@
 	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
 </script>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- The transcript is read: a field drawn in it (a margin card's reply) never scrolls it for a change of size (keepInView). -->
 <div
 	class="messages"
+	data-reading-scroller
 	bind:this={messagesEl}
 	onscroll={onMessagesScroll}
 	onwheel={onWheel}

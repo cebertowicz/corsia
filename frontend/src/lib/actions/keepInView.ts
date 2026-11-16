@@ -39,11 +39,16 @@ function roomOf(owner: HTMLElement): number {
  *
  * Typing at the end of a field brings its end back as growing does: the browser's own caret reveal stops at the caret
  * line, leaving the field's padding and the Send beside it past the scroller's end when the text did not wrap.
+ *
+ * A scroller the person reads in (marked `data-reading-scroller`: the chat transcript, which a margin card's field sits
+ * in) is never scrolled for its own or the viewport's change of size: that would move the text under the reader. There
+ * the field is brought back only for its own growth and for typing at its end.
  */
 export function keepInView(node: HTMLElement, options: { enabled: boolean; whole?: HTMLElement }) {
 	let { enabled, whole } = options;
 	let frame = 0;
 	const owner = scroller(node);
+	const reading = owner?.matches('[data-reading-scroller]') ?? false;
 	/** Whether the node's end (the caret of a growing field, and its Send) was in view at the last scroll. */
 	let endShown = true;
 	/** Where this action's own last reveal left the scroller. */
@@ -77,11 +82,11 @@ export function keepInView(node: HTMLElement, options: { enabled: boolean; whole
 			if (node.selectionEnd === node.value.length) schedule();
 		}
 	};
-	const viewport = window.visualViewport;
+	const viewport = reading ? null : window.visualViewport;
 	viewport?.addEventListener('resize', resized);
 	// The node growing is the person typing into it; the scroller or viewport changing size is not.
 	const grown = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
-	const ownerResized = typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
+	const ownerResized = !reading && typeof ResizeObserver === 'function' ? new ResizeObserver(resized) : null;
 	if (owner) ownerResized?.observe(owner);
 	grown?.observe(node);
 	node.addEventListener('input', typed);

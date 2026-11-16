@@ -64,6 +64,16 @@ export function createPager(initial?: Partial<PagerState>): PagerState {
 	};
 }
 
+/**
+ * The pager for a refetch of the first page of the chat already on screen. It keeps what the loaded window already
+ * knows (whether older history exists, and where it starts) until the refetched page lands and says otherwise, so the
+ * rows above the reader (the load-older row, the update cards placed by that window) stay put meanwhile. A fresh
+ * object: a read of the generation it replaces settles on its own pager, never on this one.
+ */
+export function refreshPager(state: Pick<PagerState, 'hasMore' | 'oldestId'>): PagerState {
+	return createPager({ hasMore: state.hasMore, oldestId: state.oldestId });
+}
+
 export function adoptFirstPage(state: PagerState, page: MessagePage): void {
 	state.hasMore = page.has_more ?? false;
 	state.oldestId = page.oldest_id ?? null;

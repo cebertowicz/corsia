@@ -183,6 +183,39 @@ describe('ChatPanel first-page failure', () => {
 		expect(messageCalls()).toBe(2);
 	});
 
+	it('keeps the older-history row above the reader while a same-thread refresh reads its page', async () => {
+		let firstPages = 0;
+		let landRefresh: (() => void) | null = null;
+		const page = { messages: [{ id: 'm1', thread_id: 'thread-b', role: 'assistant', content: 'reading here', created_at: 't', seq: 51, metadata: { for_user: true } }], has_more: true, oldest_id: 'm1' };
+		globalThis.fetch = withEmptyAttentionQueue(vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			// An older page is never answered here, so whatever the row shows is the window's own state.
+			if (url.includes('/messages?') && url.includes('before=')) return new Promise(() => {});
+			if (url.includes('/messages?')) {
+				firstPages += 1;
+				const answer = { ok: true, status: 200, json: async () => page };
+				return firstPages === 1 ? answer : new Promise((resolve) => { landRefresh = () => resolve(answer); });
+			}
+			return { ok: true, status: 200, json: async () => ({}) };
+		}) as unknown as typeof fetch);
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.loading-older')).not.toBeNull());
+
+		// A turn ends and the first page is read again: until it lands, nothing above the reader comes or goes.
+		const refreshing = (component as Record<string, any>).fetchThreadMessages('thread-b');
+		flushSync();
+		await vi.waitFor(() => expect(firstPages).toBe(2));
+		flushSync();
+		expect(host.querySelector('.loading-older')).not.toBeNull();
+		landRefresh!();
+		await refreshing;
+		flushSync();
+		expect(host.querySelector('.loading-older')).not.toBeNull();
+	});
+
 	it('keeps completed labels for already-loaded older rows through a same-thread refresh', async () => {
 		activeThreadId.set('thread-b');
 		coreSettings.set({ features: { focus_mode: true } } as never);

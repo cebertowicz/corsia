@@ -43,6 +43,14 @@ it('keeps an answer read here read when a thread read started before the read la
   expect(get(messages)[0].chat_comments?.[0].answers[0].unread).toBe(false);
 });
 
+it('keeps a comment the server states unchanged as the object on screen, so the margin column is not rebuilt for it', () => {
+  const comment = () => ({ id: 'comment', cid: 'c1.1', user_message_id: 'user', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [{ author_kind: 'agent', user_message_id: 'user', assistant_message_id: 'answer', cid: 'c1.1', text: 'answer', created_at: 't', unread: false }] });
+  const shown = [comment()];
+  messages.set([row('target', 1, { chat_comments: shown })] as never);
+  adoptCommentThreads('thread', [{ id: 'target', chat_comments: [comment()] }] as never);
+  expect(get(messages)[0].chat_comments).toBe(shown);
+});
+
 it('reads the answer only once for a thread with no comment anywhere', async () => {
   messages.set([row('one', 1)]);
   const batches: string[][] = [];

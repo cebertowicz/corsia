@@ -99,4 +99,34 @@ describe('keepInView', () => {
 		expect(reveals).toHaveBeenCalledTimes(2);
 		action.destroy();
 	});
+
+	it('keeps a sheet\'s field above the keyboard: a visual viewport resize brings it back', () => {
+		const { card, field, reveals } = sheet();
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card });
+		expect(reveals).toHaveBeenCalledTimes(1);
+		viewport.dispatchEvent(new Event('resize'));
+		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
+
+	it('never scrolls the chat transcript a margin card sits in for its own or the viewport\'s change of size, only for the field growing', () => {
+		const { owner, card, field, reveals, shrink } = sheet();
+		owner.setAttribute('data-reading-scroller', '');
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
+		const action = keepInView(field, { enabled: false, whole: card });
+		action.update({ enabled: true, whole: card });
+		expect(reveals).toHaveBeenCalledTimes(1);
+		// Something below the text grows (the composer, an attention stack) and the transcript's view shrinks.
+		shrink(290);
+		viewport.dispatchEvent(new Event('resize'));
+		expect(reveals).toHaveBeenCalledTimes(1);
+		// The reader's own field grows as they type.
+		observers.get(field)?.();
+		expect(reveals).toHaveBeenCalledTimes(2);
+		action.destroy();
+	});
 });
