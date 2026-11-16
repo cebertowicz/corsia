@@ -16,6 +16,7 @@ import { _resetSubagentHydrationForTests, subagentMeta } from '$lib/stores/subag
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
 import { coreSettings } from '$lib/stores/settings';
 import { _cancelPendingMessageCardRefreshForTests } from '$lib/stores/messageCardRefresh';
+import { threadUpdateCards } from '$lib/stores/threadUpdateCards';
 
 /**
  * When the first page of a thread fails, the canvas must not answer with
@@ -214,6 +215,72 @@ describe('ChatPanel first-page failure', () => {
 		await refreshing;
 		flushSync();
 		expect(host.querySelector('.loading-older')).not.toBeNull();
+	});
+
+	it('starts no older read while a same-thread refresh reads its page', async () => {
+		let firstPages = 0;
+		let landRefresh: (() => void) | null = null;
+		const page = { messages: [{ id: 'm1', thread_id: 'thread-b', role: 'assistant', content: 'reading here', created_at: 't', seq: 51, metadata: { for_user: true } }], has_more: true, oldest_id: 'm1' };
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/messages?') && url.includes('before=')) return new Promise(() => {});
+			if (url.includes('/messages?')) {
+				firstPages += 1;
+				const answer = { ok: true, status: 200, json: async () => page };
+				return firstPages === 1 ? answer : new Promise((resolve) => { landRefresh = () => resolve(answer); });
+			}
+			return { ok: true, status: 200, json: async () => ({}) };
+		});
+		globalThis.fetch = withEmptyAttentionQueue(fetchMock as unknown as typeof fetch);
+		const olderReads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('before=')).length;
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.loading-older')).not.toBeNull());
+		await tick();
+		const before = olderReads();
+
+		// The reader wheels up at the top while the refreshed page is on its way: the window it would page from is being replaced.
+		const refreshing = (component as Record<string, any>).fetchThreadMessages('thread-b');
+		await vi.waitFor(() => expect(firstPages).toBe(2));
+		flushSync();
+		host.querySelector('.messages')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+		await tick();
+		expect(olderReads()).toBe(before);
+		landRefresh!();
+		await refreshing;
+	});
+
+	it('starts over from an empty window when the Focus setting changes', async () => {
+		let firstPages = 0;
+		const page = { messages: [{ id: 'm1', thread_id: 'thread-b', role: 'assistant', content: 'reading here', created_at: 't', seq: 51, metadata: { for_user: true } }], has_more: true, oldest_id: 'm1' };
+		globalThis.fetch = withEmptyAttentionQueue(vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes('/messages?') && url.includes('before=')) return new Promise(() => {});
+			if (url.includes('/messages?')) {
+				firstPages += 1;
+				// The other view's first page never lands here: what shows meanwhile is the window the change left behind.
+				return firstPages === 1 ? { ok: true, status: 200, json: async () => page } : new Promise(() => {});
+			}
+			return { ok: true, status: 200, json: async () => ({}) };
+		}) as unknown as typeof fetch);
+		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
+		flushSync();
+		await (component as Record<string, any>).selectThread('thread-b');
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('.loading-older')).not.toBeNull());
+
+		coreSettings.set({ features: { focus_mode: true } } as never);
+		flushSync();
+		await vi.waitFor(() => expect(firstPages).toBe(2));
+		flushSync();
+		expect(get(messages).filter((row) => row.thread_id === 'thread-b')).toEqual([]);
+		// The thread's plan update cards stay drawn: no window is loaded yet, so none of them falls outside it.
+		threadUpdateCards.set({ 'thread-b': { fromSeq: 0, cards: [{ id: 7, thread_id: 'thread-b', kind: 'done', node_id: 'n7', title: 'Item 7', after_seq: 10, created_at: '2026-09-29T10:00:00.000000', node_exists: true, asks_user: false } as never] } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[data-update-id="7"]')).not.toBeNull());
+		threadUpdateCards.set({});
 	});
 
 	it('keeps completed labels for already-loaded older rows through a same-thread refresh', async () => {

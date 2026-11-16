@@ -8,6 +8,7 @@ import {
 	LOAD_OLDER_TRIGGER_PX,
 	MAX_PAGER_CHAIN,
 	PAGER_ABORT,
+	refreshPager,
 	type MessagePage,
 	type PagerPort,
 	type ScrollAnchor,
@@ -60,6 +61,25 @@ describe('adoptFirstPage', () => {
 		expect(s.oldestId).toBe('m20');
 		expect(s.loading).toBe(false);
 		expect(s.error).toBe(false);
+	});
+});
+
+describe('refreshPager', () => {
+	it('keeps that older history exists but starts no older read until the refetched first page lands', async () => {
+		const el = makeScrollEl();
+		const port: PagerPort = {
+			fetchPage: vi.fn(async () => pageOf(['o1', 'o2'], false)),
+			prepend: vi.fn(),
+			getScrollEl: () => el,
+			afterRender: async () => {},
+		};
+		const s = refreshPager(createPager({ hasMore: true, oldestId: 'm0' }));
+		expect(s.hasMore).toBe(true);
+		expect(await loadOlder(s, port, 1)).toBe(0);
+		expect(port.fetchPage).not.toHaveBeenCalled();
+		adoptFirstPage(s, pageOf(['m20', 'm21'], true));
+		expect(await loadOlder(s, port, 1)).toBe(2);
+		expect(port.fetchPage).toHaveBeenCalledWith('m20');
 	});
 });
 

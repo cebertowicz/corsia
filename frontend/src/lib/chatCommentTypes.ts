@@ -48,7 +48,7 @@ function sameData(a: unknown, b: unknown): boolean {
  * A comment the page states unchanged stays the very object on screen (and so does the list, when none changed): what
  * draws comments by identity (the margin column) is not rebuilt, and a refresh that changed nothing moves nothing.
  */
-export function keepReadAnswers(existing: ChatComment[] | undefined, incoming: ChatComment[] | undefined): ChatComment[] | undefined {
+export function adoptPageComments(existing: ChatComment[] | undefined, incoming: ChatComment[] | undefined): ChatComment[] | undefined {
 	if (!existing?.length || !incoming?.length) return incoming;
 	const key = (answer: ChatCommentAnswer) => answer.author_kind === 'agent' ? `${answer.user_message_id}:${answer.cid}:${answer.assistant_message_id}` : null;
 	const read = new Set(existing.flatMap(comment => comment.answers.filter(answer => !answer.unread).map(key).filter(Boolean)));

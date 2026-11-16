@@ -217,7 +217,7 @@
 		focusSeen = focusOn();
 		const id = get(activeThreadId);
 		if (!changed || !id) return;
-		[focusRuns, runLoads] = [[], {}];
+		clearThreadTranscript();
 		messages.update((current) => current.filter((row) => row.thread_id !== id));
 		void fetchThreadMessages(id);
 	});
