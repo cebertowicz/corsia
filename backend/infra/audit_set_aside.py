@@ -8,14 +8,8 @@ read returns counts only: no payload, external id or thread.
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from datetime import datetime, timedelta
-
-# A stored reason is a short code. Older rows can hold an exception's text; it
-# may quote the event, so it is counted under one label and never returned.
-_CODE = re.compile(r"[a-z][a-z0-9_.:-]{0,63}")
-UNCODED = "uncoded"
 
 # Rows are written with more than one ISO form, so the text bounds only narrow
 # the index range (a day wide on each side) and julianday() decides. Each
@@ -48,7 +42,7 @@ def set_aside(db: sqlite3.Connection, since: str, until: str) -> list[dict]:
     }
     groups: dict[tuple[str, str], dict] = {}
     for row in db.execute(_SET_ASIDE_SQL, params):
-        reason = row["reason"] if _CODE.fullmatch(row["reason"] or "") else UNCODED
+        reason = row["reason"]
         key = (row["internal_event"], reason)
         group = groups.setdefault(key, {
             "internal_event": row["internal_event"], "reason": reason, "total": 0, "days": {},

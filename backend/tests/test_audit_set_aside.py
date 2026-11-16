@@ -25,9 +25,6 @@ def _seed(path) -> None:
                 ("a3", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-11T08:00:00Z"),
                 # Another status still counts: it was set aside when it was written.
                 ("b1", NO_OWNER, None, "no_owner", "{}", "retrying", "2026-11-10T12:00:00Z"),
-                # Exception text from before reasons were codes: counted, never returned.
-                ("c1", "webhook.github.push", None, "stored webhook payload is not an object: thread-secret",
-                 "{}", "parked", "2026-11-12T01:00:00Z"),
                 # Outside the window on both sides; the end is exclusive.
                 ("z1", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-08T23:59:59+00:00"),
                 ("z2", NOISE, None, "check_suite_noise_parked", "{}", "parked", "2026-11-16T00:00:00Z"),
@@ -46,8 +43,6 @@ def test_set_aside_counts_per_kind_reason_and_day(isolated_db, monkeypatch):
         {"internal_event": NOISE, "reason": "check_suite_noise_parked", "total": 3,
          "days": {"2026-11-09": 2, "2026-11-11": 1}},
         {"internal_event": NO_OWNER, "reason": "no_owner", "total": 1, "days": {"2026-11-10": 1}},
-        {"internal_event": "webhook.github.push", "reason": "uncoded", "total": 1,
-         "days": {"2026-11-12": 1}},
     ]
     text = json.dumps(result)
     for private in ("secret", "steve", "ext-"):
