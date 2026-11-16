@@ -78,6 +78,7 @@ async def test_pane_screencast_acknowledges_each_frame_before_relaying_it(monkey
         ("cdp", "Page.enable", {}),
         ("cdp", "Page.addScriptToEvaluateOnNewDocument", {"source": browser_screencast.PRELOAD, "worldName": browser_screencast.WORLD, "runImmediately": True}),
         ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80}),
+        ("cdp", "Page.captureScreenshot", {"format": "jpeg", "quality": 10}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 1}),
         ("pane", {"type": "frame", "data": "jpeg-1", "metadata": {"deviceWidth": 400, "deviceHeight": 600}}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 2}),
@@ -116,10 +117,10 @@ async def test_pane_screencast_restarts_at_the_new_device_size(monkeypatch):
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(running, 1)
     assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
-        "Page.getLayoutMetrics", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-1",
-        "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
+        "Page.getLayoutMetrics", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.startScreencast", "Page.captureScreenshot", "Page.screencastFrameAck", "jpeg-1",
+        "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.captureScreenshot", "Page.screencastFrameAck", "jpeg-2",
     ]
-    assert log[8] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
+    assert log[9] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
 
 
 @pytest.mark.asyncio
@@ -159,7 +160,8 @@ async def test_pane_screencast_sized_before_it_starts_captures_at_that_size(monk
     await asyncio.wait_for(running, 1)
     assert log == [("cdp", "Page.getLayoutMetrics", {}), ("cdp", "Page.enable", {}),
                    ("cdp", "Page.addScriptToEvaluateOnNewDocument", {"source": browser_screencast.PRELOAD, "worldName": browser_screencast.WORLD, "runImmediately": True}),
-                   ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 800, "maxHeight": 600})]
+                   ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 800, "maxHeight": 600}),
+                   ("cdp", "Page.captureScreenshot", {"format": "jpeg", "quality": 10})]
 
 
 @pytest.mark.asyncio
@@ -182,8 +184,8 @@ async def test_pane_screencast_restarts_once_a_new_document_loads_so_its_first_p
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(running, 1)
     assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
-        "Page.getLayoutMetrics", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-1",
-        "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
+        "Page.getLayoutMetrics", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Page.startScreencast", "Page.captureScreenshot", "Page.screencastFrameAck", "jpeg-1",
+        "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.captureScreenshot", "Page.screencastFrameAck", "jpeg-2",
     ]
 
 
@@ -256,6 +258,7 @@ async def test_restarts_before_their_measurements_answer_start_one_capture_after
     await asyncio.wait_for(running, 1)
     assert len(answers) == 3
     assert sum(entry[1] == "Page.startScreencast" for entry in log) == 1
+    assert sum(entry[1] == "Page.captureScreenshot" for entry in log) == 1
 
 
 @pytest.mark.asyncio
@@ -297,23 +300,31 @@ async def test_pane_screencast_ends_visibly_when_chrome_refuses_a_frame_cannot_b
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("frame_arrives", [False, True])
-async def test_a_start_that_brings_no_frame_asks_chrome_to_draw_once(monkeypatch, frame_arrives):
+@pytest.mark.parametrize("refused", [False, True])
+async def test_every_start_asks_chrome_to_draw_once_and_a_refused_draw_is_logged_not_fatal(monkeypatch, caplog, refused):
     """A still page can draw nothing after a start; one screenshot makes Chrome draw, and the screencast sends that."""
-    monkeypatch.setattr(browser_screencast.PaneScreencast, "STALL_S", 0.05)
     log = []
     cast, socket, _connected = _screencast(monkeypatch, log)
+    sent = socket.send
+
+    async def send(text):
+        message = json.loads(text)
+        if refused and message["method"] == "Page.captureScreenshot":
+            log.append(("cdp", message["method"], message["params"]))
+            socket.incoming.put_nowait({"id": message["id"], "error": {"message": "Unable to capture screenshot"}})
+        else:
+            await sent(text)
+
+    socket.send = send
     running = asyncio.create_task(cast.run())
     await _started(log)
-    if frame_arrives:
-        socket.incoming.put_nowait(_frame(1, 400))
-    await asyncio.sleep(0.2)
-    socket.incoming.put_nowait(None)
+    await cast.restart()
+    await _sent(log, "Page.startScreencast", 2)
+    for message in (_frame(1, 400), None):
+        socket.incoming.put_nowait(message)
     await asyncio.wait_for(running, 1)
-    shots = [entry for entry in log if entry[:2] == ("cdp", "Page.captureScreenshot")]
-    if frame_arrives:
-        assert shots == [] and cast.nudges == 0
-    else:
-        # Asked once only; the screenshot's own reply is never shown in the pane.
-        assert shots == [("cdp", "Page.captureScreenshot", {"format": "jpeg", "quality": 10})] and cast.nudges == 1
-        assert not any(entry[0] == "pane" for entry in log)
+    # One draw per start, each right after it; the screenshot's own reply is never shown in the pane.
+    methods = [entry[1] for entry in log if entry[0] == "cdp" and entry[1] in ("Page.startScreencast", "Page.captureScreenshot")]
+    assert methods == ["Page.startScreencast", "Page.captureScreenshot"] * 2
+    assert [entry[1]["data"] for entry in log if entry[0] == "pane"] == ["jpeg-1"]
+    assert ("Chrome refused the draw" in caplog.text) is refused

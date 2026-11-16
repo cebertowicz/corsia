@@ -96,7 +96,7 @@ async def wait_for_headed_window(endpoint, socket_dir):
             raise AssertionError('headed fixture has no owned X display') from exc
         # Which half timed out, and whether Chrome sent a frame the screencast then did not show.
         detail = ('window never mapped' if cast is None else
-                  f'window mapped; Chrome sent {getattr(cast, "received", "?")} frames after {getattr(cast, "nudges", "?")} nudges; page measured {getattr(cast, "_page", "?")}; '
+                  f'window mapped; Chrome sent {getattr(cast, "received", "?")} frames; page measured {getattr(cast, "_page", "?")}; '
                   f'{await _page_state(endpoint)}')
         raise AssertionError(f'headed fixture window or frame did not become ready: {detail}') from exc
 
