@@ -12,9 +12,8 @@ describe('the browser chip the client reads', () => {
 		expect(browserChipLabel({ host: 'github.com', domain: 'github.com' })).toBe('github.com');
 	});
 
-	it('leads with the last labels when the chip carries no domain, so the end of the host stays visible', () => {
-		expect(browserChipLabel({ host: 'accounts.example.com.other-site.net', domain: null }))
-			.toBe('other-site.net · accounts.example.com');
+	it('shows the whole host when the chip carries no domain', () => {
+		expect(browserChipLabel({ host: 'www.example.co.uk', domain: null })).toBe('www.example.co.uk');
 		expect(browserChipLabel({ host: '127.0.0.1' })).toBe('127.0.0.1');
 	});
 

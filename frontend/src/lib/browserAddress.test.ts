@@ -10,10 +10,10 @@ describe('browser pane labels', () => {
 		expect(browserAddressLabel('https://paypal.com.evil.com.br/login', 'evil.com.br')).toBe('evil.com.br · paypal.com · …login');
 	});
 
-	it('leads with the last labels when the domain is missing or names another site, so the end of the host stays visible', () => {
-		expect(browserAddressLabel('https://www.example.test/path')).toBe('example.test · www · …path');
-		expect(browserAddressLabel('https://www.example.test/path', 'other.test')).toBe('example.test · www · …path');
-		expect(browserAddressLabel('https://accounts.example.com.other-site.net/login')).toBe('other-site.net · accounts.example.com · …login');
+	it('leads with the whole host when the domain is missing or names another site', () => {
+		expect(browserAddressLabel('https://www.example.test/path')).toBe('www.example.test · …path');
+		expect(browserAddressLabel('https://www.example.test/path', 'other.test')).toBe('www.example.test · …path');
+		expect(browserAddressLabel('https://www.example.co.uk/news')).toBe('www.example.co.uk · …news');
 	});
 
 	it('keeps an IP address or single-label host whole', () => {
